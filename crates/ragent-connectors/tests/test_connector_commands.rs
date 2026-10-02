@@ -113,7 +113,7 @@ fn parses_list_default_and_verbose() {
 }
 
 #[test]
-fn parses_list_and_search_category_flag() {
+fn parses_list_and_claude_category_flag() {
     let Some(Ok(ConnectorCommand::List { category, .. })) =
         parse_connector_command("list", "--category data")
     else {
@@ -121,13 +121,17 @@ fn parses_list_and_search_category_flag() {
     };
     assert_eq!(category.label(), "data");
 
-    let Some(Ok(ConnectorCommand::Search { query, category })) =
-        parse_connector_command("search", "drive --category productivity")
+    let Some(Ok(ConnectorCommand::Claude {
+        query,
+        category,
+        refresh,
+    })) = parse_connector_command("claude", "drive --category productivity")
     else {
-        panic!("search with a category must parse");
+        panic!("claude with a category must parse");
     };
     assert_eq!(query, "drive");
     assert_eq!(category.label(), "productivity");
+    assert!(!refresh);
 
     // `--category ALL` clears the filter (FR-040).
     let Some(Ok(ConnectorCommand::List { category, .. })) =
@@ -149,21 +153,32 @@ fn parses_list_and_search_category_flag() {
 }
 
 #[test]
-fn parses_search_query_and_rejects_missing_query() {
+fn parses_claude_query_category_and_refresh() {
     assert_eq!(
-        parse_connector_command("search", "google drive"),
-        Some(Ok(ConnectorCommand::Search {
+        parse_connector_command("claude", "google drive"),
+        Some(Ok(ConnectorCommand::Claude {
             query: "google drive".to_string(),
             category: CategoryFilter::all(),
+            refresh: false,
         }))
     );
+    // A launch with no arguments is valid: the browser opens unfiltered.
     assert_eq!(
-        parse_connector_command("search", ""),
-        Some(Err(ConnectorArgError::MissingSearchQuery))
+        parse_connector_command("claude", ""),
+        Some(Ok(ConnectorCommand::Claude {
+            query: String::new(),
+            category: CategoryFilter::all(),
+            refresh: false,
+        }))
     );
+    // The flags are accepted in any order and never leak into the query.
     assert_eq!(
-        parse_connector_command("search", "--category data"),
-        Some(Err(ConnectorArgError::MissingSearchQuery))
+        parse_connector_command("claude", "--refresh drive --category data"),
+        Some(Ok(ConnectorCommand::Claude {
+            query: "drive".to_string(),
+            category: CategoryFilter::parse("data"),
+            refresh: true,
+        }))
     );
 }
 
@@ -273,7 +288,6 @@ fn unknown_subcommand_is_none() {
 fn known_subcommand_covers_the_whole_family() {
     for sub in [
         "list",
-        "search",
         "claude",
         "add",
         "remove",
@@ -292,7 +306,7 @@ fn known_subcommand_covers_the_whole_family() {
         );
     }
     assert!(!is_known_subcommand("bogus"));
-    assert_eq!(CONNECTOR_SUBCOMMANDS.len(), 13);
+    assert_eq!(CONNECTOR_SUBCOMMANDS.len(), 12);
 }
 
 // -- help / attribution (FR-006, FR-017) -------------------------------------
@@ -312,7 +326,7 @@ fn render_help_documents_every_subcommand_and_is_ascii() {
     assert!(help.is_ascii(), "usage text must be ASCII only");
     for sub in [
         "list",
-        "search",
+        "claude",
         "add",
         "remove",
         "enable",
@@ -326,7 +340,14 @@ fn render_help_documents_every_subcommand_and_is_ascii() {
     ] {
         assert!(help.contains(sub), "usage must document `{sub}`: {help}");
     }
-    for needle in ["https://", "--force", "--category", "--check", "--verbose"] {
+    for needle in [
+        "https://",
+        "--force",
+        "--category",
+        "--check",
+        "--verbose",
+        "--refresh",
+    ] {
         assert!(help.contains(needle), "usage must mention `{needle}`");
     }
 }
@@ -376,7 +397,7 @@ fn usage_block_documents_argument_placeholders_and_source_forms() {
     // FR-017: every subcommand's arguments and the accepted `<source>` forms.
     for needle in [
         "/connectors list [--verbose] [--category <name>]",
-        "/connectors search <query> [--category <name>]",
+        "/connectors claude [query] [--category <name>] [--refresh]",
         "/connectors add <id|source> [--force]",
         "/connectors remove <id>",
         "/connectors enable <id>",
@@ -418,8 +439,8 @@ fn add_report_surfaces_the_credential_requirement_without_a_secret() {
     assert!(report.contains("[ok]"));
     assert!(report.contains("gdrive"));
     assert!(
-        report.contains("disabled"),
-        "the install must report disabled"
+        report.contains("enabled"),
+        "the install must report enabled"
     );
     assert!(
         report.contains("Credential requirement:") && report.contains("GDRIVE_TOKEN"),
@@ -517,7 +538,7 @@ fn disabled_subsystem_reports_for_every_non_help_subcommand() {
 
     for (sub, rest) in [
         ("list", ""),
-        ("search", "echo"),
+        ("claude", ""),
         ("stores", ""),
         ("enable", "echo"),
     ] {
@@ -539,7 +560,7 @@ fn disabled_subsystem_reports_for_every_non_help_subcommand() {
 }
 
 #[test]
-fn add_local_directory_installs_disabled_and_reports_ok() {
+fn add_local_directory_installs_enabled_and_reports_ok() {
     let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (_guard, tree) = enter_temp_dir("add-local");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
@@ -559,8 +580,8 @@ fn add_local_directory_installs_disabled_and_reports_ok() {
     assert!(report.starts_with("From: /connectors add"));
     assert!(report.contains("[ok]"), "{report}");
     assert!(
-        report.contains("disabled"),
-        "a fresh install is disabled (FR-011)"
+        report.contains("enabled"),
+        "a fresh install is enabled (FR-011)"
     );
     assert!(
         tree.path()

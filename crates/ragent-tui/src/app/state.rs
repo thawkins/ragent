@@ -912,7 +912,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "connectors",
-        description: "Connector management: /connectors list [--verbose] [--category <name>] | search <query> [--category <name>] | claude [query] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
     },
     SlashCommandDef {
         trigger: "research",
@@ -936,7 +936,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "memory",
-        description: "Memory panel (Alt+M): /memory | /memory show | /memory init | /memory read <label> | /memory search <query>",
+        description: "Memory panel (Alt+M): /memory | /memory show | /memory clear | /memory help",
     },
     SlashCommandDef {
         trigger: "github",
@@ -988,7 +988,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
     },
     SlashCommandDef {
         trigger: "router",
@@ -1962,6 +1962,18 @@ pub struct App {
     /// Cached area of the `Clear the input queue?` confirmation dialog (set
     /// during render). Kept in [`Rect::default`] while the dialog is closed.
     pub queue_clear_confirm_area: Rect,
+    /// Whether the `Clear this project's memory?` confirmation dialog (opened by
+    /// `/memory clear`) is displayed. No memory is removed while it is open; the
+    /// store is emptied only after the user confirms with `Yes`.
+    pub memory_clear_confirm_open: bool,
+    /// Selected option index within the `Clear this project's memory?`
+    /// confirmation dialog: [`MEMORY_CLEAR_CONFIRM_YES`] (`Yes`) or
+    /// [`MEMORY_CLEAR_CONFIRM_NO`] (`No`). Initialised to `No` and reset to it
+    /// every time the dialog opens so a stray `Enter` cannot clear memory.
+    pub memory_clear_confirm_selected: usize,
+    /// Cached area of the `Clear this project's memory?` confirmation dialog
+    /// (set during render). Kept in [`Rect::default`] while the dialog is closed.
+    pub memory_clear_confirm_area: Rect,
     /// Active plugin-store browser, present while the browse panel is open
     /// (spec `pluginstores` FR-007). `None` when no panel is showing (FR-012).
     /// While it is `Some`, the panel swallows every keystroke and locks the
@@ -3333,6 +3345,65 @@ impl App {
         self.session_processor.invalidate_tool_cache();
     }
 
+    /// The live connector lifecycle session session-start published, when one
+    /// exists (spec `connectors` T-008; FR-008, FR-009).
+    ///
+    /// `ragent-agent` stores the session type-erased (it cannot name the
+    /// connector crate), so this names the concrete type and downcasts: `None`
+    /// means no session was published (a headless run or a unit-test `App`), and
+    /// `/connectors` then falls back to a fresh, empty per-invocation session.
+    pub(crate) async fn live_connector_session(
+        &self,
+    ) -> Option<Arc<tokio::sync::Mutex<ragent_connectors::ConnectorSession>>> {
+        self.session_processor
+            .connector_session::<tokio::sync::Mutex<ragent_connectors::ConnectorSession>>()
+            .await
+    }
+
+    /// Refresh the published connector status snapshot from the live session
+    /// (spec `connectors` T-008; FR-009).
+    ///
+    /// Called after a `/connectors enable|disable|connect|disconnect` so the
+    /// next `list` overlays the state the transition just produced rather than
+    /// the state startup loaded, and from the housekeeping pass so a connector
+    /// the startup bridge connected on the shared client reaches the snapshot.
+    /// A no-op when no session was published.
+    ///
+    /// The tracked snapshot is preferred; when it is empty (the startup bridge
+    /// connects on the shared client rather than driving this session) the
+    /// statuses are derived from the client's per-server state instead.
+    pub(crate) async fn refresh_connector_statuses(&self) {
+        let Some(session) = self.live_connector_session().await else {
+            return;
+        };
+        let session = session.lock().await;
+        let mut statuses = session.statuses();
+        if statuses.is_empty()
+            && let Some(client) = self.session_processor.mcp_client.get()
+        {
+            let connected = {
+                let guard = client.read().await;
+                guard
+                    .servers()
+                    .iter()
+                    .map(|server| {
+                        (
+                            server.id.clone(),
+                            (
+                                server.status == ragent_agent::mcp::McpStatus::Connected,
+                                server.tools.len(),
+                            ),
+                        )
+                    })
+                    .collect()
+            };
+            statuses = session.statuses_from_client_state(&connected);
+        }
+        self.session_processor
+            .set_connector_statuses(Some(Arc::new(statuses)))
+            .await;
+    }
+
     /// PERF-045: the instant the next housekeeping pass is due.
     pub fn housekeeping_due_at(&self) -> std::time::Instant {
         self.jobs_last_poll + HOUSEKEEPING_INTERVAL
@@ -3762,6 +3833,15 @@ pub const QUEUE_CLEAR_CONFIRM_YES: usize = 0;
 /// `No` is the default selection so pressing `Enter` without changing the
 /// selection does not empty the queue (spec `inputqueue` FR-034).
 pub const QUEUE_CLEAR_CONFIRM_NO: usize = 1;
+
+/// Index of the `Yes` option in the `Clear this project's memory?` confirmation
+/// dialog (opened by `/memory clear`).
+pub const MEMORY_CLEAR_CONFIRM_YES: usize = 0;
+
+/// Index of the `No` option in the `Clear this project's memory?` confirmation
+/// dialog. `No` is the default selection so pressing `Enter` without changing
+/// the selection does not clear memory.
+pub const MEMORY_CLEAR_CONFIRM_NO: usize = 1;
 
 /// Row index of the `Next` option in the queue-control menu (spec `inputqueue`
 /// FR-021).

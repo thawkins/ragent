@@ -36,6 +36,8 @@ pub(crate) fn test_app() -> App {
             std::collections::HashMap::new(),
         )),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),

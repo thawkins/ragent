@@ -1,5 +1,92 @@
 # Changelog
 
+## [1.0.124] - 2026-10-02
+
+### Added
+
+- **`/memory clear` - clear this project's structured memories behind a
+  `Yes`/`No` confirmation dialog.** The slash command opens the
+  `Clear this project's memory?` dialog and removes nothing; the store is
+  emptied only on an explicit `Yes`. `No` (the default selection, so a stray
+  `Enter` cannot clear memory) and `Esc` dismiss the dialog unchanged.
+  `Left`/`Right` (or `Tab`) move the selection, `Enter` selects.
+  - New `Storage::clear_memories_for_project(&Path) -> Result<usize>`
+    (crates/ragent-storage) deletes every memory whose `project` column equals
+    either the full directory path or the directory basename - the same scope
+    `count_memories_for_project` / `list_memories_for_project` already use - so
+    memories belonging to other projects are never touched. FTS rows and base
+    rows are removed in one transaction (C-3 index-desync guard).
+  - The dialog reports its outcome in the chat transcript
+    (`Cleared N memory entries for this project.`) and refreshes the memory
+    panel.
+  - Autocomplete, the slash-command registry description, the usage lines, and
+    `docs/howtos/slashcommands/memory.md` (+ its PDF and INDEX row) now list
+    `/memory show | /memory clear | /memory help`.
+  - Tests: `crates/ragent-tui/tests/test_memory_clear_confirm.rs` covers
+    open-without-deleting, `Yes` clearing the project's memories, `No` and
+    `Esc` leaving them unchanged, and the `No`-by-default selection.
+
+### Changed
+
+- **The TUI drives the session-start connector lifecycle.** `src/main.rs` now
+  publishes the bridged `ConnectorSession` wrapped in a `tokio::sync::Mutex`
+  through `SessionProcessor::set_connector_session` (type-erased, so
+  `ragent-agent` stays free of a `ragent-connectors` dependency), and the same
+  session feeds the shared connect loop that starts `ragent.json` and
+  plugin-contributed servers. `/connectors enable|disable|connect|disconnect`
+  now drive that tracked session instead of rebuilding a fresh, empty one per
+  invocation (which tracked nothing and made `disable`/`disconnect` after an
+  `enable` fail with `unknown connector id`), and `/connectors list` reads live
+  per-server tool counts from the MCP client. A single-reference subcommand
+  (`remove`, `enable`, `disable`, `connect`, `disconnect`, `auth`, `test`)
+  accepts a connector by id, slug, or display name via the new
+  `ragent_connectors::canonical_id`, resolved once at the
+  `run_connector_subcommand_env` dispatch seam; `src/connectors.rs` drops its
+  per-call `canonical_id` shim and the unused `search_catalogue` env hook.
+- **The connector catalogue has a single surface.** The standalone
+  `/connectors search <query>` subcommand is retired;
+  `/connectors claude [query] [--category <name>] [--refresh]` carries the
+  `--category` launch filter and an in-panel `c` cycle key over the categories
+  the fetched catalogue declares. `list` keeps the same category model, so the
+  browser and the textual report share one filter (FR-010, FR-041). The
+  autocomplete menu seeds from the crate's shared connector-token list so it
+  cannot drift from the usage block.
+- **`/memory` catalog mirror realigned.** `command_catalog::MEMORY_SUBS` and the
+  `SLASH_COMMANDS`/catalog descriptions now list exactly the subcommands the
+  `/memory` arm handles (`show`, `clear`, `help`), and `/tools` gains an explicit
+  `show` alias in the catalog. The `docs/howtos/slashcommands/memory.md`
+  reference (+ its PDF and INDEX row) is updated to match.
+- **Simplifications across the connector and TUI paths.** `descriptor_by_id`
+  returns a borrowed reference and clones only on match; `is_uuid` validates
+  without collecting; `process_group_members`/`find_orphaned_stdio_pids` share
+  one `proc_pids()` `/proc` walk; `tool_input_summary`/`tool_result_summary`
+  drop redundant `format!("{}", x)` wrappers; the message-widget tool line no
+  longer strips a legacy icon prefix; and the queue-clear and memory-clear
+  confirmation dialogs share one `render_yes_no_confirm` helper.
+
+### Fixed
+
+- **MCP orphan sweep reaps servers re-parented to the user session manager, not
+  just to init.** `/mcp` showed a stdio server (`npx -y mongodb-mcp-server@<3>`)
+  as `stuck` on every startup because a dead ragent's launcher tree was never
+  reaped. Two defects in `find_orphaned_stdio_pids` (crates/ragent-agent):
+  (1) the sweep accepted a process only when `Ppid == 1`, but a desktop session
+  re-parents a dead launcher's children to the per-user service manager
+  (`systemd --user`) instead of init, so the orphan never matched; and
+  (2) a candidate had to lead its own process group AND have every group member
+  match the server, but the surviving tree is `npm exec mongodb-mcp-server@<3>`
+  -> `node .../mongodb-mcp-server` and only the *child* carries the package
+  token, so requiring the non-matching leader to match rejected the whole tree.
+  The sweep now accepts `Ppid == 1` or a parent identified as the user service
+  manager, matches per process, and signals the matched process's whole group so
+  the launcher and its `node` child are both reclaimed (SPEC.md section 4.6f).
+- **Memory project scope de-duplicated.** The three memory project-scope queries
+  (`clear_memories_for_project`, `count_memories_for_project`,
+  `list_memories_for_project`) now share one `project_name` helper, so the
+  full-path and legacy basename key rule lives in one place.
+- **Stale status-bar doc comment corrected** - `layout_statusbar.rs` states the
+  last-prompt tag budget as 48 characters (was 32), matching the call site.
+
 ## [1.0.123] - 2026-10-01
 
 Adds the connector system and fixes.
@@ -114,6 +201,27 @@ Adds the connector system and fixes.
 
 ### Fixed
 
+- **MCP orphan sweep reaps servers re-parented to the user session manager, not
+  just to init.** `/mcp` showed a stdio server (`npx -y mongodb-mcp-server@<3>`)
+  as `stuck` on every startup because a dead ragent's launcher tree was never
+  reaped. Two defects in `find_orphaned_stdio_pids` (crates/ragent-agent):
+  (1) the sweep accepted a process only when `Ppid == 1`, but a desktop session
+  re-parents a dead launcher's children to the per-user service manager
+  (`systemd --user`) instead of init, so the orphan never matched; and
+  (2) a candidate had to lead its own process group AND have every group member
+  match the server, but the surviving tree is `npm exec mongodb-mcp-server@<3>`
+  -> `node .../mongodb-mcp-server` and only the *child* carries the package
+  token, so requiring the non-matching leader to match rejected the whole tree.
+  The sweep now accepts `Ppid == 1` or a parent identified as the user service
+  manager (`/proc/<parent>/comm` or argv[0] basename `systemd`), and matches
+  **per process**: every supervisor-reparented process whose own command line
+  matches is swept, and each returned pid's process group is signalled, so both
+  the launcher and its `node` child are reclaimed without killing a live
+  sibling instance's server. Verification: `cargo test -p ragent-agent --test
+  test_mcp_adopt` (14 passed) and `--lib` (355 passed) green; live proof that an
+  orphaned `npx -y mongodb-mcp-server@<3>` tree (launcher re-parented to
+  `systemd --user`) is found and killed by the sweep.
+
 - **YOLO toggle now persists to the user-global config (CI `Check & Test`
   failure).** `Config::save_to_source` writes back to whichever config file was
   loaded (project preferred over global), and `Config::load` creates a
@@ -128,6 +236,64 @@ Adds the connector system and fixes.
   now use them. This also stops the toggle polluting the working directory's
   project config. The regression test is retargeted to the global path (via an
   `XDG_CONFIG_HOME` redirect) so it actually exercises the failure mode.
+
+- **Tool name now renders immediately after the step counter (TUI-019).** Two
+  divergent renderers emitted a tool-call line: `MessageWidget::to_lines`
+  (`crates/ragent-tui/src/widgets/message_widget.rs`) already put the name first,
+  but the log-panel path in `crates/ragent-tui/src/layout.rs` split the first
+  whitespace token off `tool_input_summary` and emitted it *before* the display
+  name, so any summary without an icon prefix (for example `bg` -> `output:
+  task-123`) put a parameter before the tool name. A new public
+  `split_summary_icon(summary)` helper treats only a leading `[...]` tag as an
+  icon and returns the whole text otherwise; both render arms now emit name,
+  icon, then summary. Regression test
+  `test_tool_name_immediately_follows_step_counter` asserts the rendered line
+  starts with `[3.2] Bg` and carries the parameters after the name.
+
+- **`/mcp` now renders one server per row as a markdown table (TUI-019).** The
+  `/mcp` listing emitted fixed-width `{:<18}` text rows, which pulldown-cmark
+  joined into a single wrapped paragraph. It is now a six-column markdown table
+  (`| Server | Enabled | Status | Transport | Endpoint | Tools |`) laid out row
+  by row, with `|` in a cell escaped so an id or URL cannot split a row, and the
+  pre-existing `normalize_ascii_tables` pass re-renders it as `+---+` ASCII rows.
+
+- **`/tools` subcommand surface tidied.** A bare `/tools` (and `help`, `--help`,
+  `-h`, `usage`) now prints a help block for the family; `/tools list` (alias
+  `/tools show`) renders the visibility table plus every visible and disabled
+  tool; `/tools <switch>` reports one switch; and `/tools <switch> on|off` turns
+  it on or off and saves it. The command-catalog description is updated to match.
+
+- **`/connectors claude` accepts a `--category <name>` filter and a `c` cycle
+  key (spec `connectors` FR-041).** The catalogue browser's launch parser now
+  removes `--refresh` *and* `--category <name>` from the query tokens (so a
+  pre-filled query may contain spaces), validates the category against the
+  categories the fetched catalogue actually declares, and falls back to an
+  unfiltered launch when it is unknown. While the panel is open the `c` key
+  cycles the category filter through the catalogue's categories and back to
+  `ALL`. `/connectors claude` is now the single catalogue surface: the
+  standalone `/connectors search` subcommand is retired and `list`'s filter is
+  the same category model, so the browser and the textual report cannot disagree.
+
+- **Connector lifecycle is tracked against the session-start session (spec
+  `connectors` T-008).** `src/main.rs` resolves the enabled connectors through
+  the bridge into the same background connect loop that starts the configured
+  `ragent.json` and plugin-contributed servers, then publishes a
+  `ConnectorSession` and its live status snapshot on the session processor. The
+  processor stores both type-erased (`set_connector_session` /
+  `set_connector_statuses`, `connector_session::<T>()`), so `ragent-agent` still
+  does not depend on `ragent-connectors`. `/connectors
+  enable|disable|connect|disconnect` now drives that published session and
+  reconciles the MCP tool registry afterwards, `/connectors list` takes its
+  per-server tool counts from the live MCP client
+  (`ConnectorCommandEnv::tool_counts`), and `statuses_from_client_state` derives
+  per-connector statuses from the client when the tracked snapshot is empty, so
+  a bridged server that connected *after* startup reports a real count instead
+  of `?`. The shared connect loop publishes a completion `McpStatusChanged`
+  once every server is settled so the TUI adopts the client promptly. Lifecycle
+  references are also resolved to the installed connector's canonical id
+  (`canonical_id`), so `enable`/`disable`/`connect`/`disconnect` accept a
+  connector by id, slug, or display name. Verification: `cargo check`
+  (workspace, all targets) and `cargo audit` green.
 
 ## [1.0.122] - 2026-09-30
 

@@ -965,9 +965,8 @@ Manage connectors from the TUI or the CLI:
 | Command | Description |
 |---|---|
 | `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts; `--category` filters the rows (`ALL` clears the filter) |
-| `/connectors search <query> [--category <name>]` | Search the catalogue by name, category, or tag |
-| `/connectors claude [query] [--refresh]` | Open the interactive Claude connector-catalogue browser (filter, browse, install with one key); `--refresh` bypasses the cache |
-| `/connectors add <id\|source> [--force]` | Install a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL (recorded **disabled**) |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser (`query` pre-fills the search field, `--category` pre-selects the filter, `--refresh` bypasses the cache; press `c` in the panel to cycle the category filter) |
+| `/connectors add <id\|source> [--force]` | Install a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL (recorded **enabled**) |
 | `/connectors remove <id>` | Uninstall a connector (refused while enabled) |
 | `/connectors enable <id>` | Enable a connector and connect its servers now |
 | `/connectors disable <id>` | Disable a connector and disconnect its servers |
@@ -1869,6 +1868,19 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.124
+
+- **`/memory clear` — clear this project's structured memories behind a
+  `Yes`/`No` confirmation dialog.** The slash command opens a
+  `Clear this project's memory?` dialog (`No` selected by default) and removes
+  nothing; the store is emptied only on an explicit `Yes`. Only memories scoped
+  to the current project directory (full path or basename) are deleted - other
+  projects' entries are never touched - and FTS rows and base rows are removed
+  in one transaction. The dialog reports `Cleared N memory entries for this
+  project.` in the transcript and refreshes the memory panel. The `/memory`
+  slash family is now `/memory`, `/memory show`, `/memory clear`, and
+  `/memory help`.
 
 ## Version 1.0.122
 

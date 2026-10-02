@@ -128,6 +128,7 @@ fn test_indicator_uses_warning_color() {
 
 #[test]
 fn test_busy_indicator_character() {
-    // The ⟳ character used in minimal mode matches the BUSY indicator pattern
-    assert_eq!(indicators::BUSY, "⟳");
+    // The status-bar busy tag is a plain ASCII text label (ANTIPAT M1 sweep);
+    // it is rendered as `BUSY:<label>` on the second status-bar line.
+    assert_eq!(indicators::BUSY, "BUSY:");
 }

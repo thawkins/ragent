@@ -40,6 +40,8 @@ fn test_state(token: &str) -> AppState {
         agent_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         stream_config: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),

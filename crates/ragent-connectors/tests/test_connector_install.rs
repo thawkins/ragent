@@ -143,7 +143,7 @@ fn classify_missing_path_shaped_source_is_local() {
 // -- add: local directory (FR-011, FR-027) ----------------------------------
 
 #[test]
-fn add_local_directory_installs_a_disabled_connector() {
+fn add_local_directory_installs_an_enabled_connector() {
     let tree = TempTree::new("add-dir");
     let src = stage_source_dir(&tree.0.join("src"), "echo");
 
@@ -152,9 +152,9 @@ fn add_local_directory_installs_a_disabled_connector() {
     assert_eq!(staged.descriptor.id.as_str(), "echo");
     let store = tree.0.join("proj/.ragent/connectors");
     assert!(store.join("echo").join(MANIFEST_FILE).is_file());
-    // FR-011: recorded disabled so no server starts until enable.
+    // FR-011: recorded enabled so a fresh connector is ready to use.
     let ledger = StoreLedger::load(&store);
-    assert!(!ledger.state("echo").is_some_and(|s| s.enabled));
+    assert!(ledger.state("echo").is_some_and(|s| s.enabled));
 }
 
 #[test]
@@ -233,8 +233,9 @@ fn add_installs_a_catalogue_id_from_the_supplied_catalogue() {
     assert_eq!(staged.descriptor.id.as_str(), "echo");
     let store = tree.0.join("proj/.ragent/connectors");
     assert!(store.join("echo").join(MANIFEST_FILE).is_file());
+    // FR-011: a catalogue install is recorded enabled, ready to use.
     assert!(
-        !StoreLedger::load(&store)
+        StoreLedger::load(&store)
             .state("echo")
             .is_some_and(|s| s.enabled)
     );
@@ -254,18 +255,25 @@ fn add_refuses_a_catalogue_id_the_catalogue_does_not_hold() {
 
 // -- remove (FR-030) --------------------------------------------------------
 
-/// Install `echo` disabled and return the store path it landed in.
-fn install_disabled(tree: &TempTree) -> PathBuf {
+/// Install `echo` (recorded enabled by the install, FR-011) and return the
+/// store path it landed in.
+fn install_echo(tree: &TempTree) -> PathBuf {
     let store = tree.0.join("proj/.ragent/connectors");
     install_descriptor(&store, descriptor_for("echo"), false).expect("install");
     store
 }
 
 #[test]
-fn remove_deletes_a_disabled_connector_and_clears_its_ledger_row() {
+fn remove_deletes_a_connector_and_clears_its_ledger_row() {
     let tree = TempTree::new("remove-ok");
-    let store = install_disabled(&tree);
+    let store = install_echo(&tree);
     assert!(store.join("echo").is_dir());
+
+    // A fresh install is enabled (FR-011), and removal is refused while
+    // enabled (FR-030); disable it first, then remove.
+    let mut ledger = StoreLedger::load(&store);
+    ledger.state_mut("echo").enabled = false;
+    ledger.save(&store).expect("ledger saved");
 
     let outcome = remove(&dirs(&tree), "echo").expect("removed");
 
@@ -279,11 +287,8 @@ fn remove_deletes_a_disabled_connector_and_clears_its_ledger_row() {
 #[test]
 fn remove_refuses_while_enabled_and_changes_nothing() {
     let tree = TempTree::new("remove-enabled");
-    let store = install_disabled(&tree);
-    // Flip the connector enabled in the store ledger.
-    let mut ledger = StoreLedger::load(&store);
-    ledger.state_mut("echo").enabled = true;
-    ledger.save(&store).expect("ledger saved");
+    let store = install_echo(&tree);
+    // A fresh install is enabled (FR-011), so removal is refused as-is.
 
     let err = remove(&dirs(&tree), "echo").expect_err("refused");
     assert!(
@@ -302,7 +307,7 @@ fn remove_refuses_while_enabled_and_changes_nothing() {
 #[test]
 fn remove_reports_an_unknown_connector_id() {
     let tree = TempTree::new("remove-unknown");
-    install_disabled(&tree);
+    install_echo(&tree);
     let err = remove(&dirs(&tree), "nope").expect_err("refused");
     assert!(
         matches!(err, RemoveError::UnknownConnector(ref id) if id == "nope"),

@@ -148,15 +148,15 @@ fn cli_usage() -> String {
 /// The interactive Claude connector-catalogue browser lives on the TUI surface
 /// (`/connectors claude`); a one-shot CLI invocation has no terminal to hand it,
 /// so the CLI states what the browser does and how to open it, and names the
-/// non-interactive equivalents. ASCII only, in the house attribution style.
+/// non-interactive equivalent. ASCII only, in the house attribution style.
 #[must_use]
 fn catalogue_browser_pointer() -> String {
     "From: /connectors claude\n\n\
      The Claude connector-catalogue browser is an interactive TUI panel: run \
-     `/connectors claude [query] [--refresh]` inside ragent to filter the \
-     catalogue, browse it with Up/Down, and install a connector with Enter.\n\n\
-     From a shell, use the non-interactive equivalents:\n\
-     - `ragent connectors search <query> [--category <name>]` - search the catalogue;\n\
+     `/connectors claude [query] [--category <name>] [--refresh]` inside ragent to \
+     filter the catalogue by query and category, browse it with Up/Down, and \
+     install a connector with Enter.\n\n\
+     From a shell, use the non-interactive equivalent:\n\
      - `ragent connectors add <id>` - install a connector from the catalogue."
         .to_string()
 }
@@ -268,22 +268,11 @@ impl ConnectorCommandEnv for CliConnectorEnv {
             stored: false,
         })
     }
-
-    async fn search_catalogue(&mut self) -> Result<Vec<ConnectorDescriptor>, String> {
-        // The catalogue fetch is blocking, so it runs off the async worker thread
-        // on the same spawn_blocking path the `stores --check` probe uses.
-        let config = self.config.clone();
-        tokio::task::spawn_blocking(move || {
-            ragent_connectors::fetch_catalogue_descriptors_network(&config)
-        })
-        .await
-        .unwrap_or_else(|err| Err(format!("the catalogue fetch did not run: {err}")))
-    }
 }
 
 /// Build a [`ConnectorEnv`] over `connect` with this surface's null credentials,
 /// process environment, and always-enabled server ledger (FR-008, FR-018).
-fn connector_env<'a>(connect: &'a mut CliMcpConnect) -> ragent_connectors::ConnectorEnv<'a> {
+fn connector_env(connect: &mut CliMcpConnect) -> ragent_connectors::ConnectorEnv<'_> {
     ragent_connectors::ConnectorEnv {
         connect,
         credentials: &NullCredentialStore,

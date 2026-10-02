@@ -276,3 +276,53 @@ fn ledger_corrupt_file_is_renamed_aside_and_restarted() {
     );
     assert!(!store.join(STATE_FILE).exists());
 }
+
+// ── descriptor_by_id: id / slug / display-name resolution (FR-001) ──────────
+
+/// Build the `StoreDirs` for one project-only temp tree.
+fn dirs_at(tree: &TempTree) -> ragent_connectors::StoreDirs {
+    ragent_connectors::StoreDirs {
+        project: Some(tree.0.join("proj/.ragent/connectors")),
+        global: None,
+    }
+}
+
+#[test]
+fn descriptor_by_id_resolves_id_slug_and_display_name() {
+    let tree = TempTree::new("resolve");
+    let store = tree.0.join("proj/.ragent/connectors");
+    write_connector(
+        &store,
+        "microsoft-learn",
+        &manifest_for("microsoft-learn", "Microsoft Learn"),
+    );
+    let dirs = dirs_at(&tree);
+
+    // 1. exact id.
+    let by_id = ragent_connectors::descriptor_by_id(&dirs, "microsoft-learn").expect("id");
+    assert_eq!(by_id.id.as_str(), "microsoft-learn");
+    // 2. case-insensitive id.
+    let by_id_ci = ragent_connectors::descriptor_by_id(&dirs, "Microsoft-Learn").expect("id ci");
+    assert_eq!(by_id_ci.id.as_str(), "microsoft-learn");
+    // 3. case-insensitive display name (so a connector is addressable without
+    //    knowing its on-disk id).
+    let by_name =
+        ragent_connectors::descriptor_by_id(&dirs, "microsoft learn").expect("display name");
+    assert_eq!(by_name.id.as_str(), "microsoft-learn");
+    // An unknown reference resolves nothing.
+    assert!(ragent_connectors::descriptor_by_id(&dirs, "nosuch").is_none());
+}
+
+#[test]
+fn descriptor_by_id_exact_id_wins_over_a_display_name_collision() {
+    let tree = TempTree::new("resolve-order");
+    let store = tree.0.join("proj/.ragent/connectors");
+    // One connector's id equals the other's display name.
+    write_connector(&store, "foo", &manifest_for("foo", "Foo Display"));
+    write_connector(&store, "bar", &manifest_for("bar", "foo"));
+    let dirs = dirs_at(&tree);
+
+    // The exact id match wins, not the display-name match.
+    let found = ragent_connectors::descriptor_by_id(&dirs, "foo").expect("resolved");
+    assert_eq!(found.id.as_str(), "foo");
+}

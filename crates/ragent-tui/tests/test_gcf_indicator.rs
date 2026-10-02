@@ -36,6 +36,8 @@ fn make_app() -> App {
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
@@ -163,11 +165,11 @@ async fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
     assert!(ragent_config::gcf::is_enabled());
     assert!(app.status.contains("GCF encoding enabled"));
 
-    // Status bar should show the enabled GCF icon next to the codeindex icon.
+    // Status bar should show the enabled GCF tag next to the codeindex tag.
     let text = render_to_text(&mut app);
     assert!(
-        text.contains("🗜") && text.contains("✓"),
-        "status bar should show enabled GCF icon: {text}"
+        text.contains("GCF:") && text.contains("✓"),
+        "status bar should show enabled GCF tag: {text}"
     );
 
     // Toggle back off and verify.
@@ -178,8 +180,8 @@ async fn test_alt_g_toggles_gcf_and_status_bar_indicator() {
 
     let text = render_to_text(&mut app);
     assert!(
-        text.contains("🗜") && text.contains("✗"),
-        "status bar should show disabled GCF icon: {text}"
+        text.contains("GCF:") && text.contains("✗"),
+        "status bar should show disabled GCF tag: {text}"
     );
 }
 
@@ -208,15 +210,15 @@ fn test_gcf_indicator_sits_left_of_codeindex_icon() {
     let mut app = make_app();
     let text = render_to_text(&mut app);
 
-    // Both icons must be present on line 2, with GCF appearing before
-    // (left of) the codeindex magnifying-glass icon.
-    let gcf_pos = text.find("🗜").expect("GCF icon must render when enabled");
+    // Both tags must be present on line 2, with GCF appearing before (left of)
+    // the codeindex tag.
+    let gcf_pos = text.find("GCF:").expect("GCF tag must render when enabled");
     let codeindex_pos = text
-        .find("🔍")
-        .expect("codeindex icon must render on line 2");
+        .find("CDX:")
+        .expect("codeindex tag must render on line 2");
     assert!(
         gcf_pos < codeindex_pos,
-        "GCF icon must sit LEFT of the codeindex icon; text: {text}"
+        "GCF tag must sit LEFT of the codeindex tag; text: {text}"
     );
 
     ragent_config::gcf::set_enabled(false);

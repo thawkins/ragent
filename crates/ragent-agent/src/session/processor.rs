@@ -454,6 +454,22 @@ pub struct SessionProcessor {
     /// Optional MCP client for dynamic MCP tool registration.
     /// Set once after startup via [`SessionProcessor::set_mcp_client`].
     pub mcp_client: std::sync::OnceLock<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>>,
+    /// The connector lifecycle session, owned here so a `/connectors
+    /// enable|connect` invocation drives the same tracked connectors
+    /// session-start loaded (spec `connectors` T-008; FR-008, FR-012, FR-013,
+    /// FR-018, FR-019).
+    ///
+    /// `ragent-agent` must not depend on `ragent-connectors`, so the session is
+    /// type-erased: the owner stores an `Arc<dyn Any + Send + Sync>` and callers
+    /// downcast through [`connector_session`](Self::connector_session).
+    pub connector_session: tokio::sync::RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>,
+    /// The live connector lifecycle snapshot (`connected` / `errored` and the
+    /// per-server tool lists) behind `/connectors list` (FR-009).
+    ///
+    /// Also type-erased as an `Arc<dyn Any + Send + Sync>` holding a
+    /// `Vec<ConnectorStatus>`; `None` means no session has loaded the connectors
+    /// yet, so a list render falls back to the persisted store state.
+    pub connector_statuses: tokio::sync::RwLock<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// Optional code index for codebase search and symbol lookup.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
@@ -1333,6 +1349,62 @@ impl SessionProcessor {
             // handle's tools are registered on their own connect path.
             tracing::debug!("MCP client already published; retained the existing handle");
         }
+    }
+
+    /// Publish the connector lifecycle session for this processor (spec
+    /// `connectors` T-008; FR-008, FR-012, FR-019).
+    ///
+    /// `ragent-agent` cannot name the connector type, so the session is stored
+    /// type-erased: `session` is an `Arc<ConnectorSession>` the caller passes as
+    /// an `Arc<dyn Any + Send + Sync>`. A later [`Self::set_connector_session`]
+    /// replaces the previous owner, which is safe because the connector store
+    /// `_state.json` ledger is the durable record and the MCP client holds the
+    /// live connections.
+    ///
+    /// A previous owner is replaced (logged at `debug`); the handle never
+    /// panics, because connector tracking is best-effort and must never take
+    /// the session down.
+    pub async fn set_connector_session(&self, session: Arc<dyn std::any::Any + Send + Sync>) {
+        let mut guard = self.connector_session.write().await;
+        if guard.is_some() {
+            tracing::debug!("connector session already published; replacing the previous owner");
+        }
+        *guard = Some(session);
+    }
+
+    /// The published connector lifecycle session, downcast to `T`, or `None`
+    /// when no session has been published (FR-008).
+    ///
+    /// The caller names the concrete connector type and receives `None` on a
+    /// downcast miss rather than a panic.
+    pub async fn connector_session<T: std::any::Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        let guard = self.connector_session.read().await;
+        guard
+            .as_ref()
+            .and_then(|session| Arc::clone(session).downcast::<T>().ok())
+    }
+
+    /// Publish the live connector status snapshot behind `/connectors list`
+    /// (spec `connectors` T-008; FR-009).
+    ///
+    /// The snapshot is an `Arc<Vec<ConnectorStatus>>` passed type-erased as an
+    /// `Arc<dyn Any + Send + Sync>`; `None` clears it, so a list render falls
+    /// back to the persisted store state.
+    pub async fn set_connector_statuses(
+        &self,
+        statuses: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    ) {
+        let mut guard = self.connector_statuses.write().await;
+        *guard = statuses;
+    }
+
+    /// The published connector status snapshot, downcast to `T`, or `None` when
+    /// no session has loaded the connectors (FR-009).
+    pub async fn connector_statuses<T: std::any::Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        let guard = self.connector_statuses.read().await;
+        guard
+            .as_ref()
+            .and_then(|statuses| Arc::clone(statuses).downcast::<T>().ok())
     }
 
     /// Terminate every MCP server connection this session owns.

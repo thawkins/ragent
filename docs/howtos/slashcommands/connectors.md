@@ -1,5 +1,5 @@
 # /connectors
-> Connector management: /connectors list [--verbose] [--category <name>] | search <query> [--category <name>] | claude [query] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help
+> Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help
 
 ## Overview
 
@@ -26,9 +26,8 @@ The system is specified in [`specs/connectors/SPEC.md`](../../../specs/connector
 
 ```text
 /connectors list [--verbose] [--category <name>]   # installed connectors + state
-/connectors search <query> [--category <name>]     # search the catalogue
-/connectors claude [query] [--refresh]             # interactive catalogue browser
-/connectors add <id|source> [--force]              # install (recorded disabled)
+/connectors claude [query] [--category <name>] [--refresh]  # interactive catalogue browser
+/connectors add <id|source> [--force]              # install (recorded enabled)
 /connectors remove <id>                            # uninstall (refused while enabled)
 /connectors enable <id>                            # enable + connect now
 /connectors disable <id>                           # disable + disconnect
@@ -45,9 +44,8 @@ The system is specified in [`specs/connectors/SPEC.md`](../../../specs/connector
 | Form | Description |
 | --- | --- |
 | `/connectors list [--verbose] [--category <name>]` | One row per installed connector showing state, auth state, category, and bridged server/tool counts. `--verbose` adds detail. `--category` restricts the rows; `ALL` (any case) or a blank value clears the filter; an unknown category is refused with an `[err]` row and changes no state. |
-| `/connectors search <query> [--category <name>]` | Search the catalogue by name, category, or tag, with the same `--category` filter. |
-| `/connectors claude [query] [--refresh]` | Open the interactive Claude connector-catalogue browser: a title line (catalogue name, query, active category, visible/total count), a scrollable result list with the block cursor on the highlighted row, an `[installed]` marker and distinct colour on already-installed connectors, and a footer of key hints. `--refresh` bypasses the catalogue cache. |
-| `/connectors add <id\|source> [--force]` | Install a connector from a catalogue id, a local directory holding a connector manifest, a local `.zip`/`.tar.gz`, or an `https://` URL naming a package. A fresh install is recorded **disabled**; run `/connectors enable <id>` to connect its servers. A duplicate id is refused unless `--force` is given. |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser: a title line (catalogue name, query, active category, visible/total count), a scrollable result list with the block cursor on the highlighted row, an `[installed]` marker and distinct colour on already-installed connectors, and a footer of key hints. The optional `query` pre-fills the search field, `--category <name>` pre-selects the category filter (an unknown category is refused in the footer and no row is hidden), and `--refresh` bypasses the catalogue cache. Press `c` while the panel is open to cycle the filter through the catalogue's categories and back to `ALL`. |
+| `/connectors add <id\|source> [--force]` | Install a connector from a catalogue id, a local directory holding a connector manifest, a local `.zip`/`.tar.gz`, or an `https://` URL naming a package. A fresh install is recorded **enabled**; run `/connectors enable <id>` to connect its servers now in a running session. A duplicate id is refused unless `--force` is given. |
 | `/connectors remove <id>` | Uninstall a connector. Refused while the connector is enabled. |
 | `/connectors enable <id>` | Enable a connector and connect its servers now. |
 | `/connectors disable <id>` | Disable a connector and disconnect its servers. |
@@ -73,19 +71,14 @@ List everything with the productivity filter:
 /connectors list --category productivity
 ```
 
-Search the catalogue, then install and enable the result:
+Browse the catalogue interactively, filtered by query and category, then
+install and enable the result:
 
 ```text
-/connectors search drive
+/connectors claude drive --category productivity
 /connectors add google-drive
 /connectors auth google-drive
 /connectors enable google-drive
-```
-
-Browse the catalogue interactively (filter, browse, install with one key):
-
-```text
-/connectors claude
 ```
 
 Test a connector without touching the live session:

@@ -63,8 +63,8 @@ Connectors are discovered under:
 - `~/.config/ragent/connectors/` (user-global),
 
 with an optional `connectors.store_dir` override. A freshly installed connector
-is recorded **disabled**, so installing can never silently connect a server; run
-`/connectors enable <id>` to connect it.
+is recorded **enabled**; run `/connectors enable <id>` to connect it now in a
+running session.
 
 The durable enable state is the existing global `mcp_state.json` ledger shared
 with the rest of MCP, so a connector disabled once stays disabled everywhere and
@@ -72,7 +72,8 @@ survives a restart.
 
 ## 4. Browsing the Catalogue
 
-`/connectors claude [query] [--refresh]` opens an interactive catalogue browser:
+`/connectors claude [query] [--category <name>] [--refresh]` opens an interactive
+catalogue browser:
 
 - a title line with the catalogue name, the current query, the active category,
   and the visible/total result count;
@@ -80,12 +81,17 @@ survives a restart.
 - an `[installed]` marker and distinct colour on connectors you already have;
 - a footer of key hints.
 
-While the panel is open it owns the keyboard: `Up`/`Down` move the cursor,
-`ENTER` installs the highlighted result, `Backspace` and `Esc` edit the query
-(and `Esc` on an empty query dismisses the panel). The catalogue fetch runs off
-the event loop, so the UI keeps animating while it loads.
+An optional `query` pre-fills the search field and `--category <name>`
+pre-selects the category filter; a category the catalogue does not declare is
+refused in the panel footer and no row is hidden. `--refresh` bypasses the
+catalogue cache.
 
-`/connectors search <query>` searches the catalogue non-interactively, and
+While the panel is open it owns the keyboard: `Up`/`Down` move the cursor,
+`ENTER` installs the highlighted result, `c` cycles the category filter through
+the catalogue's categories and back to `ALL`, `Backspace` and `Esc` edit the
+query (and `Esc` on an empty query dismisses the panel). The catalogue fetch runs
+off the event loop, so the UI keeps animating while it loads.
+
 `/connectors stores [--check]` reports each catalogue endpoint and its
 provenance (`default` or `config`).
 
@@ -93,7 +99,7 @@ provenance (`default` or `config`).
 
 | Step | Command |
 | --- | --- |
-| Install | `/connectors add <id\|source>` (recorded disabled) |
+| Install | `/connectors add <id\|source>` (recorded enabled) |
 | Enable and connect now | `/connectors enable <id>` |
 | Disconnect but keep enabled | `/connectors disconnect <id>` |
 | Reconnect | `/connectors connect <id>` |
@@ -109,7 +115,9 @@ refused.
 
 `/connectors list --category <name>` restricts the rows to one category; `ALL`
 (any case) or a blank value clears the filter, and an unknown category is
-refused with an `[err]` row and changes no state.
+refused with an `[err]` row and changes no state. The same `--category` filter is
+accepted by `/connectors claude` to open the browser with that category already
+selected.
 
 ## 6. Authentication
 

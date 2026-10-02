@@ -10,7 +10,9 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 
-use ragent_connectors::{ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer};
+use ragent_connectors::{
+    CategoryFilter, ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer,
+};
 use ragent_tui::App;
 use ragent_tui::layout;
 
@@ -59,10 +61,23 @@ fn sample() -> Vec<ConnectorDescriptor> {
 /// directly.
 fn open(entries: Vec<ConnectorDescriptor>, installed: &[&str], skipped: usize) -> App {
     let mut app = support::make_app();
-    app.open_connector_catalogue("", false);
+    app.open_connector_catalogue("", CategoryFilter::all(), false);
     let browser = app.connector_store.as_mut().expect("panel open");
     browser.set_installed(installed.iter().map(|s| (*s).to_string()).collect());
     browser.set_entries(entries, skipped);
+    app
+}
+
+/// An app with the panel open on `category`, populated from `entries` exactly as
+/// [`App::poll_connector_catalogue_result`] fills it after an off-loop fetch:
+/// the entries land first and the launch category is applied against the real
+/// category set.
+fn open_with_category(entries: Vec<ConnectorDescriptor>, category: CategoryFilter) -> App {
+    let mut app = support::make_app();
+    app.open_connector_catalogue("", category, false);
+    let browser = app.connector_store.as_mut().expect("panel open");
+    browser.set_entries(entries, 0);
+    browser.apply_pending_category();
     app
 }
 
@@ -173,6 +188,7 @@ fn the_footer_lists_the_available_keys() {
     assert!(footer.contains("Enter install"), "footer: {footer:?}");
     assert!(footer.contains("Esc close"), "footer: {footer:?}");
     assert!(footer.contains("Up/Down"), "footer: {footer:?}");
+    assert!(footer.contains("c category"), "footer: {footer:?}");
 }
 
 #[test]
@@ -250,7 +266,7 @@ fn an_installed_row_carries_an_installed_marker() {
 #[test]
 fn a_loading_browser_renders_a_loading_line() {
     let mut app = support::make_app();
-    app.open_connector_catalogue("", false);
+    app.open_connector_catalogue("", CategoryFilter::all(), false);
     // Force the browser back to the loading state so the line is deterministic.
     if let Some(browser) = app.connector_store.as_mut() {
         browser.status = ragent_connectors::CatalogueBrowseStatus::Loading;
@@ -266,7 +282,7 @@ fn a_loading_browser_renders_a_loading_line() {
 #[test]
 fn a_failed_fetch_renders_the_cause_inline() {
     let mut app = support::make_app();
-    app.open_connector_catalogue("", false);
+    app.open_connector_catalogue("", CategoryFilter::all(), false);
     if let Some(browser) = app.connector_store.as_mut() {
         browser.set_failed("catalogue unreachable".to_string());
     }
@@ -384,4 +400,100 @@ fn the_panel_area_resets_when_the_panel_closes() {
     app.close_connector_catalogue();
     let _ = render(&mut app, 100, 30);
     assert_eq!(app.connector_store_area, ratatui::layout::Rect::default());
+}
+
+// ---------------------------------------------------------------------------
+// Launch category filter (`/connectors claude --category <name>`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_launch_category_filters_the_result_rows() {
+    let mut app = open_with_category(sample(), CategoryFilter::parse("developer"));
+    let terminal = render(&mut app, 100, 30);
+    let rows = panel_rows(&terminal, &app).join("\n");
+    assert!(
+        rows.contains("github"),
+        "the matching row is painted: {rows:?}"
+    );
+    assert!(
+        !rows.contains("google-drive") && !rows.contains("slack"),
+        "rows in other categories are filtered out: {rows:?}"
+    );
+    let title = full_row(&terminal, app.connector_store_area.y);
+    assert!(
+        title.contains("category developer"),
+        "the title names the active launch category: {title:?}"
+    );
+}
+
+#[test]
+fn a_launch_category_the_catalogue_lacks_is_refused_instead_of_emptying_the_panel() {
+    let mut app = open_with_category(sample(), CategoryFilter::parse("nosuch"));
+    // The refusal is reported, and the panel keeps every row visible rather than
+    // rendering an empty list that looks like a catalogue with no matches.
+    let browser = app.connector_store.as_ref().expect("panel open");
+    assert_eq!(browser.selected_category_label(), "ALL");
+    assert_eq!(
+        browser.last_install.as_deref(),
+        Some("unknown category `nosuch`")
+    );
+    let terminal = render(&mut app, 100, 30);
+    let rows = panel_rows(&terminal, &app).join("\n");
+    assert!(rows.contains("google-drive"), "rows stay visible: {rows:?}");
+}
+
+#[test]
+fn a_launch_category_all_leaves_every_row_visible() {
+    let mut app = open_with_category(sample(), CategoryFilter::all());
+    let terminal = render(&mut app, 100, 30);
+    let title = full_row(&terminal, app.connector_store_area.y);
+    assert!(
+        title.contains("category ALL"),
+        "an unfiltered launch names ALL: {title:?}"
+    );
+    let rows = panel_rows(&terminal, &app).join("\n");
+    for id in ["google-drive", "github", "slack"] {
+        assert!(rows.contains(id), "every row is visible: {rows:?}");
+    }
+}
+
+#[tokio::test]
+async fn c_cycles_the_category_filter_over_the_fetched_categories() {
+    let mut app = open(sample(), &[], 0);
+    // The fetched catalogue declares communication, developer, and productivity,
+    // sorted case-insensitively by `build_categories`.
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
+        let browser = app.connector_store.as_ref().expect("panel open");
+        seen.push(browser.selected_category_label().to_string());
+    }
+    assert_eq!(
+        seen,
+        vec![
+            "communication".to_string(),
+            "developer".to_string(),
+            "productivity".to_string(),
+            "ALL".to_string(),
+        ],
+        "the cycle runs over the catalogue categories and back to ALL"
+    );
+
+    // With `developer` active the panel shows only the matching row.
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
+    let browser = app.connector_store.as_ref().expect("panel open");
+    assert_eq!(browser.selected_category_label(), "developer");
+    let terminal = render(&mut app, 100, 30);
+    let rows = panel_rows(&terminal, &app).join("\n");
+    assert!(rows.contains("github"), "matching row painted: {rows:?}");
+    assert!(
+        !rows.contains("google-drive") && !rows.contains("slack"),
+        "non-matching rows are filtered out: {rows:?}"
+    );
+    let title = full_row(&terminal, app.connector_store_area.y);
+    assert!(
+        title.contains("category developer"),
+        "the title names the cycled category: {title:?}"
+    );
 }

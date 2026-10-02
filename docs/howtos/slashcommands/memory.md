@@ -1,18 +1,19 @@
 # /memory
-> Memory panel (Alt+M): /memory | /memory show | /memory init | /memory read <label> | /memory search <query>
+> Memory panel (Alt+M): /memory | /memory show | /memory clear | /memory help
 
 ## Overview
 
 `/memory` toggles the memory side panel and prints a structured-memory summary
-into the transcript. The panel view and the transcript summary are the only
-implemented behaviours: the bare form and `/memory show` do the same thing,
-and `/memory help` prints the usage line.
+into the transcript. The panel view, the transcript summary, and
+`/memory clear` are the implemented behaviours: the bare form and
+`/memory show` do the same thing, `/memory clear` opens a `Yes`/`No`
+confirmation dialog that empties this project's memories, and `/memory help`
+prints the usage line.
 
-The command description in the slash-command registry also advertises
-`init`, `read <label>`, and `search <query>`, but the dispatcher does not
-implement them. Any argument other than `show` (including `help` and those
-advertised forms) prints the usage line. This documentation records the
-code truth so readers do not hunt for behaviour that does not exist.
+The command description in the slash-command registry lists exactly the
+implemented forms (`/memory`, `/memory show`, `/memory clear`, `/memory help`).
+Any argument other than these prints the usage line. This documentation records
+the code truth so readers do not hunt for behaviour that does not exist.
 
 For real memory operations use the `memory_*` tools (`memory_store`,
 `memory_recall`, `memory_forget`) in chat, or `Alt+M` to toggle the panel.
@@ -22,6 +23,7 @@ For real memory operations use the `memory_*` tools (`memory_store`,
 ```
 /memory          # toggle panel + transcript summary (same as show)
 /memory show     # same as bare form
+/memory clear    # ask Yes/No, then clear this project's memories
 /memory help     # prints the usage line
 ```
 
@@ -31,10 +33,12 @@ For real memory operations use the `memory_*` tools (`memory_store`,
 | --- | --- |
 | `/memory` | Toggle the memory side panel; print the structured-memory summary |
 | `/memory show` | Identical to the bare form |
-| `/memory help` | Prints `Usage: /memory show | /memory help` |
+| `/memory clear` | Open a `Yes`/`No` confirmation dialog, then clear this project's memories |
+| `/memory help` | Prints `Usage: /memory show | /memory clear | /memory help` |
 
-Documented-but-unimplemented forms (the registry lists them, the dispatcher
-prints the usage line for all of them):
+Any other argument - including the older `init`, `read <label>`, and
+`search <query>` forms that the registry no longer advertises - prints the
+usage line.
 
 | Form | Status |
 | --- | --- |
@@ -60,6 +64,13 @@ Check the usage line:
 
 ```
 /memory help
+```
+
+Clear this project's memories (a `Yes`/`No` dialog appears; pick `Yes` to
+confirm, or `No`/`Esc` to cancel):
+
+```
+/memory clear
 ```
 
 Attempt a documented-but-unimplemented subcommand; you get the usage line:
@@ -99,10 +110,21 @@ Transcript summary (printed alongside the panel toggle):
 - Each row: `- **#id** \`confidence\` preview` with the preview truncated
   to 120 characters.
 
-Non-`show` forms print exactly:
+Clear behaviour (`/memory clear`):
+
+- Opens the `Clear this project's memory?` dialog with `Yes` / `No`, `No`
+  selected by default so a stray `Enter` cannot clear memory.
+- `Left`/`Right` (or `Tab`) move the selection; `Enter` selects; `Esc` cancels.
+- On `Yes` every memory whose project is the current working directory (full
+  path or directory basename) is deleted and the transcript reports
+  `Cleared N memory entries for this project.` Memories belonging to other
+  projects are never touched.
+- `No`/`Esc` leave memory unchanged.
+
+Argument forms with no implementation print exactly:
 
 ```
-Usage: /memory show | /memory help
+Usage: /memory show | /memory clear | /memory help
 ```
 
 ## Related

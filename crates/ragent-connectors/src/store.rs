@@ -59,7 +59,7 @@ impl StoreDirs {
     /// global fallback. `None` when neither leg resolves.
     #[must_use]
     pub fn destination(&self) -> Option<&Path> {
-        self.project.as_deref().or_else(|| self.global.as_deref())
+        self.project.as_deref().or(self.global.as_deref())
     }
 }
 
@@ -115,8 +115,9 @@ pub struct StoreLedger {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectorState {
     /// Whether the connector is enabled. A newly installed connector is recorded
-    /// **disabled** by `/connectors add` (FR-011) so no server starts until
-    /// `/connectors enable`; it can be turned off again with
+    /// **enabled** by `/connectors add` (FR-011) so it is ready to use, but
+    /// nothing is connected until the next session start or an explicit
+    /// `/connectors connect`; it can be turned off with
     /// `/connectors disable` (FR-013). The durable, cross-project enable ledger
     /// (`<state dir>/mcp_state.json`) governs whether a server actually starts
     /// (FR-012, FR-018).
@@ -304,17 +305,43 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
 }
 
 /// Find the parsed descriptor for `id` across the store legs, project winning on
-/// id collision (FR-001). `None` when no store holds a parseable connector with
-/// that id.
+/// id collision (FR-001). `None` when no store holds a parseable connector
+/// matching the reference.
+///
+/// The reference is matched against three keys, first match wins:
+///
+/// 1. the descriptor id, byte-for-byte;
+/// 2. the descriptor id, case-insensitively;
+/// 3. the display name, case-insensitively.
+///
+/// So `/connectors enable Microsoft-Learn`, `/connectors enable microsoft-learn`
+/// and `/connectors enable "Microsoft Learn"` all resolve the same installed
+/// connector, which is what makes a connector addressable without its UUID.
 ///
 /// Shared by the TUI and CLI session environments so their descriptor lookup
 /// cannot drift.
 #[must_use]
-pub fn descriptor_by_id(dirs: &StoreDirs, id: &str) -> Option<ConnectorDescriptor> {
-    scan_dirs(dirs.clone()).into_iter().find_map(|connector| {
-        let descriptor = connector.outcome.ok()?;
-        (descriptor.id.as_str() == id).then_some(descriptor)
-    })
+pub fn descriptor_by_id(dirs: &StoreDirs, reference: &str) -> Option<ConnectorDescriptor> {
+    let reference = reference.trim();
+    let descriptors: Vec<ConnectorDescriptor> = scan_dirs(dirs.clone())
+        .into_iter()
+        .filter_map(|connector| connector.outcome.ok())
+        .collect();
+    // 1. Exact id.
+    if let Some(found) = descriptors.iter().find(|d| d.id.as_str() == reference) {
+        return Some(found.clone());
+    }
+    // 2. Case-insensitive id.
+    if let Some(found) = descriptors
+        .iter()
+        .find(|d| d.id.as_str().eq_ignore_ascii_case(reference))
+    {
+        return Some(found.clone());
+    }
+    // 3. Case-insensitive display name.
+    descriptors
+        .into_iter()
+        .find(|d| d.name.eq_ignore_ascii_case(reference))
 }
 
 /// A store entry is a candidate connector directory when it is a real

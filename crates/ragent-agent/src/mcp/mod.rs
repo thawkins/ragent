@@ -1270,6 +1270,36 @@ impl Default for McpClient {
 /// outcome when `KillOnDrop` won the race.
 #[cfg(unix)]
 fn kill_stdio_child(pid: u32) {
+    // SIGKILL every process left in the child's own group first. The stdio
+    // spawn puts the child in its own group (`process_group(0)`), so the group
+    // is the unit of teardown. That matters for a launcher-mediated server:
+    // `npx` / `npm exec` fork the real server (a `node` process) and the group
+    // *leader* can exit while the grandchild stays alive holding the stdio
+    // pipes. Killing only the recorded pid then left the real server running,
+    // and because the leader had gone the orphan sweep could no longer see the
+    // group to clean it up.
+    //
+    // Killing the enumerated members before `killpg` is deliberate ordering:
+    // it leaves no window in which the leader dies, its group empties (so
+    // `killpg` finds nothing), and the grandchild survives as an
+    // unidentifiable orphan. The group is re-enumerated between passes so a
+    // grandchild that was still `fork`ing at spawn time is caught; `killpg`
+    // then covers anything that re-parents in the remaining window, because
+    // re-parenting does not change the process group.
+    #[allow(unsafe_code)]
+    // approved: `libc::kill`/`libc::killpg` take plain C ints and have no
+    // pointer arguments; the pids come from `/proc`.
+    unsafe {
+        for _ in 0..3 {
+            let members = process_group_members(pid);
+            if members.is_empty() {
+                break;
+            }
+            for member in members {
+                libc::kill(member as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
     // The child leads its own process group (`process_group(0)` at spawn), so
     // SIGKILL the whole group: launcher commands (`npx`, ...) fork the real
     // server process and exit, and killing only the recorded pid would orphan
@@ -1320,9 +1350,64 @@ pub fn read_ppid_of(pid: u32) -> Option<u32> {
 #[cfg(unix)]
 #[doc(hidden)]
 pub fn ppid_from_stat_contents(stat: &str) -> Option<u32> {
+    stat_field_after_comm(stat, 1)?.parse::<u32>().ok()
+}
+
+/// Read the `n`th whitespace-separated field that follows the `comm` field of a
+/// `/proc/<pid>/stat` line.
+///
+/// `comm` (field 2) is parenthesised and may itself contain spaces or `)`, so
+/// the fields are split after the *last* `)`. Index `0` is the state, `1` the
+/// ppid, `2` the pgrp, ... Returns `None` when the line is malformed or the
+/// process exited mid-scan.
+#[cfg(unix)]
+fn stat_field_after_comm(stat: &str, n: usize) -> Option<&str> {
     let after_comm = stat.rsplit_once(") ")?.1;
-    // Fields after comm: state(3) ppid(4) ...
-    after_comm.split_whitespace().nth(1)?.parse::<u32>().ok()
+    // Fields after comm: state(3) ppid(4) pgrp(5) ...
+    after_comm.split_whitespace().nth(n)
+}
+
+/// Whether `ppid` is the process an orphan is re-parented to once its spawner
+/// dies.
+///
+/// On a plain session this is init (`1`). Under a per-user service manager
+/// (systemd --user, launched from a desktop terminal) a dead launcher's
+/// grandchild is re-parented to the *user manager* instead, which can be any
+/// pid - so `Ppid == 1` alone misses exactly the case this sweep exists for.
+/// The supervisor is identified by [`is_user_service_manager`];
+/// `find_orphaned_stdio_pids` passes the observed ppid, so this is a small
+/// predicate rather than a second scan.
+#[cfg(unix)]
+fn is_reparented_to_the_supervisor(ppid: Option<u32>) -> bool {
+    matches!(ppid, Some(1)) || ppid.is_some_and(is_user_service_manager)
+}
+
+/// Whether `pid` looks like a per-user service manager (`systemd --user`).
+///
+/// Two signals are accepted because the `--user` flag is *not* present in the
+/// kernel's argv view of the running user manager:
+///
+/// - `/proc/<pid>/comm` is exactly `systemd`, matched first so the check needs
+///   no argv at all, or
+/// - argv[0]'s basename is `systemd` (with a `--user` flag when the full argv is
+///   visible), which is what a re-executed or containerised manager shows.
+///
+/// A process whose command line cannot be read is not treated as a supervisor,
+/// so the caller falls back to the strict init check.
+#[cfg(unix)]
+fn is_user_service_manager(pid: u32) -> bool {
+    if let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+        if comm.trim() == "systemd" {
+            return true;
+        }
+    }
+    let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&raw);
+    text.split('\0')
+        .next()
+        .is_some_and(|exe| exe.rsplit('/').next() == Some("systemd"))
 }
 
 /// Pids of orphaned processes belonging to a stdio MCP server, excluding
@@ -1336,31 +1421,42 @@ pub fn ppid_from_stat_contents(stat: &str) -> Option<u32> {
 /// and its tools would return `Transport closed`. The ppid is read *before*
 /// the cmdline so the common case (another live instance's child) is rejected
 /// without parsing argv.
+///
+/// Matching is **per process**, not per group identity, and that is what makes
+/// the launcher case work. The surviving tree is
+/// `npm exec mongodb-mcp-server@<3` (parent) -> `node .../mongodb-mcp-server`
+/// (child), and only the *child* carries the package token in a form
+/// [`orphan_cmdline_matches`] recognises: the launcher's own argv names neither
+/// the package as a bare token nor the launcher name as argv[0]. Requiring the
+/// group *leader* to match as well rejected the whole tree and left the orphan
+/// holding the pipes. Each matching member's **own** pid is therefore returned,
+/// so a non-matching leader is never killed while a matching member still is;
+/// [`kill_stdio_child`] signals each returned pid's group, which also reaps the
+/// leader.
 #[cfg(unix)]
-fn find_orphaned_stdio_pids(command: &str, args: &[String], exclude: u32) -> Vec<u32> {
+#[doc(hidden)]
+pub fn find_orphaned_stdio_pids(command: &str, args: &[String], exclude: u32) -> Vec<u32> {
     let mut pids = Vec::new();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return pids;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
+    for pid in proc_pids() {
         if pid == exclude {
             continue;
         }
-        if read_ppid_of(pid) != Some(1) {
-            continue;
-        }
-        let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
             continue;
         };
-        if orphan_cmdline_matches(&raw, command, args) {
-            pids.push(pid);
+        let ppid = stat_field_after_comm(&stat, 1).and_then(|s| s.parse::<u32>().ok());
+        if !is_reparented_to_the_supervisor(ppid) {
+            continue;
+        }
+        if let Some(raw) = process_cmdline(pid) {
+            if orphan_cmdline_matches(&raw, command, args) {
+                pids.push(pid);
+            }
+        } else {
+            tracing::debug!(
+                pid,
+                "orphan sweep: supervisor-reparented pid has no cmdline"
+            );
         }
     }
     pids.sort_unstable();
@@ -1382,6 +1478,11 @@ fn find_orphaned_stdio_pids(command: &str, args: &[String], exclude: u32) -> Vec
 /// package token, not the shared launcher name. On non-Unix platforms (or
 /// without a `command`) there is no safe process-table walk, so nothing is
 /// killed and the normal spawn proceeds.
+///
+/// A process is swept when its **own** command line matches the configured
+/// server (see [`orphan_cmdline_matches`]); each returned pid's process group is
+/// signalled, so a launcher tree (`npm exec` -> `node`) is reaped whether the
+/// launcher or the child is the process that carried the match.
 fn kill_orphaned_stdio(id: &str, config: &McpServerConfig) -> Option<Vec<u32>> {
     #[cfg(unix)]
     {
@@ -1406,6 +1507,49 @@ fn kill_orphaned_stdio(id: &str, config: &McpServerConfig) -> Option<Vec<u32>> {
         let _ = config;
         None
     }
+}
+
+/// The pids whose process group id equals `pgid`.
+///
+/// Used to enumerate the members of an orphaned stdio server's group. A leader
+/// whose group has already been reaped yields no members.
+#[cfg(unix)]
+fn process_group_members(pgid: u32) -> Vec<u32> {
+    let mut pids: Vec<u32> = proc_pids()
+        .into_iter()
+        .filter(|pid| process_group_of(*pid) == Some(pgid))
+        .collect();
+    pids.sort_unstable();
+    pids
+}
+
+/// Every numeric pid in `/proc`, or an empty vector when `/proc` is unreadable
+/// (a non-Linux Unix). Shared by the orphan sweep and the process-group
+/// enumeration so the `/proc` walk lives in one place.
+#[cfg(unix)]
+fn proc_pids() -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .collect()
+}
+
+/// The process group id of `pid`, parsed from `/proc/<pid>/stat`.
+#[cfg(unix)]
+fn process_group_of(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat_field_after_comm(&stat, 2)?.parse::<u32>().ok()
+}
+
+/// The raw NUL-separated `/proc/<pid>/cmdline` bytes, or `None` when unreadable
+/// or empty (a kernel thread has no cmdline).
+#[cfg(unix)]
+fn process_cmdline(pid: u32) -> Option<Vec<u8>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    if raw.is_empty() { None } else { Some(raw) }
 }
 
 /// The HTTP endpoint URLs to probe for an already-running instance of a server.

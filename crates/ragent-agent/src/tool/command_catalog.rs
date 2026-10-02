@@ -29,12 +29,13 @@ pub struct CommandCatalogEntry {
 const TEAM_SUBS: &[&str] = &[
     "create", "open", "close", "delete", "list", "spawn", "message", "tasks", "cleanup", "help",
 ];
-const MEMORY_SUBS: &[&str] = &["search", "add", "forget", "config", "help"];
+const MEMORY_SUBS: &[&str] = &["show", "clear", "help"];
 const AGENT_SUBS: &[&str] = &["list", "switch", "help"];
 const THINKING_LEVELS: &[&str] = &["auto", "off", "low", "medium", "high"];
 const CODEINDEX_SUBS: &[&str] = &["on", "off", "sync", "help"];
 const GCF_SUBS: &[&str] = &["on", "off", "show", "help"];
 const TOOLS_SUBS: &[&str] = &[
+    "list",
     "show",
     "office",
     "github",
@@ -113,7 +114,7 @@ const PLUGINS_SUBS: &[&str] = &[
 const PLUGINS_FLAGS: &[&str] = &["--verbose", "--force"];
 const CONNECTORS_SUBS: &[&str] = &[
     "list",
-    "search",
+    "claude",
     "add",
     "remove",
     "enable",
@@ -125,7 +126,7 @@ const CONNECTORS_SUBS: &[&str] = &[
     "stores",
     "help",
 ];
-const CONNECTORS_FLAGS: &[&str] = &["--verbose", "--category", "--force", "--check"];
+const CONNECTORS_FLAGS: &[&str] = &["--verbose", "--category", "--force", "--check", "--refresh"];
 const ALOG_SUBS: &[&str] = &[
     "help", "on", "off", "config", "list", "status", "delete", "export",
 ];
@@ -363,7 +364,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "memory",
-        description: "Memory panel (Alt+M): /memory | /memory show | /memory init | /memory read <label> | /memory search <query>",
+        description: "Memory panel (Alt+M): /memory | /memory show | /memory clear | /memory help",
         subcommands: MEMORY_SUBS,
         flags: EMPTY,
     },
@@ -417,7 +418,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "connectors",
-        description: "Connector management: /connectors list [--verbose] [--category <name>] | search <query> [--category <name>] | claude [query] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
         subcommands: CONNECTORS_SUBS,
         flags: CONNECTORS_FLAGS,
     },
@@ -573,7 +574,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
         subcommands: TOOLS_SUBS,
         flags: EMPTY,
     },

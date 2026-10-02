@@ -6,17 +6,32 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ## Highlights (uncommitted, on top of v1.0.122)
 
+- **`/memory clear`** — clear this project's structured memories behind a
+  `Yes`/`No` confirmation dialog (`No` selected by default). Only memories
+  scoped to the current project directory are removed; other projects' entries
+  are never touched. The `/memory` slash family is now `/memory` (toggle panel
+  and print the summary), `/memory show` (alias), `/memory clear`, and
+  `/memory help`.
 - **`/connectors` slash family** — manage MCP-backed connectors (named
   integrations carrying a category, an auth shape, and one or more MCP servers)
-  from the TUI: `list`, `search`, `claude`, `add`, `remove`, `enable`,
+  from the TUI: `list`, `claude`, `add`, `remove`, `enable`,
   `disable`, `connect`, `disconnect`, `auth`, `test`, `stores`, and `help`.
-  `/connectors claude` opens a modal catalogue browser (filter, browse by
-  category, install with one key); `/connectors test <id>` runs an isolated
-  connect-and-invoke harness; `/connectors stores [--check]` reports each
-  catalogue endpoint's provenance. A bare `/connectors` or an unknown subcommand
-  prints the usage block. The same operations are available as
-  `ragent connectors <sub>`. See
+  `/connectors claude [query] [--category <name>] [--refresh]` opens a modal
+  catalogue browser (query pre-fills the search field, `--category` pre-selects
+  the filter, `--refresh` bypasses the cache; press `c` in the panel to cycle the
+  category filter, and install with one key). `/connectors test <id>` runs an
+  isolated connect-and-invoke harness; `/connectors stores [--check]` reports
+  each catalogue endpoint's provenance. The TUI drives the session-start
+  connector session, so `enable`/`disable`/`connect`/`disconnect` take effect
+  live and a connector is accepted by id, slug, or display name. A bare
+  `/connectors` or an unknown subcommand prints the usage block. The same
+  operations are available as `ragent connectors <sub>`. See
   [`docs/howtos/slashcommands/connectors.md`](docs/howtos/slashcommands/connectors.md).
+- **Message-window and `/mcp` render fixes (TUI-019)** — the tool name now
+  renders immediately after the step counter with every parameter after it, and
+  `/mcp` renders one server per row as a markdown/ASCII table instead of a
+  single wrapped paragraph. `/tools` gained an explicit `/tools list` (alias
+  `/tools show`) and a `/tools help` block.
 - **ASCII status-bar and tool markers** — the status-bar service icons and the
   message-window tool-category icons are now plain ASCII text tags (`CDX:`,
   `LOG:`, `AUTO:`, `EDIT:`, `TELE:`, `YOLO:`, `GCF:`, `BUSY: `) and marker
@@ -716,11 +731,13 @@ the code index and memory directories exist.
 ## 3.2 Tool visibility toggles
 
 Some large tool families are hidden from the model by default to keep prompts
-small. Use `/tools` to list switches and `/tools <switch> on|off` to enable or
-disable them persistently.
+small. Use `/tools` for the help block, `/tools list` (alias `/tools show`) to
+render the visibility table, and `/tools <switch> on|off` to enable or disable a
+switch persistently.
 
 ```text
-/tools show
+/tools
+/tools list
 /tools browser on
 /tools office on
 /tools github off
@@ -1392,6 +1409,17 @@ report `stored: true`, and the TUI summary and Memory panel reflect the update.
 - Store project conventions that should persist across sessions.
 - Keep a running analysis of the architecture.
 - Remember user preferences (e.g. "always use `anyhow::Result`").
+
+### Clearing this project's memories
+
+`/memory clear` opens a `Clear this project's memory?` dialog with `Yes` / `No`
+(`No` is selected by default, so a stray `Enter` cannot clear memory). Only
+memories scoped to the current project directory are deleted; other projects'
+entries are never touched.
+
+```text
+/memory clear
+```
 
 ### Updating memory
 

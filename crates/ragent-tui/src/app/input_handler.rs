@@ -1812,6 +1812,21 @@ impl App {
                         self.needs_redraw = true;
                     }
                 }
+                // `Clear this project's memory?` confirmation dialog (opened by
+                // `/memory clear`). Memory is removed only here, on an explicit
+                // `Yes`.
+                InputAction::ConfirmMemoryClear => {
+                    if self.memory_clear_confirm_open {
+                        self.close_memory_clear_confirm();
+                        self.clear_project_memory();
+                    }
+                }
+                InputAction::CancelMemoryClear => {
+                    if self.memory_clear_confirm_open {
+                        // Dismissing with `No`/`Esc` leaves memory unchanged.
+                        self.close_memory_clear_confirm();
+                    }
+                }
                 InputAction::ConfirmRouterSave => {
                     if let Some(draft) = self.pending_router_save.take() {
                         match self.save_router_config(&draft) {

@@ -1,7 +1,7 @@
 //! Tests for the last-prompt tag rendered on the status bar's top line.
 //!
 //! Covers:
-//! - `prompt_display_text` truncation semantics (first 32 chars, `....`
+//! - `prompt_display_text` truncation semantics (up to `max_chars`, `....`
 //!   suffix when longer, empty string for an empty prompt).
 //! - The tag renders in square brackets on the first status-bar line.
 //! - The tag renders immediately after the `Branch: `-labelled git branch
@@ -129,12 +129,13 @@ async fn test_statusbar_renders_slash_command_tag() {
 async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
     let mut app = support::make_app();
     // Unknown command suffix is ignored; `/about` keeps the status short so
-    // the tag has room to render.
-    app.execute_slash_command(&format!("/about {}", "c".repeat(40)))
+    // the tag has room to render. The status-bar tag budget is 48 chars (the
+    // production `prompt_display_text(&app.last_prompt, 48)` call).
+    app.execute_slash_command(&format!("/about {}", "c".repeat(60)))
         .await;
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
-    let expected = format!("[/about {}....]", "c".repeat(25));
+    let expected = format!("[/about {}....]", "c".repeat(41));
     assert!(
         line1.contains(&expected),
         "long slash command must be truncated with the .... suffix; \
@@ -149,10 +150,12 @@ async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
 #[test]
 fn test_statusbar_renders_last_prompt_tag() {
     let mut app = support::make_app();
-    app.last_prompt = "x".repeat(40);
+    // 60 chars exceeds the 48-char status-bar tag budget, so the rendered tag
+    // is the first 48 chars plus the `....` truncation suffix.
+    app.last_prompt = "x".repeat(60);
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
-    let expected = format!("[{}....]", "x".repeat(32));
+    let expected = format!("[{}....]", "x".repeat(48));
     assert!(
         line1.contains(&expected),
         "top status-bar line must contain the truncated last-prompt tag \
@@ -204,11 +207,11 @@ fn test_statusbar_tag_group_follows_branch_after_cwd() {
 fn test_statusbar_tag_group_shortens_cwd_to_fit() {
     let mut app = support::make_app();
     app.cwd = format!("~/{}/{}", "d".repeat(60), "e".repeat(40));
-    app.last_prompt = "x".repeat(40); // 38-column tag
+    app.last_prompt = "x".repeat(60); // 54-column tag (48 chars + `....`)
     app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);
     let line1 = frame.lines().next().unwrap_or("");
-    let expected = format!("[{}....]", "x".repeat(32));
+    let expected = format!("[{}....]", "x".repeat(48));
     assert!(
         line1.contains(&expected),
         "tag must still render when the cwd is shortened; line was: {line1}"

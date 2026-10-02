@@ -10,10 +10,13 @@
 //!   `ragent_plugins::surface::store_and_config`;
 //! - the subcommand parser ([`parse_connector_command`]) that recognises every
 //!   token of the family, accepts the `--force` flag on `add`, the `--verbose`
-//!   flag on `list`, the `--check` flag on `stores`, and the optional
-//!   `--category <name>` argument on `list`/`search` (FR-041), whose unknown
-//!   values render the family's `[err]` row
-//!   ([`crate::management::CategoryError`]) and change no state;
+//!   flag on `list`, the `--check` flag on `stores`, the `--refresh` flag on
+//!   `claude`, and the optional `--category <name>` argument on
+//!   `list`/`claude` (FR-041), whose unknown values render the family's `[err]`
+//!   row ([`crate::management::CategoryError`]) and change no state. `claude`
+//!   is parsed here but served by the owning surface (the TUI opens the browse
+//!   panel, the CLI prints the browser pointer), so the parser is the single
+//!   place its launch arguments are understood;
 //! - the synchronous dispatcher ([`run_connector_subcommand`]) for the sessions
 //!   that need no runtime (`help`, `add`, `remove`, `stores`), honouring the
 //!   master switch `connectors.enabled` before any work (FR-021);
@@ -43,7 +46,7 @@ use crate::fetch::{CatalogueCache, CatalogueLimits, default_fetcher, now_unix_se
 use crate::harness::{McpProbe, run_harness};
 use crate::help::{CONNECTOR_SUBCOMMANDS, attribution, render_help};
 use crate::lifecycle::{ConnectReport, ConnectorStatus, DisableReport, LifecycleError};
-use crate::management::{ListInput, render_list, render_search};
+use crate::management::{ListInput, render_list};
 use crate::remove::remove;
 use crate::report::{
     add_error_report, add_report, disabled_subsystem_report, remove_error_report, remove_report,
@@ -66,12 +69,15 @@ pub enum ConnectorCommand {
         /// The active category filter (`ALL` when unfiltered; FR-041).
         category: CategoryFilter,
     },
-    /// `search <query> [--category <name>]`.
-    Search {
-        /// The search query.
+    /// `claude [query] [--category <name>] [--refresh]`.
+    Claude {
+        /// The pre-filled search query (`""` when none was typed). The category
+        /// filter is applied on top of it (FR-041).
         query: String,
         /// The active category filter (`ALL` when unfiltered; FR-041).
         category: CategoryFilter,
+        /// Whether the launch asked for a cache-bypassing catalogue re-fetch.
+        refresh: bool,
     },
     /// `add <id|source> [--force]`.
     Add {
@@ -128,8 +134,6 @@ pub enum ConnectorCommand {
 pub enum ConnectorArgError {
     /// `add` was given no source.
     MissingAddSource,
-    /// `search` was given no query.
-    MissingSearchQuery,
     /// A single-id subcommand (`remove`, `enable`, `disable`, `connect`,
     /// `disconnect`, `auth`, `test`) was given no connector id.
     MissingId,
@@ -145,7 +149,6 @@ impl ConnectorArgError {
                  Source forms: a catalogue id, a local directory, a local `.zip`/`.tar.gz` \
                  file, or an `https://` URL ending in `.zip`/`.tar.gz`."
             }
-            Self::MissingSearchQuery => "Usage: `/connectors search <query> [--category <name>]`",
             Self::MissingId => "Usage: `/connectors <id>`",
         };
         format!("{}\n\n[err] Missing argument.\n\n{usage}", attribution(sub))
@@ -181,7 +184,7 @@ pub fn is_known_subcommand(sub: &str) -> bool {
     CONNECTOR_SUBCOMMANDS.contains(&sub)
 }
 
-/// The optional `--category <name>` argument on `list`/`search` (FR-041).
+/// The optional `--category <name>` argument on `list`/`claude` (FR-041).
 ///
 /// The flag is accepted anywhere in the argument list and consumes the next
 /// whitespace-delimited token as its value; a missing value degrades to the
@@ -221,14 +224,22 @@ pub fn parse_connector_command(
             let (category, _) = take_category_filter(&tokens);
             Some(Ok(ConnectorCommand::List { verbose, category }))
         }
-        "search" => {
+        "claude" => {
             let (category, remaining) = take_category_filter(&tokens);
-            let query = remaining.join(" ").trim().to_string();
-            if query.is_empty() {
-                Some(Err(ConnectorArgError::MissingSearchQuery))
-            } else {
-                Some(Ok(ConnectorCommand::Search { query, category }))
+            let mut refresh = false;
+            let mut query_tokens: Vec<&str> = Vec::new();
+            for token in &remaining {
+                if *token == "--refresh" {
+                    refresh = true;
+                } else {
+                    query_tokens.push(token);
+                }
             }
+            Some(Ok(ConnectorCommand::Claude {
+                query: query_tokens.join(" "),
+                category,
+                refresh,
+            }))
         }
         "add" => {
             let mut force = false;
@@ -275,9 +286,18 @@ fn id_command(
     )
 }
 
-/// The first whitespace-delimited token, or `None` when there are none.
+/// The connector reference the single-reference subcommands act on: every token
+/// joined by a space, or `None` when there are none.
+///
+/// Joining the tokens lets a multi-word display name (`Microsoft Learn`) be
+/// quoted and passed as one shell word without the whitespace being split off;
+/// an unquoted multi-word reference still resolves its first token, so the
+/// existing single-token usage is unchanged.
 fn first_id(tokens: &[&str]) -> Option<String> {
-    tokens.first().map(|id| (*id).to_string())
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(tokens.join(" "))
 }
 
 /// Run a `/connectors <sub> <rest>` invocation and return the report to print,
@@ -326,11 +346,12 @@ pub fn run_connector_subcommand(workdir: &Path, sub: &str, rest: &str) -> Option
             stores_report_with_check(&config, default_fetcher().as_ref(), args)
         }
         // The management subcommands drive a session or a catalogue fetch and
-        // are served by `run_connector_subcommand_env`; returning `None` lets
-        // the caller fall back to the usage block on a pure-sync surface.
+        // are served by `run_connector_subcommand_env`; `claude` opens a panel
+        // and is served by the owning surface. Returning `None` lets the caller
+        // fall back to the usage block on a pure-sync surface.
         Ok(
             ConnectorCommand::List { .. }
-            | ConnectorCommand::Search { .. }
+            | ConnectorCommand::Claude { .. }
             | ConnectorCommand::Enable { .. }
             | ConnectorCommand::Disable { .. }
             | ConnectorCommand::Connect { .. }
@@ -399,23 +420,56 @@ pub async fn run_connector_subcommand_async(
     // `run_connector_subcommand`.
     match sub {
         "test" => {}
-        "list" | "search" | "enable" | "disable" | "connect" | "disconnect" | "auth" => {
+        "list" | "claude" | "enable" | "disable" | "connect" | "disconnect" | "auth" => {
             // The management subcommands need a session lifecycle; the
             // session-aware entry point is `run_connector_subcommand_env`.
+            // `claude` opens a browse panel owned by the calling surface.
             return None;
         }
         _ => return None,
     }
     match parse_connector_command(sub, rest) {
         Some(Ok(ConnectorCommand::Test { id })) => {
-            match run_harness(workdir, config, credentials, env, probe, &id).await {
+            let resolved = resolve_connector_reference(workdir, &id);
+            match run_harness(workdir, config, credentials, env, probe, &resolved).await {
                 Ok(report) => Some(report),
-                Err(err) => Some(err.report(&id)),
+                Err(err) => Some(err.report(&resolved)),
             }
         }
         Some(Err(arg_err)) => Some(arg_err.report(sub)),
         // Unreachable: `sub == "test"` always parses to a `Test`.
         Some(Ok(_)) | None => None,
+    }
+}
+
+/// Resolve a user-supplied connector reference (identifier, slug, or display
+/// name) to the installed connector's canonical id.
+///
+/// `/connectors <verb> <ref>` accepts a connector's id, its slug, or its
+/// display name, so a connector is addressable without knowing its store
+/// directory name. Resolution is a single store scan shared by the harness and
+/// the lifecycle subcommands; an unresolved reference is returned unchanged so
+/// the downstream code reports it as an unknown connector under the name the
+/// user typed.
+#[must_use]
+pub fn resolve_connector_reference(workdir: &Path, reference: &str) -> String {
+    let (dirs, _config) = store_and_config(workdir);
+    canonical_id(&dirs, reference)
+}
+
+/// Resolve a connector reference (identifier, slug, or display name) to the
+/// installed connector's canonical id against `dirs` (FR-001).
+///
+/// This is the store-only half of [`resolve_connector_reference`], for callers
+/// that already hold the store dirs (the session environments and the CLI
+/// lifecycle seam) and should not perform a second config load. An unresolved
+/// reference is returned unchanged so the downstream code reports it as an
+/// unknown connector under the name the user typed.
+#[must_use]
+pub fn canonical_id(dirs: &crate::store::StoreDirs, reference: &str) -> String {
+    match crate::store::descriptor_by_id(dirs, reference) {
+        Some(descriptor) => descriptor.id.as_str().to_string(),
+        None => reference.to_string(),
     }
 }
 
@@ -438,7 +492,25 @@ pub trait ConnectorCommandEnv {
 
     /// The live per-connector status snapshot, or an empty vector when no
     /// session has loaded the connectors (FR-009).
+    ///
+    /// A surface whose connectors were connected by the shared client (the
+    /// binary's startup bridge) rather than by a [`crate::ConnectorSession::start`]
+    /// call overrides this to derive the snapshot from the client's per-server
+    /// state, so `list` reports `connected` instead of the store enable flag.
     fn statuses(&self) -> Vec<ConnectorStatus>;
+
+    /// The live advertised tool count per bridged server id
+    /// (`<connector-id>.<server>`), or an empty map when no live client is
+    /// reachable (FR-009).
+    ///
+    /// A count is the tool surface a bridged server actually exposes, which the
+    /// lifecycle state alone cannot express: a server that is `connected` but
+    /// advertises nothing is distinguishable from one whose client has not been
+    /// read yet. The default implementation reports no counts, so a surface
+    /// without a live client renders `?` rather than a misleading `0`.
+    fn tool_counts(&self) -> std::collections::BTreeMap<String, usize> {
+        std::collections::BTreeMap::new()
+    }
 
     /// Enable a connector and connect its servers now (FR-012).
     ///
@@ -481,21 +553,6 @@ pub trait ConnectorCommandEnv {
     /// Returns the refusal/failure cause when the connector is unknown or the
     /// credential store cannot be written.
     async fn auth(&mut self, id: &str) -> Result<AuthOutcome, AuthOutcomeError>;
-
-    /// Fetch the configured catalogue for a `search` query (FR-010).
-    ///
-    /// Returns the catalogue entries (the caller owns endpoint resolution and the
-    /// shared fetch budget) or a short cause when the catalogue could not be
-    /// resolved, reached, or parsed. The default implementation performs no fetch
-    /// and reports an empty catalogue, so a surface without network access still
-    /// renders a coherent (empty) result.
-    ///
-    /// # Errors
-    ///
-    /// Returns a short ASCII cause when the catalogue cannot be fetched.
-    async fn search_catalogue(&mut self) -> Result<Vec<ConnectorDescriptor>, String> {
-        Ok(Vec::new())
-    }
 }
 
 /// The result of `/connectors auth <id>` (FR-014, FR-022).
@@ -565,43 +622,51 @@ pub async fn run_connector_subcommand_env(
     let report = match parsed {
         ConnectorCommand::List { verbose, category } => {
             let statuses = env.statuses();
+            let tool_counts = env.tool_counts();
             let input = ListInput {
                 dirs: env.dirs(),
                 statuses: &statuses,
+                tool_counts: &tool_counts,
             };
             match render_list(&input, &category, verbose) {
                 Ok(report) => report,
                 Err(err) => err.report("list"),
             }
         }
-        ConnectorCommand::Search { query, category } => match env.search_catalogue().await {
-            Ok(catalogue) => match render_search(&query, &catalogue, &category) {
-                Ok(report) => report,
-                Err(err) => err.report("search"),
-            },
-            Err(cause) => search_error_report(&query, &cause),
-        },
-        ConnectorCommand::Enable { id } => match env.enable(&id).await {
-            Ok(outcome) => enable_report(&outcome),
-            Err(err) => lifecycle_error_report("enable", &id, &err),
-        },
-        ConnectorCommand::Disable { id } => match env.disable(&id).await {
-            Ok(outcome) => disable_report(&outcome),
-            Err(err) => lifecycle_error_report("disable", &id, &err),
-        },
-        ConnectorCommand::Connect { id } => match env.connect(&id).await {
-            Ok(outcome) => connect_report(&outcome),
-            Err(err) => lifecycle_error_report("connect", &id, &err),
-        },
-        ConnectorCommand::Disconnect { id } => match env.disconnect(&id).await {
-            Ok(outcome) => disconnect_report(&outcome),
-            Err(err) => lifecycle_error_report("disconnect", &id, &err),
-        },
+        ConnectorCommand::Enable { id } => {
+            let id = canonical_id(env.dirs(), &id);
+            match env.enable(&id).await {
+                Ok(outcome) => enable_report(&outcome),
+                Err(err) => lifecycle_error_report("enable", &id, &err),
+            }
+        }
+        ConnectorCommand::Disable { id } => {
+            let id = canonical_id(env.dirs(), &id);
+            match env.disable(&id).await {
+                Ok(outcome) => disable_report(&outcome),
+                Err(err) => lifecycle_error_report("disable", &id, &err),
+            }
+        }
+        ConnectorCommand::Connect { id } => {
+            let id = canonical_id(env.dirs(), &id);
+            match env.connect(&id).await {
+                Ok(outcome) => connect_report(&outcome),
+                Err(err) => lifecycle_error_report("connect", &id, &err),
+            }
+        }
+        ConnectorCommand::Disconnect { id } => {
+            let id = canonical_id(env.dirs(), &id);
+            match env.disconnect(&id).await {
+                Ok(outcome) => disconnect_report(&outcome),
+                Err(err) => lifecycle_error_report("disconnect", &id, &err),
+            }
+        }
         ConnectorCommand::Auth { id } => match env.auth(&id).await {
             Ok(outcome) => auth_report(&outcome),
             Err(err) => format!("{}\n\n[err] {err}", attribution(&format!("auth {id}"))),
         },
         ConnectorCommand::Test { id } => {
+            let id = resolve_connector_reference(workdir, &id);
             match run_harness(
                 workdir,
                 env.config(),
@@ -623,9 +688,11 @@ pub async fn run_connector_subcommand_env(
         ConnectorCommand::Stores { check: true } => {
             run_connector_subcommand_stores_check(env.config()).await
         }
-        // The remaining store subcommands are served by `run_connector_subcommand`.
+        // The remaining store subcommands are served by `run_connector_subcommand`,
+        // and `claude` opens a browse panel owned by the calling surface.
         ConnectorCommand::Add { .. }
         | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::Claude { .. }
         | ConnectorCommand::Stores { check: false } => return None,
     };
     Some(report)
@@ -699,14 +766,53 @@ pub fn fetch_catalogue_descriptors_with_skipped(
     }
 }
 
-/// Render the `[err]` report for a `search` whose catalogue could not be
-/// resolved, reached, or parsed (FR-010).
-#[must_use]
-pub fn search_error_report(query: &str, cause: &str) -> String {
-    format!(
-        "{}\n\n[err] could not search the connector catalogue for \"{query}\": {cause}",
-        attribution("search")
-    )
+/// Fetch the catalogue descriptors a catalogue-browser
+/// query filters, excluding connectors already installed in `dirs` (FR-010).
+///
+/// A catalogue entry's id is the connector id, so an entry whose id is already
+/// present in the store cannot be installed (the install refuses the
+/// collision); dropping such entries at the source means the search report
+/// lists what can still be added, and the browse panel never offers a row that
+/// would be refused. An entry installed under a different on-disk id (a
+/// pre-existing UUID install) is not matched and stays listed.
+///
+/// # Errors
+///
+/// Returns a short ASCII cause when no catalogue could be fetched.
+pub fn search_installable_catalogue(
+    config: &ConnectorsConfig,
+    dirs: &crate::store::StoreDirs,
+) -> Result<Vec<ConnectorDescriptor>, String> {
+    search_installable_catalogue_with_skipped(config, dirs)
+        .map(|(descriptors, _skipped)| descriptors)
+}
+
+/// [`search_installable_catalogue`] with the parser's skip count.
+///
+/// The browse panel reports a short list as a partial result rather than a
+/// silent one, so it needs the number of entries the provider dropped as
+/// malformed or unexpressible *plus* the already-installed entries omitted.
+///
+/// # Errors
+///
+/// Returns a short ASCII cause when no catalogue could be fetched.
+pub fn search_installable_catalogue_with_skipped(
+    config: &ConnectorsConfig,
+    dirs: &crate::store::StoreDirs,
+) -> Result<(Vec<ConnectorDescriptor>, usize), String> {
+    let (descriptors, skipped) = fetch_catalogue_descriptors_with_skipped(config)?;
+    let installed: std::collections::BTreeSet<String> = crate::store::scan_dirs(dirs.clone())
+        .into_iter()
+        .filter_map(|connector| connector.outcome.ok())
+        .map(|descriptor| descriptor.id.as_str().to_string())
+        .collect();
+    let before = descriptors.len();
+    let descriptors: Vec<ConnectorDescriptor> = descriptors
+        .into_iter()
+        .filter(|descriptor| !installed.contains(descriptor.id.as_str()))
+        .collect();
+    let omitted = before.saturating_sub(descriptors.len());
+    Ok((descriptors, skipped + omitted))
 }
 
 /// Render the `[err]` report for a refused lifecycle transition (FR-016).

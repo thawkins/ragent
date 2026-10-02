@@ -430,7 +430,7 @@ fn entry_matches_covers_the_id_name_description_category_and_tags() {
 }
 
 #[test]
-fn the_browse_install_report_names_the_install_and_its_disabled_posture() {
+fn the_browse_install_report_names_the_install_and_its_enabled_posture() {
     let outcome = ragent_connectors::StagedConnector {
         descriptor: descriptor("github", "developer"),
         installed_dir: std::path::PathBuf::from("/store/github"),
@@ -439,6 +439,6 @@ fn the_browse_install_report_names_the_install_and_its_disabled_posture() {
     assert!(report.contains("Installed connector `github`"));
     assert!(report.contains("category: developer"));
     assert!(report.contains("/store/github"));
-    assert!(report.contains("recorded **disabled**"));
+    assert!(report.contains("recorded **enabled**"));
     assert!(report.contains("/connectors enable github"));
 }

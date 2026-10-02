@@ -1,49 +1,54 @@
 //! TUI `/connectors` command surface (spec `connectors` T-010, T-011; FR-004,
-//! FR-006, FR-009, FR-010, FR-012, FR-013, FR-014, FR-019, FR-022, FR-023).
+//! FR-006, FR-009, FR-012, FR-013, FR-014, FR-019, FR-022, FR-023).
 //!
 //! `/connectors <sub> [args...]` is dispatched here. The heavy lifting lives in
 //! the `ragent-connectors` crate: [`run_connector_subcommand`] serves the
 //! session-free subcommands (`help`, `add`, `remove`, `stores`),
 //! [`run_connector_subcommand_env`] drives the management subcommands (`list`,
-//! `search`, `enable`, `disable`, `connect`, `disconnect`, `auth`) against the
-//! session environment, and [`run_connector_subcommand_async`] runs the isolated
+//! `enable`, `disable`, `connect`, `disconnect`, `auth`) against the session
+//! environment, and [`run_connector_subcommand_async`] runs the isolated
 //! `test` harness. This module adds the TUI-side glue: [`handle_connectors_command`]
 //! renders usage for the bare `/connectors` and unknown-subcommand cases and
-//! forwards the rest to the crate dispatchers.
+//! forwards the rest to the crate dispatchers. `claude` is handled here: it opens
+//! the interactive browse panel rather than returning a report.
 //!
 //! ## Session environment
 //!
-//! [`ConnectorCommandEnv`] is implemented by [`TuiConnectorEnv`], which owns a
-//! [`ConnectorSession`] built from the project's connector store and bridges the
-//! live MCP client through [`TuiMcpConnect`]. The lifecycle session is rebuilt
-//! per invocation: the durable enable state lives in the store `_state.json`
-//! ledger and the global `mcp_state.json` ledger, both re-read on every call, so
-//! a rebuild cannot lose a state transition.
+//! [`ConnectorCommandEnv`] is implemented by [`TuiConnectorEnv`], which drives
+//! the connector session session-start published and bridges the live MCP
+//! client through [`TuiMcpConnect`]. The session is shared behind a
+//! `tokio::sync::Mutex` rather than rebuilt per invocation, so a transition
+//! drives the same tracked connectors `/connectors list` reports from; a process
+//! with no published session (headless runs, unit tests) falls back to a fresh,
+//! empty one.
 //!
 //! The isolated `test` harness runs against a throwaway [`TuiMcpProbe`], so
 //! nothing it starts survives the command and the live session is untouched
-//! (FR-015). The `search` catalogue fetch goes through the crate's guarded
-//! endpoint resolver and a bounded fetch on a blocking worker, so the event loop
-//! keeps animating.
+//! (FR-015). The `/connectors claude` catalogue fetch goes through the crate's
+//! guarded endpoint resolver and a bounded fetch on a blocking worker, so the
+//! event loop keeps animating.
 //!
 //! ## Scope
 //!
-//! Registering a connector's bridged servers into the live session's MCP client
-//! at session start is the session-start integration (T-008), deliberately not
-//! driven from here; the `enable`/`connect` transitions update the live client
-//! for the duration of the invocation.
+//! Registering a connector's bridged servers at session start is the
+//! session-start integration (T-008), driven by `src/main.rs`; this module
+//! *drives that same session* for the `enable`/`connect`/`disable`/`disconnect`
+//! transitions, so a transition is tracked by the object `/connectors list`
+//! reports from and the tool registry is reconciled afterwards. A process with
+//! no published session (headless runs, unit tests) falls back to a fresh,
+//! empty per-invocation session.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ragent_config::{ConnectorsConfig, McpServerConfig};
 use ragent_connectors::{
-    AlwaysEnabled, AuthOutcome, AuthOutcomeError, ConnectReport, ConnectorCommandEnv,
-    ConnectorDescriptor, ConnectorEnv, ConnectorError, ConnectorSession, ConnectorStatus,
-    DisableReport, LifecycleError, McpConnect, McpProbe, NullCredentialStore, ProbeTool,
-    ProcessEnv, StoreDirs, render_help, run_connector_subcommand, run_connector_subcommand_async,
-    run_connector_subcommand_env, run_connector_subcommand_stores_check, store_and_config,
-    subcommand_of,
+    AlwaysEnabled, AuthOutcome, AuthOutcomeError, CategoryFilter, ConnectReport,
+    ConnectorCommandEnv, ConnectorDescriptor, ConnectorEnv, ConnectorError, ConnectorSession,
+    ConnectorStatus, DisableReport, LifecycleError, McpConnect, McpProbe, NullCredentialStore,
+    ProbeTool, ProcessEnv, StoreDirs, render_help, run_connector_subcommand,
+    run_connector_subcommand_async, run_connector_subcommand_env,
+    run_connector_subcommand_stores_check, store_and_config, subcommand_of,
 };
 
 /// Dispatch a `/connectors <args>` invocation.
@@ -71,8 +76,8 @@ pub(super) async fn handle_connectors_command(app: &mut crate::app::App, args: &
         if !store_and_config(&app.cwd_path).1.is_enabled() {
             return ragent_connectors::disabled_subsystem_report(sub);
         }
-        let (query, refresh) = parse_catalogue_launch(rest);
-        app.open_connector_catalogue(&query, refresh);
+        let launch = parse_catalogue_launch(rest);
+        app.open_connector_catalogue(&launch.query, launch.category, launch.refresh);
         return String::new();
     }
 
@@ -109,40 +114,84 @@ pub(super) async fn handle_connectors_command(app: &mut crate::app::App, args: &
     }
 
     // The management subcommands drive the live session through the TUI
-    // environment.
-    let mut env = TuiConnectorEnv::build(app);
+    // environment. A successful `enable`/`connect` connects servers on the
+    // shared client, so the tool registry is reconciled afterwards: without it
+    // `/tools` would keep reporting the stale surface until the next startup
+    // (T-008, FR-012, FR-020).
+    let mut env = TuiConnectorEnv::build(app).await;
     if let Some(report) =
         run_connector_subcommand_env(&app.cwd_path, &mut env, &mut NoProbe, sub, rest).await
     {
+        if matches!(sub, "enable" | "connect" | "disable" | "disconnect") {
+            app.register_mcp_tools().await;
+            app.refresh_connector_statuses().await;
+        }
         return report;
     }
 
     render_help(sub)
 }
 
-/// Parse the optional trailing arguments of a catalogue-browser launch
-/// (`/connectors claude [query] [--refresh]`).
+/// The parsed launch arguments of a connector-catalogue browser launch
+/// (`/connectors claude [query] [--category <name>] [--refresh]`).
 ///
-/// Returns the pre-filled search query and whether a cache-bypassing re-fetch
-/// was requested. `--refresh` is accepted anywhere and is removed from the query
-/// tokens, so a pre-filled query may contain spaces.
+/// The parse itself lives in the shared crate parser
+/// ([`ragent_connectors::parse_connector_command`]), so the TUI and the CLI
+/// understand the launch arguments identically; this type only unwraps the
+/// resulting [`ConnectorCommand::Claude`](ragent_connectors::ConnectorCommand)
+/// variant.
+struct CatalogueLaunch {
+    /// The pre-filled search query (`""` when none was typed).
+    query: String,
+    /// The category filter requested by `--category` (`ALL` when absent).
+    category: CategoryFilter,
+    /// Whether the launch asked for a cache-bypassing re-fetch.
+    refresh: bool,
+}
+
+/// Parse the optional trailing arguments of a catalogue-browser launch
+/// (`/connectors claude [query] [--category <name>] [--refresh]`).
+///
+/// `--refresh` and `--category <name>` are accepted anywhere and are removed
+/// from the query tokens, so a pre-filled query may contain spaces. A `--category`
+/// value is validated against the categories the fetched catalogue actually
+/// carries once the off-loop fetch lands (see [`App::poll_connector_catalogue_result`]),
+/// so an unknown value renders the panel's inline refusal rather than an empty
+/// list.
 #[must_use]
-fn parse_catalogue_launch(rest: &str) -> (String, bool) {
-    let mut refresh = false;
-    let mut query_tokens: Vec<&str> = Vec::new();
-    for token in rest.split_whitespace() {
-        if token == "--refresh" {
-            refresh = true;
-        } else {
-            query_tokens.push(token);
-        }
+fn parse_catalogue_launch(rest: &str) -> CatalogueLaunch {
+    match ragent_connectors::parse_connector_command("claude", rest) {
+        Some(Ok(ragent_connectors::ConnectorCommand::Claude {
+            query,
+            category,
+            refresh,
+        })) => CatalogueLaunch {
+            query,
+            category,
+            refresh,
+        },
+        // Unreachable: `claude` is a known subcommand and its arm always parses.
+        // Falling back to an unfiltered launch keeps the browser openable rather
+        // than panicking on an impossible state.
+        _ => CatalogueLaunch {
+            query: String::new(),
+            category: CategoryFilter::all(),
+            refresh: false,
+        },
     }
-    (query_tokens.join(" "), refresh)
 }
 
 /// The TUI's connector session environment (T-011).
 struct TuiConnectorEnv {
-    session: ConnectorSession,
+    /// The lifecycle session this invocation drives: the live session
+    /// session-start published when there is one, otherwise a per-invocation
+    /// rebuild with no tracked connectors.
+    ///
+    /// The live session is what keeps successive `/connectors` calls coherent
+    /// (T-008, FR-008, FR-019): a rebuild would track nothing, so `list` would
+    /// report no live state and `disable`/`disconnect` after an earlier `enable`
+    /// would fail with `unknown connector id`.
+    session: Arc<tokio::sync::Mutex<ConnectorSession>>,
     dirs: StoreDirs,
     config: ConnectorsConfig,
     /// The shared MCP client, once the startup connect loop has published it.
@@ -151,11 +200,21 @@ struct TuiConnectorEnv {
 
 impl TuiConnectorEnv {
     /// Build the environment for one `/connectors` invocation.
-    fn build(app: &crate::app::App) -> Self {
+    async fn build(app: &crate::app::App) -> Self {
         let (dirs, config) = store_and_config(&app.cwd_path);
         let client = app.session_processor.mcp_client.get().cloned();
-        let configured = configured_server_ids();
-        let session = ConnectorSession::new(dirs.clone(), config.clone(), configured);
+        // Prefer the session session-start published: it already tracks the
+        // connectors startup loaded, so a list reports live state and a
+        // disable/disconnect after an earlier enable still resolves. Only a
+        // process with no published session falls back to a fresh, empty one.
+        let session = app.live_connector_session().await.unwrap_or_else(|| {
+            let configured = configured_server_ids();
+            Arc::new(tokio::sync::Mutex::new(ConnectorSession::new(
+                dirs.clone(),
+                config.clone(),
+                configured,
+            )))
+        });
         Self {
             session,
             dirs,
@@ -193,35 +252,89 @@ impl ConnectorCommandEnv for TuiConnectorEnv {
     }
 
     fn statuses(&self) -> Vec<ConnectorStatus> {
-        self.session.statuses()
+        // Prefer the tracked snapshot when a lifecycle session drove the
+        // connections; the startup bridge connects on the shared client, so the
+        // tracked map is empty and the live client's per-server state is the
+        // only source of truth for `connected` (FR-009).
+        let tracked = self
+            .session
+            .try_lock()
+            .map(|session| session.statuses())
+            .unwrap_or_default();
+        if !tracked.is_empty() {
+            return tracked;
+        }
+        let Some(client) = self.client.as_ref() else {
+            return tracked;
+        };
+        let Ok(guard) = client.try_read() else {
+            return tracked;
+        };
+        let connected = guard
+            .servers()
+            .iter()
+            .map(|server| {
+                (
+                    server.id.clone(),
+                    (
+                        server.status == ragent_agent::mcp::McpStatus::Connected,
+                        server.tools.len(),
+                    ),
+                )
+            })
+            .collect();
+        match self.session.try_lock() {
+            Ok(session) => session.statuses_from_client_state(&connected),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn tool_counts(&self) -> std::collections::BTreeMap<String, usize> {
+        // The tool count per bridged server comes from the shared MCP client:
+        // `/connectors list` prints a `?` while no live client has an entry for
+        // a bridged id. Reaching into the client here (rather than through the
+        // lifecycle session) keeps a discovery-only render honest: the session
+        // does not own the connections.
+        let Some(client) = self.client.as_ref() else {
+            return std::collections::BTreeMap::new();
+        };
+        let Ok(guard) = client.try_read() else {
+            return std::collections::BTreeMap::new();
+        };
+        guard
+            .servers()
+            .iter()
+            .filter(|server| server.status == ragent_agent::mcp::McpStatus::Connected)
+            .map(|server| (server.id.clone(), server.tools.len()))
+            .collect()
     }
 
     async fn enable(&mut self, id: &str) -> Result<ConnectReport, LifecycleError> {
         let client = self.require_client()?;
         let mut connect = TuiMcpConnect { client };
         let mut env = connector_env(&mut connect);
-        self.session.enable(id, &mut env).await
+        self.session.lock().await.enable(id, &mut env).await
     }
 
     async fn disable(&mut self, id: &str) -> Result<DisableReport, LifecycleError> {
         let client = self.require_client()?;
         let mut connect = TuiMcpConnect { client };
         let mut env = connector_env(&mut connect);
-        self.session.disable(id, &mut env).await
+        self.session.lock().await.disable(id, &mut env).await
     }
 
     async fn connect(&mut self, id: &str) -> Result<ConnectReport, LifecycleError> {
         let client = self.require_client()?;
         let mut connect = TuiMcpConnect { client };
         let mut env = connector_env(&mut connect);
-        self.session.connect(id, &mut env).await
+        self.session.lock().await.connect(id, &mut env).await
     }
 
     async fn disconnect(&mut self, id: &str) -> Result<DisableReport, LifecycleError> {
         let client = self.require_client()?;
         let mut connect = TuiMcpConnect { client };
         let mut env = connector_env(&mut connect);
-        self.session.disconnect(id, &mut env).await
+        self.session.lock().await.disconnect(id, &mut env).await
     }
 
     async fn auth(&mut self, id: &str) -> Result<AuthOutcome, AuthOutcomeError> {
@@ -246,17 +359,6 @@ impl ConnectorCommandEnv for TuiConnectorEnv {
             stored: false,
         })
     }
-
-    async fn search_catalogue(&mut self) -> Result<Vec<ConnectorDescriptor>, String> {
-        // The catalogue fetch is blocking, so it runs off the event loop's worker
-        // thread and the UI keeps animating (FR-010).
-        let config = self.config.clone();
-        tokio::task::spawn_blocking(move || {
-            ragent_connectors::fetch_catalogue_descriptors_network(&config)
-        })
-        .await
-        .unwrap_or_else(|err| Err(format!("the catalogue fetch did not run: {err}")))
-    }
 }
 
 /// Build a [`ConnectorEnv`] over `connect` with this surface's null credentials,
@@ -266,7 +368,7 @@ impl ConnectorCommandEnv for TuiConnectorEnv {
 /// connector's enable flag (FR-012, FR-013, FR-018); the global per-server
 /// `mcp_state.json` consult is the session-start integration's concern (T-008),
 /// so the ledger here always enables.
-fn connector_env<'a>(connect: &'a mut TuiMcpConnect) -> ConnectorEnv<'a> {
+fn connector_env(connect: &mut TuiMcpConnect) -> ConnectorEnv<'_> {
     ConnectorEnv {
         connect,
         credentials: &NullCredentialStore,

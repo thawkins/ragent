@@ -780,14 +780,8 @@ impl App {
                 ]
             }
             "memory" => {
-                // Suggest memory categories
-                vec![
-                    "search".to_string(),
-                    "add".to_string(),
-                    "forget".to_string(),
-                    "config".to_string(),
-                    "help".to_string(),
-                ]
+                // Mirrors the subcommands the `/memory` arm actually handles.
+                vec!["show".to_string(), "clear".to_string(), "help".to_string()]
             }
             "agent" | "agents" => {
                 // Suggest agent-related subcommands
@@ -819,7 +813,7 @@ impl App {
                 ]
             }
             "tools" => vec![
-                "show".to_string(),
+                "list".to_string(),
                 "office".to_string(),
                 "github".to_string(),
                 "gitlab".to_string(),
@@ -4795,15 +4789,13 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "tools" => {
                 let parts: Vec<&str> = args.split_whitespace().collect();
                 match parts.as_slice() {
-                    [] | ["show"] => {
+                    [] | ["help"] | ["--help"] | ["-h"] | ["usage"] => {
+                        self.append_assistant_text("/tools\n\n## /tools - Tool family visibility\n\n| Subcommand | Description |\n|---|---|\n| `/tools` | Show this help |\n| `/tools list` | List the tool-family visibility table plus every visible and disabled tool |\n| `/tools <switch>` | Report whether one visibility switch is on or off |\n| `/tools <switch> on|off` | Turn a visibility switch on or off and save it |\n| `/tools help` | Show this help |\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.");
+                        self.status = "tools help".to_string();
+                    }
+                    ["list"] | ["show"] => {
                         self.append_assistant_text(&self.render_tool_visibility_table());
                         self.status = "tools".to_string();
-                    }
-                    ["help"] | ["--help"] | ["-h"] | ["usage"] => {
-                        self.append_assistant_text(
-                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
-                                              );
-                        self.status = "tools help".to_string();
                     }
                     [switch] => {
                         if let Some(enabled) = self.tool_visibility_state(switch) {
@@ -4875,7 +4867,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                     _ => {
                         self.append_assistant_text(
-                            "From: /tools\n[warn] Usage: `/tools` | `/tools <switch>` | `/tools <switch> on|off`.",
+                            "From: /tools\n[warn] Usage: `/tools` (help) | `/tools list` | `/tools <switch>` | `/tools <switch> on|off`.",
                         );
                         self.status = "tools error".to_string();
                     }
@@ -5005,7 +4997,10 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             &self.cwd_path,
                             &self.mcp_status_map,
                         );
-                        // Show all registered servers, enabled state and status.
+                        // Emit a markdown table so every server lands on its own
+                        // rendered row (TUI-019): pulldown-cmark joins plain
+                        // source newlines into one paragraph, but a table is
+                        // laid out row by row by html2text.
                         let mut out = String::from("From: /mcp\nMCP Servers:\n\n");
                         if self.mcp_servers.is_empty() {
                             out.push_str("  (no MCP servers configured)\n\n");
@@ -5016,6 +5011,10 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                  bridged automatically.\n",
                             );
                         } else {
+                            out.push_str(
+                                "| Server | Enabled | Status | Transport | Endpoint | Tools |\n",
+                            );
+                            out.push_str("|---|---|---|---|---|---|\n");
                             for s in &self.mcp_servers {
                                 let status_icon = match &s.status {
                                     ragent_agent::mcp::McpStatus::Connected => "[green] connected",
@@ -5036,24 +5035,20 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                         s.config.url.clone().unwrap_or_default()
                                     }
                                 };
-                                let endpoint_suffix = if endpoint.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {endpoint}")
-                                };
+                                let cell = |value: &str| value.replace('|', "\\|");
                                 out.push_str(&format!(
-                                    "  {:<18} enabled {:<3} {} [{}]{}\n",
-                                    s.id,
+                                    "| {} | {} | {} | {} | {} | {} |\n",
+                                    cell(&s.id),
                                     if server_is_enabled(s, &self.mcp_enabled_map) {
                                         "yes"
                                     } else {
                                         "no"
                                     },
-                                    status_icon,
+                                    cell(status_icon),
                                     s.config.type_,
-                                    endpoint_suffix
+                                    cell(&endpoint),
+                                    s.tools.len()
                                 ));
-                                out.push_str(&format!("    tools: {}\n", s.tools.len()));
                             }
                             let connected = self
                                 .mcp_servers
@@ -8965,14 +8960,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         self.append_assistant_text(&output);
                     }
+                    "clear" => {
+                        // Open a `Yes`/`No` confirmation dialog before removing
+                        // anything. The store is emptied only when the user
+                        // confirms (handled in `input_handler.rs`).
+                        self.open_memory_clear_confirm();
+                        self.status = "confirm clearing memory".to_string();
+                    }
                     "help" | "--help" | "-h" => {
                         self.append_assistant_text(
-                            "From: /memory\nUsage: `/memory show` | `/memory help`",
+                            "From: /memory\nUsage: `/memory show` | `/memory clear` | `/memory help`",
                         );
                     }
                     _ => {
                         self.append_assistant_text(
-                            "From: /memory\nUsage: `/memory show` | `/memory help`",
+                            "From: /memory\nUsage: `/memory show` | `/memory clear` | `/memory help`",
                         );
                     }
                 }

@@ -26,8 +26,8 @@ When a switch is `off`, tools in that family are excluded from:
 1. The tool list advertised in the system prompt
 2. The tool schema list sent to the provider
 
-The tools remain registered, but the model is not told to use them. The `/tools`
-report prints `Visible Tools (N total, M disabled)` and then a
+The tools remain registered, but the model is not told to use them. `/tools list`
+prints `Visible Tools (N total, M disabled)` and then a
 `Disabled by visibility (M)` section listing every hidden-but-still-registered
 tool (it is the complement of the model-facing tool list, backed by
 `ToolRegistry::hidden_definitions()`), so a family switched off stays visible in
@@ -35,15 +35,19 @@ the report instead of vanishing.
 
 ## Slash commands
 
-Use `/tools` from the TUI:
+Use these from the TUI (`/tools` on its own prints the help):
 
 ```text
 /tools
+/tools list
 /tools help
 /tools <switch>
 /tools <switch> on
 /tools <switch> off
 ```
+
+`/tools list` (alias `/tools show`) renders the family visibility table plus every
+visible and disabled tool.
 
 Examples:
 

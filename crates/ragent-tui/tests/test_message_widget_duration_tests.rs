@@ -202,3 +202,50 @@ fn test_toolcall_duration_with_inline_diff() {
         line_text
     );
 }
+
+/// Regression test: the tool name must render immediately after the step
+/// counter, with every other parameter rendered after the tool name.
+///
+/// `tool_input_summary` may return a parameter carrying a trailing `:`
+/// (for example `bg` renders `output: task-123`); before the fix that text was
+/// split on whitespace and its first token was emitted BEFORE the tool name.
+#[test]
+fn test_tool_name_immediately_follows_step_counter() {
+    let msg = Message::new(
+        "session-1",
+        Role::Assistant,
+        vec![MessagePart::ToolCall {
+            tool: "bg".to_string(),
+            call_id: "call-001".to_string(),
+            state: Box::new(ToolCallState {
+                status: ToolCallStatus::Completed,
+                input: json!({"action": "output", "task_id": "task-123"}),
+                output: Some(json!({"stdout": "running"})),
+                error: None,
+                duration_ms: Some(200),
+            }),
+        }],
+    );
+
+    let mut tool_step_map: std::collections::HashMap<String, (String, u32, u32)> =
+        std::collections::HashMap::new();
+    tool_step_map.insert("call-001".to_string(), ("sess".to_string(), 3, 2));
+
+    let widget = MessageWidget::new(&msg, "/tmp", &tool_step_map);
+    let lines = widget.to_lines();
+
+    let tool_line = lines
+        .iter()
+        .find(|line| line.spans.iter().any(|span| span.content.contains("Bg")))
+        .expect("Should find a line with the 'Bg' tool name");
+
+    let line_text: String = tool_line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        line_text.starts_with("[3.2] Bg"),
+        "Tool name must immediately follow the step counter. Got: {line_text}"
+    );
+    assert!(
+        line_text.contains("output") && line_text.contains("task-123"),
+        "Parameters must render after the tool name. Got: {line_text}"
+    );
+}

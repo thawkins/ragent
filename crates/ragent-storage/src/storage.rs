@@ -3166,6 +3166,49 @@ impl Storage {
         Ok(deleted)
     }
 
+    /// Deletes every structured memory scoped to the given project directory.
+    ///
+    /// Scope follows [`Self::count_memories_for_project`]: a row matches when
+    /// its `project` column equals either the full directory path or the
+    /// directory basename (the legacy project key). Memories belonging to other
+    /// projects are never touched.
+    ///
+    /// The FTS rows and base rows are removed in one transaction so a failure
+    /// between them cannot desync the search index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn clear_memories_for_project(&self, project_dir: &Path) -> Result<usize> {
+        let mut conn = lock_conn!(self)?;
+        let full = project_dir.to_string_lossy();
+        let name = project_name(project_dir);
+
+        let tx = conn.transaction()?;
+        let deleted = if name.is_empty() {
+            tx.execute(
+                "DELETE FROM memories_fts WHERE rowid IN (SELECT rowid FROM memories WHERE project = ?1)",
+                params![full.as_ref()],
+            )?;
+            tx.execute(
+                "DELETE FROM memories WHERE project = ?1",
+                params![full.as_ref()],
+            )?
+        } else {
+            tx.execute(
+                "DELETE FROM memories_fts WHERE rowid IN (SELECT rowid FROM memories WHERE project IN (?1, ?2))",
+                params![full.as_ref(), name],
+            )?;
+            tx.execute(
+                "DELETE FROM memories WHERE project IN (?1, ?2)",
+                params![full.as_ref(), name],
+            )?
+        };
+        tx.commit()?;
+
+        Ok(deleted)
+    }
+
     /// Updates the confidence score of a memory.
     ///
     /// # Errors
@@ -3223,10 +3266,7 @@ impl Storage {
     pub fn count_memories_for_project(&self, project_dir: &Path) -> Result<u64> {
         let conn = lock_conn_read!(self)?;
         let full = project_dir.to_string_lossy();
-        let name = project_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = project_name(project_dir);
         let count: u64 = if name.is_empty() {
             conn.query_row(
                 "SELECT COUNT(*) FROM memories WHERE project = ?1",
@@ -3266,10 +3306,7 @@ impl Storage {
     ) -> Result<Vec<MemoryRow>> {
         let conn = lock_conn_read!(self)?;
         let full = project_dir.to_string_lossy();
-        let name = project_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = project_name(project_dir);
 
         let mut stmt;
         let rows = if name.is_empty() {
@@ -5014,6 +5051,18 @@ pub struct RunCostSummaryRow {
     pub duration_ms: u64,
     /// ISO-8601 creation timestamp.
     pub created_at: String,
+}
+
+/// The project's directory basename (the legacy project key), or `&str::default()`
+/// when the path has no final component.
+///
+/// Shared by the three memory project-scope queries so the current (full-path)
+/// and legacy (basename) key rule lives in one place.
+fn project_name(project_dir: &Path) -> &str {
+    project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
 }
 
 /// Maps a SQL row to a [`MemoryRow`].

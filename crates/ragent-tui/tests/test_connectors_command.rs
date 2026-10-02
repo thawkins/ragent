@@ -61,7 +61,6 @@ fn connectors_registered_in_slash_commands() {
         .expect("/connectors must be registered in SLASH_COMMANDS (FR-004)");
     for sub in [
         "list",
-        "search",
         "claude",
         "add",
         "remove",
@@ -101,7 +100,6 @@ fn connectors_suggestions_list_all_subcommands() {
         .expect("menu must contain the connectors entry");
     for sub in [
         "list",
-        "search",
         "claude",
         "add",
         "remove",
@@ -161,7 +159,7 @@ async fn help_bare_and_unknown_all_render_the_usage_block() {
             text.contains("Sources accepted by `/connectors add`"),
             "`{invocation}` must document the source forms: {text}"
         );
-        for needle in ["https://", "--force", "--category", "--check"] {
+        for needle in ["https://", "--category", "--check", "--refresh"] {
             assert!(
                 text.contains(needle),
                 "`{invocation}` must mention `{needle}`: {text}"
@@ -249,5 +247,83 @@ async fn master_switch_disables_the_subsystem() {
     assert!(
         help.contains("command reference"),
         "help must still render while disabled: {help}"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn list_reports_a_bridged_server_connected_from_the_live_client() {
+    // T-008 follow-up (FR-009): the startup bridge connects on the *shared*
+    // client, so the connector session tracks nothing. `/connectors list` must
+    // still report `connected` and a real tool count by reading the client's
+    // per-server state rather than the (empty) tracked snapshot.
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+    let store = temp.path().join(".ragent").join("connectors");
+    let dir = store.join("demo");
+    std::fs::create_dir_all(&dir).expect("connector dir creatable");
+    let descriptor = ragent_connectors::ConnectorDescriptor {
+        id: ragent_connectors::ConnectorId::new("demo").expect("valid id"),
+        name: "Demo".to_string(),
+        description: String::new(),
+        category: "code".to_string(),
+        tags: Vec::new(),
+        source: String::new(),
+        provenance: Default::default(),
+        auth: ragent_connectors::ConnectorAuthShape::None,
+        auth_scope: Vec::new(),
+        credential: None,
+        servers: vec![ragent_connectors::ConnectorServer {
+            id: "main".to_string(),
+            transport: "http".to_string(),
+            command: None,
+            args: Vec::new(),
+            env: Default::default(),
+            url: Some("https://example.invalid/mcp".to_string()),
+            headers: Default::default(),
+        }],
+        unsupported: Vec::new(),
+    };
+    ragent_connectors::write_manifest(&dir, &descriptor).expect("manifest writable");
+    let mut ledger = ragent_connectors::StoreLedger::load(&store);
+    ledger.state_mut("demo").enabled = true;
+    ledger.save(&store).expect("ledger save");
+
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+
+    // Publish the live client with the bridged server connected and two tools,
+    // exactly as the startup connect loop leaves it.
+    let client = std::sync::Arc::new(tokio::sync::RwLock::new(ragent_agent::mcp::McpClient::new()));
+    client.write().await.register_connected_for_tests(
+        "demo.main",
+        vec![
+            ragent_agent::mcp::McpToolDef {
+                name: "one".to_string(),
+                description: String::new(),
+                parameters: serde_json::json!({ "type": "object" }),
+            },
+            ragent_agent::mcp::McpToolDef {
+                name: "two".to_string(),
+                description: String::new(),
+                parameters: serde_json::json!({ "type": "object" }),
+            },
+        ],
+    );
+    let _ = app.session_processor.mcp_client.set(client);
+
+    app.execute_slash_command("/connectors list").await;
+    let text = flat_text(&app);
+    assert!(
+        text.contains("demo: Demo;") && text.contains("state connected"),
+        "a bridged server connected on the shared client must report connected: {text}"
+    );
+    assert!(
+        text.contains("2 tool(s)"),
+        "the live client's tool count must reach the list: {text}"
+    );
+    assert!(
+        text.contains("1 connected, 0 enabled"),
+        "the totals must count the connector as connected: {text}"
     );
 }

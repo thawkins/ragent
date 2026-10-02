@@ -751,3 +751,32 @@ fn probe_trait_is_object_safe_and_send() {
     assert_send::<FakeProbe>();
     let _: &dyn McpProbe = &FakeProbe::default();
 }
+
+#[tokio::test]
+async fn async_dispatcher_resolves_a_display_name_reference_to_the_installed_id() {
+    let tree = TempTree::new("dispatch-name");
+    // The connector id is `echo` but its display name is `Echo Probe`, so the
+    // reference `"Echo Probe"` must resolve to the installed id `echo`.
+    let mut d = descriptor("echo", vec![stdio("main", "echo")]);
+    d.name = "Echo Probe".to_string();
+    write_connector(&tree.store(), &d);
+
+    let credentials = InMemoryCredentialStore::new();
+    let env_source = no_env();
+    let mut probe = FakeProbe::default();
+    let report = run_connector_subcommand_async(
+        &tree.0,
+        &ConnectorsConfig::default(),
+        &credentials,
+        &env_source,
+        &mut probe,
+        "test",
+        "Echo Probe",
+    )
+    .await
+    .expect("test subcommand");
+    // Resolution reached the harness (which then runs the `echo` connector),
+    // rather than reporting an unknown connector under the display name.
+    assert!(report.contains("harness complete"), "{report}");
+    assert!(!report.contains("unknown connector"), "{report}");
+}

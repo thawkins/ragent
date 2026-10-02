@@ -52,14 +52,14 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/yolo` | [yolo](yolo.md) | Toggle YOLO mode  -  bypass all command validation and tool restrictions (/yolo help) |
 | `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|govcreate\|help |
 | `/plugins` | [plugins](plugins.md) | Plugin management: /plugins list [--verbose] \| add <source> [--force] \| remove <pluginid> \| enable <pluginid> \| disable <pluginid> \| test <pluginid> \| help |
-| `/connectors` | [connectors](connectors.md) | Connector management: /connectors list [--verbose] [--category <name>] \| search <query> [--category <name>] \| claude [query] [--refresh] \| add <id\|source> [--force] \| remove <id> \| enable <id> \| disable <id> \| connect <id> \| disconnect <id> \| auth <id> \| test <id> \| stores [--check] \| help |
+| `/connectors` | [connectors](connectors.md) | Connector management: /connectors list [--verbose] [--category <name>] \| claude [query] [--category <name>] [--refresh] \| add <id\|source> [--force] \| remove <id> \| enable <id> \| disable <id> \| connect <id> \| disconnect <id> \| auth <id> \| test <id> \| stores [--check] \| help |
 | `/research` | [research](research.md) | Research system: /research create [--mode tiered\|supervisor\|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> \| list \| open \| search \| show \| delete \| archive \| cluster |
 | `/spec reverse` | [reverse](specreverse.md) | Reverse-engineer a GitHub repo: /spec reverse <owner/repo \| URL> [--language <lang> --type <type> [--stack <name>]] [--create <name>] [--depth <N>] [--folder <path>] [--github \| --gitlab] |
 | `/new` | [new](new.md) | Scaffold a new project: /new --language <lang> --type <type> [--stack <name>] [--github \| --gitlab] \| /new help |
 | `/autopilot` | [autopilot](autopilot.md) | Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] \| off \| status \| help |
 | `/plan` | [plan](plan.md) | Delegate planning to the plan agent: /plan <task description> \| /plan help |
 | `/mode` | [mode](mode.md) | Set agent role mode: /mode architect\|coder\|reviewer\|debugger\|tester\|off\|help |
-| `/memory` | [memory](memory.md) | Memory panel (Alt+M): /memory \| /memory show \| /memory init \| /memory read <label> \| /memory search <query> |
+| `/memory` | [memory](memory.md) | Memory panel (Alt+M): /memory \| /memory show \| /memory clear \| /memory help |
 | `/github` | [github](github.md) | GitHub integration: /github login \| logout \| status \| help |
 | `/gitlab` | [gitlab](gitlab.md) | GitLab integration: /gitlab setup \| logout \| status \| help |
 | `/update` | [update](update.md) | Check for or install updates: /update \| /update install \| /update help |

@@ -26,6 +26,7 @@ use ragent_agent::{
     tool,
 };
 use ragent_config::{activity_log, edit_log, gcf, yolo};
+use ragent_connectors::{ConnectorSession, store_dirs};
 
 mod cli;
 mod connectors;
@@ -711,6 +712,8 @@ async fn async_main() -> Result<()> {
             std::collections::HashMap::new(),
         )),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
@@ -783,16 +786,25 @@ async fn async_main() -> Result<()> {
     // Enable state: whether a server is started is a durable, global choice
     // recorded in the MCP enable-state ledger. A server absent from the ledger
     // is enabled, so a newly added server starts connected.
-    let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = {
+    // Connector bridge (spec `connectors` T-008; FR-008, FR-020): an enabled
+    // connector's servers are resolved into bridged ids (`<connector>.<server>`)
+    // and connect through the same loop as the configured servers, so their tools
+    // surface as the ordinary `mcp_<server>_<tool>` tools of the shared client.
+    // `scan_connector_bridge` is the read-only half (store scan + collision
+    // refusal, no connection); the connect loop applies the durable per-server
+    // enable ledger to the bridged ids exactly as it does for configured servers.
+    let (mcp_configs, connector_session) = {
         let working_dir = std::env::current_dir().unwrap_or_else(|e| {
             tracing::warn!(
                 error = %e,
-                "cannot determine working directory; plugin-contributed MCP servers will not be scanned"
+                "cannot determine working directory; plugin- and connector-contributed MCP servers will not be scanned"
             );
             std::path::PathBuf::new()
         });
         let guard = config.read().await;
-        ragent_agent::plugin::plugin_mcp_servers(&working_dir, &guard.mcp)
+        let mut merged = ragent_agent::plugin::plugin_mcp_servers(&working_dir, &guard.mcp);
+        let connector_session = merge_connector_bridge(&working_dir, &guard, &mut merged);
+        (merged, connector_session)
     };
     let mcp_server_count = mcp_configs.len();
     if mcp_server_count > 0 {
@@ -809,6 +821,20 @@ async fn async_main() -> Result<()> {
         // through a second handle still publishes every server the caller sees.
         let shared_client = Arc::new(tokio::sync::RwLock::new(ragent_agent::mcp::McpClient::new()));
         sp.set_mcp_client(Arc::clone(&shared_client)).await;
+        // Hand the live session its lifecycle owner before the connect loop
+        // publishes any status: `/connectors enable|connect` drives this
+        // session, so a connector enabled after startup is tracked by the same
+        // object `/connectors list` reports from, and the status snapshot
+        // loaded here is what the list overlays onto the store scan (FR-009).
+        if let Some(session) = connector_session {
+            // Wrap the session in a mutex so the TUI's `/connectors` surface can
+            // mutate the same tracked session through a shared `Arc` (an
+            // `Arc::get_mut` would always fail once the processor holds a handle).
+            let session = Arc::new(tokio::sync::Mutex::new(session));
+            sp.set_connector_statuses(Some(Arc::new(session.lock().await.statuses())))
+                .await;
+            sp.set_connector_session(session).await;
+        }
         tokio::spawn(async move {
             let ledger = ragent_agent::mcp::McpEnableLedger::load();
             let mut mcp_connected = 0u32;
@@ -848,6 +874,14 @@ async fn async_main() -> Result<()> {
                 total = mcp_server_count,
                 "MCP servers initialized (background)"
             );
+            // The MCP server list the TUI renders is adopted from the shared
+            // client by a background task; wake it now that the connect loop has
+            // published every server, so `/mcp` and `/connectors list` do not
+            // wait out the poll interval to see `connected` (FR-009).
+            bus.publish(ragent_agent::event::Event::McpStatusChanged {
+                server_id: String::new(),
+                status: "initialized".to_string(),
+            });
         });
     }
 
@@ -1436,6 +1470,61 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
         }
     }
     Ok(())
+}
+
+/// Resolve the enabled connectors into bridged MCP server configs, append them
+/// to `merged`, and return the unconnected lifecycle session owner for the
+/// caller's shared connect loop (T-008; FR-008, FR-012, FR-018, FR-020, FR-026,
+/// FR-032, FR-033).
+///
+/// Returns `None` when the connector subsystem is switched off
+/// (`connectors.enabled: false`, FR-021); the call then creates no connector
+/// session and connects nothing.
+///
+/// The bridge's accepted `(bridged_id, config)` pairs are appended to the MCP
+/// server set the existing background connect loop will start, so a connector's
+/// tools surface as the ordinary `mcp_<server>_<tool>` tools of the shared
+/// client (FR-020) without a second connection path. A bridged id that collides
+/// with a configured `ragent.json` server (or another connector's server) is
+/// refused by the bridge and reported rather than silently overwriting (FR-033).
+///
+/// The bridge itself never connects; the returned [`ConnectorSession`] is the
+/// lifecycle owner the connect loop drives with the live per-server enable
+/// ledger consulted through [`McpConnect`], so a server switched off in `/mcp`
+/// is not started here (FR-018). The session must be kept alive for the process
+/// lifetime: dropping it would drop every connection it owns.
+fn merge_connector_bridge(
+    working_dir: &std::path::Path,
+    config: &ragent_agent::Config,
+    merged: &mut Vec<(String, ragent_agent::McpServerConfig)>,
+) -> Option<ConnectorSession> {
+    let connectors = config.connectors.clone().unwrap_or_default();
+    if !connectors.is_enabled() {
+        return None;
+    }
+
+    let dirs = store_dirs(working_dir, connectors.store_dir.as_deref());
+    let configured_ids: Vec<&str> = merged.iter().map(|(id, _)| id.as_str()).collect();
+    let plan = ragent_connectors::scanned_bridge(&dirs, configured_ids);
+    for refused in &plan.refused {
+        // FR-033: a refused bridged id is dropped with a one-line cause, never
+        // silently overwriting the server it collides with.
+        tracing::warn!(
+            connector = %refused.connector_id,
+            "bridged connector server {}",
+            refused.describe()
+        );
+    }
+
+    // The resolved servers are queued for the caller's shared connect loop, so
+    // the session is built over the no-op connect seam: letting the session
+    // connect through it too would open every bridged server twice.
+    let session = ConnectorSession::new(dirs, connectors, Vec::new());
+    for server in &plan.servers {
+        merged.push((server.server_id.clone(), server.config.clone()));
+    }
+
+    Some(session)
 }
 
 /// Wrap the tokio entrypoint so the runtime is shut down with a bounded

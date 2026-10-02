@@ -2,10 +2,10 @@
 //! top-right) and the background codeindex task result poller.
 //!
 //! Covers:
-//! - `⟳idx` renders when `code_index_busy` is latched (FTS indexing in
+//! - `BUSY:cdx-idx` renders when `code_index_busy` is latched (FTS indexing in
 //!   progress).
-//! - `⟳graph` renders when `code_index_graph_busy` is latched (semantic graph
-//!   being built) and does NOT render when idle.
+//! - `BUSY:cdx-graph` renders when `code_index_graph_busy` is latched
+//!   (semantic graph being built) and does NOT render when idle.
 //! - Both indicators appear on the second status-bar line.
 //! - `poll_codeindex_bg_result` drains the off-thread completion payload,
 //!   clears the spawned latches, and sets the carried status text.
@@ -68,6 +68,8 @@ fn make_app() -> App {
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: StreamConfig::default(),
@@ -116,16 +118,25 @@ fn make_app() -> App {
     )
 }
 
-/// Render the app at 120x40 and return the visible frame text.
+/// Width of the test terminal. Wide enough that the provider/model label
+/// (whose length depends on the resolved default provider) can never push the
+/// busy tags past the right edge and clip them - the status bar itself has no
+/// truncation stage for the left/center/right sections.
+const TEST_WIDTH: u16 = 200;
+
+/// Height of the test terminal.
+const TEST_HEIGHT: u16 = 40;
+
+/// Render the app and return the visible frame text.
 fn render_app_to_string(app: &mut App) -> String {
-    let backend = TestBackend::new(120, 40);
+    let backend = TestBackend::new(TEST_WIDTH, TEST_HEIGHT);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
         .draw(|frame| layout::render(frame, app))
         .expect("render app");
-    let rows: Vec<String> = (0..40)
+    let rows: Vec<String> = (0..TEST_HEIGHT)
         .map(|y| {
-            (0..120)
+            (0..TEST_WIDTH)
                 .map(|x| {
                     terminal
                         .backend()
@@ -147,7 +158,7 @@ fn test_statusbar_renders_graph_busy_indicator() {
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
-        line2.contains("\u{27f3}graph"),
+        line2.contains("cdx-graph"),
         "second status-bar line must contain the graph-busy indicator when the \
          graph is building; line was: {line2}"
     );
@@ -160,7 +171,7 @@ fn test_statusbar_renders_index_busy_indicator() {
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
-        line2.contains("\u{27f3}idx"),
+        line2.contains("cdx-idx"),
         "second status-bar line must contain the index-busy indicator while \
          indexing; line was: {line2}"
     );
@@ -174,7 +185,7 @@ fn test_statusbar_renders_both_indicators_together() {
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
-        line2.contains("\u{27f3}idx") && line2.contains("\u{27f3}graph"),
+        line2.contains("cdx-idx") && line2.contains("cdx-graph"),
         "both busy indicators must render when indexing and graph building \
          overlap; line was: {line2}"
     );
@@ -186,7 +197,7 @@ fn test_statusbar_hides_indicators_when_idle() {
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
-        !line2.contains("\u{27f3}idx") && !line2.contains("\u{27f3}graph"),
+        !line2.contains("cdx-idx") && !line2.contains("cdx-graph"),
         "no busy indicators may render when the index is idle; line was: {line2}"
     );
 }

@@ -42,6 +42,26 @@
 //! configured `ragent.json` server or another connector's server is refused and
 //! reported rather than silently overwriting (FR-033).
 //!
+//! # Session-start wiring (T-008)
+//!
+//! [`ConnectorSession::start`] is driven at startup by the binary
+//! (`src/main.rs`), which owns the shared MCP client and therefore supplies the
+//! [`McpConnect`] and [`ServerEnableLedger`] seams. The started session is
+//! published on the session processor so later `/connectors enable|connect`
+//! invocations drive the *same* tracked connectors, and [`StartReport::statuses`]
+//! carries the live snapshot `/connectors list` overlays onto the store scan
+//! (FR-009).
+//!
+//! # Client-derived statuses (T-008 follow-up)
+//!
+//! Where a surface holds a live MCP client but did not drive the connection
+//! (the binary's startup bridge connects on the *shared* client), the tracked
+//! runtime map is empty and [`ConnectorSession::statuses`] reports nothing.
+//! [`ConnectorSession::statuses_from_client_state`] derives the same statuses
+//! from the client's per-server connection state instead, so `/connectors list`
+//! reports `connected` and real tool counts for a bridged server no matter
+//! which path connected it.
+//!
 //! The module is modelled on `ragent_plugins::session` / `ragent_plugins::lifecycle`
 //! so the two session integrations read the same way.
 
@@ -269,6 +289,11 @@ pub struct StartReport {
     pub reports: Vec<ConnectReport>,
     /// Ids of connectors that were disabled and therefore inert (FR-018).
     pub disabled: Vec<String>,
+    /// A snapshot of every tracked connector after the load, in id order. This
+    /// is the live lifecycle view `/connectors list` overlays onto the store
+    /// scan; without it a list rendered on a fresh session has no live state to
+    /// show and reports `?` for every tool count (FR-009).
+    pub statuses: Vec<ConnectorStatus>,
 }
 
 impl StartReport {
@@ -487,7 +512,12 @@ impl ConnectorSession {
             reports.push(report);
             self.tracked.insert(id, runtime);
         }
-        StartReport { reports, disabled }
+        let statuses = self.statuses();
+        StartReport {
+            reports,
+            disabled,
+            statuses,
+        }
     }
 
     /// Enable a connector and connect its servers now (FR-012).
@@ -624,7 +654,9 @@ impl ConnectorSession {
     /// Disconnect every connected server at session end (FR-008).
     pub async fn shutdown(&mut self, connect: &mut dyn McpConnect) {
         for runtime in self.tracked.values_mut() {
-            let _ = teardown_connected("shutdown", connect, &runtime.servers).await;
+            // Shutdown is best-effort by contract: `teardown_connected` already
+            // warns per failed server, so the returned counts are dropped.
+            let _ = teardown_connected("shutdown", connect, &runtime.servers).await; // INTENTIONAL: best-effort shutdown teardown; failures warned inside teardown_connected
             runtime.servers.clear();
             runtime.claimed.clear();
             if runtime.enabled {
@@ -651,6 +683,89 @@ impl ConnectorSession {
                     .collect(),
             })
             .collect()
+    }
+
+    /// Derive per-connector statuses from live MCP client state instead of the
+    /// tracked runtime map (T-008 follow-up; FR-009, FR-026).
+    ///
+    /// The startup path connects bridged servers on the *shared* MCP client
+    /// rather than driving them through [`ConnectorSession::start`], so
+    /// [`ConnectorSession::statuses`] reports nothing and `/connectors list`
+    /// falls back to the store enable flag (`enabled` / `? tool(s)`) even while
+    /// the servers are connected. This method closes that gap for a surface that
+    /// holds a live client: it scans the stores for the connector set, reads the
+    /// per-bridged-server connection state from `connected`, and renders the
+    /// lifecycle state a `start`ed session would have produced.
+    ///
+    /// `connected` maps a bridged server id (`<connector-id>.<server>`) to
+    /// whether it is connected and how many tools it advertises. A bridged id
+    /// absent from the map is `disconnected`; a connector with at least one
+    /// connected server is `connected`, one that is enabled but wholly
+    /// disconnected is `enabled`, and one that is disabled in the store ledger
+    /// is `disabled`. The auth label is the requirement's shape label, since a
+    /// client-only surface has no resolved credential state.
+    #[must_use]
+    pub fn statuses_from_client_state(
+        &self,
+        connected: &BTreeMap<String, (bool, usize)>,
+    ) -> Vec<ConnectorStatus> {
+        let mut statuses = Vec::new();
+        for connector in scan_dirs(self.dirs.clone()) {
+            let Ok(descriptor) = connector.outcome else {
+                continue;
+            };
+            if !connector.enabled {
+                statuses.push(ConnectorStatus {
+                    id: descriptor.id.as_str().to_string(),
+                    name: descriptor.name.clone(),
+                    state: ConnectorLifecycleState::Disabled,
+                    auth: AuthState::NotRequired,
+                    error: None,
+                    servers: Vec::new(),
+                });
+                continue;
+            }
+            let servers: Vec<ServerReport> = descriptor
+                .servers
+                .iter()
+                .map(|server| {
+                    let server_id = descriptor.bridged_id(&server.id);
+                    let (is_connected, tools) =
+                        connected.get(&server_id).copied().unwrap_or((false, 0));
+                    ServerReport {
+                        server_id,
+                        state: if is_connected {
+                            ServerState::Connected
+                        } else {
+                            ServerState::Disconnected
+                        },
+                        tools: vec![String::new(); tools],
+                        error: None,
+                    }
+                })
+                .collect();
+            let any_connected = servers
+                .iter()
+                .any(|server| server.state == ServerState::Connected);
+            let auth = AuthRequirement::for_descriptor(&descriptor);
+            statuses.push(ConnectorStatus {
+                id: descriptor.id.as_str().to_string(),
+                name: descriptor.name.clone(),
+                state: if any_connected {
+                    ConnectorLifecycleState::Connected
+                } else {
+                    ConnectorLifecycleState::Enabled
+                },
+                auth: if auth.requires_credential() {
+                    AuthState::NeedsAuth
+                } else {
+                    AuthState::NotRequired
+                },
+                error: None,
+                servers,
+            });
+        }
+        statuses
     }
 
     /// Load one connector into a runtime and its report (FR-008, FR-018, FR-022,

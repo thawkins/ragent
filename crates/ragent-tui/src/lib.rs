@@ -934,6 +934,11 @@ pub async fn run_tui(
             // connecting; without this retry `/mcp` would keep showing the
             // seeded `disabled` for a late-finishing server.
             app.adopt_mcp_client_state(&session_processor).await;
+
+            // Publish the connector status snapshot the same way, so
+            // `/connectors list` reports `connected` and real tool counts for a
+            // bridged server the startup loop connected (FR-009).
+            app.refresh_connector_statuses().await;
         }
 
         // Copy the latest off-thread memory count into the status bar cache

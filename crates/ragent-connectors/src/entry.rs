@@ -18,8 +18,12 @@
 //! accepts ragent's own catalogue shape and, tolerantly, the vendor shapes the
 //! shipped catalogues use:
 //!
-//! - the id falls back from `id` to `slug` to `name`, and the display name from
-//!   `name` to `display_name`;
+//! - the id is the explicit `id` when that is already a readable key, otherwise
+//!   the `slug`, otherwise the display name, and the raw `id` only as the last
+//!   resort; a catalogue that ships UUID `id`s (the Claude connector directory)
+//!   is therefore named by its slug (`google-drive`) rather than a UUID, while a
+//!   catalogue whose `id` is human-readable (`echo`) keeps that stable id; the
+//!   display name falls back from `name` to `display_name`;
 //! - the description falls back from `description` to `one_liner` (the Claude
 //!   feed's one-line summary);
 //! - the category is read from `category` or the first member of `categories`;
@@ -41,6 +45,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 use url::Url;
+
+use ragent_types::guard::validate_identifier;
 
 use crate::descriptor::{
     ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorProvenance, ConnectorServer,
@@ -107,10 +113,25 @@ impl ConnectorEntry {
         let map = item.as_object().ok_or(ConnectorEntryError::NotAnObject)?;
 
         let name = optional_str(map, "name").or_else(|| optional_str(map, "display_name"));
-        let id = optional_str(map, "id")
-            .or_else(|| optional_str(map, "slug"))
-            .or_else(|| name.clone())
-            .ok_or(ConnectorEntryError::EmptyField("id"))?;
+        // The id preference is: the explicit `id` when it is already a readable
+        // key, otherwise the `slug`, otherwise the display name, with the raw
+        // `id` accepted only as the last resort. A catalogue that ships UUID
+        // `id`s (the Claude connector directory) is therefore named by its
+        // readable slug or display name; a catalogue whose `id` is already
+        // human-readable (`echo`, `google-drive`) keeps that stable id. Each
+        // candidate must be a usable path component.
+        let explicit_id = optional_str(map, "id");
+        let slug = optional_str(map, "slug");
+        let candidate = if readable_connector_id(explicit_id.as_deref()) {
+            explicit_id
+        } else if usable_connector_id(slug.as_deref()) {
+            slug
+        } else if usable_connector_id(name.as_deref()) {
+            name.clone()
+        } else {
+            None
+        };
+        let id = candidate.ok_or(ConnectorEntryError::EmptyField("id"))?;
         let name = name.unwrap_or_else(|| id.clone());
 
         let servers = parse_servers(map)?;
@@ -327,6 +348,33 @@ fn category_of(map: &Map<String, Value>) -> String {
             .next()
             .unwrap_or_default()
     })
+}
+
+/// Whether `candidate` can name a connector: present, non-blank, and a usable
+/// single path component (see [`validate_identifier`]).
+fn usable_connector_id(candidate: Option<&str>) -> bool {
+    candidate.is_some_and(|value| validate_identifier(value, "connector id").is_ok())
+}
+
+/// Whether an explicit catalogue `id` is already a readable connector key, so an
+/// entry with a human id (`echo`, `google-drive`, `needs-token`) keeps that
+/// stable id rather than being renamed to its display name.
+///
+/// A bare UUID (the Claude connector directory's opaque key) is *not* readable,
+/// so such an entry is named by its `slug` or display name instead; a UUID that
+/// happens to fall through (no slug, a display name that is not a usable path
+/// component) is still accepted as the last resort.
+fn readable_connector_id(candidate: Option<&str>) -> bool {
+    usable_connector_id(candidate) && !candidate.is_some_and(is_uuid)
+}
+
+/// Whether `value` is a canonical 8-4-4-4-12 hyphenated hexadecimal UUID.
+fn is_uuid(value: &str) -> bool {
+    let mut groups = value.split('-');
+    let mut expected = [8usize, 4, 4, 4, 12].into_iter();
+    groups.all(|group| expected.next() == Some(group.len()))
+        && expected.next().is_none()
+        && value.chars().all(|c| c == '-' || c.is_ascii_hexdigit())
 }
 
 /// An optional non-empty string field.

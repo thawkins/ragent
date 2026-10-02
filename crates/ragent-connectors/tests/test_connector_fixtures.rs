@@ -21,12 +21,13 @@ use async_trait::async_trait;
 use ragent_config::{ConnectorsConfig, McpServerConfig};
 use ragent_connectors::{
     ALL_CATEGORY, AddError, AuthOutcome, AuthRequirement, AuthState, CatalogueKind, CategoryError,
-    CategoryFilter, ConnectorDescriptor, ConnectorError, ConnectorLifecycleState, ConnectorStatus,
-    InMemoryCredentialStore, ListInput, ListRow, MANIFEST_FILE, MapEnv, McpProbe, ProbeTool,
-    RemoveError, ServerReport, ServerState, StageError, StepOutcome, StoreDirs, StoreLedger,
-    ToolCount, add, auth_report, parse_catalogue, provider_for, read_manifest, remove, render_list,
-    render_search, resolve_filter, run_connector_subcommand_async, scan_dirs, store_dirs_at,
-    store_secret, test_connector, write_manifest,
+    CategoryFilter, CategoryFilterState, ConnectorDescriptor, ConnectorError,
+    ConnectorLifecycleState, ConnectorStatus, InMemoryCredentialStore, ListInput, ListRow,
+    MANIFEST_FILE, MapEnv, McpProbe, ProbeTool, RemoveError, ServerReport, ServerState, StageError,
+    StepOutcome, StoreDirs, StoreLedger, ToolCount, add, auth_report, parse_catalogue,
+    provider_for, read_manifest, remove, render_list, resolve_filter,
+    run_connector_subcommand_async, scan_dirs, store_dirs_at, store_secret, test_connector,
+    write_manifest,
 };
 use serde_json::json;
 
@@ -166,6 +167,7 @@ fn list(tree: &TempTree, statuses: &[ConnectorStatus], filter: &CategoryFilter) 
         &ListInput {
             dirs: &tree.dirs(),
             statuses,
+            tool_counts: &std::collections::BTreeMap::new(),
         },
         filter,
         false,
@@ -263,36 +265,25 @@ fn acceptance_1_usage_fallbacks_print_one_block_and_create_no_files() {
     );
 }
 
-// ── acceptance criterion 2: search reports, never errors ────────────────────
+// ── acceptance criterion 2: the catalogue parses into a usable set ──────────
 
 #[test]
-fn acceptance_2_search_returns_entries_and_an_empty_set_is_a_message() {
+fn acceptance_2_catalogue_parses_into_installable_entries() {
     let catalogue = fixture_catalogue("index.json");
     assert!(
         catalogue.iter().any(|d| d.id.as_str() == "echo"),
         "catalogue holds echo"
     );
-
-    let hit = render_search("echo", &catalogue, &CategoryFilter::all()).expect("filter known");
-    assert!(hit.contains("echo"), "{hit}");
-    assert!(!hit.contains("[err]"), "{hit}");
-
-    let miss =
-        render_search("zzzznomatch", &catalogue, &CategoryFilter::all()).expect("filter known");
     assert!(
-        !miss.contains("[err]"),
-        "empty result is not an error: {miss}"
-    );
-    assert!(
-        miss.to_lowercase().contains("no catalogue connector"),
-        "empty result prints a message: {miss}"
+        catalogue.iter().all(|d| !d.category.trim().is_empty()),
+        "every fixture catalogue entry declares a category"
     );
 }
 
-// ── acceptance criterion 3: add installs disabled, connects nothing ─────────
+// ── acceptance criterion 3: add installs enabled, connects nothing ──────────
 
 #[test]
-fn acceptance_3_add_installs_disabled_and_connects_nothing() {
+fn acceptance_3_add_installs_enabled_and_connects_nothing() {
     let tree = TempTree::new("ac3");
     let id = tree.install("echo");
     assert_eq!(id, "echo");
@@ -300,20 +291,22 @@ fn acceptance_3_add_installs_disabled_and_connects_nothing() {
 
     let ledger = tree.ledger();
     let state = ledger.state("echo").expect("ledger row written");
-    assert!(!state.enabled, "installed disabled (FR-011)");
+    assert!(state.enabled, "installed enabled (FR-011)");
 
+    // A connector with no credential connects nothing at install time: the
+    // harness reports auth, not a live connection.
     let rendered = list(
         &tree,
         &[status(
             "echo",
             "Echo",
-            ConnectorLifecycleState::Disabled,
+            ConnectorLifecycleState::Enabled,
             AuthState::NotRequired,
         )],
         &CategoryFilter::all(),
     );
     assert!(rendered.contains("echo"), "{rendered}");
-    assert!(rendered.contains("disabled"), "{rendered}");
+    assert!(rendered.contains("enabled"), "{rendered}");
 }
 
 // ── acceptance criterion 4: enable surfaces bridged server ids ──────────────
@@ -643,6 +636,7 @@ fn acceptance_10_cli_list_wording_matches_the_tui_spelling_rule() {
         &ListInput {
             dirs: &tree.dirs(),
             statuses: &statuses,
+            tool_counts: &std::collections::BTreeMap::new(),
         },
         &CategoryFilter::of("nosuch"),
         false,
@@ -653,27 +647,24 @@ fn acceptance_10_cli_list_wording_matches_the_tui_spelling_rule() {
     assert!(rendered.contains("[err]"), "{rendered}");
     assert!(rendered.contains("nosuch"), "{rendered}");
 
-    // TC-024 step 5: search combines the query with the category filter.
-    // `render_search` resolves against the categories its catalogue carries, so
-    // the `data` case is exercised against a catalogue that declares one.
+    // TC-024 step 5: the shared filter predicate narrows the catalogue the same
+    // way for the browser and the list report.
     let catalogue = fixture_catalogue("index.json");
-    let hit = render_search("echo", &catalogue, &CategoryFilter::of("productivity"))
-        .expect("known category");
-    assert!(hit.contains("echo"), "{hit}");
+    let visible = CategoryFilterState::from_descriptors(std::iter::empty(), catalogue.iter())
+        .visible(catalogue.iter());
     assert!(
-        !hit.contains("id: github"),
-        "category filter applied: {hit}"
+        !visible.is_empty(),
+        "the fixture catalogue declares at least one category"
     );
-
-    let empty = render_search(
-        "zzzznomatch",
-        &catalogue,
-        &CategoryFilter::of("productivity"),
-    )
-    .expect("known category");
+    let narrowed: Vec<&ConnectorDescriptor> = catalogue
+        .iter()
+        .filter(|descriptor| CategoryFilter::of("productivity").matches(descriptor))
+        .collect();
     assert!(
-        empty.to_lowercase().contains("no catalogue connector"),
-        "{empty}"
+        narrowed
+            .iter()
+            .all(|d| d.category.eq_ignore_ascii_case("productivity")),
+        "the predicate keeps only the requested category"
     );
 }
 
@@ -758,7 +749,7 @@ async fn tc_010_a_failing_server_reports_a_failed_connect_step_without_panicking
 // ── packaged install (TC-003) ───────────────────────────────────────────────
 
 #[test]
-fn tc_003_archive_installs_are_disabled_and_surface_the_credential_name() {
+fn tc_003_archive_installs_are_enabled_and_surface_the_credential_name() {
     let tree = TempTree::new("tc3");
     assert_eq!(tree.install_archive("echo.zip", false), "echo");
     assert_eq!(
@@ -767,8 +758,8 @@ fn tc_003_archive_installs_are_disabled_and_surface_the_credential_name() {
     );
 
     let ledger = tree.ledger();
-    assert!(!ledger.state("echo").expect("row").enabled);
-    assert!(!ledger.state("needs-token").expect("row").enabled);
+    assert!(ledger.state("echo").expect("row").enabled);
+    assert!(ledger.state("needs-token").expect("row").enabled);
 
     let descriptor = read_manifest(&tree.store().join("needs-token")).expect("manifest readable");
     let requirement = AuthRequirement::for_descriptor(&descriptor);

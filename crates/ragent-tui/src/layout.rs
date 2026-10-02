@@ -62,6 +62,21 @@ const MODEL_PICKER_COLUMN_SPACING: usize = 1;
 /// it is truncated (spec `pluginstores` FR-004).
 const PLUGIN_STORE_DESC_MAX: u16 = 40;
 
+/// Maximum terminal columns reserved for a connector-catalogue row description
+/// before it is truncated (spec `connectors`).
+///
+/// Wider than [`PLUGIN_STORE_DESC_MAX`] because the connector-catalogue panel is
+/// given a wider maximum (see [`render_connector_catalogue_panel`]).
+const CONNECTOR_CATALOGUE_DESC_MAX: u16 = 90;
+
+/// Maximum terminal columns reserved for a connector-catalogue row name (id)
+/// before it is truncated (spec `connectors`).
+const CONNECTOR_CATALOGUE_NAME_MAX: usize = 26;
+
+/// Maximum terminal columns reserved for a connector-catalogue row category
+/// before it is truncated (spec `connectors`).
+const CONNECTOR_CATALOGUE_CATEGORY_MAX: u16 = 22;
+
 /// An ASCII-only border set for the plugin-store panel (spec `pluginstores`
 /// FR-004, acceptance criterion 10).
 ///
@@ -245,6 +260,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.queue_clear_confirm_area = Rect::default();
     }
+    // `Clear this project's memory?` confirmation dialog (`/memory clear`) - a
+    // modal drawn above the chat that reuses the shared overlay machinery.
+    if app.memory_clear_confirm_open {
+        render_memory_clear_confirm(frame, app);
+    } else {
+        app.memory_clear_confirm_area = Rect::default();
+    }
     // Plugin-store browse panel (spec `pluginstores` T-006) - a full-screen-ish
     // modal drawn last so it sits above every other overlay while it owns the
     // keyboard (FR-004, FR-015).
@@ -293,7 +315,7 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     let width = screen
         .width
         .saturating_sub(4)
-        .clamp(30, 100)
+        .clamp(30, 150)
         .min(screen.width);
     let height = screen
         .height
@@ -353,12 +375,15 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
                         normal_style
                     };
                     let row = format!(
-                        "> {:<22} {:<12} {}{}",
-                        truncate_bytes_no_ellipsis(id, 22),
-                        truncate_bytes_no_ellipsis(&entry.category, 12),
+                        "> {:<26} {:<22} {}{}",
+                        truncate_bytes_no_ellipsis(id, CONNECTOR_CATALOGUE_NAME_MAX),
+                        truncate_bytes_no_ellipsis(
+                            &entry.category,
+                            CONNECTOR_CATALOGUE_CATEGORY_MAX as usize
+                        ),
                         truncate_bytes_no_ellipsis(
                             &entry.description,
-                            PLUGIN_STORE_DESC_MAX as usize
+                            CONNECTOR_CATALOGUE_DESC_MAX as usize
                         ),
                         marker,
                     );
@@ -469,7 +494,7 @@ fn connector_catalogue_footer(
         return Line::from(Span::styled(notice.to_string(), installed_style));
     }
     Line::from(Span::styled(
-        "Up/Down move  Enter install  Esc close".to_string(),
+        "Up/Down move  Enter install  c category  Esc close".to_string(),
         dim_style,
     ))
 }
@@ -962,31 +987,23 @@ fn plugin_store_footer(
     ))
 }
 
-/// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`
-/// T-021, FR-033, FR-034, NFR-010).
+/// Render a two-option `Yes`/`No` confirmation dialog and return its hit area.
 ///
-/// Opened by the queue-control menu's `Clear` row; it reuses the shared overlay
-/// drawing path (`Clear` + a bordered `List`) and the standard modal key-dispatch
-/// machinery in [`crate::input::handle_key`] rather than adding a parallel input
-/// path (NFR-010). It presents the message `Clear the input queue?` and exactly
-/// two options, `Yes` and `No`, with `No` selected by default so a stray `Enter`
-/// cannot empty the queue (FR-034).
-///
-/// The dialog only paints state here - it removes no entry. The queue is emptied
-/// by the `Yes` gating step (FR-036); `No`/`Esc` leave it unchanged (FR-035).
-fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
+/// `title` is the box title, `selected` the currently highlighted option (0 =
+/// `Yes`, 1 = `No`). The body paints state only; the caller's key handling
+/// interprets the selection. Shared by every `Yes`/`No` confirm so their layout
+/// cannot drift.
+fn render_yes_no_confirm(frame: &mut Frame, title: &str, selected: usize) -> Rect {
     use ratatui::widgets::{List, ListItem, ListState};
 
     // Option order matches the index constants: `Yes` at 0, `No` at 1.
     let options = ["Yes", "No"];
-    let title = " Clear the input queue? ";
 
     let width = (title.chars().count() as u16 + 2).max(30);
     let height = (options.len() as u16).saturating_add(5);
     let screen = frame.area();
     let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
-    app.queue_clear_confirm_area = area;
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1010,9 +1027,9 @@ fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
         .iter()
         .enumerate()
         .map(|(i, label)| {
-            let selected = i == app.queue_clear_confirm_selected;
-            let marker = if selected { "> " } else { "  " };
-            let style = if selected {
+            let is_selected = i == selected;
+            let marker = if is_selected { "> " } else { "  " };
+            let style = if is_selected {
                 selected_style
             } else {
                 normal_style
@@ -1036,14 +1053,48 @@ fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
         .split(inner);
     let list = List::new(items);
     let mut state = ListState::default();
-    state.select(Some(
-        app.queue_clear_confirm_selected
-            .min(options.len().saturating_sub(1)),
-    ));
+    state.select(Some(selected.min(options.len().saturating_sub(1))));
     frame.render_stateful_widget(list, chunks[0], &mut state);
     frame.render_widget(
         Paragraph::new(footer).alignment(Alignment::Center),
         chunks[1],
+    );
+
+    area
+}
+
+/// Render the `Clear the input queue?` confirmation dialog (spec `inputqueue`
+/// T-021, FR-033, FR-034, NFR-010).
+///
+/// Opened by the queue-control menu's `Clear` row; it reuses the shared overlay
+/// drawing path and the standard modal key-dispatch machinery in
+/// [`crate::input::handle_key`] rather than adding a parallel input path
+/// (NFR-010). It presents exactly two options, `Yes` and `No`, with `No`
+/// selected by default so a stray `Enter` cannot empty the queue (FR-034).
+///
+/// The dialog only paints state here - it removes no entry. The queue is emptied
+/// by the `Yes` gating step (FR-036); `No`/`Esc` leave it unchanged (FR-035).
+fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
+    app.queue_clear_confirm_area = render_yes_no_confirm(
+        frame,
+        " Clear the input queue? ",
+        app.queue_clear_confirm_selected,
+    );
+}
+
+/// Render the `Clear this project's memory?` confirmation dialog (opened by
+/// `/memory clear`).
+///
+/// The dialog offers two options, `Yes` and `No`, with `No` selected by default
+/// so a stray `Enter` cannot clear memory.
+///
+/// The dialog only paints state here - it removes no memory. The store is
+/// emptied by the `Yes` gating step; `No`/`Esc` leave it unchanged.
+fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
+    app.memory_clear_confirm_area = render_yes_no_confirm(
+        frame,
+        " Clear this project's memory? ",
+        app.memory_clear_confirm_selected,
     );
 }
 
@@ -6100,27 +6151,10 @@ fn messages_to_lines(
                     if canonical_tool_name(tool) == "think" || summary.is_empty() {
                         spans.push(Span::styled(display_name, name_style));
                     } else {
-                        // Extract icon (emoji + space) from the beginning of summary
-                        let mut parts = summary.splitn(2, ' ');
-                        let icon = parts.next().unwrap_or("");
-                        let rest = parts.next().unwrap_or("");
-                        if !icon.is_empty() {
-                            let icon_style = if canonical_tool_name(tool) == "think" {
-                                theme::think_summary()
-                            } else {
-                                Style::default().fg(Color::DarkGray)
-                            };
-                            spans.push(Span::styled(format!("{} ", icon), icon_style));
-                        }
+                        // The tool name always comes immediately after the step
+                        // counter, with every other parameter rendered after it.
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
-                        if !rest.is_empty() {
-                            let summary_style = if canonical_tool_name(tool) == "think" {
-                                theme::think_summary()
-                            } else {
-                                Style::default().fg(Color::DarkGray)
-                            };
-                            spans.push(Span::styled(rest.to_string(), summary_style));
-                        }
+                        spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
                     }
                     if tool == "read" {
                         if let Some(range) = read_line_range(&state.output) {

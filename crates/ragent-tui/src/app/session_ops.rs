@@ -12,7 +12,7 @@ use ragent_agent::{
     message::{Message, MessagePart, Role},
     session::processor::estimate_tool_definition_bytes,
 };
-use ragent_connectors::CatalogueBrowser;
+use ragent_connectors::{CatalogueBrowser, CategoryFilter};
 use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
 use ragent_plugins::{
     FetchLimits, StoreDirs, StoreError, StoreIndex, StoreIndexFetcher, StoreKind, add,
@@ -96,8 +96,8 @@ fn run_plugin_store_install(
 /// The catalogue-id install path resolves the descriptor from the live catalogue
 /// (the same fetch `search` uses), so the store is written exactly as
 /// `/connectors add <id>` would write it: the collision guard applies and the
-/// connector is recorded **disabled**. The success report names the installed id
-/// and its disabled posture; every refusal becomes the `[err]` report naming the
+/// connector is recorded **enabled**. The success report names the installed id
+/// and its enabled posture; every refusal becomes the `[err]` report naming the
 /// cause. Never panics.
 fn run_connector_catalogue_install(
     dirs: &ragent_connectors::StoreDirs,
@@ -1654,7 +1654,8 @@ impl App {
     }
 
     /// Open the connector-catalogue browse panel for `/connectors claude`,
-    /// pre-filling the search field from `prefill`.
+    /// pre-filling the search field from `prefill` and pre-selecting the
+    /// `category` filter.
     ///
     /// Mirrors [`Self::open_plugin_store`]: the panel opens in the `Loading`
     /// state and its catalogue fetch is started off-loop, so the event loop and
@@ -1663,10 +1664,22 @@ impl App {
     ///
     /// The installed-connector-id set is derived once from the store scan on open
     /// so the renderer can colour already-present rows.
-    pub fn open_connector_catalogue(&mut self, prefill: &str, refresh: bool) {
+    ///
+    /// `category` is applied once the fetch lands, against the categories the
+    /// fetched catalogue actually declares (FR-041): a category the launch named
+    /// that the catalogue turns out not to carry is refused inline by
+    /// [`Self::poll_connector_catalogue_result`] rather than leaving a silently
+    /// empty panel.
+    pub fn open_connector_catalogue(
+        &mut self,
+        prefill: &str,
+        category: CategoryFilter,
+        refresh: bool,
+    ) {
         let installed = self.derive_installed_connector_set();
         let mut browser = CatalogueBrowser::new(prefill, refresh);
         browser.set_installed(installed);
+        browser.set_pending_category(category);
         self.connector_store = Some(browser);
         self.needs_redraw = true;
         self.spawn_connector_catalogue_fetch();
@@ -1683,7 +1696,7 @@ impl App {
     /// [`App::poll_connector_catalogue_result`] on a later frame, so the panel
     /// renders its loading row until the result lands.
     pub(crate) fn spawn_connector_catalogue_fetch(&mut self) {
-        let config = ragent_connectors::store_and_config(&self.cwd_path).1;
+        let (dirs, config) = ragent_connectors::store_and_config(&self.cwd_path);
         if !config.is_enabled() {
             // A disabled subsystem is inert: no catalogue fetch is attempted.
             self.connector_catalogue_failed("connectors.enabled = false".to_string());
@@ -1691,7 +1704,8 @@ impl App {
         }
         let slot = Arc::clone(&self.connector_catalogue_result);
         std::thread::spawn(move || {
-            let outcome = ragent_connectors::fetch_catalogue_descriptors_with_skipped(&config);
+            let outcome =
+                ragent_connectors::search_installable_catalogue_with_skipped(&config, &dirs);
             let result = match outcome {
                 Ok((descriptors, skipped)) => ConnectorCatalogueResult {
                     outcome: Ok(descriptors),
@@ -1710,6 +1724,12 @@ impl App {
     ///
     /// A no-op when no panel is open, so a late result never fills a closed
     /// browser.
+    ///
+    /// After the entries land, a category named at launch is applied (FR-041):
+    /// [`CatalogueBrowser::set_entries`] derives the real category set from the
+    /// fetched catalogue, so a launch category the catalogue does not carry is
+    /// refused here and reported in the panel footer rather than leaving the
+    /// panel silently empty.
     pub fn poll_connector_catalogue_result(&mut self) {
         let result = {
             let mut guard = recover_poisoned(
@@ -1728,6 +1748,7 @@ impl App {
             Ok(entries) => {
                 if let Some(browser) = self.connector_store.as_mut() {
                     browser.set_entries(entries, result.skipped);
+                    browser.apply_pending_category();
                 }
             }
             Err(cause) => self.connector_catalogue_failed(cause),
@@ -1924,6 +1945,39 @@ impl App {
             browser.move_down();
             self.needs_redraw = true;
         }
+    }
+
+    /// Advance the connector-catalogue panel to the next category filter.
+    ///
+    /// The cycle runs over the categories the fetched catalogue actually
+    /// declares (FR-039) and then back to the `ALL` sentinel (FR-040): the
+    /// browser's own [`CategoryFilterState`] enumerates them, so the panel and
+    /// the `/connectors list` report can never disagree about which categories
+    /// exist. A catalogue with a single category still cycles back to `ALL`, so
+    /// the filter can always be cleared. Every step re-derives the visible rows
+    /// and repaints on the next frame; nothing is enabled, connected, or
+    /// installed.
+    pub fn connector_catalogue_next_category(&mut self) {
+        let Some(browser) = self.connector_store.as_mut() else {
+            return;
+        };
+        let mut order: Vec<CategoryFilter> = Vec::new();
+        order.push(CategoryFilter::all());
+        order.extend(
+            browser
+                .categories()
+                .categories()
+                .iter()
+                .map(|name| CategoryFilter::of(name)),
+        );
+        let current = browser.categories().filter().label().to_ascii_lowercase();
+        let next = order
+            .iter()
+            .position(|filter| filter.label().to_ascii_lowercase() == current)
+            .map_or(0, |index| (index + 1) % order.len());
+        browser.categories_mut().select(order[next].clone());
+        browser.reapply_filter();
+        self.needs_redraw = true;
     }
 
     /// Close the connector-catalogue browse panel.
@@ -2292,6 +2346,67 @@ impl App {
         self.queue_clear_confirm_selected == crate::app::QUEUE_CLEAR_CONFIRM_YES
     }
 
+    /// Open the `Clear this project's memory?` confirmation dialog.
+    ///
+    /// Invoked by `/memory clear`. It only arms the dialog - no memory is
+    /// removed until the user picks `Yes`. The default selection is reset to
+    /// `No` every time it opens so a stray `Enter` cannot clear memory.
+    pub fn open_memory_clear_confirm(&mut self) {
+        self.memory_clear_confirm_open = true;
+        self.memory_clear_confirm_selected = crate::app::MEMORY_CLEAR_CONFIRM_NO;
+        self.needs_redraw = true;
+    }
+
+    /// Flip the `Clear this project's memory?` dialog selection between `Yes`
+    /// and `No`.
+    ///
+    /// The dialog has exactly two options, so any horizontal move (`Left` /
+    /// `Right` / `Tab` / `BackTab`) simply toggles the current selection. The
+    /// redraw flag is set so the change paints on the next frame.
+    pub fn memory_clear_confirm_toggle(&mut self) {
+        self.memory_clear_confirm_selected = if self.memory_clear_confirm_is_yes() {
+            crate::app::MEMORY_CLEAR_CONFIRM_NO
+        } else {
+            crate::app::MEMORY_CLEAR_CONFIRM_YES
+        };
+        self.needs_redraw = true;
+    }
+
+    /// Whether the `Clear this project's memory?` dialog currently has `Yes`
+    /// selected.
+    #[must_use]
+    pub fn memory_clear_confirm_is_yes(&self) -> bool {
+        self.memory_clear_confirm_selected == crate::app::MEMORY_CLEAR_CONFIRM_YES
+    }
+
+    /// Close the `Clear this project's memory?` confirmation dialog, resetting
+    /// the selection to `No`.
+    pub(crate) fn close_memory_clear_confirm(&mut self) {
+        self.memory_clear_confirm_open = false;
+        self.memory_clear_confirm_selected = crate::app::MEMORY_CLEAR_CONFIRM_NO;
+        self.needs_redraw = true;
+    }
+
+    /// Clear every structured memory scoped to the current project directory.
+    ///
+    /// Only the project's own memories are removed - other projects' entries are
+    /// left untouched. The outcome is reported in the chat transcript and the
+    /// memory panel is refreshed.
+    pub fn clear_project_memory(&mut self) {
+        let project_dir = crate::app::helpers::current_working_dir();
+        let output = match self.storage.clear_memories_for_project(&project_dir) {
+            Ok(n) => {
+                self.memory_cache_dirty = true;
+                format!(
+                    "From: /memory clear\n\nCleared {n} memory entr{} for this project.",
+                    if n == 1 { "y" } else { "ies" }
+                )
+            }
+            Err(e) => format!("From: /memory clear\n\n[warn] Could not clear memories: {e}"),
+        };
+        self.append_assistant_text(&output);
+    }
+
     pub(crate) fn assert_input_cursor_invariant(&self) {
         debug_assert!(self.input_cursor <= self.input_len_chars());
     }
@@ -2398,7 +2513,7 @@ impl App {
             "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
             "gcf" => Some("[on|off|show|help]".to_string()),
             "tools" => Some(
-                "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
+                "[list|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
             "model" => Some("[show]".to_string()),
             "spec" => Some("[create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github|--gitlab] [--force]|activate|deactivate|coverage|impl|jtbd|help]".to_string()),

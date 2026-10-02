@@ -112,6 +112,7 @@ fn list_renders_one_row_per_connector_with_counts() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &statuses,
+        tool_counts: &std::collections::BTreeMap::new(),
     };
     let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
 
@@ -134,6 +135,7 @@ fn list_without_a_session_shows_the_store_enable_state() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
 
     // A fresh connector is disabled and, with no live session, unknown tools.
@@ -163,6 +165,7 @@ fn list_verbose_appends_the_per_server_tool_counts() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &statuses,
+        tool_counts: &std::collections::BTreeMap::new(),
     };
     let report = render_list(&input, &CategoryFilter::all(), true).expect("filter known");
     assert!(report.contains("gdrive.main (2)"), "{report}");
@@ -184,6 +187,7 @@ fn list_reports_unsupported_labels_and_errors() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &[status],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
     // The unsupported block reads the *scanned* descriptor; write it to the
     // store so the scan sees it.
@@ -216,6 +220,7 @@ fn list_category_filter_restricts_rows_and_reports_the_count() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
 
     let filtered =
@@ -251,6 +256,7 @@ fn list_refuses_an_unknown_category_but_all_and_installed_categories_apply() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
 
     // `ALL` (any case) clears the filter and shows every row (FR-040).
@@ -292,6 +298,7 @@ fn list_with_no_connectors_installed_is_a_message() {
     let input = ListInput {
         dirs: &empty_dirs,
         statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
     let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
     assert!(report.contains("No connectors installed"), "{report}");
@@ -312,6 +319,7 @@ fn list_reports_a_broken_manifest_as_its_own_err_row() {
     let input = ListInput {
         dirs: &dirs,
         statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
     };
     let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
     assert!(
@@ -523,15 +531,13 @@ fn auth_report_never_echoes_a_secret() {
     assert!(!report.contains("s3cr3t"), "{report}");
 }
 
-// -- the async dispatcher (FR-009, FR-010, FR-021) ----------------------------
+// -- the async dispatcher (FR-009, FR-021) ------------------------------------
 
-/// A fake session environment: every lifecycle transition succeeds and the
-/// catalogue is a fixed fixture.
+/// A fake session environment: every lifecycle transition succeeds.
 struct FakeEnv {
     dirs: StoreDirs,
     config: ConnectorsConfig,
     statuses: Vec<ConnectorStatus>,
-    catalogue: Result<Vec<ConnectorDescriptor>, String>,
     enabled_calls: Vec<String>,
     disabled_calls: Vec<String>,
     connected_calls: Vec<String>,
@@ -545,7 +551,6 @@ impl FakeEnv {
             dirs,
             config: ConnectorsConfig::default(),
             statuses: Vec::new(),
-            catalogue: Ok(Vec::new()),
             enabled_calls: Vec::new(),
             disabled_calls: Vec::new(),
             connected_calls: Vec::new(),
@@ -606,10 +611,6 @@ impl ConnectorCommandEnv for FakeEnv {
             stored: false,
         })
     }
-
-    async fn search_catalogue(&mut self) -> Result<Vec<ConnectorDescriptor>, String> {
-        self.catalogue.clone()
-    }
 }
 
 /// A probe that is never called by the management subcommands.
@@ -649,18 +650,12 @@ async fn dispatcher_routes_each_management_subcommand() {
         AuthState::Satisfied,
         1,
     )];
-    env.catalogue = Ok(vec![descriptor("gdrive", "Google Drive", "productivity")]);
     let mut probe = NeverProbe;
 
     let list = run_connector_subcommand_env(&tree.0, &mut env, &mut probe, "list", "")
         .await
         .expect("list report");
     assert!(list.starts_with("From: /connectors list"), "{list}");
-
-    let search = run_connector_subcommand_env(&tree.0, &mut env, &mut probe, "search", "drive")
-        .await
-        .expect("search report");
-    assert!(search.contains("- gdrive:"), "{search}");
 
     // The `--category` argument is honoured end to end (FR-041): a known
     // category filters, `ALL` clears, an unknown value renders an `[err]` row.
@@ -692,34 +687,6 @@ async fn dispatcher_routes_each_management_subcommand() {
         "{refused}"
     );
     assert!(refused.starts_with("From: /connectors list"), "{refused}");
-
-    let searched = run_connector_subcommand_env(
-        &tree.0,
-        &mut env,
-        &mut probe,
-        "search",
-        "drive --category productivity",
-    )
-    .await
-    .expect("filtered search report");
-    assert!(
-        searched.contains("category productivity (1 catalogue entries)"),
-        "{searched}"
-    );
-
-    let refused_search = run_connector_subcommand_env(
-        &tree.0,
-        &mut env,
-        &mut probe,
-        "search",
-        "drive --category nosuch",
-    )
-    .await
-    .expect("refusal report");
-    assert!(
-        refused_search.contains("[err] Unknown category `nosuch`."),
-        "{refused_search}"
-    );
 
     for (sub, id) in [
         ("enable", "gdrive"),
@@ -760,11 +727,6 @@ async fn dispatcher_malformed_arguments_render_an_err_row_and_change_no_state() 
         env.enabled_calls.is_empty(),
         "no state change on a malformed arg"
     );
-
-    let report = run_connector_subcommand_env(&tree.0, &mut env, &mut probe, "search", "")
-        .await
-        .expect("err report");
-    assert!(report.contains("[err] Missing argument."), "{report}");
 }
 
 #[tokio::test]
@@ -777,7 +739,7 @@ async fn dispatcher_honours_the_master_switch() {
     };
     let mut probe = NeverProbe;
 
-    for (sub, rest) in [("list", ""), ("search", "drive"), ("enable", "gdrive")] {
+    for (sub, rest) in [("list", ""), ("claude", ""), ("enable", "gdrive")] {
         let report = run_connector_subcommand_env(&tree.0, &mut env, &mut probe, sub, rest)
             .await
             .unwrap_or_else(|| panic!("`{sub}` must render a report"));
@@ -805,6 +767,7 @@ async fn dispatcher_returns_none_for_non_management_subcommands() {
         ("add", "thing"),
         ("remove", "thing"),
         ("stores", ""),
+        ("claude", ""),
         ("bogus", ""),
     ] {
         assert!(
@@ -817,18 +780,20 @@ async fn dispatcher_returns_none_for_non_management_subcommands() {
 }
 
 #[tokio::test]
-async fn dispatcher_renders_a_fetch_failure_as_an_err_report() {
-    let tree = TempTree::new("dispatch-fetch-fail");
+async fn dispatcher_leaves_the_catalogue_fetch_to_the_browser_panel() {
+    // `/connectors claude` opens the browse panel on the owning surface, so the
+    // shared dispatcher must return `None` and never trigger a catalogue fetch
+    // of its own (the panel owns the fetch, its cache policy, and its filter).
+    let tree = TempTree::new("dispatch-claude");
     let mut env = FakeEnv::new(tree.dirs());
-    env.catalogue = Err("catalogue endpoint must use https, not http".to_string());
     let mut probe = NeverProbe;
 
-    let report = run_connector_subcommand_env(&tree.0, &mut env, &mut probe, "search", "drive")
-        .await
-        .expect("err report");
-    assert!(report.starts_with("From: /connectors search"), "{report}");
-    assert!(report.contains("[err]"), "{report}");
-    assert!(report.contains("must use https"), "{report}");
+    assert!(
+        run_connector_subcommand_env(&tree.0, &mut env, &mut probe, "claude", "drive")
+            .await
+            .is_none(),
+        "`claude` is served by the owning surface, not this dispatcher"
+    );
 }
 
 #[tokio::test]
@@ -924,4 +889,54 @@ fn temp_tree_store_matches_the_dispatcher_dirs() {
     let tree = TempTree::new("store-parity");
     assert_eq!(tree.dirs().project.as_deref(), Some(tree.store().as_path()));
     assert!(Path::new(&tree.store()).is_dir());
+}
+
+// -- live tool counts (T-008, FR-009) -----------------------------------------
+
+#[test]
+fn list_prefers_the_live_client_count_over_the_snapshot() {
+    let tree = TempTree::new("list-live-counts");
+    let dirs = tree.dirs();
+    let statuses = vec![status(
+        "gdrive",
+        ConnectorLifecycleState::Connected,
+        AuthState::Satisfied,
+        2,
+    )];
+    // The shared client advertises five tools for the bridged server. A server
+    // that connected after `start` is absent from the snapshot's tool list, so
+    // the live count must win.
+    let mut live = BTreeMap::new();
+    live.insert("gdrive.main".to_string(), 5usize);
+    let input = ListInput {
+        dirs: &dirs,
+        statuses: &statuses,
+        tool_counts: &live,
+    };
+    let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
+
+    assert!(report.contains("1 server(s), 5 tool(s)"), "{report}");
+}
+
+#[test]
+fn list_reports_a_connected_server_with_no_live_count_as_unknown() {
+    let tree = TempTree::new("list-degraded-counts");
+    let dirs = tree.dirs();
+    let statuses = vec![status(
+        "gdrive",
+        ConnectorLifecycleState::Connected,
+        AuthState::Satisfied,
+        2,
+    )];
+    // A degraded client (try_read failed, or the server is not Connected there)
+    // yields no count: `?` is honest, `0` would claim the server surfaced
+    // nothing.
+    let input = ListInput {
+        dirs: &dirs,
+        statuses: &statuses,
+        tool_counts: &BTreeMap::new(),
+    };
+    let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
+
+    assert!(report.contains("1 server(s), 2 tool(s)"), "{report}");
 }

@@ -88,7 +88,7 @@ automated test code.
 **Steps:**
 1. Type `/connectors ` (with a trailing space) into the message input and observe the
    autocomplete menu.
-2. Press `Down` repeatedly to scroll the menu and confirm `list`, `search`, `add`, `remove`,
+2. Press `Down` repeatedly to scroll the menu and confirm `list`, `claude`, `add`, `remove`,
    `enable`, `disable`, `connect`, `disconnect`, `auth`, `test`, `stores`, and `help` appear;
    press `Esc` to dismiss the menu.
 3. Type `/connectors help` and press `Enter`; read the usage block.
@@ -100,7 +100,7 @@ automated test code.
 **Expected results:**
 - All twelve subcommands appear in the autocomplete menu and in the usage block.
 - The usage block documents `list` (with `--verbose` and `--category <name>`),
-  `search <query>` (with `--category <name>`), `add <id|source> [--force]`, `remove <id>`,
+  `claude [query] [--category <name>] [--refresh]`, `add <id|source> [--force]`, `remove <id>`,
   `enable <id>`, `disable <id>`, `connect <id>`, `disconnect <id>`, `auth <id>`,
   `test <id>`, and `stores` (with `--check`), plus the accepted `<source>` forms (catalogue
   id, local directory, local zip/tar.gz, https URL).
@@ -109,7 +109,7 @@ automated test code.
   directories created.
 - The output contains no non-ASCII characters.
 
-### TC-002 - Add a connector from a local directory (installed disabled)
+### TC-002 - Add a connector from a local directory (installed enabled)
 
 **Requirement:** FR-002, FR-011, FR-018, FR-027
 
@@ -132,10 +132,10 @@ real MCP server path; the project connector store empty.
 **Test data:** source path `~/scratch/connectors-tests/fixtures-src/echo`.
 
 **Expected results:**
-- The report names the connector id `echo` and states it was installed and is **disabled**.
+- The report names the connector id `echo` and states it was installed and is **enabled**.
 - The store directory now contains the connector manifest; the manifest records the MCP
   server definition but **no** secret value.
-- `/connectors list` shows one row for `echo` with state `disabled`, an auth state of
+- `/connectors list` shows one row for `echo` with state `enabled`, an auth state of
   `none`, and a server count of `1`.
 - The MCP panel shows no `echo.*` server: no connection was made at install time.
 
@@ -158,11 +158,12 @@ staged.
 **Test data:** the two archive paths above.
 
 **Expected results:**
-- The zip install reports id `echo` installed and disabled, re-using the id even though a
+- The zip install reports id `echo` installed and enabled, re-using the id even though a
   directory install already used it because `--force` was given.
-- The tar.gz install reports id `needs-token` installed and disabled, and surfaces its
+- The tar.gz install reports id `needs-token` installed and enabled, and surfaces its
   credential requirement `NEEDS_TOKEN_VALUE` (FR-023).
-- `/connectors list` shows both connectors with state `disabled`.
+- `/connectors list` shows both connectors with state `enabled` (no MCP connection is
+  made at install time, so both list as `enabled`, not `connected`).
 
 ### TC-004 - Refusal cases for `/connectors add`
 
@@ -190,7 +191,7 @@ staged.
   file is written outside `~/scratch/connectors-tests/.ragent/connectors/`.
 - Step 4 finds no new file outside the connector store.
 
-### TC-005 - Catalogue search and add-by-id
+### TC-005 - Catalogue browsing (`claude`) and add-by-id
 
 **Requirement:** FR-010, FR-011, FR-024, FR-025, FR-031
 
@@ -198,19 +199,19 @@ staged.
 `connectors.stores.community.url` in `ragent.json`; TUI restarted after the config edit.
 
 **Steps:**
-1. Type `/connectors search echo` and press `Enter`; read the results.
-2. Type `/connectors search zzzznomatch` and press `Enter`; read the result.
+1. Type `/connectors claude echo` and press `Enter`; read the panel rows, then `Esc` to close.
+2. Type `/connectors claude zzzznomatch` and press `Enter`; read the empty-state line, then
+   `Esc` to close.
 3. Type `/connectors add echo --force` and press `Enter`; read the report.
 4. Type `/connectors list --verbose` and press `Enter`; read the rows.
-5. Stop the HTTPS endpoint, restart the TUI, and type `/connectors search echo` and press
-   `Enter`; read the result.
+5. Stop the HTTPS endpoint, restart the TUI, and type `/connectors claude echo` and press
+   `Enter`; read the panel's failure line.
 
 **Test data:** the queries `echo` and `zzzznomatch`; the connector id `echo`.
 
 **Expected results:**
-- Step 1 lists the catalogue `echo` entry with id, name, category, tags, and auth
-  requirement.
-- Step 2 prints a "no connectors matched" message, not an error.
+- Step 1 lists the catalogue `echo` row with id, category, and description.
+- Step 2 prints a "no matching connectors" line, not an error.
 - Step 3 installs `echo` and reports the unsupported `unsupported` catalogue entry was
   skipped (a skipped-entry count is shown).
 - Step 4 shows the `unsupported` entry's capability label if it was retained locally
@@ -228,9 +229,9 @@ prepared; the TUI pointed at each in turn via `connectors.stores.community.url`.
 
 **Steps:**
 1. Set `connectors.stores.community.url` to the truncated catalogue, restart the TUI, type
-   `/connectors search echo` and press `Enter`; read the result.
-2. Set the URL to the oversize catalogue, restart the TUI, repeat the search; read the
-   result.
+   `/connectors claude echo` and press `Enter`; read the panel's failure line, then `Esc`.
+2. Set the URL to the oversize catalogue, restart the TUI, repeat the browse; read the
+   panel's failure line.
 3. In a second terminal, check the on-disk catalogue cache directory is unchanged in size
    and mtime.
 
@@ -306,7 +307,7 @@ the same way); a configured LLM provider.
 
 **Requirement:** FR-005, FR-014, FR-022, FR-023, FR-032
 
-**Preconditions:** TUI running; `needs-token` installed and disabled (TC-003).
+**Preconditions:** TUI running; `needs-token` installed and enabled but not connected (TC-003).
 
 **Steps:**
 1. Type `/connectors list` and press `Enter`; read the `needs-token` row.
@@ -453,7 +454,7 @@ the same way); a configured LLM provider.
    `{ "connectors": { "enabled": false } }`.
 2. Restart the TUI.
 3. Type `/connectors list` and press `Enter`; read the report.
-4. Type `/connectors search echo` and press `Enter`; read the report.
+4. Type `/connectors claude echo` and press `Enter`; read the panel, then `Esc`.
 5. Type `/mcp` and press `Enter`; check no connector-bridged server is connected.
 6. Type `/connectors help` and press `Enter`; read the usage block.
 
@@ -469,7 +470,7 @@ the same way); a configured LLM provider.
 
 **Requirement:** FR-004, FR-006, FR-041
 
-**Preconditions:** the binary built; the `echo` connector installed and disabled; the
+**Preconditions:** the binary built; the `echo` connector installed and enabled; the
 catalogue URL configured; the category-tagged fixtures from Prerequisite 12 installed.
 
 **Steps:**
@@ -586,7 +587,7 @@ available for the `--check` step.
 
 2. Restart the TUI (no rebuild).
 3. Type `/connectors stores` and press `Enter`; read the Claude row.
-4. Type `/connectors search echo` and press `Enter`; read the results.
+4. Type `/connectors claude echo` and press `Enter`; read the panel rows, then `Esc`.
 5. Clear the override back to an empty string
    (`"claude": { "url": "" }`), restart the TUI, and repeat step 3.
 6. Delete the `claude` entry entirely, restart the TUI, and repeat step 3.
@@ -616,7 +617,7 @@ Prerequisite 10; know the on-disk location of the catalogue cache so you can ins
 2. Set the URL to `not-a-url`, restart, repeat the `/connectors stores` command; read the
    report.
 3. Set the URL to `https://example.org/connectors/index.json`, restart, type
-   `/connectors search echo` and press `Enter`; read the result.
+   `/connectors claude echo` and press `Enter`; read the panel, then `Esc`.
 4. In a second terminal, inspect the catalogue cache directory and its most recent file
    mtime from before these steps.
 
@@ -690,7 +691,7 @@ the connector browser open.
 - Step 5 shows the browser reopened on `ALL`, the documented default (FR-040).
 - No non-ASCII characters appear in the output; the session stays stable throughout.
 
-### TC-024 - `list`/`search` honour `--category` and the `ALL` reset
+### TC-024 - `list`/`claude` honour `--category` and the `ALL` reset
 
 **Requirement:** FR-039, FR-040, FR-041
 
@@ -701,8 +702,9 @@ the connector browser open.
 2. Run `/connectors list --category ALL` and read the rows and the reported filter.
 3. Run `/connectors list --category nosuch` and read the output.
 4. Run `ragent connectors list --category data` from a second terminal and read the output.
-5. Run `/connectors search echo --category productivity` and then
-   `/connectors search echo --category developer`, reading each result set.
+5. Run `/connectors claude echo --category productivity` and then
+   `/connectors claude echo --category developer`, reading each panel's rows and title
+   (closing each panel with `Esc`).
 
 **Test data:** the categories `developer`, `data`, `productivity`, `ALL`, and the unknown
 value `nosuch`.
@@ -711,12 +713,13 @@ value `nosuch`.
 - Step 1 prints only `two-server`, states the active category `developer`, and shows a match
   count of one (FR-041).
 - Step 2 prints every connector and reports the filter as `ALL` (FR-040).
-- Step 3 prints an empty-result message naming the unknown category; it is not an error and no
-  state changes (FR-041).
+- Step 3 prints an `[err] Unknown category` row naming the unknown category; it is not an
+  error and no state changes (FR-041).
 - Step 4 prints the same rows and wording as the TUI `/connectors list --category data`
   report (CLI parity).
-- Step 5 prints the `echo` entry under `productivity` and an empty-result message under
-  `developer`, confirming the search query is combined with the category filter.
+- Step 5 shows the `echo` row under `productivity` and a "no matching connectors" line under
+  `developer`, confirming the query is combined with the category filter. An unknown launch
+  category leaves every row visible and reports the refusal in the panel footer.
 
 ## Cleanup
 

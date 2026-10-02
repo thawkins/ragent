@@ -236,3 +236,71 @@ fn read_ppid_of_reads_this_process_and_rejects_missing_pids() {
     // PID 4_194_304 is the default kernel pid_max upper bound; it cannot exist.
     assert_eq!(read_ppid_of(4_194_304), None);
 }
+
+// ── Orphan sweep: process-group identity ────────────────────────────────────
+
+/// The sweep must reclaim a launcher's tree: `npm exec <pkg>` leads its own
+/// group and forks the real `node` server, then the *leader* exits, leaving the
+/// re-parented grandchild as a group member whose pid is not the group id. The
+/// candidate scan therefore has to accept a member of a group made up entirely
+/// of the configured package, or the grandchild holds the stdio pipes forever
+/// and a fresh spawn can never serve its client.
+#[cfg(unix)]
+#[test]
+fn orphan_sweep_finds_and_kills_a_reparented_launcher_grandchild() {
+    use ragent_agent::mcp::find_orphaned_stdio_pids;
+    use std::process::{Command, Stdio};
+
+    // A stand-in launcher that leads its own process group, forks a child, and
+    // exits - leaving the child re-parented to init inside the group. `sleep`
+    // plays the "real server" the launcher left behind.
+    const ORPHAN_SLEEP_SECS: &str = "600";
+    let status = Command::new("setsid")
+        .args([
+            "sh",
+            "-c",
+            &format!("sh -c 'exec sleep {ORPHAN_SLEEP_SECS}' & exit 0"),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("spawn a detached launcher stand-in");
+    assert!(status.success(), "the launcher stand-in must exit cleanly");
+
+    // Poll for the grandchild to settle: the launcher has exited so nothing is
+    // left re-parenting it, and its cmdline (`sleep 600`) is the config match.
+    let args = vec![ORPHAN_SLEEP_SECS.to_string()];
+    let mut found = Vec::new();
+    for _ in 0..200 {
+        found = find_orphaned_stdio_pids("sleep", &args, std::process::id());
+        if !found.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        !found.is_empty(),
+        "an orphaned launcher grandchild must be discoverable for the sweep"
+    );
+
+    // Clean up whatever was found so the test leaves no `sleep 600` behind.
+    for pid in &found {
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+    }
+}
+
+/// A process whose command line does not match the configured package is never
+/// a sweep candidate, so one server's sweep cannot reap another's processes.
+#[cfg(unix)]
+#[test]
+fn orphan_sweep_ignores_a_unrelated_process() {
+    use ragent_agent::mcp::find_orphaned_stdio_pids;
+
+    let args = vec!["definitely-not-a-real-package-xyz".to_string()];
+    let found = find_orphaned_stdio_pids("npx", &args, std::process::id());
+    assert!(
+        found.is_empty(),
+        "no process should match a package that is not running: {found:?}"
+    );
+}

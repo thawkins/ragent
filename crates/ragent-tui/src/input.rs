@@ -125,6 +125,12 @@ pub enum InputAction {
     /// Dismiss the `Clear the input queue?` dialog: the `No` option or `Esc`.
     /// Leaves the queue unchanged (spec `inputqueue` FR-035).
     CancelQueueClear,
+    /// Confirm the `Clear this project's memory?` dialog's `Yes` option
+    /// (opened by `/memory clear`).
+    ConfirmMemoryClear,
+    /// Dismiss the `Clear this project's memory?` dialog: the `No` option or
+    /// `Esc`. Leaves memory unchanged.
+    CancelMemoryClear,
     /// Confirm the plan approval dialog (Enter when cursor_approve = true).
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
@@ -308,15 +314,19 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
     // While the connector-catalogue browse panel (`/connectors claude`) is open
     // it owns the keyboard exactly as the plugin-store panel does: `Up`/`Down`
-    // move the block cursor, `ENTER` installs the highlighted result,
-    // `Backspace` and `Esc` edit the query (and `Esc` on an empty query dismisses
-    // the panel), and printable characters type into the panel's own search
-    // field. Every other key is swallowed and the input field stays locked.
+    // move the block cursor, `ENTER` installs the highlighted result, `c`
+    // advances the category filter, `Backspace` and `Esc` edit the query (and
+    // `Esc` on an empty query dismisses the panel), and printable characters type
+    // into the panel's own search field. Every other key is swallowed and the
+    // input field stays locked.
     if app.connector_store.is_some() {
         match key.code {
             KeyCode::Up => app.connector_catalogue_move_up(),
             KeyCode::Down => app.connector_catalogue_move_down(),
             KeyCode::Enter => app.connector_catalogue_install_selected(),
+            KeyCode::Char('c') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.connector_catalogue_next_category();
+            }
             KeyCode::Backspace | KeyCode::Esc => {
                 app.connector_catalogue_edit_or_close();
             }
@@ -590,6 +600,30 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 });
             }
             KeyCode::Esc => return Some(InputAction::CancelQueueClear),
+            _ => return None,
+        }
+    }
+
+    // If the `Clear this project's memory?` confirmation dialog (opened by
+    // `/memory clear`) is active, intercept keys before any other dialog.
+    // `Left`/`Right` (and `Tab`/`BackTab`) move between `Yes` and `No`, `Enter`
+    // selects, `Esc` dismisses. Every other key is swallowed so it cannot mutate
+    // the editable input buffer.
+    if app.memory_clear_confirm_open {
+        match key.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                app.memory_clear_confirm_toggle();
+                app.needs_redraw = true;
+                return None;
+            }
+            KeyCode::Enter => {
+                return Some(if app.memory_clear_confirm_is_yes() {
+                    InputAction::ConfirmMemoryClear
+                } else {
+                    InputAction::CancelMemoryClear
+                });
+            }
+            KeyCode::Esc => return Some(InputAction::CancelMemoryClear),
             _ => return None,
         }
     }

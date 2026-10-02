@@ -107,6 +107,18 @@ current state of all subsystems.
 
 **Current uncommitted work (on top of v1.0.122):**
 
+- **`/memory clear` (§ Memory)** — `/memory clear` opens a
+  `Clear this project's memory?` `Yes`/`No` dialog and removes nothing until the
+  user confirms. `No` is the default selection, so a stray `Enter` cannot clear
+  memory; `Left`/`Right` (or `Tab`) move the selection, `Enter` selects, and
+  `Esc` cancels. On `Yes`, `Storage::clear_memories_for_project(&Path)` deletes
+  every structured memory whose `project` column equals the current directory's
+  full path or its basename (the same scope `count_memories_for_project` /
+  `list_memories_for_project` use), removing the FTS rows and base rows in one
+  transaction; other projects' memories are never touched. The dialog reports
+  `Cleared N memory entries for this project.` in the transcript. The
+  `command_catalog` and `SLASH_COMMANDS` `/memory` entries list exactly the
+  implemented subcommands (`show`, `clear`, `help`).
 - **Connector system (spec `connectors`, §19C)** — a new `ragent-connectors`
   crate (the workspace advances from 16 to 17 crates) adds a
   Claude-connector-equivalent integration catalogue over MCP: a connector is a
@@ -115,7 +127,8 @@ current state of all subsystems.
   more MCP servers, resolved onto the existing `McpClient` and the durable
   `mcp_state.json` enable ledger. It is driven by the twelve-subcommand
   `/connectors` family (with an interactive off-the-event-loop catalogue browser
-  `/connectors claude`, an isolated `test` harness, and endpoint-provenance
+  `/connectors claude [query] [--category <name>] [--refresh]`, an isolated
+  `test` harness, and endpoint-provenance
   reporting via `stores [--check]`), a `ragent connectors` CLI parity surface,
   and a `connectors` config block (master switch, store dir, catalogue endpoints
   and fetch budgets, credential-name mapping). Spec `connectors` FR-001..FR-041
@@ -1729,12 +1742,12 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/websearch help` | Show `/websearch` subcommand help |
 | `/websearch test` | Test configured web-search backends |
 | `/webapi enable\|disable\|help` | Manage the HTTP REST API |
-| `/tools` | Toggle tool visibility |
+| `/tools` | Tool-family visibility: `/tools list` (alias `show`) prints the table, `/tools <switch> on\|off` toggles one, `/tools help` prints help |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
-| `/memory` | Memory management commands |
+| `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
 | `/yolo` | Toggle YOLO mode |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
@@ -1751,7 +1764,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
 | `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
-| `/connectors list\|search\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude` opens the interactive catalogue browser; `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
+| `/connectors list\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude [query] [--category <name>] [--refresh]` opens the interactive catalogue browser (the single catalogue surface); `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
@@ -3238,10 +3251,18 @@ time never reaps a child another instance is still using. Before spawning,
 copies of the same `command` + `args` and SIGKILLs them, because an orphaned
 stdio server can no longer serve anyone yet keeps holding file locks, ports it
 also binds, API rate-limit slots, and memory. A process counts as orphaned only
-after being re-parented to init (`/proc/<pid>/stat` field 4, `Ppid == 1`); a
-same-command process whose own parent is still alive belongs to a *running*
-ragent instance and is never killed, so concurrent sessions sharing one MCP
-stdio command do not sever each other's pipes (`Transport closed`). The
+after being re-parented away from its spawner: `/proc/<pid>/stat` field 4
+(`Ppid`) equals `1`, or the parent is the per-user service manager
+(`systemd --user`, matched on `/proc/<parent>/comm` or argv[0]). A same-command
+process whose own parent is still alive belongs to a *running* ragent instance
+and is never killed, so concurrent sessions sharing one MCP stdio command do
+not sever each other's pipes (`Transport closed`). Desktop sessions re-parent a
+dead ragent's launcher tree to the user manager rather than to init, so the
+`Ppid == 1` check alone missed exactly the orphans this sweep exists to reap.
+Matching is per process: any supervisor-reparented process whose own command
+line matches is swept, and its process group is signalled, so the launcher
+(`npm exec mongodb-mcp-server@<3>`) and the `node` child it forked are both
+reclaimed even though only the child carries the package token. The
 current process is always
 excluded, matching keys on the executable basename (`/usr/bin/npx` == `npx`)
 plus, for launcher commands (`npx`, `npm`, `bunx`, `pnpx`), the package token
@@ -3437,8 +3458,9 @@ falling back to `~/.config/ragent/connectors/` (user-global) (FR-001), with an
 optional `connectors.store_dir` override. A connector install is
 **path-traversal-safe**: an archive member that escapes the store root (for
 example `../../escape.json`) is refused (FR-029), and a non-`https` package URL
-is refused (FR-028). A freshly installed connector is recorded **disabled** and
-is enabled explicitly (FR-011). The durable enable state is the **existing**
+is refused (FR-028). A freshly installed connector is recorded **enabled** and
+is ready to use; `/connectors enable <id>` connects its servers now in a running
+session (FR-011). The durable enable state is the **existing**
 `ragent_agent::mcp::enable_state` ledger (`mcp_state.json`), so a connector
 disabled once stays disabled everywhere and the connector crate adds no second
 enable file (FR-018). `remove` is refused while the connector is enabled
@@ -3489,15 +3511,14 @@ credential must be resolved from an environment variable.
 Twelve subcommands, dispatched through
 `crates/ragent-tui/src/app/connector.rs`, registered in `SLASH_COMMANDS`, and
 listed in the command catalog and the `/` autocomplete menu (seeded from the
-crate's `autocomplete_tokens` so the menu cannot drift from the usage block)
-(FR-004):
+crate's `CONNECTOR_SUBCOMMANDS` token list so the menu cannot drift from the
+usage block) (FR-004):
 
 | Subcommand | Purpose |
 |------------|---------|
 | `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts (FR-009) |
-| `/connectors search <query> [--category <name>]` | Search the catalogue by name, category, or tag (FR-010) |
-| `/connectors claude [query] [--refresh]` | Open the interactive catalogue browser |
-| `/connectors add <id\|source> [--force]` | Install a connector (recorded disabled; FR-011) |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive catalogue browser (FR-010) |
+| `/connectors add <id\|source> [--force]` | Install a connector (recorded enabled; FR-011) |
 | `/connectors remove <id>` | Uninstall (refused while enabled; FR-030) |
 | `/connectors enable <id>` | Enable and connect the connector's servers now (FR-012) |
 | `/connectors disable <id>` | Disable and disconnect (FR-013) |
@@ -3513,7 +3534,24 @@ render the same usage block. Every report carries a `From: /connectors <sub>`
 attribution line and is ASCII-only (FR-006). The category filter (FR-039,
 FR-040, FR-041) restricts the displayed rows; `ALL` (any case) or a blank value
 clears it, and an unknown category is refused with an `[err]` row and changes no
-state.
+state. The interactive `claude` browser is the single catalogue surface (FR-010):
+its `--category <name>` launch argument and its in-panel `c` cycle key select the
+filter over the categories the fetched catalogue declares, so there is no
+standalone `search` subcommand and the browser and the textual `list` report
+share one filter model. The single-reference subcommands (`remove`, `enable`,
+`disable`, `connect`, `disconnect`, `auth`, `test`) accept a connector by
+canonical id, slug, or display name; the reference is resolved to the installed
+connector's canonical id before the lifecycle call.
+
+The TUI drives a single published lifecycle session. `src/main.rs` resolves the
+enabled connectors through the bridge into the same background connect loop that
+starts the configured `ragent.json` and plugin-contributed servers, then
+publishes a `ConnectorSession` and its status snapshot on the session processor
+(type-erased, so `ragent-agent` does not depend on `ragent-connectors`).
+`/connectors enable|disable|connect|disconnect` drives that session and
+reconciles the MCP tool registry afterwards, and `/connectors list` takes its
+per-server tool counts from the live MCP client, so a bridged server that
+connected after startup reports a real count (T-008).
 
 ### 19C.7 Catalogue browser (`/connectors claude`)
 
@@ -3525,8 +3563,14 @@ already-installed connectors, and a footer of key hints. The catalogue fetch and
 the `ENTER` install both run **off the event loop** on a blocking worker and
 deposit their result for the UI thread to drain, so the fetch never blocks the
 loop or an agent turn. While open the panel owns the keyboard (`Up`/`Down` move
-the cursor, `ENTER` installs, `Backspace`/`Esc` edit the query, and `Esc` on an
-empty query dismisses the panel).
+the cursor, `ENTER` installs, `c` cycles the category filter through the
+catalogue's declared categories and back to `ALL`, `Backspace`/`Esc` edit the
+query, and `Esc` on an empty query dismisses the panel). The launch parser
+removes both `--refresh` and `--category <name>` from the query tokens (so a
+pre-filled query may contain spaces) and validates the category against the
+categories the fetched catalogue actually declares, falling back to an
+unfiltered launch when it is unknown; a refused category is reported in the
+footer while every row stays visible (FR-041).
 
 ### 19C.8 Configuration
 
@@ -3613,7 +3657,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| Uncommitted (post-v1.0.122) | 2026-09-30 | Connector system (spec `connectors`, §19C): a new `ragent-connectors` crate (17th workspace crate) adds a Claude-connector-equivalent integration catalogue over MCP - a connector is a named integration carrying a category, an auth shape, and one or more MCP servers, resolved onto the existing `McpClient` and the durable `mcp_state.json` enable ledger; driven by the twelve-subcommand `/connectors` family (interactive off-the-event-loop `/connectors claude` browser, isolated `test` harness, `stores [--check]` provenance), a `ragent connectors` CLI parity surface, and a `connectors` config block (master switch, store dir, catalogue endpoints and fetch budgets, credential-name mapping). Fixtures under `assets/connectors/fixtures/` and an acceptance walk. Also: ANTIPAT M1 ASCII sweep (TUI tool-category and status-bar emoji replaced with ASCII marker prefixes; `shorten_middle`/`truncate_with_ellipsis` use the U+2026 glyph); `/yolo` persists to the user-global config only; spec plan parser accepts `T-001..T-014` dependency ranges; new `check-connector-endpoint-literal.sh` guard wired into CI and `pre-flight.sh`, retired `check-non-ascii.sh`. |
+| Uncommitted (post-v1.0.123) | 2026-10-02 | Connector system follow-up, `/memory clear`, and TUI render fixes. (1) `/memory clear` opens a `Clear this project's memory?` `Yes`/`No` confirmation dialog (no removal until confirmed; `No` selected by default) and, on `Yes`, calls `Storage::clear_memories_for_project` to delete only the current project's structured memories (full path or basename, FTS + base rows in one transaction), reporting `Cleared N memory entries for this project.`; the `command_catalog`/`SLASH_COMMANDS` `/memory` entries now list exactly `show`, `clear`, `help`. (2) The connector catalogue has a single surface: the standalone `/connectors search` subcommand is retired, `/connectors claude [query] [--category <name>] [--refresh]` carries the `--category` launch filter and an in-panel `c` cycle key over the categories the fetched catalogue declares (FR-010, FR-041), and `list` keeps the same category model. (3) The TUI drives the session-start connector lifecycle: `src/main.rs` bridges the enabled connectors into the shared connect loop and publishes a `ConnectorSession` plus its status snapshot on the session processor (type-erased); `/connectors enable\|disable\|connect\|disconnect` drive that session and reconcile the MCP tool registry, `/connectors list` reads live tool counts from the MCP client, and a single-reference subcommand accepts a connector by id, slug, or display name (`canonical_id`). (4) TUI-019 render fixes: the tool name renders immediately after the step counter (new `split_summary_icon` helper, both the message-widget and layout arms) and `/mcp` renders one server per row as a markdown/ASCII table with `\|`-escaped cells; `/tools` gains `/tools list` (alias `/tools show`) and a `/tools help` block. (5) The MCP orphan sweep reaps stdio servers re-parented to the per-user service manager (`systemd --user`) as well as init, and matches per process, so `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every startup. Earlier work folded in: a new `ragent-connectors` crate (17th workspace crate), the ANTIPAT M1 ASCII sweep, `/yolo` persisting to the user-global config only, spec plan parser `T-001..T-014` ranges, and the `check-connector-endpoint-literal.sh` guard. |
 | v1.0.122 | 2026-09-30 | Security and anti-pattern remediation sweep, folding in the staged working tree on top of `6cf0b60f` (MS-04). `ANTIPAT.md` M0 (the two shipping defects - crash-marker ordering and search-retry shift overflow - plus the highest-severity containment holes) and M2-M7 complete: `ragent-team` shim crate deleted (17 -> 16 workspace crates), major dependency bumps (`rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ...), and `SECTASKS.md` MS-05 "prevent recurrence" - new `ragent_types::guard` (re-exported as `ragent_tools_core::guard`) owns `reject_option_like`, `is_safe_operand`, `validate_identifier`, `validate_relative_component`, `contained_join`, `clamp_retry_after` and `cap_read`; `ragent-agent`/`ragent-storage`/`ragent-tools-core` re-export `ragent_types::sanitize` so there is one secret registry and one redaction chokepoint (`Event` no longer derives `Debug`); the `security-guards` CI job runs `check-file-tool-containment.sh`, `check-security-unwraps.sh`, `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a `--self-test`); `SECTASKS.md` records the accepted-risk register (T-071). `SPEC.md` §4.6a-§4.6e document the guards and call sites. Earlier commits on the tree: MS-03 network/secret hardening (`da83d927`) and MS-04 defence in depth (`6cf0b60f`). Verification: `cargo check --workspace`, `cargo clippy --all-targets`, `cargo fmt --all -- --check`, `cargo audit` clean; workspace test suite green. |
 | v1.0.121 | 2026-09-27 | Introspection and MCP hygiene release. New read-only, hardwired auto-approve tools `tool_info` (JSON dump of the tool registry: name, description, parameters schema, permission category, source family, hidden state, MCP server/tool provenance) and `commands_info` (JSON catalog of every slash command — built-in TUI set from a drift-tested static mirror plus plugin-contributed commands resolved live) take the registry from 169 to 171 tools; the TUI `/tools` report and `tool_info` now share one source classifier built on `Tool::mcp_wrapper_info`. MCP lifecycle: `McpClient::connect` sweeps orphaned stdio server processes before spawning (a process counts as an orphan only when re-parented to init — `/proc/<pid>/stat` field 4 — so a live sibling ragent's server is never killed, fixing cross-instance `Transport closed`), and `shutdown` kills the whole spawned process group (`process_group(0)` + `killpg`) so no `npx`/`node` children survive exit. Fixes: post-loop rollback removes the capture from `active_loop_captures` only after the restore fully completes (a failed restore stays pending for retry — CI flake `test_rollback_accept_restores_snapshot`); OpenSkills discovery covers `~/.agents/skills/` and `.agents/skills/`; the Claude store's self-describing `*-lsp` stubs (e.g. `rust-analyzer-lsp`) install by materialising the marketplace document's inline `lspServers` manifest into `.claude-plugin/plugin.json` (recorded under `sha256(origin-url + bytes)`, never overwriting an existing manifest); plugins shipping a conventional `skills/` directory without a `skills` manifest section now bridge those skills. A `/simplify all` pass over the 50-file changed set: scoped-block lock release in `ToolRegistry::remove_all`, single SHA-256 + no JSON round-trip in the store provider, shared `merge_scanned_skills` in the plugins manifests, awaited (no nested `block_in_place`/`block_on`) `/mcp connect|disconnect|discover` arms, and validation-before-ledger in `set_mcp_server_enabled`. Verification: `cargo check --workspace --all-targets`, full `ragent-agent`/`ragent-plugins`/`ragent-tui` test suites, `cargo fmt --all -- --check`, `cargo audit` all green. |
 | v1.0.119 | 2026-09-26 | User headline "mcp fixes": a sessionful Streamable-HTTP MCP server (the MongoDB MCP server) now reports its tools — `HttpMcpClient::initialize` negotiates the session, replays the returned `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected` adopts an already-running server through that client; the HTTP client is built lazily so it no longer panics outside a Tokio runtime. The TUI startup MCP report awaits the shared client lock with a `MCP_STARTUP_GRACE = 3s` connect wait, `/plugins list` resolves live MCP tool counts via `run_control_command`, and `/plugins list --mcp` sorts server ids for a deterministic contributions block. A `/simplify all` pass over v1.0.116–v1.0.118 fixed the `/swarm status` progress-bar overflow, the `/spawn` pending-marker race, `/plugins <non-list> --mcp` handling, swarm unblock persistence, and `/alog` error propagation. Rust-hygiene sweep green: `cargo check --workspace --all-targets`, `cargo check --tests --workspace`, `cargo test --workspace`, dead-code lint and reason checks, `cargo clippy --workspace --all-targets`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`. |
@@ -4186,12 +4230,12 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/websearch help` | Show `/websearch` subcommand help |
 | `/websearch test` | Test configured web-search backends |
 | `/webapi enable\|disable\|help` | Manage the HTTP REST API |
-| `/tools` | Toggle tool visibility |
+| `/tools` | Tool-family visibility: `/tools list` (alias `show`) prints the table, `/tools <switch> on\|off` toggles one, `/tools help` prints help |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
-| `/memory` | Memory management commands |
+| `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
 | `/yolo` | Toggle YOLO mode |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |

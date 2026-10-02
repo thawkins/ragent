@@ -1,10 +1,10 @@
 //! Connector category filter for the connector browser (spec `connectors`
 //! T-020; FR-039, FR-040).
 //!
-//! The browser and the textual `/connectors list` / `/connectors search` reports
-//! must never disagree about which connectors a category shows, so the filter is
-//! one shared predicate ([`CategoryFilter::matches`]) plus one shared
-//! enumeration ([`build_categories`]) that both call.
+//! The browser and the textual `/connectors list` report must never disagree
+//! about which connectors a category shows, so the filter is one shared
+//! predicate ([`CategoryFilter::matches`]) plus one shared enumeration
+//! ([`build_categories`]) that both call.
 //!
 //! - [`CategoryFilter`] is the filter value: the sentinel [`CategoryFilter::All`]
 //!   or a single category name. `ALL` is the default, so a browser opened with no
@@ -198,8 +198,8 @@ impl CategoryFilterState {
     /// A blank category is ignored (a connector with no category belongs to
     /// `ALL` only); a category already present case-insensitively is not
     /// duplicated, so the set keeps the first spelling seen. The set is left
-    /// unsorted: call [`CategoryFilterState::sort_categories`] once after the
-    /// last insert, so a batch of inserts does not re-sort on every call.
+    /// unsorted: call `sort_categories` once after the last insert, so a batch
+    /// of inserts does not re-sort on every call.
     pub fn add_category(&mut self, category: &str) {
         let category = category.trim();
         if category.is_empty()
@@ -379,6 +379,16 @@ pub struct CatalogueBrowser {
     pub refresh: bool,
     /// The most recent install result shown in the panel footer.
     pub last_install: Option<String>,
+    /// A category filter requested when the panel was opened, held until the
+    /// catalogue lands and its real category set is known (FR-041).
+    ///
+    /// A launch (`/connectors claude --category <name>`) fixes the filter before
+    /// any entry has been fetched, so the name cannot be validated yet. Holding
+    /// it here lets [`CatalogueBrowser::apply_pending_category`] validate it
+    /// against the fetched categories once, exactly as an in-panel selection is
+    /// validated, and refuse an unknown name in the footer instead of leaving the
+    /// panel silently empty.
+    pending_category: Option<CategoryFilter>,
 }
 
 impl Default for CatalogueBrowser {
@@ -407,6 +417,7 @@ impl CatalogueBrowser {
             status: CatalogueBrowseStatus::Loading,
             refresh,
             last_install: None,
+            pending_category: None,
         };
         if !prefill.is_empty() {
             browser.set_query(prefill.to_string());
@@ -516,23 +527,81 @@ impl CatalogueBrowser {
     /// The active category label, for a report or panel title.
     ///
     /// Delegates to [`CategoryFilterState`] so the browser, the panel title, and
-    /// the `list`/`search` report headers all spell the category the same way.
+    /// the `list`/`claude` report headers all spell the category the same way.
     #[must_use]
     pub fn selected_category_label(&self) -> &str {
         self.categories.selected.label()
+    }
+
+    /// The category filter and its derived category set, for a caller that owns
+    /// the panel's filter interaction.
+    ///
+    /// The TUI's `c` key (`/connectors claude`) enumerates [`Self::categories`]
+    /// to cycle the filter, so the cycle is driven by the same category set the
+    /// browser and the reports use and cannot offer a category the catalogue does
+    /// not declare (FR-039).
+    #[must_use]
+    pub const fn categories(&self) -> &CategoryFilterState {
+        &self.categories
+    }
+
+    /// The category filter and its category set, mutably.
+    ///
+    /// A caller that changes the selection must follow it with
+    /// [`Self::reapply_filter`] so [`Self::filtered`] and the cursor follow the
+    /// new filter.
+    pub const fn categories_mut(&mut self) -> &mut CategoryFilterState {
+        &mut self.categories
+    }
+
+    /// Re-derive [`Self::filtered`] from the current query and category filter
+    /// after the filter was changed through [`Self::categories_mut`].
+    pub fn reapply_filter(&mut self) {
+        self.apply_filter();
     }
 
     /// Select a category by name, refusing an unknown one.
     ///
     /// The one place an unknown category is refused (via
     /// [`CategoryFilterState::select_when_known`]), so the browser and the
-    /// `list`/`search` reports cannot disagree about which categories exist.
+    /// `list`/`claude` reports cannot disagree about which categories exist.
     pub fn select_category(&mut self, name: &str) -> bool {
         let applied = self.categories.select_when_known(name);
         if applied {
             self.apply_filter();
         }
         applied
+    }
+
+    /// Record a category filter requested at launch, before the catalogue (and
+    /// therefore the real category set) has been fetched (FR-041).
+    ///
+    /// The filter is *held*, not applied: applying an unvalidated name now would
+    /// hide every entry until the fetch lands, and would not distinguish an
+    /// unknown category from an empty one. [`CategoryFilterState::All`] clears
+    /// nothing and drops any filter already held.
+    pub fn set_pending_category(&mut self, category: CategoryFilter) {
+        self.pending_category = match category {
+            CategoryFilter::All => None,
+            named => Some(named),
+        };
+    }
+
+    /// Apply a category filter recorded by [`Self::set_pending_category`] against
+    /// the categories now known, refusing an unknown one.
+    ///
+    /// Called once the fetched entries have landed ([`Self::set_entries`]), so the
+    /// name is validated against the categories the catalogue actually declares -
+    /// exactly like an in-panel [`Self::select_category`] - and an unknown name is
+    /// reported in the footer instead of rendering an indistinguishable empty
+    /// list. A no-op when no launch filter is held.
+    pub fn apply_pending_category(&mut self) {
+        let Some(category) = self.pending_category.take() else {
+            return;
+        };
+        if !self.select_category(category.label()) {
+            self.last_install = Some(format!("unknown category `{}`", category.label()));
+        }
     }
 
     /// Re-derive [`Self::filtered`] from [`Self::all`], the query, and the
@@ -588,7 +657,7 @@ pub fn entry_matches(entry: &ConnectorDescriptor, needle_lower: &str) -> bool {
 ///
 /// `id` is the catalogued connector id the row carried and `outcome` the
 /// committed install. The caller only installs an entry whose id is not already
-/// in the store scan, so the report states the disabled posture and points at
+/// in the store scan, so the report states the enabled posture and points at
 /// `/connectors enable`, matching the `/connectors add` wording without the
 /// add-attribution header.
 #[must_use]
@@ -596,8 +665,8 @@ pub fn browse_install_report(id: &str, outcome: &crate::manifest::StagedConnecto
     format!(
         "[ok] Installed connector `{id}` ({}, category: {}).\n\
          Installed to `{}`.\n\
-         The connector is recorded **disabled**; run `/connectors enable {id}` \
-         to connect its servers.",
+         The connector is recorded **enabled**; run `/connectors enable {id}` \
+         to connect its servers now in a running session.",
         outcome.descriptor.name,
         if outcome.descriptor.category.is_empty() {
             "(none)"

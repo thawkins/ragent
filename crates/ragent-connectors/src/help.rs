@@ -14,9 +14,8 @@
 /// The `/connectors` subcommand tokens, in display order (FR-004). Used to seed
 /// the autocomplete menu, to recognise a known subcommand, and to document the
 /// family in the usage block.
-pub const CONNECTOR_SUBCOMMANDS: [&str; 13] = [
+pub const CONNECTOR_SUBCOMMANDS: [&str; 12] = [
     "list",
-    "search",
     "claude",
     "add",
     "remove",
@@ -67,9 +66,8 @@ reach an external system through one or more MCP servers.
 | Command | Arguments | Description |
 |---|---|---|
 | `/connectors list [--verbose] [--category <name>]` | optional | List installed connectors with state, auth state, category, and bridged server and tool counts. `--category` filters by category. |
-| `/connectors search <query> [--category <name>]` | required `query` | Search the catalogue by name, category, or tag. |
-| `/connectors claude [query] [--refresh]` | optional | Open the interactive Claude connector-catalogue browser (filter, browse, and install with one key). `--refresh` bypasses the catalogue cache. |
-| `/connectors add <id|source> [--force]` | required `id|source` | Install a connector. It is recorded disabled until `/connectors enable`. |
+| `/connectors claude [query] [--category <name>] [--refresh]` | optional | Open the interactive Claude connector-catalogue browser (filter, browse, and install with one key). An optional `query` pre-fills the search field, `--category` pre-filters by category, and `--refresh` bypasses the catalogue cache. |
+| `/connectors add <id|source> [--force]` | required `id|source` | Install a connector. It is recorded enabled; `/connectors enable` connects it now in a running session. |
 | `/connectors remove <id>` | required `id` | Uninstall a connector. Refused while the connector is enabled. |
 | `/connectors enable <id>` | required `id` | Enable a connector and connect its servers now. |
 | `/connectors disable <id>` | required `id` | Disable a connector and disconnect its servers. |
@@ -87,8 +85,8 @@ reach an external system through one or more MCP servers.
 - a local `.zip` or `.tar.gz` package;
 - an `https://` URL naming a `.zip`/`.tar.gz` package.
 
-A newly installed connector is recorded disabled; run `/connectors enable <id>` to
-connect its servers.";
+A newly installed connector is recorded enabled; run `/connectors enable <id>` to
+connect its servers now in a session that is already running.";
 
 /// The `From: /connectors <subcommand>` attribution line every report renders
 /// (FR-006).

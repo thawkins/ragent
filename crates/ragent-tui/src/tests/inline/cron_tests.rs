@@ -879,6 +879,8 @@ fn create_test_processor() -> ragent_agent::session::processor::SessionProcessor
             std::collections::HashMap::new(),
         )),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),

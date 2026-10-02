@@ -279,7 +279,7 @@ fn build_line1(
     let left = build_line1_left(app, config, mode);
 
     // Branch + last-prompt tag group: the `Branch: `-labelled git branch
-    // section followed by the last-prompt tag (first 32 characters of the
+    // section followed by the last-prompt tag (first 48 characters of the
     // most recent prompt, plus `....` when truncated, in square brackets),
     // rendered as one group immediately after the working-directory section.
     // The working-directory section is shortened when the group plus the

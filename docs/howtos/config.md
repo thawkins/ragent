@@ -1665,7 +1665,7 @@ and the non-secret credential-name mapping.
 | `credentials` | `map<string, object>` | `{}` | Non-secret credential-name mapping keyed by connector id. Each value holds the **name** of a credential in the encrypted credential store, never the secret value. |
 
 The section merges with overlay-wins precedence (project config overrides
-user-global). Manage connectors with `/connectors list|search|add|remove|enable|disable|connect|disconnect|auth|test|stores|help`
+user-global). Manage connectors with `/connectors list|claude|add|remove|enable|disable|connect|disconnect|auth|test|stores|help`
 in the TUI or `ragent connectors <sub>` from the CLI.
 
 ---

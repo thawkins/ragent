@@ -46,6 +46,8 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::StreamConfig::default(),
@@ -250,7 +252,7 @@ async fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("✏") && text.contains("✓"),
+        text.contains("EDIT:") && text.contains("✓"),
         "status bar should show enabled edit-log icon: {text}"
     );
 
@@ -268,7 +270,7 @@ async fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("✏") && text.contains("✗"),
+        text.contains("EDIT:") && text.contains("✗"),
         "status bar should show disabled edit-log icon: {text}"
     );
 }
@@ -2805,7 +2807,7 @@ async fn test_slash_tools_lists_visibility_switches() {
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools").await;
+    app.execute_slash_command("/tools list").await;
 
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
@@ -2820,6 +2822,43 @@ async fn test_slash_tools_lists_visibility_switches() {
     assert!(text.contains("agents"), "should list agents switch");
     assert!(text.contains("plan"), "should list plan switch");
     assert!(text.contains("codeindex"), "should list codeindex switch");
+}
+
+#[tokio::test]
+async fn test_slash_tools_default_shows_help() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
+
+    app.execute_slash_command("/tools").await;
+
+    assert_eq!(app.status, "tools help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("`/tools list`"),
+        "should document /tools list"
+    );
+    assert!(
+        text.contains("Valid switches:"),
+        "should list the valid switches"
+    );
+    assert!(
+        !text.contains("Tool Family Visibility"),
+        "default /tools no longer renders the table"
+    );
+}
+
+#[tokio::test]
+async fn test_slash_tools_show_alias_still_lists_visibility_switches() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
+
+    app.execute_slash_command("/tools show").await;
+
+    assert_eq!(app.status, "tools");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Tool Family Visibility"));
 }
 
 #[tokio::test]
@@ -2843,18 +2882,18 @@ async fn test_slash_tools_help_shows_usage() {
     app.execute_slash_command("/tools help").await;
 
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`/tools show`"));
+    assert!(text.contains("`/tools list`"));
     assert!(text.contains("`/tools help`"));
     assert!(text.contains("`/tools <switch> on|off`"));
     assert!(text.contains("`office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`"));
 }
 #[tokio::test]
-async fn test_slash_tools_show_alias_lists_visibility_switches() {
+async fn test_slash_tools_list_alias_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools show").await;
+    app.execute_slash_command("/tools list").await;
 
     assert_eq!(app.status, "tools");
     let text = app.messages.last().unwrap().text_content();
@@ -3057,7 +3096,7 @@ async fn test_slash_tools_creates_session_if_none() {
     let mut app = make_app();
     assert!(app.session_id.is_none());
 
-    app.execute_slash_command("/tools").await;
+    app.execute_slash_command("/tools list").await;
 
     assert!(app.session_id.is_some(), "should create session");
     assert_eq!(app.status, "tools");
@@ -3704,7 +3743,7 @@ async fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("⚠") && text.contains("✓"),
+        text.contains("YOLO:") && text.contains("✓"),
         "status bar should show enabled YOLO icon: {text}"
     );
 
@@ -3723,7 +3762,7 @@ async fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let cells = terminal.backend().buffer().content.clone();
     let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
-        text.contains("⚠") && text.contains("✗"),
+        text.contains("YOLO:") && text.contains("✗"),
         "status bar should show disabled YOLO icon: {text}"
     );
 }
@@ -5417,10 +5456,15 @@ async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
-    let flat = joined.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        flat.contains("tools: 2"),
-        "the list must report the tool count: {joined}"
+        joined
+            .lines()
+            .any(|l| l.trim_start().starts_with("| Server") && l.contains("Tools"))
+            && joined.lines().any(|l| {
+                let cells: Vec<&str> = l.split('|').map(str::trim).collect();
+                cells.len() == 8 && cells[6] == "2"
+            }),
+        "the list must report the tool count in a Tools column: {joined}"
     );
     assert!(
         !joined.contains("find") && !joined.contains("mcp_configured_find"),
@@ -5479,14 +5523,18 @@ async fn test_slash_mcp_list_shows_transport_and_endpoint() {
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(
-        joined.contains("[stdio]") && joined.contains("uvx"),
-        "stdio row must show the transport and command: {joined}"
-    );
-    assert!(
-        joined.contains("[http]") && joined.contains("http://127.0.0.1:3000/mcp"),
-        "http row must show the transport and URL: {joined}"
-    );
+    let cell = |row_prefix: &str, col: usize| -> String {
+        joined
+            .lines()
+            .find(|l| l.trim_start().starts_with(row_prefix))
+            .and_then(|l| l.split('|').map(str::trim).nth(col).map(str::to_string))
+            .unwrap_or_default()
+    };
+    // Column 4 is the transport, column 5 the endpoint (stdio command or URL).
+    assert_eq!(cell("| fetcher", 4), "stdio", "{joined}");
+    assert_eq!(cell("| fetcher", 5), "uvx", "{joined}");
+    assert_eq!(cell("| remote", 4), "http", "{joined}");
+    assert_eq!(cell("| remote", 5), "http://127.0.0.1:3000/mcp", "{joined}");
 }
 
 /// Disconnecting an MCP server must drop its tools from the session registry:

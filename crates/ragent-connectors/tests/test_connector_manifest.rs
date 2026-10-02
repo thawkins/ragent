@@ -137,7 +137,7 @@ fn read_manifest_reports_parse_failure_for_malformed_json() {
 // ── direct descriptor install (catalogue path, FR-011, FR-027) ───────────────
 
 #[test]
-fn install_descriptor_writes_a_disabled_connector() {
+fn install_descriptor_writes_an_enabled_connector() {
     let tree = TempTree::new("install-descriptor");
     let store = tree.0.join("store");
 
@@ -145,9 +145,9 @@ fn install_descriptor_writes_a_disabled_connector() {
 
     assert_eq!(staged.installed_dir, store.join("echo"));
     assert!(store.join("echo").join(MANIFEST_FILE).is_file());
-    // FR-011: recorded disabled so no server starts until enable.
+    // FR-011: recorded enabled so a fresh connector is ready to use.
     let ledger = ragent_connectors::StoreLedger::load(&store);
-    assert!(!ledger.state("echo").is_some_and(|s| s.enabled));
+    assert!(ledger.state("echo").is_some_and(|s| s.enabled));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn install_descriptor_refuses_a_descriptor_with_no_server() {
 // ── stage: local directory (FR-011, FR-027) ─────────────────────────────────
 
 #[test]
-fn stage_local_directory_installs_a_disabled_connector() {
+fn stage_local_directory_installs_an_enabled_connector() {
     let tree = TempTree::new("stage-dir");
     let source = stage_source_dir(&tree.0.join("src"), "echo");
 
@@ -193,10 +193,10 @@ fn stage_local_directory_installs_a_disabled_connector() {
     let store = tree.0.join("proj/.ragent/connectors");
     assert!(store.join("echo").join(MANIFEST_FILE).is_file());
 
-    // Discovery finds the installed connector, disabled.
+    // Discovery finds the installed connector, enabled.
     let found = ragent_connectors::scan_dirs(dirs(&tree));
     assert_eq!(found.len(), 1);
-    assert!(!found[0].enabled);
+    assert!(found[0].enabled);
 }
 
 #[test]

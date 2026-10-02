@@ -194,17 +194,18 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   MCP servers; a connector is a catalogue entry (display name, category, auth
   shape, and one or more servers) on top of the MCP transport ragent already
   speaks. Managed through the twelve-subcommand `/connectors` family
-  (`list [--verbose] [--category <name>]`, `search <query> [--category <name>]`,
-  `claude [query] [--refresh]`, `add <id|source> [--force]`, `remove <id>`,
-  `enable <id>`, `disable <id>`, `connect <id>`, `disconnect <id>`,
-  `auth <id>`, `test <id>`, `stores [--check]`, `help`) in the TUI and the
-  `ragent connectors <sub>` CLI. `/connectors claude` opens an interactive,
-  off-the-event-loop catalogue browser (filter, browse, install with one key),
-  `/connectors test <id>` runs an isolated connect-and-invoke harness that
-  never touches the live session, and `/connectors stores [--check]` reports
-  each catalogue endpoint and its provenance. Connectors install disabled;
-  `enable` connects their servers now. `connectors.enabled: false` makes the
-  subsystem inert
+  (`list [--verbose] [--category <name>]`,
+  `claude [query] [--category <name>] [--refresh]`, `add <id|source> [--force]`,
+  `remove <id>`, `enable <id>`, `disable <id>`, `connect <id>`,
+  `disconnect <id>`, `auth <id>`, `test <id>`, `stores [--check]`, `help`) in
+  the TUI and the `ragent connectors <sub>` CLI. `/connectors claude` opens an
+  interactive, off-the-event-loop catalogue browser (filter by query and
+  category, browse, install with one key; the `c` key cycles the category
+  filter), `/connectors test <id>` runs an isolated connect-and-invoke harness
+  that never touches the live session, and `/connectors stores [--check]`
+  reports each catalogue endpoint and its provenance. Connectors install
+  enabled; `enable` connects their servers now in a running session.
+  `connectors.enabled: false` makes the subsystem inert
 - **Input queue** — the TUI input field stays editable while the primary agent
   executes: each `Enter` appends the message to a bounded FIFO queue (default 32
   entries, configurable via `input_queue_capacity`), a two-digit counter appears
@@ -519,27 +520,45 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.122** — The core architecture, tool system (171 tools across 25 categories), TUI,
+**v1.0.124** — The core architecture, tool system (171 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
-- **Uncommitted — connector system (spec `connectors`)** — a new
-  `ragent-connectors` crate (the workspace now has 17) adds a
-  Claude-connector-equivalent catalogue over MCP: a connector is a named
-  integration (Google Drive, Slack, GitHub, ...) carrying a category, an auth
-  shape, and one or more MCP servers, resolved onto the existing `McpClient` and
-  the durable `mcp_state.json` ledger. It is driven by the twelve-subcommand
-  `/connectors` family and the `ragent connectors` CLI, with an interactive
-  off-the-event-loop catalogue browser (`/connectors claude`), an isolated
-  `test` harness, endpoint-provenance reporting (`stores [--check]`), and a
-  `connectors` config block (master switch, store dir, catalogue endpoints and
-  fetch budgets, credential-name mapping). Alongside it, the ANTIPAT M1 ASCII
-  sweep replaces the TUI tool-category and status-bar emoji with plain ASCII
-  marker prefixes; `/yolo` now persists to the user-global config only; and the
-  spec plan parser accepts `T-001..T-014` dependency ranges.
+- **Uncommitted — `/memory clear`, connector lifecycle tracking, TUI-019 fixes,
+  MCP orphan sweep** — `/memory clear` empties this project's structured memories
+  behind a `Yes`/`No` confirmation dialog (`No` selected by default, so a stray
+  `Enter` cannot clear memory); the new
+  `Storage::clear_memories_for_project` deletes only the current project's rows
+  (full path or basename) in one transaction, and the `command_catalog` and
+  `SLASH_COMMANDS` `/memory` entries now list exactly the subcommands the arm
+  handles (`show`, `clear`, `help`).
+- **Uncommitted — connector system tracking, TUI-019 fixes, MCP orphan sweep
+  (spec `connectors`, `SECTASKS`)** — a new `ragent-connectors` crate (the
+  workspace now has 17) adds a Claude-connector-equivalent catalogue over MCP: a
+  connector is a named integration (Google Drive, Slack, GitHub, ...) carrying a
+  category, an auth shape, and one or more MCP servers, resolved onto the
+  existing `McpClient` and the durable `mcp_state.json` ledger. It is driven by
+  the twelve-subcommand `/connectors` family and the `ragent connectors` CLI,
+  with an interactive off-the-event-loop catalogue browser (`/connectors claude`,
+  now with a `--category <name>` filter and a `c` cycle key), an isolated `test`
+  harness, endpoint-provenance reporting (`stores [--check]`), and a `connectors`
+  config block (master switch, store dir, catalogue endpoints and fetch budgets,
+  credential-name mapping). The TUI now drives the session-start connector
+  session for `enable`/`disable`/`connect`/`disconnect`, lists live tool counts
+  from the MCP client, and accepts a connector by id, slug, or display name.
+  Alongside it: the tool name now renders immediately after the step counter in
+  the message window (TUI-019), `/mcp` renders one server per row as a markdown
+  table (TUI-019), the `/tools` subcommand surface is tidied (`/tools list`,
+  `/tools help`), the ANTIPAT M1 ASCII sweep replaces the TUI tool-category and
+  status-bar emoji with plain ASCII marker prefixes, `/yolo` persists to the
+  user-global config only, the spec plan parser accepts `T-001..T-014`
+  dependency ranges, and the **MCP orphan sweep now reaps stdio servers
+  re-parented to the user session manager (`systemd --user`), not just init, so
+  `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every
+  startup**.
 
 - **Version 1.0.122 — security and anti-pattern remediation sweep** — the
   `ANTIPAT.md` milestones M0 and M2-M7 landed (standards conformance, shared-helper

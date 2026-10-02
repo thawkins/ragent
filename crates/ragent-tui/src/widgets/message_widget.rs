@@ -203,27 +203,28 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// Extract a brief summary from tool input for display next to the tool name.
 /// Visual Style Guide for Tool Input/Output Summaries
 ///
-/// Tool categories with their associated emoji icons:
-/// - 📄 File Operations: read, write, create, edit, patch, rm, multiedit
-/// - 📁 Directory Operations: list, make_directory/mkdir
-/// - ℹ️  File Info: file_info
-/// - 🔍 Search Operations: search, grep, glob
-/// - ⚡ Execution: bash, calculator
-/// - 🌐 Network: webfetch, websearch, http_request
-/// - 🔧 Environment: get_env
-/// - ❓ User Interaction: question, ask_user
-/// - 💭 Reasoning: think
-/// - 📝 Planning: plan_enter, plan_exit
-/// - 📋 Task Management: task_create, task_update, task_get, task_list
-/// - 🤖 Sub-agent: new_agent, cancel_agent, list_agents, wait_agents
-/// - 👥 Team Coordination: team_*
-/// - 🔎 LSP/Code Intelligence: lsp_*
-/// - 📄 Document: office_*, pdf_*
-/// - 📋 GitHub: github_list_issues, github_get_issue, github_create_issue,
+/// Tool categories (the leading category marker was removed, so each summary
+/// is now just the tool's own arguments/result text):
+/// - File Operations: read, write, create, edit, patch, rm, multiedit
+/// - Directory Operations: list, make_directory/mkdir
+/// - File Info: file_info
+/// - Search Operations: search, grep, glob
+/// - Execution: bash, calculator
+/// - Network: webfetch, websearch, http_request
+/// - Environment: get_env
+/// - User Interaction: question, ask_user
+/// - Reasoning: think
+/// - Planning: plan_enter, plan_exit
+/// - Task Management: task_create, task_update, task_get, task_list
+/// - Sub-agent: new_agent, cancel_agent, list_agents, wait_agents
+/// - Team Coordination: team_*
+/// - LSP/Code Intelligence: lsp_*
+/// - Document: office_*, pdf_*
+/// - GitHub: github_list_issues, github_get_issue, github_create_issue,
 ///   github_comment_issue, github_close_issue, github_list_prs,
 ///   github_get_pr, github_create_pr, github_merge_pr, github_review_pr
-/// - ✨ Utility: format, metadata, truncate, read_line_range
-/// - ⏰ Cron Scheduler: cron_add, cron_remove, cron_list, cron_enable, cron_disable
+/// - Utility: format, metadata, truncate, read_line_range
+/// - Cron Scheduler: cron_add, cron_remove, cron_list, cron_enable, cron_disable
 ///
 /// Summarise a tool's input for display in the TUI log panel.
 pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
@@ -286,11 +287,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             // resolves to an empty path (e.g. `{"path":""}`), we intentionally return
             // an empty summary to preserve existing test expectations.
             let path = get_relative_path(&["path", "file_path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📄 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         // intentionally gated on the structured extractor yielding an empty
         // string. This preserves existing behaviour for empty/missing known
@@ -298,30 +295,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // uses unexpected field names.
         "write" | "create" => {
             let path = get_relative_path(&["path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📄 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         "edit" | "patch" => {
             // The edit tool's canonical parameter is `file_path`, with `path` as a
             // deprecated legacy alias. Check both so the file name always shows
             // in the message window header regardless of which name the model used.
             let path = get_relative_path(&["file_path", "path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📄 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         "rm" => {
             let path = get_relative_path(&["path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📄 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         "multiedit" | "multi_edit" => {
             let count = input
@@ -329,29 +314,25 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            format!("📄 {}", pluralize(count, "edit", "edits"))
+            pluralize(count, "edit", "edits")
         }
         "append_to_file" | "append_file" => {
             let path = get_relative_path(&["path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📄 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         "apply_patch" => {
             let target = get_str(&["path"]).unwrap_or_default();
             if target.is_empty() {
-                "📄 apply patch".to_string()
+                "apply patch".to_string()
             } else {
-                format!("📄 {}", trunc120(&target))
+                trunc120(&target)
             }
         }
         "diff_files" => {
             let a = get_str(&["path_a", "file_a", "original"]).unwrap_or_default();
             let b = get_str(&["path_b", "file_b", "modified"]).unwrap_or_default();
             format!(
-                "📄 {} ↔ {}",
+                "{} ↔ {}",
                 make_relative_path(&a, cwd),
                 make_relative_path(&b, cwd)
             )
@@ -363,19 +344,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "list" => {
             // list_directory uses "directory"; canonical list uses "path".
             let path = get_relative_path(&["path", "directory"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📁 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
         "make_directory" | "mkdir" => {
             let path = get_relative_path(&["path", "directory"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("📁 {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -383,11 +356,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "file_info" => {
             let path = get_relative_path(&["path"]);
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("ℹ️  {}", path)
-            }
+            if path.is_empty() { String::new() } else { path }
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -397,10 +366,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
             let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
             if dst.is_empty() {
-                format!("📄 {}", make_relative_path(&src, cwd))
+                make_relative_path(&src, cwd)
             } else {
                 format!(
-                    "📄 {} → {}",
+                    "{} → {}",
                     make_relative_path(&src, cwd),
                     make_relative_path(&dst, cwd)
                 )
@@ -410,7 +379,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
             let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
             format!(
-                "📄 {} → {}",
+                "{} → {}",
                 make_relative_path(&src, cwd),
                 make_relative_path(&dst, cwd)
             )
@@ -425,8 +394,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .as_deref()
                 .map(|p| make_relative_path(p, cwd));
             match path {
-                Some(p) if !p.is_empty() => format!("🔍 \"{}\" in {}", trunc120(&query), p),
-                _ => format!("🔍 \"{}\"", trunc120(&query)),
+                Some(p) if !p.is_empty() => format!("\"{}\" in {}", trunc120(&query), p),
+                _ => format!("\"{}\"", trunc120(&query)),
             }
         }
         "grep" => {
@@ -437,19 +406,16 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|p| make_relative_path(p, cwd));
             match path {
                 Some(p) if !p.is_empty() => {
-                    format!("🔍 \"{}\" in {}", trunc120(pattern), p)
+                    format!("\"{}\" in {}", trunc120(pattern), p)
                 }
-                _ => format!("🔍 \"{}\"", trunc120(pattern)),
+                _ => format!("\"{}\"", trunc120(pattern)),
             }
         }
-        "glob" => {
-            let pattern = input
-                .get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            format!("🔍 {}", pattern)
-        }
+        "glob" => input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
 
         // ═══════════════════════════════════════════════════════════════════
         // ⚡ EXECUTION
@@ -460,13 +426,13 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             get_str(&["command", "code", "cmd"])
                 .as_deref()
                 .map(|s| s.replace('\n', " ; "))
-                .map(|s| format!("⚡ $ {}", trunc120(&s)))
-                .unwrap_or_else(|| "⚡ bash".to_string())
+                .map(|s| format!("$ {}", trunc120(&s)))
+                .unwrap_or_else(|| "bash".to_string())
         }
 
         "calculator" => {
             let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
-            format!("⚡ {}", trunc120(&expr))
+            trunc120(&expr)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -475,52 +441,52 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "http_request" | "web_request" => {
             let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
             let url = get_str(&["url"]).unwrap_or_default();
-            format!("🌐 {} {}", method, trunc120(&url))
+            format!("{} {}", method, trunc120(&url))
         }
         "webfetch" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|u| format!("🌐 {}", trunc120(u)))
-            .unwrap_or_else(|| "🌐 fetch".to_string()),
+            .map(trunc120)
+            .unwrap_or_else(|| "fetch".to_string()),
         "websearch" => input
             .get("query")
             .and_then(|v| v.as_str())
-            .map(|q| format!("🌐 \"{}\"", trunc120(q)))
-            .unwrap_or_else(|| "🌐 search".to_string()),
+            .map(|q| format!("\"{}\"", trunc120(q)))
+            .unwrap_or_else(|| "search".to_string()),
         "mf_fetch" => input
             .get("url")
             .or_else(|| input.get("urls").and_then(|v| v.as_array()?.first()))
             .and_then(|v| v.as_str())
-            .map(|u| format!("🌐 {}", trunc120(u)))
-            .unwrap_or_else(|| "🌐 fetch".to_string()),
+            .map(trunc120)
+            .unwrap_or_else(|| "fetch".to_string()),
         "mf_crawl" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|u| format!("🕷️ {}", trunc120(u)))
-            .unwrap_or_else(|| "🕷️ crawl".to_string()),
+            .map(trunc120)
+            .unwrap_or_else(|| "crawl".to_string()),
         "mf_screenshot" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|u| format!("📸 {}", trunc120(u)))
-            .unwrap_or_else(|| "📸 screenshot".to_string()),
-        "mf_cache_clear" => "🧹 clear cache".to_string(),
-        "mf_version" => "ℹ️ masterfetch version".to_string(),
+            .map(trunc120)
+            .unwrap_or_else(|| "screenshot".to_string()),
+        "mf_cache_clear" => "clear cache".to_string(),
+        "mf_version" => "masterfetch version".to_string(),
         "mf_search" => input
             .get("query")
             .and_then(|v| v.as_str())
-            .map(|q| format!("🌐 \"{}\"", trunc120(q)))
-            .unwrap_or_else(|| "🌐 search".to_string()),
+            .map(|q| format!("\"{}\"", trunc120(q)))
+            .unwrap_or_else(|| "search".to_string()),
 
         // ═══════════════════════════════════════════════════════════════════
         // 🔎 EXTENDED SEARCH / INTELLIGENCE
         // ═══════════════════════════════════════════════════════════════════
         "conversation_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
-            format!("🔎 session: \"{}\"", trunc120(&query))
+            format!("session: \"{}\"", trunc120(&query))
         }
         "session_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
-            format!("🔎 all sessions: \"{}\"", trunc120(&query))
+            format!("all sessions: \"{}\"", trunc120(&query))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -529,12 +495,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "get_env" => {
             let key = get_str(&["key", "name", "variable"]).unwrap_or_default();
             if key.is_empty() {
-                "🔧 all vars".to_string()
+                "all vars".to_string()
             } else {
-                format!("🔧 {}", key)
+                key
             }
         }
-        "bash_reset" => "🔧 reset shell".to_string(),
+        "bash_reset" => "reset shell".to_string(),
 
         // ═══════════════════════════════════════════════════════════════════
         // 🗂️ BACKGROUND PROCESS MANAGEMENT
@@ -545,14 +511,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 "spawn" => {
                     let cmd = get_str(&["command"]).unwrap_or_default();
                     let first = cmd.lines().next().unwrap_or("");
-                    format!("🗂️ spawn: {}", trunc120(first))
+                    format!("spawn: {}", trunc120(first))
                 }
                 other => {
                     let task = get_str(&["task_id"]).unwrap_or_default();
                     if task.is_empty() {
-                        format!("🗂️ {}", other)
+                        format!("{}", other)
                     } else {
-                        format!("🗂️ {} {}", other, &task[..8.min(task.len())])
+                        format!("{} {}", other, &task[..8.min(task.len())])
                     }
                 }
             }
@@ -566,18 +532,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             match action.as_str() {
                 "open" => {
                     let url = get_str(&["url"]).unwrap_or_default();
-                    format!("🖥️ open {}", trunc120(&url))
+                    format!("open {}", trunc120(&url))
                 }
                 "type" | "fill_form" => {
                     let selector = get_str(&["selector"]).unwrap_or_default();
-                    format!("🖥️ {} {}", action, trunc120(&selector))
+                    format!("{} {}", action, trunc120(&selector))
                 }
                 "eval" => {
                     let expr = get_str(&["expression"]).unwrap_or_default();
-                    format!("🖥️ eval {}", trunc120(&expr))
+                    format!("eval {}", trunc120(&expr))
                 }
-                "screenshot" => "🖥️ screenshot".to_string(),
-                other => format!("🖥️ {}", other),
+                "screenshot" => "screenshot".to_string(),
+                other => format!("{}", other),
             }
         }
         "gmail" => {
@@ -585,59 +551,59 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             match action.as_str() {
                 "search" => {
                     let q = get_str(&["query"]).unwrap_or_default();
-                    format!("📧 search \"{}\"", trunc120(&q))
+                    format!("search \"{}\"", trunc120(&q))
                 }
                 "read" => {
                     let id = get_str(&["id"]).unwrap_or_default();
-                    format!("📧 read {}", trunc120(&id))
+                    format!("read {}", trunc120(&id))
                 }
                 "send" | "draft" => {
                     let to = get_str(&["to"]).unwrap_or_default();
                     let subject = get_str(&["subject"]).unwrap_or_default();
                     if subject.is_empty() {
-                        format!("📧 {} to {}", action, to)
+                        format!("{} to {}", action, to)
                     } else {
-                        format!("📧 {} to {}: {}", action, to, trunc120(&subject))
+                        format!("{} to {}: {}", action, to, trunc120(&subject))
                     }
                 }
-                other => format!("📧 {}", other),
+                other => format!("{}", other),
             }
         }
         "send_channel_message" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "send".to_string());
             let channel = get_str(&["channel"]).unwrap_or_else(|| "all".to_string());
             if action == "send" {
-                format!("📨 send [{}]", channel)
+                format!("send [{}]", channel)
             } else {
-                format!("📨 {} [{}]", action, channel)
+                format!("{} [{}]", action, channel)
             }
         }
         "open" => {
             let target = get_str(&["target"]).unwrap_or_default();
             let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
-            format!("📂 {} {}", action, trunc120(&target))
+            format!("{} {}", action, trunc120(&target))
         }
         "initiative" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
             match action.as_str() {
                 "create" => {
                     let title = get_str(&["title"]).unwrap_or_default();
-                    format!("🎯 create \"{}\"", trunc120(&title))
+                    format!("create \"{}\"", trunc120(&title))
                 }
                 "update" | "read" | "close" | "checkpoint" => {
                     let id = get_str(&["id"]).unwrap_or_default();
-                    format!("🎯 {} {}", action, trunc120(&id))
+                    format!("{} {}", action, trunc120(&id))
                 }
-                other => format!("🎯 {}", other),
+                other => format!("{}", other),
             }
         }
         "skill_manage" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
             match action.as_str() {
-                "list" | "reload" => format!("🧩 {}", action),
+                "list" | "reload" => action,
                 other => {
                     let name = get_str(&["name"]).unwrap_or_default();
-                    format!("🧩 {} {}", other, trunc120(&name))
+                    format!("{} {}", other, trunc120(&name))
                 }
             }
         }
@@ -647,7 +613,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "question" | "ask_user" => {
             let q = get_str(&["question", "query"]).unwrap_or_default();
-            format!("❓ {}", trunc120(&q))
+            trunc120(&q)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -655,7 +621,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "think" => {
             let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
-            format!("💭 {}", trunc120(&thought))
+            trunc120(&thought)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -663,11 +629,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "plan_enter" => {
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📝 → {}", trunc120(task))
+            format!("→ {}", trunc120(task))
         }
         "plan_exit" => {
             let summary = input.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📝 ← {}", trunc120(summary))
+            format!("← {}", trunc120(summary))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -675,28 +641,28 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "task_create" => {
             let subject = get_str(&["subject"]).unwrap_or_default();
-            format!("📋 +{}", trunc120(&subject))
+            format!("+{}", trunc120(&subject))
         }
         "task_update" => {
             let task_id = get_str(&["task_id"]).unwrap_or_default();
             let status = get_str(&["status"]);
             let subject = get_str(&["subject"]);
             match (status, subject) {
-                (Some(s), _) => format!("📋 ✓{} → {}", task_id, s),
-                (None, Some(t)) => format!("📋 ~{} \"{}\"", task_id, trunc120(&t)),
-                (None, None) => format!("📋 ~{}", task_id),
+                (Some(s), _) => format!("{} → {}", task_id, s),
+                (None, Some(t)) => format!("~{} \"{}\"", task_id, trunc120(&t)),
+                (None, None) => format!("~{}", task_id),
             }
         }
         "task_get" => {
             let task_id = get_str(&["task_id"]).unwrap_or_default();
-            format!("📋 get {}", task_id)
+            format!("get {}", task_id)
         }
         "task_list" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("all");
-            format!("📋 filter: {}", status)
+            format!("filter: {}", status)
         }
         // ═══════════════════════════════════════════════════════════════════
         // 🤖 SUB-AGENT
@@ -704,18 +670,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "new_agent" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            format!("🤖 {} → {}", agent, trunc120(&task))
+            format!("{} → {}", agent, trunc120(&task))
         }
         "cancel_agent" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-            format!("🤖 cancel {}", &task_id[..8.min(task_id.len())])
+            format!("cancel {}", &task_id[..8.min(task_id.len())])
         }
         "list_agents" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("all");
-            format!("🤖 filter: {}", status)
+            format!("filter: {}", status)
         }
         "wait_agents" => {
             let task_ids = input
@@ -724,9 +690,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|a| a.len())
                 .unwrap_or(0);
             if task_ids > 0 {
-                format!("🤖 wait on {} task(s)", task_ids)
+                format!("wait on {} task(s)", task_ids)
             } else {
-                "🤖 wait on all tasks".to_string()
+                "wait on all tasks".to_string()
             }
         }
 
@@ -735,67 +701,67 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "team_create" => {
             let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("👥 create {}", name)
+            format!("create {}", name)
         }
         "team_spawn" => {
             let agent = input
                 .get("agent_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            format!("👥 spawn {}", agent)
+            format!("spawn {}", agent)
         }
-        "team_status" => "👥 status".to_string(),
-        "team_idle" => "👥 idle".to_string(),
-        "team_cleanup" => "👥 cleanup".to_string(),
+        "team_status" => "status".to_string(),
+        "team_idle" => "idle".to_string(),
+        "team_cleanup" => "cleanup".to_string(),
         "team_broadcast" => {
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
             if content.is_empty() {
-                "👥 broadcast".to_string()
+                "broadcast".to_string()
             } else {
-                format!("👥 broadcast: {}", trunc120(content))
+                format!("broadcast: {}", trunc120(content))
             }
         }
         "team_message" => {
             let to = input.get("to").and_then(|v| v.as_str()).unwrap_or("?");
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            format!("👥 msg to {}: {}", to, trunc120(content))
+            format!("msg to {}: {}", to, trunc120(content))
         }
-        "team_read_messages" => "👥 read messages".to_string(),
+        "team_read_messages" => "read messages".to_string(),
         "team_task_create" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("👥 task: {}", trunc120(&title))
+            format!("task: {}", trunc120(&title))
         }
-        "team_task_list" => "👥 list tasks".to_string(),
+        "team_task_list" => "list tasks".to_string(),
         "team_task_claim" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str());
             match task_id {
-                Some(id) => format!("👥 claim {}", id),
-                None => "👥 claim next".to_string(),
+                Some(id) => format!("claim {}", id),
+                None => "claim next".to_string(),
             }
         }
         "team_task_complete" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("👥 complete {}", task_id)
+            format!("complete {}", task_id)
         }
         "team_assign_task" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
             let to = input.get("to").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("👥 assign {} to {}", task_id, to)
+            format!("assign {} to {}", task_id, to)
         }
-        "team_submit_plan" => "👥 submit plan".to_string(),
+        "team_submit_plan" => "submit plan".to_string(),
         "team_approve_plan" => {
             let approved = input
                 .get("approved")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if approved {
-                "👥 approve plan".to_string()
+                "approve plan".to_string()
             } else {
-                "👥 reject plan".to_string()
+                "reject plan".to_string()
             }
         }
-        "team_memory_read" => "👥 read memory".to_string(),
-        "team_memory_write" => "👥 write memory".to_string(),
+        "team_memory_read" => "read memory".to_string(),
+        "team_memory_write" => "write memory".to_string(),
         "team_wait" => {
             let agent_ids = input
                 .get("agent_ids")
@@ -803,9 +769,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|a| a.len())
                 .unwrap_or(0);
             if agent_ids > 0 {
-                format!("👥 wait on {} agent(s)", agent_ids)
+                format!("wait on {} agent(s)", agent_ids)
             } else {
-                "👥 wait on all agents".to_string()
+                "wait on all agents".to_string()
             }
         }
         "team_shutdown_teammate" => {
@@ -813,9 +779,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .get("teammate")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            format!("👥 shutdown {}", teammate)
+            format!("shutdown {}", teammate)
         }
-        "team_shutdown_ack" => "👥 ack shutdown".to_string(),
+        "team_shutdown_ack" => "ack shutdown".to_string(),
 
         // ═══════════════════════════════════════════════════════════════════
         // 🔎 LSP / CODE INTELLIGENCE
@@ -825,9 +791,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
             let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
             if path.is_empty() {
-                format!("🔎 L{}:{}", line, column)
+                format!("L{}:{}", line, column)
             } else {
-                format!("🔎 {} L{}:{}", path, line, column)
+                format!("{} L{}:{}", path, line, column)
             }
         }
         "lsp_hover" => {
@@ -835,17 +801,17 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
             let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
             if path.is_empty() {
-                format!("🔎 L{}:{}", line, column)
+                format!("L{}:{}", line, column)
             } else {
-                format!("🔎 {} L{}:{}", path, line, column)
+                format!("{} L{}:{}", path, line, column)
             }
         }
         "lsp_symbols" | "lsp_diagnostics" => {
             let path = get_relative_path(&["path"]);
             if path.is_empty() {
-                "🔎 analyze".to_string()
+                "analyze".to_string()
             } else {
-                format!("🔎 {}", path)
+                path
             }
         }
 
@@ -856,7 +822,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let query = get_str(&["query"]).unwrap_or_default();
             let kind = get_str(&["kind"]);
             let lang = get_str(&["language"]);
-            let mut label = format!("📇 \"{}\"", trunc120(&query));
+            let mut label = format!("\"{}\"", trunc120(&query));
             if let Some(k) = kind {
                 label.push_str(&format!(" kind:{}", k));
             }
@@ -880,14 +846,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 parts.push(format!("file:{}", make_relative_path(&f, cwd)));
             }
             if parts.is_empty() {
-                "📇 all symbols".to_string()
+                "all symbols".to_string()
             } else {
-                format!("📇 {}", parts.join(" "))
+                parts.join(" ")
             }
         }
         "codeindex_references" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("📇 refs: {}", trunc120(&symbol))
+            format!("refs: {}", trunc120(&symbol))
         }
         "codeindex_status" => {
             let enabled = input
@@ -895,31 +861,31 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             let label = if enabled { "on" } else { "off" };
-            format!("📇 status: {}", label)
+            format!("status: {}", label)
         }
-        "codeindex_reindex" => "📇 reindex".to_string(),
+        "codeindex_reindex" => "reindex".to_string(),
         "codeindex_dependencies" => {
             let path = get_relative_path(&["path"]);
             let direction = input
                 .get("direction")
                 .and_then(|v| v.as_str())
                 .unwrap_or("imports");
-            format!("📇 {}: {}", direction, path)
+            format!("{}: {}", direction, path)
         }
         "codeindex_godnodes" => {
             let n = input.get("n").and_then(|v| v.as_u64()).unwrap_or(10);
-            format!("📇 god nodes (top {})", n)
+            format!("god nodes (top {})", n)
         }
         "codeindex_path" => {
             let from = get_str(&["from"]).unwrap_or_default();
             let to = get_str(&["to"]).unwrap_or_default();
-            format!("📇 path {} → {}", trunc120(&from), trunc120(&to))
+            format!("path {} → {}", trunc120(&from), trunc120(&to))
         }
         "codeindex_explain" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("📇 explain {}", trunc120(&symbol))
+            format!("explain {}", trunc120(&symbol))
         }
-        "codeindex_communities" => "📇 communities".to_string(),
+        "codeindex_communities" => "communities".to_string(),
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 SPEC MANAGEMENT
@@ -927,43 +893,38 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "spec_list" => {
             let status = input.get("status").and_then(|v| v.as_str());
             match status {
-                Some(s) => format!("📋 list ({s})"),
-                None => "📋 list all".to_string(),
+                Some(s) => format!("list ({s})"),
+                None => "list all".to_string(),
             }
         }
         "spec_read" => {
             let id = get_str(&["spec_id"]).unwrap_or_default();
-            format!("📋 read {}", trunc120(&id))
+            format!("read {}", trunc120(&id))
         }
         "spec_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
-            format!("📋 search \"{}\"", trunc120(&query))
+            format!("search \"{}\"", trunc120(&query))
         }
         "spec_task_update" => {
             let id = get_str(&["spec_id"]).unwrap_or_default();
             let task = get_str(&["task_id"]).unwrap_or_default();
             let status = get_str(&["status"]).unwrap_or_default();
-            format!("📋 {} {} → {}", id, task, status)
+            format!("{} {} → {}", id, task, status)
         }
         "spec_coverage" => {
             let id = get_str(&["spec_id"]).unwrap_or_default();
-            format!("📋 coverage {}", trunc120(&id))
+            format!("coverage {}", trunc120(&id))
         }
 
         // ═══════════════════════════════════════════════════════════════════
         // 📄 DOCUMENT (Office/PDF)        // ═══════════════════════════════════════════════════════════════════
         "office_read" | "pdf_read" | "libre_read" | "libreoffice_read" => {
-            let path = get_relative_path(&["path"]);
-            format!("📄 {}", path)
+            get_relative_path(&["path"])
         }
         "office_write" | "pdf_write" | "libre_write" | "libreoffice_write" => {
-            let path = get_relative_path(&["path"]);
-            format!("📄 {}", path)
+            get_relative_path(&["path"])
         }
-        "office_info" | "libre_info" | "libreoffice_info" => {
-            let path = get_relative_path(&["path"]);
-            format!("📄 {}", path)
-        }
+        "office_info" | "libre_info" | "libreoffice_info" => get_relative_path(&["path"]),
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
@@ -978,16 +939,16 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if all {
-                "🌿 add -A".to_string()
+                "add -A".to_string()
             } else if update {
-                "🌿 add -u".to_string()
+                "add -u".to_string()
             } else {
                 let paths = input
                     .get("paths")
                     .and_then(|v| v.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
-                format!("🌿 add {} path(s)", paths)
+                format!("add {} path(s)", paths)
             }
         }
         "git_branch" => {
@@ -996,15 +957,15 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .get("format")
                 .and_then(|v| v.as_str())
                 .unwrap_or("short");
-            format!("🌿 branch list ({})", if all { "all" } else { "local" })
+            format!("branch list ({})", if all { "all" } else { "local" })
         }
         "git_checkout" => {
             let branch = input.get("branch").and_then(|v| v.as_str());
             let paths = input.get("paths").and_then(|v| v.as_array());
             match (branch, paths) {
-                (Some(b), _) => format!("🌿 checkout {}", b),
-                (_, Some(p)) if !p.is_empty() => format!("🌿 checkout {} path(s)", p.len()),
-                _ => "🌿 checkout".to_string(),
+                (Some(b), _) => format!("checkout {}", b),
+                (_, Some(p)) if !p.is_empty() => format!("checkout {} path(s)", p.len()),
+                _ => "checkout".to_string(),
             }
         }
         "git_cherry_pick" => {
@@ -1013,11 +974,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            format!("🌿 cherry-pick {} commit(s)", commits)
+            format!("cherry-pick {} commit(s)", commits)
         }
         "git_clone" => {
             let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("🌿 clone {}", trunc120(url))
+            format!("clone {}", trunc120(url))
         }
         "git_commit" => {
             let msg = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
@@ -1026,9 +987,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if amend {
-                "🌿 commit --amend".to_string()
+                "commit --amend".to_string()
             } else {
-                format!("🌿 commit: {}", trunc120(msg))
+                format!("commit: {}", trunc120(msg))
             }
         }
         "git_diff" => {
@@ -1038,9 +999,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("working");
             let stat = input.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
             if stat {
-                format!("🌿 diff --stat {}", target)
+                format!("diff --stat {}", target)
             } else {
-                format!("🌿 diff {}", target)
+                format!("diff {}", target)
             }
         }
         "git_fetch" => {
@@ -1050,22 +1011,22 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("origin");
             let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             if all {
-                "🌿 fetch --all".to_string()
+                "fetch --all".to_string()
             } else {
-                format!("🌿 fetch {}", remote)
+                format!("fetch {}", remote)
             }
         }
         "git_log" => {
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
             let branch = input.get("branch").and_then(|v| v.as_str());
             match branch {
-                Some(b) => format!("🌿 log {} ({})", b, limit),
-                None => format!("🌿 log ({})", limit),
+                Some(b) => format!("log {} ({})", b, limit),
+                None => format!("log ({})", limit),
             }
         }
         "git_merge" => {
             let branch = input.get("branch").and_then(|v| v.as_str()).unwrap_or("?");
-            format!("🌿 merge {}", branch)
+            format!("merge {}", branch)
         }
         "git_pull" => {
             let remote = input
@@ -1077,9 +1038,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if rebase {
-                format!("🌿 pull --rebase {}", remote)
+                format!("pull --rebase {}", remote)
             } else {
-                format!("🌿 pull {}", remote)
+                format!("pull {}", remote)
             }
         }
         "git_push" => {
@@ -1094,11 +1055,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(false);
             let tags = input.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
             match (tags, force, branch) {
-                (true, _, _) => format!("🌿 push --tags {}", remote),
-                (_, true, Some(b)) => format!("🌿 push --force-with-lease {}/{}", remote, b),
-                (_, true, None) => format!("🌿 push --force-with-lease {}", remote),
-                (_, _, Some(b)) => format!("🌿 push {}/{}", remote, b),
-                (_, _, None) => format!("🌿 push {}", remote),
+                (true, _, _) => format!("push --tags {}", remote),
+                (_, true, Some(b)) => format!("push --force-with-lease {}/{}", remote, b),
+                (_, true, None) => format!("push --force-with-lease {}", remote),
+                (_, _, Some(b)) => format!("push {}/{}", remote, b),
+                (_, _, None) => format!("push {}", remote),
             }
         }
         "git_remote" => {
@@ -1108,12 +1069,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("list");
             let name = input.get("name").and_then(|v| v.as_str());
             match (action, name) {
-                ("list", _) => "🌿 remote -v".to_string(),
-                ("add", Some(n)) => format!("🌿 remote add {}", n),
-                ("remove", Some(n)) => format!("🌿 remote remove {}", n),
-                ("set-url", Some(n)) => format!("🌿 remote set-url {}", n),
-                (a, Some(n)) => format!("🌿 remote {} {}", a, n),
-                (a, None) => format!("🌿 remote {}", a),
+                ("list", _) => "remote -v".to_string(),
+                ("add", Some(n)) => format!("remote add {}", n),
+                ("remove", Some(n)) => format!("remote remove {}", n),
+                ("set-url", Some(n)) => format!("remote set-url {}", n),
+                (a, Some(n)) => format!("remote {} {}", a, n),
+                (a, None) => format!("remote {}", a),
             }
         }
         "git_reset" => {
@@ -1124,21 +1085,21 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let target = input.get("target").and_then(|v| v.as_str());
             let paths = input.get("paths").and_then(|v| v.as_array());
             match (target, paths) {
-                (Some(t), _) => format!("🌿 reset --{} {}", mode, t),
-                (_, Some(p)) if !p.is_empty() => format!("🌿 reset {} path(s)", p.len()),
-                _ => format!("🌿 reset --{}", mode),
+                (Some(t), _) => format!("reset --{} {}", mode, t),
+                (_, Some(p)) if !p.is_empty() => format!("reset {} path(s)", p.len()),
+                _ => format!("reset --{}", mode),
             }
         }
         "git_show" => {
             let ref_name = input.get("ref").and_then(|v| v.as_str()).unwrap_or("HEAD");
-            format!("🌿 show {}", ref_name)
+            format!("show {}", ref_name)
         }
         "git_stash" => {
             let action = input
                 .get("action")
                 .and_then(|v| v.as_str())
                 .unwrap_or("push");
-            format!("🌿 stash {}", action)
+            format!("stash {}", action)
         }
         "git_status" => {
             let short = input
@@ -1146,9 +1107,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if short {
-                "🌿 status --short".to_string()
+                "status --short".to_string()
             } else {
-                "🌿 status".to_string()
+                "status".to_string()
             }
         }
         "git_tag" => {
@@ -1158,11 +1119,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("list");
             let name = input.get("name").and_then(|v| v.as_str());
             match (action, name) {
-                ("list", _) => "🌿 tag -l".to_string(),
-                ("create", Some(n)) => format!("🌿 tag {}", n),
-                ("delete", Some(n)) => format!("🌿 tag -d {}", n),
-                (a, Some(n)) => format!("🌿 tag {} {}", a, n),
-                (a, None) => format!("🌿 tag {}", a),
+                ("list", _) => "tag -l".to_string(),
+                ("create", Some(n)) => format!("tag {}", n),
+                ("delete", Some(n)) => format!("tag -d {}", n),
+                (a, Some(n)) => format!("tag {} {}", a, n),
+                (a, None) => format!("tag {}", a),
             }
         }
 
@@ -1174,52 +1135,52 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("opened");
-            format!("🦊 issues ({})", state)
+            format!("issues ({})", state)
         }
         "gitlab_get_issue" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 issue #{}", iid)
+            format!("issue #{}", iid)
         }
         "gitlab_create_issue" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("🦊 new issue: {}", trunc120(title))
+            format!("new issue: {}", trunc120(title))
         }
         "gitlab_comment_issue" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 comment on #{}", iid)
+            format!("comment on #{}", iid)
         }
         "gitlab_close_issue" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 close #{}", iid)
+            format!("close #{}", iid)
         }
         "gitlab_list_mrs" => {
             let state = input
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("opened");
-            format!("🦊 MRs ({})", state)
+            format!("MRs ({})", state)
         }
         "gitlab_get_mr" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 MR #{}", iid)
+            format!("MR #{}", iid)
         }
         "gitlab_create_mr" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("🦊 new MR: {}", trunc120(title))
+            format!("new MR: {}", trunc120(title))
         }
         "gitlab_merge_mr" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 merge !{}", iid)
+            format!("merge !{}", iid)
         }
         "gitlab_approve_mr" => {
             let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 approve !{}", iid)
+            format!("approve !{}", iid)
         }
         "gitlab_list_pipelines" => {
             let status = input.get("status").and_then(|v| v.as_str());
             match status {
-                Some(s) => format!("🦊 pipelines ({})", s),
-                None => "🦊 pipelines".to_string(),
+                Some(s) => format!("pipelines ({})", s),
+                None => "pipelines".to_string(),
             }
         }
         "gitlab_get_pipeline" => {
@@ -1227,44 +1188,44 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .get("pipeline_id")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            format!("🦊 pipeline #{}", id)
+            format!("pipeline #{}", id)
         }
         "gitlab_list_jobs" => {
             let pipeline_id = input
                 .get("pipeline_id")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            format!("🦊 jobs for pipeline #{}", pipeline_id)
+            format!("jobs for pipeline #{}", pipeline_id)
         }
         "gitlab_get_job" => {
             let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 job #{}", job_id)
+            format!("job #{}", job_id)
         }
         "gitlab_get_job_log" => {
             let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 log for job #{}", job_id)
+            format!("log for job #{}", job_id)
         }
         "gitlab_retry_job" => {
             let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 retry job #{}", job_id)
+            format!("retry job #{}", job_id)
         }
         "gitlab_cancel_job" => {
             let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("🦊 cancel job #{}", job_id)
+            format!("cancel job #{}", job_id)
         }
         "gitlab_retry_pipeline" => {
             let id = input
                 .get("pipeline_id")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            format!("🦊 retry pipeline #{}", id)
+            format!("retry pipeline #{}", id)
         }
         "gitlab_cancel_pipeline" => {
             let id = input
                 .get("pipeline_id")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            format!("🦊 cancel pipeline #{}", id)
+            format!("cancel pipeline #{}", id)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1275,72 +1236,72 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("open");
-            format!("📋 issues ({})", state)
+            format!("issues ({})", state)
         }
         "github_get_issue" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 issue #{}", number)
+            format!("issue #{}", number)
         }
         "github_create_issue" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📋 new issue: {}", trunc120(title))
+            format!("new issue: {}", trunc120(title))
         }
         "github_comment_issue" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 comment on #{}", number)
+            format!("comment on #{}", number)
         }
         "github_close_issue" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 close #{}", number)
+            format!("close #{}", number)
         }
         "github_list_prs" => {
             let state = input
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("open");
-            format!("📋 PRs ({})", state)
+            format!("PRs ({})", state)
         }
         "github_get_pr" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 PR #{}", number)
+            format!("PR #{}", number)
         }
         "github_create_pr" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📋 new PR: {}", trunc120(title))
+            format!("new PR: {}", trunc120(title))
         }
         "github_merge_pr" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 merge #{}", number)
+            format!("merge #{}", number)
         }
         "github_review_pr" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("📋 review #{}", number)
+            format!("review #{}", number)
         }
         "github_get_actions" => {
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(1);
-            format!("📋 actions ({})", limit)
+            format!("actions ({})", limit)
         }
         // ═══════════════════════════════════════════════════════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
-        "format" => "✨ format".to_string(),
-        "metadata" => "✨ metadata".to_string(),
-        "truncate" => "✨ truncate".to_string(),
-        "read_line_range" => "✨ line range".to_string(),
+        "format" => "format".to_string(),
+        "metadata" => "metadata".to_string(),
+        "truncate" => "truncate".to_string(),
+        "read_line_range" => "line range".to_string(),
         "memory_store" => {
             let category = get_str(&["category"]).unwrap_or_default();
-            format!("✨ store {}", trunc120(&category))
+            format!("store {}", trunc120(&category))
         }
         "memory_recall" => {
             let query = get_str(&["query"]).unwrap_or_default();
-            format!("✨ recall \"{}\"", trunc120(&query))
+            format!("recall \"{}\"", trunc120(&query))
         }
         "memory_forget" => {
             let id = get_str(&["id"]).unwrap_or_default();
             if id.is_empty() {
-                "✨ forget".to_string()
+                "forget".to_string()
             } else {
-                format!("✨ forget {}", trunc120(&id))
+                format!("forget {}", trunc120(&id))
             }
         }
 
@@ -1350,20 +1311,20 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "cron_add" => {
             let id = get_str(&["id"]).unwrap_or_default();
             let schedule = get_str(&["schedule"]).unwrap_or_default();
-            format!("⏰ add `{}` {}", trunc120(&id), trunc120(&schedule))
+            format!("add `{}` {}", trunc120(&id), trunc120(&schedule))
         }
         "cron_remove" => {
             let id = get_str(&["id"]).unwrap_or_default();
-            format!("⏰ remove `{}`", trunc120(&id))
+            format!("remove `{}`", trunc120(&id))
         }
-        "cron_list" => "⏰ list events".to_string(),
+        "cron_list" => "list events".to_string(),
         "cron_enable" => {
             let id = get_str(&["id"]).unwrap_or_default();
-            format!("⏰ enable `{}`", trunc120(&id))
+            format!("enable `{}`", trunc120(&id))
         }
         "cron_disable" => {
             let id = get_str(&["id"]).unwrap_or_default();
-            format!("⏰ disable `{}`", trunc120(&id))
+            format!("disable `{}`", trunc120(&id))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1371,42 +1332,42 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "stock_quote" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("💰 {}", trunc120(&symbol))
+            trunc120(&symbol)
         }
         "stock_history" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
             let period = get_str(&["period"]).unwrap_or_default();
             if period.is_empty() {
-                format!("💰 {} history", trunc120(&symbol))
+                format!("{} history", trunc120(&symbol))
             } else {
-                format!("💰 {} ({})", trunc120(&symbol), period)
+                format!("{} ({})", trunc120(&symbol), period)
             }
         }
         "stock_fundamentals" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("💰 {} fundamentals", trunc120(&symbol))
+            format!("{} fundamentals", trunc120(&symbol))
         }
         "stock_options" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("💰 {} options", trunc120(&symbol))
+            format!("{} options", trunc120(&symbol))
         }
         "stock_recommendations" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("💰 {} recommendations", trunc120(&symbol))
+            format!("{} recommendations", trunc120(&symbol))
         }
         "stock_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
-            format!("💰 search \"{}\"", trunc120(&query))
+            format!("search \"{}\"", trunc120(&query))
         }
         "currency_rate" => {
             let base = get_str(&["base"]).unwrap_or_default();
             let quote = get_str(&["quote"]).unwrap_or_default();
-            format!("💰 {} → {}", base, quote)
+            format!("{} → {}", base, quote)
         }
         "currency_history" => {
             let base = get_str(&["base"]).unwrap_or_default();
             let quote = get_str(&["quote"]).unwrap_or_default();
-            format!("💰 {} → {} history", base, quote)
+            format!("{} → {} history", base, quote)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1414,11 +1375,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "model_info" => {
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
-            format!("🧠 model info ({})", format)
+            format!("model info ({})", format)
         }
         "ragent_info" => {
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
-            format!("ℹ️ ragent build info ({})", format)
+            format!("ragent build info ({})", format)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1432,9 +1393,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(1);
             let title = get_str(&["title"]).unwrap_or_default();
             if title.is_empty() {
-                format!("📊 {} ({} series)", tool, series)
+                format!("{} ({} series)", tool, series)
             } else {
-                format!("📊 {}: {} ({} series)", tool, trunc120(&title), series)
+                format!("{}: {} ({} series)", tool, trunc120(&title), series)
             }
         }
         "plot_bar" => {
@@ -1445,9 +1406,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(0);
             let title = get_str(&["title"]).unwrap_or_default();
             if title.is_empty() {
-                format!("📊 bar ({} categories)", cats)
+                format!("bar ({} categories)", cats)
             } else {
-                format!("📊 bar: {} ({} categories)", trunc120(&title), cats)
+                format!("bar: {} ({} categories)", trunc120(&title), cats)
             }
         }
         "plot_histogram" => {
@@ -1459,10 +1420,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let bins = input.get("bins").and_then(|v| v.as_u64()).unwrap_or(20);
             let title = get_str(&["title"]).unwrap_or_default();
             if title.is_empty() {
-                format!("📊 histogram ({} samples, {} bins)", samples, bins)
+                format!("histogram ({} samples, {} bins)", samples, bins)
             } else {
                 format!(
-                    "📊 histogram: {} ({} samples, {} bins)",
+                    "histogram: {} ({} samples, {} bins)",
                     trunc120(&title),
                     samples,
                     bins
@@ -1477,9 +1438,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(0);
             let title = get_str(&["title"]).unwrap_or_default();
             if title.is_empty() {
-                format!("📊 pie ({} slices)", slices)
+                format!("pie ({} slices)", slices)
             } else {
-                format!("📊 pie: {} ({} slices)", trunc120(&title), slices)
+                format!("pie: {} ({} slices)", trunc120(&title), slices)
             }
         }
         "plot_heatmap" => {
@@ -1491,9 +1452,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(0);
             let title = get_str(&["title"]).unwrap_or_default();
             if title.is_empty() {
-                format!("📊 heatmap ({} rows)", rows)
+                format!("heatmap ({} rows)", rows)
             } else {
-                format!("📊 heatmap: {} ({} rows)", trunc120(&title), rows)
+                format!("heatmap: {} ({} rows)", trunc120(&title), rows)
             }
         }
 
@@ -1507,7 +1468,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             // strips '\n' graphemes inside a Span).  The full summary is
             // rendered line-by-line in the result section below.
             let first_line = summary.lines().next().unwrap_or_default();
-            format!("🏁 {}", trunc120(first_line))
+            trunc120(first_line).to_string()
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1515,10 +1476,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         _ => {
             if tool.starts_with("team_") {
-                format!("👥 {}", summarize_tool_args(input, 40))
+                summarize_tool_args(input, 40)
             } else if tool.starts_with("mcp_") {
                 let server_tool = tool.strip_prefix("mcp_").unwrap_or(tool);
-                format!("🔌 {}", server_tool)
+                server_tool.to_string()
             } else {
                 summarize_tool_args(input, 40)
             }
@@ -1842,7 +1803,7 @@ pub fn tool_result_summary(
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
             Some(format!(
-                "📄 {} written to {}",
+                "{} written to {}",
                 pluralize(line_count, "line", "lines"),
                 path
             ))
@@ -1853,7 +1814,7 @@ pub fn tool_result_summary(
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
             Some(format!(
-                "📄 {} created in {}",
+                "{} created in {}",
                 pluralize(line_count, "line", "lines"),
                 path
             ))
@@ -1872,7 +1833,7 @@ pub fn tool_result_summary(
             let old_lines = out.get("old_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let new_lines = out.get("new_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
-                "📄 Edited {}: {} → {} lines",
+                "Edited {}: {} → {} lines",
                 path, old_lines, new_lines
             ))
         }
@@ -2075,7 +2036,7 @@ pub fn tool_result_summary(
         "get_env" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             if count > 0 {
-                Some(format!("{}", pluralize(count, "var", "vars")))
+                Some(pluralize(count, "var", "vars"))
             } else {
                 Some("not found".to_string())
             }
@@ -2090,7 +2051,7 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_str())
                 .or_else(|| out.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            Some(format!("{}", truncate_str(response, 100)))
+            Some(truncate_str(response, 100))
         }
         // ═══════════════════════════════════════════════════════════════════
         // 💭 REASONING
@@ -2114,7 +2075,7 @@ pub fn tool_result_summary(
             if summary.is_empty() {
                 Some("Task complete".to_string())
             } else {
-                Some(format!("✅ {}", summary))
+                Some(summary.to_string())
             }
         }
         // ═══════════════════════════════════════════════════════════════════
@@ -2182,7 +2143,7 @@ pub fn tool_result_summary(
         }
         "task_list" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{}", pluralize(count, "task", "tasks")))
+            Some(pluralize(count, "task", "tasks"))
         } // ═══════════════════════════════════════════════════════════════════
         // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
@@ -2223,7 +2184,7 @@ pub fn tool_result_summary(
         }
         "list_agents" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{}", pluralize(count, "task", "tasks")))
+            Some(pluralize(count, "task", "tasks"))
         }
         "wait_agents" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -2528,22 +2489,22 @@ pub fn tool_result_summary(
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             let update = out.get("update").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if all {
-                "🌿 add -A".to_string()
+                "add -A".to_string()
             } else if update {
-                "🌿 add -u".to_string()
+                "add -u".to_string()
             } else {
                 let paths = out
                     .get("paths")
                     .and_then(|v| v.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
-                format!("🌿 add {} path(s)", paths)
+                format!("add {} path(s)", paths)
             })
         }
         "git_branch" => {
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(true);
             Some(format!(
-                "🌿 branch list ({})",
+                "branch list ({})",
                 if all { "all" } else { "local" }
             ))
         }
@@ -2551,9 +2512,9 @@ pub fn tool_result_summary(
             let branch = out.get("branch").and_then(|v| v.as_str());
             let paths = out.get("paths").and_then(|v| v.as_array());
             Some(match (branch, paths) {
-                (Some(b), _) => format!("🌿 checkout {}", b),
-                (_, Some(p)) if !p.is_empty() => format!("🌿 checkout {} path(s)", p.len()),
-                _ => "🌿 checkout".to_string(),
+                (Some(b), _) => format!("checkout {}", b),
+                (_, Some(p)) if !p.is_empty() => format!("checkout {} path(s)", p.len()),
+                _ => "checkout".to_string(),
             })
         }
         "git_cherry_pick" => {
@@ -2562,19 +2523,19 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            Some(format!("🌿 cherry-pick {} commit(s)", commits))
+            Some(format!("cherry-pick {} commit(s)", commits))
         }
         "git_clone" => {
             let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-            Some(format!("🌿 clone {}", trunc120(url)))
+            Some(format!("clone {}", trunc120(url)))
         }
         "git_commit" => {
             let msg = out.get("message").and_then(|v| v.as_str()).unwrap_or("");
             let amend = out.get("amend").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if amend {
-                "🌿 commit --amend".to_string()
+                "commit --amend".to_string()
             } else {
-                format!("🌿 commit: {}", trunc120(msg))
+                format!("commit: {}", trunc120(msg))
             })
         }
         "git_diff" => {
@@ -2584,9 +2545,9 @@ pub fn tool_result_summary(
                 .unwrap_or("working");
             let stat = out.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if stat {
-                format!("🌿 diff --stat {}", target)
+                format!("diff --stat {}", target)
             } else {
-                format!("🌿 diff {}", target)
+                format!("diff {}", target)
             })
         }
         "git_fetch" => {
@@ -2596,22 +2557,22 @@ pub fn tool_result_summary(
                 .unwrap_or("origin");
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if all {
-                "🌿 fetch --all".to_string()
+                "fetch --all".to_string()
             } else {
-                format!("🌿 fetch {}", remote)
+                format!("fetch {}", remote)
             })
         }
         "git_log" => {
             let limit = out.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
             let branch = out.get("branch").and_then(|v| v.as_str());
             Some(match branch {
-                Some(b) => format!("🌿 log {} ({})", b, limit),
-                None => format!("🌿 log ({})", limit),
+                Some(b) => format!("log {} ({})", b, limit),
+                None => format!("log ({})", limit),
             })
         }
         "git_merge" => {
             let branch = out.get("branch").and_then(|v| v.as_str()).unwrap_or("?");
-            Some(format!("🌿 merge {}", branch))
+            Some(format!("merge {}", branch))
         }
         "git_pull" => {
             let remote = out
@@ -2620,9 +2581,9 @@ pub fn tool_result_summary(
                 .unwrap_or("origin");
             let rebase = out.get("rebase").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if rebase {
-                format!("🌿 pull --rebase {}", remote)
+                format!("pull --rebase {}", remote)
             } else {
-                format!("🌿 pull {}", remote)
+                format!("pull {}", remote)
             })
         }
         "git_push" => {
@@ -2634,23 +2595,23 @@ pub fn tool_result_summary(
             let force = out.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
             let tags = out.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(match (tags, force, branch) {
-                (true, _, _) => format!("🌿 push --tags {}", remote),
-                (_, true, Some(b)) => format!("🌿 push --force-with-lease {}/{}", remote, b),
-                (_, true, None) => format!("🌿 push --force-with-lease {}", remote),
-                (_, _, Some(b)) => format!("🌿 push {}/{}", remote, b),
-                (_, _, None) => format!("🌿 push {}", remote),
+                (true, _, _) => format!("push --tags {}", remote),
+                (_, true, Some(b)) => format!("push --force-with-lease {}/{}", remote, b),
+                (_, true, None) => format!("push --force-with-lease {}", remote),
+                (_, _, Some(b)) => format!("push {}/{}", remote, b),
+                (_, _, None) => format!("push {}", remote),
             })
         }
         "git_remote" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("list");
             let name = out.get("name").and_then(|v| v.as_str());
             Some(match (action, name) {
-                ("list", _) => "🌿 remote -v".to_string(),
-                ("add", Some(n)) => format!("🌿 remote add {}", n),
-                ("remove", Some(n)) => format!("🌿 remote remove {}", n),
-                ("set-url", Some(n)) => format!("🌿 remote set-url {}", n),
-                (a, Some(n)) => format!("🌿 remote {} {}", a, n),
-                (a, None) => format!("🌿 remote {}", a),
+                ("list", _) => "remote -v".to_string(),
+                ("add", Some(n)) => format!("remote add {}", n),
+                ("remove", Some(n)) => format!("remote remove {}", n),
+                ("set-url", Some(n)) => format!("remote set-url {}", n),
+                (a, Some(n)) => format!("remote {} {}", a, n),
+                (a, None) => format!("remote {}", a),
             })
         }
         "git_reset" => {
@@ -2658,36 +2619,36 @@ pub fn tool_result_summary(
             let target = out.get("target").and_then(|v| v.as_str());
             let paths = out.get("paths").and_then(|v| v.as_array());
             Some(match (target, paths) {
-                (Some(t), _) => format!("🌿 reset --{} {}", mode, t),
-                (_, Some(p)) if !p.is_empty() => format!("🌿 reset {} path(s)", p.len()),
-                _ => format!("🌿 reset --{}", mode),
+                (Some(t), _) => format!("reset --{} {}", mode, t),
+                (_, Some(p)) if !p.is_empty() => format!("reset {} path(s)", p.len()),
+                _ => format!("reset --{}", mode),
             })
         }
         "git_show" => {
             let ref_name = out.get("ref").and_then(|v| v.as_str()).unwrap_or("HEAD");
-            Some(format!("🌿 show {}", ref_name))
+            Some(format!("show {}", ref_name))
         }
         "git_stash" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("push");
-            Some(format!("🌿 stash {}", action))
+            Some(format!("stash {}", action))
         }
         "git_status" => {
             let short = out.get("short").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if short {
-                "🌿 status --short".to_string()
+                "status --short".to_string()
             } else {
-                "🌿 status".to_string()
+                "status".to_string()
             })
         }
         "git_tag" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("list");
             let name = out.get("name").and_then(|v| v.as_str());
             Some(match (action, name) {
-                ("list", _) => "🌿 tag -l".to_string(),
-                ("create", Some(n)) => format!("🌿 tag {}", n),
-                ("delete", Some(n)) => format!("🌿 tag -d {}", n),
-                (a, Some(n)) => format!("🌿 tag {} {}", a, n),
-                (a, None) => format!("🌿 tag {}", a),
+                ("list", _) => "tag -l".to_string(),
+                ("create", Some(n)) => format!("tag {}", n),
+                ("delete", Some(n)) => format!("tag -d {}", n),
+                (a, Some(n)) => format!("tag {} {}", a, n),
+                (a, None) => format!("tag {}", a),
             })
         }
 
@@ -2699,85 +2660,85 @@ pub fn tool_result_summary(
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("opened");
-            Some(format!("🦊 issues ({})", state))
+            Some(format!("issues ({})", state))
         }
         "gitlab_get_issue" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 issue #{}", iid))
+            Some(format!("issue #{}", iid))
         }
         "gitlab_create_issue" => {
             let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            Some(format!("🦊 new issue: {}", trunc120(title)))
+            Some(format!("new issue: {}", trunc120(title)))
         }
         "gitlab_comment_issue" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 comment on #{}", iid))
+            Some(format!("comment on #{}", iid))
         }
         "gitlab_close_issue" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 close #{}", iid))
+            Some(format!("close #{}", iid))
         }
         "gitlab_list_mrs" => {
             let state = out
                 .get("state")
                 .and_then(|v| v.as_str())
                 .unwrap_or("opened");
-            Some(format!("🦊 MRs ({})", state))
+            Some(format!("MRs ({})", state))
         }
         "gitlab_get_mr" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 MR #{}", iid))
+            Some(format!("MR #{}", iid))
         }
         "gitlab_create_mr" => {
             let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            Some(format!("🦊 new MR: {}", trunc120(title)))
+            Some(format!("new MR: {}", trunc120(title)))
         }
         "gitlab_merge_mr" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 merge !{}", iid))
+            Some(format!("merge !{}", iid))
         }
         "gitlab_approve_mr" => {
             let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 approve !{}", iid))
+            Some(format!("approve !{}", iid))
         }
         "gitlab_list_pipelines" => {
             let status = out.get("status").and_then(|v| v.as_str());
             Some(match status {
-                Some(s) => format!("🦊 pipelines ({})", s),
-                None => "🦊 pipelines".to_string(),
+                Some(s) => format!("pipelines ({})", s),
+                None => "pipelines".to_string(),
             })
         }
         "gitlab_get_pipeline" => {
             let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 pipeline #{}", id))
+            Some(format!("pipeline #{}", id))
         }
         "gitlab_list_jobs" => {
             let pipeline_id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 jobs for pipeline #{}", pipeline_id))
+            Some(format!("jobs for pipeline #{}", pipeline_id))
         }
         "gitlab_get_job" => {
             let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 job #{}", job_id))
+            Some(format!("job #{}", job_id))
         }
         "gitlab_get_job_log" => {
             let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 log for job #{}", job_id))
+            Some(format!("log for job #{}", job_id))
         }
         "gitlab_retry_job" => {
             let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 retry job #{}", job_id))
+            Some(format!("retry job #{}", job_id))
         }
         "gitlab_cancel_job" => {
             let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 cancel job #{}", job_id))
+            Some(format!("cancel job #{}", job_id))
         }
         "gitlab_retry_pipeline" => {
             let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 retry pipeline #{}", id))
+            Some(format!("retry pipeline #{}", id))
         }
         "gitlab_cancel_pipeline" => {
             let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("🦊 cancel pipeline #{}", id))
+            Some(format!("cancel pipeline #{}", id))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -2785,49 +2746,49 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         "github_list_issues" => {
             let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-            Some(format!("📋 issues listed ({})", state))
+            Some(format!("issues listed ({})", state))
         }
         "github_get_issue" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 issue #{} retrieved", number))
+            Some(format!("issue #{} retrieved", number))
         }
         "github_create_issue" => {
             let number = out.get("number").and_then(|v| v.as_u64());
             match number {
-                Some(n) => Some(format!("📋 issue #{} created", n)),
-                None => Some("📋 issue created".to_string()),
+                Some(n) => Some(format!("issue #{} created", n)),
+                None => Some("issue created".to_string()),
             }
         }
         "github_comment_issue" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 commented on #{}", number))
+            Some(format!("commented on #{}", number))
         }
         "github_close_issue" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 issue #{} closed", number))
+            Some(format!("issue #{} closed", number))
         }
         "github_list_prs" => {
             let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-            Some(format!("📋 PRs listed ({})", state))
+            Some(format!("PRs listed ({})", state))
         }
         "github_get_pr" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 PR #{} retrieved", number))
+            Some(format!("PR #{} retrieved", number))
         }
         "github_create_pr" => {
             let number = out.get("number").and_then(|v| v.as_u64());
             match number {
-                Some(n) => Some(format!("📋 PR #{} created", n)),
-                None => Some("📋 PR created".to_string()),
+                Some(n) => Some(format!("PR #{} created", n)),
+                None => Some("PR created".to_string()),
             }
         }
         "github_merge_pr" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 PR #{} merged", number))
+            Some(format!("PR #{} merged", number))
         }
         "github_review_pr" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📋 reviewed #{}", number))
+            Some(format!("reviewed #{}", number))
         }
         "github_get_actions" => {
             let inspected = out
@@ -2835,7 +2796,7 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
             let failed = out.get("failed_runs").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let mut s = format!("📋 {} inspected", pluralize(inspected, "run", "runs"));
+            let mut s = format!("{} inspected", pluralize(inspected, "run", "runs"));
             if failed > 0 {
                 s.push_str(&format!(", {} failed", pluralize(failed, "run", "runs")));
             }
@@ -2896,7 +2857,7 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         "cron_add" => {
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
-            Some(format!("⏰ `{}` scheduled", trunc120(id)))
+            Some(format!("`{}` scheduled", trunc120(id)))
         }
         "cron_remove" => {
             let removed = out
@@ -2905,14 +2866,14 @@ pub fn tool_result_summary(
                 .unwrap_or(false);
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             Some(if removed {
-                format!("⏰ `{}` removed", trunc120(id))
+                format!("`{}` removed", trunc120(id))
             } else {
-                format!("⏰ `{}` not found", trunc120(id))
+                format!("`{}` not found", trunc120(id))
             })
         }
         "cron_list" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("⏰ {} listed", pluralize(count, "event", "events")))
+            Some(format!("{} listed", pluralize(count, "event", "events")))
         }
         "cron_enable" | "cron_disable" => {
             let enabled = out
@@ -2921,9 +2882,9 @@ pub fn tool_result_summary(
                 .unwrap_or(false);
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             Some(if enabled {
-                format!("⏰ `{}` enabled", trunc120(id))
+                format!("`{}` enabled", trunc120(id))
             } else {
-                format!("⏰ `{}` disabled", trunc120(id))
+                format!("`{}` disabled", trunc120(id))
             })
         }
 
@@ -2975,11 +2936,11 @@ pub fn tool_result_summary(
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
             let cached = out.get("cached").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if cached {
-                format!("🌐 cached {}", trunc120(url))
+                format!("cached {}", trunc120(url))
             } else if status > 0 {
-                format!("🌐 {} ({})", trunc120(url), status)
+                format!("{} ({})", trunc120(url), status)
             } else {
-                format!("🌐 {}", trunc120(url))
+                trunc120(url)
             })
         }
         "mf_crawl" => {
@@ -2987,17 +2948,14 @@ pub fn tool_result_summary(
                 .get("pages_fetched")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
-            Some(format!("🌐 {} crawled", pluralize(pages, "page", "pages")))
+            Some(format!("{} crawled", pluralize(pages, "page", "pages")))
         }
         "mf_cache_clear" => {
             let purged = out.get("purged").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!(
-                "🌐 {} purged",
-                pluralize(purged, "entry", "entries")
-            ))
+            Some(format!("{} purged", pluralize(purged, "entry", "entries")))
         }
-        "mf_screenshot" => Some("🌐 screenshot captured".to_string()),
-        "mf_version" => Some("🌐 version info".to_string()),
+        "mf_screenshot" => Some("screenshot captured".to_string()),
+        "mf_version" => Some("version info".to_string()),
 
         // ═══════════════════════════════════════════════════════════════════
         // 🔧 APPLY PATCH / SKILLS / SEARCH
@@ -3007,7 +2965,7 @@ pub fn tool_result_summary(
             let added = out.get("added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let removed = out.get("removed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
-                "📄 {} applied (+{} -{})",
+                "{} applied (+{} -{})",
                 pluralize(ops, "op", "ops"),
                 added,
                 removed
@@ -3040,9 +2998,9 @@ pub fn tool_result_summary(
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             let task_id = out.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
             if task_id.is_empty() {
-                Some(format!("🗂️ {}", action))
+                Some(action.to_string())
             } else {
-                Some(format!("🗂️ {} {}", action, task_id))
+                Some(format!("{} {}", action, task_id))
             }
         }
 
@@ -3056,18 +3014,18 @@ pub fn tool_result_summary(
                     let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
                     let loaded = out.get("loaded").and_then(|v| v.as_bool()).unwrap_or(false);
                     Some(format!(
-                        "🖥️ opened {} ({})",
+                        "opened {} ({})",
                         trunc120(url),
                         if loaded { "loaded" } else { "not loaded" }
                     ))
                 }
                 "snapshot" => {
                     let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("🖥️ snapshot: {}", trunc120(title)))
+                    Some(format!("snapshot: {}", trunc120(title)))
                 }
                 "screenshot" => {
                     let len = out.get("data_length").and_then(|v| v.as_u64()).unwrap_or(0);
-                    Some(format!("🖥️ screenshot ({} bytes)", len))
+                    Some(format!("screenshot ({} bytes)", len))
                 }
                 "status" => {
                     let available = out
@@ -3079,7 +3037,7 @@ pub fn tool_result_summary(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
                     Some(format!(
-                        "🖥️ status: {} ({} pages)",
+                        "status: {} ({} pages)",
                         if available {
                             "available"
                         } else {
@@ -3090,9 +3048,9 @@ pub fn tool_result_summary(
                 }
                 "setup" => {
                     let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("done");
-                    Some(format!("🖥️ setup: {}", status))
+                    Some(format!("setup: {}", status))
                 }
-                other => Some(format!("🖥️ {}", other)),
+                other => Some(other.to_string()),
             }
         }
 
@@ -3104,18 +3062,15 @@ pub fn tool_result_summary(
             match action {
                 "search" => {
                     let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    Some(format!(
-                        "📧 {} found",
-                        pluralize(count, "message", "messages")
-                    ))
+                    Some(format!("{} found", pluralize(count, "message", "messages")))
                 }
                 "send" => {
                     let id = out.get("message_id").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("📧 sent ({})", trunc120(id)))
+                    Some(format!("sent ({})", trunc120(id)))
                 }
                 "draft" => {
                     let id = out.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("📧 drafted ({})", trunc120(id)))
+                    Some(format!("drafted ({})", trunc120(id)))
                 }
                 "status" => {
                     let auth = out
@@ -3123,7 +3078,7 @@ pub fn tool_result_summary(
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
                     Some(format!(
-                        "📧 status: {}",
+                        "status: {}",
                         if auth {
                             "authenticated"
                         } else {
@@ -3131,7 +3086,7 @@ pub fn tool_result_summary(
                         }
                     ))
                 }
-                other => Some(format!("📧 {}", other)),
+                other => Some(other.to_string()),
             }
         }
 
@@ -3141,7 +3096,7 @@ pub fn tool_result_summary(
         "send_channel_message" => {
             let delivered = out.get("delivered").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
-                "📨 {} delivered",
+                "{} delivered",
                 pluralize(delivered, "message", "messages")
             ))
         }
@@ -3156,7 +3111,7 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             Some(format!(
-                "📂 {} ({})",
+                "{} ({})",
                 trunc120(target),
                 if success { "opened" } else { "failed" }
             ))
@@ -3174,7 +3129,7 @@ pub fn tool_result_summary(
                 .get("model_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            Some(format!("🧠 {} / {}", trunc120(provider), trunc120(model)))
+            Some(format!("{} / {}", trunc120(provider), trunc120(model)))
         }
         "ragent_info" => {
             let version = out.get("version").and_then(|v| v.as_str()).unwrap_or("?");
@@ -3182,11 +3137,7 @@ pub fn tool_result_summary(
                 .get("build_time")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            Some(format!(
-                "ℹ️ v{} built {}",
-                trunc120(version),
-                trunc120(built)
-            ))
+            Some(format!("v{} built {}", trunc120(version), trunc120(built)))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -3209,7 +3160,7 @@ pub fn tool_result_summary(
         "codeindex_explain" => {
             let name = out.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let degree = out.get("degree").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📇 {} (degree {})", trunc120(name), degree))
+            Some(format!("{} (degree {})", trunc120(name), degree))
         }
         "codeindex_communities" => {
             let total = out
@@ -3230,7 +3181,7 @@ pub fn tool_result_summary(
             let w = out.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
             let h = out.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(format!(
-                "📊 {} ({} series, {}x{})",
+                "{} ({} series, {}x{})",
                 tool,
                 pluralize(series, "series", "series"),
                 w,
@@ -3240,18 +3191,18 @@ pub fn tool_result_summary(
         "plot_bar" => {
             let cats = out.get("categories").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let ds = out.get("datasets").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("📊 bar ({} categories, {} datasets)", cats, ds))
+            Some(format!("bar ({} categories, {} datasets)", cats, ds))
         }
         "plot_histogram" => {
             let samples = out.get("samples").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let bins = out.get("bins").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("📊 histogram ({} samples, {} bins)", samples, bins))
+            Some(format!("histogram ({} samples, {} bins)", samples, bins))
         }
         "plot_pie" => {
             let slices = out.get("slices").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let donut = out.get("donut").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(format!(
-                "📊 pie ({} slices{})",
+                "pie ({} slices{})",
                 slices,
                 if donut { ", donut" } else { "" }
             ))
@@ -3259,7 +3210,7 @@ pub fn tool_result_summary(
         "plot_heatmap" => {
             let rows = out.get("rows").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let cols = out.get("cols").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("📊 heatmap ({}x{})", rows, cols))
+            Some(format!("heatmap ({}x{})", rows, cols))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -3267,10 +3218,12 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         _ => {
             if tool.starts_with("team_") {
-                Some(format!(
-                    "{}",
-                    out.get("status").and_then(|v| v.as_str()).unwrap_or("done")
-                ))
+                Some(
+                    out.get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("done")
+                        .to_string(),
+                )
             } else {
                 None
             }
@@ -3341,7 +3294,7 @@ impl<'a> MessageWidget<'a> {
                         && trimmed.len() <= 6;
                     if is_thinking_placeholder && self.message.role == Role::Assistant {
                         lines.push(Line::from(vec![
-                            Span::styled("💭 ", theme::think()),
+                            Span::styled("", theme::think()),
                             Span::styled("Thinking ...", theme::think()),
                         ]));
                         continue;
@@ -3364,11 +3317,11 @@ impl<'a> MessageWidget<'a> {
                             13,
                         ),
                         Role::Assistant => (
-                            "● ",
+                            "",
                             Style::default()
                                 .fg(Color::Magenta)
                                 .add_modifier(Modifier::BOLD),
-                            2,
+                            0,
                         ),
                     };
                     // SEC-ragent-types-001 (SECTASKS T-023): assistant text is
@@ -3430,19 +3383,19 @@ impl<'a> MessageWidget<'a> {
                         .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
-                            "● ",
+                            "",
                             Style::default().fg(Color::Green),
                             Style::default()
                                 .fg(Color::Green)
                                 .add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Error => (
-                            "✗ ",
+                            "",
                             Style::default().fg(Color::Red),
                             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Running | ToolCallStatus::Pending => (
-                            "● ",
+                            "",
                             Style::default().fg(Color::DarkGray),
                             Style::default().fg(Color::DarkGray),
                         ),
@@ -3467,16 +3420,13 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ];
+                    // The tool name always comes immediately after the step
+                    // counter, with every other parameter rendered after it.
                     if canonical_tool_name(tool) == "think" || summary.is_empty() {
                         spans.push(Span::styled(display_name, name_style));
                     } else {
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
-                        let summary_style = if canonical_tool_name(tool) == "think" {
-                            theme::think_summary()
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        };
-                        spans.push(Span::styled(summary, summary_style));
+                        spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
                     }
                     // Show line range for read tool (and aliases) in bold
                     if canonical_tool_name(tool) == "read" {
@@ -3573,7 +3523,7 @@ impl<'a> MessageWidget<'a> {
                                 }
                             }
                         } else if tool == "think" {
-                            // Render full thought text multi-line with 💭 prefix
+                            // Render full thought text multi-line
                             if let Some(thought) = state
                                 .output
                                 .as_ref()
@@ -3596,7 +3546,7 @@ impl<'a> MessageWidget<'a> {
                             {
                                 for line in thought.lines() {
                                     lines.push(Line::from(Span::styled(
-                                        format!("  💭 {}", line),
+                                        format!("  {}", line),
                                         theme::think(),
                                     )));
                                 }
@@ -3611,7 +3561,7 @@ impl<'a> MessageWidget<'a> {
                             {
                                 for line in summary.lines() {
                                     lines.push(Line::from(Span::styled(
-                                        format!("  ✅ {}", line),
+                                        format!("  {}", line),
                                         Style::default().fg(Color::Green),
                                     )));
                                 }
@@ -3683,8 +3633,8 @@ impl<'a> MessageWidget<'a> {
                             }
                         } else if tool != "edit" && tool != "think" {
                             // Skip result summary for edit tool on success (already shows inline diff)
-                            // Skip result summary for think tool (full thought rendered above
-                            // with 💭 prefix, same as Reasoning parts)
+                            // Skip result summary for think tool (full thought rendered above,
+                            // same as Reasoning parts)
                             if let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, self.cwd)
                             {
@@ -3709,7 +3659,7 @@ impl<'a> MessageWidget<'a> {
                 MessagePart::Reasoning { text } => {
                     for line in text.lines() {
                         lines.push(Line::from(Span::styled(
-                            format!("  💭 {}", line),
+                            format!("  {}", line),
                             theme::think(),
                         )));
                     }
@@ -3721,7 +3671,7 @@ impl<'a> MessageWidget<'a> {
                         .and_then(|n| n.to_str())
                         .unwrap_or("image");
                     lines.push(Line::from(Span::styled(
-                        format!("  📎 [image: {}]", name),
+                        format!("  [image: {}]", name),
                         Style::default().fg(Color::Yellow),
                     )));
                 }

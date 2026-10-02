@@ -1,4 +1,4 @@
-//! `/connectors list` and `/connectors search` report wording (spec `connectors`
+//! `/connectors list` report wording and the catalogue search renderer (spec `connectors`
 //! T-011; FR-009, FR-010, FR-025, FR-039, FR-041).
 //!
 //! The pure renderers live here so the TUI family and the `ragent connectors`
@@ -114,6 +114,15 @@ pub struct ListInput<'a> {
     pub dirs: &'a StoreDirs,
     /// The live lifecycle snapshot, empty for a discovery-only render.
     pub statuses: &'a [ConnectorStatus],
+    /// The live advertised tool count per bridged server id, empty when no live
+    /// client is reachable.
+    ///
+    /// Taken from the live MCP client rather than the lifecycle snapshot: a
+    /// bridged server that connects *after* the startup load (an
+    /// `enable`/`connect` transition) is absent from the snapshot's per-server
+    /// tool lists until the next `start`, so the client is the only place its
+    /// real count can be read without a re-connect.
+    pub tool_counts: &'a BTreeMap<String, usize>,
 }
 
 /// Resolve the requested category filter against the categories a surface knows
@@ -217,6 +226,7 @@ pub fn render_list(
                     descriptor,
                     connector.enabled,
                     statuses.get(descriptor.id.as_str()).copied(),
+                    input.tool_counts,
                 ));
             }
             Err(ScanFailure { error }) => {
@@ -299,12 +309,14 @@ fn finish_list(
     lines.join("\n")
 }
 
-/// Build one list row from a parsed descriptor, its persisted enable flag, and
-/// the live status when the connector is tracked (FR-009).
+/// Build one list row from a parsed descriptor, its persisted enable flag, the
+/// live status when the connector is tracked, and the live per-server tool
+/// counts read from the shared MCP client (FR-009).
 fn row_for(
     descriptor: &ConnectorDescriptor,
     enabled: bool,
     status: Option<&ConnectorStatus>,
+    live_counts: &BTreeMap<String, usize>,
 ) -> ListRow {
     let (state, auth, error, tool_counts) = match status {
         Some(status) => {
@@ -316,7 +328,16 @@ fn row_for(
                     (
                         server.server_id.clone(),
                         match server.state {
-                            ServerState::Connected => ToolCount::Known(server.tools.len()),
+                            // A connected server's count is a live client read:
+                            // the snapshot's own list can be stale when the
+                            // server connected after `start`, so the client's
+                            // count wins and the snapshot is the fallback.
+                            ServerState::Connected => ToolCount::Known(
+                                live_counts
+                                    .get(&server.server_id)
+                                    .copied()
+                                    .unwrap_or(server.tools.len()),
+                            ),
                             ServerState::Disconnected | ServerState::Errored => ToolCount::Unknown,
                         },
                     )
@@ -391,8 +412,8 @@ fn row_line(row: &ListRow, verbose: bool) -> String {
 /// FR-041).
 fn empty_message(filter: &CategoryFilter, total: usize) -> String {
     if total == 0 {
-        "No connectors installed. Run `/connectors search <query>` then \
-         `/connectors add <id>` to install one."
+        "No connectors installed. Run `/connectors claude` to browse the \
+         catalogue, then `/connectors add <id>` to install one."
             .to_string()
     } else {
         format!("No connectors in {}.", category_header(filter, 0, total))

@@ -23,7 +23,7 @@
 //! | [`harness`]    | T-013| `/connectors test` isolated connect-and-invoke harness (FR-015, FR-016) |
 //! | [`help`]       | T-010| `/connectors` usage text, attribution, and subcommand list (FR-004, FR-006, FR-017) |
 //! | [`lifecycle`]  | T-008| session-start load, connect, and disconnect lifecycle (FR-008, FR-012, FR-013, FR-018, FR-019, FR-032, FR-033) |
-//! | [`management`] | T-011| `/connectors list` and `/connectors search` report wording (FR-009, FR-010, FR-025, FR-039, FR-041) |
+//! | [`management`] | T-011| `/connectors list` report wording and the catalogue search renderer (FR-009, FR-010, FR-025, FR-039, FR-041) |
 //! | [`manifest`]   | T-004| manifest read/write and install staging (FR-002, FR-011, FR-027) |
 //! | [`provider`]   | T-005| catalogue normalisation providers and skip discipline (FR-025)   |
 //! | [`mod@remove`]     | T-009| uninstall a disabled connector, refusing while enabled (FR-030)  |
@@ -71,11 +71,12 @@ pub use browse::{
 };
 pub use commands::{
     AuthOutcome, AuthOutcomeError, ConnectorArgError, ConnectorCommand, ConnectorCommandEnv,
-    auth_report, connect_report, disable_report, disconnect_report, enable_report,
+    auth_report, canonical_id, connect_report, disable_report, disconnect_report, enable_report,
     fetch_catalogue_descriptors_network, fetch_catalogue_descriptors_with_skipped,
-    is_known_subcommand, lifecycle_error_report, parse_connector_command, run_connector_subcommand,
-    run_connector_subcommand_async, run_connector_subcommand_env,
-    run_connector_subcommand_stores_check, search_error_report, store_and_config,
+    is_known_subcommand, lifecycle_error_report, parse_connector_command,
+    resolve_connector_reference, run_connector_subcommand, run_connector_subcommand_async,
+    run_connector_subcommand_env, run_connector_subcommand_stores_check,
+    search_installable_catalogue, search_installable_catalogue_with_skipped, store_and_config,
 };
 pub use descriptor::{
     ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorProvenance, ConnectorServer,

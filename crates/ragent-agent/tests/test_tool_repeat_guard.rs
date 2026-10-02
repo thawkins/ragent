@@ -203,6 +203,8 @@ fn make_processor(
         team_context_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
         tool_repeat_guard: Arc::new(parking_lot::Mutex::new(HashMap::new())),
         mcp_client: std::sync::OnceLock::new(),
+        connector_session: tokio::sync::RwLock::new(None),
+        connector_statuses: tokio::sync::RwLock::new(None),
         code_index: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),

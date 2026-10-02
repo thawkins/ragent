@@ -175,7 +175,9 @@ pub fn write_manifest(dir: &Path, descriptor: &ConnectorDescriptor) -> Result<()
 /// `/connectors add <id>` command layer calls after a catalogue lookup. The
 /// descriptor is validated (FR-002, FR-025), the id is confined to the store, an
 /// existing id is refused unless `force` (FR-027), and the connector is recorded
-/// **disabled** so no server starts until `/connectors enable` (FR-011).
+/// **enabled** so a freshly installed connector is ready to use; nothing is
+/// connected until the next session start or an explicit
+/// `/connectors connect` (FR-011).
 ///
 /// No MCP server is contacted (FR-011).
 ///
@@ -190,7 +192,7 @@ pub fn install_descriptor(
     descriptor.validate()?;
     let dest = resolve_dest(store, descriptor.id.as_str(), force)?;
     write_manifest(&dest, &descriptor)?;
-    record_disabled(store, descriptor.id.as_str())?;
+    record_enabled(store, descriptor.id.as_str())?;
     Ok(StagedConnector {
         descriptor,
         installed_dir: dest,
@@ -208,7 +210,7 @@ pub fn install_descriptor(
 ///
 /// When `force` is false and the connector id already exists in the destination
 /// store, the install is refused ([`StageError::Exists`], FR-027). A committed
-/// connector is recorded **disabled** (FR-011); no MCP server is contacted.
+/// connector is recorded **enabled** (FR-011); no MCP server is contacted.
 ///
 /// # Errors
 ///
@@ -276,7 +278,7 @@ pub fn stage(
     // Re-write the manifest from the normalised descriptor so the stored copy
     // carries the resolved provenance and source rather than the packaged ones.
     write_manifest(&dest, &descriptor)?;
-    record_disabled(&store, descriptor.id.as_str())?;
+    record_enabled(&store, descriptor.id.as_str())?;
     Ok(StagedConnector {
         descriptor,
         installed_dir: dest,
@@ -408,11 +410,12 @@ fn resolve_dest(store: &Path, id: &str, force: bool) -> Result<PathBuf, StageErr
     Ok(dest)
 }
 
-/// Record `id` as disabled in the store ledger so no server starts until
-/// `/connectors enable` (FR-011).
-fn record_disabled(store: &Path, id: &str) -> Result<(), StageError> {
+/// Record `id` as enabled in the store ledger so a freshly installed connector
+/// is ready to use; nothing is connected until the next session start or an
+/// explicit `/connectors connect` (FR-011).
+fn record_enabled(store: &Path, id: &str) -> Result<(), StageError> {
     let mut ledger = StoreLedger::load(store);
-    ledger.state_mut(id).enabled = false;
+    ledger.state_mut(id).enabled = true;
     ledger.save(store).map_err(StageError::Descriptor)?;
     Ok(())
 }

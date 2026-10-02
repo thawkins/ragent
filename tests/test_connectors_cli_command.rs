@@ -165,7 +165,7 @@ fn store_round_trip_uses_the_cli_surface_spelling() {
     let fx = Fixture::new();
     let src = fx.write_connector_source("echo");
 
-    // add (FR-011): installed disabled, recorded in the project store.
+    // add (FR-011): installed enabled, recorded in the project store.
     let out = fx.ragent(&["connectors", "add", src.to_str().expect("utf8 src")]);
     assert!(out.status.success(), "add must succeed");
     let added = stdout(&out);
@@ -181,11 +181,11 @@ fn store_round_trip_uses_the_cli_surface_spelling() {
         "the connector must be copied into the project store"
     );
 
-    // list shows it disabled (FR-011, FR-018).
+    // list shows it enabled (FR-011, FR-018).
     let listed = stdout(&fx.ragent(&["connectors", "list"]));
     assert!(listed.starts_with("ragent connectors list"), "{listed}");
     assert!(listed.contains("echo"), "{listed}");
-    assert!(listed.contains("state disabled"), "{listed}");
+    assert!(listed.contains("state enabled"), "{listed}");
 
     // `--category` filters (FR-041).
     let filtered = stdout(&fx.ragent(&["connectors", "list", "--category", "developer"]));
@@ -220,7 +220,7 @@ fn store_round_trip_uses_the_cli_surface_spelling() {
         "{unknown}"
     );
 
-    // disable a disabled connector is a no-op transition that reports ok.
+    // disable an enabled connector reports ok.
     let disabled = stdout(&fx.ragent(&["connectors", "disable", "echo"]));
     assert!(
         disabled.starts_with("ragent connectors disable"),
@@ -341,8 +341,12 @@ fn claude_points_at_the_tui_browser_and_names_the_non_interactive_equivalents() 
         "identifies the browser as a TUI-only panel: {text}"
     );
     assert!(
-        text.contains("ragent connectors search"),
-        "names the non-interactive search: {text}"
+        text.contains("--category <name>"),
+        "documents the --category launch filter: {text}"
+    );
+    assert!(
+        !text.contains("ragent connectors search"),
+        "the redundant search subcommand is gone: {text}"
     );
     assert!(
         text.contains("ragent connectors add"),
@@ -360,7 +364,11 @@ fn help_documents_the_claude_browser_subcommand() {
     let fx = Fixture::new();
     let help = stdout(&fx.ragent(&["connectors", "help"]));
     assert!(
-        help.contains("ragent connectors claude [query] [--refresh]"),
-        "the usage block documents the browser: {help}"
+        help.contains("ragent connectors claude [query] [--category <name>] [--refresh]"),
+        "the usage block documents the browser and its category filter: {help}"
+    );
+    assert!(
+        !help.contains("search <query>"),
+        "the usage block no longer advertises the removed search subcommand: {help}"
     );
 }

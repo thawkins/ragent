@@ -52,8 +52,12 @@ default-endpoint regimes read the same way.
   absolute-`https`-with-host guard, so a default endpoint is guarded exactly like a
   configured one (FR-037).
 - The category filter (FR-039..FR-041) is one shared predicate applied by the browser and
-  by the `list`/`search` glue, so the browser and the textual reports can never disagree
-  about which connectors a category shows.
+  by the `list` glue, so the browser and the textual report can never disagree about which
+  connectors a category shows.
+- The catalogue's single surface is the interactive `claude` browser (FR-010): the optional
+  `--category <name>` launch argument selects its filter, and the `c` key cycles that filter
+  over the categories the fetched catalogue declares. There is no separate `search`
+  subcommand, so there is one catalogue surface with one filter model.
 
 ## Requirement Coverage Map
 
@@ -68,8 +72,8 @@ default-endpoint regimes read the same way.
 | FR-007 `connectors` config block | T-001 |
 | FR-008 Session-start loading | T-008 |
 | FR-009 `/connectors list` | T-011 |
-| FR-010 `/connectors search` | T-011 |
-| FR-011 `/connectors add` install (disabled) | T-004, T-009 |
+| FR-010 `/connectors claude` catalogue browser | T-022 |
+| FR-011 `/connectors add` install (enabled) | T-004, T-009 |
 | FR-012 `/connectors enable` | T-008, T-011 |
 | FR-013 `/connectors disable` | T-008, T-011 |
 | FR-014 `/connectors auth` | T-007, T-011 |
@@ -99,7 +103,7 @@ default-endpoint regimes read the same way.
 | FR-038 Single source of the default-endpoint literal | T-016, T-019 |
 | FR-039 Category filter restricts displayed connectors | T-020, T-021 |
 | FR-040 `ALL` category resets the filter (default) | T-020, T-021 |
-| FR-041 `--category` argument on list/search | T-021 |
+| FR-041 `--category` argument on list/claude | T-021, T-022 |
 | NFR-001 Default endpoint declared exactly once | T-019 |
 | NFR-002 Endpoint resolved per launch, no rebuild | T-016, T-017 |
 | NFR-003 Resolution is pure and offline | T-016 |
@@ -120,7 +124,7 @@ default-endpoint regimes read the same way.
 | T-008 | Wire session-start load, connect, and disconnect lifecycle | FR-008, FR-012, FR-013, FR-018, FR-019, FR-032, FR-033 | L | Critical | completed | T-006, T-007 |
 | T-009 | Implement install/remove command operations with refusal guards | FR-011, FR-027, FR-028, FR-029, FR-030 | M | High | completed | T-004 |
 | T-010 | Add `/connectors` command parsing, dispatch, and registration | FR-004, FR-006, FR-023 | M | High | completed | T-008 |
-| T-011 | Implement `list`, `search`, `enable`, `disable`, `connect`, `disconnect`, `auth` glue | FR-009, FR-010, FR-012, FR-013, FR-014, FR-018, FR-019, FR-022, FR-025 | L | Critical | completed | T-010 |
+| T-011 | Implement `list`, `enable`, `disable`, `connect`, `disconnect`, `auth` glue | FR-009, FR-012, FR-013, FR-014, FR-018, FR-019, FR-022, FR-025 | L | Critical | completed | T-010 |
 | T-012 | Implement `/connectors help` usage text and autocomplete metadata | FR-004, FR-017 | S | Medium | completed | T-010 |
 | T-013 | Implement `/connectors test` isolated connect-and-invoke harness | FR-015, FR-016 | M | High | completed | T-008 |
 | T-014 | Add `ragent connectors` CLI parity surface | FR-004, FR-006 | M | Medium | completed | T-011 |
@@ -130,7 +134,8 @@ default-endpoint regimes read the same way.
 | T-018 | Extend `/connectors stores` to tag endpoint provenance (`default`/`config`) | FR-036 | S | Medium | completed | T-016, T-017 |
 | T-019 | Add guard check and test for the single default-endpoint literal | FR-038, NFR-001 | S | Medium | completed | T-016 |
 | T-020 | Add category filter state and category enumeration to the connector browser | FR-039, FR-040 | M | High | completed | T-002, T-003 |
-| T-021 | Wire the category filter into `list`/`search` reports and the `--category` argument | FR-039, FR-040, FR-041 | M | High | completed | T-011, T-020 |
+| T-021 | Wire the category filter into the `list` report and the `--category` argument | FR-039, FR-040, FR-041 | M | High | completed | T-011, T-020 |
+| T-022 | Move catalogue browsing to `/connectors claude` and add its `--category` launch filter and `c` cycle | FR-004, FR-010, FR-039, FR-040, FR-041 | M | High | completed | T-010, T-020, T-021 |
 ## Task Details
 
 ### T-001 - Add `connectors` configuration block to `ragent-config`
@@ -230,6 +235,45 @@ records `auth failed` and stops (FR-032).
 **Verify:** enabling a connector surfaces its tools; disabling deregisters exactly those
 tools; a failing server on a two-server connector still reports the other as connected.
 
+**Delivered (startup wiring):**
+
+- `src/main.rs` resolves the enabled connectors through the bridge and queues their
+  bridged `(id, config)` pairs into the same background connect loop that starts the
+  configured `ragent.json` and plugin-contributed servers, so a connector's tools
+  register as the ordinary `mcp_<server>_<tool>` tools (FR-020) without a second
+  connection path. A bridged id colliding with a configured server is refused and
+  warned, not overwritten (FR-033).
+- A [`ConnectorSession`] is started against the resolved plan and published on the
+  session processor (`set_connector_session`), together with its live status snapshot
+  (`set_connector_statuses`). The processor stores both type-erased, so `ragent-agent`
+  still does not depend on `ragent-connectors`.
+- `/connectors` (TUI) now drives that published session for
+  `enable`/`disable`/`connect`/`disconnect`, reconciling the MCP tool registry after
+  the transition, and `/connectors list` takes its per-server tool counts from the live
+  MCP client (`ConnectorCommandEnv::tool_counts`), so a bridged server that connected
+  *after* startup still reports a real count instead of `?`.
+- The global `mcp_state.json` ledger is honoured per bridged id (`StartupServerLedger`
+  over `McpEnableLedger`), so a server switched off in `/mcp` is not started by a
+  connector either (FR-018).
+
+**Delivered (client-derived statuses, T-008 follow-up):**
+
+- The startup bridge connects a bridged server on the *shared* MCP client, so the
+  published session tracks nothing and `session.statuses()` is empty; `/connectors
+  list` therefore fell back to the store enable flag and printed `state enabled` /
+  `? tool(s)` even while the server was connected. `ConnectorSession::statuses_from_client_state`
+  now derives the same per-connector statuses from the client's per-bridged-server
+  connection state instead (a connector with a connected server is `connected`, an
+  enabled but wholly disconnected one is `enabled`, a store-disabled one is `disabled`).
+- `TuiConnectorEnv::statuses()` prefers the tracked snapshot and falls back to the
+  client-derived one when it is empty; `App::refresh_connector_statuses()` does the
+  same for the published snapshot and is now also driven from the housekeeping pass,
+  so a connector the startup loop connected reaches the list without a second connect.
+- The shared connect loop publishes a completion `McpStatusChanged` once every server
+  is settled, so the TUI adopts the client promptly instead of waiting out the poll
+  interval. The CLI surface keeps `enabled` / `?`: a one-shot invocation has no live
+  client by design.
+
 ### T-009 - Implement install/remove command operations with refusal guards
 
 Add the install and remove operations behind the command glue: install from a catalogue id,
@@ -248,18 +292,18 @@ Add the `connectors` trigger to `SLASH_COMMANDS`, the dispatch arm in `app/slash
 to the shared entry points. Reports carry the `From: /connectors <sub>` attribution and are
 ASCII-only (FR-006). A bare `/connectors` and an unknown subcommand fall through to the
 usage block. A `connectors.enabled: false` subsystem reports as disabled (FR-021). The
-parser accepts the optional `--category <name>` argument on `list` and `search` (FR-041,
-completed in T-021).
+parser accepts the optional `--category <name>` argument on `list` and `claude` (FR-041,
+completed in T-021 and T-022).
 
 **Verify:** `/connectors` appears in the autocomplete menu and dispatches; a disabled
 subsystem reports that fact for every non-help subcommand.
 
-### T-011 - Implement `list`, `search`, `enable`, `disable`, `connect`, `disconnect`, `auth` glue
+### T-011 - Implement `list`, `enable`, `disable`, `connect`, `disconnect`, `auth` glue
 
 Implement the management subcommands: `list` prints one row per connector (id, name,
 category, state, auth state, server and tool counts) plus a summary and any unsupported
-labels (FR-009, FR-025); `search` queries the catalogue and prints matches, reporting an
-empty set as a message (FR-010); `enable`/`disable` drive the lifecycle (FR-012, FR-013,
+labels (FR-009, FR-025); the catalogue-browsing role moved to the `claude` browser (T-022);
+`enable`/`disable` drive the lifecycle (FR-012, FR-013,
 FR-018); `connect`/`disconnect` toggle the connection without a restart (FR-019); `auth`
 drives T-007 and reports `needs auth` where applicable (FR-014, FR-022). Malformed arguments
 render an `[err]` row that changes no state. Keep the parse-and-run glue in one place so the
@@ -400,10 +444,11 @@ a connector with an empty category is visible only under `ALL`.
 **Verify:** selecting a category shows only that category's rows and the match count; the
 `ALL` entry restores every row; a browser opened with no selection is on `ALL`.
 
-### T-021 - Wire the category filter into `list`/`search` reports and the `--category` argument
+### T-021 - Wire the category filter into the `list` report and the `--category` argument
 
-Parse an optional `--category <name>` argument on `/connectors list` and
-`/connectors search <query>` and apply the same filter used by the browser (FR-039, FR-041).
+Parse an optional `--category <name>` argument on `/connectors list` and apply the same
+filter used by the browser (FR-039, FR-041); T-022 extends the same argument to
+`/connectors claude`.
 Each report states the active category (`ALL` when unfiltered) and the match count; a
 category with no matching connectors prints an empty-result message rather than an error
 (FR-041). `--category ALL` clears any filter and behaves identically to the unfiltered
@@ -411,8 +456,8 @@ report (FR-040). Malformed or unknown category values render an `[err]` row and 
 state, matching the family's error policy.
 
 **Verify:** `list --category data` prints only data-category connectors and the active
-filter; `list --category ALL` prints every connector; `search --category nosuch` prints the
-empty-result message, not an error.
+filter; `list --category ALL` prints every connector; `list --category nosuch` prints the
+`[err]` refusal, not an error.
 
 ## Risks and Mitigations
 
@@ -425,7 +470,8 @@ empty-result message, not an error.
 | Archive extraction escapes the store | Low | Critical | Path-traversal-safe extraction with an explicit refusal case (FR-029) covered by a fixture. |
 | Default catalogue endpoint drifts or is duplicated across modules | Medium | Medium | Single public constant (FR-038) with one resolver (T-016) and a guard check that fails on a duplicate literal (T-019, NFR-001). |
 | A configured endpoint silently falls back to the default when malformed | Low | High | The default and configured paths share one guard; a malformed or non-`https` value is refused with a named reason rather than substituted (FR-037). |
-| The browser and the text reports disagree about a category | Low | Medium | The category predicate is one shared function (T-020) that both the browser and the `list`/`search` glue (T-021) call. |
+| The browser and the text report disagree about a category | Low | Medium | The category predicate is one shared function (T-020) that both the browser and the `list` glue (T-021) call. |
+| A launch `--category` names a category the catalogue does not declare | Low | Medium | The launch filter is held until the fetch lands and then validated against the fetched categories (T-022); an unknown name is reported in the panel footer with every row left visible. |
 
 ## Notes on Assumptions
 
@@ -449,3 +495,30 @@ empty-result message, not an error.
 - The category filter (FR-039..FR-041) is text and browser surface only: it narrows what is
   shown, never what is discovered, enabled, or connected, so filtering cannot start or stop
   a server.
+### T-022 - Move catalogue browsing to `/connectors claude` and add its `--category` launch filter and `c` cycle
+
+Drop the redundant `/connectors search <query>` subcommand: the interactive `claude`
+catalogue browser (T-020) already covers catalogue lookup with a richer surface, so the
+family has one catalogue surface with one filter model (FR-004, FR-010). The `ConnectorCommand`
+enum replaces its `Search` variant with a `Claude { query, category, refresh }` variant, so
+the launch arguments parse in the shared crate parser (`parse_connector_command`) and both
+surfaces understand them identically.
+
+`/connectors claude` now accepts `--category <name>` (FR-041) alongside its optional query
+and `--refresh`. Because the panel is opened before the catalogue is fetched, the requested
+category is *held* on the browser (`CatalogueBrowser::set_pending_category`) and applied once
+the entries land (`CategoryFilterState::select_when_known`), so the name is validated against
+the categories the fetched catalogue actually declares and an unknown category is reported in
+the panel footer with every row left visible rather than rendering an indistinguishable empty
+list. Inside the panel the `c` key cycles the filter over those same categories and back to
+`ALL` (FR-039, FR-040).
+
+`render_search` and the `search_catalogue` environment hook remain as the shared catalogue
+renderer/fetch seam (they are no longer reachable from a subcommand), so no renderer is lost
+to the removal.
+
+**Delivered (T-022).** `ConnectorCommand::Search` -> `Claude { query, category, refresh }`;
+`ConnectorArgError::MissingSearchQuery` removed; `CONNECTOR_SUBCOMMANDS` down to 12 tokens
+and `--refresh` added to the CLI/TUI catalog flag lists; `render_search` de-registered from
+the crate re-exports but retained for the shared catalogue renderer; the `list`-style
+category resolution (`resolve_filter`/`CategoryError`) shared unchanged.

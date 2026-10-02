@@ -599,4 +599,25 @@ fn parses_recorded_claude_feed_when_present() {
             assert!(!server.id.trim().is_empty(), "every server has an id");
         }
     }
+    // The feed ships UUID `id`s but readable `slug`s (and, for the handful of
+    // entries with no slug, readable display names); the provider prefers the
+    // readable key, so as few connectors as possible are named after a UUID.
+    let readable = parsed
+        .connectors
+        .iter()
+        .filter(|c| c.id.as_str() == "atlassian" || c.id.as_str() == "microsoft-learn")
+        .count();
+    assert_eq!(
+        readable, 2,
+        "readable slugs become connector ids (`atlassian`, `microsoft-learn`)"
+    );
+    let uuid_named = parsed
+        .connectors
+        .iter()
+        .filter(|c| c.id.as_str().len() == 36 && c.id.as_str().matches('-').count() == 4)
+        .count();
+    assert!(
+        uuid_named <= 1,
+        "at most one feed entry falls back to a UUID id, got {uuid_named}"
+    );
 }

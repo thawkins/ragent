@@ -26,8 +26,8 @@ after the `/plugins` family (spec `plugins` FR-006):
 
 | Subcommand                    | Purpose                                                            |
 | ----------------------------- | ------------------------------------------------------------------ |
-| `/connectors list [--verbose]`| List installed connectors, their state, and their bridged servers. |
-| `/connectors search <query>`  | Search the connector catalogue by name, category, or tag.          |
+| `/connectors list [--verbose] [--category <name>]` | List installed connectors, their state, and their bridged servers. |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser (filter, browse, install). |
 | `/connectors add <id\|source>`| Install a connector from the catalogue or a local/URL source.      |
 | `/connectors remove <id>`     | Uninstall a connector (refused while enabled).                     |
 | `/connectors enable <id>`     | Enable a connector and connect its MCP server(s) now.              |
@@ -52,7 +52,7 @@ shape, managed through one coherent surface.
 ### Worked examples
 
 ```text
-/connectors search drive                        # find the Google Drive connector
+/connectors claude drive --category productivity   # find it in the catalogue browser
 /connectors add google-drive                    # install from the catalogue
 /connectors auth google-drive                   # begin OAuth / paste a token
 /connectors enable google-drive                 # connect and expose its tools
@@ -153,10 +153,12 @@ the `/connectors` family and the `ragent connectors` CLI print one wording.
 and are subject to the normal permission engine (default action: `ask`).
 
 **FR-004** — The system shall provide the `/connectors` slash-command family with the
-subcommands `list`, `search`, `add`, `remove`, `enable`, `disable`, `connect`,
+subcommands `list`, `claude`, `add`, `remove`, `enable`, `disable`, `connect`,
 `disconnect`, `auth`, `test`, `stores`, and `help`, registered in the `SLASH_COMMANDS`
 registry, reachable through the slash-command dispatch arm, listed in the autocomplete
-menu, and documented in `/connectors help`.
+menu, and documented in `/connectors help`. The catalogue-browsing role is served by the
+interactive `claude` subcommand rather than a separate `search` subcommand, so there is one
+catalogue surface with one filter model.
 
 **FR-005** — The system shall store a connector's secrets (tokens, client secrets,
 passwords) in the existing encrypted credential store and shall reference them by name from
@@ -185,16 +187,19 @@ discovered connector showing id, name, category, state (`disabled`, `enabled`, `
 tools, shall print a summary line with totals, and shall print a notice for any connector
 whose catalogue entry requested an unsupported capability.
 
-**FR-010** — When `/connectors search <query>` is invoked, the system shall query the
-catalogue and print matching entries with their id, name, category, tags, and authentication
-requirement, and shall report an empty result set as a message rather than an error.
+**FR-010** — When `/connectors claude <query>` is invoked, the system shall open the
+interactive Claude connector-catalogue browser with the optional query pre-filling the
+search field, shall fetch the catalogue off the event loop, and shall display matching
+entries with their id, name, category, and description. The browser is the catalogue's
+single surface: it shows an empty result set as a message rather than an error, and an
+optional `--refresh` bypasses the catalogue cache.
 
 **FR-011** — When `/connectors add <id|source>` is invoked, the system shall install the
 named catalogue connector (or the connector defined by a local directory, a local
 `.zip`/`.tar.gz` package, or an `https://` URL) into the connector store, shall validate its
-manifest and authentication shape, and shall record it as **disabled** so no server is
-started until the user runs `/connectors enable`; no MCP connection is made during the
-install.
+manifest and authentication shape, and shall record it as **enabled** so it is ready to use;
+no MCP connection is made during the install, so its servers connect at the next session
+start (or immediately when `/connectors connect` is invoked in a running session).
 
 **FR-012** — When `/connectors enable <id>` is invoked, the system shall mark the connector
 enabled, shall immediately connect each bridged server in the current session, and shall
@@ -390,9 +395,9 @@ transport itself.
 
 1. `/connectors help`, a bare `/connectors`, and an unknown subcommand all print the same
    usage block and create no files.
-2. `/connectors search` returns catalogue entries; an empty result set prints a message, not
-   an error.
-3. `/connectors add` installs a connector disabled; no MCP connection is made.
+2. `/connectors claude` opens the catalogue browser and lists catalogue entries; an empty
+   result set prints a message, not an error.
+3. `/connectors add` installs a connector enabled; no MCP connection is made during the install.
 4. `/connectors enable` connects the servers and surfaces their tools under
    `mcp_<connector-id>.<server>_<tool>`.
 5. `/connectors disable` disconnects and deregisters exactly the tools the connector
@@ -451,22 +456,27 @@ surface carries a second copy of the endpoint string.
 
 ## Category filtering
 
-This section adds a category filter to the connector browser and the `list`/`search`
+This section adds a category filter to the connector browser and the `list`
 commands, with an `ALL` category that resets the filter to every connector.
 
 **FR-039** — While a category filter is active in the connector browser or in
-`/connectors list` / `/connectors search`, the system shall restrict the displayed
-connectors to the single selected category, shall exclude connectors whose declared
-category differs, and shall report the active category together with the match count.
+`/connectors list`, the system shall restrict the displayed connectors to the single
+selected category, shall exclude connectors whose declared category differs, and shall
+report the active category together with the match count. In the browser the filter is set
+by `--category` at launch or cycled with the `c` key over the categories the fetched
+catalogue declares.
 
 **FR-040** — When the `ALL` category is selected, the system shall clear any active
 category filter and display every connector regardless of category, and `ALL` shall be the
 default filter whenever no specific category has been selected.
 
-**FR-041** — When `/connectors list` or `/connectors search <query>` is invoked with a
+**FR-041** — When `/connectors list` or `/connectors claude` is invoked with a
 `--category <name>` argument, the system shall display only connectors whose declared
 category matches, shall report the active filter and the match count, and shall report a
-category with no matching connectors as an empty result message rather than an error.
+category with no matching connectors as an empty result message rather than an error. A
+category the surface does not know is refused: `list` renders the family's `[err]` row and
+changes no state, and the browser reports the refusal in its footer while leaving every row
+visible.
 
 ## Non-Functional Requirements
 

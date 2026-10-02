@@ -22,10 +22,11 @@ use crate::remove::{RemoveError, RemoveOutcome};
 /// Render the success report for `/connectors add` (FR-006, FR-011, FR-023).
 ///
 /// Names the installed id, its display name and category, the directory it was
-/// written to, and the disabled state (no server starts until `/connectors
-/// enable`). The connector's declared credential requirement is surfaced so the
-/// requirement is visible without contacting the catalogue again (FR-023); the
-/// requirement describes the shape and the credential name, never a secret.
+/// written to, and the enabled state (nothing connects until the next session
+/// start or an explicit `/connectors connect`). The connector's declared
+/// credential requirement is surfaced so the requirement is visible without
+/// contacting the catalogue again (FR-023); the requirement describes the shape
+/// and the credential name, never a secret.
 #[must_use]
 pub fn add_report(outcome: &StagedConnector) -> String {
     let d = &outcome.descriptor;
@@ -43,8 +44,9 @@ pub fn add_report(outcome: &StagedConnector) -> String {
             }
         ),
         format!("Installed to `{}`.", outcome.installed_dir.display()),
-        "The connector is recorded **disabled**; run `/connectors enable \
-         <id>` to connect its servers."
+        "The connector is recorded **enabled**; run `/connectors enable \
+         <id>` after installing while a session is already running to connect \
+         its servers now."
             .to_string(),
     ];
     if requirement.requires_credential() {

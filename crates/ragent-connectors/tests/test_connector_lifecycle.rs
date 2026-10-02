@@ -882,3 +882,113 @@ fn connect_report_helpers_count_servers_and_tools() {
     assert_eq!(report.connected_servers(), 1);
     assert_eq!(report.tools(), 1);
 }
+
+// ── T-008 follow-up: client-derived statuses ───────────────────────────────
+
+/// A connected bridged server reports `connected` with its live tool count,
+/// even though this session never drove the connection (the startup bridge
+/// connects on the shared client).
+#[test]
+fn statuses_from_client_state_reports_connected_and_the_live_tool_count() {
+    let tree = TempTree::new("client-state-connected");
+    write_connector(
+        &tree.store(),
+        &descriptor("echo", vec![stdio("srv", "/bin/echo")]),
+    );
+    set_enabled(&tree.store(), "echo", true);
+    let dirs = tree.dirs();
+    let session = session(&dirs, Vec::new());
+
+    let mut connected = BTreeMap::new();
+    connected.insert("echo.srv".to_string(), (true, 3usize));
+    let statuses = session.statuses_from_client_state(&connected);
+
+    assert_eq!(statuses.len(), 1);
+    let status = &statuses[0];
+    assert_eq!(status.id, "echo");
+    assert_eq!(status.state, ConnectorLifecycleState::Connected);
+    assert_eq!(status.servers.len(), 1);
+    assert_eq!(status.servers[0].server_id, "echo.srv");
+    assert_eq!(status.servers[0].state, ServerState::Connected);
+    assert_eq!(status.servers[0].tools.len(), 3);
+}
+
+/// A bridged id absent from the client state is `disconnected`, so an enabled
+/// but wholly disconnected connector reports `enabled` with an unknown count.
+#[test]
+fn statuses_from_client_state_reports_an_absent_server_as_disconnected() {
+    let tree = TempTree::new("client-state-absent");
+    write_connector(
+        &tree.store(),
+        &descriptor("echo", vec![stdio("srv", "/bin/echo")]),
+    );
+    set_enabled(&tree.store(), "echo", true);
+    let dirs = tree.dirs();
+    let session = session(&dirs, Vec::new());
+
+    let statuses = session.statuses_from_client_state(&BTreeMap::new());
+
+    assert_eq!(statuses.len(), 1);
+    let status = &statuses[0];
+    assert_eq!(status.state, ConnectorLifecycleState::Enabled);
+    assert_eq!(status.servers[0].state, ServerState::Disconnected);
+}
+
+/// A connector disabled in the store ledger is reported `disabled` regardless
+/// of any client state, so a switched-off connector never looks connected.
+#[test]
+fn statuses_from_client_state_reports_a_disabled_connector_as_disabled() {
+    let tree = TempTree::new("client-state-disabled");
+    write_connector(
+        &tree.store(),
+        &descriptor("echo", vec![stdio("srv", "/bin/echo")]),
+    );
+    set_enabled(&tree.store(), "echo", false);
+    let dirs = tree.dirs();
+    let session = session(&dirs, Vec::new());
+
+    let mut connected = BTreeMap::new();
+    connected.insert("echo.srv".to_string(), (true, 5usize));
+    let statuses = session.statuses_from_client_state(&connected);
+
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].state, ConnectorLifecycleState::Disabled);
+    assert!(statuses[0].servers.is_empty());
+}
+
+/// One connected server of a multi-server connector is enough for the
+/// connector to report `connected` (FR-026 per-server independence).
+#[test]
+fn statuses_from_client_state_marks_a_multi_server_connector_connected_when_one_is_up() {
+    let tree = TempTree::new("client-state-multi");
+    write_connector(
+        &tree.store(),
+        &descriptor(
+            "pair",
+            vec![stdio("alpha", "/bin/echo"), stdio("beta", "/bin/echo")],
+        ),
+    );
+    set_enabled(&tree.store(), "pair", true);
+    let dirs = tree.dirs();
+    let session = session(&dirs, Vec::new());
+
+    let mut connected = BTreeMap::new();
+    connected.insert("pair.alpha".to_string(), (true, 2usize));
+    let statuses = session.statuses_from_client_state(&connected);
+
+    assert_eq!(statuses.len(), 1);
+    let status = &statuses[0];
+    assert_eq!(status.state, ConnectorLifecycleState::Connected);
+    let alpha = status
+        .servers
+        .iter()
+        .find(|s| s.server_id == "pair.alpha")
+        .expect("alpha reported");
+    let beta = status
+        .servers
+        .iter()
+        .find(|s| s.server_id == "pair.beta")
+        .expect("beta reported");
+    assert_eq!(alpha.state, ServerState::Connected);
+    assert_eq!(beta.state, ServerState::Disconnected);
+}

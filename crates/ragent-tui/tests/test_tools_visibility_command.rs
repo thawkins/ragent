@@ -172,7 +172,7 @@ async fn test_slash_tools_table_rows_fit_message_width() {
     let mut app = support::make_app();
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools").await;
+    app.execute_slash_command("/tools list").await;
 
     let body = app
         .messages
@@ -227,7 +227,7 @@ async fn test_slash_tools_lists_disabled_tools_separately() {
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools codeindex off").await;
-    app.execute_slash_command("/tools").await;
+    app.execute_slash_command("/tools list").await;
 
     let body = app
         .messages
