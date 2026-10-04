@@ -219,7 +219,7 @@ enum EngineClass {
 /// Scholarly membership delegates to the shared
 /// [`is_academic_engine`] / [`ACADEMIC_ENGINES`] vocabulary in
 /// `masterfetch::search`; encyclopedia membership reads [`ENCYCLOPEDIA_ENGINES`].
-/// Both the `--no-papers` exclusion set (the academic branch above) and the
+/// Both the default scholarly-exclusion set (the academic branch above) and the
 /// hit-level [`is_scholarly_hit`] / [`is_encyclopedia_hit`] predicates derive
 /// from this one table, so they cannot drift apart (ANTIPAT F-14).
 fn classify_engine(engine: &str) -> EngineClass {
@@ -451,7 +451,7 @@ pub struct EngineSweepStat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExclusionReason {
-    /// Scholarly engine (e.g. OpenAlex) filtered out by `--no-papers`.
+    /// Scholarly engine (e.g. OpenAlex) filtered out when papers are disabled.
     ScholarlyEngine,
     /// PDF web source skipped because `--use-pdf` is off.
     PdfDisabled,
@@ -2056,7 +2056,7 @@ impl WebGatherer {
         let search_budget = self.search_budget.clone();
         let query_cache = self.query_cache.clone();
         let provider_stats = self.provider_stats.clone();
-        // T-008 (FR-006, FR-010, NFR-001): when `--no-papers` is active, steer
+        // T-008 (FR-006, FR-010, NFR-001): when scholarly exclusion is active, steer
         // the search tool away from every academically-classified engine
         // (OpenAlex) *before* any request is dispatched, so no search budget or
         // metered backend call is spent on them. The names come from the single
@@ -2070,7 +2070,7 @@ impl WebGatherer {
         let exclude_engines: Arc<[&str]> = if self.disable_scholarly {
             tracing::info!(
                 engines = ?ACADEMIC_ENGINES,
-                "research: --no-papers excludes academic search engines from this sweep"
+                "research: --papers re-enables academic search engines for this sweep"
             );
             Arc::from(ACADEMIC_ENGINES)
         } else {
@@ -2095,7 +2095,7 @@ impl WebGatherer {
                     }
                     // Shared query cache: an identical query already answered
                     // this run is served without a provider call. The exclusion
-                    // set is folded into the cache key so a `--no-papers` result
+                    // set is folded into the cache key so an exclusion-aware result
                     // can never satisfy a later unfiltered query (or vice versa)
                     // within the same run.
                     let cache_key = if exclude.is_empty() {
@@ -2284,7 +2284,7 @@ impl WebGatherer {
                             "",
                             None,
                         );
-                        // Filter out scholarly hits when --no-papers is set.
+                        // Filter out scholarly hits unless --papers is set.
                         if self.disable_scholarly && is_scholarly {
                             excluded_count += 1;
                             bump_engine_exclusions(
@@ -2293,11 +2293,11 @@ impl WebGatherer {
                                 &hit.search_engine,
                                 ExclusionReason::ScholarlyEngine,
                             );
-                            let reason = "scholarly engine excluded by --no-papers";
+                            let reason = "scholarly engine excluded (--papers not set)";
                             tracing::info!(
                                 query = %query,
                                 url = %hit.url,
-                                "research: skipping scholarly hit due to --no-papers"
+                                "research: skipping scholarly hit (--papers not set)"
                             );
                             log_rejected(
                                 &hit.url,

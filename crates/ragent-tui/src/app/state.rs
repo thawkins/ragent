@@ -1038,6 +1038,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "blueprints",
         description: "List installed team blueprints: /blueprints help|list",
     },
+    SlashCommandDef {
+        trigger: "osinfo",
+        description: "Report host OS and hardware info: /osinfo show [--no-probe]|help",
+    },
 ];
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]

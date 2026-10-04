@@ -244,8 +244,8 @@ async fn gather_captures_scholarly_hit_without_fetch() {
 }
 
 #[tokio::test]
-async fn gather_filters_scholarly_hit_when_no_papers_set() {
-    // With --no-papers, OpenAlex hits should be filtered out before
+async fn gather_filters_scholarly_hit_when_papers_not_set() {
+    // With --papers unset, OpenAlex hits should be filtered out before
     // any fetch or capture.
     let hits = vec![WebSearchHit {
         url: "https://doi.org/10.1000/rust-async".into(),
@@ -267,7 +267,7 @@ async fn gather_filters_scholarly_hit_when_no_papers_set() {
     assert_eq!(
         sources.len(),
         0,
-        "scholarly hit should be filtered out by --no-papers"
+        "scholarly hit should be filtered out when --papers is not set"
     );
     let calls = fetch.calls.lock().unwrap();
     assert!(

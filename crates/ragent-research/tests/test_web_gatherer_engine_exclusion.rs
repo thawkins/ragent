@@ -10,7 +10,7 @@
 //!
 //! The key guarantees under test:
 //!
-//! - NFR-001: with `--no-papers` active the excluded (OpenAlex) engine's
+//! - NFR-001: with scholarly exclusion active the excluded (OpenAlex) engine's
 //!   `search` method is never invoked, so no request is dispatched.
 //! - FR-010: the non-academic (Wikipedia) engine keeps running and its results
 //!   still gather.
@@ -160,7 +160,7 @@ fn gatherer() -> (WebGatherer, Arc<AtomicUsize>, Arc<AtomicUsize>) {
 
 #[tokio::test]
 async fn no_papers_never_queries_excluded_engine_and_still_gathers_web() {
-    // FR-006 / NFR-001: with --no-papers the OpenAlex engine must never be
+    // FR-006 / NFR-001: with exclusion enabled the OpenAlex engine must never be
     // queried (zero `search` calls), while Wikipedia (FR-010) still runs and
     // its source is captured.
     let (web, openalex_calls, wikipedia_calls) = gatherer();
@@ -201,11 +201,11 @@ async fn without_no_papers_every_engine_is_queried() {
 
     assert!(
         openalex_calls.load(Ordering::SeqCst) >= 1,
-        "the OpenAlex engine must run when --no-papers is off"
+        "the OpenAlex engine must run when exclusion is off"
     );
     assert!(
         wikipedia_calls.load(Ordering::SeqCst) >= 1,
-        "the Wikipedia engine must run when --no-papers is off"
+        "the Wikipedia engine must run when exclusion is off"
     );
     assert!(
         sources

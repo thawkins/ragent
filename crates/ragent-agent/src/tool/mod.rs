@@ -69,6 +69,10 @@ pub mod model_info;
 /// when the binary was built.
 pub mod ragent_info;
 
+/// Host operating-system, CPU, GPU, memory, and process introspection - report
+/// the platform ragent is running on (spec `osinfo`).
+pub mod os_info;
+
 /// Registry introspection - `tool_info` / `commands_info` JSON dumps.
 pub mod tool_info;
 
@@ -1673,6 +1677,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(model_info::ModelInfoTool));
     // Build/version introspection
     registry.register(Arc::new(ragent_info::RagentInfoTool));
+    // Host operating-system introspection
+    registry.register(Arc::new(os_info::OsInfoTool));
     // Registry introspection (tool_info/commands_info)
     registry.register(Arc::new(tool_info::ToolInfoTool));
     registry.register(Arc::new(tool_info::CommandsInfoTool));

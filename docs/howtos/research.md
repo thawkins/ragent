@@ -178,7 +178,7 @@ Run a research session and write `RESEARCH.md`. This is the primary command.
   [--search-max-retries N] [--search-retry-base-delay-ms N]
   [--max-web-results N] [--max-search-calls N]
   [--max-concepts N] [--max-findings N]
-  [--use-local] [--use-specs] [--use-low-relevance] [--no-papers] [--use-pdf]
+  [--use-local] [--use-specs] [--use-low-relevance] [--papers] [--use-pdf]
   [--oa-enable] [--no-oa] [--url-cloak]
 ```
 
@@ -226,7 +226,7 @@ Quick light-tier lookup for a fast answer:
 Local-only research (no web search, scan project files only):
 
 ```text
-/research create local-only "Project error handling" --use-local --no-papers
+/research create local-only "Project error handling" --use-local --papers
 ```
 
 Seed from a web page (topic derived from page content):
@@ -724,7 +724,7 @@ These flags control the performance and resilience of the gathering phases.
 | `--max-concepts N` | `research.max_concepts` (5) | Output cap on the `## Concepts` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
 | `--max-findings N` | `research.max_findings` (20) | Output cap on the `## Findings` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
 | `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. The pre-fetch filter matches query terms morphologically (plurals, gerunds, and derived forms such as "agentic" matching "agent" or "loops" matching "loop") and retains hits scoring Medium (35%+ term overlap) or better. |
-| `--no-papers` | `research.exclude_academic_engines` (off) | Exclude academically-classified backends (OpenAlex) before any request is dispatched, so only general web results are captured. Alias: `--no-scholarly`. |
+| `--papers` | off | Include academically-classified backends (OpenAlex) in the search sweep. Scholarly engines are excluded by default, so this flag opts them back in for academic topics. |
 | `--use-pdf` | off | Allow PDF documents from web search or `--from-url` to be captured as sources. |
 | `--oa-enable` | `research.open_access_recovery` (off) | Force open-access recovery on for this run, overriding `ragent.json`. |
 | `--no-oa` | `research.open_access_recovery` (off) | Force open-access recovery off for this run, overriding `ragent.json`. |
@@ -858,7 +858,7 @@ When a research session runs, the TUI shows progress in three places:
    width-sweep table (separated from the surrounding lines by a blank line),
    showing for each backend search engine how many candidates were
    `considered`, `captured`, and `excluded`, plus a breakdown of the
-   exclusion reasons: `papers` (`--no-papers` scholarly-engine blocks), `pdf`
+   exclusion reasons: `papers` (scholarly-engine blocks - clear with `--papers`), `pdf`
    (disabled PDF sources), `relev` (low title/snippet or post-fetch
    relevance), `short` (content below the minimum extractable length), and
    `fetch` (page fetch failures/timeouts). The `fetch` column is broken down
@@ -947,20 +947,18 @@ Use the TUI diagnostics to check availability:
 /websearch test   # live probe each configured engine
 ```
 
-The `--no-papers` flag excludes academically-classified backends (OpenAlex)
-*before* any search request is dispatched, so scholarly results are neither
-queried nor merged. This is useful when researching non-academic topics where
-scholarly papers would add noise. Because the exclusion happens ahead of the
-search, OpenAlex consumes no search budget and its URLs never enter the dedup
-set. Non-academic engines (Wikipedia and any configured web engines) still run.
-`--no-scholarly` is accepted as an alias. Set
+The `--papers` flag includes academically-classified backends (OpenAlex) in the
+search sweep. Because scholarly engines are excluded by default, this flag opts
+them back in for academic topics where scholarly results help. Non-academic
+engines (Wikipedia and any configured web engines) always run. Set
 `research.exclude_academic_engines: true` in `ragent.json` to make the
-exclusion persistent; a per-run `--no-papers` also enables it, and the flag
-wins when both are present.
+exclusion explicit; a per-run `--papers` overrides it, and the flag wins when
+both are present.
 
 ### Engine exclusion
 
-Under the hood `--no-papers` / `research.exclude_academic_engines` map onto the
+Under the hood the scholarly-engine default and
+`research.exclude_academic_engines` map onto the
 `mf_search` `exclude_engines` parameter (an array of engine names) and the
 research `WebSearchTool` exclusion argument. Exclusions are applied to the
 orchestrator *before* any request is dispatched, so excluded engines are never
@@ -1183,7 +1181,7 @@ source count, and all session events as a JSON array.
     "use_local": true,
     "use_specs": true,
     "use_low_relevance": false,
-    "no_scholarly": false,
+    "papers": false,
     "use_pdf": false,
     "fetch_concurrency": 10,
     "fetch_timeout_secs": 30,
@@ -1372,7 +1370,7 @@ Research-specific configuration lives under the `research` key in
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `open_access_recovery` | bool | `false` | Enable OA recovery via Unpaywall and Europe PMC |
-| `exclude_academic_engines` | bool | `false` | Persistently exclude academically-classified engines (OpenAlex) from research runs. A per-run `--no-papers` takes precedence. |
+| `exclude_academic_engines` | bool | `false` | Keep academically-classified engines (OpenAlex) excluded from research runs. Scholarly engines are already excluded by default; a per-run `--papers` opts them back in and takes precedence. |
 | `contact_email` | string? | `null` | Email required by Unpaywall's ToS |
 | `oa_min_full_text_chars` | usize | `1000` | Minimum body length that triggers OA recovery |
 | `max_concepts` | usize | `5` | Output cap on the `## Concepts` list. A per-run `--max-concepts` takes precedence; `0` means unbounded. |
@@ -1413,8 +1411,8 @@ Web search engine keys are top-level in `ragent.json`:
   sources — a backend may be rate-limited or blocked.
 - **Read the progress log** to see which sources were captured, which
   failed, and whether the synthesis used the LLM or the mechanical fallback.
-- **Use `--no-papers`** for non-academic topics where scholarly results add
-  noise.
+- **Use `--papers`** for academic topics where scholarly results are wanted;
+  they are excluded by default.
 - **Use `--use-pdf`** when PDFs are likely to contain the best evidence
   (white papers, technical reports, academic papers).
 - **Use `--use-low-relevance`** when researching niche topics where even
@@ -1450,7 +1448,7 @@ Web search engine keys are top-level in `ragent.json`:
 | Name rejected | Invalid research name | Use 3–64 lowercase ASCII letters/digits/hyphens starting with a letter |
 | `research/<name>` already exists | Duplicate create | Use `/research open <name>` or pick a new name |
 | Very slow run | Deep depth + full tier + many sources | Use `--depth standard` or `--tier light`; reduce `--fetch-concurrently` |
-| No scholarly sources | `--no-papers` or `research.exclude_academic_engines` is set, or OpenAlex is down | Remove the exclusion; check `/websearch test` for OpenAlex status |
+| No scholarly sources | Scholarly engines are excluded by default | Pass `--papers` to include them; check `/websearch test` for OpenAlex status |
 | OA recovery not working | Not enabled or `contact_email` missing | Pass `--oa-enable`, or set `research.open_access_recovery: true` (plus `contact_email`) in `ragent.json` |
 | PDFs skipped | `--use-pdf` not set | Add `--use-pdf` to allow PDF web sources |
 | Sources not reused on re-run | Vault threshold not met | The vault needs 3/8/15 sources (light/full/dissertation) before skipping web search |

@@ -673,7 +673,7 @@ async fn events_stream(
 ) -> Response {
     // F-M9: reserve a slot in the connection budget before subscribing, so a
     // flood of clients cannot each hold a broadcast receiver unboundedly.
-    let reserved = SSE_CONNECTIONS.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+    let reserved = SSE_CONNECTIONS.try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
         (n < MAX_SSE_CONNECTIONS).then_some(n + 1)
     });
     if reserved.is_err() {

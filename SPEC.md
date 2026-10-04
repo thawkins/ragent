@@ -98,14 +98,14 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.122). The core architecture, tool system,
+Ragent is in **beta** (v1.0.125). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current uncommitted work (on top of v1.0.122):**
+**Current Release Highlights (v1.0.123 → v1.0.125):**
 
 - **`/memory clear` (§ Memory)** — `/memory clear` opens a
   `Clear this project's memory?` `Yes`/`No` dialog and removes nothing until the
@@ -145,11 +145,31 @@ current state of all subsystems.
   (SECTASKS T-011).
 - **Spec plan parser** — dependency-range expansion accepts `T-001..T-014` and
   `T-001...T-014` in addition to the existing dash and `through` spellings.
+- **`os_info` host-introspection tool and `/osinfo` command (spec `osinfo`)** —
+  a new read-only `os_info` tool (registry 171 -> 172) reports the host OS and
+  distro, CPU, graphics adapters (integrated/discrete/virtual) and graphics-API
+  support with version numbers, physical hardware
+  (system/chassis/motherboard/BIOS identity plus storage devices and network
+  interfaces), memory, uptime, and the process environment; the
+  `/osinfo show [--no-probe]` slash command renders the same report through the
+  tool's collector/renderer, `/osinfo help` documents both modes, and the
+  `probe` parameter defaults to `true` so every graphics API gets a version.
+  Never writes, spawns only the allowlisted bounded diagnostics, and reads no
+  serial numbers, UUIDs, or asset tags.
+- **Research scholarly-engine default flip** — scholarly backends (OpenAlex)
+  are excluded from research web sweeps by default; `--papers` replaces
+  `--no-papers` / `--no-scholarly` at every entry point (root CLI, TUI,
+  `POST /research`), `ResearchRunRequest`/the config carry `papers`, and
+  `research.exclude_academic_engines` now only persists the exclusion.
+- **Three new tracked research items** — `research/codemigrate/`,
+  `research/connectors/`, and `research/vendormarketplace/`, each with
+  `RESEARCH.md`, `CORPA.md`, and a `sources/` tree (`research/INDEX.md` lists
+  15 items).
 - **Guards** — new `scripts/check-connector-endpoint-literal.sh` (FR-038,
   NFR-001) wired into `pre-flight.sh` and CI; the retired
   `scripts/check-non-ascii.sh` guard removed.
 
-**Current Release Highlights (v1.0.107 → v1.0.122):**
+**Earlier Release Highlights (v1.0.107 → v1.0.122):**
 
 - **v1.0.122 — Security and anti-pattern remediation sweep.** The `ANTIPAT.md`
   milestones M0 and M2-M7 plus the `SECTASKS.md` remediation programme through
@@ -245,10 +265,11 @@ current state of all subsystems.
   persistently via `research.max_concepts` / `research.max_findings`; `0` means
   unbounded and non-integers are rejected. `mf_search` gained an
   `exclude_engines` array (spec `researchnoacc`) that removes named backends
-  before any request is dispatched; research `--no-papers` (alias
-  `--no-scholarly`, config `research.exclude_academic_engines`) routes through
+  before any request is dispatched; research excludes scholarly backends
+  (OpenAlex) by default, with `--papers` opting them back in (config
+  `research.exclude_academic_engines` persists the exclusion), routing through
   it, so OpenAlex consumes no search budget and cannot shadow general-web URLs
-  in dedup, and `POST /research` gained a `no_scholarly` field. `--oa-enable` /
+  in dedup, and `POST /research` gained a `papers` field. `--oa-enable` /
   `--no-oa` toggle open-access recovery per run. The per-engine progress table
   breaks exclusions out by reason (`papers`/`pdf`/`relev`/`short`/`fetch`) and
   fetch failures out by cause (timeout/network/block/http/wall/js/extraction).
@@ -459,7 +480,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 171 registered tools across 25 categories |
+| **Tool-rich** | 172 registered tools across 25 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -824,13 +845,14 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `task_get` | Retrieve the full record of a single task by ID |
 | `task_list` | List all session tasks, optionally filtered by status |
 
-#### Utility Tools (5)
+#### Utility Tools (6)
 
 | Tool | Purpose |
 |------|---------|
 | `get_env` | Read non-sensitive environment variables |
 | `calculator` | Evaluate mathematical expressions |
 | `ragent_info` | Report the running ragent version, build time, git commit, and compiler |
+| `os_info` | Report read-only host OS/hardware introspection (OS identity and distro, CPU, GPU adapters and graphics-API versions, physical hardware, memory, uptime, process environment); also `/osinfo show` |
 | `tool_info` | Return a JSON-encoded dump of the tool registry (name, description, parameters schema, permission category, source, hidden state) |
 | `commands_info` | Return a JSON-encoded catalog of every slash command (trigger, description, subcommands, flags) including plugin-contributed commands |
 
@@ -856,7 +878,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Initiatives / skills | `initiative`, `skill_manage` | 2 |
 | Interactive | `ask_user`, `think` | 2 |
 | Task management | `task_create`, `task_update`, `task_get`, `task_list` | 4 |
-| Utility | `get_env`, `calculator`, `ragent_info`, `tool_info`, `commands_info` | 5 |
+| Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` | 6 |
 
 #### Team Tools (19)
 
@@ -1766,7 +1788,10 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
 | `/connectors list\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude [query] [--category <name>] [--refresh]` opens the interactive catalogue browser (the single catalogue surface); `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
+| `/toolchain list [lang] [--json]` | Language toolchain report |
+| `/blueprints help\|list` | List installed team blueprints |
+| `/osinfo show [--no-probe]\|help` | Read-only host OS/hardware report; routes through the `os_info` tool's collector/renderer (spec `osinfo`) |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |
@@ -2397,7 +2422,7 @@ Every `RESEARCH.md` contains:
 | `/research create ... --compression-model <provider:model>` | Model used to compress intermediate findings |
 | `/research create ... --final-report-model <provider:model>` | Model used to write the final report |
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
-| `/research create ... --no-papers` | Exclude academically-classified backends (OpenAlex) before any search request (alias `--no-scholarly`; config `research.exclude_academic_engines`) |
+| `/research create ... --papers` | Include academically-classified backends (OpenAlex) in the search sweep. Scholarly engines are excluded by default; config `research.exclude_academic_engines` persists the exclusion |
 | `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
 | `/research create ... --max-concepts N` | Cap the `## Concepts` list (default 5; `0` = unbounded); entries are ordered most-relevant-first before truncation |
 | `/research create ... --max-findings N` | Cap the `## Findings` list (default 20; `0` = unbounded); entries are ordered most-relevant-first before truncation |
@@ -2480,7 +2505,7 @@ The `POST /research` request body mirrors `ResearchRunRequest`:
 `template`, `depth`, `tier`, `iterations`, `format`, `mode`,
 `summarization_model`, `research_model`, `compression_model`,
 `final_report_model`, `max_concurrent_research_units`, `use_local`,
-`use_specs`, `use_low_relevance`, `no_scholarly`, `exclude_academic_engines`,
+`use_specs`, `use_low_relevance`, `papers`, `exclude_academic_engines`,
 `open_access_recovery`, `use_pdf`, `evaluate`,
 `brief`, `clarify`, `fetch_concurrency`, `local_concurrency`,
 `fetch_timeout_secs`, `web_phase_timeout_secs`,
@@ -3657,7 +3682,8 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| Uncommitted (post-v1.0.123) | 2026-10-02 | Connector system follow-up, `/memory clear`, and TUI render fixes. (1) `/memory clear` opens a `Clear this project's memory?` `Yes`/`No` confirmation dialog (no removal until confirmed; `No` selected by default) and, on `Yes`, calls `Storage::clear_memories_for_project` to delete only the current project's structured memories (full path or basename, FTS + base rows in one transaction), reporting `Cleared N memory entries for this project.`; the `command_catalog`/`SLASH_COMMANDS` `/memory` entries now list exactly `show`, `clear`, `help`. (2) The connector catalogue has a single surface: the standalone `/connectors search` subcommand is retired, `/connectors claude [query] [--category <name>] [--refresh]` carries the `--category` launch filter and an in-panel `c` cycle key over the categories the fetched catalogue declares (FR-010, FR-041), and `list` keeps the same category model. (3) The TUI drives the session-start connector lifecycle: `src/main.rs` bridges the enabled connectors into the shared connect loop and publishes a `ConnectorSession` plus its status snapshot on the session processor (type-erased); `/connectors enable\|disable\|connect\|disconnect` drive that session and reconcile the MCP tool registry, `/connectors list` reads live tool counts from the MCP client, and a single-reference subcommand accepts a connector by id, slug, or display name (`canonical_id`). (4) TUI-019 render fixes: the tool name renders immediately after the step counter (new `split_summary_icon` helper, both the message-widget and layout arms) and `/mcp` renders one server per row as a markdown/ASCII table with `\|`-escaped cells; `/tools` gains `/tools list` (alias `/tools show`) and a `/tools help` block. (5) The MCP orphan sweep reaps stdio servers re-parented to the per-user service manager (`systemd --user`) as well as init, and matches per process, so `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every startup. Earlier work folded in: a new `ragent-connectors` crate (17th workspace crate), the ANTIPAT M1 ASCII sweep, `/yolo` persisting to the user-global config only, spec plan parser `T-001..T-014` ranges, and the `check-connector-endpoint-literal.sh` guard. |
+| v1.0.125 | 2026-10-04 | `os_info` host-introspection tool and `/osinfo` slash command family, plus the research scholarly-engine default flip. `os_info` (registry 171 -> 172, spec `osinfo` FR-019..FR-025) reports OS identity and Linux distribution, CPU, graphics adapters (`/sys/class/drm` + `pci.ids`, integrated/discrete/virtual classification), graphics-API support with best-effort versions (`Direct3D`, `DirectX`, `Metal`, `OpenGL`, `OpenGL ES`, `Mesa`, `Vulkan`, `OptiX`, `CUDA`, `ROCm`), physical hardware (DMI system/chassis/motherboard/BIOS identity, `/sys/block` storage devices, `/sys/class/net` interfaces), memory, uptime, and the process environment. The `probe` parameter defaults to `true`, so the fixed, timeout-bounded allowlisted graphics diagnostics (`vulkaninfo`, `glxinfo -B`, `nvidia-smi`, `rocminfo`, `system_profiler`) confirm support and supply versions for OpenGL, OpenGL ES, and Mesa; `{"probe": false}` (or `/osinfo show --no-probe`) is the fully process-free path. Read-only throughout: no writes, no network, and never serial numbers, UUIDs, or asset tags. `/osinfo show [--no-probe]` renders through the tool's own collector/renderer, `/osinfo help` documents both modes, and autocomplete offers `show`, `--no-probe`, `help`. Research: scholarly backends (OpenAlex) are excluded from the web sweep by default; `--papers` replaces `--no-papers`/`--no-scholarly` at every entry point (root CLI, TUI, `POST /research`), `ResearchRunRequest` carries `papers`, and `research.exclude_academic_engines` only persists the exclusion. Three new tracked research items (`codemigrate`, `connectors`, `vendormarketplace`). |
+| v1.0.124 | 2026-10-02 | Connector system follow-up, `/memory clear`, and TUI render fixes. (1) `/memory clear` opens a `Clear this project's memory?` `Yes`/`No` confirmation dialog (no removal until confirmed; `No` selected by default) and, on `Yes`, calls `Storage::clear_memories_for_project` to delete only the current project's structured memories (full path or basename, FTS + base rows in one transaction), reporting `Cleared N memory entries for this project.`; the `command_catalog`/`SLASH_COMMANDS` `/memory` entries now list exactly `show`, `clear`, `help`. (2) The connector catalogue has a single surface: the standalone `/connectors search` subcommand is retired, `/connectors claude [query] [--category <name>] [--refresh]` carries the `--category` launch filter and an in-panel `c` cycle key over the categories the fetched catalogue declares (FR-010, FR-041), and `list` keeps the same category model. (3) The TUI drives the session-start connector lifecycle: `src/main.rs` bridges the enabled connectors into the shared connect loop and publishes a `ConnectorSession` plus its status snapshot on the session processor (type-erased); `/connectors enable\|disable\|connect\|disconnect` drive that session and reconcile the MCP tool registry, `/connectors list` reads live tool counts from the MCP client, and a single-reference subcommand accepts a connector by id, slug, or display name (`canonical_id`). (4) TUI-019 render fixes: the tool name renders immediately after the step counter (new `split_summary_icon` helper, both the message-widget and layout arms) and `/mcp` renders one server per row as a markdown/ASCII table with `\|`-escaped cells; `/tools` gains `/tools list` (alias `/tools show`) and a `/tools help` block. (5) The MCP orphan sweep reaps stdio servers re-parented to the per-user service manager (`systemd --user`) as well as init, and matches per process, so `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every startup. Earlier work folded in: a new `ragent-connectors` crate (17th workspace crate), the ANTIPAT M1 ASCII sweep, `/yolo` persisting to the user-global config only, spec plan parser `T-001..T-014` ranges, and the `check-connector-endpoint-literal.sh` guard. |
 | v1.0.122 | 2026-09-30 | Security and anti-pattern remediation sweep, folding in the staged working tree on top of `6cf0b60f` (MS-04). `ANTIPAT.md` M0 (the two shipping defects - crash-marker ordering and search-retry shift overflow - plus the highest-severity containment holes) and M2-M7 complete: `ragent-team` shim crate deleted (17 -> 16 workspace crates), major dependency bumps (`rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ...), and `SECTASKS.md` MS-05 "prevent recurrence" - new `ragent_types::guard` (re-exported as `ragent_tools_core::guard`) owns `reject_option_like`, `is_safe_operand`, `validate_identifier`, `validate_relative_component`, `contained_join`, `clamp_retry_after` and `cap_read`; `ragent-agent`/`ragent-storage`/`ragent-tools-core` re-export `ragent_types::sanitize` so there is one secret registry and one redaction chokepoint (`Event` no longer derives `Debug`); the `security-guards` CI job runs `check-file-tool-containment.sh`, `check-security-unwraps.sh`, `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a `--self-test`); `SECTASKS.md` records the accepted-risk register (T-071). `SPEC.md` §4.6a-§4.6e document the guards and call sites. Earlier commits on the tree: MS-03 network/secret hardening (`da83d927`) and MS-04 defence in depth (`6cf0b60f`). Verification: `cargo check --workspace`, `cargo clippy --all-targets`, `cargo fmt --all -- --check`, `cargo audit` clean; workspace test suite green. |
 | v1.0.121 | 2026-09-27 | Introspection and MCP hygiene release. New read-only, hardwired auto-approve tools `tool_info` (JSON dump of the tool registry: name, description, parameters schema, permission category, source family, hidden state, MCP server/tool provenance) and `commands_info` (JSON catalog of every slash command — built-in TUI set from a drift-tested static mirror plus plugin-contributed commands resolved live) take the registry from 169 to 171 tools; the TUI `/tools` report and `tool_info` now share one source classifier built on `Tool::mcp_wrapper_info`. MCP lifecycle: `McpClient::connect` sweeps orphaned stdio server processes before spawning (a process counts as an orphan only when re-parented to init — `/proc/<pid>/stat` field 4 — so a live sibling ragent's server is never killed, fixing cross-instance `Transport closed`), and `shutdown` kills the whole spawned process group (`process_group(0)` + `killpg`) so no `npx`/`node` children survive exit. Fixes: post-loop rollback removes the capture from `active_loop_captures` only after the restore fully completes (a failed restore stays pending for retry — CI flake `test_rollback_accept_restores_snapshot`); OpenSkills discovery covers `~/.agents/skills/` and `.agents/skills/`; the Claude store's self-describing `*-lsp` stubs (e.g. `rust-analyzer-lsp`) install by materialising the marketplace document's inline `lspServers` manifest into `.claude-plugin/plugin.json` (recorded under `sha256(origin-url + bytes)`, never overwriting an existing manifest); plugins shipping a conventional `skills/` directory without a `skills` manifest section now bridge those skills. A `/simplify all` pass over the 50-file changed set: scoped-block lock release in `ToolRegistry::remove_all`, single SHA-256 + no JSON round-trip in the store provider, shared `merge_scanned_skills` in the plugins manifests, awaited (no nested `block_in_place`/`block_on`) `/mcp connect|disconnect|discover` arms, and validation-before-ledger in `set_mcp_server_enabled`. Verification: `cargo check --workspace --all-targets`, full `ragent-agent`/`ragent-plugins`/`ragent-tui` test suites, `cargo fmt --all -- --check`, `cargo audit` all green. |
 | v1.0.119 | 2026-09-26 | User headline "mcp fixes": a sessionful Streamable-HTTP MCP server (the MongoDB MCP server) now reports its tools — `HttpMcpClient::initialize` negotiates the session, replays the returned `mcp-session-id`, advertises `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected` adopts an already-running server through that client; the HTTP client is built lazily so it no longer panics outside a Tokio runtime. The TUI startup MCP report awaits the shared client lock with a `MCP_STARTUP_GRACE = 3s` connect wait, `/plugins list` resolves live MCP tool counts via `run_control_command`, and `/plugins list --mcp` sorts server ids for a deterministic contributions block. A `/simplify all` pass over v1.0.116–v1.0.118 fixed the `/swarm status` progress-bar overflow, the `/spawn` pending-marker race, `/plugins <non-list> --mcp` handling, swarm unblock persistence, and `/alog` error propagation. Rust-hygiene sweep green: `cargo check --workspace --all-targets`, `cargo check --tests --workspace`, `cargo test --workspace`, dead-code lint and reason checks, `cargo clippy --workspace --all-targets`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`. |
@@ -4253,7 +4279,9 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
 | `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--no-papers` (alias `--no-scholarly`), `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
+| `/todo` `/task` | Open the TASKS side panel |
+| `/osinfo show [--no-probe]\|help` | Read-only host OS/hardware report; routes through the `os_info` tool's collector/renderer (spec `osinfo`) |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |

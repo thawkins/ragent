@@ -47,6 +47,8 @@ dashmap = { workspace = true }
 parking_lot = { workspace = true }
 # PERF-031: FxHash for non-cryptographic cache keys.
 rustc-hash = { workspace = true }
+# OS/CPU/memory/uptime introspection for the `os_info` tool (spec `osinfo`).
+sysinfo = { workspace = true }
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-llm = { path = "../ragent-llm" }

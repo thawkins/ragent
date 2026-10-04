@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 171 registered tools across 25 categories:
+- **Comprehensive tool system** — 172 registered tools across 25 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -51,7 +51,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       - **Task Management** — task_create, task_update, task_get, task_list
       - **Interactive** — question, think
       - **Utility** — calculator, get_env, ragent_info (reports the running
-        version, build time, git commit, and compiler)
+        version, build time, git commit, and compiler), os_info (read-only host
+        report: OS identity and Linux distribution, CPU, graphics adapters and
+        graphics-API versions, physical hardware — system/chassis/motherboard/
+        BIOS identity plus storage devices and network interfaces — memory,
+        uptime, and process environment; also `/osinfo show`)
       - **Stocks & currency** — stock_quote, stock_history, stock_fundamentals,
         stock_search, stock_options, currency_rate, currency_history. Free Yahoo
         Finance is the default; Alpha Vantage can be configured in `ragent.json`.
@@ -149,8 +153,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints;
   concept/finding output limits (`--max-concepts`/`--max-findings`, `research.max_concepts`/
-  `research.max_findings`), scholarly-engine exclusion (`--no-papers`, alias
-  `--no-scholarly`, `research.exclude_academic_engines`), open-access toggles
+  `research.max_findings`), scholarly-engine control (scholarly backends are
+  excluded by default; `--papers` includes them, `research.exclude_academic_engines`
+  persists the exclusion), open-access toggles
   (`--oa-enable`/`--no-oa`), URL cloaking (`--url-cloak`) that defangs web
   source URLs in the `Sources` bullets and `References Index` so scanners do
   not flag them, a per-engine progress table that breaks exclusions
@@ -520,13 +525,28 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.124** — The core architecture, tool system (171 tools across 25 categories), TUI,
+**v1.0.125** — The core architecture, tool system (172 tools across 25 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **v1.0.125 — `os_info` host-introspection tool and `/osinfo` command** — a
+  new read-only `os_info` tool (registry 171 -> 172) reports the host OS and
+  distro, CPU, graphics adapters and graphics-API versions, physical hardware
+  (system/chassis/motherboard/BIOS, storage devices, network interfaces),
+  memory, uptime, and the process environment, always without writing a file,
+  making a network request, or reading serial numbers/UUIDs/asset tags. The
+  `/osinfo show [--no-probe]` slash command renders the same report through the
+  tool's collector/renderer, and `/osinfo help` documents both modes. The
+  `probe` parameter defaults to `true` so every graphics API (including OpenGL,
+  OpenGL ES, and Mesa) is reported with a version.
+- **v1.0.125 — research `--papers` replaces `--no-papers`** — scholarly
+  backends (OpenAlex) are now excluded from research web sweeps by default; the
+  new `--papers` flag opts them back in for academic topics.
+  `research.exclude_academic_engines` persists the exclusion, and `--papers`
+  overrides it for a run.
 - **Uncommitted — `/memory clear`, connector lifecycle tracking, TUI-019 fixes,
   MCP orphan sweep** — `/memory clear` empties this project's structured memories
   behind a `Yes`/`No` confirmation dialog (`No` selected by default, so a stray
@@ -767,10 +787,11 @@ Recent highlights:
   on the root CLI, TUI, and `POST /research` (`max_concepts` / `max_findings`
   fields), or persistently via `research.max_concepts` / `research.max_findings`
   (`0` = unbounded). `mf_search` gained an `exclude_engines` array that drops
-  named backends before any request is dispatched, and research `--no-papers`
-  (alias `--no-scholarly`, config `research.exclude_academic_engines`) routes
-  through it so OpenAlex consumes no search budget and cannot shadow general-web
-  URLs in dedup. `POST /research` gained `no_scholarly`; `--oa-enable`/`--no-oa`
+  named backends before any request is dispatched, and research excludes
+  scholarly backends (OpenAlex) by default (`--papers` opts them back in;
+  `research.exclude_academic_engines` persists the exclusion) by routing through
+  it so OpenAlex consumes no search budget and cannot shadow general-web
+  URLs in dedup. `POST /research` gained `papers`; `--oa-enable`/`--no-oa`
   toggle open-access recovery per run. The per-engine progress table now shows
   *why* candidates were dropped (five exclusion-reason columns) and *how* fetches
   failed (seven failure-kind columns). `/spec impl` now expands task-range

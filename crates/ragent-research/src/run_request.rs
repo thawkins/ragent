@@ -70,9 +70,10 @@ pub struct ResearchRunRequest {
     pub use_specs: bool,
     /// `--use-low-relevance` - keep low-relevance web sources.
     pub use_low_relevance: bool,
-    /// `--no-papers` (alias `--no-scholarly`) - disable scholarly search
-    /// engines.
-    pub no_scholarly: bool,
+    /// `--papers` - include scholarly search engines. Scholarly engines are
+    /// excluded from the web-gathering phase by default; the flag opts them
+    /// back in.
+    pub papers: bool,
     /// `--use-pdf` - allow PDF documents from web search/`--from-url`.
     pub use_pdf: bool,
     /// `--oa-enable` / `--no-oa` - per-run open-access recovery override.
@@ -214,7 +215,7 @@ impl ResearchRunRequest {
                 use_local,
                 use_specs,
                 use_low_relevance,
-                no_papers,
+                papers,
                 use_pdf,
                 oa_recovery,
                 fetch_timeout_secs,
@@ -251,7 +252,7 @@ impl ResearchRunRequest {
                     use_local,
                     use_specs,
                     use_low_relevance,
-                    no_scholarly: no_papers,
+                    papers,
                     use_pdf,
                     open_access_recovery: oa_recovery,
                     fetch_concurrency,
@@ -424,14 +425,12 @@ pub fn build_session_config(
                 .fetch_timeout_secs
                 .unwrap_or(DEFAULT_FETCH_TIMEOUT.as_secs()),
             use_low_relevance: req.use_low_relevance,
-            // Precedence: the per-run `--no-papers` flag wins; otherwise the
-            // configured `research.exclude_academic_engines`; otherwise off.
-            // The flag has no negative form, so OR expresses the chain exactly
-            // (a flag can only turn exclusion on).
-            disable_scholarly: req.no_scholarly
-                || cfg_research
-                    .map(|r| r.exclude_academic_engines)
-                    .unwrap_or(false),
+            // Precedence: scholarly engines are excluded unless the per-run
+            // `--papers` flag opts them back in. The `research.
+            // exclude_academic_engines` config setting can only persist the
+            // exclusion; `--papers` requests inclusion, so it overrides the
+            // config setting for the run.
+            disable_scholarly: !req.papers,
             use_pdf_web_sources: req.use_pdf,
             web_phase_timeout_secs: req
                 .web_phase_timeout_secs

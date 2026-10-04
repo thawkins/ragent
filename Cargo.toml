@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.124"
+version = "1.0.125"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -240,6 +240,12 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ── Hardware / IPMI ──────────────────────────────────────────────────────
 rmcp = { version = "3.4", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+
+# ── System introspection ─────────────────────────────────────────────────
+# os_info tool (spec `osinfo`): cross-platform OS/CPU/memory/uptime data,
+# pure Rust with no shell-out. Pinned to the `system` feature only (not
+# disk/network/user/component) to keep compile cost low (NFR-002).
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 
 # ── Document format support ─────────────────────────────────────────────
 docx-rust = "0.1"

@@ -3553,9 +3553,9 @@ impl PieGapConfig {
 /// required by Unpaywall's terms of service when OA recovery is enabled.
 /// `oa_min_full_text_chars` defaults to the value used by the open-access
 /// recovery layer (`ragent_research::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS`).
-/// `exclude_academic_engines` defaults to `false`; when `true`, research runs
+/// `exclude_academic_engines` defaults to `false`; research runs always
 /// exclude academically-classified search engines (OpenAlex) unless the
-/// per-run `--no-papers` flag overrides it.
+/// per-run `--papers` flag opts them back in.
 /// `max_concepts` (default 5) and `max_findings` (default 20) cap the report's
 /// `## Concepts` and `## Findings` blocks (spec `researchmax` FR-008/FR-017);
 /// the per-run `--max-concepts` / `--max-findings` flags take precedence.
@@ -3566,8 +3566,9 @@ pub struct ResearchConfig {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub open_access_recovery: bool,
     /// Persistently exclude academically-classified search engines (OpenAlex)
-    /// from research runs (spec `researchnoacc` FR-012). The per-run
-    /// `--no-papers` flag takes precedence over this value.
+    /// from research runs (spec `researchnoacc` FR-012). Scholarly engines are
+    /// already excluded by default; the per-run `--papers` flag opts them back
+    /// in and takes precedence over this value.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclude_academic_engines: bool,
     /// Contact email required by Unpaywall's terms of service (FR-012).

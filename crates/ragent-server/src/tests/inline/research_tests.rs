@@ -43,7 +43,7 @@ fn to_run_request_preserves_defaults_when_optional_fields_omitted() {
 
 /// Build a minimal request with every optional field defaulted, for the
 /// scholarly-exclusion invocation tests (FR-009).
-fn minimal_request(name: &str, no_scholarly: bool) -> CreateResearchRequest {
+fn minimal_request(name: &str, papers: bool) -> CreateResearchRequest {
     CreateResearchRequest {
         name: name.into(),
         topic: "Rust async".into(),
@@ -55,7 +55,7 @@ fn minimal_request(name: &str, no_scholarly: bool) -> CreateResearchRequest {
         use_local: false,
         use_specs: false,
         use_low_relevance: false,
-        no_scholarly,
+        papers,
         use_pdf: false,
         oa_recovery: None,
         fetch_concurrency: None,
@@ -88,23 +88,23 @@ fn minimal_request(name: &str, no_scholarly: bool) -> CreateResearchRequest {
 }
 
 #[test]
-fn invocation_summary_emits_canonical_no_papers_spelling() {
-    // FR-005/FR-009: the server must emit the canonical `--no-papers`
+fn invocation_summary_emits_canonical_papers_spelling() {
+    // FR-005/FR-009: the server must emit the canonical `--papers`
     // spelling so the recorded invocation replays on every front-end.
     let req = minimal_request("excl-on", true);
     let summary = req.invocation_summary();
     assert!(
-        summary.contains("--no-papers"),
+        summary.contains("--papers"),
         "summary should carry the canonical flag: {summary}"
     );
     assert!(
-        !summary.contains("--no-scholarly"),
-        "summary should not emit the legacy alias: {summary}"
+        !summary.contains("--no-papers"),
+        "summary should not emit the legacy exclusion flag: {summary}"
     );
     // The recorded invocation must round-trip through the shared parser.
     let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
         .expect("canonical summary must replay");
-    assert!(replayed.no_scholarly);
+    assert!(replayed.papers);
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn invocation_summary_omits_flag_when_exclusion_off() {
     let req = minimal_request("excl-off", false);
     let summary = req.invocation_summary();
     assert!(
-        !summary.contains("--no-papers"),
+        !summary.contains("--papers"),
         "summary should not carry the flag when disabled: {summary}"
     );
 }
@@ -121,7 +121,7 @@ fn invocation_summary_omits_flag_when_exclusion_off() {
 fn to_run_request_forwards_scholarly_exclusion() {
     let req = minimal_request("forward", true);
     let run = req.to_run_request();
-    assert!(run.no_scholarly);
+    assert!(run.papers);
 }
 
 #[test]

@@ -67,6 +67,7 @@ const SPEC_SUBS: &[&str] = &[
     "task",
 ];
 const BLUEPRINTS_SUBS: &[&str] = &["help", "list"];
+const OSINFO_SUBS: &[&str] = &["show", "help"];
 const ROUTER_SUBS: &[&str] = &[
     "help",
     "on",
@@ -99,7 +100,7 @@ const RESEARCH_FLAGS: &[&str] = &[
     "--use-specs",
     "--use-low-relevance",
     "--use-pdf",
-    "--no-papers",
+    "--papers",
     "--oa-enable",
     "--no-oa",
     "--web-time",
@@ -397,6 +398,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         description: "Scaffold a new project: /new --language <lang> --type <type> [--stack <name>] [--github | --gitlab] | /new help",
         subcommands: HELP_ONLY,
         flags: NEW_FLAGS,
+    },
+    CommandCatalogEntry {
+        trigger: "osinfo",
+        description: "Report host OS and hardware info: /osinfo show [--no-probe]|help",
+        subcommands: OSINFO_SUBS,
+        flags: EMPTY,
     },
     CommandCatalogEntry {
         trigger: "perf",

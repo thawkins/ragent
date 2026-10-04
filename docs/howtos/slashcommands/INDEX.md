@@ -84,6 +84,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/toolchain` | [toolchain](toolchain.md) | Language toolchain report: /toolchain list [lang] [--json] \| /toolchain help |
 | `/prompt` | [prompt](prompt.md) | Agent system-prompt inspector: /prompt help\|primary [agent]\|subagent [agent]\|list\|<agent> |
 | `/blueprints` | [blueprints](blueprints.md) | List installed team blueprints: /blueprints help\|list |
+| `/osinfo` | [osinfo](osinfo.md) | Host OS and hardware report: /osinfo show [--no-probe]\|help |
 
 ## Aliases
 

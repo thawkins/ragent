@@ -1,29 +1,29 @@
 # Project Statistics
 
-**Version:** 1.0.124
+**Version:** 1.0.125
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the working tree on top of v1.0.124.
+> Metrics below are measured against the v1.0.125 tree.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 548,612 (542,810 in `crates/` + 5,802 in root `src/`/`tests/`/`examples/`) |
-| Total Rust files | 1,509 (workspace crates) + 16 (root `src/`/`tests/`/`examples/`) |
-| Tests defined | ~10,330 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
-| Test files | 763 external + ~200 inline-bearing |
-| Test binaries | ~781 (763 integration test files + 17 lib/bin targets + 1 root bin) |
+| Total Rust lines | 551,830 (546,041 in `crates/` + 5,789 in root `src/`/`tests/`/`examples/`) |
+| Total Rust files | 1,513 (workspace crates) + 16 (root `src/`/`tests/`/`examples/`) |
+| Tests defined | ~10,348 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 824 external + ~210 inline-bearing |
+| Test binaries | ~842 (824 integration test files + 17 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
-| Tools registered | 171 |
+| Tools registered | 172 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 55 directories in `specs/` |
-| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 21 category how-tos, 79 slash-command docs |
+| Specs on disk | 56 directories in `specs/` |
+| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 21 category how-tos, 80 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.124 |
+| Version | 1.0.125 |
 
 ---
 
@@ -35,22 +35,22 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 281 | 90,230 | 119 |
-| `ragent-bench` | 28 | 8,619 | 5 |
+| `ragent-agent` | 283 | 92,933 | 140 |
+| `ragent-bench` | 28 | 8,619 | 6 |
 | `ragent-codeindex` | 73 | 24,192 | 43 |
-| `ragent-config` | 52 | 12,699 | 34 |
+| `ragent-config` | 52 | 12,700 | 34 |
 | `ragent-connectors` | 37 | 17,024 | 16 |
-| `ragent-llm` | 66 | 24,295 | 24 |
+| `ragent-llm` | 66 | 24,295 | 36 |
 | `ragent-plugins` | 56 | 21,152 | 31 |
-| `ragent-research` | 158 | 60,863 | 92 |
-| `ragent-server` | 15 | 6,467 | 8 |
+| `ragent-research` | 158 | 60,850 | 92 |
+| `ragent-server` | 15 | 6,468 | 9 |
 | `ragent-specs` | 37 | 20,362 | 24 |
 | `ragent-storage` | 39 | 15,246 | 34 |
 | `ragent-telemetry` | 30 | 10,560 | 21 |
 | `ragent-tools-core` | 95 | 18,628 | 25 |
-| `ragent-tools-extended` | 218 | 75,610 | 88 |
-| `ragent-tools-vcs` | 64 | 15,873 | 23 |
-| `ragent-tui` | 211 | 110,703 | 150 |
+| `ragent-tools-extended` | 218 | 75,610 | 99 |
+| `ragent-tools-vcs` | 64 | 15,873 | 24 |
+| `ragent-tui` | 213 | 111,242 | 156 |
 | `ragent-types` | 49 | 10,287 | 27 |
 
 ---
@@ -58,23 +58,23 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui            ############ 110,703 lines (20.4%)
-ragent-agent          ########## 90,230 lines (16.6%)
-ragent-tools-extended ######## 75,610 lines (13.9%)
-ragent-research       ####### 60,863 lines (11.2%)
-ragent-llm            ### 24,295 lines (4.5%)
-ragent-codeindex      ### 24,192 lines (4.5%)
+ragent-tui            ############ 111,242 lines (20.4%)
+ragent-agent          ########## 92,933 lines (17.0%)
+ragent-tools-extended ######## 75,610 lines (13.8%)
+ragent-research       ####### 60,850 lines (11.1%)
+ragent-llm            ### 24,295 lines (4.4%)
+ragent-codeindex      ### 24,192 lines (4.4%)
 ragent-plugins        ## 21,152 lines (3.9%)
-ragent-specs          ## 20,362 lines (3.8%)
+ragent-specs          ## 20,362 lines (3.7%)
 ragent-tools-core     ## 18,628 lines (3.4%)
 ragent-connectors     ## 17,024 lines (3.1%)
 ragent-tools-vcs      ## 15,873 lines (2.9%)
 ragent-storage        ## 15,246 lines (2.8%)
-ragent-config         # 12,699 lines (2.3%)
+ragent-config         # 12,700 lines (2.3%)
 ragent-telemetry      # 10,560 lines (1.9%)
 ragent-types          # 10,287 lines (1.9%)
 ragent-bench          # 8,619 lines (1.6%)
-ragent-server         # 6,467 lines (1.2%)
+ragent-server         # 6,468 lines (1.2%)
 ```
 
 ---
@@ -83,29 +83,29 @@ ragent-server         # 6,467 lines (1.2%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tools-extended` | 88 | ~2,037 |
-| `ragent-tui` | 150 | ~1,755 |
-| `ragent-agent` | 119 | ~1,147 |
-| `ragent-research` | 92 | ~1,099 |
+| `ragent-tools-extended` | 99 | ~2,037 |
+| `ragent-tui` | 156 | ~1,769 |
+| `ragent-agent` | 140 | ~1,160 |
+| `ragent-research` | 92 | ~1,098 |
 | `ragent-specs` | 24 | ~683 |
 | `ragent-plugins` | 31 | ~435 |
 | `ragent-codeindex` | 43 | ~411 |
-| `ragent-tools-vcs` | 23 | ~403 |
-| `ragent-llm` | 24 | ~376 |
+| `ragent-tools-vcs` | 24 | ~403 |
+| `ragent-llm` | 36 | ~376 |
 | `ragent-connectors` | 16 | ~318 |
 | `ragent-types` | 27 | ~300 |
 | `ragent-config` | 34 | ~292 |
 | `ragent-storage` | 34 | ~291 |
 | `ragent-tools-core` | 25 | ~284 |
 | `ragent-telemetry` | 21 | ~260 |
-| `ragent-server` | 8 | ~114 |
-| `ragent-bench` | 5 | ~63 |
-| **Total (external)** | **763** | **~10,268** |
+| `ragent-server` | 9 | ~114 |
+| `ragent-bench` | 6 | ~63 |
+| **Total (external)** | **824** | **~10,294** |
 
 Inline `#[cfg(test)]` modules in library sources contribute a further
-~60 test attributes (root `src/`/`tests/`; the migration effort has moved the
+~54 test attributes (root `src/`/`tests/`; the migration effort has moved the
 bulk of these into each crate's `tests/` tree), bringing the estimated total to
-~10,330.
+~10,348.
 
 ---
 
@@ -149,7 +149,7 @@ Notes:
   they are not re-measured on every documentation pass because
   `cargo llvm-cov` instruments and runs the entire workspace. The
   `ragent-plugins` crate (added in v1.0.112) and the `ragent-connectors` crate
-  (added in the uncommitted connector work) are not part of that run.
+  (added in v1.0.123) are not part of that run.
 - Line counts here are executable lines under LLVM profiling, which is smaller
   than the raw `wc -l` figures in the crate table above (declarations, blank
   and comment-only lines are not instrumented).
@@ -164,36 +164,28 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 53 lines (10,330 tests / 548,612 lines)
-- Largest crate: `ragent-tui` (110,703 lines, 20.4%)
-- Smallest crate: `ragent-server` (6,467 lines, 1.2%)
+- Test-to-code ratio: ~1 test per 53 lines (10,348 tests / 551,830 lines)
+- Largest crate: `ragent-tui` (111,242 lines, 20.4%)
+- Smallest crate: `ragent-server` (6,468 lines, 1.2%)
 - Median crate size: 18,628 lines (`ragent-tools-core`)
 - Crates over 10k lines: 15 of 17
 - Crates under 5k lines: 0 of 17
 
 ---
 
-_Generated 2026-10-02 (v1.0.124 tree plus the uncommitted follow-up work -
-`/memory clear` clears this project's structured memories behind a `Yes`/`No`
-confirmation dialog (new `Storage::clear_memories_for_project`, `No` by default),
-and the `command_catalog`/`SLASH_COMMANDS` `/memory` entries are realigned to the
-subcommands the arm handles; the TUI now drives the session-start connector
-lifecycle with live tool counts and a single interactive `claude` catalogue
-surface carrying `--category` and a `c` cycle key; the TUI-019 render fixes put
-the tool name immediately after the step counter and render `/mcp` as
-one-server-per-row markdown/ASCII table; the `/tools` subcommand surface gained
-`/tools list` and a help block; and the MCP orphan sweep reaps stdio servers
-re-parented to the per-user service manager (`systemd --user`) as well as init,
-matching per process - alongside the connector work itself (the
-new `ragent-connectors` crate takes the workspace from 16 to 17 crates), the
-ANTIPAT M1 ASCII sweep that replaces the TUI tool-category and status-bar emoji
-with ASCII marker prefixes, `/yolo` persisting to the user-global config only, and
-the spec plan parser `T-001..T-014` ranges - and the committed v1.0.122 security
-and anti-pattern remediation sweep folding in the `ANTIPAT.md` M0 plus M2-M7 and
-`SECTASKS.md` MS-05 work - `ragent-team` shim crate removed - and the
-`ragent_types::guard` shared-guard module added. Earlier v1.0.121
-work: rollback-capture remove-after-restore race fix (CI flake
+_Generated 2026-10-04 (v1.0.125 tree - the
+`os_info` host-introspection tool (GPU adapters, graphics-API versions, physical
+hardware) and its `/osinfo show [--no-probe]` slash command, the research
+`--papers` default flip (scholarly engines now excluded by default), and three
+new tracked research items (`codemigrate`, `connectors`, `vendormarketplace`) -
+alongside earlier `/memory clear`, the session-start connector lifecycle, the
+MCP orphan sweep, and the committed v1.0.122 security and anti-pattern
+remediation sweep folding in the `ANTIPAT.md` M0 plus M2-M7 and `SECTASKS.md`
+MS-05 work - `ragent-team` shim crate removed - and the `ragent_types::guard`
+shared-guard module added. Earlier v1.0.121 work: rollback-capture
+remove-after-restore race fix (CI flake
 `test_rollback_accept_restores_snapshot`), OpenSkills `.agents` discovery, Claude
 marketplace `*-lsp` inline-manifest materialisation, conventional `skills/`
 directory bridging, plus a `/simplify all` pass over the 50-file changed set. Tool
-count is 171 registered (`tool_info` + `commands_info` added in v1.0.120).)_
+count is 172 registered (`os_info` added in v1.0.125; `tool_info` +
+`commands_info` added in v1.0.120).)_

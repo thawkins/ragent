@@ -1,7 +1,7 @@
 //! Tests for T-008: driving engine exclusion from `WebGatherer.disable_scholarly`
 //! (spec `researchnoacc`; FR-006, FR-010, FR-015, NFR-001).
 //!
-//! When `--no-papers` is active the gatherer must steer the search tool away
+//! When scholarly exclusion is active the gatherer must steer the search tool away
 //! from the academically-classified engines *before* any request is dispatched,
 //! rather than querying them and discarding the hits afterwards. Non-academic
 //! engines must keep running, and the hit-level scholarly filter stays in place
@@ -100,7 +100,7 @@ impl ragent_research::WebFetchTool for NoFetch {
 
 #[tokio::test]
 async fn no_papers_excludes_academic_engines_before_search() {
-    // FR-006 / NFR-001: with --no-papers set, the academic engine name must be
+    // FR-006 / NFR-001: with exclusion enabled, the academic engine name must be
     // pushed through the trait so OpenAlex is never queried, and the base
     // (unfiltered) search must not be used at all.
     let search = Arc::new(RecordingSearch::default());
@@ -111,7 +111,7 @@ async fn no_papers_excludes_academic_engines_before_search() {
     assert_eq!(
         search.base_call_count(),
         0,
-        "the unfiltered search must not run while --no-papers is active"
+        "the unfiltered search must not run while exclusion is active"
     );
     let exclusions = search.exclusion_calls();
     assert!(
@@ -158,18 +158,18 @@ async fn without_no_papers_search_is_unchanged() {
     );
     assert!(
         search.exclusion_calls().is_empty(),
-        "no exclusion-aware search should be issued without --no-papers"
+        "no exclusion-aware search should be issued without scholarly exclusion"
     );
     assert_eq!(
         sources.len(),
         2,
-        "both academic and general-web sources must flow through when --no-papers is off: {sources:?}"
+        "both academic and general-web sources must flow through when exclusion is off: {sources:?}"
     );
     assert!(
         sources
             .iter()
             .any(|s| s.path_or_url().contains("openalex.example")),
-        "academic hits must flow through normally when --no-papers is off"
+        "academic hits must flow through normally when exclusion is off"
     );
 }
 

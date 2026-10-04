@@ -42,7 +42,7 @@ fn from_invocation_parses_cli_argv_with_plural_clap_flags() {
 fn from_invocation_preserves_model_and_concurrency_flags() {
     let recorded = "ragent research create deep-dive topic --mode supervisor \
                     --max-concurrent-research-units 4 --summarization-model openai:gpt-4.1-mini \
-                    --clarify --no-papers --evaluate";
+                    --clarify --papers --evaluate";
     let req = ResearchRunRequest::from_invocation(recorded).expect("flags must parse");
     assert_eq!(req.mode.as_deref(), Some("supervisor"));
     assert_eq!(req.max_concurrent_research_units, Some(4));
@@ -51,7 +51,7 @@ fn from_invocation_preserves_model_and_concurrency_flags() {
         Some("openai:gpt-4.1-mini")
     );
     assert_eq!(req.clarify, Some(true));
-    assert!(req.no_scholarly);
+    assert!(req.papers);
     assert_eq!(req.evaluate, Some(true));
 }
 

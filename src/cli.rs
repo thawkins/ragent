@@ -153,12 +153,11 @@ pub enum ResearchCommands {
         /// Keep low-relevance web sources instead of filtering them out.
         #[arg(long)]
         use_low_relevance: bool,
-        /// Disable scholarly search engines (e.g. OpenAlex) during web gathering.
-        ///
-        /// Canonical spelling is `--no-papers` (matching the TUI and docs);
-        /// `--no-scholarly` is kept as a backward-compatible alias (FR-005).
-        #[arg(long = "no-papers", visible_alias = "no-scholarly")]
-        no_scholarly: bool,
+        /// Re-enable scholarly search engines (e.g. OpenAlex) during web
+        /// gathering. Scholarly engines are excluded by default; `--papers`
+        /// opts back in for academic topics.
+        #[arg(long)]
+        papers: bool,
         /// Allow PDF documents from web search or --from-url to be captured
         /// as sources. By default PDF web sources are skipped.
         #[arg(long)]
@@ -370,7 +369,7 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
-            no_scholarly,
+            papers,
             use_pdf,
             oa_enable,
             no_oa,
@@ -418,7 +417,7 @@ pub async fn handle_research_command(
                 use_local,
                 use_specs,
                 use_low_relevance,
-                no_papers: no_scholarly,
+                papers,
                 use_pdf,
                 oa_recovery: match (oa_enable, no_oa) {
                     (true, _) => Some(true),
@@ -578,7 +577,7 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
-            no_papers,
+            papers,
             use_pdf,
             local_concurrency,
             fetch_timeout_secs,
@@ -622,7 +621,7 @@ pub async fn handle_research_command(
                 use_local,
                 use_specs,
                 use_low_relevance,
-                no_scholarly: no_papers,
+                papers,
                 use_pdf,
                 fetch_concurrency,
                 local_concurrency,

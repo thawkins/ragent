@@ -38,7 +38,8 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(cfg.web.fetch_concurrency > 0);
     assert!(cfg.web.fetch_timeout_secs > 0);
     assert!(!cfg.web.use_low_relevance);
-    assert!(!cfg.web.disable_scholarly);
+    // Scholarly engines are excluded unless `--papers` opts them back in.
+    assert!(cfg.web.disable_scholarly);
     assert!(!cfg.web.use_pdf_web_sources);
     assert!(cfg.web.max_search_calls.is_none());
     assert_eq!(
@@ -100,7 +101,7 @@ fn build_session_config_maps_all_explicit_fields() {
         use_local: true,
         use_specs: true,
         use_low_relevance: true,
-        no_scholarly: true,
+        papers: false,
         use_pdf: true,
         open_access_recovery: Some(true),
         fetch_concurrency: Some(20),
@@ -585,47 +586,36 @@ fn build_session_config_no_mode_still_defaults_to_report() {
 // ── `research.exclude_academic_engines` config precedence (FR-012) ──────
 
 #[test]
-fn build_session_config_exclude_academic_engines_from_app_config() {
-    // With no per-run flag, the configured value turns exclusion on.
+fn build_session_config_scholarly_excluded_by_default() {
+    // No config and no flag still excludes scholarly engines: inclusion is
+    // opt-in via `--papers`.
+    let req = ResearchRunRequest::new("noacc-default", "topic");
+    let session = build_session_config(&req, None);
+    assert!(session.web.disable_scholarly);
+
+    let session = build_session_config(&req, Some(&Config::default()));
+    assert!(session.web.disable_scholarly);
+}
+
+#[test]
+fn build_session_config_papers_flag_wins_over_config_on() {
+    // `--papers` requests inclusion, so it overrides an enabled
+    // `research.exclude_academic_engines` config.
+    let mut cfg = Config::default();
+    cfg.research.exclude_academic_engines = true;
+    let req = ResearchRunRequest {
+        papers: true,
+        ..ResearchRunRequest::new("noacc-papers", "topic")
+    };
+    let session = build_session_config(&req, Some(&cfg));
+    assert!(!session.web.disable_scholarly);
+}
+
+#[test]
+fn build_session_config_config_exclusion_survives_without_papers() {
     let mut cfg = Config::default();
     cfg.research.exclude_academic_engines = true;
     let req = ResearchRunRequest::new("noacc-cfg", "topic");
-    let session = build_session_config(&req, Some(&cfg));
-    assert!(session.web.disable_scholarly);
-}
-
-#[test]
-fn build_session_config_exclude_academic_engines_off_by_default() {
-    // No config and no flag leaves scholarly engines enabled.
-    let req = ResearchRunRequest::new("noacc-off", "topic");
-    let session = build_session_config(&req, None);
-    assert!(!session.web.disable_scholarly);
-
-    let session = build_session_config(&req, Some(&Config::default()));
-    assert!(!session.web.disable_scholarly);
-}
-
-#[test]
-fn build_session_config_no_papers_flag_wins_over_config_off() {
-    // The per-run flag has no negative form, so OR expresses the precedence
-    // chain: flag on wins, config off cannot turn it back off.
-    let cfg = Config::default(); // exclude_academic_engines = false
-    let req = ResearchRunRequest {
-        no_scholarly: true,
-        ..ResearchRunRequest::new("noacc-flag", "topic")
-    };
-    let session = build_session_config(&req, Some(&cfg));
-    assert!(session.web.disable_scholarly);
-}
-
-#[test]
-fn build_session_config_no_papers_flag_and_config_on_stay_on() {
-    let mut cfg = Config::default();
-    cfg.research.exclude_academic_engines = true;
-    let req = ResearchRunRequest {
-        no_scholarly: true,
-        ..ResearchRunRequest::new("noacc-both", "topic")
-    };
     let session = build_session_config(&req, Some(&cfg));
     assert!(session.web.disable_scholarly);
 }

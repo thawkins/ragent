@@ -90,7 +90,7 @@ topic can be quoted as one argument.
 | `--use-local` | Include local file sources. |
 | `--use-specs` | Include spec documents as sources. |
 | `--use-low-relevance` | Keep low-relevance hits. |
-| `--no-papers` | Exclude scholarly-paper engines (OpenAlex) before any search request. Alias: `--no-scholarly`. |
+| `--papers` | Include scholarly-paper engines (OpenAlex) in the search sweep. Excluded by default. |
 | `--use-pdf` | Enable PDF extraction. |
 | `--clarify` / `--no-clarify` | Force on or off the clarification stage. Off by default. |
 | `--evaluate` | Enable evaluation scoring of findings. |

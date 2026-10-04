@@ -1381,6 +1381,19 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
             format!("ragent build info ({})", format)
         }
+        "os_info" => {
+            let format = get_str(&["format"]);
+            let probe = input
+                .get("probe")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            match (format, probe) {
+                (Some(format), true) => format!("format: {format}, probe: true"),
+                (Some(format), false) => format!("format: {format}"),
+                (None, true) => "probe: true".to_string(),
+                (None, false) => "(no parameters)".to_string(),
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // 📊 PLOT

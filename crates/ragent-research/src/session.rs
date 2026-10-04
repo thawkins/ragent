@@ -488,9 +488,9 @@ pub struct WebConfig {
     /// every fetched page regardless of its query-match relevance score,
     /// disabling the default filter that discards "Low"/"Very low" sources.
     pub use_low_relevance: bool,
-    /// `--no-papers`: when `true`, the web-gathering phase filters out
-    /// hits from scholarly search engines (e.g. OpenAlex) so only general
-    /// web search results are captured.
+    /// `--papers`: when `true`, the web-gathering phase includes hits from
+    /// scholarly search engines (e.g. OpenAlex). Scholarly engines are
+    /// excluded by default; the flag opts them back in.
     pub disable_scholarly: bool,
     /// `--use-pdf`: when `true`, the web-gathering phase may capture PDF
     /// documents returned by web search or supplied via `--from-url`. By default

@@ -743,6 +743,54 @@ fn test_input_summary_ragent_info_tool() {
 }
 
 #[test]
+fn test_input_summary_os_info_tool_default_shows_no_parameters() {
+    // FR-012 (spec `osinfo`): an `os_info` call with no arguments renders
+    // `(no parameters)`.
+    let summary = tool_input_summary("os_info", &json!({}), "/home/user/project");
+    assert_eq!(summary, "(no parameters)", "got: {summary}");
+    assert!(
+        !summary.contains("[info]"),
+        "Tag should be removed: {summary}"
+    );
+}
+
+#[test]
+fn test_input_summary_os_info_tool_reports_format() {
+    // FR-012: the summary surfaces the selected `format` value.
+    let text = tool_input_summary("os_info", &json!({"format": "text"}), "/home/user/project");
+    assert_eq!(text, "format: text", "got: {text}");
+
+    let json_fmt = tool_input_summary("os_info", &json!({"format": "json"}), "/home/user/project");
+    assert_eq!(json_fmt, "format: json", "got: {json_fmt}");
+}
+
+#[test]
+fn test_input_summary_os_info_tool_null_format_shows_no_parameters() {
+    // FR-012: an explicit `null` `format` is treated the same as omission
+    // (and must not panic).
+    let summary = tool_input_summary("os_info", &json!({"format": null}), "/home/user/project");
+    assert_eq!(summary, "(no parameters)", "got: {summary}");
+}
+
+#[test]
+fn test_input_summary_os_info_tool_reports_probe() {
+    // FR-020: the summary surfaces the optional probe flag when enabled, with
+    // or without an explicit format.
+    let with_format = tool_input_summary(
+        "os_info",
+        &json!({"format": "text", "probe": true}),
+        "/home/user/project",
+    );
+    assert_eq!(
+        with_format, "format: text, probe: true",
+        "got: {with_format}"
+    );
+
+    let probe_only = tool_input_summary("os_info", &json!({"probe": true}), "/home/user/project");
+    assert_eq!(probe_only, "probe: true", "got: {probe_only}");
+}
+
+#[test]
 fn test_input_summary_github_get_actions_tool() {
     let summary = tool_input_summary("github_get_actions", &json!({}), "/project");
     assert!(

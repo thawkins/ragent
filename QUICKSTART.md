@@ -750,13 +750,14 @@ The AI agent can use these tools during a session:
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `ask_user` | Ask the user a clarifying question              | `ask_user`      |
 | `ragent_info`| Report ragent version and build time          | `none`          |
+| `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 | `plot_line`| Render an XY line plot on the message window   | `system`        |
 | `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
 | `plot_pie` | Render a pie/donut chart                       | `system`        |
 
-171 tools are registered in total across 25 categories — run `/tools` in the
+172 tools are registered in total across 25 categories — run `/tools` in the
 TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
 `plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
 graphs, coloured via ANSI, inline in the message window.
@@ -1309,7 +1310,7 @@ Run any of these from the TUI prompt:
 /research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 /research create rust-async "async/await idioms" --evaluate
 /research create brief "Vector databases" --max-concepts 3 --max-findings 10
-/research create local-only "Project error handling" --use-local --no-papers
+/research create local-only "Project error handling" --use-local --papers
 /research create vendors "Managed vector db vendors" --url-cloak
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec specify async-await Add async/await ergonomics --from-research rust-async
@@ -1366,7 +1367,7 @@ ragent research create fireworks "Compare Fireworks AI, Together.ai and Groq" --
 ragent research create rust-async "async/await idioms" --mode supervisor --summarization-model ollama:phi4 --max-concurrent-research-units 3
 ragent research create rust-async "async/await idioms" --evaluate
 ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
-ragent research create local-only "Project error handling" --use-local --no-papers
+ragent research create local-only "Project error handling" --use-local --papers
 ragent research create vendors "Managed vector db vendors" --url-cloak
 ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
@@ -1388,10 +1389,11 @@ default, ordering each most-relevant-first (highest cited source rank, then
 cited count) before truncation. Override per run with `--max-concepts N` /
 `--max-findings N` (also accepted as `max_concepts` / `max_findings` on
 `POST /research`) or persistently via the `research.max_concepts` /
-`research.max_findings` config keys; `0` means unbounded. `--no-papers` (alias
-`--no-scholarly`, config `research.exclude_academic_engines`) excludes
-academically-classified engines (OpenAlex) before any search request is issued,
-and `--oa-enable` / `--no-oa` toggle open-access recovery for the run.
+`research.max_findings` config keys; `0` means unbounded. Scholarly engines are
+excluded from research runs by default; pass `--papers` to include
+academically-classified engines (OpenAlex) in the search sweep
+(`research.exclude_academic_engines` persists the exclusion), and
+`--oa-enable` / `--no-oa` toggle open-access recovery for the run.
 
 Pass `--url-cloak` to write web source URLs as defanged plain text
 (`hxxps://host[.]tld/…` in a code span) in the `Sources` bullets and the
@@ -1869,6 +1871,26 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.125
+
+- **`os_info` host-introspection tool and `/osinfo` command** — the new read-only
+  `os_info` tool (registry 171 -> 172) reports the host OS and Linux
+  distribution, CPU, graphics adapters and graphics-API versions, physical
+  hardware (system/chassis/motherboard/BIOS, storage devices, network
+  interfaces), memory, uptime, and the process environment. It never writes a
+  file, makes a network request, or reads serial numbers, UUIDs, or asset tags.
+  The `probe` parameter defaults to `true`, so every graphics API (including
+  OpenGL, OpenGL ES, and Mesa, read from `glxinfo -B`) is reported with a
+  version; pass `{"probe": false}` for the process-free path.
+- **`/osinfo` slash command family** — `/osinfo show [--no-probe]` renders the
+  same report through the tool's collector/renderer, `/osinfo help` prints the
+  command page, and an unknown subcommand is rejected with the usage line.
+- **Research `--papers` replaces `--no-papers` / `--no-scholarly`** — scholarly
+  backends (OpenAlex) are now excluded from research web sweeps by default; the
+  new `--papers` flag opts them back in for academic topics.
+  `research.exclude_academic_engines` persists the exclusion, and `--papers`
+  overrides it for a run.
+
 ## Version 1.0.124
 
 - **`/memory clear` — clear this project's structured memories behind a
@@ -2152,11 +2174,10 @@ on top of `6cf0b60f` (MS-04).
   detail** — `/research create` caps its `## Concepts` and `## Findings` lists
   at 5 and 20 by default, reordering most-relevant-first before truncation
   (`--max-concepts N` / `--max-findings N`, or `research.max_concepts` /
-  `research.max_findings`; `0` = unbounded); `--no-papers` (alias
-  `--no-scholarly`) excludes academically-classified engines before any search
-  request is dispatched; `--oa-enable` / `--no-oa` toggle open-access recovery
-  per run; and the per-engine progress table breaks exclusions and fetch
-  failures down by reason/cause.
+  `research.max_findings`; `0` = unbounded); scholarly engines are excluded by
+  default and `--papers` opts them back in; `--oa-enable` / `--no-oa` toggle
+  open-access recovery per run; and the per-engine progress table breaks
+  exclusions and fetch failures down by reason/cause.
 
 ## Version 1.0.104
 

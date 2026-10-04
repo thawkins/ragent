@@ -1,5 +1,121 @@
 # Changelog
 
+## [1.0.125] - 2026-10-04
+
+### Added
+
+- **`os_info` now reports graphics adapters (GPU), including integrated
+  graphics** (spec `osinfo` FR-019). The report gains a `## GPU` section (text)
+  and a `gpus` array (JSON): every detected adapter's best-effort name (e.g.
+  `Intel Corporation TigerLake-LP GT2 [Iris Xe Graphics]`), vendor, PCI
+  vendor/device ids, bound kernel driver (`i915`), a coarse
+  `integrated`/`discrete`/`virtual`/`unknown` classification, and dedicated VRAM
+  where exposed. Linux enumerates the read-only DRM sysfs tree under
+  `/sys/class/drm` and resolves names from `pci.ids`; non-Linux hosts, or hosts
+  with no DRM card, render the `Adapters: unknown` placeholder (empty `gpus`
+  array). The section stays read-only (no process, no write, no network) and is
+  shared by `/osinfo show` through the tool's collector/renderer. `sysinfo` is
+  unchanged; no new dependency is added.
+- **`os_info` now detects common graphics-API support** (spec `osinfo` FR-020).
+  The `## GPU` section gains an `- **APIs**: ...` line and the JSON gains a
+  `gpu_apis` array listing the graphics programming APIs the host can support,
+  from the fixed vocabulary `Direct3D`, `DirectX`, `Metal`, `OpenGL`,
+  `OpenGL ES`, `Mesa`, `Vulkan`, `OptiX`, `CUDA`, `ROCm`, emitted in that order.
+  The list is platform-scoped: `Direct3D`/`DirectX` are reported only on
+  Windows, `Metal` only on macOS.
+- **`os_info` now reports the version of each detected graphics API** (spec
+  `osinfo` FR-021). Each `gpu_apis` element is an object carrying a `name` and a
+  best-effort `version` (e.g. `{"name": "Vulkan", "version": "1.4.354"}`), and
+  the text `- **APIs**` line renders `Vulkan 1.4.354` (bare name when the version
+  is unknown). The version is read from read-only artefacts - the Vulkan ICD
+  manifest `api_version`, the CUDA/ROCm version files, the OptiX header, and the
+  macOS Metal plist - with no process spawned. With `{"probe": true}` the version
+  is also read from the vendor diagnostics: `vulkaninfo` for Vulkan and
+  `glxinfo -B` for OpenGL, OpenGL ES, and Mesa (each at most once per report).
+- **`os_info` now reports physical hardware: system model, chassis, motherboard,
+  firmware, storage devices, and network interfaces** (spec `osinfo` FR-022,
+  FR-023, FR-024, FR-025). The report gains a `## Hardware` section (text) and
+  the flat JSON gains identity keys (`system_vendor`, `system_model`,
+  `system_version`, `product_family`, `chassis_type`, `chassis_vendor`,
+  `board_vendor`, `board_name`, `board_version`, `bios_vendor`, `bios_version`,
+  `bios_date`) plus `storage_devices` and `network_interfaces` arrays. System
+  identity (e.g. `LENOVO` / `20W1S20H00` / `ThinkPad T14 Gen 2i`), the chassis
+  type rendered as its SMBIOS label (`Notebook`), and the motherboard and
+  firmware (BIOS) vendor/version/date come from the read-only Linux DMI sysfs
+  tree (`/sys/class/dmi/id`); storage devices (name, vendor, model, capacity,
+  `nvme`/`ssd`/`hdd` class) from `/sys/block` (virtual `ram*`/`zram*`/`loop*`/
+  `dm-*`/`md*`/`sr*` excluded); network interfaces (name, MAC, operational state,
+  link speed, loopback flag) from `/sys/class/net`. Non-Linux hosts, or hosts
+  without these trees, render `unknown` placeholders and `none detected` device
+  lists. Serial numbers, UUIDs, and asset tags are never read, so a report can be
+  shared safely.
+- **`--papers` research flag** - re-enables scholarly search engines for a
+  `/research create` run (root CLI, TUI, and the `papers` field on
+  `POST /research`).
+- **`/osinfo` slash command family added** (spec `osinfo` FR-014). `/osinfo show
+  [--no-probe]` renders the host report through the `os_info` tool's own
+  collector/renderer (so the command and the tool agree), `/osinfo help` prints
+  the command page, and an unknown subcommand is rejected with the usage line.
+  Read-only: it writes no file, makes no network request, and consults no
+  provider; registered in `SLASH_COMMANDS`, the agent command catalog, the help
+  index, and autocomplete.
+- **`sysinfo` 0.38 workspace dependency** (`system` feature only) and the
+  `os_info` tool module (`crates/ragent-agent/src/tool/os_info.rs`), registered
+  in `create_default_registry` (tool count 171 -> 172), with external tests
+  (`crates/ragent-agent/tests/test_os_info_tool.rs`) and TUI tests
+  (`tests/test_osinfo_command.rs`, `tests/test_osinfo_registration.rs`,
+  `tests/test_tool_display.rs`).
+- **Spec `osinfo`** now on disk (`specs/osinfo/{SPEC.md,PLAN.md,TESTPLAN.md}`).
+- **Research outputs added to the tracked tree.** Three new self-contained
+  research items - `research/codemigrate/`, `research/connectors/`, and
+  `research/vendormarketplace/` - each with `RESEARCH.md`, `CORPA.md`, and a
+  `sources/` tree; `research/INDEX.md` now lists 15 items.
+
+### Changed
+
+- **Research excludes scholarly engines by default; `--papers` opts them back
+  in.** `/research create` (and `ragent research create`) no longer need
+  `--no-papers`: academically-classified backends (OpenAlex) are excluded from
+  the web-gathering sweep unless `--papers` is supplied. The old `--no-papers` /
+  `--no-scholarly` spellings are removed from every entry point (root CLI, TUI
+  hand parser, HTTP `POST /research`, catalog/`SLASH_COMMANDS` mirrors), and
+  `ResearchRunRequest` now carries a `papers: bool` field in place of
+  `no_scholarly`; the HTTP request body takes `papers` and the recorded
+  invocation summary emits `--papers`. `research.exclude_academic_engines` still
+  exists but can only persist the exclusion - it no longer governs the default,
+  and `--papers` overrides it for a run. Tests, `/research` autocomplete and
+  parameter hints, and the docs (`docs/howtos/research.md`,
+  `docs/howtos/slashcommands/research.md`, `docs/howtos/config.md`, `README.md`,
+  `QUICKSTART.md`, `TUI-QUICKSTART.md`, `SPEC.md`) were updated to the new
+  spelling.
+- **Graphics-API version reporting is now on by default.** OpenGL, OpenGL ES,
+  and Mesa have no read-only version artefact, so `/osinfo show` and a default
+  `os_info` call previously omitted their versions (only Vulkan showed one, from
+  its ICD manifest). Now the default `os_info` call runs the fixed,
+  timeout-bounded graphics diagnostics (`vulkaninfo`, `glxinfo`, `nvidia-smi`,
+  `rocminfo`, `system_profiler`), so `/osinfo show` reports every API with its
+  version on this host: `OpenGL 4.6, OpenGL ES 3.2, Mesa 26.2.3, Vulkan 1.4.354`.
+  The `os_info` `probe` parameter defaults to `true`; pass `{"probe": false}`
+  (or `/osinfo show --no-probe`) for a fully process-free report that reads only
+  read-only files. The diagnostics only read host state (no writes, no network)
+  and each is still run at most once per report under a 2 s timeout, degrading
+  to "no signal" on a missing tool, non-zero exit, or timeout. Spec `osinfo`
+  FR-009/FR-010/FR-014/FR-015/FR-016/FR-017/FR-020/FR-021 were updated to record
+  the new default and the `--no-probe` opt-out; `/osinfo help` documents both
+  modes, and `/osinfo` autocomplete offers `show`, `--no-probe`, and `help`.
+
+### Fixed
+
+- **`os_info` reports every graphics API version by default.** The default
+  `os_info` call (and `/osinfo show`) now runs the allowlisted, timeout-bounded
+  vendor diagnostics so OpenGL, OpenGL ES, and Mesa - which expose no read-only
+  version artefact - are reported with their version alongside Vulkan; pass
+  `{"probe": false}` (or `/osinfo show --no-probe`) for the process-free path.
+- **Research scholarly-exclusion reporting.** Progress rows and gather-log lines
+  now read "scholarly engine excluded (`--papers` not set)" instead of referring
+  to the retired flag, and the cache key folds the new `papers` flag so an
+  inclusion run never reuses an exclusion-run result.
+
 ## [1.0.124] - 2026-10-02
 
 ### Added

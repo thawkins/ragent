@@ -1490,7 +1490,7 @@ Research subsystem configuration.
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `open_access_recovery` | `bool` | `false` | Enable open-access recovery via Unpaywall and Europe PMC for short scholarly sources (FR-011). |
-| `exclude_academic_engines` | `bool` | `false` | Persistently exclude academically-classified search engines (OpenAlex) from research runs (spec `researchnoacc` FR-012). A per-run `--no-papers` takes precedence. |
+| `exclude_academic_engines` | `bool` | `false` | Keep academically-classified search engines (OpenAlex) excluded from research runs (spec `researchnoacc` FR-012). Scholarly engines are already excluded by default; a per-run `--papers` opts them back in and takes precedence. |
 | `contact_email` | `Option<String>` | `None` | Contact email required by Unpaywall's terms of service (FR-012). |
 | `oa_min_full_text_chars` | `usize` | `1000` | Minimum full-text length (chars) that triggers OA recovery. |
 | `max_concepts` | `usize` | `5` | Maximum number of concepts rendered in the report's `## Concepts` block (spec `researchmax` FR-008). A per-run `--max-concepts` takes precedence; `0` means unbounded. |
@@ -1510,9 +1510,10 @@ so far. See [`docs/howtos/research.md`](research.md) for the full research workf
 `true` when at default values.
 
 `exclude_academic_engines` also uses OR semantics on merge and is omitted from
-serialized output when `false`. When enabled, research runs pass
-`exclude_engines = ["openalex"]` to `mf_search` so OpenAlex is never queried; a
-per-run `--no-papers` (alias `--no-scholarly`) takes precedence over the config
+serialized output when `false`. Scholarly engines are excluded from research
+runs by default; when enabled, the setting makes that exclusion explicit and
+research runs pass `exclude_engines = ["openalex"]` to `mf_search` so OpenAlex
+is never queried; a per-run `--papers` takes precedence over the config
 value. See [`docs/howtos/research.md`](research.md).
 
 A per-run `--oa-enable` / `--no-oa` flag overrides

@@ -57,7 +57,7 @@ fn parse_create_with_sources_dir_and_template() {
 #[test]
 fn parse_create_with_flags() {
     let cmd = ResearchCliCommand::parse(
-        "create bar topic --use-local --use-specs --use-low-relevance --no-papers --use-pdf",
+        "create bar topic --use-local --use-specs --use-low-relevance --papers --use-pdf",
     );
     match cmd {
         ResearchCliCommand::Create {
@@ -66,7 +66,7 @@ fn parse_create_with_flags() {
             use_local,
             use_specs,
             use_low_relevance,
-            no_papers,
+            papers,
             use_pdf,
             ..
         } => {
@@ -75,7 +75,7 @@ fn parse_create_with_flags() {
             assert!(use_local);
             assert!(use_specs);
             assert!(use_low_relevance);
-            assert!(no_papers);
+            assert!(papers);
             assert!(use_pdf);
         }
         other => panic!("unexpected variant: {other:?}"),
@@ -83,18 +83,17 @@ fn parse_create_with_flags() {
 }
 
 #[test]
-fn parse_create_accepts_no_scholarly_alias() {
-    // FR-005: the shared parser accepts both `--no-papers` (canonical) and
-    // `--no-scholarly` (legacy alias) so CLI, TUI and HTTP invocations all
-    // toggle the same flag.
-    for flag in ["--no-papers", "--no-scholarly"] {
-        let cmd = ResearchCliCommand::parse(&format!("create alias topic {flag}"));
-        match cmd {
-            ResearchCliCommand::Create { no_papers, .. } => {
-                assert!(no_papers, "{flag} must set no_papers")
-            }
-            other => panic!("unexpected variant for {flag}: {other:?}"),
+fn parse_create_papers_defaults_off() {
+    // FR-005: scholarly engines are excluded unless `--papers` is supplied.
+    match ResearchCliCommand::parse("create default topic") {
+        ResearchCliCommand::Create { papers, .. } => assert!(!papers),
+        other => panic!("unexpected variant: {other:?}"),
+    }
+    match ResearchCliCommand::parse("create papers topic --papers") {
+        ResearchCliCommand::Create { papers, .. } => {
+            assert!(papers, "--papers must opt scholarly engines back in")
         }
+        other => panic!("unexpected variant: {other:?}"),
     }
 }
 

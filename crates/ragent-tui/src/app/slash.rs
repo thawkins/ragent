@@ -847,6 +847,11 @@ impl App {
             "status" => {
                 vec!["clear".to_string()]
             }
+            "osinfo" => vec![
+                "show".to_string(),
+                "--no-probe".to_string(),
+                "help".to_string(),
+            ],
             "queue" => {
                 vec![
                     "list".to_string(),
@@ -950,7 +955,7 @@ impl App {
                     "--use-specs".to_string(),
                     "--use-low-relevance".to_string(),
                     "--use-pdf".to_string(),
-                    "--no-papers".to_string(),
+                    "--papers".to_string(),
                     "--oa-enable".to_string(),
                     "--no-oa".to_string(),
                     "--web-time".to_string(),
@@ -1572,6 +1577,109 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 self.status = "telemetry: usage".to_string();
             }
         }
+    }
+
+    /// Dispatch the `/osinfo` slash command family (spec `osinfo` FR-014).
+    ///
+    /// `execute_slash_command_inner` routes `/osinfo <args>` here. The first
+    /// whitespace-separated token (lowercased) selects the subcommand: the
+    /// empty string and the help aliases `help`/`--help`/`-h` render the help
+    /// page (FR-015, [`Self::handle_osinfo_help`]); `show` renders the host
+    /// report (FR-016, [`Self::handle_osinfo_show`]); any other token is
+    /// rejected with the valid-subcommand list (FR-014). A `show` invocation
+    /// may carry a trailing `--no-probe` / `--read-only` flag that forces the
+    /// process-free collection path (FR-017).
+    ///
+    /// Read-only guarantee (FR-017): dispatch never writes a file, makes a
+    /// network request, or mutates session/config state. `show` runs the
+    /// allowlisted, timeout-bounded vendor diagnostics by default so every
+    /// graphics API gets its version (`--no-probe` opts out); those
+    /// diagnostics only read host state.
+    fn handle_osinfo_command(&mut self, args: &str) {
+        let mut tokens = args.split_whitespace();
+        let sub = tokens.next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "help" | "--help" | "-h" => self.handle_osinfo_help(),
+            "show" => {
+                let probe = !tokens.any(|token| {
+                    matches!(
+                        token.to_lowercase().as_str(),
+                        "--no-probe" | "--read-only" | "--no-diagnostics"
+                    )
+                });
+                self.handle_osinfo_show(probe);
+            }
+            _ => {
+                self.append_assistant_text(
+                    "From: /osinfo\n\nUnknown subcommand. \
+                     Usage: `/osinfo show [--no-probe]|help`",
+                );
+                self.status = "osinfo: usage".to_string();
+            }
+        }
+    }
+
+    /// Render the `/osinfo help` page (spec `osinfo` FR-015).
+    ///
+    /// Reached from [`Self::handle_osinfo_command`] for the empty argument and
+    /// every help alias. Documents the `show` and `help` subcommands in a table,
+    /// states the read-only guarantee and the two collection modes, and gives a
+    /// worked example. Emits the `From: /osinfo help` prefix and sets the status
+    /// bar to `osinfo: help`.
+    fn handle_osinfo_help(&mut self) {
+        self.append_assistant_text(
+            "From: /osinfo help\n\n\
+             ## /osinfo - Host OS and hardware report\n\n\
+             `/osinfo` reports read-only information about the host operating \
+             system and hardware (OS identity and Linux distribution, CPU, \
+             graphics adapters and graphics-API support with version numbers, \
+             physical hardware - system/chassis/motherboard/BIOS identity plus \
+             storage devices and network interfaces - \
+             memory/uptime, and the ragent process \
+             environment). It writes no files and makes no network request, and \
+             never reports serial numbers, UUIDs, or asset tags.\n\n\
+             By default `/osinfo show` runs the host's own graphics diagnostics \
+             (`vulkaninfo`, `glxinfo`, `nvidia-smi`, `rocminfo`, `system_profiler`) \
+             under a hard timeout so every graphics API is reported with its \
+             version - OpenGL, OpenGL ES, and Mesa have no read-only version file \
+             and can only be read this way. The diagnostics only read host state. \
+             Pass `--no-probe` to skip them for a fully process-free report.\n\n\
+             | Subcommand | Description |\n\
+             |---|---|\n\
+             | `/osinfo show` | Render the host OS and hardware report (runs the \
+             bounded graphics diagnostics) |\n\
+             | `/osinfo show --no-probe` | Render the report without running any \
+             external command |\n\
+             | `/osinfo help` | Show this help (bare `/osinfo` does the same) |\n\n\
+             Examples:\n\
+             - `/osinfo show` - print the report, including each graphics API's \
+             version, into the message window.\n\
+             - `/osinfo show --no-probe` - print the report without spawning any \
+             diagnostics process.\n\
+             - `/osinfo help` - show this page (also `/osinfo --help` and \
+             `/osinfo -h`).",
+        );
+        self.status = "osinfo: help".to_string();
+    }
+
+    /// Render the `/osinfo show` host report (spec `osinfo` FR-016, FR-018).
+    ///
+    /// Reached from [`Self::handle_osinfo_command`] for the `show` subcommand.
+    /// Collects host data with, and renders through, the `os_info` tool's own
+    /// collector and text renderer (FR-018) so the slash command and the tool
+    /// report identical values; only the `From: /osinfo show` prefix is added.
+    ///
+    /// `probe` mirrors the tool's `probe` parameter (FR-020): `true` (the
+    /// default) runs the allowlisted, timeout-bounded vendor diagnostics so
+    /// OpenGL, OpenGL ES, and Mesa get their version, while `false`
+    /// (`/osinfo show --no-probe`) stays on the process-free path. Either way
+    /// this writes no file, makes no network request, and consults no provider
+    /// (NFR-004); the diagnostics themselves only read host state (FR-017).
+    fn handle_osinfo_show(&mut self, probe: bool) {
+        let info = ragent_agent::tool::os_info::OsInfo::collect_with_probe(probe);
+        let report = ragent_agent::tool::os_info::render_text(&info);
+        self.append_assistant_text(&format!("From: /osinfo show\n\n{report}"));
+        self.status = "osinfo: show".to_string();
     }
 
     /// Handle the `/alog` slash command (activity log UI).
@@ -2877,6 +2985,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "template" => handle_template_command(self, args),
             "goal" => handle_goal_command(self, args),
             "telemetry" => self.handle_telemetry_command(args),
+            "osinfo" => self.handle_osinfo_command(args),
             "about" => {
                 let about = format!(
                     "  ragent - AI Coding Agent\n\

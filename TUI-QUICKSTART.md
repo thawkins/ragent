@@ -4,7 +4,28 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (uncommitted, on top of v1.0.122)
+## Highlights (v1.0.125)
+
+- **`/osinfo` host report** — `/osinfo show [--no-probe]` renders read-only OS,
+  CPU, GPU, physical-hardware, memory, uptime, and process-environment details
+  into the message window, through the `os_info` tool's own collector/renderer
+  so the command and the tool agree. It runs the host's bounded graphics
+  diagnostics by default so every graphics API gets a version; `--no-probe`
+  stays fully process-free. `/osinfo help` prints the command page. Nothing is
+  written, no network request is made, and no provider is consulted.
+- **`os_info` tool** — the LLM can read the same host report directly through
+  the new `os_info` tool (registry count 171 -> 172); it reports OS identity and
+  Linux distribution, CPU, GPU adapters and graphics-API versions, physical
+  hardware (system/chassis/motherboard/BIOS, storage devices, network
+  interfaces), memory, uptime, and process environment, always read-only and
+  never leaking serial numbers, UUIDs, or asset tags.
+- **Research `--papers` replaces `--no-papers`** — scholarly search engines
+  (OpenAlex) are now excluded from `/research create` by default; pass
+  `--papers` to include them for academic topics.
+  `research.exclude_academic_engines` still persists the exclusion, and
+  `--papers` overrides it for a run.
+
+## Highlights (v1.0.124)
 
 - **`/memory clear`** — clear this project's structured memories behind a
   `Yes`/`No` confirmation dialog (`No` selected by default). Only memories
@@ -215,7 +236,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   the LLM HTTP client, custom-agent discovery, and `ragent-research`; no
   behaviour change.
 
-## Highlights (uncommitted, on top of v1.0.106)
+## Highlights (v1.0.106)
 
 - **`/spec govcreate` — author a spec from an architecture document** —
   `/spec govcreate <spec-id> <content-ref> <target-folder> [--language ..]
@@ -258,9 +279,9 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   `--max-findings N` (autocomplete and parameter hints updated; `0` =
   unbounded) or persistently via `research.max_concepts` /
   `research.max_findings`.
-- **Scholarly-engine exclusion** — `/research create --no-papers` (alias
-  `--no-scholarly`) excludes academically-classified backends (OpenAlex) before
-  any search request is dispatched; persist it with
+- **Scholarly-engine inclusion** — scholarly backends (OpenAlex) are excluded
+  from `/research create` by default; pass `--papers` to include them in the
+  search sweep, or keep the exclusion explicit with
   `research.exclude_academic_engines`.
 - **Per-engine progress table detail** — the width-sweep table now shows *why*
   candidates were dropped (five exclusion-reason columns) and *how* fetches

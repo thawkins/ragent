@@ -279,30 +279,18 @@ fn oa_flags_parse_independently() {
 }
 
 #[test]
-fn no_papers_flag_and_legacy_alias_both_parse() {
-    // FR-005: `--no-papers` is the canonical spelling; `--no-scholarly`
-    // is a backward-compatible alias mapping to the same field.
-    let cli = TestCli::parse_from(["research", "create", "--no-papers", "my-name", "my topic"]);
-    match cli.command {
-        ResearchCommands::Create { no_scholarly, .. } => assert!(no_scholarly),
-        other => panic!("expected Create, got {other:?}"),
-    }
-
-    let cli = TestCli::parse_from([
-        "research",
-        "create",
-        "--no-scholarly",
-        "my-name",
-        "my topic",
-    ]);
-    match cli.command {
-        ResearchCommands::Create { no_scholarly, .. } => assert!(no_scholarly),
-        other => panic!("expected Create, got {other:?}"),
-    }
-
+fn papers_flag_defaults_to_excluding_scholarly() {
+    // FR-005: scholarly engines are excluded by default; `--papers` opts
+    // them back in.
     let cli = TestCli::parse_from(["research", "create", "my-name", "my topic"]);
     match cli.command {
-        ResearchCommands::Create { no_scholarly, .. } => assert!(!no_scholarly),
+        ResearchCommands::Create { papers, .. } => assert!(!papers),
+        other => panic!("expected Create, got {other:?}"),
+    }
+
+    let cli = TestCli::parse_from(["research", "create", "--papers", "my-name", "my topic"]);
+    match cli.command {
+        ResearchCommands::Create { papers, .. } => assert!(papers),
         other => panic!("expected Create, got {other:?}"),
     }
 }

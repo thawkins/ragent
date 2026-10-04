@@ -3595,9 +3595,9 @@ fn test_slash_config_subcommand_suggestions_include_save_and_list() {
 }
 
 #[test]
-fn test_research_completion_and_help_list_no_papers() {
+fn test_research_completion_and_help_list_papers() {
     // researchnoacc FR-005: `/research` autocomplete and the parameter hint
-    // must advertise the canonical `--no-papers` scholarly-exclusion flag.
+    // must advertise the canonical `--papers` scholarly-inclusion flag.
     let mut app = make_app();
     app.input = "/research".to_string();
     app.input_cursor = app.input.chars().count();
@@ -3615,8 +3615,8 @@ fn test_research_completion_and_help_list_no_papers() {
         .expect("menu should contain a /research entry");
 
     assert!(
-        entry.suggestions.contains(&"--no-papers".to_string()),
-        "research suggestions should include '--no-papers': {:?}",
+        entry.suggestions.contains(&"--papers".to_string()),
+        "research suggestions should include '--papers': {:?}",
         entry.suggestions
     );
     let hint = entry
@@ -3624,8 +3624,8 @@ fn test_research_completion_and_help_list_no_papers() {
         .as_deref()
         .expect("research entry should carry a parameter hint");
     assert!(
-        hint.contains("--no-papers"),
-        "research parameter hint should list '--no-papers': {hint}"
+        hint.contains("--papers"),
+        "research parameter hint should list '--papers': {hint}"
     );
 }
 

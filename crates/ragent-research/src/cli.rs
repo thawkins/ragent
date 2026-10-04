@@ -93,11 +93,10 @@ pub enum ResearchCliCommand {
         /// threshold; this flag disables that filter so every fetched page is
         /// retained regardless of relevance score.
         use_low_relevance: bool,
-        /// `--no-papers` - disable scholarly search engines (e.g. OpenAlex)
-        /// during the web-gathering phase. When set, hits from scholarly
-        /// backends are filtered out so only general web search results are
-        /// captured.
-        no_papers: bool,
+        /// `--papers` - include scholarly search engines (e.g. OpenAlex) during
+        /// the web-gathering phase. Scholarly engines are excluded by default;
+        /// this flag opts back in so their hits are captured.
+        papers: bool,
         /// `--use-pdf` - allow PDF documents returned by web search or
         /// `--from-url` to be captured as sources. By default PDF web sources
         /// are skipped because they require extra extraction time and are often
@@ -318,7 +317,7 @@ impl ResearchCliCommand {
         let mut use_local = false;
         let mut use_specs = false;
         let mut use_low_relevance = false;
-        let mut no_papers = false;
+        let mut papers = false;
         let mut use_pdf = false;
         let mut oa_recovery: Option<bool> = None;
         let mut max_web_results: Option<usize> = None;
@@ -466,7 +465,7 @@ impl ResearchCliCommand {
                 "--use-local" => use_local = true,
                 "--use-specs" => use_specs = true,
                 "--use-low-relevance" => use_low_relevance = true,
-                "--no-papers" | "--no-scholarly" => no_papers = true,
+                "--papers" => papers = true,
                 "--use-pdf" => use_pdf = true,
                 "--oa-enable" => oa_recovery = Some(true),
                 "--no-oa" => oa_recovery = Some(false),
@@ -513,7 +512,7 @@ impl ResearchCliCommand {
             use_local,
             use_specs,
             use_low_relevance,
-            no_papers,
+            papers,
             use_pdf,
             oa_recovery,
             fetch_timeout_secs,
@@ -738,7 +737,7 @@ Common create flags:
   --use-local                                        Include local file sources
   --use-specs                                        Include spec documents as sources
   --use-low-relevance                                Keep low-relevance web hits
-  --no-papers                                        Exclude scholarly-paper engines (alias --no-scholarly)
+  --papers                                           Include scholarly-paper engines (excluded by default)
   --use-pdf                                          Enable PDF extraction
   --oa-enable                                        Force open-access recovery on
   --no-oa                                            Force open-access recovery off

@@ -205,10 +205,11 @@ struct CreateResearchRequest {
     /// filtering them out.
     #[serde(default)]
     use_low_relevance: bool,
-    /// `--no-papers` (alias `--no-scholarly`): disable scholarly search engines
-    /// (e.g. OpenAlex) during web gathering (spec `researchnoacc` FR-009).
+    /// `--papers`: include scholarly search engines (e.g. OpenAlex) during web
+    /// gathering. Scholarly engines are excluded by default (spec
+    /// `researchnoacc` FR-009).
     #[serde(default)]
-    no_scholarly: bool,
+    papers: bool,
     /// `--use-pdf`: allow PDF documents returned by web search or `--from-url`
     /// to be captured as sources. By default PDF web sources are skipped.
     #[serde(default)]
@@ -363,10 +364,10 @@ impl CreateResearchRequest {
         if self.use_low_relevance {
             parts.push("--use-low-relevance".to_string());
         }
-        if self.no_scholarly {
+        if self.papers {
             // Emit the canonical spelling so a replayed invocation parses on
             // the root CLI, the hand parser, and the TUI (FR-005, FR-009).
-            parts.push("--no-papers".to_string());
+            parts.push("--papers".to_string());
         }
         if self.use_pdf {
             parts.push("--use-pdf".to_string());
@@ -461,7 +462,7 @@ impl CreateResearchRequest {
             use_local: self.use_local,
             use_specs: self.use_specs,
             use_low_relevance: self.use_low_relevance,
-            no_scholarly: self.no_scholarly,
+            papers: self.papers,
             use_pdf: self.use_pdf,
             open_access_recovery: self.oa_recovery,
             fetch_concurrency: self.fetch_concurrency,
