@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 172 registered tools across 25 categories:
+- **Comprehensive tool system** — 158 registered tools across 23 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -56,12 +56,6 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
         graphics-API versions, physical hardware — system/chassis/motherboard/
         BIOS identity plus storage devices and network interfaces — memory,
         uptime, and process environment; also `/osinfo show`)
-      - **Stocks & currency** — stock_quote, stock_history, stock_fundamentals,
-        stock_search, stock_options, currency_rate, currency_history. Free Yahoo
-        Finance is the default; Alpha Vantage can be configured in `ragent.json`.
-      - **Plotting** — plot_line, plot_scatter, plot_bar, plot_histogram,
-        plot_pie, plot_heatmap render ASCII-art graphs (with ANSI colours)
-        inline in the message window via `ratatui-plt`
       - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
     - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
@@ -473,7 +467,7 @@ The project is a Cargo workspace built from 17 focused crates:
 | `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
 | `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
 | `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
-| `ragent-tools-extended` | Extended document/web/memory/codeindex/plot tools                                                                                                                                                      |
+| `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
 | `ragent-tools-vcs`      | GitHub and GitLab tool surface                                                                                                                                                                    |
 | `ragent-tui`            | Ratatui terminal interface                                                                                                                                                                        |
 | `ragent-types`          | Shared IDs, events, messages, and sanitization primitives                                                                                                                                         |
@@ -525,7 +519,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.125** — The core architecture, tool system (172 tools across 25 categories), TUI,
+**v1.0.125** — The core architecture, tool system (158 tools across 23 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
@@ -975,12 +969,6 @@ Recent highlights:
   config writes (`/codeindex off`, `/tools`, ...) are immediately visible to
   subsequent loads in the same process — this fixes the v1.0.80 CI failure
   (run 34023696563)
-
-- **`plot_*` tool family** — six scientific/terminal plotting tools
-  (`plot_line`, `plot_scatter`, `plot_bar`, `plot_histogram`, `plot_pie`,
-  `plot_heatmap`) render ASCII-art graphs — with real ANSI colours — inline in
-  the TUI message window via `ratatui-plt`; GPL-3.0 dependency explicitly
-  accepted and allow-listed in `deny.toml` (v1.0.80)
 
 - **Research web-search quota controls** — `--max-search-calls N` places a hard,
   run-scoped cap on total web-search calls per research run, shared via `Arc` across

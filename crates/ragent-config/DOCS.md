@@ -28,7 +28,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **config** — Core configuration loading, merging, and all top-level config types.
 - **dir_lists** — Runtime directory/file glob allowlist/denylist management for permissions.
 - **edit_log** — Edit-operation logging toggle with config persistence.
-- **finance** — Paid finance-provider configuration (Yahoo/Alpha Vantage).
 - **permission** — Permission checking and access-control primitives.
 - **telemetry** — OpenTelemetry metrics export configuration.
 - **trigger** — Dynamic trigger rule system and MCP notification injection configuration.
@@ -104,11 +103,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 ### Module: edit_log
 
 - **is_enabled** / **set_enabled** / **toggle** / **persist_edit_log** / **sync_from_config** / **toggle_persist** (fns) — Edit-log state management.
-
-### Module: finance
-
-- **FinanceProviderConfig** (struct) — Finance provider selection and credentials.
-- **is_paid_provider_configured** / **is_explicitly_configured** / **yahoo_fallback_enabled** (methods) — Provider state queries.
 
 ### Module: permission
 

@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.126] - 2026-10-04
+
+### Removed
+
+- **Finance tools removed** — the eight `stock_*` / `currency_*` tools
+  (`stock_quote`, `stock_history`, `stock_fundamentals`, `stock_search`,
+  `stock_options`, `stock_recommendations`, `currency_rate`, `currency_history`)
+  and their whole dependency chain are gone. Removed the
+  `ragent-tools-extended::finance` module (providers `YahooFinanceProvider`,
+  `PaidProvider`, `TwelveDataProvider`, cache, rate limiter, throttle, models,
+  tools), the `ragent-config::finance` module and the `Config.finance` field and
+  `tool_visibility.finance` switch, the TUI result formatters, all finance tests
+  and fixtures, the `specs/yfinance` spec, the `docs/howtos/finance.md` how-to
+  (plus its PDFs and index entries), and the finance skill packs. Dependencies
+  dropped: `yfinance-rs`, `paft-decimal`, `paft-money`, and the now-unused
+  `rand` direct dependency in `ragent-tools-extended`. Registered tool count
+  falls 172 -> 164 (24 categories). Configs that still carry a `finance` block
+  are ignored (the field is gone; unknown keys are tolerated).
+- **Plot tools removed** — the six `plot_*` tools (`plot_line`, `plot_scatter`,
+  `plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) and their whole
+  dependency chain are gone. Removed the `ragent-tools-extended::plot` module,
+  the TUI inline-plot rendering (`plot_output_lines`, `ansi_line_to_styled`,
+  `apply_sgr`, and the plot input/result formatters in `message_widget.rs` and
+  `layout.rs`), the plot tool tests, the `docs/howtos/tools/plot.md` how-to (plus
+  its PDF and index entry), and the GPL-3.0 `ratatui-plt` license allow-list
+  entry. Dependencies dropped: `ratatui-plt` and the crate-local `ratatui`
+  declaration in `ragent-tools-extended`. Registered tool count falls
+  164 -> 158 (23 categories).
+
 ## [1.0.125] - 2026-10-04
 
 ### Added

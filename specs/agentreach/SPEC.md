@@ -162,7 +162,7 @@ checker, and tool-visibility system treat them identically to all other tools.
 
 The system **shall** expose a `tool_visibility.reach` boolean config switch in
 `ragent-config::ToolVisibilityConfig`, defaulting to `true`, governed by the
-same `set_hidden()` mechanism as `office`, `github`, and `finance`.
+same `set_hidden()` mechanism as `office`, `github`, and `gitlab`.
 
 ### FR-003 — Event-driven
 

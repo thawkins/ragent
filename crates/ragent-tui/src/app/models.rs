@@ -2298,7 +2298,7 @@ impl App {
     ///   (name `plugin_<id>_<tool>`);
     /// - `visibility:<switch>` when the tool belongs to a tool-family
     ///   visibility switch (`office`, `github`, `gitlab`, `teams`, `agents`,
-    ///   `plan`, `codeindex`, `masterfetch`, `browser`, `finance`);
+    ///   `plan`, `codeindex`, `masterfetch`, `browser`);
     /// - `internal` otherwise (a core or built-in tool).
     fn tool_source(&self, registry: &ragent_agent::tool::ToolRegistry, name: &str) -> String {
         if let Some(tool) = registry.get(name) {

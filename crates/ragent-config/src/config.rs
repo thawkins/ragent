@@ -258,9 +258,6 @@ pub struct Config {
     /// disabled / empty so existing workflows are not disrupted.
     #[serde(default, skip_serializing_if = "ResearchConfig::is_empty")]
     pub research: ResearchConfig,
-    /// Paid finance-provider configuration.
-    #[serde(default)]
-    pub finance: crate::finance::FinanceProviderConfig,
     /// Plugin subsystem configuration (spec `plugins`; FR-001, FR-017).
     ///
     /// Loaded and merged with the same precedence as other optional config
@@ -343,7 +340,6 @@ impl Default for Config {
             trigger: crate::trigger::TriggerConfig::default(),
             piegap: PieGapConfig::default(),
             research: ResearchConfig::default(),
-            finance: crate::finance::FinanceProviderConfig::default(),
             plugins: None,
             connectors: None,
             input_queue_capacity: None,
@@ -357,8 +353,7 @@ impl Default for Config {
 /// `Config` carries plaintext secrets (`tavily_api_key`,
 /// `langsearch_api_key`, `perplexity_api_key`, `exa_api_key`,
 /// `serper_api_key`, `gitlab.token`, `channels.telegram.bot_token`,
-/// `channels.discord.webhook_url`, `gmail.client_secret`,
-/// `finance.api_key`). A derived `Debug` printed them verbatim on any
+/// `channels.discord.webhook_url`, `gmail.client_secret`). A derived `Debug` printed them verbatim on any
 /// `{:?}`/`{cfg:?}`/`tracing::debug!(?cfg)`; this impl mirrors the MS-05
 /// decision to drop derived `Debug` from `ragent_types::Event`.
 ///
@@ -423,8 +418,6 @@ pub struct ToolVisibilitySpecified {
     pub masterfetch: bool,
     /// `true` when `browser` was explicitly set in the source JSON or via a setter.
     pub browser: bool,
-    /// `true` when `finance` was explicitly set in the source JSON or via a setter.
-    pub finance: bool,
 }
 
 /// Tool-family visibility configuration.
@@ -468,13 +461,6 @@ pub struct ToolVisibilityConfig {
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::browser`]).
     pub browser: bool,
-    /// Finance tools (`stock_quote`, `stock_history`, `stock_fundamentals`,
-    /// `stock_recommendations`, `currency_rate`, `currency_history`,
-    /// `stock_search`, `stock_options`).
-    /// Default `true` - the finance tools are visible by default.
-    /// When serialised, this field is only written if the user explicitly set it
-    /// (tracked by [`ToolVisibilitySpecified::finance`]).
-    pub finance: bool,
     /// Tracks which switches were explicitly set, so merge/serialise can
     /// distinguish "user set this" from "this is just the default".
     pub specified: ToolVisibilitySpecified,
@@ -493,7 +479,6 @@ impl ToolVisibilityConfig {
             ("codeindex", self.codeindex),
             ("masterfetch", self.masterfetch),
             ("browser", self.browser),
-            ("finance", self.finance),
         ]
         .into_iter()
     }
@@ -532,7 +517,6 @@ impl ToolVisibilityConfig {
         merge_field!(codeindex);
         merge_field!(masterfetch);
         merge_field!(browser);
-        merge_field!(finance);
     }
 }
 
@@ -554,9 +538,6 @@ impl Serialize for ToolVisibilityConfig {
         if self.specified.browser {
             count += 1;
         }
-        if self.specified.finance {
-            count += 1;
-        }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
         s.serialize_field("office", &self.office)?;
         s.serialize_field("github", &self.github)?;
@@ -572,9 +553,6 @@ impl Serialize for ToolVisibilityConfig {
         }
         if self.specified.browser {
             s.serialize_field("browser", &self.browser)?;
-        }
-        if self.specified.finance {
-            s.serialize_field("finance", &self.finance)?;
         }
         s.end()
     }
@@ -816,7 +794,6 @@ impl Default for ToolVisibilityConfig {
             codeindex: true,
             masterfetch: true,
             browser: true,
-            finance: true,
             specified: ToolVisibilitySpecified::default(),
         }
     }
@@ -838,7 +815,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             codeindex: Option<bool>,
             masterfetch: Option<bool>,
             browser: Option<bool>,
-            finance: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
@@ -852,7 +828,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             masterfetch: raw.masterfetch.unwrap_or_else(default_true),
             browser: raw.browser.unwrap_or_else(default_true),
-            finance: raw.finance.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
                 github: raw.github.is_some(),
@@ -863,7 +838,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 codeindex: raw.codeindex.is_some(),
                 masterfetch: raw.masterfetch.is_some(),
                 browser: raw.browser.is_some(),
-                finance: raw.finance.is_some(),
             },
         })
     }
@@ -966,16 +940,6 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "mf_version",
         ]),
         "browser" => Some(&["browser"]),
-        "finance" => Some(&[
-            "stock_quote",
-            "stock_history",
-            "stock_fundamentals",
-            "stock_recommendations",
-            "currency_rate",
-            "currency_history",
-            "stock_search",
-            "stock_options",
-        ]),
         _ => None,
     }
 }
@@ -2607,12 +2571,6 @@ impl Config {
             base.research.max_findings = overlay.research.max_findings;
         }
         base.research.evaluate.merge(&overlay.research.evaluate);
-        // Finance provider config: overlay takes precedence when it contains
-        // any explicit setting, so project-level Alpha Vantage credentials are
-        // not silently discarded by the default Yahoo config.
-        if overlay.finance.is_explicitly_configured() {
-            base.finance = overlay.finance;
-        }
 
         // Plugins config: the overlay section wins wholesale when present, so
         // project-level `plugins` settings are not silently discarded by an

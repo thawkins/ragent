@@ -107,7 +107,7 @@ fn test_gcf_below_threshold_json_stays_raw() {
         // 199 chars, and a shape that encodes with large savings.
         let content = rows_json(21, 0);
         assert_eq!(content.chars().count(), 199);
-        let result = tool_result_content_for_llm("stock_history", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert_eq!(result.as_ref(), content, "sub-threshold JSON must stay raw");
     });
 }
@@ -118,7 +118,7 @@ fn test_gcf_at_threshold_json_encodes() {
         // 200 chars: not below the threshold, and it encodes well.
         let content = rows_json(20, 1);
         assert_eq!(content.chars().count(), 200);
-        let result = tool_result_content_for_llm("stock_history", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert!(
             result.starts_with(GCF_BEGIN),
             "200-char JSON should be GCF-encoded, got: {}",
@@ -135,7 +135,7 @@ fn test_gcf_at_threshold_json_encodes() {
 fn test_gcf_large_json_emits_labelled_block() {
     with_gcf(true, || {
         let content = rows_json(60, 0);
-        let result = tool_result_content_for_llm("stock_history", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert!(result.starts_with(GCF_BEGIN));
         assert!(result.ends_with(GCF_END));
         let payload = block_payload(&result);
@@ -151,7 +151,7 @@ fn test_gcf_large_json_emits_labelled_block() {
 fn test_gcf_block_round_trips_losslessly() {
     with_gcf(true, || {
         let value = json!({
-            "tool": "stock_fundamentals",
+            "tool": "task_list",
             "ok": true,
             "price": null,
             "data": {
@@ -165,7 +165,7 @@ fn test_gcf_block_round_trips_losslessly() {
         });
         let content = serde_json::to_string(&value).expect("serialise");
         assert!(content.chars().count() >= 200);
-        let result = tool_result_content_for_llm("stock_fundamentals", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert!(result.starts_with(GCF_BEGIN), "expected a GCF block");
         let payload = block_payload(&result);
         let decoded = gcf::decode_generic(&payload).expect("block must decode");
@@ -189,7 +189,7 @@ fn test_gcf_array_tool_result_encodes_and_round_trips() {
             "padding": "y".repeat(220)
         }))
         .expect("serialise");
-        let result = tool_result_content_for_llm("stock_search", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         if result.starts_with(GCF_BEGIN) {
             let payload = block_payload(&result);
             let decoded = gcf::decode_generic(&payload).expect("block must decode");
@@ -209,7 +209,7 @@ fn test_gcf_below_margin_json_stays_raw() {
     with_gcf(true, || {
         let content = flat_long_json();
         assert!(content.chars().count() >= 200);
-        let result = tool_result_content_for_llm("stock_fundamentals", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert_eq!(result.as_ref(), content, "low-savings JSON must stay raw");
         assert!(!result.contains(GCF_BEGIN));
     });
@@ -235,7 +235,7 @@ fn test_gcf_encode_failure_falls_back_to_raw() {
             raw_encode.is_err(),
             "precondition: gcf must reject u64::MAX"
         );
-        let result = tool_result_content_for_llm("stock_fundamentals", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert_eq!(
             result.as_ref(),
             content,
@@ -252,7 +252,7 @@ fn test_gcf_encode_failure_falls_back_to_raw() {
 fn test_gcf_disabled_leaves_json_raw() {
     with_gcf(false, || {
         let content = rows_json(60, 0);
-        let result = tool_result_content_for_llm("stock_history", &content, None);
+        let result = tool_result_content_for_llm("task_list", &content, None);
         assert!(
             !result.contains(GCF_BEGIN),
             "GCF must not run when the feature flag is off"

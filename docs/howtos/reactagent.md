@@ -358,7 +358,6 @@ listings (the tools stay registered and executable):
 | `tool_visibility.codeindex` | `true` |
 | `tool_visibility.masterfetch` | `true` |
 | `tool_visibility.browser` | `true` |
-| `tool_visibility.finance` | `true` |
 
 ### The `loop` section — `/loop` only, not the core loop
 

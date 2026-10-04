@@ -38,7 +38,7 @@ preventable lint / build issues that are cheap to catch locally.
      comment within two lines.
    - Failures are caused by contributors adding suppressions without the
      required `// reason: ...` comment.
-   - Recent examples: `crates/ragent-tools-extended/src/finance/tools/mod.rs`,
+   - Recent examples: `crates/ragent-tools-extended/src/browser/mod.rs`,
      `crates/ragent-agent/src/session/archive.rs`.
 
 2. **Clippy**

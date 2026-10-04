@@ -31,9 +31,8 @@ maps to acceptance criteria AC-1..AC-8.
   ```
   (Substitute any provider you have credentials for; the `provider` block
   content does not matter for the GCF cases.)
-- A tool that returns JSON-dense output. Recommended: `stock_quote` (Yahoo
-  Finance) or, offline, `task_list` / `codeindex_search` after running
-  `/codeindex on`. A provider that produces tool calls on request is needed;
+- A tool that returns JSON-dense output. Recommended: `task_list` /
+  `codeindex_search` after running `/codeindex on`. A provider that produces tool calls on request is needed;
   prompt example given per case.
 - No `gcf` key present in `.ragent/ragent.json` before TC-001.
 
@@ -124,18 +123,18 @@ maps to acceptance criteria AC-1..AC-8.
 
 **Preconditions**
 - ragent running in the scratch project, GCF **off** (after TC-003).
-- A JSON-dense tool available (e.g. `stock_quote`); or use `task_list` /
-  `codeindex_search` offline. This case uses `stock_quote`.
+- A JSON-dense tool available: `task_list` or `codeindex_search`
+  (offline). This case uses `task_list`.
 
 **Steps**
 1. With GCF off, submit a prompt that triggers a JSON-dense tool:
-   `Use stock_quote to fetch AAPL and show me the data`.
+   `List the session tasks and show me the data`.
 2. Wait for the tool call to complete. Open the prompt inspector:
    type `/prompt` and press Enter. Read the rendered tool-surface
    information (this confirms the session is live; encoding visibility is
    checked in step 4-6 via the transcript and log).
 3. Type `/gcf on` and press Enter.
-4. Submit the same prompt again: `Use stock_quote to fetch AAPL and show
+4. Submit the same prompt again: `List the session tasks and show
    me the data`.
 5. Compare the two assistant responses:
    - with GCF off (step 1-2) the tool result the model received was raw JSON;
@@ -147,11 +146,11 @@ maps to acceptance criteria AC-1..AC-8.
    logged (non-LLM consumers still see raw, FR-005).
 
 **Test data**
-- Prompt (both passes): `Use stock_quote to fetch AAPL and show me the data`
+- Prompt (both passes): `List the session tasks and show me the data`
 - Toggle inputs: `/gcf off` state at pass 1; `/gcf on` at pass 2.
 
 **Expected results**
-- Both passes produce a successful `stock_quote` tool call.
+- Both passes produce a successful `task_list` tool call.
 - Pass 2's model answer is factually consistent with pass 1 (same price,
   change, volume — market data may differ slightly between calls; compare
   structure not exact timestamps).
@@ -264,8 +263,7 @@ maps to acceptance criteria AC-1..AC-8.
 2. Restore the scratch config: remove the `gcf` section from
    `.ragent/ragent.json`, or delete the scratch directory:
    `rm -rf /tmp/gcf-test`.
-3. If `stock_quote` network calls were made, no cleanup is required (public
-   API, no credentials).
+3. No network calls are made by the recommended `task_list` tool.
 4. If any test sessions were created in the scratch project, they are
    removed with the directory.
 

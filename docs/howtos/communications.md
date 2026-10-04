@@ -1463,7 +1463,7 @@ or a refresh token (plus client credentials):
 { "action": "auth", "refresh_token": "...", "client_id": "...", "client_secret": "..." }
 ```
 
-**"finance configuration error: Gmail client secret missing"**
+**"Gmail configuration error: client secret missing"**
 
 You provided a refresh token but the tool cannot find the client
 secret. Either:

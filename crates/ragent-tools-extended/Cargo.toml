@@ -27,30 +27,15 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 chrono = { workspace = true }
-rand = "0.9"
-paft-decimal = "0.9"
-paft-money = "0.9"
 uuid = { workspace = true }
 html2text = { workspace = true }
 readability-rs = { workspace = true }
-# GPL-3.0 dependency (explicitly accepted by the project owner 2026-09-06):
-# scientific/terminal plotting widgets used by the plot_* tools. Added to the
-# cargo-deny allow list with the same rationale. `default-features = false`
-# avoids pulling in crossterm (we render off-screen to text only).
-ratatui-plt = { version = "0.0.2", default-features = false }
-# ratatui must match the version ratatui-plt pins (0.30); it is used here only
-# for the `Widget` bound + `Color` in the plot_* off-screen renderer. The
-# workspace ratatui (0.30) is pinned to the same version by ratatui-plt, so this
-# is a crate-local declaration rather than a workspace inherit to keep the
-# requirement explicit; it is not a second, conflicting version.
-ratatui = "0.30"
 base64 = { workspace = true }
 
 reqwest = { workspace = true, features = ["cookies", "gzip", "deflate", "blocking"] }
 tokio-tungstenite = { workspace = true }
 regex = { workspace = true }
 docx-rust = { workspace = true }
-yfinance-rs = "0.9.1"
 calamine = { workspace = true }
 ooxmlsdk = { workspace = true }
 zip = { workspace = true }

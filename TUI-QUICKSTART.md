@@ -471,10 +471,6 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ## Highlights (1.0.80)
 
-- **`plot_*` tools render inline graphs** — `plot_line`, `plot_scatter`,
-  `plot_bar`, `plot_histogram`, `plot_pie`, and `plot_heatmap` draw ASCII-art
-  charts directly in the message window, with real ANSI colours for palette
-  series, pie slices, and heatmaps (rendered off-screen via `ratatui-plt`).
 - **Threaded codeindex graph build** — `/codeindex graph build`,
   `/codeindex graph lang <l>`, and `/codeindex reindex` run in the background;
   the status bar animates `idx`/`graph` busy tags while the work runs and the
@@ -558,9 +554,6 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **Research panic isolation** — Vendored `html2text` with `saturating_sub`
   patches; `extract_pdf_text` runs on a dedicated OS thread with `panic_guard`
   (v1.0.40)
-- **Stocks & currency tools** — `stock_quote`, `stock_history`,
-  `stock_fundamentals`, `stock_search`, `stock_options`,
-  `stock_recommendations`, `currency_rate`, `currency_history` (v1.0.36)
 - **Start-of-turn compaction** — Uses persisted provider-reported input token
   count so it aligns with the TUI usage percentage (v1.0.34)
 

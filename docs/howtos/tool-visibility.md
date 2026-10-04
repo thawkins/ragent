@@ -19,7 +19,6 @@ The available switches are:
 | `codeindex` | `on` | Code index tools |
 | `masterfetch` | `on` | MasterFetch web-access tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot`, `mf_cache_clear`, `mf_version`) |
 | `browser` | `on` | Browser automation tool (`browser` — Chrome DevTools Protocol) |
-| `finance` | `on` | Finance/stock/currency tools (`stock_quote`, `stock_history`, `stock_fundamentals`, `stock_recommendations`, `stock_search`, `stock_options`, `currency_rate`, `currency_history`) |
 
 When a switch is `off`, tools in that family are excluded from:
 
@@ -60,7 +59,6 @@ Examples:
 /tools codeindex off
 /tools masterfetch off
 /tools browser off
-/tools finance off
 ```
 
 Changes are written to `.ragent/ragent.json` when a project config directory is
@@ -81,8 +79,7 @@ You can also configure visibility directly in `ragent.json`:
     "plan": false,
     "codeindex": true,
     "masterfetch": true,
-    "browser": true,
-    "finance": true
+    "browser": true
   }
 }
 ```
@@ -102,13 +99,3 @@ set.
 `/codeindex on` and `/codeindex off` also keep `tool_visibility.codeindex` in
 sync, so the code index command and the tool visibility command do not drift.
 
-## Finance visibility note
-
-The `finance` switch was added in v1.0.45. It controls the visibility of the
-`stock_*` and `currency_*` tools in the finance family — `stock_quote`,
-`stock_history`, `stock_fundamentals`, `stock_recommendations`, `stock_search`,
-`stock_options`, `currency_rate`, and `currency_history`. When set to `off`, the family tools are hidden from
-the model's advertised tool list but remain registered and callable. The
-finance tools are visible by default (`on`). Note that the `/tools` TUI command
-does not currently include `finance` in its interactive switch list, but the
-switch can be set via `ragent.json` as shown above.

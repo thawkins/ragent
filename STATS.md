@@ -17,11 +17,11 @@
 | Test files | 824 external + ~210 inline-bearing |
 | Test binaries | ~842 (824 integration test files + 17 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
-| Tools registered | 172 |
+| Tools registered | 158 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
 | Specs on disk | 56 directories in `specs/` |
-| Documentation | 27 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 21 category how-tos, 80 slash-command docs |
+| Documentation | 24 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 21 category how-tos, 80 slash-command docs |
 | Authors | 1 |
 | Version | 1.0.125 |
 
@@ -187,5 +187,5 @@ remove-after-restore race fix (CI flake
 `test_rollback_accept_restores_snapshot`), OpenSkills `.agents` discovery, Claude
 marketplace `*-lsp` inline-manifest materialisation, conventional `skills/`
 directory bridging, plus a `/simplify all` pass over the 50-file changed set. Tool
-count is 172 registered (`os_info` added in v1.0.125; `tool_info` +
+count is 158 registered (8 finance tools and 6 plot tools removed post v1.0.125; `os_info` added in v1.0.125; `tool_info` +
 `commands_info` added in v1.0.120).)_

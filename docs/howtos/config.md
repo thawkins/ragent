@@ -49,17 +49,16 @@ the project root `README.md` and the **Tutorial** in
    - 7.26 [`gmail`](#726-gmail)
    - 7.27 [`telemetry`](#727-telemetry)
    - 7.28 [`agent_perf`](#728-agent_perf)
-   - 7.29 [`finance`](#729-finance)
-   - 7.30 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#730-search-api-keys)
-   - 7.31 [`sdd`](#731-sdd)
-   - 7.32 [`trigger`](#732-trigger)
-   - 7.33 [`piegap`](#733-piegap)
-   - 7.34 [`research`](#734-research)
-   - 7.35 [`loop`](#735-loop)
-   - 7.36 [`activity_log`](#736-activity_log)
-    - 7.37 [`plugins`](#737-plugins)
-    - 7.38 [`input_queue_capacity`](#738-input_queue_capacity)
-    - 7.39 [`connectors`](#739-connectors)
+   - 7.29 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#729-search-api-keys)
+   - 7.30 [`sdd`](#730-sdd)
+   - 7.31 [`trigger`](#731-trigger)
+   - 7.32 [`piegap`](#732-piegap)
+   - 7.33 [`research`](#733-research)
+   - 7.34 [`loop`](#734-loop)
+   - 7.35 [`activity_log`](#735-activity_log)
+    - 7.36 [`plugins`](#736-plugins)
+    - 7.37 [`input_queue_capacity`](#737-input_queue_capacity)
+    - 7.38 [`connectors`](#738-connectors)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -77,8 +76,7 @@ All ragent runtime behaviour is driven by a single layered JSON configuration:
 - **Tool visibility** (which tool families are advertised to the LLM)
 - **Memory, compaction, and retrieval** settings
 - **Telemetry / OpenTelemetry export**
-- **External integrations** (GitLab, Telegram/Discord channels, Gmail, finance
-  data providers)
+- **External integrations** (GitLab, Telegram/Discord channels, Gmail)
 - **Feature flags** (experimental, SDD, pie-gap, triggers, research)
 
 The config is loaded once at startup by `ragent-config::Config::load`, merged
@@ -781,8 +779,7 @@ system-prompt listings. Hidden tools remain registered and executable.
     "plan": true,
     "codeindex": true,
     "masterfetch": true,
-    "browser": true,
-    "finance": true
+    "browser": true
   }
 }
 ```
@@ -800,9 +797,8 @@ system-prompt listings. Hidden tools remain registered and executable.
 | `codeindex` | `true` | `codeindex_search`, `codeindex_status`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_reindex` |
 | `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` |
 | `browser` | `true` | `browser` |
-| `finance` | `true` | `stock_quote`, `stock_history`, `stock_fundamentals`, `currency_rate`, `currency_history`, `stock_search`, `stock_options` |
 
-The `codeindex`, `masterfetch`, `browser`, and `finance` switches are
+The `codeindex`, `masterfetch`, and `browser` switches are
 serialised **only** when explicitly set (tracked by `specified` flags). This
 lets the default config omit the key so code-level default changes propagate,
 while ensuring an explicit user toggle persists on save.
@@ -1299,37 +1295,7 @@ any are present.
 
 ---
 
-### 7.29 `finance`
-
-Paid finance-provider configuration for the stock/currency toolset.
-
-```json
-{
-  "finance": {
-    "provider": "alpha_vantage",
-    "api_key": "env:ALPHA_VANTAGE_API_KEY",
-    "requests_per_minute": 5,
-    "min_call_interval_seconds": 5,
-    "yahoo_fallback": true
-  }
-}
-```
-
-#### `FinanceProviderConfig` schema
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `provider` | `String` | `"yahoo"` | Selected provider: `"yahoo"` (free, default) or `"alpha_vantage"`. |
-| `api_key` | `Option<String>` | `None` | API key when a paid provider is selected. |
-| `base_url` | `Option<String>` | `None` | Optional base URL override for the paid provider. |
-| `requests_per_minute` | `Option<u32>` | `None` | Optional request rate limit. |
-| `user_agent` | `Option<String>` | `None` | Optional custom User-Agent header for the free Yahoo provider. |
-| `min_call_interval_seconds` | `u64` | `5` | Minimum seconds between any two finance API calls. |
-| `yahoo_fallback` | `Option<bool>` | `None` | Whether to fall back to Yahoo when the paid provider fails. `None` = enabled for Yahoo, disabled for paid providers. |
-
----
-
-### 7.30 Search API keys
+### 7.29 Search API keys
 
 Several API keys for the `mf_search` / `websearch` tools can be stored in the
 config file. Environment variables always take precedence.
@@ -1348,7 +1314,7 @@ search engine alongside the keyless backends (OpenAlex, Wikipedia).
 
 ---
 
-### 7.31 `sdd`
+### 7.30 `sdd`
 
 Spec-Driven Development (SDD) capability toggles. All flags default to `false`
 (opt-in).
@@ -1394,7 +1360,7 @@ For the spec system, see [`docs/howtos/spec.md`](spec.md).
 
 ---
 
-### 7.32 `trigger`
+### 7.31 `trigger`
 
 Dynamic trigger rule system configuration.
 
@@ -1421,7 +1387,7 @@ section is omitted from serialised output when nothing is configured.
 
 ---
 
-### 7.33 `piegap`
+### 7.32 `piegap`
 
 Pie feature gap toggles. Each flag gates a standalone pie-derived feature. All
 default to `false` (opt-in).
@@ -1465,7 +1431,7 @@ enabled.
 
 ---
 
-### 7.34 `research`
+### 7.33 `research`
 
 Research subsystem configuration.
 
@@ -1525,7 +1491,7 @@ For the research system, see [`docs/howtos/research.md`](research.md).
 
 ---
 
-### 7.35 `loop`
+### 7.34 `loop`
 
 Goal-driven `/loop` run budgets and checkpoints (see
 [`docs/howtos/loopprogramming.md`](loopprogramming.md)). The whole section is
@@ -1559,7 +1525,7 @@ win.
 
 ---
 
-### 7.36 `activity_log`
+### 7.35 `activity_log`
 
 ```json
 {
@@ -1573,7 +1539,7 @@ win.
 
 Toggle at runtime with `/alog on|off`.
 
-### 7.37 `plugins`
+### 7.36 `plugins`
 
 Plugin subsystem configuration (spec `plugins`). Controls the master switch,
 the sandbox budgets, the store location, and per-plugin permission grants.
@@ -1607,7 +1573,7 @@ user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|
 in the TUI or `ragent plugins <sub>` from the CLI. See
 [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
 
-### 7.38 `input_queue_capacity`
+### 7.37 `input_queue_capacity`
 
 Maximum number of messages the TUI message input queue may hold (spec
 `inputqueue`). While the primary agent is executing, messages submitted with
@@ -1629,7 +1595,7 @@ absent user-global value. The per-run queue is in memory only and is never
 persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
 (see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
 
-### 7.39 `connectors`
+### 7.38 `connectors`
 
 Connector subsystem configuration (spec `connectors`). Controls the master
 switch, the connector store location, the catalogue endpoints and fetch budgets,
@@ -1784,8 +1750,7 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "plan": true,
       "codeindex": true,
       "masterfetch": true,
-      "browser": true,
-      "finance": true
+      "browser": true
     },
 
     "code_index": {
@@ -1894,12 +1859,6 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "max_concurrent_tools": 4,
     "parallel_independent_tools": true
   },
-
-  "finance": {
-    "provider": "yahoo",
-    "min_call_interval_seconds": 5
-  },
-
   "tavily_api_key": null,
   "langsearch_api_key": null,
   "perplexity_api_key": null,
@@ -2170,7 +2129,6 @@ This is merged last, with the highest precedence.
 | [`docs/howtos/codeindex.md`](codeindex.md) | Code index (tree-sitter, search, graph) |
 | [`docs/howtos/spec.md`](spec.md) | Spec lifecycle management |
 | [`docs/howtos/research.md`](research.md) | Research system |
-| [`docs/howtos/finance.md`](finance.md) | Stock and currency tools |
 | [`docs/howtos/communications.md`](communications.md) | Gmail and messaging channels |
 | [`docs/howtos/reverse.md`](reverse.md) | GitHub repo reverse-engineering |
 | [`README.md`](../../README.md) | Project overview and quick start |

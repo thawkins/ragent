@@ -38,7 +38,7 @@ telemetry/bench/root).
 
 Wave 2 (gap-filling, because agents time-box): VCS gitlab/pipelines/vcs_provider,
 codeindex graph/worker, specs/telemetry/bench, server/types/config/root,
-research modules not yet read, extended-tools memory/mail/finance.
+research modules not yet read, extended-tools memory/mail.
 
 **Coverage caveats are recorded in Appendix C.** Areas not read to depth are
 listed there as a follow-up worklist; this plan is not a clean bill for them.
@@ -134,7 +134,6 @@ M1-M5 are the follow-up train.
 | FUNC-001 | Critical | P0 | PANIC | `crates/ragent-llm/src/providers/openrouter.rs:892-897` | `&error_body[..MAX_ERR_LEN]` slices an HTTP error body at fixed byte 4096; multibyte UTF-8 → mid-codepoint panic | Clamp to a char boundary (`floor_char_boundary`/`char_indices`) before slicing | S | Unit test feeds a 5 KB body of multibyte chars; no panic, prefix preserved |
 | FUNC-002 | Critical | P0 | PANIC | `crates/ragent-agent/src/memory/extract.rs:667`, `:741` | `&content[..content.len().min(60)]` / `..min(80)` cut at byte offsets | Cut on a char boundary (reuse `ragent_types::strutil::truncate_bytes_no_ellipsis`) | S | Test with CJK content > 60/80 bytes passes |
 | FUNC-003 | Medium | P0 | LOGIC | `crates/ragent-tools-extended/src/office_common.rs:97-105`; `libreoffice_common.rs:77-84` | The `boundary` used for the final slice is a raw byte offset (`max_body`) or a `rfind('\n')` result, not a char boundary — the truncation length is wrong for non-ASCII, newline-free text (may drop a char or split the notice from the body) | Clamp `boundary` with `is_char_boundary` after the `rfind` fallback; factor one shared helper | S | Test with non-ASCII, newline-free body > limit: output length ≤ budget and ends on a char boundary |
-| FUNC-004 | High | P0 | PANIC | `crates/ragent-tools-extended/src/finance/providers/yahoo.rs:30,40` | `Instant::now().checked_sub(..).unwrap()` / `checked_sub(elapsed).unwrap()` in throttle logic | Use `saturating_sub`/`unwrap_or_default` on the `Duration` | S | Throttle test with clock at epoch boundary passes |
 | FUNC-005 | High | P0 | PANIC | `crates/ragent-llm/src/providers/router_config.rs:213`, `:239` | `panic!("weight_by_index: index {index} out of range")` on a classifier/config-supplied index | Return clamped value or `Result`; never `panic!` on data-derived index | S | Test with index ≥ 15 returns error/default, no panic |
 
 ### 6.2 Security controls (SEC)
@@ -207,7 +206,7 @@ success or blank data on a path that reaches the user". Before M1 can close:
 
 | ID | Sev | Pri | Class | Location | Defect | Required fix | Effort | Acceptance |
 |----|-----|-----|-------|----------|--------|--------------|--------|------------|
-| FUNC-040 | High | P2 | PANIC | `crates/ragent-tools-extended/src/lib.rs:372-405`; `masterfetch/robots.rs:918-1010`; `masterfetch/cache.rs:324-586`; `finance/throttle.rs:38-62`; `finance/providers/paid.rs:54` | `.expect("… lock poisoned")` on `RwLock`/`Mutex` — one panic bricks the tool registry / cache / robots / finance surfaces for the process lifetime | `unwrap_or_else(PoisonError::into_inner)` | M | Grep test asserts no `.expect("…poisoned")` remains; poison test passes |
+| FUNC-040 | High | P2 | PANIC | `crates/ragent-tools-extended/src/lib.rs:372-405`; `masterfetch/robots.rs:918-1010`; `masterfetch/cache.rs:324-586` | `.expect("… lock poisoned")` on `RwLock`/`Mutex` — one panic bricks the tool registry / cache / robots surfaces for the process lifetime | `unwrap_or_else(PoisonError::into_inner)` | M | Grep test asserts no `.expect("…poisoned")` remains; poison test passes |
 | FUNC-041 | High | P2 | PANIC | `crates/ragent-agent/src/team/manager.rs:1384,1413,1637`; `session/mod.rs:154,169`; `background/mod.rs` (13 sites) | `.lock().unwrap()/.expect("… poisoned")` — a poisoned watchdog/cache/background lock panics unrelated callers | Recover via `into_inner()`; centralise a lock helper | M | Poison tests for each subsystem pass |
 | FUNC-042 | Medium | P2 | PANIC | `crates/ragent-research/src/` (~68 `.lock().unwrap()` sites; runtime ones in `session.rs`, `manager.rs`) | Poisoned research locks panic the gather/session path | Recover via `into_inner()` on runtime paths (`session.rs:1825` is the reference pattern) | M | Grep gate: no `.lock().unwrap()` in non-test research code |
 | FUNC-043 | Medium | P2 | PANIC | `ragent-agent`: `history.rs:757`, `reference/resolve.rs:245`, `compaction/runner.rs:204,252`, `team/task.rs:672`; `ragent-storage`: `storage.rs:1730`; `ragent-tools-core`: `bash.rs:862,1076`; `ragent-llm`: `ollama_cloud.rs:428`, `ollama.rs:334`; `ragent-tui`: `input_handler.rs:719`, `input.rs:2108-2158`, `research.rs:255`; `ragent-tools-extended`: `gmail.rs:407` | `unreachable!()`/`expect`/`unwrap` on invariant-dependent paths — a refactor or unexpected variant becomes a process panic | Return `Result`/`bail!`/default; no `unreachable!` on data-driven dispatch | M | Each site has a test that exercises the previously-"unreachable" branch |
@@ -320,7 +319,7 @@ to claim they are defect-free. They are a reading worklist, not a clean bill.
 |------|-----------------|
 | `ragent-config/src` | Full crate — parsing, defaulting, error reporting (only grepped) |
 | `ragent-server` | `sse.rs` (1178 lines, event mapping); `routes/memory.rs` (`unwrap_or_default` at 190/300/316 unverified) |
-| `ragent-tools-extended` | `plot/*`, `codeindex_*.rs` bodies, `channels.rs`, `memory/embedding*`; masterfetch `extractor.rs`, `youtube.rs`, `urlnorm.rs`, `language.rs`, `links.rs`, `security.rs`, `crawl/` |
+| `ragent-tools-extended` | `codeindex_*.rs` bodies, `channels.rs`, `memory/embedding*`; masterfetch `extractor.rs`, `youtube.rs`, `urlnorm.rs`, `language.rs`, `links.rs`, `security.rs`, `crawl/` |
 | `ragent-research` | Deep read of `relevance.rs`, `document.rs` (4414 lines), `session.rs` (6430 lines), `analysis.rs`, `cluster.rs`, `io.rs`, `open_access.rs` beyond grep hits |
 | `ragent-tools-vcs` | `gitlab/auth.rs` body, `gitlab_mrs.rs` body (pagination/state mapping) |
 | `ragent-telemetry` | `recorder.rs` beyond grep hits |

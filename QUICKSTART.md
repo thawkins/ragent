@@ -417,13 +417,6 @@ Ragent loads configuration from multiple sources (last wins):
     }
   },
 
-  // Finance data provider (optional)
-  // Default uses free Yahoo Finance. To use Alpha Vantage instead:
-  "finance": {
-    "provider": "alpha_vantage",
-    "api_key": "YOUR_ALPHA_VANTAGE_API_KEY"
-  },
-
   // Plugin subsystem (optional; defaults shown). Loads Codex- and
   // Claude Code/Desktop-dialect plugins on a sandboxed JS engine.
   // `enabled: false` makes the whole subsystem inert (no discovery/loading).
@@ -753,14 +746,9 @@ The AI agent can use these tools during a session:
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
-| `plot_line`| Render an XY line plot on the message window   | `system`        |
-| `plot_bar` | Render a bar chart (stacked/horizontal)        | `system`        |
-| `plot_pie` | Render a pie/donut chart                       | `system`        |
 
-172 tools are registered in total across 25 categories — run `/tools` in the
-TUI to list them all. The `plot_*` family (`plot_line`, `plot_scatter`,
-`plot_bar`, `plot_histogram`, `plot_pie`, `plot_heatmap`) renders ASCII-art
-graphs, coloured via ANSI, inline in the message window.
+158 tools are registered in total across 23 categories — run `/tools` in the
+TUI to list them all.
 
 The **office + PDF family** (`office_read`, `office_write`, `office_info`,
 `libre_read`, `libre_write`, `libre_info`, `pdf_read`, `pdf_write`) reads and

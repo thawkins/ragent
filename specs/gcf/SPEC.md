@@ -20,7 +20,7 @@ trailer) suitable for encoding tool results that are currently JSON-heavy.
 
 JSON-heavy tool outputs currently flow to the LLM verbatim. Several built-in
 tools serialise results with `serde_json::to_string(_pretty)` straight into the
-observation content (finance suite, `pdf_read`, `office_read`/`libreoffice_*`,
+observation content (`pdf_read`, `office_read`/`libreoffice_*`,
 `browser`, `mcp_tool`, `model_info`). Encoding these payloads as GCF at the
 single LLM-view choke point reduces token cost for every turn that carries a
 tool result, without changing tool implementations or the TUI rendering.
@@ -222,7 +222,7 @@ from.
   tool results are never encoded (FR-001, FR-002).
 - AC-2: `/gcf on` persists `gcf.enabled: true` to the loaded config source and
   survives restart; `/gcf off` persists `false` (FR-002, FR-003, FR-009).
-- AC-3: With GCF on, a JSON-dense tool result (e.g. `stock_quote`) reaches the
+- AC-3: With GCF on, a JSON-dense tool result (e.g. `codeindex_search`) reaches the
   LLM as a GCF block; with GCF off the same result reaches the LLM as raw
   JSON (FR-004).
 - AC-4: The GCF block decodes back to the exact original JSON (FR-007).

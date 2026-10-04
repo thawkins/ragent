@@ -73,14 +73,14 @@ fn eligible_json() -> String {
     serde_json::to_string(&value).expect("serialise")
 }
 
-/// Build a completed `stock_history` tool call whose output is the raw
+/// Build a completed `task_list` tool call whose output is the raw
 /// (unencoded) JSON observation, exactly as the live dispatch stores it.
 fn completed_tool_call(output_json: Value) -> Message {
     Message::new(
         "session-1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "stock_history".to_string(),
+            tool: "task_list".to_string(),
             call_id: "call-1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
@@ -150,7 +150,7 @@ fn test_tool_result_event_payload_stays_raw() {
     let event = Event::ToolResult {
         session_id: "session-1".to_string(),
         call_id: "call-1".to_string(),
-        tool: "stock_history".to_string(),
+        tool: "task_list".to_string(),
         content: preview.clone(),
         content_line_count: 1,
         metadata: None,

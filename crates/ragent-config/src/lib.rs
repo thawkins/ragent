@@ -14,7 +14,6 @@ pub mod config;
 pub mod connectors;
 pub mod dir_lists;
 pub mod edit_log;
-pub mod finance;
 pub mod gcf;
 pub mod github;
 pub mod permission;

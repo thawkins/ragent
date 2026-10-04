@@ -4,7 +4,7 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (172 registered
+> **Scope:** Tool names, parameter schemas, and usage patterns (158 registered
 > tools plus the dynamic `mcp_tool`). For TUI workflow see
 > `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
@@ -37,9 +37,7 @@ worked examples.
 | 21 | [skills.md](skills.md) | 1 | always on |
 | 22 | [interactive.md](interactive.md) | 4 | always on |
 | 23 | [utility.md](utility.md) | 5 | always on |
-| 24 | [finance.md](finance.md) | 8 | `finance` |
-| 25 | [communications.md](communications.md) | 2 | always on |
-| 26 | [plot.md](plot.md) | 6 | always on |
+| 24 | [communications.md](communications.md) | 2 | always on |
 
 Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`,
 `office`; the rest default `on`. See `docs/howtos/tool-visibility.md`.
@@ -54,7 +52,6 @@ All documents are also available as PDFs under `pdf/`.
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/teams.md` | Multi-agent team coordination |
 | `docs/howtos/communications.md` | Gmail and messaging channel tools |
-| `docs/howtos/finance.md` | Stock and currency tools |
 | `docs/howtos/spec.md` | Spec management and SDD workflow |
 | `docs/howtos/reverse.md` | Repository reverse-engineering |
 | `docs/howtos/research.md` | Research system and report synthesis |

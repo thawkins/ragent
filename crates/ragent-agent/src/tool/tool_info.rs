@@ -131,7 +131,6 @@ const VISIBILITY_SWITCHES: &[&str] = &[
     "codeindex",
     "masterfetch",
     "browser",
-    "finance",
 ];
 
 /// Build the sorted snapshot of every registered tool (visible + hidden).

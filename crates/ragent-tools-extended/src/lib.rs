@@ -3,12 +3,6 @@
 //! This crate owns the Milestone 5 extracted tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
-// The `yfinance_rs` dependency generates deeply nested async futures that trip
-// the `recursion_depth_exceeding_limit` future-incompat lint (rust-lang/rust
-// #159228). Raising the recursion limit keeps the crate compiling on newer
-// toolchains until the dependency is fixed upstream.
-#![recursion_limit = "256"]
-
 pub mod archdoc;
 pub mod browser;
 pub mod channels;
@@ -25,7 +19,6 @@ pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
 pub(crate) mod docio;
 pub mod document_extract;
-pub mod finance;
 pub mod gmail;
 pub mod http_request;
 pub mod libreoffice_common;
@@ -39,7 +32,6 @@ pub mod office_read;
 pub mod office_write;
 pub mod pdf_read;
 pub mod pdf_write;
-pub mod plot;
 pub mod project_scaffold;
 pub mod task;
 pub mod webfetch;
@@ -526,33 +518,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
     registry.register(Arc::new(masterfetch::tools::cache_clear::MfCacheClearTool));
     registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
-
-    // plot_* tools: render graphs on the message window via ratatui-plt
-    // (GPL-3.0 - explicitly accepted by the project owner 2026-09-06; see
-    // src/plot/mod.rs). Read-only, local off-screen rendering, "system"
-    // permission category.
-    registry.register(Arc::new(plot::plot_line::PlotLineTool));
-    registry.register(Arc::new(plot::plot_scatter::PlotScatterTool));
-    registry.register(Arc::new(plot::plot_bar::PlotBarTool));
-    registry.register(Arc::new(plot::plot_histogram::PlotHistogramTool));
-    registry.register(Arc::new(plot::plot_pie::PlotPieTool));
-    registry.register(Arc::new(plot::plot_heatmap::PlotHeatmapTool));
-
-    // yfinance tools (T-015)
-    registry.register(Arc::new(finance::tools::quote::StockQuoteTool::new()));
-    registry.register(Arc::new(finance::tools::history::StockHistoryTool));
-    registry.register(Arc::new(
-        finance::tools::fundamentals::StockFundamentalsTool,
-    ));
-    registry.register(Arc::new(finance::tools::currency_rate::CurrencyRateTool));
-    registry.register(Arc::new(
-        finance::tools::currency_history::CurrencyHistoryTool,
-    ));
-    registry.register(Arc::new(finance::tools::search::StockSearchTool));
-    registry.register(Arc::new(finance::tools::options::StockOptionsTool));
-    registry.register(Arc::new(
-        finance::tools::recommendations::StockRecommendationsTool,
-    ));
 
     registry
 }

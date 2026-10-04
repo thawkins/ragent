@@ -371,15 +371,6 @@ current state of all subsystems.
   (v1.0.43)
 - **Research panic fixes** — Vendored `html2text` with `saturating_sub` patches;
   `extract_pdf_text` now runs on a dedicated OS thread with `panic_guard` (v1.0.40)
-- **Stocks & currency tools** — `stock_quote`, `stock_history`,
-  `stock_fundamentals`, `stock_search`, `stock_options`, `stock_recommendations`,
-  `currency_rate`, `currency_history` (v1.0.36)
-- **Plot tools** — `plot_line`, `plot_scatter`, `plot_bar`, `plot_histogram`,
-  `plot_pie`, `plot_heatmap` render ASCII-art graphs (with ANSI colours)
-  inline in the TUI message window via `ratatui-plt` 0.0.2 (GPL-3.0
-  dependency explicitly accepted and allow-listed in `deny.toml`); the TUI
-  renders the tools' `plot_ansi` canvas with per-colour-run styled spans
-  (uncommitted, post v1.0.79)
 - **Start-of-turn compaction** — Uses persisted provider-reported input token
   count so it aligns with the TUI usage percentage (v1.0.34)
 
@@ -480,7 +471,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 172 registered tools across 25 categories |
+| **Tool-rich** | 158 registered tools across 23 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -1316,7 +1307,7 @@ split**, or an **owner-only file mode**.
 | `bash_scratch_dir` private fallback | `ragent-tools-core::bash` | a failed private-dir creation falls back to a process-private 0700 directory, never to shared temp |
 | tree-walk budget | `ragent-tools-vcs::github` | the GitHub recursive tree walk carries a `MAX_TREE_REQUESTS`/`MAX_TREE_ENTRIES` budget, matching the GitLab equivalent |
 | `redacted_event_debug` / SSE device-code masking | `ragent-server::sse` | credential-bearing events expose presence-only fields on the SSE stream and a redacted rendering for log sites |
-| `target_is_allowed` | `ragent-tools-extended::channels` | config-supplied outbound base URLs (Telegram, Gmail, finance providers) are SSRF-checked; an explicitly configured loopback target is permitted, everything else private is refused |
+| `target_is_allowed` | `ragent-tools-extended::channels` | config-supplied outbound base URLs (Telegram, Gmail) are SSRF-checked; an explicitly configured loopback target is permitted, everything else private is refused |
 | `CrawlFetcher` SSRF contract | `ragent-tools-extended::masterfetch::crawl` | the SSRF obligation is stated on the trait and validated at the `mf_crawl` tool boundary |
 
 ### 4.6e Shared Guards and Recurrence Prevention (SECTASKS MS-05)
@@ -1404,7 +1395,7 @@ containment gaps found by the 18-crate audit.
 | `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a hardcoded `api.github.com`, which previously ignored a configured GitHub Enterprise `base_url` and sent the Bearer token to the public origin |
 | `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
 | `refuse_non_public_target` on the Discord sink | `ragent-tools-extended::channels` | a config-supplied `channels.discord.webhook_url` pointing at a private, link-local, or metadata host (its Telegram sibling already had the check) |
-| `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from finance/search/robots/gmail/channels/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
+| `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from search/robots/gmail/channels/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
 | `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created (ANTIPAT H-1) |
 | `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure that previously returned an empty denylist, silently dropping the mandatory built-in system-directory protection (ANTIPAT H-3) |
 | plugin `content_digest` | `ragent-plugins::add` | an install with no integrity record: a SHA-256 over the staged tree is recorded in the store ledger, so a substituted archive or checkout is detectable |

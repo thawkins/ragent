@@ -103,7 +103,6 @@ For reference, the default visibility switches are:
 | `codeindex` | `true` |
 | `masterfetch` | `true` |
 | `browser` | `true` |
-| `finance` | `true` |
 
 ---
 

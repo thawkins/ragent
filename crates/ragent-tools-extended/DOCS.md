@@ -1,6 +1,6 @@
 # ragent-tools-extended
 
-Extended document, web, memory, codeindex, finance, and browser tools for
+Extended document, web, memory, codeindex, and browser tools for
 ragent. Implements ~30 tool modules and the MasterFetch web content extraction
 engine.
 
@@ -14,11 +14,10 @@ engine.
 
 ## External Dependencies
 
-- tokio, async-trait, futures, serde, serde_json, anyhow, thiserror, tracing, chrono, rand, uuid, dirs
+- tokio, async-trait, futures, serde, serde_json, anyhow, thiserror, tracing, chrono, uuid, dirs
 - reqwest (with cookies/gzip/deflate), tokio-tungstenite, regex, percent-encoding, url, rusqlite
 - html2text, readability-rs, base64, lingua
 - docx-rust, calamine, rust_xlsxwriter, ooxmlsdk, zip, quick-xml, spreadsheet-ods, printpdf, pdf-extract, lopdf
-- yfinance-rs, paft-decimal, paft-money
 - ort, tokenizers, ndarray (optional, `embeddings` feature)
 
 Dev-dependencies: tempfile, axum.
@@ -54,7 +53,6 @@ Dev-dependencies: tempfile, axum.
 - **codeindex_explain** — `CodeIndexExplainTool` (`codeindex_explain`).
 - **codeindex_communities** — `CodeIndexCommunitiesTool` (`codeindex_communities`).
 - **document_extract** — `DocumentFormat` (enum), `detect_document_format`, `ExtractedDocument`, `extract_file_as_markdown`.
-- **finance** — Provider-agnostic finance data. `FinanceProvider` (trait), `Quote`, `OhlcvBar`, `Fundamentals`, `CurrencyRate`, `OptionContract`, `SearchResult`, `RecommendationPeriod`, `QuoteCache`, `RateLimiter`. Providers: `YahooFinanceProvider`, `PaidProvider`, `TwelveDataProvider`. Tools: `StockQuoteTool`, `StockHistoryTool`, `StockFundamentalsTool`, `CurrencyRateTool`, `CurrencyHistoryTool`, `StockSearchTool`, `StockOptionsTool`, `StockRecommendationsTool`.
 - **gmail** — `GmailTool` (`gmail`), `GmailTokens`, `TokenStore` (trait), `SqliteTokenStore`, `GmailResolvedConfig`.
 - **http_request** — `HttpRequestTool` (`http_request`).
 - **libreoffice_common** / **libreoffice_info** / **libreoffice_read** / **libreoffice_write** — ODF document tools: `LibreInfoTool`, `LibreReadTool`, `LibreWriteTool`; helpers `read_odt`, `read_ods`, `read_odp`.

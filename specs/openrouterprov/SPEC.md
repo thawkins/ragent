@@ -361,7 +361,7 @@ The system shall NOT:
 - automatically retry a failed chat POST (billing safety; only the
   discovery GET is ever retry-eligible);
 - expose OpenRouter models in tool lists, bash security allowlists, or the
-  finance/codeindex tool families (`openrouter` is never a tool provider).
+  codeindex tool family (`openrouter` is never a tool provider).
 
 **Acceptance:** log/panic/`Debug` sites show no key interpolation; the chat
 POST path has no retry wrapper.

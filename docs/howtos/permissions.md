@@ -198,7 +198,7 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 | `edit`, `file:write` | `Permission::Edit`     | `write`, `create`, `edit`, `multi_edit`, `append_to_file`, `rm`, `move_file`, `copy_file`, `make_directory`, `patch`, `apply_patch` |
 | `bash`, `bash:execute` | `Permission::Bash`   | `bash`, `bash_reset`, `bg`              |
 | `web`                | `Permission::Web`      | `webfetch`, `websearch`, `mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot`, `browser` |
-| `network:fetch`      | `Permission::Web`     | `http_request`, `stock_quote`, `currency_rate` |
+| `network:fetch`      | `Permission::Web`     | `http_request` |
 | `network:send`       | `Permission::Web`      | `gmail`, `send_channel_message`         |
 | `plan`, `plan_enter` | `Permission::PlanEnter`| `plan_enter`                            |
 | `task`               | `Permission::Task`     | `task_create`, `task_update`, `task_get`, `task_list` |
