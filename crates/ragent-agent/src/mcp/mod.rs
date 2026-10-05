@@ -1441,11 +1441,10 @@ pub fn find_orphaned_stdio_pids(command: &str, args: &[String], exclude: u32) ->
         if pid == exclude {
             continue;
         }
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        let Some(ppid) = read_ppid_of(pid) else {
             continue;
         };
-        let ppid = stat_field_after_comm(&stat, 1).and_then(|s| s.parse::<u32>().ok());
-        if !is_reparented_to_the_supervisor(ppid) {
+        if !is_reparented_to_the_supervisor(Some(ppid)) {
             continue;
         }
         if let Some(raw) = process_cmdline(pid) {

@@ -747,15 +747,11 @@ The AI agent can use these tools during a session:
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 
-158 tools are registered in total across 23 categories — run `/tools` in the
+152 tools are registered in total across 23 categories — run `/tools` in the
 TUI to list them all.
 
-The **office + PDF family** (`office_read`, `office_write`, `office_info`,
-`libre_read`, `libre_write`, `libre_info`, `pdf_read`, `pdf_write`) reads and
-writes Word/Excel/PowerPoint (OOXML), OpenDocument (ODT/ODS/ODP), and PDF
-files entirely in-process — no `soffice`/Word installation is required. The
-family is hidden from the model by default; enable it with `/tools office on`
-(see [`docs/howtos/office.md`](docs/howtos/office.md)).
+The **PDF family** (`pdf_read`, `pdf_write`) reads and writes PDF files
+entirely in-process (see [`docs/howtos/office.md`](docs/howtos/office.md)).
 
 Goal-driven loop programming is available via the **`/loop` slash command**:
 it runs a `LoopSpec` (agent, goal, verify command, scope, tool set, budget) to
@@ -1858,6 +1854,26 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.126
+
+- **Office / LibreOffice document tools removed** — the six document tools
+  (`office_read`, `office_write`, `office_info`, `libre_read`, `libre_write`,
+  `libre_info`) and their module set are gone; only the PDF family
+  (`pdf_read`, `pdf_write`) remains, sharing a new `pdf_common` helper. The
+  registered tool count falls 158 -> 152 across 23 categories. The
+  `tool_visibility.office` switch is removed (the remaining switches are
+  `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`,
+  `browser`), OOXML/ODF extensions now return an actionable error from
+  `detect_document_format`, and the dependencies `docx-rust`, `calamine`,
+  `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped. The research
+  `--from-file` pre-step still reads PDF and plain-text/markdown files.
+- **`/simplify all` code-quality pass** — a correctness, performance, and
+  dead-code sweep over the changed set, including a `pdf_write` image-path
+  containment fix (an `image` element's `image_path` is now confined to the
+  workspace), a single-parse `pdf_read`, a single-pass connectors
+  `descriptor_by_id` lookup, and a TUI `/memory clear` fix that scopes the
+  delete to the real project directory.
 
 ## Version 1.0.125
 

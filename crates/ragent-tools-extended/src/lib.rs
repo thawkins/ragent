@@ -1,6 +1,6 @@
 //! Extended document, web, memory, and code index tools for ragent.
 //!
-//! This crate owns the Milestone 5 extracted tool set while keeping a small
+//! This crate owns the extended tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
 pub mod archdoc;
@@ -17,19 +17,11 @@ pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
-pub(crate) mod docio;
 pub mod document_extract;
 pub mod gmail;
 pub mod http_request;
-pub mod libreoffice_common;
-pub mod libreoffice_info;
-pub mod libreoffice_read;
-pub mod libreoffice_write;
 pub mod masterfetch;
-pub mod office_common;
-pub mod office_info;
-pub mod office_read;
-pub mod office_write;
+pub mod pdf_common;
 pub mod pdf_read;
 pub mod pdf_write;
 pub mod project_scaffold;
@@ -326,10 +318,10 @@ pub struct ToolContext {
     pub read_timestamps: Arc<std::sync::RwLock<std::collections::HashMap<PathBuf, u64>>>,
     /// Per-step canonical-path cache, forwarded from the core context.
     ///
-    /// SEC-tools-extended-002 (SECTASKS T-055): the document write tools
-    /// (`office_write`, `pdf_write`, `libreoffice_write`) are now path-confined
-    /// like every core write tool, which needs the same cache the core tools
-    /// use. `None` means the tool builds a fresh cache for the call.
+    /// SEC-tools-extended-002 (SECTASKS T-055): the document write tool
+    /// (`pdf_write`) is path-confined like every core write tool, which needs
+    /// the same cache the core tools use. `None` means the tool builds a fresh
+    /// cache for the call.
     pub canonical_cache: Option<Arc<ragent_tools_core::CanonicalPathCache>>,
     /// Allowed root directories for path escape checking, forwarded from the
     /// core context (SEC-tools-extended-002 / SECTASKS T-055).
@@ -474,12 +466,6 @@ pub fn create_extended_registry() -> ToolRegistry {
 
     registry.register(Arc::new(pdf_read::PdfReadTool));
     registry.register(Arc::new(pdf_write::PdfWriteTool));
-    registry.register(Arc::new(office_read::OfficeReadTool));
-    registry.register(Arc::new(office_write::OfficeWriteTool));
-    registry.register(Arc::new(office_info::OfficeInfoTool));
-    registry.register(Arc::new(libreoffice_read::LibreReadTool));
-    registry.register(Arc::new(libreoffice_write::LibreWriteTool));
-    registry.register(Arc::new(libreoffice_info::LibreInfoTool));
     registry.register(Arc::new(webfetch::WebFetchTool));
     registry.register(Arc::new(websearch::WebSearchTool));
     registry.register(Arc::new(http_request::HttpRequestTool));

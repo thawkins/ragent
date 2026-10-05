@@ -2,6 +2,68 @@
 
 ## [Unreleased]
 
+## [1.0.127] - 2026-10-05
+
+### Added
+
+- **`TOOLREP.md` tool dependency report** — a new root-level reference document
+  listing, per tool group, the unique dependency crates each group uses. Groups
+  map to the three tool crates that register tools (`ragent-tools-core`,
+  `ragent-tools-extended`, `ragent-tools-vcs`) plus the agent-local tool modules
+  under `ragent-agent/src/tool/`, with tool counts from the `create_*_registry`
+  constructors.
+
+### Changed
+
+- **MS Office / LibreOffice document tools removed** — the six document tools
+  (`office_read`, `office_write`, `office_info`, `libre_read`, `libre_write`,
+  `libre_info`) and the whole `office_common` / `office_write` / `office_info` /
+  `libreoffice_common` / `libreoffice_write` / `libreoffice_info` module set are
+  gone. Only the PDF family (`pdf_read`, `pdf_write`) remains; a new
+  `pdf_common` module collapses the path/truncation helpers the office modules
+  used to share. Removed the `tool_visibility.office` switch and its
+  `ToolVisibilityConfig` / `ToolVisibilitySpecified` fields (the remaining
+  switches are `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`,
+  `masterfetch`, `browser`), the now-unused `ragent-tools-extended::docio`
+  helper module, the shared `DocumentFormat::{Docx,Xlsx,Pptx,Odt,Ods,Odp}`
+  variants (OOXML/ODF extensions now return an actionable error from
+  `detect_document_format`), and the dependencies `docx-rust`, `calamine`,
+  `ooxmlsdk`, `zip`, and `spreadsheet-ods`. Registered tool count falls
+  158 -> 152 (23 categories). Documentation updated (the `docs/howtos/office.md`
+  how-to is now PDF-only, `docs/howtos/tools/office-pdf.md` and its index row
+  list the two PDF tools, the `/tools` switch lists and `tool_visibility` tables
+  drop `office`), the sample `assets/officedocs/testword1.docx` was deleted, and
+  the generated how-to PDFs were regenerated. Configs that still carry an
+  `office` visibility key are ignored (unknown keys are tolerated). The read
+  path is now the two PDF tools plus `document_extract`, which reads PDF through
+  `pdf_read` and `.md`/`.markdown`/`.txt` verbatim; OOXML and ODF extensions
+  return an actionable error from `detect_document_format`.
+- **`/simplify all` code-quality pass** — a review-and-fix sweep over the changed
+  set that accompanies the Office / LibreOffice tool removal. Correctness:
+  `pdf_write`'s `image` element now runs `image_path` through
+  `ctx.check_path_within_workspace` (SEC-tools-extended-002), so an absolute path
+  such as `/etc/passwd` can no longer be read and embedded into the generated
+  PDF; the write metadata key is fixed from `line_count` to `page_count` with a
+  comment recording that a document always renders one page (no `page_break`
+  element exists); the `web_gatherer` scholarly-exclusion log message no longer
+  claims `--papers` re-enables the engines when the branch actually excludes
+  them; the TUI `/memory clear` handler now scopes the delete to `self.cwd_path`
+  (the same key the Memory panel lists) instead of the process cwd;
+  `connectors::store::descriptor_by_id` resolves a reference in a single pass
+  with exact-id > case-insensitive-id > case-insensitive-name precedence,
+  allocating only the winning descriptor. Performance: `pdf_read` parses the PDF
+  once and threads the parsed `lopdf::Document` into `extract_pages_text` (the
+  expensive whole-document `pdf-extract` pass now runs only when the per-page
+  pass yields nothing); `pdf_write` clones the content once and shares
+  char-aware `truncate_cell`/`wrap_text` helpers; `os_info::render_json` is
+  computed once and its unused `Serialize` derives/import dropped. Dead code and
+  docs: the unused `theme::think_summary`, the write-only `memory_clear_confirm_area`
+  field, a duplicated doc line, and malformed section banners are removed;
+  `mcp::find_orphaned_stdio_pids` reuses `read_ppid_of` and drops a stale
+  `DCREMOVALPLAN.md` reference; dangling rustdoc links (`CategoryFilter::All`,
+  the removed `search_catalogue`) and the `first_id`, `xlsx`, and `lib.rs`
+  module docs are corrected.
+
 ## [1.0.126] - 2026-10-04
 
 ### Removed

@@ -427,9 +427,9 @@ pub fn build_session_config(
             use_low_relevance: req.use_low_relevance,
             // Precedence: scholarly engines are excluded unless the per-run
             // `--papers` flag opts them back in. The `research.
-            // exclude_academic_engines` config setting can only persist the
-            // exclusion; `--papers` requests inclusion, so it overrides the
-            // config setting for the run.
+            // exclude_academic_engines` config setting only records the
+            // exclusion; scholarly engines are already off by default, so the
+            // setting has no additional effect on a run.
             disable_scholarly: !req.papers,
             use_pdf_web_sources: req.use_pdf,
             web_phase_timeout_secs: req

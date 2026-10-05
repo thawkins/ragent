@@ -30,8 +30,8 @@ provider-agnostic assistant that runs wherever a terminal does.
 
 Ragent bridges the gap between conversational AI and hands-on software
 engineering. An agent can read and write files, execute shell commands, search
-codebases, manage Git and GitHub workflows, query language servers, read and
-write office documents, and coordinate with other agents — all through a
+codebases, manage Git and GitHub workflows, query language servers, read PDF
+documents, and coordinate with other agents — all through a
 large built-in tool library organised across multiple categories. Every tool
 invocation passes through a multi-layered security and permission system that
 gives the user full control over what the agent can and cannot do.
@@ -52,7 +52,7 @@ graph LR
     SP --> LLM[LLM Provider]
     SP --> AP[Agent Profile]
     SP --> TR[Tool Registry]
-          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, web, ...]
+          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>PDF, web, ...]
 
 ```
 
@@ -65,7 +65,7 @@ graph LR
 | **Multi-provider LLM** | 12 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
-| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, office/PDF, web, and MCP |
+| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, PDF, web, and MCP |
 | **Code Intelligence** | Tree-sitter parsing (15+ languages), Tantivy FTS, symbol/reference search, and code index queries |
 | **Persistent Memory** | Three-tier system — file blocks, structured SQLite store, and optional embedding-based semantic search — with automatic extraction, decay, compaction, and a knowledge graph |
 | **Teams & Swarms** | Multi-agent coordination with named teammates, shared task lists, mailbox messaging, and swarm decomposition for parallel work |
@@ -98,14 +98,41 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.125). The core architecture, tool system,
+Ragent is in **beta** (v1.0.126). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.123 → v1.0.125):**
+**Current Release Highlights (v1.0.124 → v1.0.126):**
+
+- **Office / LibreOffice document tools removed (v1.0.126)** — the six
+  `office_*` / `libre_*` document tools and their whole module set
+  (`office_common`, `office_write`, `office_info`, `libreoffice_common`,
+  `libreoffice_write`, `libreoffice_info`) are gone; only the two PDF tools
+  (`pdf_read`, `pdf_write`) remain, sharing the new `pdf_common` helper module.
+  The `tool_visibility.office` switch and its `ToolVisibilityConfig` /
+  `ToolVisibilitySpecified` fields, the unused `ragent-tools-extended::docio`
+  helper, and the OOXML/ODF `DocumentFormat::{Docx,Xlsx,Pptx,Odt,Ods,Odp}`
+  variants are removed (those extensions now return an actionable error from
+  `detect_document_format`). The dependencies `docx-rust`, `calamine`,
+  `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped, the registered tool
+  count falls 158 -> 152 (23 categories), the sample
+  `assets/officedocs/testword1.docx` is deleted, and the `/tools` switch lists
+  and `tool_visibility` tables drop `office`. Configs that still carry an
+  `office` visibility key are ignored (unknown keys are tolerated).
+- **`/simplify all` code-quality pass (v1.0.126)** — a review-and-fix sweep over
+  the changed set: `pdf_write` now confines an `image` element's `image_path`
+  through `ctx.check_path_within_workspace` (SEC-tools-extended-002) and reports
+  `page_count`; `pdf_read` parses each PDF once and falls back to the
+  whole-document extraction only when the per-page pass yields nothing;
+  `os_info::render_json` runs once; the TUI `/memory clear` handler scopes the
+  delete to `self.cwd_path`; and `connectors::store::descriptor_by_id` resolves a
+  reference in a single allocating pass (exact id > case-insensitive id >
+  case-insensitive name). Dead `theme::think_summary` /
+  `memory_clear_confirm_area` items and several stale doc references are removed.
+
 
 - **`/memory clear` (§ Memory)** — `/memory clear` opens a
   `Clear this project's memory?` `Yes`/`No` dialog and removes nothing until the
@@ -336,8 +363,8 @@ current state of all subsystems.
   uncommitted).
 - **How-to documentation set** — `docs/howtos/reactagent.md` (core per-turn
   ReACT loop), `docs/howtos/loopprogramming.md` (goal-driven loops), and
-  `docs/howtos/office.md` (office + PDF tool families, format matrix, and
-  `tool_visibility.office` configuration).
+  `docs/howtos/office.md` (the PDF tool family, format matrix, and
+  configuration).
 
 - **Research web-search quota controls** — `--max-search-calls N` places a hard, run-scoped cap on total web-search calls per research run, shared via `Arc` across every supervisor/competitive researcher and gather pass; a run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls (FR-016 of specs/opendeepresearch).
 - **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits search/fetch volume.
@@ -471,7 +498,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 158 registered tools across 23 categories |
+| **Tool-rich** | 152 registered tools across 23 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -562,7 +589,7 @@ graph TB
 | `ragent-storage` | SQLite persistence, snapshots, encrypted credentials | ~2,800 |
 | `ragent-llm` | Provider clients and model/provider registry | ~6,700 |
 | `ragent-tools-core` | File, shell, search, and utility tools | ~4,100 |
-| `ragent-tools-extended` | Memory, code index, office/PDF, web tools | ~4,300 |
+| `ragent-tools-extended` | Memory, code index, PDF, web tools | ~4,300 |
 | `ragent-tools-vcs` | GitHub and GitLab tool surface | ~5,200 |
 | `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP; team runtime + 20 team tools (former `ragent-team` shim folded in) | ~12,500 |
 | `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~4,000 |
@@ -861,7 +888,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Teams | 19 team lifecycle/task/message tools | 19 |
 | Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` | 5 |
 | VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
-| Office / PDF | `office_read/write/info`, `libre_read/write/info`, `pdf_read/write` | 8 |
+| PDF | `pdf_read/write` | 2 |
 | External messaging | `gmail`, `send_channel_message` | 2 |
 | MCP | `mcp_tool` | 1 |
 | Planning | `plan_enter`, `plan_exit` | 2 |
@@ -1260,7 +1287,7 @@ attachment**.
 | `redact_secrets` on tool output | `ragent-tools-core::bash`, `ragent-tools-vcs::github_actions` | bash partial/completed output and CI log excerpts are redacted before they reach the model or the session store |
 | `is_denied_request_header` | `ragent-tools-extended::http_request` | routing/credential headers (`Host`, `Cookie`, `Authorization`, `Proxy-*`, ...) are rejected |
 | `mask_secret` | `ragent-tui::layout` | the provider-setup dialog masks the API key and the GitLab PAT |
-| `check_path_within_workspace` | `ragent-tools-extended::ToolContext` | `office_write`/`libreoffice_write`/`pdf_write` confine their output path |
+| `check_path_within_workspace` | `ragent-tools-extended::ToolContext` | `pdf_write` confines its output path |
 | `build_exclude_matcher` / `clear_index_dir` | `ragent-codeindex` | the configured exclusion globs are applied and the FTS recovery wipe refuses a symlinked directory |
 | Scratch-dir confinement (`bash_scratch_dir`, `restrict_to_owner`) | `ragent-tools-core::bash` | the wrapper script and `export -p` state file live in a 0700 directory as 0600 files |
 | `MAX_CANDIDATES_PER_REF` / `MAX_EDGES_PER_PASS` | `ragent-codeindex::graph::edges` | edge derivation carries a per-reference fan-out cap and a global edge budget |
@@ -1574,7 +1601,6 @@ The format is compatible with OpenCode's `opencode.json`.
     "auto_threshold": 0.80
   },
   "tool_visibility": {
-    "office": true,
     "github": true,
     "gitlab": true,
     "teams": true,
@@ -3673,6 +3699,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.126 | 2026-10-04 | Office / LibreOffice document tools removed. The six `office_*` / `libre_*` tools and their module set (`office_common`, `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`, `libreoffice_info`) are deleted; only the two PDF tools (`pdf_read`, `pdf_write`) remain, sharing a new `pdf_common` helper module. The `tool_visibility.office` switch and its `ToolVisibilityConfig` / `ToolVisibilitySpecified` fields, the unused `docio` helper, and the OOXML/ODF `DocumentFormat` variants are removed, and the dependencies `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped. Registered tool count falls 158 -> 152 (23 categories); `assets/officedocs/testword1.docx` is deleted; `/tools` switch lists and `tool_visibility` tables drop `office`; configs carrying `office` are ignored. A `/simplify all` pass over the changed set fixes a `pdf_write` image-path containment hole (SEC-tools-extended-002), halves `pdf_read` PDF parsing, computes `os_info` JSON once, scopes the TUI `/memory clear` delete to `self.cwd_path`, and makes `connectors::store::descriptor_by_id` a single allocating pass. |
 | v1.0.125 | 2026-10-04 | `os_info` host-introspection tool and `/osinfo` slash command family, plus the research scholarly-engine default flip. `os_info` (registry 171 -> 172, spec `osinfo` FR-019..FR-025) reports OS identity and Linux distribution, CPU, graphics adapters (`/sys/class/drm` + `pci.ids`, integrated/discrete/virtual classification), graphics-API support with best-effort versions (`Direct3D`, `DirectX`, `Metal`, `OpenGL`, `OpenGL ES`, `Mesa`, `Vulkan`, `OptiX`, `CUDA`, `ROCm`), physical hardware (DMI system/chassis/motherboard/BIOS identity, `/sys/block` storage devices, `/sys/class/net` interfaces), memory, uptime, and the process environment. The `probe` parameter defaults to `true`, so the fixed, timeout-bounded allowlisted graphics diagnostics (`vulkaninfo`, `glxinfo -B`, `nvidia-smi`, `rocminfo`, `system_profiler`) confirm support and supply versions for OpenGL, OpenGL ES, and Mesa; `{"probe": false}` (or `/osinfo show --no-probe`) is the fully process-free path. Read-only throughout: no writes, no network, and never serial numbers, UUIDs, or asset tags. `/osinfo show [--no-probe]` renders through the tool's own collector/renderer, `/osinfo help` documents both modes, and autocomplete offers `show`, `--no-probe`, `help`. Research: scholarly backends (OpenAlex) are excluded from the web sweep by default; `--papers` replaces `--no-papers`/`--no-scholarly` at every entry point (root CLI, TUI, `POST /research`), `ResearchRunRequest` carries `papers`, and `research.exclude_academic_engines` only persists the exclusion. Three new tracked research items (`codemigrate`, `connectors`, `vendormarketplace`). |
 | v1.0.124 | 2026-10-02 | Connector system follow-up, `/memory clear`, and TUI render fixes. (1) `/memory clear` opens a `Clear this project's memory?` `Yes`/`No` confirmation dialog (no removal until confirmed; `No` selected by default) and, on `Yes`, calls `Storage::clear_memories_for_project` to delete only the current project's structured memories (full path or basename, FTS + base rows in one transaction), reporting `Cleared N memory entries for this project.`; the `command_catalog`/`SLASH_COMMANDS` `/memory` entries now list exactly `show`, `clear`, `help`. (2) The connector catalogue has a single surface: the standalone `/connectors search` subcommand is retired, `/connectors claude [query] [--category <name>] [--refresh]` carries the `--category` launch filter and an in-panel `c` cycle key over the categories the fetched catalogue declares (FR-010, FR-041), and `list` keeps the same category model. (3) The TUI drives the session-start connector lifecycle: `src/main.rs` bridges the enabled connectors into the shared connect loop and publishes a `ConnectorSession` plus its status snapshot on the session processor (type-erased); `/connectors enable\|disable\|connect\|disconnect` drive that session and reconcile the MCP tool registry, `/connectors list` reads live tool counts from the MCP client, and a single-reference subcommand accepts a connector by id, slug, or display name (`canonical_id`). (4) TUI-019 render fixes: the tool name renders immediately after the step counter (new `split_summary_icon` helper, both the message-widget and layout arms) and `/mcp` renders one server per row as a markdown/ASCII table with `\|`-escaped cells; `/tools` gains `/tools list` (alias `/tools show`) and a `/tools help` block. (5) The MCP orphan sweep reaps stdio servers re-parented to the per-user service manager (`systemd --user`) as well as init, and matches per process, so `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every startup. Earlier work folded in: a new `ragent-connectors` crate (17th workspace crate), the ANTIPAT M1 ASCII sweep, `/yolo` persisting to the user-global config only, spec plan parser `T-001..T-014` ranges, and the `check-connector-endpoint-literal.sh` guard. |
 | v1.0.122 | 2026-09-30 | Security and anti-pattern remediation sweep, folding in the staged working tree on top of `6cf0b60f` (MS-04). `ANTIPAT.md` M0 (the two shipping defects - crash-marker ordering and search-retry shift overflow - plus the highest-severity containment holes) and M2-M7 complete: `ragent-team` shim crate deleted (17 -> 16 workspace crates), major dependency bumps (`rmcp` 3.5, `rusqlite` 0.40, `ratatui` 0.30, ...), and `SECTASKS.md` MS-05 "prevent recurrence" - new `ragent_types::guard` (re-exported as `ragent_tools_core::guard`) owns `reject_option_like`, `is_safe_operand`, `validate_identifier`, `validate_relative_component`, `contained_join`, `clamp_retry_after` and `cap_read`; `ragent-agent`/`ragent-storage`/`ragent-tools-core` re-export `ragent_types::sanitize` so there is one secret registry and one redaction chokepoint (`Event` no longer derives `Debug`); the `security-guards` CI job runs `check-file-tool-containment.sh`, `check-security-unwraps.sh`, `check-shared-guards.sh` and `check-vcs-duplication.sh` (each with a `--self-test`); `SECTASKS.md` records the accepted-risk register (T-071). `SPEC.md` §4.6a-§4.6e document the guards and call sites. Earlier commits on the tree: MS-03 network/secret hardening (`da83d927`) and MS-04 defence in depth (`6cf0b60f`). Verification: `cargo check --workspace`, `cargo clippy --all-targets`, `cargo fmt --all -- --check`, `cargo audit` clean; workspace test suite green. |
@@ -4033,7 +4060,6 @@ still override per run with the corresponding flags.
 - `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
 ```jsonc
     "tool_visibility": {
-      "office": true,
       "github": true,
       "gitlab": true,
       "teams": true,

@@ -17,7 +17,7 @@ engine.
 - tokio, async-trait, futures, serde, serde_json, anyhow, thiserror, tracing, chrono, uuid, dirs
 - reqwest (with cookies/gzip/deflate), tokio-tungstenite, regex, percent-encoding, url, rusqlite
 - html2text, readability-rs, base64, lingua
-- docx-rust, calamine, rust_xlsxwriter, ooxmlsdk, zip, quick-xml, spreadsheet-ods, printpdf, pdf-extract, lopdf
+- quick-xml, printpdf, pdf-extract, lopdf
 - ort, tokenizers, ndarray (optional, `embeddings` feature)
 
 Dev-dependencies: tempfile, axum.
@@ -55,9 +55,8 @@ Dev-dependencies: tempfile, axum.
 - **document_extract** — `DocumentFormat` (enum), `detect_document_format`, `ExtractedDocument`, `extract_file_as_markdown`.
 - **gmail** — `GmailTool` (`gmail`), `GmailTokens`, `TokenStore` (trait), `SqliteTokenStore`, `GmailResolvedConfig`.
 - **http_request** — `HttpRequestTool` (`http_request`).
-- **libreoffice_common** / **libreoffice_info** / **libreoffice_read** / **libreoffice_write** — ODF document tools: `LibreInfoTool`, `LibreReadTool`, `LibreWriteTool`; helpers `read_odt`, `read_ods`, `read_odp`.
 - **masterfetch** — MasterFetch web content engine. Types: `PageType`, `SourceType`, `PageMetadata`, `EnvelopeSignals`, `FetchResult`, `SearchResult`, `CrawlPage`. Tools: `MfFetchTool`, `MfCrawlTool`, `MfSearchTool`, `MfScreenshotTool`, `MfCacheClearTool`, `MfVersionTool`. Submodules: `cache`, `envelope`, `extractor`, `focus`, `http`, `language`, `links`, `metadata`, `pdf`, `robots`, `search`, `security`, `urlnorm`, `youtube`, `crawl` (`CrawlOrchestrator`, `CrawlConfig`, `CrawlResult`).
-- **office_common** / **office_info** / **office_read** / **office_write** — Office (OOXML) tools: `OfficeInfoTool`, `OfficeReadTool`, `OfficeWriteTool`; helpers `read_docx`, `read_xlsx`, `read_pptx`.
+- **pdf_common** — `MAX_OUTPUT_BYTES`, `truncate_output`, and the `resolve_path` re-export shared by the PDF tools.
 - **pdf_read** — `PdfReadTool` (`pdf_read`), `read_pdf`.
 - **pdf_write** — `PdfWriteTool` (`pdf_write`).
 - **task** — Session-scoped task management: `TaskCreateTool`, `TaskUpdateTool`, `TaskGetTool`, `TaskListTool`.

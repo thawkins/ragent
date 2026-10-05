@@ -18,7 +18,7 @@ This document synthesizes competitive intelligence from four major AI coding ass
 - Multi-provider support (no vendor lock-in)
 - Team/swarm orchestration system
 - Native code intelligence (semantic code understanding)
-- Office document and PDF tools
+- PDF document tools
 - Terminal-first philosophy
 - No cloud dependencies
 
@@ -1243,13 +1243,13 @@ ClaudeCode:
 - ✅ Multi-provider (not Anthropic-locked)
 - ✅ Team orchestration (no sub-agent limit)
 - ✅ Native code intelligence (semantic code understanding)
-- ✅ Office/PDF tools
+- ✅ PDF tools
 - ❌ Need: Persistent shell, memory system
 
 ### vs OpenCode
 - ✅ Rust performance (10x faster)
 - ✅ Single binary (no Bun dependency)
-- ✅ Office/PDF tools
+- ✅ PDF tools
 - ❌ Need: Full MCP, skills system
 
 ### vs GitHub Copilot CLI

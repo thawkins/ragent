@@ -2070,7 +2070,7 @@ impl WebGatherer {
         let exclude_engines: Arc<[&str]> = if self.disable_scholarly {
             tracing::info!(
                 engines = ?ACADEMIC_ENGINES,
-                "research: --papers re-enables academic search engines for this sweep"
+                "research: scholarly search engines excluded for this sweep (--papers not set)"
             );
             Arc::from(ACADEMIC_ENGINES)
         } else {

@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 158 registered tools across 23 categories:
+- **Comprehensive tool system** — 152 registered tools across 23 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -44,7 +44,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
       - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
         and repository management
-      - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
+      - **PDF** — pdf_read, pdf_write
       - **Sub-agents** — new_agent, cancel_agent, list_agents, wait_agents, agent_complete
       - **Planning** — plan_enter, plan_exit
       - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
@@ -342,7 +342,7 @@ with OpenCode's `opencode.json`.
         // "summary_tokens": 1500,
         // "tool_output_max_chars": 2000
       },
-      "tool_visibility": {    "office": true,
+      "tool_visibility": {
     "github": true,
     "gitlab": true,
     "teams": true,
@@ -519,12 +519,29 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.125** — The core architecture, tool system (158 tools across 23 categories), TUI,
+**v1.0.126** — The core architecture, tool system (152 tools across 23 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
+
+- **v1.0.126 — Office / LibreOffice document tools removed** — the six
+  `office_*`/`libre_*` document tools and their module set (`office_common`,
+  `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`,
+  `libreoffice_info`) are gone; only the PDF family (`pdf_read`, `pdf_write`)
+  remains, sharing the new `pdf_common` helper module. The
+  `tool_visibility.office` switch and the unused `docio` helper are removed, the
+  OOXML/ODF `DocumentFormat` variants are dropped (those extensions now return
+  an actionable error from `detect_document_format`), and the dependencies
+  `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and `spreadsheet-ods` are
+  dropped. The registered tool count falls 158 -> 152 across 23 categories.
+- **v1.0.126 — `/simplify all` code-quality pass** — a correctness, performance,
+  and dead-code sweep over the changed set: `pdf_write` now confines an `image`
+  element's `image_path` to the workspace (SEC-tools-extended-002), `pdf_read`
+  parses each PDF once instead of twice, `os_info` computes its JSON once, the
+  TUI `/memory clear` handler scopes deletes to the real project directory, and
+  the connectors `descriptor_by_id` lookup resolves in a single allocating pass.
 
 - **v1.0.125 — `os_info` host-introspection tool and `/osinfo` command** — a
   new read-only `os_info` tool (registry 171 -> 172) reports the host OS and
@@ -953,8 +970,8 @@ Recent highlights:
   regardless of broadcast-lag event loss (shipped in v1.0.82)
 - **How-to documentation set** — three new how-to manuals in `docs/howtos/`:
   `reactagent.md` (the core per-turn ReACT loop), `loopprogramming.md`
-  (goal-driven loops with `/loop`), and `office.md` (office + PDF tool
-  families with format matrix, JSON examples, and configuration)
+  (goal-driven loops with `/loop`), and `office.md` (the PDF tool family
+  with format matrix, JSON examples, and configuration)
 
 - **Code index status improvements** — the `codeindex_status` tool never
   blocks on the store lock: when a background reindex or graph build holds

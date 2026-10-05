@@ -988,7 +988,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
     },
     SlashCommandDef {
         trigger: "router",
@@ -1975,9 +1975,6 @@ pub struct App {
     /// [`MEMORY_CLEAR_CONFIRM_NO`] (`No`). Initialised to `No` and reset to it
     /// every time the dialog opens so a stray `Enter` cannot clear memory.
     pub memory_clear_confirm_selected: usize,
-    /// Cached area of the `Clear this project's memory?` confirmation dialog
-    /// (set during render). Kept in [`Rect::default`] while the dialog is closed.
-    pub memory_clear_confirm_area: Rect,
     /// Active plugin-store browser, present while the browse panel is open
     /// (spec `pluginstores` FR-007). `None` when no panel is showing (FR-012).
     /// While it is `Some`, the panel swallows every keystroke and locks the

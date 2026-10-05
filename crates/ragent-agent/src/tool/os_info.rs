@@ -32,7 +32,6 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -42,7 +41,7 @@ use super::{Tool, ToolContext, ToolOutput};
 /// `distribution_id` and `distribution_name` are filled on Linux and carry
 /// the `n/a (<family>)` placeholder elsewhere so the schema is stable across
 /// platforms.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct OsSection {
     /// OS family, e.g. `linux`, `macos`, `windows`, `freebsd`, or `unknown`.
     family: String,
@@ -66,7 +65,7 @@ struct OsSection {
 ///
 /// Metrics the host cannot supply are reported as `unknown` or `0` rather
 /// than failing the call (FR-011).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct CpuSection {
     /// CPU architecture, e.g. `x86_64` or `aarch64`.
     architecture: String,
@@ -87,7 +86,7 @@ struct CpuSection {
 /// One entry per detected graphics adapter, ordered by DRM card index so the
 /// list is stable across calls. Hosts that expose no adapter information (or
 /// non-Linux platforms) yield an empty list rather than failing the call.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct GpuSection {
     /// Detected graphics adapters (integrated, discrete, or virtual).
     adapters: Vec<GpuAdapter>,
@@ -104,7 +103,7 @@ struct GpuSection {
 /// `unknown` placeholder otherwise (FR-011). The version is read from read-only
 /// runtime artefacts and, by default, from the timeout-bounded vendor
 /// diagnostics allowlist (`probe: false` disables the latter).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct GpuApi {
     /// API name from the fixed [`API_ORDER`] vocabulary, e.g. `Vulkan`.
     name: String,
@@ -116,7 +115,7 @@ struct GpuApi {
 ///
 /// Every field falls back to a placeholder (`unknown`, or `0` for
 /// `vram_bytes`) when the host cannot supply it (FR-011).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct GpuAdapter {
     /// Best-effort human-readable adapter name, e.g.
     /// `Intel Corporation TigerLake-LP GT2 [Iris Xe Graphics]`, or `unknown`.
@@ -144,7 +143,7 @@ struct GpuAdapter {
 /// DMI table is absent (or a non-Linux platform) reports the `unknown`
 /// placeholder and empty device lists, so the schema is stable everywhere
 /// (FR-011). No serial numbers, UUIDs, or asset tags are read (FR-025).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct HardwareSection {
     /// System (product) vendor, e.g. `LENOVO`, or `unknown`.
     system_vendor: String,
@@ -181,7 +180,7 @@ struct HardwareSection {
 /// One entry per non-virtual `/sys/block` node, ordered by kernel name so the
 /// list is stable across calls. Devices with no readable model/vendor report the
 /// `unknown` placeholder rather than being dropped (FR-011).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct StorageDevice {
     /// Kernel block-device name, e.g. `nvme0n1` or `sda`.
     name: String,
@@ -199,7 +198,7 @@ struct StorageDevice {
 ///
 /// One entry per `/sys/class/net` node, including the loopback interface,
 /// ordered by name so the list is stable across calls.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct NetworkInterface {
     /// Interface name, e.g. `wlp0s20f3`.
     name: String,
@@ -217,7 +216,7 @@ struct NetworkInterface {
 ///
 /// Byte counts are exact; the text renderer adds GiB and days/hours/minutes
 /// renderings.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct MemorySection {
     /// Total physical memory in bytes.
     total_memory_bytes: u64,
@@ -237,7 +236,7 @@ struct MemorySection {
 ///
 /// No environment variable other than the resolved shell path is exposed
 /// (FR-008); every field falls back to `unknown` when it cannot be resolved.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 struct ProcessSection {
     /// Process id of the running ragent process.
     pid: u32,
@@ -253,7 +252,7 @@ struct ProcessSection {
 ///
 /// Grouped into one section per text-format heading so the tool and the
 /// `/osinfo show` slash command share a single schema (FR-018).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct OsInfo {
     /// Operating-system identity (FR-002, FR-003).
     os: OsSection,
@@ -352,19 +351,17 @@ impl Tool for OsInfoTool {
 
         let probe = input.get("probe").and_then(Value::as_bool).unwrap_or(true);
         let info = OsInfo::collect_with_probe(probe);
+        let value = render_json(&info);
 
         match format {
             "text" => Ok(ToolOutput {
                 content: render_text(&info),
-                metadata: Some(render_json(&info)),
+                metadata: Some(value),
             }),
-            "json" => {
-                let value = render_json(&info);
-                Ok(ToolOutput {
-                    content: serde_json::to_string_pretty(&value)?,
-                    metadata: Some(value),
-                })
-            }
+            "json" => Ok(ToolOutput {
+                content: serde_json::to_string_pretty(&value)?,
+                metadata: Some(value),
+            }),
             other => Err(invalid_format(other)),
         }
     }

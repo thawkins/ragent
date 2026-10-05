@@ -10,10 +10,7 @@ use anyhow::{Context, Result};
 
 use super::fuzzy::{collect_project_files_async, fuzzy_match};
 use super::parse::{FileRef, ParsedRef, parse_refs};
-// Source-of-truth for office/PDF reading lives in ragent-tools-extended;
-// the agent-local copies under crate::tool are dormant duplicates slated
-// for removal (see DCREMOVALPLAN.md M2.1 / M4).
-use ragent_tools_extended::office_read;
+// Source-of-truth for PDF reading lives in ragent-tools-extended.
 use ragent_tools_extended::pdf_read;
 
 /// Shared HTTP client for URL reference resolution.
@@ -116,8 +113,8 @@ fn number_lines(content: &str) -> String {
 
 /// Resolve a file reference by reading its contents.
 ///
-/// For binary formats (.docx, .xlsx, .pptx, .pdf), delegates to the
-/// appropriate reader tool. Text files are read with `read_to_string`.
+/// For the binary PDF format (`.pdf`), delegates to the PDF reader tool.
+/// Text files are read with `read_to_string`.
 async fn resolve_file(path: &Path, raw: &str, working_dir: &Path) -> Result<ResolvedRef> {
     let abs_path = if path.is_absolute() {
         path.to_path_buf()
@@ -220,12 +217,11 @@ async fn resolve_fuzzy(name: &str, raw: &str, working_dir: &Path) -> Result<Reso
     read_file_content(&abs_path, FileRef::File(best.path.clone()), raw).await
 }
 
-/// Attempt to read a file as a binary document (Office or PDF).
+/// Attempt to read a file as a binary document (PDF).
 ///
 /// Returns `Some(content)` if the file has a recognised binary extension
-/// (.docx, .xlsx, .pptx, .pdf) and was read successfully, or `None` if the
-/// extension is not a binary document type (caller should fall back to
-/// text reading).
+/// (`.pdf`) and was read successfully, or `None` if the extension is not a
+/// binary document type (caller should fall back to text reading).
 async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
     let ext: Option<String> = abs_path
         .extension()
@@ -233,26 +229,6 @@ async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
         .map(|s| s.to_lowercase());
 
     match ext.as_deref() {
-        Some("docx" | "xlsx" | "pptx") => {
-            let path = abs_path.to_path_buf();
-            let ext_owned = ext.unwrap_or_default();
-            let raw_owned = raw.to_string();
-            let content = tokio::task::spawn_blocking(move || -> Result<String> {
-                match ext_owned.as_str() {
-                    "docx" => office_read::read_docx(&path, "markdown"),
-                    "xlsx" => office_read::read_xlsx(&path, None, None, "markdown"),
-                    "pptx" => office_read::read_pptx(&path, None, "markdown"),
-                    // FUNC-043: the outer match already restricts `ext_owned`
-                    // to these three arms; return an error instead of
-                    // panicking if a future refactor breaks that invariant.
-                    other => Err(anyhow::anyhow!("unsupported office extension: {other}")),
-                }
-            })
-            .await
-            .with_context(|| format!("Failed to read '@{raw_owned}'"))??;
-
-            Ok(Some(content))
-        }
         Some("pdf") => {
             let path = abs_path.to_path_buf();
             let raw_owned = raw.to_string();

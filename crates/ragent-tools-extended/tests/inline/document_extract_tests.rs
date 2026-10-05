@@ -13,35 +13,17 @@ fn detect_pdf() {
 }
 
 #[test]
-fn detect_office_formats() {
-    assert_eq!(
-        detect_document_format(Path::new("doc.docx")).unwrap(),
-        DocumentFormat::Docx
-    );
-    assert_eq!(
-        detect_document_format(Path::new("sheet.xlsx")).unwrap(),
-        DocumentFormat::Xlsx
-    );
-    assert_eq!(
-        detect_document_format(Path::new("slides.pptx")).unwrap(),
-        DocumentFormat::Pptx
-    );
+fn detect_office_formats_unsupported() {
+    assert!(detect_document_format(Path::new("doc.docx")).is_err());
+    assert!(detect_document_format(Path::new("sheet.xlsx")).is_err());
+    assert!(detect_document_format(Path::new("slides.pptx")).is_err());
 }
 
 #[test]
-fn detect_libreoffice_formats() {
-    assert_eq!(
-        detect_document_format(Path::new("doc.odt")).unwrap(),
-        DocumentFormat::Odt
-    );
-    assert_eq!(
-        detect_document_format(Path::new("sheet.ods")).unwrap(),
-        DocumentFormat::Ods
-    );
-    assert_eq!(
-        detect_document_format(Path::new("slides.odp")).unwrap(),
-        DocumentFormat::Odp
-    );
+fn detect_libreoffice_formats_unsupported() {
+    assert!(detect_document_format(Path::new("doc.odt")).is_err());
+    assert!(detect_document_format(Path::new("sheet.ods")).is_err());
+    assert!(detect_document_format(Path::new("slides.odp")).is_err());
 }
 
 #[test]
@@ -93,6 +75,6 @@ fn extract_markdown_file_reads_verbatim() {
 #[test]
 fn format_as_str_and_display() {
     assert_eq!(DocumentFormat::Pdf.as_str(), "pdf");
-    assert_eq!(DocumentFormat::Docx.as_str(), "docx");
-    assert_eq!(format!("{}", DocumentFormat::Odp), "odp");
+    assert_eq!(DocumentFormat::Text.as_str(), "text");
+    assert_eq!(format!("{}", DocumentFormat::Text), "text");
 }

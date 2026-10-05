@@ -37,7 +37,6 @@ const GCF_SUBS: &[&str] = &["on", "off", "show", "help"];
 const TOOLS_SUBS: &[&str] = &[
     "list",
     "show",
-    "office",
     "github",
     "gitlab",
     "teams",
@@ -581,7 +580,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [office|github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
         subcommands: TOOLS_SUBS,
         flags: EMPTY,
     },

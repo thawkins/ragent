@@ -122,7 +122,6 @@ fn tool_source(tool: &Arc<dyn Tool>, mcp_info: Option<(&str, &str)>) -> String {
 /// in one place so adding a family means editing one list here and the
 /// config struct.
 const VISIBILITY_SWITCHES: &[&str] = &[
-    "office",
     "github",
     "gitlab",
     "teams",

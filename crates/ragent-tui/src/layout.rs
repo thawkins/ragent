@@ -263,8 +263,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // modal drawn above the chat that reuses the shared overlay machinery.
     if app.memory_clear_confirm_open {
         render_memory_clear_confirm(frame, app);
-    } else {
-        app.memory_clear_confirm_area = Rect::default();
     }
     // Plugin-store browse panel (spec `pluginstores` T-006) - a full-screen-ish
     // modal drawn last so it sits above every other overlay while it owns the
@@ -1090,7 +1088,7 @@ fn render_queue_clear_confirm(frame: &mut Frame, app: &mut App) {
 /// The dialog only paints state here - it removes no memory. The store is
 /// emptied by the `Yes` gating step; `No`/`Esc` leave it unchanged.
 fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
-    app.memory_clear_confirm_area = render_yes_no_confirm(
+    render_yes_no_confirm(
         frame,
         " Clear this project's memory? ",
         app.memory_clear_confirm_selected,

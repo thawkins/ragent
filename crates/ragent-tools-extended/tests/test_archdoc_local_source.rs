@@ -122,10 +122,10 @@ fn test_local_budget_exhausted_deadline_takes_precedence() {
 fn test_is_supported_document_by_extension() {
     assert!(is_supported_document(Path::new("a/sad.md")));
     assert!(is_supported_document(Path::new("a/design.pdf")));
-    assert!(is_supported_document(Path::new("a/pack.docx")));
     assert!(is_supported_document(Path::new("a/notes.txt")));
     assert!(is_supported_document(Path::new("no-extension")));
     assert!(!is_supported_document(Path::new("a/diagram.png")));
+    assert!(!is_supported_document(Path::new("a/pack.docx")));
     assert!(!is_supported_document(Path::new("a/legacy.doc")));
     assert!(!is_supported_document(Path::new("a/binary.exe")));
 }

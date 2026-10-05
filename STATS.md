@@ -1,29 +1,29 @@
 # Project Statistics
 
-**Version:** 1.0.125
+**Version:** 1.0.126
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.125 tree.
+> Metrics below are measured against the v1.0.126 tree.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 551,830 (546,041 in `crates/` + 5,789 in root `src/`/`tests/`/`examples/`) |
-| Total Rust files | 1,513 (workspace crates) + 16 (root `src/`/`tests/`/`examples/`) |
-| Tests defined | ~10,348 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
-| Test files | 824 external + ~210 inline-bearing |
-| Test binaries | ~842 (824 integration test files + 17 lib/bin targets + 1 root bin) |
+| Total Rust lines | 540,894 (535,105 in `crates/` + 5,789 in root `src/`/`tests/`) |
+| Total Rust files | 1,484 (1,468 workspace crates + 16 root `src/`/`tests/`) |
+| Tests defined | ~10,237 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 759 external + ~210 inline-bearing |
+| Test binaries | ~777 (759 integration test files + 17 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
-| Tools registered | 158 |
+| Tools registered | 152 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 17 |
-| Specs on disk | 56 directories in `specs/` |
-| Documentation | 24 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 21 category how-tos, 80 slash-command docs |
+| Specs on disk | 55 directories in `specs/` |
+| Documentation | 25 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 20 category how-tos, 80 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.125 |
+| Version | 1.0.126 |
 
 ---
 
@@ -35,22 +35,22 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 283 | 92,933 | 140 |
-| `ragent-bench` | 28 | 8,619 | 6 |
+| `ragent-agent` | 283 | 92,882 | 120 |
+| `ragent-bench` | 28 | 8,619 | 5 |
 | `ragent-codeindex` | 73 | 24,192 | 43 |
-| `ragent-config` | 52 | 12,700 | 34 |
-| `ragent-connectors` | 37 | 17,024 | 16 |
-| `ragent-llm` | 66 | 24,295 | 36 |
+| `ragent-config` | 50 | 12,465 | 33 |
+| `ragent-connectors` | 37 | 17,027 | 16 |
+| `ragent-llm` | 66 | 24,295 | 24 |
 | `ragent-plugins` | 56 | 21,152 | 31 |
-| `ragent-research` | 158 | 60,850 | 92 |
-| `ragent-server` | 15 | 6,468 | 9 |
+| `ragent-research` | 158 | 60,849 | 92 |
+| `ragent-server` | 15 | 6,468 | 8 |
 | `ragent-specs` | 37 | 20,362 | 24 |
 | `ragent-storage` | 39 | 15,246 | 34 |
 | `ragent-telemetry` | 30 | 10,560 | 21 |
-| `ragent-tools-core` | 95 | 18,628 | 25 |
-| `ragent-tools-extended` | 218 | 75,610 | 99 |
-| `ragent-tools-vcs` | 64 | 15,873 | 24 |
-| `ragent-tui` | 213 | 111,242 | 156 |
+| `ragent-tools-core` | 99 | 18,628 | 25 |
+| `ragent-tools-extended` | 171 | 65,590 | 81 |
+| `ragent-tools-vcs` | 64 | 15,873 | 23 |
+| `ragent-tui` | 213 | 110,610 | 152 |
 | `ragent-types` | 49 | 10,287 | 27 |
 
 ---
@@ -58,20 +58,20 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui            ############ 111,242 lines (20.4%)
-ragent-agent          ########## 92,933 lines (17.0%)
-ragent-tools-extended ######## 75,610 lines (13.8%)
-ragent-research       ####### 60,850 lines (11.1%)
-ragent-llm            ### 24,295 lines (4.4%)
-ragent-codeindex      ### 24,192 lines (4.4%)
+ragent-tui            ############ 110,610 lines (20.4%)
+ragent-agent          ########## 92,882 lines (17.2%)
+ragent-tools-extended ######## 65,590 lines (12.1%)
+ragent-research       ####### 60,849 lines (11.2%)
+ragent-llm            ### 24,295 lines (4.5%)
+ragent-codeindex      ### 24,192 lines (4.5%)
 ragent-plugins        ## 21,152 lines (3.9%)
-ragent-specs          ## 20,362 lines (3.7%)
+ragent-specs          ## 20,362 lines (3.8%)
 ragent-tools-core     ## 18,628 lines (3.4%)
-ragent-connectors     ## 17,024 lines (3.1%)
+ragent-connectors     ## 17,027 lines (3.1%)
 ragent-tools-vcs      ## 15,873 lines (2.9%)
 ragent-storage        ## 15,246 lines (2.8%)
-ragent-config         # 12,700 lines (2.3%)
-ragent-telemetry      # 10,560 lines (1.9%)
+ragent-config         # 12,465 lines (2.3%)
+ragent-telemetry      # 10,560 lines (2.0%)
 ragent-types          # 10,287 lines (1.9%)
 ragent-bench          # 8,619 lines (1.6%)
 ragent-server         # 6,468 lines (1.2%)
@@ -83,29 +83,29 @@ ragent-server         # 6,468 lines (1.2%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tools-extended` | 99 | ~2,037 |
-| `ragent-tui` | 156 | ~1,769 |
-| `ragent-agent` | 140 | ~1,160 |
+| `ragent-tools-extended` | 81 | ~1,931 |
+| `ragent-tui` | 152 | ~1,767 |
+| `ragent-agent` | 120 | ~1,160 |
 | `ragent-research` | 92 | ~1,098 |
 | `ragent-specs` | 24 | ~683 |
 | `ragent-plugins` | 31 | ~435 |
-| `ragent-codeindex` | 43 | ~411 |
-| `ragent-tools-vcs` | 24 | ~403 |
-| `ragent-llm` | 36 | ~376 |
+| `ragent-codeindex` | 43 | ~412 |
+| `ragent-tools-vcs` | 23 | ~403 |
+| `ragent-llm` | 24 | ~376 |
 | `ragent-connectors` | 16 | ~318 |
 | `ragent-types` | 27 | ~300 |
-| `ragent-config` | 34 | ~292 |
 | `ragent-storage` | 34 | ~291 |
+| `ragent-config` | 33 | ~288 |
 | `ragent-tools-core` | 25 | ~284 |
 | `ragent-telemetry` | 21 | ~260 |
-| `ragent-server` | 9 | ~114 |
-| `ragent-bench` | 6 | ~63 |
-| **Total (external)** | **824** | **~10,294** |
+| `ragent-server` | 8 | ~114 |
+| `ragent-bench` | 5 | ~63 |
+| **Total (external)** | **759** | **~10,183** |
 
-Inline `#[cfg(test)]` modules in library sources contribute a further
-~54 test attributes (root `src/`/`tests/`; the migration effort has moved the
-bulk of these into each crate's `tests/` tree), bringing the estimated total to
-~10,348.
+Inline `#[cfg(test)]` modules in library sources contribute the remaining
+test attributes (a handful under root `src/`/`tests/`; the migration effort has
+moved the bulk of these into each crate's `tests/` tree), bringing the estimated
+total to ~10,237.
 
 ---
 
@@ -164,8 +164,8 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 53 lines (10,348 tests / 551,830 lines)
-- Largest crate: `ragent-tui` (111,242 lines, 20.4%)
+- Test-to-code ratio: ~1 test per 53 lines (10,237 tests / 540,894 lines)
+- Largest crate: `ragent-tui` (110,610 lines, 20.5%)
 - Smallest crate: `ragent-server` (6,468 lines, 1.2%)
 - Median crate size: 18,628 lines (`ragent-tools-core`)
 - Crates over 10k lines: 15 of 17
@@ -173,7 +173,14 @@ Notes:
 
 ---
 
-_Generated 2026-10-04 (v1.0.125 tree - the
+_Generated 2026-10-05 (v1.0.126 tree - the Office / LibreOffice document
+tools (`office_read/write/info`, `libre_read/write/info`) and their
+`office_common` / `libreoffice_*` modules removed (only the PDF family
+`pdf_read` / `pdf_write` remains, sharing a new `pdf_common` helper), the
+`tool_visibility.office` switch and the OOXML/ODF `DocumentFormat` variants
+dropped, and a `/simplify all` pass over the changed set (pdf_write image-path
+containment, single-parse pdf_read, single-pass connector lookup). Builds on
+v1.0.125: the
 `os_info` host-introspection tool (GPU adapters, graphics-API versions, physical
 hardware) and its `/osinfo show [--no-probe]` slash command, the research
 `--papers` default flip (scholarly engines now excluded by default), and three
@@ -187,5 +194,5 @@ remove-after-restore race fix (CI flake
 `test_rollback_accept_restores_snapshot`), OpenSkills `.agents` discovery, Claude
 marketplace `*-lsp` inline-manifest materialisation, conventional `skills/`
 directory bridging, plus a `/simplify all` pass over the 50-file changed set. Tool
-count is 158 registered (8 finance tools and 6 plot tools removed post v1.0.125; `os_info` added in v1.0.125; `tool_info` +
+count is 152 registered (6 Office/LibreOffice document tools removed this cycle; 8 finance tools and 6 plot tools removed post v1.0.125; `os_info` added in v1.0.125; `tool_info` +
 `commands_info` added in v1.0.120).)_

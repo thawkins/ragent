@@ -30,7 +30,7 @@ There are no subcommands; the command runs immediately.
 |---------|------------------|
 | Session Information | Session id, title, directory, created/updated timestamps |
 | Agent Configuration | Active agent, its description, selected model |
-| Tool Configuration | Visible tool count and per-family visibility (office, github, gitlab, teams, agents, plan, codeindex) |
+| Tool Configuration | Visible tool count and per-family visibility (github, gitlab, teams, agents, plan, codeindex, masterfetch, browser) |
 | Token Usage | Input, output, and total token counts for the session |
 | Recent Log Entries | Last 50 log lines, `redact_secrets` applied |
 | Session Transcript | Each message, redacted, truncated to 501 characters |

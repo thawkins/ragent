@@ -2816,7 +2816,6 @@ async fn test_slash_tools_lists_visibility_switches() {
         text.contains("Tool Family Visibility"),
         "should show visibility heading"
     );
-    assert!(text.contains("office"), "should list office switch");
     assert!(text.contains("github"), "should list github switch");
     assert!(text.contains("teams"), "should list teams switch");
     assert!(text.contains("agents"), "should list agents switch");
@@ -2867,10 +2866,10 @@ async fn test_slash_tools_shows_single_switch_state() {
     app.session_id = Some("test-session".to_string());
     app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools office").await;
+    app.execute_slash_command("/tools github").await;
 
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`office` is currently **off**"));
+    assert!(text.contains("`github` is currently **off**"));
 }
 
 #[tokio::test]
@@ -2885,7 +2884,7 @@ async fn test_slash_tools_help_shows_usage() {
     assert!(text.contains("`/tools list`"));
     assert!(text.contains("`/tools help`"));
     assert!(text.contains("`/tools <switch> on|off`"));
-    assert!(text.contains("`office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`"));
+    assert!(text.contains("`github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`"));
 }
 #[tokio::test]
 async fn test_slash_tools_list_alias_lists_visibility_switches() {
@@ -2898,7 +2897,7 @@ async fn test_slash_tools_list_alias_lists_visibility_switches() {
     assert_eq!(app.status, "tools");
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("Tool Family Visibility"));
-    assert!(text.contains("office"));
+    assert!(text.contains("github"));
     assert!(text.contains("teams"));
     assert!(text.contains("agents"));
     assert!(text.contains("plan"));
@@ -2906,51 +2905,6 @@ async fn test_slash_tools_list_alias_lists_visibility_switches() {
     // Verify the visible tools list is included.
     assert!(text.contains("Visible Tools"), "should list visible tools");
     assert!(text.contains("read"), "should include the read tool");
-}
-
-#[tokio::test]
-#[allow(clippy::await_holding_lock)]
-async fn test_slash_tools_office_on_shows_office_tools() {
-    let lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard {
-        prev: original_cwd,
-        lock,
-        temp: None,
-    };
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    let hidden = ragent_agent::tool_family_names("office")
-        .expect("office family")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    app.session_processor.tool_registry.set_hidden(&hidden);
-    assert!(
-        !app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "office_read")
-    );
-
-    app.execute_slash_command("/tools office on").await;
-
-    assert!(app.tool_visibility.office);
-    assert_eq!(app.status, "tools: office on");
-    assert!(
-        app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "office_read")
-    );
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`office` visibility is now **on**"));
 }
 
 #[tokio::test]

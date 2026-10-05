@@ -255,7 +255,6 @@ impl App {
             queue_clear_confirm_area: Rect::default(),
             memory_clear_confirm_open: false,
             memory_clear_confirm_selected: crate::app::MEMORY_CLEAR_CONFIRM_NO,
-            memory_clear_confirm_area: Rect::default(),
             plugin_store: None,
             plugin_store_result: Arc::new(std::sync::Mutex::new(None)),
             plugin_store_install_result: Arc::new(std::sync::Mutex::new(None)),

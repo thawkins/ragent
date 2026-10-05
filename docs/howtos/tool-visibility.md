@@ -10,7 +10,6 @@ The available switches are:
 
 | Switch | Default | Family |
 |--------|---------|--------|
-| `office` | `off` | Office/PDF tools |
 | `github` | `off` | GitHub issue and PR tools |
 | `gitlab` | `off` | GitLab issue, MR, pipeline, and job tools |
 | `teams` | `off` | Team coordination tools |
@@ -52,7 +51,7 @@ Examples:
 
 ```text
 /tools github on
-/tools office on
+/tools teams on
 /tools teams off
 /tools agents off
 /tools plan off
@@ -71,7 +70,6 @@ You can also configure visibility directly in `ragent.json`:
 ```json
 {
   "tool_visibility": {
-    "office": true,
     "github": false,
     "gitlab": false,
     "teams": false,

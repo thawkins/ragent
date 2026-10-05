@@ -204,7 +204,7 @@ fn test_config_defaults_masterfetch_true_when_absent() {
     let config: Config = serde_json::from_str(
         r#"{
             "tool_visibility": {
-                "office": true
+                "github": true
             }
         }"#,
     )
@@ -318,7 +318,7 @@ fn test_merge_preserves_base_masterfetch_when_overlay_unspecified() {
     let overlay: Config = serde_json::from_str(
         r#"{
             "tool_visibility": {
-                "office": true
+                "github": true
             }
         }"#,
     )

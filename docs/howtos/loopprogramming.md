@@ -363,7 +363,7 @@ Supporting constants:
   `create`, `edit`, `multi_edit`, `multiedit`, `patch`, `apply_patch`,
   `append_to_file`, `update_file`, `write_file`, `rm`, `move_file`, `copy_file`,
   `make_directory`, `memory_store`, `memory_forget`, `memory_replace`,
-  `memory_write`, `office_write`, `libre_write`, `pdf_write`.
+  `memory_write`, `pdf_write`.
 - `LOOP_ALWAYS_ALLOWED_TOOLS` -- mandatory safety tools that stay available even
   under a restricted tool set: `think`, `ask_user`, `agent_complete`,
   `model_info`, `memory_store`, `memory_recall`, `memory_forget`,

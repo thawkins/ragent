@@ -771,7 +771,6 @@ system-prompt listings. Hidden tools remain registered and executable.
 ```json
 {
   "tool_visibility": {
-    "office": true,
     "github": true,
     "gitlab": false,
     "teams": true,
@@ -788,7 +787,6 @@ system-prompt listings. Hidden tools remain registered and executable.
 
 | Switch | Default | Tools governed |
 | ------ | ------- | -------------- |
-| `office` | `false` | `office_read`, `office_write`, `office_info`, `libre_read`, `libre_write`, `libre_info`, `pdf_read`, `pdf_write` |
 | `github` | `false` | `github_list_issues`, `github_get_issue`, `github_create_issue`, `github_comment_issue`, `github_close_issue`, `github_list_prs`, `github_get_pr`, `github_create_pr`, `github_merge_pr`, `github_review_pr` |
 | `gitlab` | `false` | 19 GitLab tools (issues, MRs, pipelines, jobs) |
 | `teams` | `false` | 20 team coordination tools |
@@ -1742,7 +1740,6 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     },
 
     "tool_visibility": {
-      "office": true,
       "github": true,
       "gitlab": false,
       "teams": true,

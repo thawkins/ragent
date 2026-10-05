@@ -4,6 +4,19 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.126)
+
+- **Office / LibreOffice document tools removed** — the six `office_*` /
+  `libre_*` document tools are gone and only the PDF family (`pdf_read`,
+  `pdf_write`) remains, so the `/tools` switch list is now `github`, `gitlab`,
+  `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser` (the
+  `office` switch is removed and any config key for it is ignored). The
+  registered tool count falls 158 -> 152.
+- **`/simplify all` code-quality pass** — includes a `pdf_write` image-path
+  containment fix, a single-parse `pdf_read`, a single-pass connectors
+  `descriptor_by_id` lookup, and a `/memory clear` fix that scopes the delete to
+  the real project directory.
+
 ## Highlights (v1.0.125)
 
 - **`/osinfo` host report** — `/osinfo show [--no-probe]` renders read-only OS,
@@ -434,8 +447,8 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   `docs/howtos/loopprogramming.md`.
 - **New how-to manuals** — `docs/howtos/reactagent.md` (the core per-turn
   ReACT loop), `docs/howtos/loopprogramming.md` (goal-driven loops with
-  `/loop`), and `docs/howtos/office.md` (office + PDF tool families with
-  format matrix, JSON examples, and `tool_visibility.office` configuration).
+  `/loop`), and `docs/howtos/office.md` (the PDF tool family with format
+  matrix, JSON examples, and configuration).
 
 ## Highlights (1.0.79)
 
@@ -753,11 +766,11 @@ switch persistently.
 /tools
 /tools list
 /tools browser on
-/tools office on
+/tools teams on
 /tools github off
 ```
 
-Valid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`,
+Valid switches: `github`, `gitlab`, `teams`, `agents`, `plan`,
 `codeindex`, `masterfetch`, `browser`. Changes are saved to `ragent.json`.
 
 ---

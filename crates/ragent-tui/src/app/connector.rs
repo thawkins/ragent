@@ -256,11 +256,10 @@ impl ConnectorCommandEnv for TuiConnectorEnv {
         // connections; the startup bridge connects on the shared client, so the
         // tracked map is empty and the live client's per-server state is the
         // only source of truth for `connected` (FR-009).
-        let tracked = self
-            .session
-            .try_lock()
-            .map(|session| session.statuses())
-            .unwrap_or_default();
+        let Ok(session) = self.session.try_lock() else {
+            return Vec::new();
+        };
+        let tracked = session.statuses();
         if !tracked.is_empty() {
             return tracked;
         }
@@ -283,10 +282,7 @@ impl ConnectorCommandEnv for TuiConnectorEnv {
                 )
             })
             .collect();
-        match self.session.try_lock() {
-            Ok(session) => session.statuses_from_client_state(&connected),
-            Err(_) => Vec::new(),
-        }
+        session.statuses_from_client_state(&connected)
     }
 
     fn tool_counts(&self) -> std::collections::BTreeMap<String, usize> {

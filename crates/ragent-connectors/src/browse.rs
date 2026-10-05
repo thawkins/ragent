@@ -578,7 +578,7 @@ impl CatalogueBrowser {
     ///
     /// The filter is *held*, not applied: applying an unvalidated name now would
     /// hide every entry until the fetch lands, and would not distinguish an
-    /// unknown category from an empty one. [`CategoryFilterState::All`] clears
+    /// unknown category from an empty one. [`CategoryFilter::All`] clears
     /// nothing and drops any filter already held.
     pub fn set_pending_category(&mut self, category: CategoryFilter) {
         self.pending_category = match category {

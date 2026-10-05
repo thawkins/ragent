@@ -440,9 +440,8 @@ pub struct InputConfig {
     pub from_urls: Vec<String>,
     /// `--from-file <PATH>`: extract one or more local documents and use their
     /// content as research subjects in place of (or alongside) an explicit
-    /// topic. Supported formats include PDF, Microsoft Office (`.docx`,
-    /// `.xlsx`, `.pptx`), LibreOffice/ODF (`.odt`, `.ods`, `.odp`), and plain
-    /// text/markdown. When `topic` is empty, a concise topic is derived from the
+    /// topic. Supported formats include PDF and plain text/markdown. When
+    /// `topic` is empty, a concise topic is derived from the
     /// extracted text. The extracted content from each file is captured as the
     /// first `Source::Other` source; the normal web-search phase still runs using
     /// the derived topic. Repeat the flag to seed multiple files. If any

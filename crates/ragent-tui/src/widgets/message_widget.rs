@@ -219,7 +219,7 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// - Sub-agent: new_agent, cancel_agent, list_agents, wait_agents
 /// - Team Coordination: team_*
 /// - LSP/Code Intelligence: lsp_*
-/// - Document: office_*, pdf_*
+/// - Document: pdf_*
 /// - GitHub: github_list_issues, github_get_issue, github_create_issue,
 ///   github_comment_issue, github_close_issue, github_list_prs,
 ///   github_get_pr, github_create_pr, github_merge_pr, github_review_pr
@@ -917,14 +917,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (Office/PDF)        // ═══════════════════════════════════════════════════════════════════
-        "office_read" | "pdf_read" | "libre_read" | "libreoffice_read" => {
-            get_relative_path(&["path"])
-        }
-        "office_write" | "pdf_write" | "libre_write" | "libreoffice_write" => {
-            get_relative_path(&["path"])
-        }
-        "office_info" | "libre_info" | "libreoffice_info" => get_relative_path(&["path"]),
+        // 📄 DOCUMENT (PDF)
+        // ═══════════════════════════════════════════════════════════════════
+        "pdf_read" => get_relative_path(&["path"]),
+        "pdf_write" => get_relative_path(&["path"]),
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
@@ -1340,6 +1336,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "os_info" => {
             let format = get_str(&["format"]);
+            // Show the probe flag only when the caller set it explicitly, so
+            // the summary reflects the supplied arguments rather than the tool
+            // default (`probe` defaults to `true` server-side).
             let probe = input
                 .get("probe")
                 .and_then(serde_json::Value::as_bool)
@@ -1362,7 +1361,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             // strips '\n' graphemes inside a Span).  The full summary is
             // rendered line-by-line in the result section below.
             let first_line = summary.lines().next().unwrap_or_default();
-            trunc120(first_line).to_string()
+            trunc120(first_line)
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1446,7 +1445,6 @@ pub(crate) fn tool_inline_diff(
     }
 }
 
-/// Generate a result summary line for a completed tool call.
 /// Generate a result summary line for a completed tool call.
 ///
 /// Uses emoji icons consistent with tool_input_summary for visual alignment.
@@ -2154,25 +2152,17 @@ pub fn tool_result_summary(
             ))
         }
         // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (Office/PDF)        // ═══════════════════════════════════════════════════════════════════
-        "office_read" | "pdf_read" | "libre_read" | "libreoffice_read" => {
-            Some(format!("{} read", pluralize(line_count, "line", "lines")))
-        }
-        "office_write" | "pdf_write" | "libre_write" | "libreoffice_write" => {
+        // 📄 DOCUMENT (PDF)
+        // ═══════════════════════════════════════════════════════════════════
+        "pdf_read" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
+        "pdf_write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!(
-                "{} written to {}",
-                pluralize(line_count, "line", "lines"),
-                path
-            ))
+            // `pdf_write` reports a page count, not a line count.
+            Some(format!("written to {}", path))
         }
-        "office_info" | "libre_info" | "libreoffice_info" => Some(format!(
-            "{} of metadata",
-            pluralize(line_count, "line", "lines")
-        )),
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
         // ═══════════════════════════════════════════════════════════════════

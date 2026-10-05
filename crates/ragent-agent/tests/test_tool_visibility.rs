@@ -5,26 +5,12 @@ use ragent_agent::{Config, ToolVisibilityConfig, tool_family_names};
 #[test]
 fn test_default_tool_visibility_config() {
     let config = ToolVisibilityConfig::default();
-    assert!(!config.office);
     assert!(!config.github);
     assert!(!config.gitlab);
     assert!(!config.teams);
     assert!(!config.agents);
     assert!(!config.plan);
     assert!(config.codeindex);
-}
-
-#[test]
-fn test_tool_family_names_office() {
-    let names = tool_family_names("office").unwrap();
-    assert!(names.contains(&"office_read"));
-    assert!(names.contains(&"office_write"));
-    assert!(names.contains(&"office_info"));
-    assert!(names.contains(&"libre_read"));
-    assert!(names.contains(&"libre_write"));
-    assert!(names.contains(&"libre_info"));
-    assert!(names.contains(&"pdf_read"));
-    assert!(names.contains(&"pdf_write"));
 }
 
 #[test]
@@ -84,7 +70,6 @@ fn test_tool_family_names_invalid() {
 fn test_serde_defaults() {
     let json = "{}";
     let config: ToolVisibilityConfig = serde_json::from_str(json).unwrap();
-    assert!(!config.office);
     assert!(!config.github);
     assert!(!config.gitlab);
     assert!(!config.teams);
@@ -96,7 +81,6 @@ fn test_serde_defaults() {
 #[test]
 fn test_serde_custom_values() {
     let json = r#"{
-        "office": true,
         "github": true,
         "gitlab": true,
         "teams": true,
@@ -105,7 +89,6 @@ fn test_serde_custom_values() {
         "codeindex": false
     }"#;
     let config: ToolVisibilityConfig = serde_json::from_str(json).unwrap();
-    assert!(config.office);
     assert!(config.github);
     assert!(config.gitlab);
     assert!(config.teams);
@@ -138,7 +121,7 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
     let overlay: Config = serde_json::from_str(
         r#"{
             "tool_visibility": {
-                "office": true
+                "plan": false
             }
         }"#,
     )
@@ -146,12 +129,11 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
 
     let merged = Config::merge(base, overlay);
 
-    assert!(merged.tool_visibility.office);
+    assert!(!merged.tool_visibility.plan);
     assert!(merged.tool_visibility.github);
     assert!(merged.tool_visibility.gitlab);
     assert!(merged.tool_visibility.teams);
     assert!(merged.tool_visibility.agents);
-    assert!(merged.tool_visibility.plan);
 }
 
 #[test]

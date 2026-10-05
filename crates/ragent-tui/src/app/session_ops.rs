@@ -2393,7 +2393,10 @@ impl App {
     /// left untouched. The outcome is reported in the chat transcript and the
     /// memory panel is refreshed.
     pub fn clear_project_memory(&mut self) {
-        let project_dir = crate::app::helpers::current_working_dir();
+        // Use the real, non-collapsed working directory so this clears the same
+        // project key the Memory panel lists (`cwd_path`), not whatever the
+        // process cwd happens to be.
+        let project_dir = self.cwd_path.clone();
         let output = match self.storage.clear_memories_for_project(&project_dir) {
             Ok(n) => {
                 self.memory_cache_dirty = true;
@@ -2513,7 +2516,7 @@ impl App {
             "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
             "gcf" => Some("[on|off|show|help]".to_string()),
             "tools" => Some(
-                "[list|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
+                "[list|help|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
             "model" => Some("[show]".to_string()),
             "spec" => Some("[create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github|--gitlab] [--force]|activate|deactivate|coverage|impl|jtbd|help]".to_string()),

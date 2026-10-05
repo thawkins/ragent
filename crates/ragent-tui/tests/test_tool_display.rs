@@ -690,14 +690,14 @@ fn test_input_summary_mf_screenshot_tool() {
 }
 
 #[test]
-fn test_input_summary_libre_read_tool() {
-    let input = json!({"path": "docs/report.odt"});
-    let summary = tool_input_summary("libre_read", &input, "/home/user/project");
+fn test_input_summary_pdf_read_tool() {
+    let input = json!({"path": "docs/report.pdf"});
+    let summary = tool_input_summary("pdf_read", &input, "/home/user/project");
     assert!(
         !summary.contains("[file]"),
         "Tag should be removed: {summary}"
     );
-    assert!(summary.contains("docs/report.odt"), "Should contain path");
+    assert!(summary.contains("docs/report.pdf"), "Should contain path");
 }
 
 #[test]

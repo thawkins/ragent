@@ -428,8 +428,6 @@ pub const LOOP_WRITE_TOOLS: &[&str] = &[
     "memory_forget",
     "memory_replace",
     "memory_write",
-    "office_write",
-    "libre_write",
     "pdf_write",
 ];
 

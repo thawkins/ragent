@@ -9,11 +9,12 @@ use printpdf::{
     BuiltinFont, Color, Greyscale, Line, LinePoint, Mm, Op, PdfDocument, PdfFontHandle, PdfPage,
     PdfSaveOptions, PdfWarnMsg, Point, Pt, RawImage, TextItem, XObjectTransform,
 };
+use ragent_types::strutil::truncate_chars;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
-use super::office_common::resolve_path;
+use super::pdf_common::resolve_path;
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Creates PDF files from structured JSON content.
@@ -152,54 +153,39 @@ impl Tool for PdfWriteTool {
             .context("Missing 'content' parameter")?
             .clone();
 
+        // SEC-tools-extended-002: an `image` element's `image_path` is read
+        // verbatim into the PDF, so it must obey the same workspace containment
+        // rule as the output path (an absolute `/etc/...` would otherwise be
+        // read and embedded).
+        if let Some(elements) = content["elements"].as_array() {
+            for element in elements {
+                if element["type"].as_str() == Some("image")
+                    && let Some(image_path) = element["image_path"].as_str()
+                {
+                    ctx.check_path_within_workspace(&resolve_path(&ctx.working_dir, image_path))?;
+                }
+            }
+        }
+
         let working_dir = ctx.working_dir.clone();
         let path_clone = path.clone();
-
-        let content_clone = content.clone();
-        let bytes_written = tokio::task::spawn_blocking(move || {
-            write_pdf(&path_clone, &content_clone, &working_dir)
-        })
-        .await
-        .context("Failed to write PDF: the background task exited unexpectedly")??;
-
-        // Estimate page count from bytes (approximate)
-        let page_count = estimate_page_count(&content);
+        let bytes_written =
+            tokio::task::spawn_blocking(move || write_pdf(&path_clone, &content, &working_dir))
+                .await
+                .context("Failed to write PDF: the background task exited unexpectedly")??;
 
         Ok(ToolOutput {
             content: format!("Wrote PDF ({} bytes) to {}", bytes_written, path.display()),
             metadata: Some(json!({
                 "path": path.display().to_string(),
                 "byte_count": bytes_written,
-                "line_count": page_count,
+                // Page breaks are not a supported element type, so a document
+                // always renders exactly one page.
+                "page_count": 1,
                 "format": "pdf",
             })),
         })
     }
-}
-
-/// Estimates the page count from PDF content for metadata purposes.
-///
-/// Pages are created based on content elements and page breaks.
-fn estimate_page_count(content: &Value) -> usize {
-    let mut page_count = 1; // At least one page
-
-    if let Some(elements) = content["elements"].as_array() {
-        // Count explicit page breaks in elements
-        for elem in elements {
-            if let Some(elem_type) = elem["type"].as_str()
-                && elem_type == "page_break"
-            {
-                page_count += 1;
-            }
-        }
-    }
-
-    // Also check content structure
-    if content.get("title").is_some() {
-        page_count = page_count.max(1);
-    }
-
-    page_count
 }
 
 /// Cursor tracking Y position and managing page breaks.
@@ -582,15 +568,20 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
         }
         let words: Vec<&str> = paragraph.split_whitespace().collect();
         let mut current_line = String::new();
+        let mut current_chars = 0usize;
         for word in words {
+            let word_chars = word.chars().count();
             if current_line.is_empty() {
                 current_line = word.to_string();
-            } else if current_line.len() + 1 + word.len() <= max_chars {
+                current_chars = word_chars;
+            } else if current_chars + 1 + word_chars <= max_chars {
                 current_line.push(' ');
                 current_line.push_str(word);
+                current_chars += 1 + word_chars;
             } else {
                 lines.push(current_line);
                 current_line = word.to_string();
+                current_chars = word_chars;
             }
         }
         if !current_line.is_empty() {
@@ -603,15 +594,5 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
 /// Truncate a cell value to fit within a column width.
 fn truncate_cell(text: &str, col_width_mm: f32) -> String {
     let max_chars = (col_width_mm / (BODY_FONT_SIZE * 0.2116)) as usize;
-    if text.len() <= max_chars {
-        text.to_string()
-    } else if max_chars > 3 {
-        let mut end = max_chars - 1;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &text[..end])
-    } else {
-        text.chars().take(max_chars).collect()
-    }
+    truncate_chars(text, max_chars)
 }

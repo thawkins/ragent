@@ -349,7 +349,6 @@ listings (the tools stay registered and executable):
 
 | Key | Default |
 |---|---|
-| `tool_visibility.office` | `false` |
 | `tool_visibility.github` | `false` |
 | `tool_visibility.gitlab` | `false` |
 | `tool_visibility.teams` | `false` |
@@ -484,7 +483,6 @@ exhausted, or `/autopilot off` is issued.
 - `SPEC.md` — full configuration schema
 - `docs/howtos/loopprogramming.md` — the goal-driven `/loop` extension that
   wraps this loop with a spec and stop conditions
-- `docs/howtos/office.md` — the office + PDF tool families this loop can
-  execute (`tool_visibility.office` gated)
+- `docs/howtos/office.md` — the PDF tool family this loop can execute
 - `docs/howtos/teams.md` — multi-agent team coordination
 - `docs/performance/benchmark-guide.md` — benchmarking the loop surfaces

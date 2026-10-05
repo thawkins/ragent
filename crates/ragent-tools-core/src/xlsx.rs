@@ -1,4 +1,4 @@
-//! Shared XLSX writing helpers used by office tools and benchmark exports.
+//! Shared XLSX writing helpers used by benchmark exports.
 //!
 //! This module centralizes the workbook writer so every XLSX-producing surface
 //! in the workspace uses the same `serde_json` sheet/row representation.

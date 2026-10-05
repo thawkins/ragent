@@ -323,25 +323,29 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
 #[must_use]
 pub fn descriptor_by_id(dirs: &StoreDirs, reference: &str) -> Option<ConnectorDescriptor> {
     let reference = reference.trim();
-    let descriptors: Vec<ConnectorDescriptor> = scan_dirs(dirs.clone())
+    let descriptors = scan_dirs(dirs.clone())
         .into_iter()
-        .filter_map(|connector| connector.outcome.ok())
-        .collect();
-    // 1. Exact id.
-    if let Some(found) = descriptors.iter().find(|d| d.id.as_str() == reference) {
-        return Some(found.clone());
+        .filter_map(|connector| connector.outcome.ok());
+    // Match precedence: exact id, then case-insensitive id, then
+    // case-insensitive display name. Collecting into a `Vec` is unnecessary -
+    // the first matching precedence wins, so a single pass that keeps the
+    // highest-priority match is equivalent and allocates only the winner.
+    let mut exact_id: Option<ConnectorDescriptor> = None;
+    let mut ci_id: Option<ConnectorDescriptor> = None;
+    let mut ci_name: Option<ConnectorDescriptor> = None;
+    for d in descriptors {
+        if exact_id.is_none() && d.id.as_str() == reference {
+            exact_id = Some(d);
+        } else if ci_id.is_none() && d.id.as_str().eq_ignore_ascii_case(reference) {
+            ci_id = Some(d);
+        } else if ci_name.is_none() && d.name.eq_ignore_ascii_case(reference) {
+            ci_name = Some(d);
+        }
+        if exact_id.is_some() {
+            break;
+        }
     }
-    // 2. Case-insensitive id.
-    if let Some(found) = descriptors
-        .iter()
-        .find(|d| d.id.as_str().eq_ignore_ascii_case(reference))
-    {
-        return Some(found.clone());
-    }
-    // 3. Case-insensitive display name.
-    descriptors
-        .into_iter()
-        .find(|d| d.name.eq_ignore_ascii_case(reference))
+    exact_id.or(ci_id).or(ci_name)
 }
 
 /// A store entry is a candidate connector directory when it is a real

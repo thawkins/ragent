@@ -198,13 +198,6 @@ pub fn think() -> Style {
         .add_modifier(Modifier::ITALIC)
 }
 
-/// Think tool summary style (lavender + bold, for tool call headers)
-pub fn think_summary() -> Style {
-    Style::default()
-        .fg(colors::THINK)
-        .add_modifier(Modifier::BOLD)
-}
-
 /// Loading text style (bold cyan with dimmed effect)
 pub fn loading() -> Style {
     Style::default()

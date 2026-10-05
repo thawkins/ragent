@@ -8,7 +8,7 @@
 - `jcode` (https://github.com/1jehuang/jcode) is a Rust coding-agent harness with
   a large set of first-class built-in tools and ambient/background execution.
 - `ragent` (this repo) already has a broad tool surface: file/shell/search, VCS,
-  office/PDF, web, codeindex, memory, teams/swarm, sub-agents, specs, MCP, etc.
+  PDF, web, codeindex, memory, teams/swarm, sub-agents, specs, MCP, etc.
 - This plan focuses on **built-in tool and runtime capabilities** that `jcode`
   provides and `ragent` currently lacks, grouped into milestones that can be
   implemented independently.
@@ -17,7 +17,7 @@
 
 Close the most valuable gaps between `jcode` and `ragent` by porting selected
 agent-facing tools and supporting runtime features, without duplicating
-existing `ragent` functionality (VCS, codeindex, office/PDF, masterfetch, teams,
+existing `ragent` functionality (VCS, codeindex, PDF, masterfetch, teams,
 specs, MCP) or building UI-only features that are out of scope.
 
 ## Approach

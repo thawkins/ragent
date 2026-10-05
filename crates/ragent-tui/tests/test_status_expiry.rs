@@ -1,7 +1,7 @@
 //! Tests for the slash-command status auto-expiry mechanism.
 //!
 //! After a slash command completes, the status indicator shows the command's
-//! status (e.g. "help", "tools: office on") for a short grace period and then
+//! status (e.g. "help", "tools: teams on") for a short grace period and then
 //! auto-transitions to "ready" so the user can see the system is ready for the
 //! next interaction. These tests verify the arming, polling, and guard logic.
 

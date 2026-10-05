@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use super::office_common::{MAX_OUTPUT_BYTES, resolve_path, truncate_output};
+use super::pdf_common::{MAX_OUTPUT_BYTES, resolve_path, truncate_output};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Reads a PDF file and extracts its text content and metadata.
@@ -141,7 +141,7 @@ pub fn read_pdf(
             Ok(output)
         }
         "json" => {
-            let pages = extract_pages_text(&bytes, total_pages, start_page, end_page)?;
+            let pages = extract_pages_text(&doc, &bytes, total_pages, start_page, end_page)?;
             let page_objects: Vec<Value> = pages
                 .iter()
                 .map(|(num, text)| {
@@ -168,7 +168,7 @@ pub fn read_pdf(
         }
         _ => {
             // "text" format - plain text extraction
-            let pages = extract_pages_text(&bytes, total_pages, start_page, end_page)?;
+            let pages = extract_pages_text(&doc, &bytes, total_pages, start_page, end_page)?;
             let mut output = String::new();
             for (page_num, text) in &pages {
                 if pages.len() > 1 {
@@ -187,6 +187,7 @@ pub fn read_pdf(
 
 /// Extract text from specified pages using pdf-extract.
 fn extract_pages_text(
+    doc: &lopdf::Document,
     bytes: &[u8],
     total_pages: usize,
     start_page: Option<usize>,
@@ -199,40 +200,40 @@ fn extract_pages_text(
         anyhow::bail!("start_page {start} exceeds total pages ({total_pages})");
     }
 
-    // pdf-extract works on the whole document; extract all then filter
-    let full_text = pdf_extract::extract_text_from_mem(bytes)
-        .with_context(|| "Failed to extract text from PDF")?;
-
-    // pdf-extract doesn't provide per-page extraction directly,
-    // so we use lopdf to get page-by-page text via content streams.
-    let doc = lopdf::Document::load_mem(bytes)?;
+    // pdf-extract doesn't provide per-page extraction directly, so use the
+    // already-parsed lopdf document for page-by-page text via content streams.
     let pages = doc.get_pages();
 
     let mut result = Vec::new();
     for page_num in start..=end {
         let text = if let Some(&page_id) = pages.get(&(page_num as u32)) {
-            extract_page_text(&doc, page_id).unwrap_or_default()
+            extract_page_text(doc, page_id).unwrap_or_default()
         } else {
             String::new()
         };
         result.push((page_num, text));
     }
 
-    // If lopdf extraction yielded empty pages but pdf-extract got text,
-    // fall back to the full text for the range
+    // If lopdf extraction yielded empty pages, fall back to pdf-extract's
+    // whole-document text. That call is expensive, so only run it once the
+    // per-page pass has been shown to produce nothing.
     let all_empty = result.iter().all(|(_, t)| t.trim().is_empty());
-    if all_empty && !full_text.trim().is_empty() {
-        // Can't do per-page, return full text attributed to page range
-        result.clear();
-        if start == 1 && end == total_pages {
-            result.push((1, full_text));
-        } else {
-            result.push((
-                start,
-                format!(
-                    "[Pages {start}-{end} - per-page extraction unavailable, showing full document text]\n\n{full_text}"
-                ),
-            ));
+    if all_empty {
+        let full_text = pdf_extract::extract_text_from_mem(bytes)
+            .with_context(|| "Failed to extract text from PDF")?;
+        if !full_text.trim().is_empty() {
+            // Can't do per-page, return full text attributed to page range
+            result.clear();
+            if start == 1 && end == total_pages {
+                result.push((1, full_text));
+            } else {
+                result.push((
+                    start,
+                    format!(
+                        "[Pages {start}-{end} - per-page extraction unavailable, showing full document text]\n\n{full_text}"
+                    ),
+                ));
+            }
         }
     }
 

@@ -400,8 +400,6 @@ const MAX_INPUT_QUEUE_CAPACITY: usize = 99;
 /// user-set before persisting the config.
 #[derive(Debug, Clone, Default)]
 pub struct ToolVisibilitySpecified {
-    /// `true` when `office` was explicitly set in the source JSON or via a setter.
-    pub office: bool,
     /// `true` when `github` was explicitly set in the source JSON or via a setter.
     pub github: bool,
     /// `true` when `gitlab` was explicitly set in the source JSON or via a setter.
@@ -432,8 +430,6 @@ pub struct ToolVisibilitySpecified {
 /// disk and survives a restart - even when a global config disagrees.
 #[derive(Debug, Clone)]
 pub struct ToolVisibilityConfig {
-    /// Office document tools (office_read, office_write, office_info, libre_read, etc.).
-    pub office: bool,
     /// GitHub tools (github_list_issues, github_get_issue, github_create_issue, etc.).
     pub github: bool,
     /// GitLab tools (gitlab_list_issues, gitlab_get_issue, gitlab_create_mr, etc.).
@@ -470,7 +466,6 @@ impl ToolVisibilityConfig {
     /// Iterate over every tool-visibility switch and its enabled state.
     pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
         [
-            ("office", self.office),
             ("github", self.github),
             ("gitlab", self.gitlab),
             ("teams", self.teams),
@@ -508,7 +503,6 @@ impl ToolVisibilityConfig {
                 }
             };
         }
-        merge_field!(office);
         merge_field!(github);
         merge_field!(gitlab);
         merge_field!(teams);
@@ -528,7 +522,7 @@ impl Serialize for ToolVisibilityConfig {
         use serde::ser::SerializeStruct;
         // Non-codeindex switches are always serialised (they default to false
         // and have no skip). `codeindex` is serialised only when explicitly set.
-        let mut count = 6; // office, github, gitlab, teams, agents, plan
+        let mut count = 5; // github, gitlab, teams, agents, plan
         if self.specified.codeindex {
             count += 1;
         }
@@ -539,7 +533,6 @@ impl Serialize for ToolVisibilityConfig {
             count += 1;
         }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
-        s.serialize_field("office", &self.office)?;
         s.serialize_field("github", &self.github)?;
         s.serialize_field("gitlab", &self.gitlab)?;
         s.serialize_field("teams", &self.teams)?;
@@ -785,7 +778,6 @@ impl LoopConfig {
 impl Default for ToolVisibilityConfig {
     fn default() -> Self {
         Self {
-            office: false,
             github: false,
             gitlab: false,
             teams: false,
@@ -806,7 +798,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
     {
         #[derive(Deserialize, Default)]
         struct RawToolVisibilityConfig {
-            office: Option<bool>,
             github: Option<bool>,
             gitlab: Option<bool>,
             teams: Option<bool>,
@@ -819,7 +810,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
         Ok(Self {
-            office: raw.office.unwrap_or_else(default_false),
             github: raw.github.unwrap_or_else(default_false),
             gitlab: raw.gitlab.unwrap_or_else(default_false),
             teams: raw.teams.unwrap_or_else(default_false),
@@ -829,7 +819,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             masterfetch: raw.masterfetch.unwrap_or_else(default_true),
             browser: raw.browser.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
-                office: raw.office.is_some(),
                 github: raw.github.is_some(),
                 gitlab: raw.gitlab.is_some(),
                 teams: raw.teams.is_some(),
@@ -850,16 +839,6 @@ const fn default_false() -> bool {
 /// Map a visibility switch to the list of tool names it governs.
 pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
     match switch {
-        "office" => Some(&[
-            "office_read",
-            "office_write",
-            "office_info",
-            "libre_read",
-            "libre_write",
-            "libre_info",
-            "pdf_read",
-            "pdf_write",
-        ]),
         "github" => Some(&[
             "github_list_issues",
             "github_get_issue",

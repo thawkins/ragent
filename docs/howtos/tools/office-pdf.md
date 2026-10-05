@@ -1,75 +1,51 @@
-# Tools — Office & PDF
+# Tools — PDF
 
-Read and write Microsoft Office (DOCX/XLSX/PPTX), LibreOffice (ODT/ODS/ODP),
-and PDF documents.
+Read and write PDF documents.
 
 | Tool | Description |
 |------|-------------|
-| `office_read` | Read DOCX/XLSX/PPTX content. |
-| `office_write` | Write Office documents. |
-| `office_info` | Return Office document metadata. |
-| `libre_read` | Read ODT/ODS/ODP content. |
-| `libre_write` | Write LibreOffice documents. |
-| `libre_info` | Return LibreOffice document metadata. |
-| `pdf_read` | Extract text from a PDF. |
+| `pdf_read` | Extract text or metadata from a PDF. |
 | `pdf_write` | Write a PDF document. |
 
-**Visibility switch:** `office`. See `docs/howtos/office.md` for the full
-manual.
+**Visibility switch:** none — the PDF family is registered and visible by
+default. See `docs/howtos/office.md` for the full manual.
 
 ---
 
-## office_read / libre_read / pdf_read
+## pdf_read
 
-Extract the text content of a document.
+Extract text, metadata, or structured per-page JSON from a PDF.
 
 **Arguments**
 
 | Argument | Type | Required | Description | Typical value |
 |----------|------|----------|-------------|---------------|
-| `path` | string | yes | Document path | `"report.docx"`, `"spec.pdf"` |
-| `sheet` | string | no (office_read) | Specific worksheet for XLSX | `"Sheet1"` |
+| `path` | string | yes | PDF path | `"spec.pdf"` |
+| `start_page` | integer | no | First page (1-based, inclusive) | `1` |
+| `end_page` | integer | no | Last page (1-based, inclusive) | `10` |
+| `format` | string | no | `text` (default), `metadata`, or `json` | `"metadata"` |
 
 **Example:**
 ```text
-office_read path="report.docx"
 pdf_read path="spec.pdf"
+pdf_read path="paper.pdf" start_page=3 end_page=7
+pdf_read path="report.pdf" format="metadata"
 ```
-
----
-
-## office_write / libre_write
-
-Write a document. Format follows the file extension.
-
-**Arguments**
-
-| Argument | Type | Required | Description | Typical value |
-|----------|------|----------|-------------|---------------|
-| `path` | string | yes | Output path | `"out.docx"` |
-| `content` | string | yes | Document content (plain text / markdown-ish structure) | — |
-
----
-
-## office_info / libre_info
-
-Return document metadata (title, author, page/sheet counts, etc.).
-
-**Arguments**
-
-| Argument | Type | Required | Description |
-|----------|------|----------|-------------|
-| `path` | string | yes | Document path |
 
 ---
 
 ## pdf_write
 
-Write plain-text content as a PDF document.
+Write a PDF document from structured content.
 
 **Arguments**
 
 | Argument | Type | Required | Description | Typical value |
 |----------|------|----------|-------------|---------------|
 | `path` | string | yes | Output path | `"notes.pdf"` |
-| `content` | string | yes | Text content to render | — |
+| `content` | object | yes | Document content: optional `title` and an `elements` array of `paragraph`/`heading`/`table`/`image` items | — |
+
+**Example:**
+```text
+pdf_write path="report.pdf" content={"title":"Report","elements":[{"type":"heading","level":1,"text":"Summary"},{"type":"paragraph","text":"All checks pass."}]}
+```

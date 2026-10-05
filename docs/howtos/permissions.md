@@ -1144,7 +1144,6 @@ entries from all sources are combined.
 
   // Tool-family visibility (hides tools from the LLM, does not affect permissions)
   "tool_visibility": {
-    "office": true,
     "github": true,
     "gitlab": true,
     "teams": true,

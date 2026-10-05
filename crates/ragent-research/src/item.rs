@@ -525,7 +525,7 @@ fn sources_count(sources: &[Source]) -> String {
 
 /// Strip non-printable control characters that would corrupt `RESEARCH.md`.
 ///
-/// LLM text streams and PDF/Office extraction can emit C0 control codes
+/// LLM text streams and PDF extraction can emit C0 control codes
 /// (0x00-0x1F), DEL (0x7F), and C1 control codes (0x80-0x9F). These make
 /// markdown editors detect the file as binary. Newlines (`\n`) and tabs
 /// (`\t`) are preserved so multi-line findings render correctly; carriage

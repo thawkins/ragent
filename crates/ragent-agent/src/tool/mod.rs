@@ -1605,8 +1605,8 @@ impl Default for ToolRegistry {
 /// Creates a [`ToolRegistry`] pre-populated with all built-in tools.
 ///
 /// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`,
-/// `question`, `office_read`, `office_write`, `office_info`, `pdf_read`,
-/// `pdf_write`, `new_agent`, `cancel_agent`, `list_agents`.
+/// `question`, `pdf_read`, `pdf_write`, `new_agent`, `cancel_agent`,
+/// `list_agents`.
 ///
 /// # Examples
 ///

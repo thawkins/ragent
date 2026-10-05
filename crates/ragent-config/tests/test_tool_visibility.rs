@@ -6,7 +6,6 @@ use ragent_config::{Config, tool_family_names};
 fn test_tool_visibility_defaults_match_phase_one_plan() {
     let config = Config::default();
 
-    assert!(!config.tool_visibility.office);
     assert!(!config.tool_visibility.github);
     assert!(!config.tool_visibility.gitlab);
     assert!(!config.tool_visibility.teams);
@@ -19,7 +18,6 @@ fn test_tool_visibility_defaults_match_phase_one_plan() {
 fn test_config_parses_tool_visibility_section() {
     let config: Config = serde_json::from_str(
         r#"{              "tool_visibility": {
-                  "office": true,
                   "teams": true,
                   "agents": true,
                   "plan": true,
@@ -29,7 +27,6 @@ fn test_config_parses_tool_visibility_section() {
     )
     .expect("config should parse");
 
-    assert!(config.tool_visibility.office);
     assert!(!config.tool_visibility.github);
     assert!(!config.tool_visibility.gitlab);
     assert!(config.tool_visibility.teams);
@@ -41,7 +38,6 @@ fn test_config_parses_tool_visibility_section() {
 #[test]
 fn test_merge_preserves_unspecified_tool_visibility_switches() {
     let mut base = Config::default();
-    base.tool_visibility.office = true;
     base.tool_visibility.github = true;
     base.tool_visibility.teams = true;
     base.tool_visibility.agents = true;
@@ -59,7 +55,6 @@ fn test_merge_preserves_unspecified_tool_visibility_switches() {
 
     let merged = Config::merge(base, overlay);
 
-    assert!(merged.tool_visibility.office);
     assert!(merged.tool_visibility.github);
     assert!(merged.tool_visibility.teams);
     assert!(merged.tool_visibility.agents);

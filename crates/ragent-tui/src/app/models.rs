@@ -2145,9 +2145,8 @@ impl App {
         }
     }
 
-    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 9] {
+    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 8] {
         [
-            ("office", self.tool_visibility.office),
             ("github", self.tool_visibility.github),
             ("gitlab", self.tool_visibility.gitlab),
             ("teams", self.tool_visibility.teams),
@@ -2167,10 +2166,6 @@ impl App {
 
     pub(crate) fn set_tool_visibility_state(&mut self, switch: &str, enabled: bool) -> bool {
         match switch {
-            "office" => {
-                self.tool_visibility.office = enabled;
-                self.tool_visibility.specified.office = true;
-            }
             "github" => {
                 self.tool_visibility.github = enabled;
                 self.tool_visibility.specified.github = true;
@@ -2297,7 +2292,7 @@ impl App {
     /// - `plugin:<id>` when the tool was registered by a plugin
     ///   (name `plugin_<id>_<tool>`);
     /// - `visibility:<switch>` when the tool belongs to a tool-family
-    ///   visibility switch (`office`, `github`, `gitlab`, `teams`, `agents`,
+    ///   visibility switch (`github`, `gitlab`, `teams`, `agents`,
     ///   `plan`, `codeindex`, `masterfetch`, `browser`);
     /// - `internal` otherwise (a core or built-in tool).
     fn tool_source(&self, registry: &ragent_agent::tool::ToolRegistry, name: &str) -> String {

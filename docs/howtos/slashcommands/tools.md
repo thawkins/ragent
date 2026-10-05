@@ -1,5 +1,5 @@
 # /tools
-> Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off] | /tools help
+> Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help
 
 ## Overview
 
@@ -10,7 +10,7 @@ word it toggles the visibility of that tool family for the session and saves
 the choice to the active config source.
 
 Note the registry description lists seven switches but the implementation
-accepts nine: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`,
+accepts eight: `github`, `gitlab`, `teams`, `agents`, `plan`,
 `codeindex`, `masterfetch`, and `browser`. Toggling a switch rewrites
 `tool_visibility` in the config source and invalidates the session
 processor's config cache so the change takes effect immediately.
@@ -36,7 +36,7 @@ processor's config cache so the change takes effect immediately.
 | `/tools <switch> off` | Disable the switch (`disable` also accepted) |
 | `/tools help` | Print usage help |
 
-Switches (all nine accepted): `office`, `github`, `gitlab`, `teams`,
+Switches (all eight accepted): `github`, `gitlab`, `teams`,
 `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.
 
 ## Examples
@@ -50,7 +50,7 @@ Show the visibility table:
 Read a single switch:
 
 ```
-/tools office
+/tools teams
 ```
 
 Turn the GitHub tool family off for this project:
@@ -84,7 +84,7 @@ Visibility table (bare form): one row per switch with its on/off state.
 Single switch read:
 
 ```
-`office` is currently **on**.
+`teams` is currently **on**.
 ```
 
 Successful toggle (the config is saved and the config cache invalidated):

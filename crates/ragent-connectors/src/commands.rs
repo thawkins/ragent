@@ -291,8 +291,8 @@ fn id_command(
 ///
 /// Joining the tokens lets a multi-word display name (`Microsoft Learn`) be
 /// quoted and passed as one shell word without the whitespace being split off;
-/// an unquoted multi-word reference still resolves its first token, so the
-/// existing single-token usage is unchanged.
+/// an unquoted multi-word reference is joined the same way, so `enable Microsoft
+/// Learn` resolves `Microsoft Learn`.
 fn first_id(tokens: &[&str]) -> Option<String> {
     if tokens.is_empty() {
         return None;
@@ -702,9 +702,8 @@ pub async fn run_connector_subcommand_env(
 ///
 /// Fetches every [`CatalogueKind`] under its resolved endpoint and returns the
 /// union of the descriptors that survived normalisation, together with a short
-/// cause describing the first failure. Both command surfaces
-/// ([`ConnectorCommandEnv::search_catalogue`]) call this, so they search one
-/// catalogue with one wording.
+/// cause describing the first failure, so every surface searches one catalogue
+/// with one wording.
 ///
 /// A fetch failure is non-fatal when a later store succeeds; the returned cause
 /// names the first failure so an empty union still reports why it is empty

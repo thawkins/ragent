@@ -4,7 +4,7 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (158 registered
+> **Scope:** Tool names, parameter schemas, and usage patterns (152 registered
 > tools plus the dynamic `mcp_tool`). For TUI workflow see
 > `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
@@ -25,7 +25,7 @@ worked examples.
 | 9 | [git.md](git.md) | 18 | always on |
 | 10 | [github.md](github.md) | 11 | `github` |
 | 11 | [gitlab.md](gitlab.md) | 19 | `gitlab` |
-| 12 | [office-pdf.md](office-pdf.md) | 8 | `office` |
+| 12 | [office-pdf.md](office-pdf.md) | 2 | always on |
 | 13 | [teams.md](teams.md) | 20 | `teams` |
 | 14 | [sub-agents.md](sub-agents.md) | 5 | `agents` |
 | 15 | [planning.md](planning.md) | 2 | `plan` |
@@ -39,8 +39,8 @@ worked examples.
 | 23 | [utility.md](utility.md) | 5 | always on |
 | 24 | [communications.md](communications.md) | 2 | always on |
 
-Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`,
-`office`; the rest default `on`. See `docs/howtos/tool-visibility.md`.
+Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`;
+the rest default `on`. See `docs/howtos/tool-visibility.md`.
 
 All documents are also available as PDFs under `pdf/`.
 

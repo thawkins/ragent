@@ -198,8 +198,7 @@ run. The same replay is available from the CLI (`ragent research update <name>`)
 and over HTTP (`PUT /research/{name}`).
 
 **Quick syntax note:** The `--from-url` flag can be repeated to seed multiple
-pages. The `--from-file` flag accepts PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP,
-TXT, and MD files. When neither a topic nor a seed source is supplied, the
+pages. The `--from-file` flag accepts PDF, TXT, and MD files. When neither a topic nor a seed source is supplied, the
 command errors.
 
 #### Examples
@@ -669,8 +668,6 @@ The file body is extracted as the primary `Other` source and used to derive
 the topic. Supported file formats:
 
 - PDF (`.pdf`)
-- Microsoft Office (`.docx`, `.xlsx`, `.pptx`)
-- LibreOffice/ODF (`.odt`, `.ods`, `.odp`)
 - Plain text (`.txt`)
 - Markdown (`.md`)
 
@@ -679,7 +676,7 @@ text. The normal web-search phase still runs using the derived topic.
 
 ```text
 /research create from-pdf --from-file papers/attention-is-all-you-need.pdf --format imrad --tier full
-/research create from-docx --from-file specs/design.docx --use-specs
+/research create from-doc --from-file docs/design.md --use-specs
 ```
 
 ### 8.3 Include project files and specs

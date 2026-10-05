@@ -76,4 +76,4 @@ Derived cache of every research item on disk. This file is regenerated on every 
 | test-research-routes-1791103151778166113 | test topic | draft | 2026-10-04T08:39:11.874476421+00:00 | 2026-10-04T08:39:11.874482158+00:00 |
 | test-research-routes-1791103152336598106 | test topic for post | draft | 2026-10-04T08:39:12.411027489+00:00 | 2026-10-04T08:39:12.411032763+00:00 |
 
-_Generated 2026-10-04T08:39:13.650521831+00:00 * 71 items._
+_Generated 2026-10-05T13:33:07.624500412+00:00 * 71 items._

@@ -17,7 +17,7 @@ ragent offers a rich set of features designed to enhance developer productivity:
 
 ### Comprehensive Tool System
 - **Built-in Tools (8)**: File operations (read/write/create/edit), bash execution, grep, glob, directory listing, and interactive questions
-- **Extended Tools (15)**: Advanced editing (multiedit, patch), web integration (webfetch, websearch), planning (plan delegation), task management (todo), document processing (Office, PDF), and file deletion
+- **Extended Tools (15)**: Advanced editing (multiedit, patch), web integration (webfetch, websearch), planning (plan delegation), task management (todo), document processing (PDF), and file deletion
 - **Sub-Agent Tools (3)**: Background task management with new_agent, cancel_agent, and list_agents
 
 ### Terminal User Interface
