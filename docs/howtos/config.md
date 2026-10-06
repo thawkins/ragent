@@ -1085,6 +1085,14 @@ persist the change to the **user-global** config
 (untrusted repository content, SECTASKS T-011). See
 [`docs/howtos/permissions.md`](permissions.md).
 
+The persistence path writes only the single top-level `yolo` key in the raw
+global file (`Config::set_global_bool_key`), preserving every other key
+byte-for-byte rather than re-serialising the merged `Config`, and the write is
+atomic (unique temp file + `fsync` + rename), so an interrupted write can never
+leave a partial config that a later `Config::load` would fall back on (which
+would silently reset a persisted `true`). Every such write logs the key, value,
+and path with a forced backtrace, so a privileged flag flip is attributable.
+
 ---
 
 ### 7.22 `edit_log`

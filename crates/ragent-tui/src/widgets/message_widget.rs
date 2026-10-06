@@ -1332,7 +1332,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "ragent_info" => {
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
-            format!("ragent build info ({})", format)
+            format!("ragent build/execution info ({})", format)
         }
         "os_info" => {
             let format = get_str(&["format"]);
@@ -2781,7 +2781,17 @@ pub fn tool_result_summary(
                 .get("build_time")
                 .and_then(|v| v.as_str())
                 .unwrap_or("?");
-            Some(format!("v{} built {}", trunc120(version), trunc120(built)))
+            let pid = out
+                .get("execution")
+                .and_then(|e| e.get("pid"))
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(|| "?".to_string(), |p| p.to_string());
+            Some(format!(
+                "v{} built {} (pid {})",
+                trunc120(version),
+                trunc120(built),
+                pid
+            ))
         }
 
         // ═══════════════════════════════════════════════════════════════════

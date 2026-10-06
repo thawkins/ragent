@@ -46,3 +46,17 @@ pub use permission::{
 pub use plugins::{PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
 pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};
 pub use trigger::{McpNotificationMode, TriggerConfig};
+
+/// Re-synchronise every process-wide runtime flag (`yolo`, `edit_log`,
+/// `activity_log`, `gcf`) from an already-loaded [`Config`].
+///
+/// Callers that have just loaded or rewritten the config pass the values they
+/// already hold here instead of reaching into each module, so the "which
+/// config-backed flags exist" list lives in one place and a new flag cannot be
+/// left un-synchronised at a second call site.
+pub fn sync_runtime_flags(config: &Config) {
+    yolo::sync_from_config_value(config.yolo);
+    edit_log::sync_from_config_value(config.edit_log);
+    activity_log::sync_from_config_value(config.activity_log);
+    gcf::sync_from_config_value(config.gcf.enabled);
+}

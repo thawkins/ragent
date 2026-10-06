@@ -128,3 +128,71 @@ fn test_yolo_true_is_serialized() {
     let json = serde_json::to_string_pretty(&config).expect("serialize config");
     assert!(json.contains("\"yolo\": true"));
 }
+
+#[test]
+#[serial_test::serial]
+fn test_yolo_persist_preserves_unrelated_and_unknown_keys() {
+    let _guard = EnvGuard::new();
+    let temp = tempfile::tempdir().expect("temp dir");
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config")) };
+    unsafe { std::env::remove_var("RAGENT_CONFIG") };
+    unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
+
+    // A hand-written global config carrying an unmodelled key and a non-default
+    // value the running build knows nothing about.
+    let global_path = Config::global_config_path().expect("global path");
+    std::fs::create_dir_all(global_path.parent().expect("parent")).expect("create dir");
+    std::fs::write(
+        &global_path,
+        "{\n  \"yolo\": false,\n  \"user_note\": \"keep me\"\n}\n",
+    )
+    .expect("seed global config");
+
+    ragent_config::yolo::persist_yolo(true).expect("persist yolo");
+
+    let on_disk = std::fs::read_to_string(&global_path).expect("read global config");
+    assert!(
+        on_disk.contains("\"yolo\": true"),
+        "yolo should be persisted, got:\n{on_disk}"
+    );
+    assert!(
+        on_disk.contains("\"user_note\": \"keep me\""),
+        "an unrelated hand-written key must survive the toggle, got:\n{on_disk}"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn test_yolo_persist_is_atomic_and_leaves_no_temp_files() {
+    use ragent_config::Config;
+
+    let _guard = EnvGuard::new();
+    let temp = tempfile::tempdir().expect("temp dir");
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config")) };
+    unsafe { std::env::remove_var("RAGENT_CONFIG") };
+    unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
+
+    ragent_config::yolo::persist_yolo(true).expect("persist yolo");
+    ragent_config::yolo::persist_yolo(false).expect("persist yolo off");
+
+    let config_dir = Config::global_config_dir().expect("config dir");
+    let leftovers: Vec<String> = std::fs::read_dir(&config_dir)
+        .expect("read config dir")
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|name| {
+            std::path::Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+        })
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "atomic write must not leave temp files behind: {leftovers:?}"
+    );
+
+    // The final file must be valid JSON with the last value applied.
+    let on_disk = std::fs::read_to_string(config_dir.join("ragent.json")).expect("read global");
+    let value: serde_json::Value = serde_json::from_str(&on_disk).expect("valid JSON after writes");
+    assert_eq!(value.get("yolo"), Some(&serde_json::Value::Bool(false)));
+}

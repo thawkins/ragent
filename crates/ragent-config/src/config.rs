@@ -2149,6 +2149,15 @@ impl Config {
     ///
     /// Comparing parsed [`serde_json::Value`]s prevents spurious rewrites when
     /// map key ordering differs between serialisations.
+    ///
+    /// The write is **atomic**: the bytes land in a uniquely named temp file in
+    /// the same directory and are then renamed over the target, so a crash,
+    /// kill, or power loss mid-write can never leave a truncated config file.
+    /// That matters because [`Config::load`] treats a truncated or
+    /// parse-failing `ragent.json` as unreadable and falls back to the compiled
+    /// defaults - which would silently flip a persisted `"yolo": true` back to
+    /// the `false` default and re-enable the interactive permission prompts on
+    /// the next start (the intermittent "YOLO keeps going off" report).
     fn write_config_if_changed(path: &Path, json: &str) -> anyhow::Result<()> {
         let changed = match std::fs::read_to_string(path) {
             Ok(existing) => {
@@ -2161,13 +2170,106 @@ impl Config {
             Err(_) => true,
         };
 
-        if changed {
-            std::fs::write(path, json).map_err(|e| {
-                anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e)
+        if !changed {
+            return Ok(());
+        }
+
+        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+        if let Some(parent) = parent {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create config directory '{}': {}",
+                    parent.display(),
+                    e
+                )
             })?;
+        }
+        let dir = parent.unwrap_or_else(|| Path::new("."));
+        // Unique temp name in the target directory so `rename` stays on one
+        // filesystem (required for atomicity). pid + nanos keeps concurrent
+        // writers from colliding without adding a dependency.
+        let tmp_path = dir.join(format!(
+            ".{}.{}.{}.tmp",
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("ragent"),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let write_result = (|| -> std::io::Result<()> {
+            use std::io::Write as _;
+            let mut file = std::fs::File::create(&tmp_path)?;
+            file.write_all(json.as_bytes())?;
+            // Flush to stable storage before the rename so a crash after the
+            // rename cannot expose a target whose contents were not yet
+            // durable.
+            file.sync_all()?;
+            std::fs::rename(&tmp_path, path)
+        })();
+        if let Err(e) = write_result {
+            let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
+            return Err(anyhow::anyhow!(
+                "Failed to write config file '{}': {}",
+                path.display(),
+                e
+            ));
         }
 
         Ok(())
+    }
+
+    /// Atomically set one top-level boolean key in the **user-global** config
+    /// file, preserving every other key exactly as written.
+    ///
+    /// Unlike a full [`Config::save`], which serialises the *merged* config and
+    /// can therefore drop unknown keys or rewrite unrelated values, this reads
+    /// the global file as raw JSON, sets the single key, and writes it back
+    /// through the same atomic helper as [`Config::save`]. It is the persistence
+    /// path for the privileged runtime-flag toggles (`yolo`, `edit_log`,
+    /// `activity_log`, `gcf`), whose values must round-trip without disturbing
+    /// anything else in the file.
+    ///
+    /// Returns the path that was written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global config directory cannot be resolved, an
+    /// existing config file is present but not valid JSON, or the write fails.
+    pub(crate) fn set_global_bool_key(key: &str, value: bool) -> anyhow::Result<PathBuf> {
+        let path = Self::global_config_path()
+            .ok_or_else(|| anyhow::anyhow!("no config directory found"))?;
+        let mut json: serde_json::Value = match std::fs::read_to_string(&path) {
+            Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).map_err(|e| {
+                anyhow::anyhow!("Failed to parse global config '{}': {}", path.display(), e)
+            })?,
+            _ => serde_json::Value::Object(serde_json::Map::new()),
+        };
+        let object = json.as_object_mut().ok_or_else(|| {
+            anyhow::anyhow!("global config '{}' is not a JSON object", path.display())
+        })?;
+        object.insert(key.to_string(), serde_json::Value::Bool(value));
+
+        // Attribution trail: this is the single writer of the user-global
+        // config's privileged runtime-flag keys, so an unexplained flip on disk
+        // (the intermittent "YOLO keeps going off" report) can be tied back to
+        // the keystroke or code path that caused it.
+        tracing::warn!(
+            key,
+            value,
+            path = %path.display(),
+            backtrace = %std::backtrace::Backtrace::force_capture(),
+            "setting user-global config key"
+        );
+
+        let json = serde_json::to_string_pretty(&json)
+            .map_err(|e| anyhow::anyhow!("Failed to serialise global config: {}", e))?;
+        Self::write_config_if_changed(&path, &json)?;
+        // The write changed a file the M-025 load cache is keyed on; drop it so
+        // the next `load` re-reads the new value.
+        Self::invalidate_load_cache();
+        Ok(path)
     }
 
     /// Compute the complete hidden-tool set from both legacy per-tool overrides

@@ -328,6 +328,32 @@ impl McpClient {
     /// Default timeout for tool calls in seconds.
     const TOOL_CALL_TIMEOUT_SECS: u64 = 120;
 
+    /// Default bound, in seconds, on a single connection attempt (spawn +
+    /// `initialize` handshake + `tools/list`).
+    ///
+    /// A stdio launch often goes through an `npx`/`npm exec` launcher that
+    /// resolves a package specifier against the npm registry before the real
+    /// server starts. A slow or unreachable registry can therefore stall the
+    /// handshake indefinitely. Without a bound the connect future never
+    /// resolves and startup waits forever with nothing the user can act on.
+    /// The generous default leaves a normal cold `npx` resolve comfortably
+    /// inside it while still failing fast when the launcher hangs.
+    const CONNECT_TIMEOUT_SECS: u64 = 30;
+
+    /// Resolve the per-attempt connect timeout (see [`Self::CONNECT_TIMEOUT_SECS`]).
+    ///
+    /// Overridable process-wide via `RAGENT_MCP_CONNECT_TIMEOUT_SECS` so an
+    /// operator on a slow network can raise the bound without a rebuild.
+    /// Unparseable or zero values fall back to the default.
+    fn connect_timeout() -> std::time::Duration {
+        let secs = std::env::var("RAGENT_MCP_CONNECT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .unwrap_or(Self::CONNECT_TIMEOUT_SECS);
+        std::time::Duration::from_secs(secs)
+    }
+
     /// Creates a new `McpClient` with no registered servers.
     ///
     /// # Examples
@@ -386,8 +412,11 @@ impl McpClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the transport cannot be established, the
-    /// initialize handshake fails, or tool discovery fails.
+    /// Returns an error if the config is rejected by
+    /// [`validate_mcp_config`], the transport cannot be established, the
+    /// initialize handshake fails, or tool discovery fails. Every failure path
+    /// records the server as [`McpStatus::Failed`] before returning, so the
+    /// startup report and `/mcp` name the server and the reason.
     ///
     /// # Examples
     ///
@@ -419,6 +448,26 @@ impl McpClient {
         tracing::info!(server_id = id, "MCP server registered as disabled");
     }
 
+    /// Record a server that failed to connect, so every surface that reads the
+    /// client's server list (`/mcp`, the startup report) still lists it with the
+    /// reason it did not start instead of silently dropping it.
+    ///
+    /// Called on every failure path - config validation, a closed spawn
+    /// semaphore, and a failed transport handshake - so `server.status` is the
+    /// single source of truth for the failure reason.
+    fn record_failed(&mut self, id: &str, config: McpServerConfig, error: &str) {
+        self.servers.push(McpServer {
+            id: id.to_string(),
+            config,
+            status: McpStatus::Failed {
+                error: error.to_string(),
+            },
+            tools: Vec::new(),
+        });
+        self.rebuild_tool_index();
+        tracing::error!(server_id = id, error, "MCP server connection failed");
+    }
+
     /// Connect to an MCP server using the configured transport.
     pub async fn connect(&mut self, id: &str, config: McpServerConfig) -> anyhow::Result<()> {
         if config.disabled {
@@ -426,8 +475,14 @@ impl McpClient {
             return Ok(());
         }
 
-        // Validate config before attempting connection.
-        validate_mcp_config(id, &config)?;
+        // Validate config before attempting connection. A rejected config is a
+        // startup failure like any other: record it so the report names the
+        // server and the reason rather than dropping it silently.
+        if let Err(error) = validate_mcp_config(id, &config) {
+            let message = format!("{error:#}");
+            self.record_failed(id, config, &message);
+            return Err(error);
+        }
 
         // Adopt an already-running instance of this server before spawning our
         // own. A plugin (or a hand-configured entry) declares how the server is
@@ -484,12 +539,16 @@ impl McpClient {
         }
 
         // Acquire a spawn permit to limit concurrent MCP connections.
-        let _permit = MCP_SPAWN_SEMAPHORE
-            .acquire()
-            .await
-            .map_err(|_| anyhow::anyhow!("MCP spawn semaphore closed"))?;
+        let _permit = match MCP_SPAWN_SEMAPHORE.acquire().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                let error = anyhow::anyhow!("MCP spawn semaphore closed");
+                self.record_failed(id, config, &format!("{error:#}"));
+                return Err(error);
+            }
+        };
 
-        match self.connect_inner(id, &config).await {
+        match self.connect_bounded(id, &config).await {
             Ok((connection, tool_defs)) => {
                 let tool_count = tool_defs.len();
                 let server = McpServer {
@@ -512,21 +571,7 @@ impl McpClient {
             }
             Err(e) => {
                 let error_msg = format!("{e:#}");
-                let server = McpServer {
-                    id: id.to_string(),
-                    config,
-                    status: McpStatus::Failed {
-                        error: error_msg.clone(),
-                    },
-                    tools: Vec::new(),
-                };
-                self.servers.push(server);
-                self.rebuild_tool_index();
-                tracing::error!(
-                    server_id = id,
-                    error = %error_msg,
-                    "MCP server connection failed"
-                );
+                self.record_failed(id, config, &error_msg);
                 Err(e)
             }
         }
@@ -565,6 +610,53 @@ impl McpClient {
             "No already-running MCP server answered; starting a new instance"
         );
         None
+    }
+
+    /// Bounded connection: run [`Self::connect_inner`] under a timeout and, on
+    /// timeout only, retry it once.
+    ///
+    /// A timed-out attempt is aborted mid-spawn. The partially-started child it
+    /// may have launched is torn down deterministically before the retry by the
+    /// same [`kill_orphaned_stdio`] sweep a fresh [`Self::connect`] runs, so the
+    /// retry cannot adopt or collide with a half-started instance. A genuine
+    /// error (bad command, refused endpoint, malformed manifest) is surfaced
+    /// immediately and is *not* retried - the second attempt would fail
+    /// identically and only lengthen the report.
+    async fn connect_bounded(
+        &self,
+        id: &str,
+        config: &McpServerConfig,
+    ) -> anyhow::Result<(McpConnection, Vec<McpToolDef>)> {
+        let timeout = Self::connect_timeout();
+        let first = tokio::time::timeout(timeout, self.connect_inner(id, config)).await;
+        match first {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    server_id = id,
+                    timeout_secs = timeout.as_secs(),
+                    "MCP connect attempt timed out; terminating any partially-started child and retrying once"
+                );
+                if config.type_ == McpTransport::Stdio
+                    && let Some(killed) = kill_orphaned_stdio(id, config)
+                {
+                    tracing::info!(
+                        server_id = id,
+                        pids = ?killed,
+                        "Killed partially-started MCP stdio child before retry"
+                    );
+                }
+                match tokio::time::timeout(timeout, self.connect_inner(id, config)).await {
+                    Ok(result) => result,
+                    Err(_second) => Err(anyhow::anyhow!(
+                        "[{id}] MCP server did not become ready within {}s after two attempts; \
+                         check that the command starts and that any package it fetches resolves \
+                         (raise RAGENT_MCP_CONNECT_TIMEOUT_SECS for a slow network)",
+                        timeout.as_secs()
+                    )),
+                }
+            }
+        }
     }
 
     /// Internal connection logic, separated for clean error handling.

@@ -2,7 +2,9 @@
 //!
 //! Verifies that the tool is registered, reports the running ragent version and
 //! a build timestamp, supports both `text` and `json` formats, and never
-//! requires an active model or network access.
+//! requires an active model or network access. Also verifies the runtime
+//! execution section (pid, uptime, executable, working directory, memory, and
+//! thread count).
 
 use ragent_agent::event::EventBus;
 use ragent_agent::tool::{ToolContext, create_default_registry};
@@ -67,6 +69,61 @@ async fn test_ragent_info_text_reports_version_and_build_time() {
         "expected build timestamp: {}",
         output.content
     );
+    // Execution section (text format) is present and reports the live pid.
+    assert!(
+        output.content.contains("## ragent Execution Information"),
+        "expected execution section: {}",
+        output.content
+    );
+    assert!(
+        output
+            .content
+            .contains(&format!("**PID**: {}", std::process::id())),
+        "expected running pid: {}",
+        output.content
+    );
+}
+
+#[tokio::test]
+async fn test_ragent_info_json_reports_execution_section() {
+    let registry = create_default_registry();
+    let tool = registry.get("ragent_info").expect("ragent_info registered");
+    let ctx = base_ctx();
+
+    let output = tool
+        .execute(json!({"format": "json"}), &ctx)
+        .await
+        .expect("execute ok");
+    let parsed: serde_json::Value = serde_json::from_str(&output.content).expect("valid json");
+    let exec = &parsed["execution"];
+    assert!(
+        exec.is_object(),
+        "expected execution object in json: {parsed}"
+    );
+    assert_eq!(
+        exec["pid"].as_u64(),
+        Some(u64::from(std::process::id())),
+        "expected running pid in json: {parsed}"
+    );
+    // Working directory is always resolvable for the running process.
+    assert!(
+        exec["working_directory"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "expected a working directory: {parsed}"
+    );
+    // User is a best-effort field; when present it must be a non-empty string.
+    assert!(
+        exec["user"].is_null() || exec["user"].as_str().is_some_and(|s| !s.is_empty()),
+        "user must be a non-empty string or null: {parsed}"
+    );
+    // Uptime is a best-effort field; when present it must be a number.
+    if let Some(uptime) = exec.get("uptime_seconds") {
+        assert!(
+            uptime.is_null() || uptime.as_u64().is_some(),
+            "uptime_seconds must be numeric or null: {parsed}"
+        );
+    }
 }
 
 #[tokio::test]

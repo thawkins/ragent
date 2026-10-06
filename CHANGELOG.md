@@ -1,6 +1,174 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.128] - 2026-10-06
+
+*Fixes intermittent YOLO-off at startup (atomic config writes), bounds MCP
+connect so a stalled stdio server cannot hang TUI startup, and stops dropping
+MCP startup errors. The last ten commits (`87024938` `d0eaa4e1` `b2b46d5d`
+`80fac9fb` `f6199c1c` `0647d365` `6cf0b60f` `da83d927` `14c25e1d` `340c32cc`)
+are documented in their own sections below.*
+
+### Fixed
+
+- **Configuration writes are now atomic (intermittent YOLO-off at startup).**
+  Every `ragent.json` write (`Config::save`, `Config::save_to_source`, the
+  runtime-flag toggles, and `/config save`) went through
+  `write_config_if_changed`, which used a plain `std::fs::write` - truncate then
+  write. A crash, `kill`, or power loss between the truncate and the write left
+  a partial config that no longer parsed; `Config::load` then fell back to the
+  compiled defaults, silently turning a persisted `"yolo": true` back to
+  `false` and re-enabling the interactive permission prompts on the next start.
+  This was the "YOLO keeps going off after a few restarts" report - a real
+  disablement, not just a status-bar glitch. The write now lands in a uniquely
+  named temp file in the config directory, is `fsync`-ed, and is renamed over
+  the target, so a partial file can never be observed. Regression tests assert
+  no temp files are left behind and that the file is valid JSON after writes.
+- **Runtime-flag persistence no longer rewrites the whole global config.**
+  `yolo`/`edit_log`/`activity_log` toggles persisted by loading the merged
+  `Config` and re-serialising it to the global file. That folded the project
+  overlay and any key the running build does not model into the user's global
+  config, and rewrote unrelated values (e.g. `activity_log`). They now edit the
+  single top-level key in the raw global file (new
+  `Config::set_global_bool_key`), preserving every other key byte-for-byte.
+- **`/spec reverse --folder` scaffolds without a GitHub token.** The FR-027
+  scaffold stage ran *after* the FR-004 GitHub authentication check, so on a
+  runner with no token (the CI release jobs) the request returned at
+  `reverse: no token` and the target folder was never populated, failing
+  `test_slash_spec_reverse_folder_scaffolds_project`. The local scaffold needs
+  no credential, so it now runs before the token gate; the credential still
+  gates the network fetch-and-generate stage (FR-004, FR-027, FR-028).
+
+### Added
+
+- **`ragent_info` execution details** — the tool now reports runtime execution
+  information about the current ragent instance in addition to build metadata:
+  process id and parent process id, wall-clock start time (RFC 3339 UTC),
+  uptime (seconds and `Nd Nh Nm Ns`), absolute executable path, current working
+  directory, resident and virtual memory, and thread (task) count. The execution
+  block appears as a new `## ragent Execution Information` section in `text`
+  format and as an `execution` object in `json` format; every field is
+  best-effort and renders `unknown` when the host does not expose it. Only the
+  current process is inspected via `sysinfo` (no subprocess, no network). The
+  TUI tool-call summary now appends the pid.
+- **Runtime-flag write attribution and load-time state log.** Every write of a
+  user-global config key logs the key, value, path, and a forced backtrace, and
+  startup logs the effective `yolo`/`edit_log`/`activity_log`/`gcf` state and
+  the contributing config paths, so an unexpected flag flip is attributable
+  instead of invisible.
+
+### Changed
+
+- **Bounded MCP connect** — every MCP server connection attempt
+  (`McpClient::connect`) now runs under a per-attempt timeout (default 30s,
+  overridable with `RAGENT_MCP_CONNECT_TIMEOUT_SECS`) and is retried once on
+  timeout only. A launcher such as `npx`/`npm exec` that stalls resolving a
+  package against the npm registry, or a server that accepts the connection and
+  then never answers the handshake, now fails within the bound with an
+  actionable error instead of hanging startup indefinitely. Genuine errors are
+  still surfaced immediately without a retry, and a timed-out stdio attempt has
+  its partially-started child torn down before the retry so the two attempts
+  cannot collide.
+
+### Fixed
+
+- **MCP startup errors are reported, not silently dropped** — a server whose
+  connection failed *before* any transport was attempted (a config rejected by
+  `validate_mcp_config`, e.g. a stdio entry with no `command`, or a closed spawn
+  semaphore) was previously never added to the client's server list, so the
+  startup report and `/mcp` omitted it entirely and the only trace was a `warn`
+  in the log panel. Every `McpClient::connect` failure path now records the
+  server as `McpStatus::Failed { error }` (via a shared `record_failed` helper)
+  before returning, so the one-shot startup report prints
+  `[mcp] Failed to connect to mcp server <id> via <transport>: <reason>` for it
+  alongside the servers that came up. The startup connect loop publishes this
+  client-derived status (`connected`, else `failed: <reason>`) rather than a bare
+  `failed`, so the `/mcp` list shows the reason too.
+- **Startup no longer blocks on MCP connection** — the TUI start-up path no
+  longer waits for the background MCP connect loop. Previously, after the
+  connect loop was moved off the main task, `run_tui` still adopted the shared
+  client and gave a still-connecting loop a fixed 3-second grace period (a
+  3051 ms `MCP server status` startup stage on this host, 6320 ms total), so
+  the first prompt appeared frozen whenever a stdio server such as the MongoDB
+  `npx` launcher took a couple of seconds to handshake. `run_tui` now adopts
+  whatever state the loop has published without blocking; the per-server
+  `[mcp] Starting/Connected/Failed` report and the tool-registry reconciliation
+  are emitted later, off the loop's completion sentinel, and every
+  event-loop read of the shared client is non-blocking (`try_read`). Ready now
+  appears in well under a second, and `/mcp list` and `/tools list` still show
+  every connected server and its tools.
+- **Runtime-flag toggles are attributable** — every write of a
+  config-backed runtime flag (`yolo`, `edit_log`, `activity_log`, `gcf`) to the
+  user-global config now logs the flag name, the value written, and a forced
+  backtrace, and a toggle logs the previous and new state. A privileged flip
+  such as YOLO mode turning itself on or off can now be traced to the keystroke
+  or code path that caused it instead of appearing unexplained.
+- **`/config list` restore resyncs runtime flags** — restoring a backup over
+  the global `ragent.json` now drops the cached config and re-reads it, then
+  resyncs the `yolo`, `edit_log`, `activity_log`, and `gcf` runtime flags. The
+  restored file and the live toggles (e.g. the status-bar YOLO indicator) no
+  longer disagree until the next restart.
+
+### Quality
+
+- **`/simplify all` pass over the 1.0.127 diff** — the per-server MCP startup
+  report now latches its own one-shot inside `report_mcp_startup` (a
+  `try_read` deferral still retries; a re-delivered `initialized` sentinel no
+  longer re-appends), `ragent_info` requests `with_tasks()` so the thread count
+  is actually populated, the four runtime-flag syncs collapse onto
+  `ragent_config::sync_runtime_flags`, and stale doc comments were corrected
+  (`ragent_info` no longer described as build-only). No behaviour change beyond
+  the report being emitted at most once.
+
+### Commits (last 10)
+
+- **`87024938` - Version: 1.0.127.** Release commit. Added `TOOLREP.md`, the
+  per-tool-group dependency report; removed the six Office / LibreOffice
+  document tools and their module set (registered tool count 158 -> 152), the
+  `tool_visibility.office` switch, the unused `docio` helper, the OOXML/ODF
+  `DocumentFormat` variants, and the `docx-rust`/`calamine`/`ooxmlsdk`/`zip`/
+  `spreadsheet-ods` dependencies; and a `/simplify all` pass over the changed
+  set. (Full detail in the `[1.0.127]` section below.)
+- **`d0eaa4e1` - Version: 1.0.126.** Office / LibreOffice tool removal and the
+  accompanying `/simplify all` sweep; tool count 158 -> 152.
+- **`b2b46d5d` - Version: 1.0.125.** `os_info` host-introspection tool and the
+  `/osinfo` slash-command family (registry 171 -> 172), plus the research
+  scholarly-engine default flip (`--papers` replaces `--no-papers`), the `probe`
+  parameter, and three new tracked research items.
+- **`80fac9fb` - Version: 1.0.124.** Connector-system follow-up, `/memory clear`,
+  and TUI render fixes (`/mcp` table rendering, `/tools list`, `split_summary_icon`,
+  the MCP orphan-sweep extension to `systemd --user`).
+- **`f6199c1c` - Version: 1.0.123.** Research system, `ragent-connectors` crate
+  (17th workspace crate), Gmail/communications, osinfo groundwork, and the
+  per-engine research progress table.
+- **`0647d365` - Version: 1.0.122.** Security and anti-pattern remediation sweep
+  folding in the staged working tree on top of `6cf0b60f` (MS-04): `ANTIPAT.md`
+  M0 plus M2-M7, `ragent-team` shim crate removed (17 -> 16 workspace crates),
+  major dependency bumps, and `SECTASKS.md` MS-05 "prevent recurrence" (the
+  `ragent_types::guard` module, the single `sanitize` redaction chokepoint, and
+  the `security-guards` CI job).
+- **`6cf0b60f` - MS-04: defence in depth (`SECTASKS` T-059..T-066).** The 33
+  Low-severity findings closed with the same guard shapes as MS-01..MS-03:
+  `--samples` clamped to `MAX_BENCH_SAMPLES` (100), streamed dataset downloads
+  under `MAX_DOWNLOAD_BYTES`, benchmark manifest path containment, plugin
+  manifest `entry`/`main`/`server.entry` validation, `resolve_memory_dir`
+  rejecting unsafe agent names, a process-private 0700 bash scratch directory,
+  redacted JSON parse-diagnostic source lines, and credential-bearing events
+  redacted on the SSE stream.
+- **`da83d927` - MS-03: network and secret hardening (`SECTASKS` T-025..T-058).**
+  The Medium-severity remediation set: MCP HTTP response bodies under an 8 MiB
+  cap, benchmark download timeouts and size/pagination budgets, LLM provider
+  `Retry-After`/SSE/error-body caps, GitHub/GitLab pagination budgets,
+  `mf_fetch`/`mf_crawl` byte caps and `crawl_urls` SSRF check, secret registry
+  seeded from every credential env var, bash/CI/SSE-argument redaction,
+  HTTP-origin-gated GitHub token, Gmail CRLF stripping, 0600 DB/WAL/activity-log
+  permissions, `http_request` refusing routing/credential headers, codeindex
+  exclusion-glob/FTS-symlink/walker guards, bounded spec numbering, mailbox
+  caps, panic-free `CronSchedule`, and a stderr-spool byte ceiling.
+- **`14c25e1d` - Add research/ folder.** Reverts the `research/` entry in
+  `.gitignore` so the directory is tracked, and commits the accumulated research
+  findings, indexes, and output reports.
+- **`340c32cc` - Version: 1.0.121 more fixes on mcp.** Incremental MCP fixes
+  carrying the v1.0.121 release; no additional tool or configuration surface.
 
 ## [1.0.127] - 2026-10-05
 

@@ -742,7 +742,7 @@ The AI agent can use these tools during a session:
 | `glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `ask_user` | Ask the user a clarifying question              | `ask_user`      |
-| `ragent_info`| Report ragent version and build time          | `none`          |
+| `ragent_info`| Report ragent version, build time, and execution details | `none`          |
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
@@ -1854,6 +1854,43 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.128
+
+- **Config durability and atomic writes** — every `ragent.json` write (`Config::save`,
+  `Config::save_to_source`, the runtime-flag toggles, `/config save`) now lands in a
+  uniquely named temp file in the config directory, is `fsync`-ed, and is renamed over
+  the target. A crash, `kill`, or power loss between the truncate and the write can no
+  longer leave a partial config that `Config::load` silently falls back on (the
+  intermittent "YOLO keeps going off after a few restarts" report). Runtime-flag
+  persistence edits only the single top-level key in the raw global file
+  (`Config::set_global_bool_key`), so the project overlay and unmodelled keys are never
+  folded into the user's global config; every such write logs the key, value, path, and
+  a forced backtrace, and startup logs the effective `yolo`/`edit_log`/`activity_log`/`gcf`
+  state with the contributing paths. `/config list` restore drops the cached config,
+  re-reads it, and resyncs the live toggles.
+- **Bounded MCP connect** — every `McpClient::connect` attempt runs under a per-attempt
+  timeout (default 30 s, `RAGENT_MCP_CONNECT_TIMEOUT_SECS`) and is retried once on
+  timeout only; a launcher such as `npx`/`npm exec` that stalls, or a server that never
+  answers the handshake, fails within the bound with an actionable error. TUI startup no
+  longer blocks on the MCP connect loop: it adopts whatever state the loop has published
+  and prints its one-shot `[mcp]` report off the loop's completion sentinel, so **Ready**
+  appears in well under a second. Every connect failure path records the server as
+  `McpStatus::Failed { error }` and reports it (with the reason) in the startup report and
+  `/mcp` instead of dropping it.
+- **`ragent_info` execution details** — the tool now reports runtime execution information
+  about the current instance in addition to build metadata: pid and parent pid, start time,
+  uptime, executable path, working directory, user, resident/virtual memory, and thread
+  count (a new `## ragent Execution Information` section in `text`; an `execution` object
+  in `json`). Read-only and offline.
+- **`/spec reverse --folder` scaffolds before the token gate** — the FR-027 local scaffold
+  now runs before the FR-004 GitHub authentication check, so a token-less runner still
+  populates the target folder; the credential still gates the network fetch-and-generate
+  stage.
+- **`/simplify all` pass over the 1.0.127 diff** — the per-server MCP startup report latches
+  its own one-shot inside `report_mcp_startup`, `ragent_info` requests `with_tasks()` so the
+  thread count is populated, and the four runtime-flag syncs collapse onto
+  `ragent_config::sync_runtime_flags`.
 
 ## Version 1.0.126
 

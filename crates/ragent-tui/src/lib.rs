@@ -166,14 +166,6 @@ const MODEL_DOWNLOAD_STALE_SECS: u64 = 45 * 60;
 /// Self-healing staleness cap for a wedged benchmark run.
 const BENCH_STALE_SECS: u64 = 30 * 60;
 
-/// How long the startup waits for the background MCP connect loop before
-/// printing the MCP status report.
-///
-/// A server whose tools are already registered is reported immediately; this
-/// bound only applies while a server is still connecting, so a slow handshake
-/// cannot hold startup indefinitely.
-const MCP_STARTUP_GRACE: Duration = Duration::from_secs(3);
-
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -511,17 +503,15 @@ pub async fn run_tui(
 
     // -- MCP server status --
     // The startup connect loop in `src/main.rs` runs concurrently and publishes
-    // its shared client before connecting anything. Adopt the published state
-    // and give a still-connecting loop a short grace period so the report shows
-    // the real per-server outcome rather than a server stuck at `disabled`; on
-    // timeout the report prints what is known and the later housekeeping pass
-    // picks up the rest.
+    // its shared client before connecting anything. Adopt whatever state it has
+    // published so far WITHOUT blocking: the loop write-locks the client across
+    // every server connect (a cold `npx` handshake alone runs into seconds), so
+    // waiting here would stall the first prompt behind it. The per-server
+    // `[mcp]` report and the tool-registry reconciliation are both emitted later
+    // off the loop's `initialized` sentinel (see `handle_event`), and this
+    // non-blocking adopt is retried by the housekeeping pass.
     let t0 = Instant::now();
     app.adopt_mcp_client_state(&session_processor).await;
-    let _ = app // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
-        .wait_for_mcp_connect(&session_processor, MCP_STARTUP_GRACE)
-        .await;
-    app.report_mcp_startup().await;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
     startup.record("MCP server status", t0.elapsed());
 

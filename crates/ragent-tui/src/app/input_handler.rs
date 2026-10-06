@@ -96,6 +96,17 @@ impl App {
 
                 match ragent_config::Config::restore_global_config(Some(&config_dir), &backup) {
                     Ok(target) => {
+                        // The restore rewrites the global config out of band (a
+                        // direct file write, not a `Config::save`), so the M-025
+                        // on-disk load cache must be dropped before the flags are
+                        // re-read; otherwise the stale cached config is served and
+                        // the runtime flags keep their pre-restore values (the
+                        // status bar would keep showing YOLO on after restoring a
+                        // `yolo: false` backup).
+                        ragent_config::Config::invalidate_load_cache();
+                        if let Ok(reloaded) = ragent_config::Config::load() {
+                            ragent_config::sync_runtime_flags(&reloaded);
+                        }
                         self.session_processor.invalidate_config_cache();
                         let name = backup
                             .file_name()

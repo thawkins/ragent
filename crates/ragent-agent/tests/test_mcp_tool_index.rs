@@ -360,6 +360,41 @@ async fn connect_does_not_adopt_a_dead_endpoint() {
     ));
 }
 
+/// A config the validator rejects (stdio with no `command`) must still be
+/// recorded as `Failed`, so the startup report names the server and the reason
+/// instead of dropping it silently.
+#[tokio::test]
+async fn connect_records_a_config_rejected_before_any_transport() {
+    let config = McpServerConfig {
+        type_: ragent_config::McpTransport::Stdio,
+        command: None,
+        ..McpServerConfig::default()
+    };
+
+    let mut client = McpClient::new();
+    let err = client
+        .connect("no-command", config)
+        .await
+        .expect_err("a stdio server with no command must be rejected");
+
+    let server = client
+        .servers()
+        .iter()
+        .find(|s| s.id == "no-command")
+        .expect("a rejected server is still registered for reporting");
+    match &server.status {
+        ragent_agent::mcp::McpStatus::Failed { error } => assert!(
+            error.contains("requires a 'command' field"),
+            "the recorded reason must name the rejected field, got: {error}"
+        ),
+        other => panic!("expected Failed, got: {other:?}"),
+    }
+    assert!(
+        !err.to_string().is_empty(),
+        "connect must still surface the error to its caller"
+    );
+}
+
 // ── Global enable ledger ────────────────────────────────────────────────────
 
 /// A server id absent from the ledger is enabled, so a newly added MCP server

@@ -207,7 +207,7 @@ current state of all subsystems.
   `ragent-team` shim crate, 17 -> 16 crates), and the shared `ragent_types::guard`
   module with a single `ragent_types::sanitize` redaction chokepoint and four
   `security-guards` CI gates (MS-05). Only `ANTIPAT.md` M1 (ASCII conformance)
-  remained open, now addressed by the uncommitted work above.
+  remained open, now addressed by the v1.0.128 work above.
 
 - **Earlier highlights (v1.0.107 → v1.0.121)** — `/simplify` phases, config rules
   and fixes, `/spec govcreate`, research output limits and engine exclusion,
@@ -869,7 +869,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 |------|---------|
 | `get_env` | Read non-sensitive environment variables |
 | `calculator` | Evaluate mathematical expressions |
-| `ragent_info` | Report the running ragent version, build time, git commit, and compiler |
+| `ragent_info` | Report the running ragent version, build time, git commit, compiler, and execution details (pid, parent pid, start time, uptime, executable, working directory, memory, thread count) |
 | `os_info` | Report read-only host OS/hardware introspection (OS identity and distro, CPU, GPU adapters and graphics-API versions, physical hardware, memory, uptime, process environment); also `/osinfo show` |
 | `tool_info` | Return a JSON-encoded dump of the tool registry (name, description, parameters schema, permission category, source, hidden state) |
 | `commands_info` | Return a JSON-encoded catalog of every slash command (trigger, description, subcommands, flags) including plugin-contributed commands |
@@ -3322,12 +3322,23 @@ rejected as not-MCP.
 The startup connect loop publishes the shared `McpClient` **before** connecting
 the first server, so every reader (the tool registry, `/mcp`, the startup
 report) sees the live handle from the beginning; a one-shot run no longer races
-the loop. The TUI then waits up to three seconds for in-flight connects and
-prints one `[mcp]` line per server — `Starting <id> (<transport>)` plus
-`Connected ... via <transport>`, or `Skipping ... (<transport>, disabled)`, or
-the failure reason, where `<transport>` is the config's declared wire protocol
-(`stdio` / `sse` / `http`, via `Display for McpTransport`) — before
-`[ok] **Ready**`.
+the loop. Startup does not block on the loop: the TUI adopts whatever state the
+loop has published, then prints its one-shot per-server report off the loop's
+completion sentinel (an empty-id `McpStatusChanged { status: "initialized" }`
+event), once, after every server has settled. The report prints one `[mcp]` line
+per server — `Starting <id> (<transport>)` plus `Connected ... via <transport>`,
+or `Skipping ... (<transport>, disabled)`, or `Failed to connect ... : <reason>`,
+or `... needs authentication` — where `<transport>` is the config's declared wire
+protocol (`stdio` / `sse` / `http`, via `Display for McpTransport`).
+`report_mcp_startup` latches its own one-shot; a `try_read` miss (the connect loop
+holds the client write lock across a connect) defers the report without latching,
+so the next sentinel retries it. Every `connect` failure path — a config rejected
+by `validate_mcp_config`, a closed spawn semaphore, or a failed handshake —
+records the server as `McpStatus::Failed { error }` before returning, so a startup
+error is reported alongside the servers that came up instead of only being logged.
+The connect loop publishes this client-derived status (`connected`, else
+`failed: <reason>`) on its per-server `McpStatusChanged` event, so `/mcp` shows the
+reason as well.
 
 The TUI reconciles the session tool registry against the live client whenever a
 connect settles or a server is enabled/disabled: a registered MCP tool whose
@@ -3699,6 +3710,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.128 | 2026-10-06 | Config durability, bounded MCP connect, and non-blocking TUI startup. (1) Atomic config writes: every `ragent.json` write (`Config::save`, `Config::save_to_source`, the runtime-flag toggles, `/config save`) now lands in a uniquely named temp file in the config directory, is `fsync`-ed, and is renamed over the target, so a crash/kill/power-loss between truncate and write can no longer leave a partial config that `Config::load` silently falls back on (the intermittent "YOLO keeps going off after a few restarts" report). (2) Runtime-flag persistence edits only the single top-level key in the raw global file (`Config::set_global_bool_key`), so the project overlay and unmodelled keys are never folded into the user's global config; every such write logs the key, value, path, and a forced backtrace, and startup logs the effective `yolo`/`edit_log`/`activity_log`/`gcf` state with the contributing config paths. (3) Bounded MCP connect: every `McpClient::connect` runs under a per-attempt timeout (default 30 s, `RAGENT_MCP_CONNECT_TIMEOUT_SECS`) and is retried once on timeout only, tearing down a partially-started stdio child before the retry. (4) MCP connect failures are recorded as `McpStatus::Failed { error }` on every failure path and reported in the startup report and `/mcp`. (5) TUI startup no longer blocks on the MCP connect loop: `run_tui` adopts whatever state the loop has published and prints its one-shot per-server report off the loop's completion sentinel; every event-loop read of the shared client is non-blocking (`try_read`). (6) `ragent_info` now reports runtime execution details (pid, parent pid, start time, uptime, executable, working directory, user, resident/virtual memory, thread count) alongside build metadata. (7) `/config list` restore drops the cached config, re-reads it, and resyncs runtime flags. (8) `/spec reverse --folder` runs the local scaffold before the GitHub token gate so a token-less runner still populates the target folder. |
 | v1.0.126 | 2026-10-04 | Office / LibreOffice document tools removed. The six `office_*` / `libre_*` tools and their module set (`office_common`, `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`, `libreoffice_info`) are deleted; only the two PDF tools (`pdf_read`, `pdf_write`) remain, sharing a new `pdf_common` helper module. The `tool_visibility.office` switch and its `ToolVisibilityConfig` / `ToolVisibilitySpecified` fields, the unused `docio` helper, and the OOXML/ODF `DocumentFormat` variants are removed, and the dependencies `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped. Registered tool count falls 158 -> 152 (23 categories); `assets/officedocs/testword1.docx` is deleted; `/tools` switch lists and `tool_visibility` tables drop `office`; configs carrying `office` are ignored. A `/simplify all` pass over the changed set fixes a `pdf_write` image-path containment hole (SEC-tools-extended-002), halves `pdf_read` PDF parsing, computes `os_info` JSON once, scopes the TUI `/memory clear` delete to `self.cwd_path`, and makes `connectors::store::descriptor_by_id` a single allocating pass. |
 | v1.0.125 | 2026-10-04 | `os_info` host-introspection tool and `/osinfo` slash command family, plus the research scholarly-engine default flip. `os_info` (registry 171 -> 172, spec `osinfo` FR-019..FR-025) reports OS identity and Linux distribution, CPU, graphics adapters (`/sys/class/drm` + `pci.ids`, integrated/discrete/virtual classification), graphics-API support with best-effort versions (`Direct3D`, `DirectX`, `Metal`, `OpenGL`, `OpenGL ES`, `Mesa`, `Vulkan`, `OptiX`, `CUDA`, `ROCm`), physical hardware (DMI system/chassis/motherboard/BIOS identity, `/sys/block` storage devices, `/sys/class/net` interfaces), memory, uptime, and the process environment. The `probe` parameter defaults to `true`, so the fixed, timeout-bounded allowlisted graphics diagnostics (`vulkaninfo`, `glxinfo -B`, `nvidia-smi`, `rocminfo`, `system_profiler`) confirm support and supply versions for OpenGL, OpenGL ES, and Mesa; `{"probe": false}` (or `/osinfo show --no-probe`) is the fully process-free path. Read-only throughout: no writes, no network, and never serial numbers, UUIDs, or asset tags. `/osinfo show [--no-probe]` renders through the tool's own collector/renderer, `/osinfo help` documents both modes, and autocomplete offers `show`, `--no-probe`, `help`. Research: scholarly backends (OpenAlex) are excluded from the web sweep by default; `--papers` replaces `--no-papers`/`--no-scholarly` at every entry point (root CLI, TUI, `POST /research`), `ResearchRunRequest` carries `papers`, and `research.exclude_academic_engines` only persists the exclusion. Three new tracked research items (`codemigrate`, `connectors`, `vendormarketplace`). |
 | v1.0.124 | 2026-10-02 | Connector system follow-up, `/memory clear`, and TUI render fixes. (1) `/memory clear` opens a `Clear this project's memory?` `Yes`/`No` confirmation dialog (no removal until confirmed; `No` selected by default) and, on `Yes`, calls `Storage::clear_memories_for_project` to delete only the current project's structured memories (full path or basename, FTS + base rows in one transaction), reporting `Cleared N memory entries for this project.`; the `command_catalog`/`SLASH_COMMANDS` `/memory` entries now list exactly `show`, `clear`, `help`. (2) The connector catalogue has a single surface: the standalone `/connectors search` subcommand is retired, `/connectors claude [query] [--category <name>] [--refresh]` carries the `--category` launch filter and an in-panel `c` cycle key over the categories the fetched catalogue declares (FR-010, FR-041), and `list` keeps the same category model. (3) The TUI drives the session-start connector lifecycle: `src/main.rs` bridges the enabled connectors into the shared connect loop and publishes a `ConnectorSession` plus its status snapshot on the session processor (type-erased); `/connectors enable\|disable\|connect\|disconnect` drive that session and reconcile the MCP tool registry, `/connectors list` reads live tool counts from the MCP client, and a single-reference subcommand accepts a connector by id, slug, or display name (`canonical_id`). (4) TUI-019 render fixes: the tool name renders immediately after the step counter (new `split_summary_icon` helper, both the message-widget and layout arms) and `/mcp` renders one server per row as a markdown/ASCII table with `\|`-escaped cells; `/tools` gains `/tools list` (alias `/tools show`) and a `/tools help` block. (5) The MCP orphan sweep reaps stdio servers re-parented to the per-user service manager (`systemd --user`) as well as init, and matches per process, so `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every startup. Earlier work folded in: a new `ragent-connectors` crate (17th workspace crate), the ANTIPAT M1 ASCII sweep, `/yolo` persisting to the user-global config only, spec plan parser `T-001..T-014` ranges, and the `check-connector-endpoint-literal.sh` guard. |

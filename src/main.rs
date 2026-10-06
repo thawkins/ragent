@@ -25,7 +25,6 @@ use ragent_agent::{
     telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
-use ragent_config::{activity_log, edit_log, gcf, yolo};
 use ragent_connectors::{ConnectorSession, store_dirs};
 
 mod cli;
@@ -477,15 +476,25 @@ async fn async_main() -> Result<()> {
         Config::load()?
     };
     startup.record("Config load", t0.elapsed());
-    // Keep the in-memory YOLO/edit-log/activity-log flags in sync with the
-    // loaded config. We pass the already-loaded config values to the
-    // `sync_from_config_value` entry points so each module does not need to
-    // reload the config from disk a second time.
-    yolo::sync_from_config_value(config.yolo);
-    edit_log::sync_from_config_value(config.edit_log);
-    activity_log::sync_from_config_value(config.activity_log);
-    gcf::sync_from_config_value(config.gcf.enabled);
-    tracing::info!("Configuration loaded successfully");
+    // Keep the in-memory runtime flags in sync with the loaded config. The
+    // helper takes the already-loaded values, so no module reloads the config
+    // from disk a second time.
+    //
+    // This is the value the whole process serves permission prompts from, so an
+    // unexpected default here is worth a line: `yolo`/`edit_log`/`gcf` all
+    // default to off, and the intermittent "YOLO keeps going off" report is a
+    // silent fall back to those defaults (a config that fails to parse, or a
+    // global file that lost the key). Logging the effective flag state at
+    // startup makes such a fallback attributable instead of invisible.
+    ragent_config::sync_runtime_flags(&config);
+    tracing::info!(
+        yolo = config.yolo,
+        edit_log = config.edit_log,
+        activity_log = config.activity_log,
+        gcf = config.gcf.enabled,
+        config_paths = ?config.config_paths,
+        "Configuration loaded successfully"
+    );
 
     let auto_extract_config = config.memory.auto_extract.clone();
 
@@ -851,22 +860,25 @@ async fn async_main() -> Result<()> {
                     continue;
                 }
                 let mut mcp_client = shared_client.write().await;
-                let status = match mcp_client.connect(&id, cfg).await {
-                    Ok(()) => {
-                        mcp_connected += 1;
-                        "connected"
-                    }
-                    Err(e) => {
-                        tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
-                        "failed"
-                    }
-                };
+                let connected = mcp_client.connect(&id, cfg).await.is_ok();
+                if connected {
+                    mcp_connected += 1;
+                }
+                // Read the status back from the client so the published string
+                // is the single source of truth: `connected` on success, else
+                // `failed: <reason>` (the client records every failure path),
+                // matching what `/mcp` and the startup report display.
+                let status = mcp_client
+                    .servers()
+                    .iter()
+                    .find(|server| server.id == id)
+                    .map_or_else(|| "failed".to_string(), |server| server.status.to_string());
                 drop(mcp_client);
                 // Publish per-server status so the TUI (`/mcp`) reflects the
                 // real connection state instead of assuming `disabled`.
                 bus.publish(ragent_agent::event::Event::McpStatusChanged {
                     server_id: id,
-                    status: status.to_string(),
+                    status,
                 });
             }
             tracing::info!(
@@ -874,10 +886,12 @@ async fn async_main() -> Result<()> {
                 total = mcp_server_count,
                 "MCP servers initialized (background)"
             );
-            // The MCP server list the TUI renders is adopted from the shared
-            // client by a background task; wake it now that the connect loop has
-            // published every server, so `/mcp` and `/connectors list` do not
-            // wait out the poll interval to see `connected` (FR-009).
+            // Completion sentinel: the loop has settled every server. The TUI
+            // uses this empty-id `initialized` event to reconcile the tool
+            // registry against the shared client and to print the one-shot
+            // per-server startup report, once the write lock (which the loop held
+            // across every connect) is free. It does not wake `adopt_mcp_client_state`
+            // for its own sake, but the next housekeeping pass runs it too.
             bus.publish(ragent_agent::event::Event::McpStatusChanged {
                 server_id: String::new(),
                 status: "initialized".to_string(),

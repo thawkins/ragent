@@ -454,6 +454,22 @@ impl App {
             }
         };
 
+        // FR-027/FR-028: `/spec reverse <flags> --folder <path>` scaffolds a
+        // real project with the shared `/new` engine before authentication is
+        // required and before the prompt is generated. A refusal (or a hosting
+        // failure) is reported immediately and the run continues, so the prompt
+        // is always produced; the scaffold itself needs no GitHub credential.
+        if let Some(request) = scaffold.as_ref() {
+            let target = folder_for_scaffold(folder.as_deref());
+            self.append_assistant_text(&format!(
+                "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`...**"
+            ));
+            let outcome = run_govcreate_scaffold(request, std::path::Path::new(&target));
+            self.append_assistant_text(&render_scaffold_outcome(&target, outcome));
+        }
+
+        // FR-004: authentication is required for the fetch-and-generate stage
+        // that follows; it gates the network path, not the local scaffold.
         match &provider {
             VcsProvider::GitHub { .. } => {
                 if ragent_agent::github::auth::load_token().is_none() {
@@ -480,19 +496,6 @@ impl App {
                 }
                 let _ = resolve_gitlab_host(host.as_deref()); // INTENTIONAL: host hint only; the parsed value is unused here
             }
-        }
-
-        // FR-027/FR-028: `/spec reverse <flags> --folder <path>` scaffolds a
-        // real project with the shared `/new` engine before the prompt is
-        // generated. A refusal (or a hosting failure) is reported immediately
-        // and the run continues, so the prompt is always produced.
-        if let Some(request) = scaffold.as_ref() {
-            let target = folder_for_scaffold(folder.as_deref());
-            self.append_assistant_text(&format!(
-                "From: /spec reverse\n\n[wait] **Scaffolding project in `{target}`...**"
-            ));
-            let outcome = run_govcreate_scaffold(request, std::path::Path::new(&target));
-            self.append_assistant_text(&render_scaffold_outcome(&target, outcome));
         }
 
         // Ensure we have a session

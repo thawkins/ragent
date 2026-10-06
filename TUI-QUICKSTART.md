@@ -4,6 +4,24 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.128)
+
+- **Startup no longer blocks on MCP** — the TUI adopts whatever state the
+  background MCP connect loop has published and prints its one-shot per-server
+  `[mcp]` report off the loop's completion sentinel, so **Ready** appears in
+  well under a second even when a stdio server such as the MongoDB `npx`
+  launcher takes a couple of seconds to handshake. Every MCP connect now runs
+  under a bounded per-attempt timeout (default 30 s,
+  `RAGENT_MCP_CONNECT_TIMEOUT_SECS`) with a single timeout retry, and a failed
+  connect is recorded and reported instead of being dropped.
+- **Durable flags** — `ragent.json` writes are now atomic (temp file + `fsync`
+  + rename), so a crash or kill mid-write can no longer silently reset a
+  persisted YOLO flag; runtime-flag toggles edit only the single top-level key
+  in the raw global file, and `/config list` restore resyncs the live toggles.
+- **`ragent_info` execution details** — the tool now also reports the running
+  instance's pid, parent pid, start time, uptime, executable path, working
+  directory, user, resident/virtual memory, and thread count.
+
 ## Highlights (v1.0.126)
 
 - **Office / LibreOffice document tools removed** — the six `office_*` /

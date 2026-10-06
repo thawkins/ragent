@@ -826,14 +826,21 @@ repository content whose `yolo` key is stripped by `Config::merge_project`
 (SECTASKS T-011), so a project-file write could never round-trip on the next
 load (and would let a repo turn YOLO on for a reviewer). YOLO state is
 persisted via `persist_yolo`, which delegates to the runtime-flag helper's
-`persist_to_global` (`Config::save(false)`):
+`persist_to_global`:
 
 ```rust
 pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
-    // RuntimeFlag::persist_to_global: load, set the field, Config::save(false).
+    // RuntimeFlag::persist_to_global: set the single top-level `yolo` key in
+    // the raw global file, preserving every other key, then write atomically.
     YOLO_MODE.persist_to_global(enabled)
 }
 ```
+
+The `persist_to_global` path goes through `Config::set_global_bool_key`, which
+reads the global file as raw JSON, sets the one key, and writes it back through
+the atomic write helper (temp file + `fsync` + rename). It deliberately does
+*not* re-serialise the merged `Config`, so the project overlay and any key the
+running build does not model are never folded into the user's global file.
 
 The `yolo` field in `ragent.json`:
 

@@ -51,7 +51,10 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       - **Task Management** — task_create, task_update, task_get, task_list
       - **Interactive** — question, think
       - **Utility** — calculator, get_env, ragent_info (reports the running
-        version, build time, git commit, and compiler), os_info (read-only host
+        version, build time, git commit, and compiler, plus the current
+        instance's pid, parent pid, start time, uptime, executable path,
+        working directory, user, resident/virtual memory, and thread count), os_info
+        (read-only host
         report: OS identity and Linux distribution, CPU, graphics adapters and
         graphics-API versions, physical hardware — system/chassis/motherboard/
         BIOS identity plus storage devices and network interfaces — memory,
@@ -519,13 +522,23 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.126** — The core architecture, tool system (152 tools across 23 categories), TUI,
+**v1.0.128** — The core architecture, tool system (152 tools across 23 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **v1.0.128 — config durability, bounded MCP connect, and
+  non-blocking startup** — `ragent.json` writes are now atomic (temp file + `fsync`
+  + rename) so an interrupted write can no longer silently reset a persisted YOLO
+  flag; runtime-flag persistence edits only the single top-level key in the raw
+  global file and logs every write with attribution; every MCP connect runs under a
+  bounded per-attempt timeout with a single timeout retry; MCP connect failures are
+  recorded and reported instead of dropped; the TUI no longer blocks on the MCP
+  connect loop at startup; `ragent_info` now reports runtime execution details
+  (pid, uptime, memory, thread count); and `/spec reverse --folder` scaffolds before
+  the GitHub token gate.
 - **v1.0.126 — Office / LibreOffice document tools removed** — the six
   `office_*`/`libre_*` document tools and their module set (`office_common`,
   `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`,
@@ -625,8 +638,9 @@ Recent highlights:
   `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected`
   adopts an already-running server through that client. The HTTP client is built
   lazily so it no longer panics outside a Tokio runtime. The TUI prints a
-  per-server MCP startup report (with the declared transport on every line and a
-  3-second connect grace), `/plugins list` resolves live MCP tool counts, and
+  per-server MCP startup report (with the declared transport on every line),
+  emitted as soon as the background connect loop settles without blocking the
+  first prompt, `/plugins list` resolves live MCP tool counts, and
   `/plugins list --mcp` sorts server ids for a deterministic contributions block.
   A `/simplify all` pass over the recent MCP/swarm/plugins work fixed a progress-bar
   overflow in `/swarm status`, a pending-marker race in `/spawn`, and `--mcp`

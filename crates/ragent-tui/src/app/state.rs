@@ -2258,6 +2258,14 @@ pub struct App {
     /// authoritative record; this latch stops the housekeeping pass re-reading
     /// it on every wake once it has been adopted.
     pub mcp_client_adopted: bool,
+    /// True once the per-server `[mcp] Starting/Connected/Failed` report has been
+    /// printed to the message window.
+    ///
+    /// Startup no longer blocks on the connect loop, so the report is emitted
+    /// from the `initialized` sentinel once the loop settles every server. This
+    /// latch keeps it a one-shot: the sentinel can arrive again on a later live
+    /// restart, and the report must not be re-appended.
+    pub mcp_startup_reported: bool,
     /// Persisted global enable state per MCP server id (the
     /// `mcp_state.json` ledger): `true` enabled, `false` disabled. An id absent
     /// from the map is enabled, so a newly added server shows as enabled.
@@ -3017,9 +3025,9 @@ impl App {
     /// server's real status and tool list; this reads it so `/mcp` reports the
     /// truth regardless of event delivery.
     ///
-    /// A no-op once [`Self::mcp_client_adopted`] is set, and a no-op while the
-    /// connect loop has not yet published the client (the per-server events
-    /// cover that window).
+    /// A no-op once [`Self::mcp_client_adopted`] is set, and a non-blocking
+    /// no-op while the connect loop holds the client lock (the next housekeeping
+    /// pass retries, and the per-server events cover that window).
     pub async fn adopt_mcp_client_state(
         &mut self,
         session_processor: &ragent_agent::session::processor::SessionProcessor,
@@ -3030,10 +3038,17 @@ impl App {
         let Some(client) = session_processor.mcp_client.get() else {
             return;
         };
-        let servers = {
-            let guard = client.read().await;
-            guard.servers().to_vec()
+        // A `try_read` miss means the background connect loop is holding the
+        // guard (it write-locks across a whole server connect). This is called
+        // from the event loop and from the one-shot startup path; neither may
+        // block on a lock that a multi-second connect holds. Skipping here is
+        // safe: the housekeeping pass re-runs this on the next wake, and the
+        // connect loop's `McpStatusChanged` events cover the interim.
+        let Ok(guard) = client.try_read() else {
+            return;
         };
+        let servers = guard.servers().to_vec();
+        drop(guard);
         self.mcp_status_map.clear();
         for server in servers {
             self.mcp_status_map
@@ -3054,27 +3069,33 @@ impl App {
         self.needs_redraw = true;
     }
 
-    /// Append the per-server MCP connection report to the message window.
+    /// Append the per-server MCP connection report to the message window, once.
     ///
-    /// Called once at startup, after the enable-state ledger has been consulted
-    /// but before the `[ok] **Ready**` line, so the user sees one line per
-    /// server that ragent attempted to start and, for the ones that came up,
-    /// a second line confirming the handshake. A server switched off in the
-    /// ledger is reported as skipped rather than started.
+    /// Emitted after the background connect loop settles every server (the
+    /// empty-id `McpStatusChanged { status: "initialized" }` sentinel), so the
+    /// user sees one line per server ragent attempted to start and, for the ones
+    /// that came up, a second line confirming the handshake. A server switched
+    /// off in the enable-state ledger is reported as skipped rather than started.
     ///
-    /// A no-op when no MCP server is configured or when the shared client has
-    /// not been published yet (the connect loop runs concurrently with startup,
-    /// and a report is better omitted than shown as a wrong "0 servers").
+    /// Idempotent: [`Self::mcp_startup_reported`] latches the one-shot. The
+    /// sentinel can arrive more than once (a live `/mcp enable` restarts a server
+    /// through the connect loop), and the report must never be re-appended after
+    /// the first successful emission.
     ///
-    /// Waits for the client lock rather than skipping when it is momentarily
-    /// held: the connect loop publishes the client and can still hold its guard
-    /// while this one-shot call runs, and a skipped report is never retried.
+    /// No-op when no server is configured, when the shared client has not been
+    /// published yet, or when a `try_read` miss defers it; in every deferral case
+    /// the latch stays clear and the report is retried on the next call.
     pub async fn report_mcp_startup(&mut self) {
         use std::fmt::Write as _;
+        if self.mcp_startup_reported {
+            return;
+        }
         let Some(client) = self.session_processor.mcp_client.get() else {
             return;
         };
-        let guard = client.read().await;
+        let Ok(guard) = client.try_read() else {
+            return;
+        };
         let mut lines = String::new();
         for server in guard.servers() {
             // The transport label rides on every line so the report names the
@@ -3120,61 +3141,56 @@ impl App {
         drop(guard);
         if !lines.is_empty() {
             self.append_assistant_text(&lines);
+            // Latch only a non-empty report: a run with no configured server
+            // leaves the latch clear so a server added mid-session is still
+            // reported by the next sentinel.
+            self.mcp_startup_reported = true;
         }
     }
 
-    /// Wait for the background MCP connect loop to register tools.
+    /// Whether every MCP server the shared client knows about is terminal.
     ///
-    /// The loop runs concurrently with startup: a server that is registered but
-    /// not yet connected (status `Disabled`) or whose tools are not yet in the
-    /// tool registry is still being set up, so this polls until every configured
-    /// server is terminal - connected with its tools registered, or
-    /// failed/needs-auth/disabled - or `timeout` expires.
+    /// A server is terminal once it has settled: connected (its tools may still
+    /// be arriving, but the client has published its manifest), failed, or
+    /// needs-auth. A `disabled` server - one the connect loop has registered but
+    /// not yet attempted - is still in flight. Used only by tests now that the
+    /// startup path no longer blocks on the connect loop.
     ///
-    /// # Returns
-    ///
-    /// `true` when every server settled, `false` when the timeout expired with
-    /// work still in flight.
-    pub async fn wait_for_mcp_connect(
+    /// Non-blocking: a `try_read` miss (the connect loop holds the write lock
+    /// across a connect) reports `false` - "not yet settled" - rather than
+    /// stalling the caller.
+    #[must_use]
+    pub fn mcp_servers_settled(
         &self,
         session_processor: &ragent_agent::session::processor::SessionProcessor,
-        timeout: std::time::Duration,
     ) -> bool {
         let Some(client) = session_processor.mcp_client.get() else {
             return true;
         };
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let settled = {
-                let guard = client.read().await;
-                guard.servers().iter().all(|server| match server.status {
-                    ragent_agent::mcp::McpStatus::Connected => {
-                        // Connected, but the tool registry is populated by the
-                        // startup tool-registration step; a server whose tools
-                        // are not there yet is still in flight. Deriving the
-                        // registration name directly (instead of constructing a
-                        // throwaway wrapper per tool per poll) keeps each pass
-                        // to a hash lookup.
-                        server.tools.is_empty()
-                            || server.tools.iter().all(|tool| {
-                                session_processor
-                                    .tool_registry
-                                    .get(&ragent_agent::tool::McpToolWrapper::ragent_name_for(
-                                        &server.id, &tool.name,
-                                    ))
-                                    .is_some()
-                            })
-                    }
-                    ragent_agent::mcp::McpStatus::Failed { .. }
-                    | ragent_agent::mcp::McpStatus::NeedsAuth => true,
-                    ragent_agent::mcp::McpStatus::Disabled => false,
-                })
-            };
-            if settled || std::time::Instant::now() >= deadline {
-                return settled;
+        let Ok(guard) = client.try_read() else {
+            return false;
+        };
+        guard.servers().iter().all(|server| match server.status {
+            ragent_agent::mcp::McpStatus::Connected => {
+                // Connected, but the tool registry is populated by the startup
+                // tool-registration step; a server whose tools are not there yet
+                // is still in flight. Deriving the registration name directly
+                // (instead of constructing a throwaway wrapper per tool per
+                // poll) keeps each pass to a hash lookup.
+                server.tools.is_empty()
+                    || server.tools.iter().all(|tool| {
+                        session_processor
+                            .tool_registry
+                            .get(&ragent_agent::tool::McpToolWrapper::ragent_name_for(
+                                &server.id, &tool.name,
+                            ))
+                            .is_some()
+                    })
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+            ragent_agent::mcp::McpStatus::Failed { .. }
+            | ragent_agent::mcp::McpStatus::NeedsAuth => true,
+            ragent_agent::mcp::McpStatus::Disabled => false,
+        })
     }
 
     /// Reload the persisted global MCP enable state into
@@ -3284,10 +3300,10 @@ impl App {
     /// Reconcile the session tool registry with the live MCP client state.
     ///
     /// Called from `set_mcp_server_enabled` (after a live enable/disable) and
-    /// from the `McpStatusChanged` event handler (after a startup connect
-    /// settles). Startup `set_mcp_client` runs before any server is Connected,
-    /// so without this the registry would stay empty of MCP tools and `/tools`
-    /// (and the model's own tool surface) would never list them.
+    /// from the housekeeping pass once the startup connect loop reports its
+    /// servers settled. Startup `set_mcp_client` runs before any server is
+    /// Connected, so without this the registry would stay empty of MCP tools and
+    /// `/tools` (and the model's own tool surface) would never list them.
     ///
     /// Disconnect works by removal, not just re-registration: dropping the
     /// connection without dropping the tools would leave dead
@@ -3300,7 +3316,13 @@ impl App {
             return;
         };
         let (live_ids, pairs) = {
-            let guard = client.read().await;
+            // Non-blocking: this is reached from the event loop (a connect
+            // loop event and the housekeeping pass), which must not stall behind
+            // the connect loop's write lock. A miss leaves the registry stale for
+            // the next reconnect trigger to repair.
+            let Ok(guard) = client.try_read() else {
+                return;
+            };
             // `live_ids` holds the registered-name prefix of each Connected
             // server (`mcp_<sanitized-server>_`), so the stale scan below can
             // prefix-match without re-deriving the sanitization.
@@ -3377,13 +3399,14 @@ impl App {
         let Some(session) = self.live_connector_session().await else {
             return;
         };
-        let session = session.lock().await;
-        let mut statuses = session.statuses();
-        if statuses.is_empty()
-            && let Some(client) = self.session_processor.mcp_client.get()
-        {
-            let connected = {
-                let guard = client.read().await;
+        // Derive the client's per-server state while holding no other lock; a
+        // `try_read` miss (the startup connect loop write-locks across a connect)
+        // leaves the snapshot for the next wake rather than stalling the
+        // housekeeping pass. The connector session stays empty until a snapshot is
+        // set, so a skipped pass loses nothing.
+        let client_state = self.session_processor.mcp_client.get().and_then(|client| {
+            let guard = client.try_read().ok()?;
+            Some(
                 guard
                     .servers()
                     .iter()
@@ -3396,8 +3419,14 @@ impl App {
                             ),
                         )
                     })
-                    .collect()
-            };
+                    .collect::<std::collections::BTreeMap<String, (bool, usize)>>(),
+            )
+        });
+        let session = session.lock().await;
+        let mut statuses = session.statuses();
+        if statuses.is_empty()
+            && let Some(connected) = client_state
+        {
             statuses = session.statuses_from_client_state(&connected);
         }
         self.session_processor

@@ -348,6 +348,7 @@ impl App {
             ),
             mcp_status_map: std::collections::HashMap::new(),
             mcp_client_adopted: false,
+            mcp_startup_reported: false,
             mcp_enabled_map: ragent_agent::mcp::McpEnableLedger::load().to_map(),
             mcp_discover: None,
             loop_setup: None,

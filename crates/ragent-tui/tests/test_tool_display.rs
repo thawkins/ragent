@@ -735,7 +735,10 @@ fn test_input_summary_mf_version_tool() {
 #[test]
 fn test_input_summary_ragent_info_tool() {
     let summary = tool_input_summary("ragent_info", &json!({}), "/home/user/project");
-    assert!(summary.contains("ragent build info"), "got: {summary}");
+    assert!(
+        summary.contains("ragent build/execution info"),
+        "got: {summary}"
+    );
     assert!(
         !summary.contains("[info]"),
         "Tag should be removed: {summary}"

@@ -5169,12 +5169,52 @@ async fn test_report_mcp_startup_lists_start_and_connect_lines() {
     );
 }
 
-/// The startup report must still print the per-server lines when the shared
-/// client exists but its lock is momentarily held by the connect loop. The
-/// connect loop sets the client and then logs, so a `try_read` failure at the
-/// one-shot `report_mcp_startup` call would otherwise drop the whole report.
+/// The report is a one-shot: once it has printed, a later call appends nothing,
+/// no matter how many times the completion sentinel is re-delivered (a live
+/// `/mcp enable` restarts a server through the connect loop and re-fires it).
 #[tokio::test(flavor = "multi_thread")]
-async fn test_report_mcp_startup_waits_for_client_lock() {
+async fn test_report_mcp_startup_is_one_shot() {
+    use ragent_agent::mcp::McpClient;
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    client.register_connected_for_tests("alpha", Vec::new());
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    app.report_mcp_startup().await;
+    let after_first: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // A second call must be a no-op: the latch, not the caller, enforces this.
+    app.report_mcp_startup().await;
+    let after_second: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        after_first, after_second,
+        "the report must be emitted at most once"
+    );
+}
+
+/// The startup report must not block while the connect loop holds the client's
+/// write lock (it does so across a whole server connect). A `try_read` miss only
+/// defers it: the caller retries once the lock is free, and the report then names
+/// every server. A deferral must not latch, or the report would be lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_defers_while_client_lock_held() {
     use ragent_agent::mcp::McpClient;
 
     let mut app = make_app();
@@ -5189,31 +5229,35 @@ async fn test_report_mcp_startup_waits_for_client_lock() {
         .map_err(|_| ())
         .expect("mcp client set once");
 
-    // Hold the write lock, as the connect loop can between publishing the
-    // client and releasing its guard.
+    // Hold the write lock, as the connect loop does mid-connect.
     let guard = shared.write().await;
-    let probe = app.session_processor.mcp_client.get().cloned();
-    let handle = tokio::spawn(async move {
-        let mut app = app;
-        app.report_mcp_startup().await;
-        app
-    });
-    tokio::task::yield_now().await;
-    drop(guard);
-    let app = handle.await.expect("report task joins");
-    drop(probe);
-
-    let joined: String = app
+    app.report_mcp_startup().await;
+    let during: String = app
         .messages
         .iter()
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        joined.contains(
+        !during.contains("[mcp] Starting mcp server alpha"),
+        "a held lock must defer the report, not block on it: {during}"
+    );
+
+    // Release it, as the connect loop does between servers; the retried report
+    // then names every server.
+    drop(guard);
+    app.report_mcp_startup().await;
+    let after: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        after.contains(
             "\n[mcp] Starting mcp server alpha (stdio)\n[mcp] Connected to mcp server alpha via stdio"
         ),
-        "a held lock must not drop the startup report: {joined}"
+        "the retried report must name every server: {after}"
     );
 }
 
@@ -5271,6 +5315,54 @@ async fn test_report_mcp_startup_labels_sse_and_http_transports() {
     );
 }
 
+/// A server that failed to start must appear in the startup report with its
+/// reason, so a startup error is surfaced alongside the servers that came up
+/// rather than only in the log panel.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_report_mcp_startup_surfaces_a_failed_server_reason() {
+    use ragent_agent::mcp::{McpClient, McpServer, McpStatus};
+    use ragent_config::config::{McpServerConfig, McpTransport};
+
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let mut client = McpClient::new();
+    client.push_server_for_tests(McpServer {
+        id: "broken".to_string(),
+        config: McpServerConfig {
+            type_: McpTransport::Stdio,
+            command: Some("npx".to_string()),
+            ..McpServerConfig::default()
+        },
+        status: McpStatus::Failed {
+            error: "did not become ready within 30s".to_string(),
+        },
+        tools: Vec::new(),
+    });
+    app.session_processor
+        .mcp_client
+        .set(Arc::new(tokio::sync::RwLock::new(client)))
+        .map_err(|_| ())
+        .expect("mcp client set once");
+
+    app.report_mcp_startup().await;
+
+    let joined: String = app
+        .messages
+        .iter()
+        .map(|m| m.text_content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains(
+            "\n[mcp] Starting mcp server broken (stdio)\n\
+             [mcp] Failed to connect to mcp server broken via stdio: \
+             did not become ready within 30s"
+        ),
+        "the failed server must be reported with its reason: {joined}"
+    );
+}
+
 /// The startup report is a no-op when the connect loop has not published the
 /// shared client yet, so a slow start never prints a misleading empty report.
 #[tokio::test(flavor = "multi_thread")]
@@ -5298,13 +5390,12 @@ async fn test_report_mcp_startup_noop_without_client() {
     );
 }
 
-/// The startup wait returns as soon as every server is terminal: a client with
-/// no in-flight work (connected, failed, or empty) settles immediately, while a
-/// registered-but-not-yet-connected server keeps it waiting for the loop.
+/// `mcp_servers_settled` reports true when every server is terminal (a client
+/// with no in-flight work: connected, failed, or empty) and false while a
+/// registered-but-not-yet-connected server is still being set up.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_wait_for_mcp_connect_settles_on_terminal_servers() {
+async fn test_mcp_servers_settled_on_terminal_servers() {
     use ragent_agent::mcp::{McpClient, McpStatus, McpToolDef};
-    use std::time::Duration;
 
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
@@ -5338,8 +5429,7 @@ async fn test_wait_for_mcp_connect_settles_on_terminal_servers() {
 
     // A connected server whose tools are already in the registry is terminal.
     assert!(
-        app.wait_for_mcp_connect(&app.session_processor, Duration::from_secs(5))
-            .await,
+        app.mcp_servers_settled(&app.session_processor),
         "a connected server with registered tools settles immediately"
     );
 
@@ -5359,8 +5449,7 @@ async fn test_wait_for_mcp_connect_settles_on_terminal_servers() {
         .clone();
     *shared.write().await = waiting;
     assert!(
-        !app.wait_for_mcp_connect(&app.session_processor, Duration::from_millis(150))
-            .await,
+        !app.mcp_servers_settled(&app.session_processor),
         "a server still connecting must not report settled"
     );
 }

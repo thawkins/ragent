@@ -1989,6 +1989,18 @@ impl App {
                 ref server_id,
                 ref status,
             } => {
+                // The startup connect loop's completion sentinel: it carries an
+                // empty server id and the status `initialized`. The report and
+                // the tool-registry reconciliation must NOT run per-server here
+                // (each would block the event loop behind the loop's write lock,
+                // which it holds across a multi-second connect). Do them once,
+                // now that every server has settled; `report_mcp_startup` latches
+                // its own one-shot.
+                if server_id.is_empty() && status == "initialized" {
+                    self.register_mcp_tools().await;
+                    self.report_mcp_startup().await;
+                    return;
+                }
                 // Track the live status per server id. The background startup
                 // connect loop publishes this; without it the `/mcp` display
                 // list has no way to learn a fresh server's real state and

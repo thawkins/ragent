@@ -69,13 +69,20 @@ impl RuntimeFlag {
     /// (SECTASKS T-011), so a project-file write would never round-trip on the
     /// next load.
     ///
-    /// If the config file cannot be loaded (e.g. it is corrupt), the error is
-    /// propagated rather than silently overwriting the file with defaults.
+    /// The named field is set directly in the on-disk global file rather than
+    /// re-serialising the merged [`Config`](crate::config::Config): writing the
+    /// merged value would fold a project overlay (and any key this build does
+    /// not model) into the user's global file. See
+    /// [`Config::set_global_bool_key`](crate::config::Config::set_global_bool_key).
+    ///
+    /// If the config file cannot be read, the error is propagated rather than
+    /// silently overwriting the file with defaults.
     pub fn persist_to_global(&self, enabled: bool) -> anyhow::Result<()> {
-        let mut config = crate::config::Config::load()
-            .with_context(|| format!("failed to load config before persisting {}", self.name))?;
-        self.apply_to_config(&mut config, enabled);
-        config.save(false)?;
+        let key = self
+            .global_config_key()
+            .ok_or_else(|| anyhow::anyhow!("runtime flag '{}' has no config key", self.name))?;
+        crate::config::Config::set_global_bool_key(key, enabled)
+            .with_context(|| format!("failed to persist {}", self.name))?;
         self.set_enabled(enabled);
         Ok(())
     }
@@ -83,8 +90,15 @@ impl RuntimeFlag {
     /// Toggle the flag and persist the new state to the **user-global** config
     /// file (see [`RuntimeFlag::persist_to_global`]); returns the new state.
     pub fn toggle_persist_global(&self) -> anyhow::Result<bool> {
-        let new_state = !self.is_enabled();
+        let previous = self.is_enabled();
+        let new_state = !previous;
         self.persist_to_global(new_state)?;
+        tracing::info!(
+            flag = self.name,
+            previous,
+            new_state,
+            "runtime flag toggled and persisted to the user-global config"
+        );
         Ok(new_state)
     }
 
@@ -132,6 +146,22 @@ impl RuntimeFlag {
             other => {
                 debug_assert!(false, "unhandled runtime flag name: {other}");
             }
+        }
+    }
+
+    /// The *top-level* `ragent.json` key this flag persists to, or `None` for a
+    /// flag whose value lives in a nested section (e.g. `gcf.enabled`).
+    ///
+    /// Used by [`RuntimeFlag::persist_to_global`] to edit the raw global file in
+    /// place instead of re-serialising the merged config.
+    fn global_config_key(&self) -> Option<&'static str> {
+        match self.name {
+            "activity_log" => Some("activity_log"),
+            "edit_log" => Some("edit_log"),
+            "yolo" => Some("yolo"),
+            // `gcf` is nested under `gcf.enabled`; it is persisted through the
+            // `Config::save` path in the `/gcf` handler, not this helper.
+            _ => None,
         }
     }
 }

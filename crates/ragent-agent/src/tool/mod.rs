@@ -65,8 +65,8 @@ pub mod skill_manage;
 /// Model metadata introspection - report the currently connected provider/model.
 pub mod model_info;
 
-/// Build and version introspection - report the running ragent version and
-/// when the binary was built.
+/// Build and execution introspection - report the running ragent version, when
+/// the binary was built, and runtime details of the current process.
 pub mod ragent_info;
 
 /// Host operating-system, CPU, GPU, memory, and process introspection - report

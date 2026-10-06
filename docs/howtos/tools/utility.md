@@ -6,7 +6,7 @@ host environment.
 | Tool | Description |
 |------|-------------|
 | `model_info` | Report the active provider/model, capabilities, context window, and cost tier. |
-| `ragent_info` | Report the running ragent version, build time, git commit, and compiler. |
+| `ragent_info` | Report the running ragent version, build time, git commit, compiler, and execution details (pid, uptime, working directory, user, memory, threads). |
 | `os_info` | Report read-only host OS and hardware introspection (also `/osinfo show`). |
 | `tool_info` | Dump the whole tool registry as JSON (name, description, schema, permission category, source). |
 | `commands_info` | Dump the slash-command catalog as JSON (built-in TUI commands plus plugin-contributed ones). |
@@ -36,10 +36,17 @@ model_info format="json"
 
 ## ragent_info
 
-Report build and version information about the running ragent binary: the ragent
+Report build and version information about the running ragent binary - the ragent
 version, the build timestamp, the git commit it was built from (best-effort), and
-the compiler version. Read-only and offline — it never shells out or hits the
-network — so the LLM can answer "which version am I running?" directly.
+the compiler version - together with runtime execution details of the current
+instance: process id and parent process id, wall-clock start time, uptime,
+absolute executable path, current working directory, user (from `$USER` /
+`$USERNAME` / `$LOGNAME`), resident and virtual memory,
+and thread (task) count. Read-only and offline - it never shells out or hits the
+network (only the current process is inspected via `sysinfo`) - so the LLM can
+answer "which version am I running, and how long has this instance been up?"
+directly. Every execution field is best-effort and renders as `unknown` when the
+host does not expose it.
 
 **Arguments**
 
