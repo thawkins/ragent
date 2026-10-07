@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::security` — SSRF protection (T-028, FR-019,
+//! Unit tests for `masterfetch::security` - SSRF protection (T-028, FR-019,
 //! NFR-003).
 //!
 //! Covers every SSRF bypass vector enumerated in the spec:
@@ -23,7 +23,7 @@
 use ragent_tools_extended::masterfetch::security::{MAX_URL_LEN, SecurityError, validate_url};
 
 // ===========================================================================
-// Valid URLs — must pass
+// Valid URLs - must pass
 // ===========================================================================
 
 #[test]
@@ -58,7 +58,7 @@ fn test_valid_url_with_fragment() {
 
 #[test]
 fn test_valid_public_ip() {
-    // 93.184.216.34 is example.com's public IP — not in any private range.
+    // 93.184.216.34 is example.com's public IP - not in any private range.
     assert!(validate_url("http://93.184.216.34").is_ok());
 }
 
@@ -144,7 +144,7 @@ fn test_backslash_alone_rejected() {
 }
 
 // ===========================================================================
-// Blocked schemes — every entry in BLOCKED_SCHEMES
+// Blocked schemes - every entry in BLOCKED_SCHEMES
 // ===========================================================================
 
 #[test]
@@ -213,7 +213,7 @@ fn test_chrome_scheme_rejected() {
 
 #[test]
 fn test_blob_scheme_rejected() {
-    // `blob:` URLs have no host and a non-http scheme — blocked.
+    // `blob:` URLs have no host and a non-http scheme - blocked.
     assert!(matches!(
         validate_url("blob:https://example.com/uuid"),
         Err(SecurityError::BlockedScheme(_))
@@ -300,7 +300,7 @@ fn test_mixed_case_localhost_rejected() {
 }
 
 // ===========================================================================
-// Loopback IPs — 127.0.0.0/8 and ::1
+// Loopback IPs - 127.0.0.0/8 and ::1
 // ===========================================================================
 
 #[test]
@@ -354,7 +354,7 @@ fn test_ipv6_loopback_with_port_rejected() {
 }
 
 // ===========================================================================
-// Private ranges — 10/8, 172.16/12, 192.168/16, 0/8
+// Private ranges - 10/8, 172.16/12, 192.168/16, 0/8
 // ===========================================================================
 
 #[test]
@@ -409,7 +409,7 @@ fn test_192_168_0_0_rejected() {
 
 #[test]
 fn test_0_0_0_0_rejected() {
-    // 0.0.0.0/8 — "this network"
+    // 0.0.0.0/8 - "this network"
     assert!(matches!(
         validate_url("http://0.0.0.0"),
         Err(SecurityError::PrivateRange(_))
@@ -612,7 +612,7 @@ fn test_ipv6_multicast_rejected() {
 }
 
 // ===========================================================================
-// Alternate IP notations — octal, hex, decimal, short-form, mixed
+// Alternate IP notations - octal, hex, decimal, short-form, mixed
 // ===========================================================================
 
 #[test]
@@ -628,7 +628,7 @@ fn test_octal_notation_rejected() {
 fn test_octal_0o_prefix_notation_rejected_as_parse_error() {
     // The `url` crate does not recognise the `0o` octal prefix as a valid IPv4
     // literal, so `0o177.0.0.1` fails at the parse stage. Either way it cannot
-    // bypass SSRF protection — the request never reaches a private host.
+    // bypass SSRF protection - the request never reaches a private host.
     assert!(matches!(
         validate_url("http://0o177.0.0.1"),
         Err(SecurityError::Parse(_))
@@ -673,7 +673,7 @@ fn test_hex_single_integer_notation_rejected() {
 
 #[test]
 fn test_hex_octal_mix_rejected() {
-    // 0x7f.0.0177.1 — hex + octal mix = 127.0.0.1
+    // 0x7f.0.0177.1 - hex + octal mix = 127.0.0.1
     assert!(matches!(
         validate_url("http://0x7f.0.0177.1"),
         Err(SecurityError::PrivateRange(_))
@@ -682,7 +682,7 @@ fn test_hex_octal_mix_rejected() {
 
 #[test]
 fn test_decimal_short_form_two_parts_rejected() {
-    // 127.1 → 127.0.0.1
+    // 127.1 -> 127.0.0.1
     assert!(matches!(
         validate_url("http://127.1"),
         Err(SecurityError::PrivateRange(_))
@@ -691,7 +691,7 @@ fn test_decimal_short_form_two_parts_rejected() {
 
 #[test]
 fn test_decimal_short_form_three_parts_rejected() {
-    // 127.0.1 → 127.0.0.1
+    // 127.0.1 -> 127.0.0.1
     assert!(matches!(
         validate_url("http://127.0.1"),
         Err(SecurityError::PrivateRange(_))
@@ -747,7 +747,7 @@ fn test_ipv4_mapped_ipv6_private_rejected() {
 
 #[test]
 fn test_ipv4_mapped_ipv6_metadata_rejected() {
-    // ::ffff:169.254.169.254 — cloud metadata via IPv4-mapped IPv6.
+    // ::ffff:169.254.169.254 - cloud metadata via IPv4-mapped IPv6.
     assert!(matches!(
         validate_url("https://[::ffff:169.254.169.254]"),
         Err(SecurityError::PrivateRange(_))
@@ -800,7 +800,7 @@ fn test_non_ascii_host_does_not_panic() {
 
 #[test]
 fn test_no_host_rejected() {
-    // "http://" with no host — the url crate rejects this at parse time.
+    // "http://" with no host - the url crate rejects this at parse time.
     assert!(matches!(
         validate_url("http://"),
         Err(SecurityError::Parse(_))
@@ -808,18 +808,18 @@ fn test_no_host_rejected() {
 }
 
 // ===========================================================================
-// Valid edge cases — public-range boundaries
+// Valid edge cases - public-range boundaries
 // ===========================================================================
 
 #[test]
 fn test_172_15_public_ok() {
-    // 172.15.x.x is just below the 172.16.0.0/12 private range — public.
+    // 172.15.x.x is just below the 172.16.0.0/12 private range - public.
     assert!(validate_url("http://172.15.0.1").is_ok());
 }
 
 #[test]
 fn test_172_32_public_ok() {
-    // 172.32.x.x is just above the 172.16.0.0/12 private range — public.
+    // 172.32.x.x is just above the 172.16.0.0/12 private range - public.
     assert!(validate_url("http://172.32.0.1").is_ok());
 }
 
@@ -843,30 +843,30 @@ fn test_172_31_boundary_rejected() {
 
 #[test]
 fn test_11_x_public_ok() {
-    // 11.x.x.x is just above 10.0.0.0/8 — public.
+    // 11.x.x.x is just above 10.0.0.0/8 - public.
     assert!(validate_url("http://11.0.0.1").is_ok());
 }
 
 #[test]
 fn test_126_x_public_ok() {
-    // 126.x.x.x is just below 127.0.0.0/8 — public.
+    // 126.x.x.x is just below 127.0.0.0/8 - public.
     assert!(validate_url("http://126.0.0.1").is_ok());
 }
 
 #[test]
 fn test_128_x_public_ok() {
-    // 128.x.x.x is just above 127.0.0.0/8 — public.
+    // 128.x.x.x is just above 127.0.0.0/8 - public.
     assert!(validate_url("http://128.0.0.1").is_ok());
 }
 
 #[test]
 fn test_223_x_public_ok() {
-    // 223.x.x.x is just below 224.0.0.0/4 multicast — public.
+    // 223.x.x.x is just below 224.0.0.0/4 multicast - public.
     assert!(validate_url("http://223.0.0.1").is_ok());
 }
 
 #[test]
 fn test_1_1_1_1_public_ok() {
-    // Cloudflare's public resolver — a well-known public IP.
+    // Cloudflare's public resolver - a well-known public IP.
     assert!(validate_url("http://1.1.1.1").is_ok());
 }

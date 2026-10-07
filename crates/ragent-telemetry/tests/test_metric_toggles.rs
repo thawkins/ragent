@@ -23,7 +23,7 @@
 //! The toggle guard lives in the **recorder layer** (the high-level API the
 //! agent loop uses). The raw `InstrumentRegistry` fields are low-level OTEL
 //! instrument handles; calling `.add()` / `.record()` on them directly
-//! bypasses the toggle. This is by design — the recorders are the public API
+//! bypasses the toggle. This is by design - the recorders are the public API
 //! that enforces FR-027, and the `pub` fields are an implementation detail.
 
 #![cfg(feature = "telemetry")]
@@ -41,7 +41,7 @@ use ragent_telemetry::recorder::{
     ToolRecorder,
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 /// Build a `SdkMeterProvider` backed by an `InMemoryMetricExporter` with a
 /// long export interval so no background export fires during the test.
@@ -80,9 +80,9 @@ fn flush_and_collect(
 /// with at least one data point.
 fn has_metric(metrics: &[ResourceMetrics], name: &str) -> bool {
     for rm in metrics {
-        for sm in &rm.scope_metrics {
-            for metric in &sm.metrics {
-                if metric.name == name {
+        for sm in rm.scope_metrics() {
+            for metric in sm.metrics() {
+                if metric.name() == name {
                     return true;
                 }
             }
@@ -153,7 +153,7 @@ fn build_subsystem_with_toggles(
     (sub, exporter, rt)
 }
 
-// ── 1. is_metric_enabled helper ───────────────────────────────────────────
+// -- 1. is_metric_enabled helper -------------------------------------------
 
 /// `is_metric_enabled` returns `true` for absent keys (FR-027).
 #[test]
@@ -161,7 +161,7 @@ fn test_is_metric_enabled_absent_is_true() {
     let (provider, _exporter, _rt) = build_in_memory_provider();
     let registry = InstrumentRegistry::from_provider(&provider);
     assert!(registry.is_metric_enabled("ragent.llm.requests"));
-    assert!(registry.is_metric_enabled("any.metric.name"));
+    assert!(registry.is_metric_enabled("any.metric.name()"));
 }
 
 /// `is_metric_enabled` returns the stored bool for present keys (FR-027).
@@ -189,7 +189,7 @@ fn test_empty_toggles_all_enabled() {
     assert!(registry.is_metric_enabled("ragent.sessions.active"));
 }
 
-// ── 2. Sibling metrics are independent ───────────────────────────────────
+// -- 2. Sibling metrics are independent -----------------------------------
 
 /// Disabling `ragent.tokens.input` leaves `ragent.tokens.output` enabled
 /// (FR-027). The `is_metric_enabled` guard checks each metric independently.
@@ -231,7 +231,7 @@ fn test_disabling_permission_approved_leaves_denied_enabled() {
     assert!(registry.is_metric_enabled("ragent.permission.denied"));
 }
 
-// ── 3. Fail-open on typo ─────────────────────────────────────────────────
+// -- 3. Fail-open on typo -------------------------------------------------
 
 /// A typo in the toggle key silently leaves the metric enabled (fail-open,
 /// FR-027).
@@ -251,7 +251,7 @@ fn test_typo_in_toggle_key_leaves_metric_enabled() {
     assert!(!registry.is_metric_enabled("ragent.llm.reqeusts"));
 }
 
-// ── 4. Toggles are shared across registry clones ─────────────────────────
+// -- 4. Toggles are shared across registry clones -------------------------
 
 /// Clones of the registry share the same toggle map (FR-027), so a
 /// recorder clone sees the same disabled state as the original.
@@ -268,7 +268,7 @@ fn test_toggles_shared_across_clones() {
     assert!(clone.is_metric_enabled("ragent.tokens.input"));
 }
 
-// ── 5. with_metric_toggles overrides the default empty map ────────────────
+// -- 5. with_metric_toggles overrides the default empty map ----------------
 
 /// `with_metric_toggles` replaces the default empty toggles map.
 #[test]
@@ -289,7 +289,7 @@ fn test_with_metric_toggles_replaces_default() {
     assert!(reg1.is_metric_enabled("ragent.llm.requests"));
 }
 
-// ── 6. Subsystem wires toggles from config ───────────────────────────────
+// -- 6. Subsystem wires toggles from config -------------------------------
 
 /// `TelemetrySubsystem::instruments()` wires the `telemetry.otel.metrics`
 /// config into the registry (FR-027).
@@ -336,7 +336,7 @@ fn test_subsystem_no_toggles_all_enabled() {
         export_interval_seconds: 3600,
         ..Default::default()
     };
-    // No `metrics` map — defaults to empty.
+    // No `metrics` map - defaults to empty.
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async {
@@ -353,7 +353,7 @@ fn test_subsystem_no_toggles_all_enabled() {
     assert!(registry.is_metric_enabled("ragent.sessions.active"));
 }
 
-// ── 7. Recorder short-circuit (export-level) ─────────────────────────────
+// -- 7. Recorder short-circuit (export-level) -----------------------------
 
 /// The `LlmRecorder::record_request` short-circuits when
 /// `ragent.llm.requests` is disabled, producing zero exported data
@@ -450,7 +450,7 @@ fn test_compression_recorder_short_circuits_disabled_metric() {
     assert!(registry.is_metric_enabled("ragent.context.compression_ratio"));
 }
 
-// ── 8. Config serde for the metrics map ──────────────────────────────────
+// -- 8. Config serde for the metrics map ----------------------------------
 
 /// The `telemetry.otel.metrics` map deserialises from JSON (FR-027).
 #[test]
@@ -500,7 +500,7 @@ fn test_absent_metrics_field_defaults_to_empty() {
     assert!(config.metrics.is_empty());
 }
 
-// ── 9. No-op recorders ignore toggles ────────────────────────────────────
+// -- 9. No-op recorders ignore toggles ------------------------------------
 
 /// Disabled recorders never record, so toggles have no observable effect
 /// (FR-022, FR-027).
@@ -540,7 +540,7 @@ fn test_disabled_recorders_ignore_toggles() {
     // If we got here, none of the disabled recorder calls panicked.
 }
 
-// ── 9. ANTIPAT M0.15: the previously toggle-blind recorders ──────────────
+// -- 9. ANTIPAT M0.15: the previously toggle-blind recorders --------------
 //
 // HIGH-4: `ToolRecorder`, `SessionRecorder`, `CoordinatorRecorder`, and
 // `CompressionRecorder` ignored the FR-027 metric toggles entirely, so a

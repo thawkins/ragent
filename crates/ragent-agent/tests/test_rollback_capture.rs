@@ -73,7 +73,7 @@ fn make_processor(storage: Arc<Storage>) -> Arc<SessionProcessor> {
 }
 
 /// After `rollback_loop` returns, the file contents must already be the
-/// pre-loop contents — regression cover for the FR-020 race where the
+/// pre-loop contents - regression cover for the FR-020 race where the
 /// capture was removed BEFORE the blocking fs writes completed, letting an
 /// observer read the mutated file the moment the map went empty.
 #[tokio::test]

@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 
+use ragent_types::format_size;
+
 use super::fuzzy::{collect_project_files_async, fuzzy_match};
 use super::parse::{FileRef, ParsedRef, parse_refs};
 // Source-of-truth for PDF reading lives in ragent-tools-extended.
@@ -382,17 +384,6 @@ fn list_recursive(
     }
 
     Ok(())
-}
-
-/// Format a byte count as a human-readable string.
-fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
 }
 
 #[cfg(test)]

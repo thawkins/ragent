@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::storage::TaskRow;
 
-// ── DAG derivation (T-006, FR-003, FR-005) ──────────────────────────
+// -- DAG derivation (T-006, FR-003, FR-005) --------------------------
 
 /// Derived DAG fields for a single task, computed at read time from the
 /// full session task set (todo2tasks T-006, FR-003, FR-005).
@@ -121,7 +121,7 @@ pub(crate) fn compute_dag(tasks: &[TaskRow]) -> HashMap<String, TaskDagInfo> {
     dag
 }
 
-// ── TaskCreateTool (T-007, FR-009, FR-011, FR-012) ───────────────────
+// -- TaskCreateTool (T-007, FR-009, FR-011, FR-012) -------------------
 
 /// Creates a new task in the current session (todo2tasks T-007,
 /// FR-009, FR-011, FR-012).
@@ -351,7 +351,7 @@ fn type_str(v: &Value) -> &'static str {
     }
 }
 
-// ── TaskUpdateTool (T-008, T-017, FR-004, FR-005, FR-009) ────────────
+// -- TaskUpdateTool (T-008, T-017, FR-004, FR-005, FR-009) ------------
 
 /// Valid status values for `task_update` (FR-005: `blocked` is NOT
 /// a storable status - it is derived at read time).
@@ -570,7 +570,7 @@ impl Tool for TaskUpdateTool {
             )
         })?;
 
-        // ── T-017: Reject status=blocked with a clear error (FR-005) ──
+        // -- T-017: Reject status=blocked with a clear error (FR-005) --
         let status = input.get("status").and_then(|v| v.as_str());
         if let Some(s) = status {
             if s == "blocked" {
@@ -590,7 +590,7 @@ impl Tool for TaskUpdateTool {
             }
         }
 
-        // ── Parse optional fields ──────────────────────────────────────
+        // -- Parse optional fields --------------------------------------
         let subject = input.get("subject").and_then(|v| v.as_str());
 
         let description = input.get("description").and_then(|v| v.as_str());
@@ -625,7 +625,7 @@ impl Tool for TaskUpdateTool {
             None
         };
 
-        // ── add_blocked_by: merge into existing blocked_by (FR-009) ────
+        // -- add_blocked_by: merge into existing blocked_by (FR-009) ----
         let add_blocked_by: Vec<String> = if let Some(arr) = input.get("add_blocked_by") {
             if !arr.is_array() {
                 anyhow::bail!(
@@ -641,7 +641,7 @@ impl Tool for TaskUpdateTool {
             Vec::new()
         };
 
-        // ── add_blocks: inverse edges - target tasks gain task_id ────
+        // -- add_blocks: inverse edges - target tasks gain task_id ----
         let add_blocks: Vec<String> = if let Some(arr) = input.get("add_blocks") {
             if !arr.is_array() {
                 anyhow::bail!(
@@ -751,7 +751,7 @@ impl Tool for TaskUpdateTool {
             map
         };
 
-        // ── FR-004: Cycle detection ──────────────────────────────────
+        // -- FR-004: Cycle detection ----------------------------------
         // Check if the proposed edges (add_blocked_by on this task +
         // add_blocks on other tasks) would create a dependency cycle.
         if !add_blocked_by.is_empty() || !add_blocks.is_empty() {
@@ -769,7 +769,7 @@ impl Tool for TaskUpdateTool {
             }
         }
 
-        // ── Persist the update ─────────────────────────────────────────
+        // -- Persist the update -----------------------------------------
         storage
             .update_task(
                 task_id,
@@ -784,7 +784,7 @@ impl Tool for TaskUpdateTool {
             )
             .map_err(|e| anyhow::anyhow!("Failed to update task: {e}"))?;
 
-        // ── Persist add_blocks: add task_id to each target's blocked_by ─
+        // -- Persist add_blocks: add task_id to each target's blocked_by -
         for target_id in &add_blocks {
             let target_task = all_tasks
                 .iter()
@@ -828,7 +828,7 @@ impl Tool for TaskUpdateTool {
         let dag = compute_dag(&all_tasks);
         let info = dag.get(&task.id).cloned().unwrap_or_default();
 
-        // ── FR-003: Auto-unblock evaluation on completion ────────────
+        // -- FR-003: Auto-unblock evaluation on completion ------------
         // When status transitions to `completed`, compute which tasks
         // became available (unblocked) as a result.  This is informational
         // - the derived `is_available` field is always recomputed at read
@@ -884,7 +884,7 @@ impl Tool for TaskUpdateTool {
     }
 }
 
-// ── TaskGetTool (T-009, FR-014) ─────────────────────────────────────
+// -- TaskGetTool (T-009, FR-014) -------------------------------------
 
 /// Retrieves the full record of a single task by ID (todo2tasks T-009,
 /// FR-014).
@@ -992,7 +992,7 @@ impl Tool for TaskGetTool {
     }
 }
 
-// ── TaskListTool (T-010, FR-015) ────────────────────────────────────
+// -- TaskListTool (T-010, FR-015) ------------------------------------
 
 /// Valid status filter values for `task_list` (FR-015).
 const LIST_STATUSES: &[&str] = &["pending", "in_progress", "completed", "all"];
@@ -1116,7 +1116,7 @@ impl Tool for TaskListTool {
     }
 }
 
-// ── Formatting helpers ──────────────────────────────────────────────
+// -- Formatting helpers ----------------------------------------------
 
 /// The ASCII status marker used in task listings.
 ///

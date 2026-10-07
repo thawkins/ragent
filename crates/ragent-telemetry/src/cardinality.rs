@@ -206,7 +206,7 @@ fn make_signature(attrs: &[KeyValue]) -> String {
     parts.join("|")
 }
 
-// ── No-op stub when `telemetry` feature is off ───────────────────────────
+// -- No-op stub when `telemetry` feature is off ---------------------------
 
 /// No-op cardinality cache used when the `telemetry` Cargo feature is off.
 ///
@@ -226,7 +226,7 @@ impl CardinalityCache {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────
+// -- Tests ----------------------------------------------------------------
 
 #[cfg(all(test, feature = "telemetry"))]
 #[path = "../tests/inline/cardinality_tests.rs"]

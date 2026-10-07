@@ -62,7 +62,7 @@ fn status(app: &App) -> PluginStoreStatus {
         .clone()
 }
 
-// ── Poll with nothing pending (FR-016) ──────────────────────────────────────
+// -- Poll with nothing pending (FR-016) --------------------------------------
 
 #[test]
 fn poll_with_no_pending_result_is_a_noop() {
@@ -76,7 +76,7 @@ fn poll_with_no_pending_result_is_a_noop() {
     assert!(!app.needs_redraw);
 }
 
-// ── A delivered index fills the open panel (FR-007, FR-016, FR-017) ─────────
+// -- A delivered index fills the open panel (FR-007, FR-016, FR-017) ---------
 
 #[test]
 fn a_delivered_index_fills_the_open_panel() {
@@ -134,7 +134,7 @@ fn a_prefilled_query_still_filters_the_delivered_entries() {
     assert_eq!(browser.selected().expect("a match").id, "codex-weather");
 }
 
-// ── A failed fetch renders inline (FR-013) ──────────────────────────────────
+// -- A failed fetch renders inline (FR-013) ----------------------------------
 
 #[test]
 fn a_delivered_error_sets_the_inline_failure() {
@@ -157,7 +157,7 @@ fn a_delivered_error_sets_the_inline_failure() {
     assert!(app.needs_redraw);
 }
 
-// ── Stale results are discarded (FR-007) ────────────────────────────────────
+// -- Stale results are discarded (FR-007) ------------------------------------
 
 #[test]
 fn a_result_for_the_other_store_is_discarded() {
@@ -191,7 +191,7 @@ fn a_result_after_the_panel_closed_is_discarded() {
     assert!(app.plugin_store_result.lock().expect("slot").is_none());
 }
 
-// ── Endpoint refusal short-circuits the spawn (FR-024) ──────────────────────
+// -- Endpoint refusal short-circuits the spawn (FR-024) ----------------------
 
 #[test]
 fn a_refused_non_https_endpoint_reports_inline_without_fetching() {
@@ -219,7 +219,7 @@ fn a_refused_non_https_endpoint_reports_inline_without_fetching() {
     assert!(app.plugin_store_result.lock().expect("slot").is_none());
 }
 
-// ── No reactor: the fetch is skipped, not run inline (FR-016, FR-026) ───────
+// -- No reactor: the fetch is skipped, not run inline (FR-016, FR-026) -------
 
 #[test]
 fn spawning_without_a_runtime_skips_the_fetch_and_keeps_loading() {
@@ -234,7 +234,7 @@ fn spawning_without_a_runtime_skips_the_fetch_and_keeps_loading() {
     assert!(app.plugin_store_result.lock().expect("slot").is_none());
 }
 
-// ── A poisoned slot never panics the poll (FR-025) ──────────────────────────
+// -- A poisoned slot never panics the poll (FR-025) --------------------------
 
 #[test]
 fn poll_recovers_a_poisoned_slot() {
@@ -253,7 +253,7 @@ fn poll_recovers_a_poisoned_slot() {
     assert_eq!(status(&app), PluginStoreStatus::Loading);
 }
 
-// ── The spawned off-loop path delivers a contained error (FR-016, FR-026) ───
+// -- The spawned off-loop path delivers a contained error (FR-016, FR-026) ---
 
 #[tokio::test]
 async fn an_off_loop_fetch_delivers_a_contained_error_for_an_unreachable_endpoint() {

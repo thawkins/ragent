@@ -39,7 +39,7 @@ regex = { workspace = true }
 rayon = { workspace = true }
 
 # Shell utilities
-which = "7.0"
+which = "8.0"
 
 # Unix process-group signalling (killpg) for killing orphaned test binaries on timeout
 libc = { workspace = true }

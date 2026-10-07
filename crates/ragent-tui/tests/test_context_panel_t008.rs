@@ -39,7 +39,7 @@ fn test_context_window_matches_registry_advertisement() {
 #[test]
 fn test_context_window_is_positive_when_available() {
     // FR-010: whenever a value is returned it must be a usable positive
-    // token capacity — zero is never a valid window.
+    // token capacity - zero is never a valid window.
     let app = support::make_app();
     if let Some(window) = app.active_context_window_tokens() {
         assert!(window > 0, "advertised context window must be positive");

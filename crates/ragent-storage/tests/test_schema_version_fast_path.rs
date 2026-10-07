@@ -50,7 +50,7 @@ fn fresh_db_writes_schema_version() {
 fn second_open_uses_fast_path_and_schema_is_intact() {
     let path = temp_db_path("second-open.db");
 
-    // First open — full migration, writes schema_version.
+    // First open - full migration, writes schema_version.
     {
         let storage = Storage::open(&path).expect("first open");
         storage
@@ -64,7 +64,7 @@ fn second_open_uses_fast_path_and_schema_is_intact() {
         assert_eq!(v, "1");
     }
 
-    // Second open — fast path.  All CRUD must still work.
+    // Second open - fast path.  All CRUD must still work.
     {
         let storage = Storage::open(&path).expect("second open (fast path)");
 
@@ -117,7 +117,7 @@ fn second_open_uses_fast_path_and_schema_is_intact() {
 fn fast_path_sets_has_format_version_cache() {
     let path = temp_db_path("fast-path-cache.db");
 
-    // First open — full migration.
+    // First open - full migration.
     {
         let storage = Storage::open(&path).expect("first open");
         storage
@@ -125,7 +125,7 @@ fn fast_path_sets_has_format_version_cache() {
             .expect("create session");
     }
 
-    // Second open — fast path.  get_session should return format_version == 1
+    // Second open - fast path.  get_session should return format_version == 1
     // without erroring, proving the cache was set correctly.
     let storage = Storage::open(&path).expect("second open (fast path)");
     let row = storage

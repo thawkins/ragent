@@ -39,7 +39,7 @@ const NEW_TOOLS: &[&str] = &[
     "codeindex_godnodes",
 ];
 
-// ── Existing tool registration ─────────────────────────────────────────
+// -- Existing tool registration -----------------------------------------
 
 #[test]
 fn test_all_existing_codeindex_tools_registered() {
@@ -129,7 +129,7 @@ fn test_existing_tool_descriptions_nonempty() {
     }
 }
 
-// ── New tool permission categories match existing ─────────────────────
+// -- New tool permission categories match existing ---------------------
 
 #[test]
 fn test_new_tool_permission_categories_match_existing() {
@@ -146,7 +146,7 @@ fn test_new_tool_permission_categories_match_existing() {
     }
 }
 
-// ── Total codeindex tool count ─────────────────────────────────────────
+// -- Total codeindex tool count -----------------------------------------
 
 #[test]
 fn test_total_codeindex_tool_count_is_ten() {
@@ -164,7 +164,7 @@ fn test_total_codeindex_tool_count_is_ten() {
     );
 }
 
-// ── No existing tool was renamed or removed ────────────────────────────
+// -- No existing tool was renamed or removed ----------------------------
 
 #[test]
 fn test_no_existing_tool_removed_or_renamed() {
@@ -177,7 +177,7 @@ fn test_no_existing_tool_removed_or_renamed() {
     }
 }
 
-// ── Existing tool parameter schemas are objects (not broken) ───────────
+// -- Existing tool parameter schemas are objects (not broken) -----------
 
 #[test]
 fn test_existing_tool_search_has_query_parameter() {

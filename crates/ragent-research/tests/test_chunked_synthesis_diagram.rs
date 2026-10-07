@@ -2,8 +2,8 @@
 //! correctly after chunked synthesis merges partial results.
 //!
 //! This test constructs an [`AnalysisResult`] that simulates the output of
-//! [`merge_chunk_results`] — findings from multiple chunks, cross-references
-//! from multiple chunks — and verifies that [`assemble_document`] produces a
+//! [`merge_chunk_results`] - findings from multiple chunks, cross-references
+//! from multiple chunks - and verifies that [`assemble_document`] produces a
 //! valid `RESEARCH.md` with:
 //!
 //! - A `## Findings Relationship Diagram` section with nodes and edges.
@@ -85,7 +85,7 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
         ],
     );
 
-    // Merge the two chunks — this is what the LLM engine does after chunked
+    // Merge the two chunks - this is what the LLM engine does after chunked
     // synthesis (Milestone E-002).
     let merged = merge_chunk_results(&[chunk1, chunk2]);
 
@@ -166,7 +166,7 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
         "F3 node must be present in diagram after chunked merge"
     );
 
-    // The dependency edge from F2 → F1 (from chunk 1) must survive the merge.
+    // The dependency edge from F2 -> F1 (from chunk 1) must survive the merge.
     assert!(
         assembled.body.contains("F2 --> F1"),
         "edge F2 --> F1 must survive chunked merge"

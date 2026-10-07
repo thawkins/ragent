@@ -150,7 +150,7 @@ async fn test_slash_status_expiry_skips_if_status_changed() {
     assert!(app.status_set_at.is_none());
 }
 
-/// The expiry timer should not be armed for async-in-progress (⏳) statuses.
+/// The expiry timer should not be armed for async-in-progress () statuses.
 #[test]
 fn test_slash_status_expiry_not_armed_for_async() {
     let mut app = make_app();
@@ -164,7 +164,7 @@ fn test_slash_status_expiry_not_armed_for_async() {
     assert_eq!(app.status, "[wait] opt/co_star: optimizing…");
 }
 
-/// The expiry timer should not be armed for error (⚠) statuses.
+/// The expiry timer should not be armed for error () statuses.
 #[test]
 fn test_slash_status_expiry_not_armed_for_error() {
     let mut app = make_app();
@@ -196,14 +196,14 @@ async fn test_slash_status_expiry_keeps_timer_before_grace_period() {
     app.execute_slash_command("/help").await;
     assert_eq!(app.status, "help");
 
-    // Poll immediately — the grace period hasn't elapsed.
+    // Poll immediately - the grace period hasn't elapsed.
     app.poll_status_expiry();
 
     assert_eq!(app.status, "help");
     assert!(app.status_set_at.is_some());
 }
 
-/// A slash command that errors (⚠ status) should not arm the expiry timer.
+/// A slash command that errors ( status) should not arm the expiry timer.
 #[tokio::test]
 async fn test_slash_error_status_not_armed() {
     let mut app = make_app();
@@ -220,7 +220,7 @@ async fn test_slash_error_status_not_armed() {
 }
 
 /// `/research create` runs its analysis in a background tokio task. Its status
-/// must use the `⏳` async-in-progress prefix so [`App::arm_status_expiry`]
+/// must use the `` async-in-progress prefix so [`App::arm_status_expiry`]
 /// (called at the end of [`App::execute_slash_command`]) does NOT auto-clear it
 /// to "ready" while the final analysis is still running.
 ///
@@ -258,7 +258,7 @@ fn test_research_create_status_is_async_in_progress() {
 }
 
 /// The live per-phase status updated by the research progress event handler
-/// also uses the `⏳` prefix, so it stays visible (and is not auto-cleared)
+/// also uses the `` prefix, so it stays visible (and is not auto-cleared)
 /// while the background research is still running.
 #[test]
 fn test_research_progress_status_is_async_in_progress() {
@@ -274,7 +274,7 @@ fn test_research_progress_status_is_async_in_progress() {
     );
 
     // Once the final progress event arrives, the handler sets a terminal
-    // (non-⏳) completion status and arms expiry — that one SHOULD expire.
+    // (non-) completion status and arms expiry - that one SHOULD expire.
     app.status = "research: my-topic complete — 7 sources".to_string();
     app.arm_status_expiry();
     assert!(

@@ -382,7 +382,7 @@ fn test_huggingface_with_token_does_not_fall_back_to_static_defaults_without_dis
     assert!(models.is_empty(), "expected no static fallback models");
 }
 
-// ── /clear ──────────────────────────────────────────────────────────
+// -- /clear ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_clear_empties_messages() {
@@ -419,7 +419,7 @@ async fn test_slash_clear_empties_messages() {
     );
 }
 
-// ── /help ───────────────────────────────────────────────────────────
+// -- /help -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_help_shows_commands() {
@@ -459,7 +459,7 @@ async fn test_slash_help_executes_in_chat_screen() {
     assert_eq!(app.current_screen, ScreenMode::Chat);
 }
 
-// ── /quit ───────────────────────────────────────────────────────────
+// -- /quit -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_quit_stops_app() {
@@ -479,7 +479,7 @@ async fn test_slash_exit_stops_app() {
     assert!(!app.is_running, "app should stop after /exit");
 }
 
-// ── /system ─────────────────────────────────────────────────────────
+// -- /system ---------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_system_sets_prompt() {
@@ -536,7 +536,7 @@ async fn test_slash_system_replaces_existing() {
     assert_eq!(app.agent_info.prompt.as_deref(), Some("Second prompt"));
 }
 
-// ── /agent ──────────────────────────────────────────────────────────
+// -- /agent ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_agent_with_name_switches() {
@@ -574,7 +574,7 @@ async fn test_slash_agent_no_args_opens_dialog() {
     );
 }
 
-// ── /log ────────────────────────────────────────────────────────────
+// -- /log ------------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_log_toggles_panel() {
@@ -809,7 +809,7 @@ async fn test_slash_log_unknown_sub_shows_usage() {
     assert_eq!(app.status, "log: usage");
 }
 
-// ── /profile ────────────────────────────────────────────────────────
+// -- /profile --------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_profile_on_enables_profiler_panel() {
@@ -865,7 +865,7 @@ async fn test_alt_p_toggles_profiler_panel() {
     agent_loop_profiler().set_enabled(false);
 }
 
-// ── /llmstats ───────────────────────────────────────────────────────
+// -- /llmstats -------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_llmstats_shows_average_metrics() {
@@ -912,7 +912,7 @@ async fn test_slash_llmstats_no_samples_shows_message() {
     assert!(text.contains("No completed LLM responses yet"));
 }
 
-// ── /cost ───────────────────────────────────────────────────────────
+// -- /cost -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_cost_shows_estimated_cost() {
@@ -955,7 +955,7 @@ async fn test_slash_cost_no_samples_shows_message() {
     assert!(text.contains("No completed LLM responses yet"));
 }
 
-// ── /clip ───────────────────────────────────────────────────────────
+// -- /clip -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_clip_copies_rendered_message_lines() {
@@ -1018,7 +1018,7 @@ async fn test_slash_clip_empty_window_shows_hint() {
     assert!(text.contains("No rendered message content"));
 }
 
-// ── /compact ────────────────────────────────────────────────────────
+// -- /compact --------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_compact_no_session_shows_warning() {
@@ -1065,7 +1065,7 @@ async fn test_slash_compress_alias_forwards_to_compact() {
     );
 }
 
-// ── /undo ───────────────────────────────────────────────────────────
+// -- /undo -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_undo_no_session_shows_warning() {
@@ -1185,7 +1185,7 @@ async fn test_slash_undo_removes_multiple_following_messages() {
     assert!(app.status.contains("removed 3 message(s)"));
 }
 
-// ── /name ───────────────────────────────────────────────────────────
+// -- /name -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_name_no_session_shows_warning() {
@@ -1323,7 +1323,7 @@ async fn test_help_lists_compact_not_compress() {
     );
 }
 
-// ── /model ──────────────────────────────────────────────────────────
+// -- /model ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_model_opens_provider_picker() {
@@ -1516,7 +1516,7 @@ async fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discove
     }
 }
 
-// ── /provider ───────────────────────────────────────────────────────
+// -- /provider -------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_provider_opens_setup() {
@@ -1740,7 +1740,7 @@ async fn test_model_selector_navigation_wraps_top_and_bottom() {
     }
 }
 
-// ── /provider_reset ─────────────────────────────────────────────────
+// -- /provider_reset -------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_provider_reset_opens_dialog() {
@@ -1923,7 +1923,7 @@ fn test_paste_text_replaces_mouse_selection() {
     assert!(app.text_selection.is_none());
 }
 
-// ── unknown command ─────────────────────────────────────────────────
+// -- unknown command -------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_unknown_command_shows_error() {
@@ -1978,7 +1978,7 @@ async fn test_slash_unknown_command_visible_in_message_window() {
     );
 }
 
-// ── /blueprints command ─────────────────────────────────────────────
+// -- /blueprints command ---------------------------------------------
 
 fn write_temp_blueprint(dir: &std::path::Path, name: &str, readme: &str, teammates: usize) {
     let bp_dir = dir
@@ -2111,7 +2111,7 @@ async fn test_team_blueprint_still_works_after_refactor() {
     assert_eq!(app.status, "team: blueprint demo");
 }
 
-// ── input clearing ──────────────────────────────────────────────────
+// -- input clearing --------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_command_clears_input() {
@@ -2173,7 +2173,7 @@ async fn test_input_editing_handles_unicode_backspace_and_delete() {
     app.input = "a💡b".to_string();
     app.input_cursor = app.input.chars().count();
 
-    // Move to between 💡 and b, then backspace removes 💡.
+    // Move to between  and b, then backspace removes .
     app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .await;
     assert_eq!(app.input_cursor, 2);
@@ -2184,7 +2184,7 @@ async fn test_input_editing_handles_unicode_backspace_and_delete() {
 
     // Delete at cursor should remove the next character.
     app.input = "a💡b".to_string();
-    app.input_cursor = 1; // before 💡
+    app.input_cursor = 1; // before 
     app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
         .await;
     assert_eq!(app.input, "ab");
@@ -2294,7 +2294,7 @@ async fn test_ctrl_terminal_cursor_movement_bindings() {
         .await;
     assert_eq!(app.input_cursor, 3);
 
-    // Ctrl+A now selects all: anchor → 0, cursor → end.
+    // Ctrl+A now selects all: anchor -> 0, cursor -> end.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
         .await;
     assert_eq!(app.kb_select_anchor, Some(0));
@@ -2642,7 +2642,7 @@ async fn test_slash_inputdiag_reports_input_state() {
     assert!(text.contains("browse menu state:"));
 }
 
-// ── with leading slash and without ──────────────────────────────────
+// -- with leading slash and without ----------------------------------
 
 #[tokio::test]
 async fn test_slash_command_works_without_leading_slash() {
@@ -2784,7 +2784,7 @@ async fn test_output_view_team_member_without_session_uses_log_filter() {
     assert!(app.output_view.is_some());
 }
 
-// ── /system preserves whitespace ────────────────────────────────────
+// -- /system preserves whitespace ------------------------------------
 
 #[tokio::test]
 async fn test_slash_system_preserves_argument_whitespace() {
@@ -2799,7 +2799,7 @@ async fn test_slash_system_preserves_argument_whitespace() {
     );
 }
 
-// ── /tools ──────────────────────────────────────────────────────────
+// -- /tools ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_tools_lists_visibility_switches() {
@@ -3112,7 +3112,7 @@ async fn test_slash_webapi_enable_sets_token() {
     }
 }
 
-// ── /spec ───────────────────────────────────────────────────────────
+// -- /spec -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_spec_no_args_shows_help() {
@@ -3382,7 +3382,7 @@ async fn test_slash_spec_create_starts_generation() {
     );
 }
 
-// ── /config ─────────────────────────────────────────────────────────
+// -- /config ---------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_config_show_displays_paths() {
@@ -3456,7 +3456,7 @@ async fn test_slash_config_no_args_shows_usage() {
 async fn test_slash_config_save_errors_when_no_global_config() {
     // FR-003: /config save must surface a clear error when there is no global
     // ragent.json to back up. We point the process at an empty temp config dir
-    // via the RAGENT_CONFIG env var indirectly — but backup_global_config(None)
+    // via the RAGENT_CONFIG env var indirectly - but backup_global_config(None)
     // resolves via dirs::config_dir(), which we cannot easily redirect. This
     // test asserts the error path produces an error status and a message
     // rather than panicking, exercising the slash arm end-to-end.
@@ -4040,7 +4040,7 @@ async fn test_slash_actionloop_with_samples_shows_timings() {
     // Leave the shared profiler clean for other tests.
     profiler.reset();
 }
-// ── /triggers slash command tests ─────────────────────────────────────
+// -- /triggers slash command tests -------------------------------------
 
 #[tokio::test]
 async fn test_triggers_list_empty() {
@@ -4274,7 +4274,7 @@ async fn test_triggers_unknown_subcommand() {
     );
     assert_eq!(app.status, "triggers: unknown");
 }
-// ── /inbox slash command tests ────────────────────────────────────────
+// -- /inbox slash command tests ----------------------------------------
 
 #[tokio::test]
 async fn test_inbox_list_empty() {
@@ -4532,7 +4532,7 @@ async fn test_inbox_list_shows_status() {
     );
 }
 
-// ── /task (todo2tasks T-016, FR-019) ─────────────────────────────────
+// -- /task (todo2tasks T-016, FR-019) ---------------------------------
 
 #[tokio::test]
 async fn test_slash_task_toggles_panel() {
@@ -4817,7 +4817,7 @@ async fn test_model_selector_preserves_openrouter_vendor_slug() {
     );
 }
 
-// ── /spawn ────────────────────────────────────────────────────────────────
+// -- /spawn ----------------------------------------------------------------
 
 #[tokio::test]
 async fn test_slash_spawn_help() {
@@ -4879,7 +4879,7 @@ async fn test_slash_spawn_builtin_agent_launches_detached() {
         app.status
     );
     // Whatever the outcome was, the slot must hold the in-flight marker
-    // (Err("")) or be cleared — never a stale real outcome.
+    // (Err("")) or be cleared - never a stale real outcome.
     let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(v) = guard.as_ref() {
         assert!(
@@ -5121,7 +5121,7 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
 
 /// The startup report must print one `[mcp] Starting mcp server <id> (<transport>)`
 /// line per attempted server and, for a server that came up, a following
-/// `[mcp] Connected to mcp server <id> via <transport>` line — each on its own
+/// `[mcp] Connected to mcp server <id> via <transport>` line - each on its own
 /// line. `register_connected_for_tests` seeds the default (stdio) config, so
 /// the label must read `stdio` here.
 #[tokio::test(flavor = "multi_thread")]

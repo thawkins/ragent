@@ -1,5 +1,5 @@
 //! Tests for instruction file discovery priority:
-//! project root → global directory → project subdirectories
+//! project root -> global directory -> project subdirectories
 
 use std::fs;
 use tempfile::TempDir;

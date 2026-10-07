@@ -266,7 +266,7 @@ async fn test_tool_call_batch_args_populate_missing_input() {
     let mut app = app_with_session();
 
     // The per-call ToolCallStart fired (part exists with null input), but the
-    // ToolCallArgs event was never delivered — exactly the case where the
+    // ToolCallArgs event was never delivered - exactly the case where the
     // batch entry's carried args must restore the input summary.
     app.handle_event(Event::ToolCallStart {
         session_id: "sess-1".to_string(),

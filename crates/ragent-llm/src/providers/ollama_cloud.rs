@@ -13,10 +13,10 @@ use std::pin::Pin;
 // Ollama Cloud supports the `think` parameter on the native `/api/chat`
 // endpoint, mirroring local Ollama. We import the binary-thinking helpers
 // to populate model metadata and set the `think` flag in requests.
+use super::ollama_shared::estimate_context_window;
 use super::thinking::{
     binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
 };
-use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
@@ -86,13 +86,31 @@ impl OllamaCloudProvider {
         if !api_key.is_empty() {
             request = request.header("Authorization", format!("Bearer {api_key}"));
         }
-        let response = request.send().await.ok()?;
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::debug!(url = %url, model = %model_name, error = %e, "/api/show request failed");
+                return None;
+            }
+        };
 
         if !response.status().is_success() {
+            tracing::debug!(
+                url = %url,
+                model = %model_name,
+                status = %response.status(),
+                "/api/show returned non-success status"
+            );
             return None;
         }
 
-        response.json().await.ok()
+        match response.json().await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::debug!(url = %url, model = %model_name, error = %e, "/api/show response parse failed");
+                None
+            }
+        }
     }
 }
 
@@ -213,32 +231,6 @@ fn parse_usize_value(value: &Value) -> Option<usize> {
         })
 }
 
-/// Estimates the context window size based on parameter count.
-///
-/// Modern local/remote Ollama models (Llama 3.2 1B/3B, Phi4-mini, Qwen2.5,
-/// Gemma 2, etc.) commonly support 128k-token contexts regardless of
-/// parameter size. The old size-based tiers under-reported capacity for
-/// current small models and caused the TUI context panel to display
-/// nonsensical ">100% full" percentages. We default to 128k for any model
-/// with at least 1B parameters, falling back to 32k only for sub-1B models.
-/// When the server returns explicit `context_length`/`num_ctx` metadata in
-/// `OllamaShowResponse`, that value takes precedence over this heuristic.
-fn estimate_context_window(parameter_size: &str) -> usize {
-    let size = parameter_size
-        .trim_end_matches('B')
-        .trim_end_matches('b')
-        .parse::<f64>()
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                parameter_size,
-                "failed to parse Ollama Cloud parameter size; defaulting context window to 128k"
-            );
-            7.0
-        });
-
-    if size >= 1.0 { 131_072 } else { 32_768 }
-}
-
 fn format_model_name(name: &str, details: &OllamaModelDetails) -> String {
     let param_size = if details.parameter_size.is_empty() {
         infer_parameter_size(name)
@@ -297,7 +289,8 @@ impl Provider for OllamaCloudProvider {
     /// Authentication is not required to list public models, so discovery works
     /// even when `OLLAMA_API_KEY` is not configured.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("OLLAMA_API_KEY").unwrap_or_default();
+        let api_key = ragent_config::credential_env::read_credential_env("OLLAMA_API_KEY")
+            .unwrap_or_default();
         let models = list_ollama_cloud_models(&api_key, Some(&self.base_url))
             .await
             .with_context(|| "Ollama Cloud model discovery failed")?;
@@ -368,18 +361,6 @@ impl OllamaCloudClient {
         // Ollama Cloud to reject the request with "this model does not support
         // image input". Compute the index once and only attach images there.
         let last_user_idx = request.messages.iter().rposition(|m| m.role == "user");
-        let parts_msgs = request
-            .messages
-            .iter()
-            .filter(|m| matches!(m.content, ChatContent::Parts(_)))
-            .count();
-        tracing::info!(
-            model = %request.model,
-            n_messages = request.messages.len(),
-            parts_msgs,
-            last_user_idx = ?last_user_idx,
-            "[image-debug] build_request_body entry"
-        );
 
         for (idx, msg) in request.messages.iter().enumerate() {
             // Ollama Cloud requires content to always be a plain string.
@@ -493,45 +474,25 @@ impl OllamaCloudClient {
             }
         }
 
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true
-        });
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !tools.is_empty() {
-            // H2: reuse the cached serialised OpenAI-compatible tool list
-            // instead of building a fresh `Vec<Value>` on every call.
-            let cached = cached_tools(ToolFormat::OpenAi, tools);
-            body["tools"] = cached.openai_tools_array();
-        }
-        // Ollama Cloud supports the `think` boolean parameter on its
-        // native `/api/chat` endpoint, just like local Ollama.
-        if let Some(think) = think_flag_from_request(request) {
-            body["think"] = json!(think);
-        }
-
+        // Native `/api/chat` message packing is Ollama Cloud specific; the
+        // shared builder supplies the model/stream/sampling/tools scaffold
+        // (audit T-401).
+        let mut compat = super::openai_compat::OpenAiCompat::with_messages(
+            request,
+            super::openai_compat::OpenAiCompatSpec::ollama_cloud(),
+            tools,
+            messages,
+        );
         {
-            let n_images_msgs = body["messages"]
-                .as_array()
-                .map(|ms| ms.iter().filter(|m| m.get("images").is_some()).count())
-                .unwrap_or(0);
-            tracing::info!(
-                n_images_msgs,
-                "[image-debug] build_request_body: messages carrying images array"
-            );
+            let body = compat.body_mut();
+            // Ollama Cloud supports the `think` boolean parameter on its
+            // native `/api/chat` endpoint, just like local Ollama.
+            if let Some(think) = think_flag_from_request(request) {
+                body["think"] = json!(think);
+            }
         }
 
-        body
+        compat.finish()
     }
 }
 #[async_trait::async_trait]
@@ -561,6 +522,9 @@ impl LlmClient for OllamaCloudClient {
         if tracing::enabled!(tracing::Level::DEBUG) {
             let preview_len = body_bytes.len().min(800);
             let body_preview = String::from_utf8_lossy(&body_bytes[..preview_len]);
+            // SEC: the request body carries the full chat messages / prompt, so
+            // route the preview through the shared redactor before logging.
+            let body_preview = ragent_types::sanitize::redact_secrets(&body_preview);
             tracing::debug!(body = %body_preview, "Ollama Cloud request body (truncated)");
         }
 
@@ -588,6 +552,8 @@ impl LlmClient for OllamaCloudClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let error_body = ragent_types::sanitize::redact_secrets(&error_body);
             tracing::warn!(
                 provider = "ollama_cloud",
                 url = %url,

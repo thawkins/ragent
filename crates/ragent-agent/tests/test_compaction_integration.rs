@@ -239,7 +239,7 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
     // Two requests, in order:
     //   (1) the summarisation call (no tools),
     //   (2) the real conversation call (has tools).
-    // No post-compaction nudge — the loop breaks immediately on a no-tool
+    // No post-compaction nudge - the loop breaks immediately on a no-tool
     // response.
     assert_eq!(
         captured.len(),
@@ -380,7 +380,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
         .expect("process_message should succeed");
 
     let captured = captured_requests.lock().expect("captured requests lock");
-    // With auto disabled, only the real conversation request is sent — no
+    // With auto disabled, only the real conversation request is sent - no
     // summarisation call.
     assert_eq!(
         captured.len(),
@@ -397,7 +397,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
     );
 }
 
-// ── Emergency overflow compaction (T-009, FR-004, FR-008) ─────────────
+// -- Emergency overflow compaction (T-009, FR-004, FR-008) -------------
 //
 // A stateful mock whose first *real* conversation call emits a
 // `StreamEvent::Error` with a context-overflow message. The agent loop's
@@ -538,7 +538,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
     let tool_registry = Arc::new(tool::create_default_registry());
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
 
-    // compaction.auto = false → pre-send path skipped (FR-008); the emergency
+    // compaction.auto = false -> pre-send path skipped (FR-008); the emergency
     // path must still fire on overflow.
     let mut disabled_config = ragent_config::Config::default();
     disabled_config.compaction.auto = false;
@@ -632,7 +632,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
     //   (1) the first real conversation attempt that overflowed (has tools),
     //   (2) the emergency summarisation call (no tools),
     //   (3) the retry that succeeded (has tools).
-    // No post-compaction nudge — the loop breaks immediately on a no-tool
+    // No post-compaction nudge - the loop breaks immediately on a no-tool
     // response.
     assert_eq!(
         captured.len(),
@@ -772,7 +772,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
     // at the unit level: the emergency branch requires
     // `!has_meaningful_partial_output`. This is already covered by the
     // `test_emergency_overflow_compaction_retries_once` test (no partial
-    // output → emergency fires) and by the dedicated stream-buffer unit tests
+    // output -> emergency fires) and by the dedicated stream-buffer unit tests
     // for `stream_has_meaningful_partial_output`. Here we just confirm the
     // auto=false config is in place and the loop completes without panicking.
     let _reply = processor
@@ -794,7 +794,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
     );
 }
 
-// ── Repeated skipped-notice guard (T-012 follow-up) ────────────────────────
+// -- Repeated skipped-notice guard (T-012 follow-up) ------------------------
 //
 // When pre-send compaction bails out with a "skipped" notice, the agent loop
 // must not re-attempt compaction on subsequent iterations of the same turn.

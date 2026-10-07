@@ -2,13 +2,13 @@
 //!
 //! These tests guard against regressions in the guidance that prevents models
 //! from confusing `agent_complete` (autonomous loop signal) with
-//! `team_task_complete` (team workflow) — see AGENTS.md for context.
+//! `team_task_complete` (team workflow) - see AGENTS.md for context.
 //!
 //! The original confusion was:
-//! - Model called `new_agent(agent: "explore")` without supplying `task` — the
+//! - Model called `new_agent(agent: "explore")` without supplying `task` - the
 //!   schema rejected it with "Missing required parameter: task".
 //! - Model called `agent_complete(task_id: "...", result: "...")` confusing it
-//!   with `team_task_complete` — the schema rejected it with "Missing required
+//!   with `team_task_complete` - the schema rejected it with "Missing required
 //!   'summary' parameter".
 //!
 //! These tests ensure the descriptions and schemas clearly distinguish the two
@@ -119,7 +119,7 @@ fn test_team_task_complete_schema_requires_team_name_and_task_id() {
         vec!["team_name", "task_id"],
         "team_task_complete must require BOTH `team_name` and `task_id`"
     );
-    // It should NOT advertise `summary` as the only field — the description
+    // It should NOT advertise `summary` as the only field - the description
     // should explicitly say it does NOT take `summary`.
     let desc = description_for("team_task_complete");
     assert!(
@@ -211,7 +211,7 @@ async fn test_agent_complete_rejects_task_id_and_result_inputs() {
     });
     let ctx = ToolContext {
         session_id: "test-session".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: event_bus.clone(),
         storage: None,
         agent_manager: None,
@@ -263,7 +263,7 @@ async fn test_agent_complete_accepts_summary_input() {
     });
     let ctx = ToolContext {
         session_id: "test-session".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: event_bus.clone(),
         storage: None,
         agent_manager: None,

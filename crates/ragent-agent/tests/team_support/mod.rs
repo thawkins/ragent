@@ -1,6 +1,6 @@
 //! Shared test-support helpers for `ragent-team` integration tests.
 //!
-//! Provides [`setup_workspace`] — a temp-directory + path helper used across
+//! Provides [`setup_workspace`] - a temp-directory + path helper used across
 //! team test files.  Previously copy-pasted into 5 test files (see
 //! `DUPPLAN.md` Milestone I, `cargo dupes` group 37).
 

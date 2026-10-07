@@ -4,7 +4,7 @@
 mod support;
 
 // =========================================================================
-// render_markdown_to_ascii — prefix gating
+// render_markdown_to_ascii - prefix gating
 // =========================================================================
 
 #[test]
@@ -33,7 +33,7 @@ fn test_render_markdown_with_prefix_converts() {
 }
 
 // =========================================================================
-// render_markdown_to_ascii — table rendering
+// render_markdown_to_ascii - table rendering
 // =========================================================================
 
 #[test]
@@ -62,7 +62,7 @@ fn test_render_markdown_table() {
 }
 
 // =========================================================================
-// normalize_ascii_tables — direct tests
+// normalize_ascii_tables - direct tests
 // =========================================================================
 
 #[test]
@@ -76,7 +76,7 @@ fn test_normalize_tables_non_table_passthrough() {
 #[test]
 fn test_normalize_tables_aligns_columns() {
     let app = support::make_app();
-    // Simulate html2text output with │ separators
+    // Simulate html2text output with | separators
     let input = "│ Name │ Value │\n─────────────────\n│ foo │ 42 │\n│ barbaz │ 1 │";
     let output = app.normalize_ascii_tables(input);
     // After normalization, columns should be aligned (padded to equal width).
@@ -99,7 +99,7 @@ fn test_normalize_tables_aligns_columns() {
 #[test]
 fn test_normalize_tables_adds_borders() {
     let app = support::make_app();
-    // Table with │ separators — normalize should add +---+---+ borders.
+    // Table with | separators - normalize should add +---+---+ borders.
     let input = "│ A │ B │\n──────────\n│ 1 │ 2 │";
     let output = app.normalize_ascii_tables(input);
     assert!(
@@ -113,7 +113,7 @@ fn test_normalize_tables_adds_borders() {
 }
 
 // =========================================================================
-// render_markdown_to_ascii — fallback on plain text
+// render_markdown_to_ascii - fallback on plain text
 // =========================================================================
 
 #[test]

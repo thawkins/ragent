@@ -1,11 +1,11 @@
 //! PERF-044 / PERF-045 / PERF-046: TUI render-loop idle guards.
 //!
-//! * **PERF-044** — the periodic safety wake only paints when a
+//! * **PERF-044** - the periodic safety wake only paints when a
 //!   wall-clock-driven display (countdown/spinner) is live.
-//! * **PERF-045** — the cheap periodic polls/refreshes run at most once per
+//! * **PERF-045** - the cheap periodic polls/refreshes run at most once per
 //!   `HOUSEKEEPING_INTERVAL`, and the loop keeps a wake scheduled for the end
 //!   of that window.
-//! * **PERF-046** — the chat input is re-wrapped and the cursor re-measured
+//! * **PERF-046** - the chat input is re-wrapped and the cursor re-measured
 //!   only when one of `(input, cursor, selection, width)` changes.
 
 mod support;
@@ -44,7 +44,7 @@ fn permission_request(id: &str) -> PermissionRequest {
     }
 }
 
-// ── PERF-044: idle safety redraw ────────────────────────────────────────
+// -- PERF-044: idle safety redraw ----------------------------------------
 
 #[test]
 fn test_idle_wake_does_not_render() {
@@ -232,7 +232,7 @@ fn test_live_agents_panel_requests_periodic_redraw() {
     assert!(!ragent_tui::should_render(&app, past_idle_interval()));
 }
 
-// ── PERF-045: housekeeping gate ─────────────────────────────────────────
+// -- PERF-045: housekeeping gate -----------------------------------------
 
 #[test]
 fn test_housekeeping_runs_only_when_due() {
@@ -271,7 +271,7 @@ fn test_deadline_schedules_housekeeping_pass() {
     );
 }
 
-// ── PERF-046: input render cache ────────────────────────────────────────
+// -- PERF-046: input render cache ----------------------------------------
 
 #[test]
 fn test_input_render_cache_reused_when_unchanged() {

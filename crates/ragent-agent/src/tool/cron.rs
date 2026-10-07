@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use super::{Tool, ToolContext, ToolOutput};
 
-// ── cron_add ─────────────────────────────────────────────────────────────
+// -- cron_add -------------------------------------------------------------
 
 /// Create a new scheduled cron event.
 pub struct CronAddTool;
@@ -152,7 +152,7 @@ impl Tool for CronAddTool {
     }
 }
 
-// ── cron_remove ──────────────────────────────────────────────────────────
+// -- cron_remove ----------------------------------------------------------
 
 /// Delete a scheduled cron event by id.
 pub struct CronRemoveTool;
@@ -223,7 +223,7 @@ impl Tool for CronRemoveTool {
     }
 }
 
-// ── cron_list ────────────────────────────────────────────────────────────
+// -- cron_list ------------------------------------------------------------
 
 /// List all scheduled cron events.
 pub struct CronListTool;
@@ -298,7 +298,7 @@ impl Tool for CronListTool {
     }
 }
 
-// ── cron_enable / cron_disable ───────────────────────────────────────────
+// -- cron_enable / cron_disable -------------------------------------------
 
 /// Enable a scheduled cron event.
 pub struct CronEnableTool;

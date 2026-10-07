@@ -53,7 +53,7 @@ impl LanguageParser for GoParser {
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Walk ────────────────────────────────────────────────────────────────────
+// -- Walk --------------------------------------------------------------------
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
@@ -75,7 +75,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Function ────────────────────────────────────────────────────────────────
+// -- Function ----------------------------------------------------------------
 
 fn extract_function(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -108,7 +108,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Str
     });
 }
 
-// ── Method (receiver-based) ─────────────────────────────────────────────────
+// -- Method (receiver-based) -------------------------------------------------
 
 fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -148,7 +148,7 @@ fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Strin
     });
 }
 
-// ── Type declarations (struct, interface, type alias) ────────────────────────
+// -- Type declarations (struct, interface, type alias) ------------------------
 
 fn extract_type_decl(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let cursor = &mut node.walk();
@@ -244,7 +244,7 @@ fn extract_struct_fields(ctx: &mut Ctx, struct_node: Node, parent_id: i64, scope
     }
 }
 
-// ── Constants / Variables ───────────────────────────────────────────────────
+// -- Constants / Variables ---------------------------------------------------
 
 fn extract_const_var(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let is_const = node.kind() == "const_declaration";
@@ -286,7 +286,7 @@ fn extract_const_var(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[St
     }
 }
 
-// ── Imports ─────────────────────────────────────────────────────────────────
+// -- Imports -----------------------------------------------------------------
 
 fn extract_imports(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
@@ -333,7 +333,7 @@ fn extract_import_specs(ctx: &mut Ctx, node: Node, line: u32) {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn go_visibility(name: &str) -> Visibility {
     if name.starts_with(|c: char| c.is_uppercase()) {
@@ -395,4 +395,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

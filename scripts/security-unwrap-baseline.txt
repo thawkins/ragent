@@ -13,7 +13,6 @@ crates/ragent-agent/src/session/archive.rs 2
 crates/ragent-agent/src/session/mod.rs 17
 crates/ragent-agent/src/session/stream_buffer.rs 1
 crates/ragent-agent/src/skill/loader.rs 1
-crates/ragent-agent/src/snapshot/mod.rs 5
 crates/ragent-agent/src/template/mod.rs 1
 crates/ragent-agent/src/tool/list_agents.rs 1
 crates/ragent-agent/src/tool/team_spawn.rs 1

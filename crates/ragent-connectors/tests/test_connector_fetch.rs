@@ -1,6 +1,10 @@
 //! Tests for catalogue fetch, cache, and normalisation providers (spec
 //! `connectors` T-005; FR-024, FR-025, FR-031).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -9,29 +13,6 @@ use ragent_connectors::{
     ConnectorAuthShape, ConnectorCatalogue, ConnectorError, FixtureCatalogueFetcher,
     NetworkCatalogueFetcher, normalise_transport, parse_catalogue, provider_for,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/fetch-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn endpoint(url: &str) -> CatalogueEndpoint {
     CatalogueEndpoint::parse(url).expect("test endpoint is a valid https URL")
@@ -70,7 +51,7 @@ const TWO_ENTRY_CATALOGUE: &str = r#"{
   ]
 }"#;
 
-// ── Provider normalisation (FR-024, FR-025) ─────────────────────────────────
+// -- Provider normalisation (FR-024, FR-025) ---------------------------------
 
 #[test]
 fn two_entry_catalogue_with_one_unexpressible_returns_one_and_skips_one() {
@@ -221,7 +202,7 @@ fn transport_spellings_normalise_and_unknowns_do_not() {
     );
 }
 
-// ── Bounded download (FR-031) ───────────────────────────────────────────────
+// -- Bounded download (FR-031) -----------------------------------------------
 
 #[test]
 fn read_capped_passes_a_body_under_the_cap() {
@@ -257,7 +238,7 @@ fn limits_from_config_maps_zero_to_default_and_reads_ttl() {
     assert_eq!(limits.cache_ttl, Duration::from_secs(60));
 }
 
-// ── Offline fixture fetcher (NFR-003) ───────────────────────────────────────
+// -- Offline fixture fetcher (NFR-003) ---------------------------------------
 
 #[test]
 fn fixture_fetcher_serves_registered_bytes_and_refuses_unknown_endpoints() {
@@ -289,7 +270,7 @@ fn fixture_fetcher_enforces_the_byte_ceiling() {
     assert!(matches!(err, ConnectorError::CatalogueTooLarge { .. }));
 }
 
-// ── Cache behaviour (FR-031) ────────────────────────────────────────────────
+// -- Cache behaviour (FR-031) ------------------------------------------------
 
 fn catalogue_with(endpoint_url: &str, fetched_at: u64) -> ConnectorCatalogue {
     let provider = provider_for(CatalogueKind::Claude);
@@ -550,7 +531,7 @@ fn network_fetcher_is_the_default_and_implements_the_seam() {
     assert_fetcher::<NetworkCatalogueFetcher>();
 }
 
-// ── Live-shape verification (opportunistic golden test) ─────────────────────
+// -- Live-shape verification (opportunistic golden test) ---------------------
 
 /// If the recorded Claude connector-directory feed is present under
 /// `target/temp/` (produced by a manual `curl` during development), parse it to

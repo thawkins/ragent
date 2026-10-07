@@ -4,7 +4,7 @@
 //! - Alt+G toggles GCF encoding through the real persist path
 //!   (`ragent_config::gcf::toggle_persist`) and reports the new state.
 //! - The GCF icon renders on the second status-bar line, LEFT of the
-//!   codeindex icon, with the enabled (`✓`) / disabled (`✗`) marker.
+//!   codeindex icon, with the enabled (`[ok]`) / disabled (`[no]`) marker.
 //! - The `g` keystroke is never inserted into the input buffer (NFR-002).
 
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};

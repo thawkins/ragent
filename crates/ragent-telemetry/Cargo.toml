@@ -30,32 +30,41 @@ parking_lot = { workspace = true }
 # Optional OTEL dependencies — only pulled in when the `telemetry` feature is
 # enabled, satisfying NFR-006 (users who do not need OTEL can build without
 # these crates).
-opentelemetry = { version = "0.29", optional = true }
-opentelemetry_sdk = { version = "0.29", optional = true, features = [
+opentelemetry = { version = "0.33", optional = true }
+opentelemetry_sdk = { version = "0.33", optional = true, features = [
     "metrics",
     "rt-tokio",
+    # `ManualReader`/`MetricReader`/`Pipeline` are required by the optional
+    # Prometheus scrape endpoint (FR-028). OTEL SDK 0.33 gates the custom
+    # reader implementation behind this feature.
+    "experimental_metrics_custom_reader",
 ] }
-opentelemetry-otlp = { version = "0.29", optional = true, default-features = false, features = [
+opentelemetry-otlp = { version = "0.33", optional = true, default-features = false, features = [
     "metrics",
     "http-proto",
     "reqwest-client",
     "grpc-tonic",
-    # SEC-ragent-telemetry-001 (SECTASKS T-019): without `tonic/tls` an
-    # `https://host:4317` gRPC endpoint is dialled in cleartext, so the OTLP
-    # payload leaves the machine unencrypted while the configuration looks
-    # secure.
+    # SEC-ragent-telemetry-001 (SECTASKS T-019): without a TLS feature an
+    # `https://host:4317` gRPC endpoint is rejected outright (opentelemetry-otlp
+    # 0.33 requires one of `tls-ring`/`tls-aws-lc`/`tls-provider-agnostic`),
+    # so the OTLP payload can never leave the machine in cleartext while the
+    # configuration looks secure.
+    # `tls-ring` is chosen over `tls-aws-lc` to match reqwest's rustls-tls
+    # (ring) provider and avoid a second crypto backend; `tls-roots` adds the
+    # native root certificate bundle for verifying the collector.
+    "tls-ring",
     "tls-roots",
 ] }
 
 [dev-dependencies]
 tokio = { workspace = true }
-opentelemetry = { version = "0.29" }
+opentelemetry = { version = "0.33" }
 # NOTE: do not enable opentelemetry_sdk's `testing` feature. It drags in
 # `rt-async-std` -> the discontinued `async-std` crate (RUSTSEC-2025-0052).
 # The `InMemoryMetricExporter` used by the telemetry tests is not feature-gated
 # (it lives in the always-present `metrics::in_memory_exporter` module), and
 # `testing` only adds async-std/trace/logs wiring we do not use.
-opentelemetry_sdk = { version = "0.29", features = ["metrics", "rt-tokio", "testing"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "rt-tokio", "testing", "experimental_metrics_custom_reader"] }
 
 [lints]
 workspace = true

@@ -170,7 +170,7 @@ fn test_godnodes_with_edges() {
     let spoke1_id = stored.iter().find(|s| s.name == "spoke1").unwrap().id;
     let spoke2_id = stored.iter().find(|s| s.name == "spoke2").unwrap().id;
 
-    // hub calls spoke1 and spoke2 — degree 2
+    // hub calls spoke1 and spoke2 - degree 2
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: hub_id,

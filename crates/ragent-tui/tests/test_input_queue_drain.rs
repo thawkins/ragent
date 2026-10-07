@@ -3,7 +3,7 @@
 //!
 //! Covers FR-006 (a non-cancelled finish pops the oldest entry and dispatches
 //! it), FR-016 (no dispatch while a compaction run or post-compact send owns
-//! the turn), FR-018 (a cancelled turn retains the queue), FR-019 (FIFO — the
+//! the turn), FR-018 (a cancelled turn retains the queue), FR-019 (FIFO - the
 //! oldest entry is never overtaken), FR-008 (the counter decrements) and
 //! NFR-004 (the drain reuses the asynchronous dispatch path instead of blocking
 //! the UI thread).

@@ -107,7 +107,7 @@ fn test_gcf_primer_absent_when_disabled() {
     });
 }
 
-/// FR-006: the primer applies to sub-agent prompts too — the encoding hook
+/// FR-006: the primer applies to sub-agent prompts too - the encoding hook
 /// runs for sub-agent runs just as it does for the primary agent, so the
 /// primer must be present for sub-agent-mode prompts when GCF is on, and
 /// absent when it is off.
@@ -131,7 +131,7 @@ fn test_gcf_primer_applies_to_subagent_prompts() {
 
 /// FR-006 + FR-001: the feature defaults to off. A caller that has never
 /// touched the runtime flag (no sync, no toggle) must get a prompt without
-/// the primer — this pins the default-off semantics end to end.
+/// the primer - this pins the default-off semantics end to end.
 #[test]
 fn test_gcf_primer_absent_by_default() {
     // The default-state assertion must run without toggling the flag, but the

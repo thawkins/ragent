@@ -67,7 +67,7 @@ fn active_run_allows_appends() {
 #[test]
 fn completed_run_allows_appends() {
     // A completed run is NOT interrupted, so appends are allowed (the store
-    // doesn't block completed runs — only interrupted ones per FR-006).
+    // doesn't block completed runs - only interrupted ones per FR-006).
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");
     log.record_termination(&run, TerminationReason::Completed)
@@ -245,8 +245,8 @@ fn resume_run_projection_excludes_resumed_event() {
 }
 #[test]
 fn run_status_active_after_resume() {
-    // FR-013: after a resume, the run's status must read back as Active —
-    // both from the point query and from a full-log projection replay — so
+    // FR-013: after a resume, the run's status must read back as Active -
+    // both from the point query and from a full-log projection replay - so
     // the run is no longer reported as resumable.
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");

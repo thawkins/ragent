@@ -95,7 +95,7 @@ fn find_checkpoint_returns_none_for_unknown_name() {
 #[test]
 fn find_checkpoint_returns_most_recent_for_duplicate_name() {
     // If multiple checkpoints share a name, the most recent (highest seq) is
-    // returned — the one a rollback would target.
+    // returned - the one a rollback would target.
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");
     log.record_checkpoint(&run, "dup").expect("cp1");

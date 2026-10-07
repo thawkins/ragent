@@ -181,7 +181,7 @@ fn loop_skill() -> SkillInfo {
     )
 }
 
-// ── Skill instruction bodies ────────────────────────────────────
+// -- Skill instruction bodies ------------------------------------
 
 const SIMPLIFY_BODY: &str = "\
 Review recently changed files in this project for code quality improvements.

@@ -6,7 +6,7 @@ use ragent_telemetry::sensitive::{
     MAX_ATTR_VALUE_LEN, REDACTED, looks_sensitive, sanitize_attr_value,
 };
 
-// ── Safe values pass through ──────────────────────────────────────────
+// -- Safe values pass through ------------------------------------------
 
 #[test]
 fn test_safe_model_name_passes() {
@@ -18,7 +18,7 @@ fn test_safe_model_name_passes() {
 
 #[test]
 fn test_safe_ollama_model_with_colons_passes() {
-    // Ollama models are "name:tag" — must NOT be flagged.
+    // Ollama models are "name:tag" - must NOT be flagged.
     assert_eq!(sanitize_attr_value("qwen3:1.7b"), "qwen3:1.7b");
     assert_eq!(sanitize_attr_value("llama3.2:latest"), "llama3.2:latest");
 }
@@ -58,7 +58,7 @@ fn test_empty_string_passes() {
     assert_eq!(sanitize_attr_value(""), "");
 }
 
-// ── API keys are redacted ─────────────────────────────────────────────
+// -- API keys are redacted ---------------------------------------------
 
 #[test]
 fn test_openai_sk_prefix_redacted() {
@@ -113,7 +113,7 @@ fn test_jwt_prefix_redacted() {
     assert_eq!(sanitize_attr_value("jwt abc123.def456.ghi789"), REDACTED);
 }
 
-// ── "key:secret" shape ────────────────────────────────────────────────
+// -- "key:secret" shape ------------------------------------------------
 
 #[test]
 fn test_username_password_shape_redacted() {
@@ -128,7 +128,7 @@ fn test_key_secret_shape_redacted() {
 
 #[test]
 fn test_short_parts_not_flagged() {
-    // Both parts < 4 chars → not flagged (too short to be a credential).
+    // Both parts < 4 chars -> not flagged (too short to be a credential).
     assert_eq!(sanitize_attr_value("a:bcd"), "a:bcd");
     assert_eq!(sanitize_attr_value("ab:cd"), "ab:cd");
 }
@@ -139,7 +139,7 @@ fn test_dots_in_parts_not_flagged() {
     assert_eq!(sanitize_attr_value("1.7b:latest"), "1.7b:latest");
 }
 
-// ── Whitespace / file content ─────────────────────────────────────────
+// -- Whitespace / file content -----------------------------------------
 
 #[test]
 fn test_newline_redacted() {
@@ -158,7 +158,7 @@ fn test_spaces_only_not_redacted() {
     assert_eq!(sanitize_attr_value("Model Router"), "Model Router");
 }
 
-// ── Length guard ────────────────────────────────────────────────────────
+// -- Length guard --------------------------------------------------------
 
 #[test]
 fn test_long_value_redacted() {
@@ -172,7 +172,7 @@ fn test_max_length_value_passes() {
     assert_eq!(sanitize_attr_value(&max), max);
 }
 
-// ── Inline token=... shape ─────────────��───────────────────────────────
+// -- Inline token=... shape -------------��-------------------------------
 
 #[test]
 fn test_inline_token_redacted() {
@@ -188,11 +188,11 @@ fn test_inline_token_redacted() {
 
 #[test]
 fn test_short_inline_value_not_redacted() {
-    // < 20 base64 chars after '=' → not flagged.
+    // < 20 base64 chars after '=' -> not flagged.
     assert_eq!(sanitize_attr_value("a=short"), "a=short");
 }
 
-// ── File content / prompt text ─────────────────────────────────────────
+// -- File content / prompt text -----------------------------------------
 
 #[test]
 fn test_file_content_redacted() {
@@ -203,7 +203,7 @@ fn test_file_content_redacted() {
 #[test]
 fn test_prompt_text_redacted() {
     let prompt = "Please explain how lifetimes work in Rust and give examples.";
-    // Single line, < 256 chars, no prefix, no colon → passes (it's a
+    // Single line, < 256 chars, no prefix, no colon -> passes (it's a
     // legitimate-looking string). This is a limitation of the deny-list
     // approach: a short single-line prompt with no sensitive shape is
     // indistinguishable from a long tool name. The cardinality cap
@@ -217,7 +217,7 @@ fn test_multiline_prompt_redacted() {
     assert_eq!(sanitize_attr_value(prompt), REDACTED);
 }
 
-// ── looks_sensitive predicate ─────────────────────────────────────────
+// -- looks_sensitive predicate -----------------------------------------
 
 #[test]
 fn test_looks_sensitive_true_for_keys() {

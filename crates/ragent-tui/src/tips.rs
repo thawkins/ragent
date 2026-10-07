@@ -1,6 +1,6 @@
 //! Rotating tips displayed on the home screen.
 
-use rand::Rng;
+use rand::RngExt;
 
 const TIPS: &[&str] = &[
     "Press Tab to cycle between Build and General agents",

@@ -1,3 +1,9 @@
+//! Secret redaction and sanitization primitives.
+//!
+//! Provides the shared [`Regex`] patterns and helpers the workspace uses to
+//! mask credential-shaped substrings before they reach logs, events, or the
+//! UI.
+
 use std::borrow::Cow;
 use std::sync::{LazyLock, RwLock};
 

@@ -52,7 +52,7 @@ impl LanguageParser for PythonParser {
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive extraction ────────────────────────────────────────────────────
+// -- Recursive extraction ----------------------------------------------------
 
 fn extract_node(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
@@ -84,7 +84,7 @@ fn extract_node(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Stri
     }
 }
 
-// ── Function / Method ───────────────────────────────────────────────────────
+// -- Function / Method -------------------------------------------------------
 
 fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -137,7 +137,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     }
 }
 
-// ── Class ───────────────────────────────────────────────────────────────────
+// -- Class -------------------------------------------------------------------
 
 fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -183,7 +183,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Imports ─────────────────────────────────────────────────────────────────
+// -- Imports -----------------------------------------------------------------
 
 fn extract_import(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
@@ -243,7 +243,7 @@ fn extract_from_import(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Module-level constants ──────────────────────────────────────────────────
+// -- Module-level constants --------------------------------------------------
 
 fn try_extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let cursor = &mut node.walk();
@@ -290,7 +290,7 @@ fn try_extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, sco
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn python_visibility(name: &str) -> Visibility {
     if name.starts_with("__") && name.ends_with("__") && name.len() > 4 {
@@ -407,4 +407,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

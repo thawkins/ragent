@@ -4,35 +4,16 @@
 //! The reports are pure renderings, so they are asserted against outcomes and
 //! errors produced by the real store operations.
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{
     AddError, RemoveError, StoreDirs, add, add_error_report, add_report, remove,
     remove_error_report, remove_report,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/report-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn dirs(tree: &TempTree) -> StoreDirs {
     StoreDirs {

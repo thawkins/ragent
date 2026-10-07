@@ -6,10 +6,10 @@
 //! `## In-Project Cross-References`, and that the addition does not remove or
 //! reorder any of the existing FR-010 sections.
 //!
-//! - **FR-001** — the `## Findings Relationship Diagram` section is present.
-//! - **FR-002** — the section sits immediately after `## Findings` and before
+//! - **FR-001** - the `## Findings Relationship Diagram` section is present.
+//! - **FR-002** - the section sits immediately after `## Findings` and before
 //!   `## In-Project Cross-References`.
-//! - **FR-012** — every section in [`REQUIRED_SECTIONS`] is still present and
+//! - **FR-012** - every section in [`REQUIRED_SECTIONS`] is still present and
 //!   appears in its canonical order; none were dropped or rearranged.
 
 use ragent_research::OutputFormat;
@@ -95,7 +95,7 @@ fn assembled_document_contains_findings_relationship_diagram_section() {
         "diagram must use Mermaid flowchart TD syntax (FR-003)"
     );
 
-    // FR-004: one node per finding (F1, F2, F3) with number — headline labels.
+    // FR-004: one node per finding (F1, F2, F3) with number - headline labels.
     assert!(assembled.body.contains("F1[\"1 - Root finding\"]"));
     assert!(assembled.body.contains("F2[\"2 - Child finding\"]"));
     assert!(assembled.body.contains("F3[\"3 - Sibling finding\"]"));
@@ -173,7 +173,7 @@ fn all_required_sections_present_in_canonical_order() {
     }
 
     // The original eight sections (excluding the new diagram section) must
-    // still all be present by name — explicit guard against accidental
+    // still all be present by name - explicit guard against accidental
     // removal.
     for legacy in [
         "Topic",

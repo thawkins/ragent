@@ -1,6 +1,6 @@
 //! GitHub Actions tools - retrieve recent workflow runs and their logs.
 //!
-//! The [`GithubGetActionsTool`] lists the last `N` workflow runs for the
+//! The [`GitHubGetActionsTool`] lists the last `N` workflow runs for the
 //! current repository. For each run it reports the run status (`OK` or
 //! `Failed`). For failed runs it downloads the run's log archive (a zip of
 //! per-job log files) and extracts log lines that contain `error` or `failed`,
@@ -185,15 +185,15 @@ async fn fetch_run_logs(
 }
 
 // ---------------------------------------------------------------------------
-// GithubGetActionsTool
+// GitHubGetActionsTool
 // ---------------------------------------------------------------------------
 
 /// Tool that lists recent GitHub Actions runs and extracts error context
 /// from the logs of failed runs.
-pub struct GithubGetActionsTool;
+pub struct GitHubGetActionsTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubGetActionsTool {
+impl Tool for GitHubGetActionsTool {
     fn name(&self) -> &'static str {
         "github_get_actions"
     }

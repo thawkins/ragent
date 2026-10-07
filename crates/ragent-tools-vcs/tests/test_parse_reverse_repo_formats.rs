@@ -553,7 +553,7 @@ fn fr013_error_message_lists_all_formats() {
 }
 
 // ===========================================================================
-// Routing correctness — each format routes to the right provider
+// Routing correctness - each format routes to the right provider
 // ===========================================================================
 
 #[test]

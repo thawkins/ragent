@@ -421,7 +421,7 @@ pub async fn run_tui(
                 // app.force_new_message = true;
                 app.append_assistant_text(&format!(
                     "\n[ok] Session created: `{}`",
-                    &session_id[..8]
+                    crate::app::short_id(&session_id)
                 ));
                 // Display the loaded configuration file(s)
                 if app.config_paths.is_empty() {

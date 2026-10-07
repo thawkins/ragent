@@ -1,7 +1,7 @@
 //! PERF-005: regression test for the duplicate `TeamTaskCompleted` event.
 //!
 //! Previously `team_task_complete::execute` published `Event::TeamTaskCompleted`
-//! **twice** — a copy-paste bug that doubled the event-bus load and the disk
+//! **twice** - a copy-paste bug that doubled the event-bus load and the disk
 //! I/O (two `TeamStore::load` calls) for every task completion.
 //!
 //! This test exercises the tool end-to-end against a real (temp-dir) team and
@@ -30,7 +30,7 @@ async fn collect_events(
                 let sleep = tokio::time::timeout(dur, rx.recv()).await;
                 match sleep {
                     Ok(Ok(ev)) => out.push(ev),
-                    Ok(Err(_)) => break, // lagged / closed — stop
+                    Ok(Err(_)) => break, // lagged / closed - stop
                     Err(_) => break,     // timed out
                 }
             }

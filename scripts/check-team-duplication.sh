@@ -6,7 +6,7 @@
 # `#[path]` includes. REMPLAN M3 moved the sources natively into
 # `crates/ragent-agent`, and ANTIPAT M7.8 deleted the `ragent-team` shim
 # entirely, so that guard reported 28 false duplicates on the shipped layout
-# and contradicted `crates/ragent-types/tests/structure_types.rs`. It is
+# and contradicted `crates/ragent-types/tests/test_structure_types.rs`. It is
 # rewritten here around the CURRENT invariant:
 #
 #   1. The team runtime lives in `crates/ragent-agent/src/team/` and nowhere
@@ -82,7 +82,7 @@ run_checks() {
     done
 
     # 1c. No `#[path]` attribute may reference ragent-team anywhere in the
-    #     agent sources (mirrors structure_types.rs:290).
+    #     agent sources (mirrors test_structure_types.rs:290).
     if grep -rn "#\[path" "$AGENT_SRC" --include='*.rs' 2>/dev/null | grep -q "ragent-team"; then
         fail "a #[path] attribute referencing ragent-team exists under $AGENT_SRC:"
         grep -rn "#\[path" "$AGENT_SRC" --include='*.rs' 2>/dev/null | grep "ragent-team" | sed 's/^/       /'

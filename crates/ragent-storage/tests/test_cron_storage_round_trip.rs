@@ -2,7 +2,7 @@
 //! (spec agentchron T-018).
 //!
 //! These tests verify that **every field** of a [`CronEvent`] survives the
-//! insert → get cycle with exact fidelity, and that subsequent update and
+//! insert -> get cycle with exact fidelity, and that subsequent update and
 //! toggle operations also preserve field integrity.  This is a stricter
 //! superset of the basic CRUD tests in `test_cron_events_table.rs`.
 
@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use ragent_storage::storage::Storage;
 use ragent_types::{CronEvent, CronForm, CronSchedule};
 
-// ── helpers ───────────────────────────────────────────────────────────
+// -- helpers -----------------------------------------------------------
 
 /// Parse an RFC-3339 timestamp for test setup.
 fn ts(s: &str) -> DateTime<Utc> {
@@ -88,9 +88,9 @@ fn assert_all_fields(event: &CronEvent, row: &ragent_storage::CronEventRow) {
     }
 }
 
-// ── one-shot full round-trip ──────────────────────────────────────────
+// -- one-shot full round-trip ------------------------------------------
 
-/// A one-shot event with all fields populated should survive insert → get
+/// A one-shot event with all fields populated should survive insert -> get
 /// with every column intact.
 #[test]
 fn test_round_trip_one_shot_all_fields() {
@@ -112,7 +112,7 @@ fn test_round_trip_one_shot_all_fields() {
     assert_all_fields(&event, &row);
 }
 
-// ── repeat-from full round-trip ───────────────────────────────────────
+// -- repeat-from full round-trip ---------------------------------------
 
 /// A repeat-from event with both start_at and duration_secs should persist
 /// every field.
@@ -139,7 +139,7 @@ fn test_round_trip_repeat_from_all_fields() {
     assert_all_fields(&event, &row);
 }
 
-// ── repeat-now full round-trip ────────────────────────────────────────
+// -- repeat-now full round-trip ----------------------------------------
 
 /// A repeat-now event (no explicit start_at) should persist with start_at
 /// as None and duration_secs populated.
@@ -165,7 +165,7 @@ fn test_round_trip_repeat_now_all_fields() {
     assert_all_fields(&event, &row);
 }
 
-// ── special characters in prompt ───────────���──────────────────────────
+// -- special characters in prompt -----------���--------------------------
 
 /// A prompt containing quotes, newlines, and unicode should persist
 /// byte-for-byte.
@@ -190,7 +190,7 @@ fn test_round_trip_special_prompt_chars() {
     assert_all_fields(&event, &row);
 }
 
-// ── very long prompt ──────────────────────────────────────────────────
+// -- very long prompt --------------------------------------------------
 
 /// A very long prompt (10 KiB) should persist without truncation.
 #[test]
@@ -215,7 +215,7 @@ fn test_round_trip_long_prompt() {
     assert_eq!(row.prompt.len(), 10_240);
 }
 
-// ─– created_at stability ──────────────────────────────────────────────
+// -- created_at stability ----------------------------------------------
 
 /// created_at must not change after an update_cron_event_next_due call.
 /// Only next_due and last_fired should be modified.
@@ -269,7 +269,7 @@ fn test_created_at_stable_after_update() {
     assert_eq!(row_after.duration_secs, event.schedule.duration_secs);
 }
 
-// ── set_enabled preserves other fields ───────────────────��────────────
+// -- set_enabled preserves other fields -------------------��------------
 
 /// Toggling enabled should not alter any other column.
 #[test]
@@ -318,7 +318,7 @@ fn test_set_enabled_preserves_all_fields() {
     assert_eq!(row.prompt, event.prompt);
 }
 
-// ── list round-trip for mixed forms ───────────────────────────────────
+// -- list round-trip for mixed forms -----------------------------------
 
 /// Multiple events of different forms should all round-trip through list.
 #[test]
@@ -374,9 +374,9 @@ fn test_list_round_trip_mixed_forms_all_fields() {
     assert_all_fields(&repeat_now, by_id["mix-now"]);
 }
 
-// ── full lifecycle round-trip ─────────────────────────────────────────
+// -- full lifecycle round-trip -----------------------------------------
 
-/// Insert → get → update → get → disable → get → delete → get (None).
+/// Insert -> get -> update -> get -> disable -> get -> delete -> get (None).
 /// Verifies every field at each stage.
 #[test]
 fn test_full_lifecycle_all_fields() {
@@ -395,7 +395,7 @@ fn test_full_lifecycle_all_fields() {
     );
     storage.insert_cron_event(&event).expect("insert");
 
-    // 2. Get — all fields
+    // 2. Get - all fields
     let row = storage
         .get_cron_event("lifecycle")
         .expect("get")
@@ -409,7 +409,7 @@ fn test_full_lifecycle_all_fields() {
         .update_cron_event_next_due("lifecycle", &new_next, Some(&fired_at))
         .expect("update");
 
-    // 4. Get — verify updated fields, all others stable
+    // 4. Get - verify updated fields, all others stable
     let row = storage
         .get_cron_event("lifecycle")
         .expect("get")
@@ -429,7 +429,7 @@ fn test_full_lifecycle_all_fields() {
         .set_cron_event_enabled("lifecycle", false)
         .expect("disable");
 
-    // 6. Get — verify disabled, all others stable
+    // 6. Get - verify disabled, all others stable
     let row = storage
         .get_cron_event("lifecycle")
         .expect("get")
@@ -443,12 +443,12 @@ fn test_full_lifecycle_all_fields() {
     let deleted = storage.delete_cron_event("lifecycle").expect("delete");
     assert!(deleted);
 
-    // 8. Get — None
+    // 8. Get - None
     let row = storage.get_cron_event("lifecycle").expect("get");
     assert!(row.is_none());
 }
 
-// ── last_fired None → Some transition ─────────────────────────────────
+// -- last_fired None -> Some transition ---------------------------------
 
 /// An event starts with last_fired = None. After update_cron_event_next_due
 /// with Some(fired_at), last_fired should become Some.  After update with
@@ -475,7 +475,7 @@ fn test_last_fired_none_to_some_to_none() {
         .expect("row");
     assert!(row.last_fired.is_none());
 
-    // Fire once — last_fired becomes Some
+    // Fire once - last_fired becomes Some
     let fired = Utc::now();
     let new_next = event.next_due + chrono::Duration::seconds(3_600);
     storage
@@ -487,7 +487,7 @@ fn test_last_fired_none_to_some_to_none() {
         .expect("row");
     assert_eq!(row.last_fired, Some(fired.to_rfc3339()));
 
-    // Clear last_fired — pass None
+    // Clear last_fired - pass None
     storage
         .update_cron_event_next_due("fired-transition", &new_next, None)
         .expect("clear");
@@ -500,7 +500,7 @@ fn test_last_fired_none_to_some_to_none() {
     assert_eq!(row.next_due, new_next.to_rfc3339());
 }
 
-// ── timezone-aware timestamp round-trip ───────────────────────────────
+// -- timezone-aware timestamp round-trip -------------------------------
 
 /// A timestamp with a non-UTC offset should be normalised to UTC on storage
 /// and the round-tripped value should represent the same instant.
@@ -536,7 +536,7 @@ fn test_round_trip_non_utc_timestamp() {
     assert_eq!(db_next, at);
 }
 
-// ─– month-duration round-trip ─────────────────────────────────────────
+// -- month-duration round-trip -----------------------------------------
 
 /// A month-duration (2_592_000 s) event should persist with the correct
 /// duration_secs value.

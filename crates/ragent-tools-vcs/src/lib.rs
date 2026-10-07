@@ -10,6 +10,7 @@ pub mod http_client;
 pub mod limits;
 pub mod percent;
 pub mod registry;
+pub mod vcs_error;
 pub mod vcs_provider;
 pub mod vocab;
 

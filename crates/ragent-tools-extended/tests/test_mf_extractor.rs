@@ -1,8 +1,8 @@
-//! Integration tests for `masterfetch::extractor` — content extraction chain
+//! Integration tests for `masterfetch::extractor` - content extraction chain
 //! (T-005, FR-002, NFR-003).
 //!
 //! Covers: format selection (markdown/html/text/raw), CSS selector narrowing,
-//! readability → html2text → raw text chain, noise tag stripping, truncation,
+//! readability -> html2text -> raw text chain, noise tag stripping, truncation,
 //! non-HTML content, and error handling.
 
 use ragent_tools_extended::masterfetch::extractor::{
@@ -568,7 +568,7 @@ fn test_self_closing_tags_preserved_in_html_format() {
         ..Default::default()
     };
     let result = extract(html, "https://example.com", "text/html", &opts).unwrap();
-    // br and img are self-closing/void — should appear in output.
+    // br and img are self-closing/void - should appear in output.
     assert!(result.content.contains("Text"));
     assert!(result.content.contains("More"));
 }

@@ -1,7 +1,7 @@
 //! rsearchdiag T-014 / FR-013.
 //!
-//! Integration test verifying that [`render_skeleton`] — the empty
-//! `RESEARCH.md` written before any gathering has run — includes the
+//! Integration test verifying that [`render_skeleton`] - the empty
+//! `RESEARCH.md` written before any gathering has run - includes the
 //! `## Findings Relationship Diagram` section with the zero-findings
 //! placeholder, so the section is present from the moment the file lands
 //! on disk.
@@ -51,7 +51,7 @@ fn skeleton_contains_zero_findings_placeholder() {
 #[test]
 fn skeleton_does_not_emit_mermaid_block() {
     // FR-005: with zero findings the diagram must NOT emit a Mermaid code
-    // block — only the placeholder text.
+    // block - only the placeholder text.
     let skeleton = skeleton();
     assert!(
         !skeleton.contains("```mermaid"),
@@ -89,7 +89,7 @@ fn skeleton_diagram_section_is_between_findings_and_cross_references() {
         "diagram section must come before ## In-Project Cross-References in skeleton (FR-002)"
     );
 
-    // No other `## `-level heading sits between Findings and the diagram —
+    // No other `## `-level heading sits between Findings and the diagram -
     // the diagram is the immediate next section.
     let between = &skeleton[findings_idx + "## Findings\n".len()..diagram_idx];
     assert!(

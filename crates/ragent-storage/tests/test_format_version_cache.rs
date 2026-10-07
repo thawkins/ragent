@@ -76,7 +76,7 @@ fn list_sessions_after_archive_excludes_archived_row() {
 fn repeated_get_session_calls_use_cached_fast_path() {
     // Smoke test: many `get_session` calls in a row must all succeed and
     // return consistent data.  This exercises the `has_format_version_cached`
-    // helper on the hot path — if the cache ever returned a stale `false`
+    // helper on the hot path - if the cache ever returned a stale `false`
     // (column missing) the SELECT would lack the `format_version` column and
     // the call would error.
     let storage = Storage::open_in_memory().expect("in-memory storage");

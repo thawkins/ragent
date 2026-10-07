@@ -10,7 +10,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::OnceLock;
 
-// ── Effort ────────────────────────────────────────────────────────────────
+// -- Effort ----------------------------------------------------------------
 
 /// Estimated effort for a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,7 +58,7 @@ impl std::fmt::Display for Effort {
     }
 }
 
-// ── Priority ──────────────────────────────────────────────────────────────
+// -- Priority --------------------------------------------------------------
 
 /// Task priority level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -109,7 +109,7 @@ impl std::fmt::Display for Priority {
     }
 }
 
-// ── PlanTask ──────────────────────────────────────────────────────────────
+// -- PlanTask --------------------------------------------------------------
 
 /// A single task parsed from a PLAN.md task table.
 ///
@@ -163,7 +163,7 @@ impl PlanTask {
     }
 }
 
-// ── Milestone ─────────────────────────────────────────────────────────────
+// -- Milestone -------------------------------------------------------------
 
 /// A milestone parsed from a PLAN.md `## Milestones` section.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,7 +198,7 @@ impl Milestone {
     }
 }
 
-// ── Phase -1 Gates (FR-008) ───────────────────────────────────────────────
+// -- Phase -1 Gates (FR-008) -----------------------------------------------
 
 /// The three required Phase -1 gate names (FR-008).
 pub const REQUIRED_GATE_NAMES: &[&str] = &["Simplicity", "Anti-Abstraction", "Integration-First"];
@@ -272,7 +272,7 @@ impl PhaseMinusOneGates {
     }
 }
 
-// ── PlanParser ────────────────────────────────────────────────────────────
+// -- PlanParser ------------------------------------------------------------
 
 /// Parser that extracts `PlanTask` structs from a PLAN.md markdown string.
 pub struct PlanParser;
@@ -708,7 +708,7 @@ impl PlanParser {
     }
 }
 
-// ── Topological Sort ──────────────────────────────────────────────────────
+// -- Topological Sort ------------------------------------------------------
 
 /// Resolve task execution order using Kahn's algorithm (BFS topological sort).
 ///
@@ -838,7 +838,7 @@ pub fn filter_for_resume(tasks: &[PlanTask], order: &[usize]) -> Vec<usize> {
 #[path = "../tests/inline/plan_parser_tests.rs"]
 mod tests;
 
-// ── Milestone tests ─────────────────────────────────────────────────────
+// -- Milestone tests -----------------------------------------------------
 
 #[test]
 fn test_milestone_normalise_item() {

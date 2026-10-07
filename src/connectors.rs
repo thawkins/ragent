@@ -125,7 +125,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
 
     // The management subcommands drive the ephemeral session environment.
     let mut env = CliConnectorEnv::build(&workdir);
-    let report = run_connector_subcommand_env(&workdir, &mut env, &mut NeverProbe, sub, rest)
+    let report = run_connector_subcommand_env(&mut env, sub, rest)
         .await
         .unwrap_or_else(|| render_help(sub));
     println!("{}", cli_body(&report));
@@ -320,27 +320,12 @@ impl McpProbe for CliMcpProbe {
         server_id: &str,
         config: McpServerConfig,
     ) -> Result<Vec<ProbeTool>, String> {
-        let mut client = ragent_agent::mcp::McpClient::new();
-        client
-            .connect(server_id, config)
-            .await
-            .map_err(|error| format!("{error:#}"))?;
-        let tools = client
-            .servers()
-            .iter()
-            .find(|server| server.id == server_id)
-            .map(|server| {
-                server
-                    .tools
-                    .iter()
-                    .map(|tool| ProbeTool {
-                        name: tool.name.clone(),
-                        parameters: tool.parameters.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(tools)
+        // Shared isolated connect-and-list helper (T-309).
+        let tools = ragent_agent::mcp::probe::connect_and_list(server_id, config).await?;
+        Ok(tools
+            .into_iter()
+            .map(|(name, parameters)| ProbeTool { name, parameters })
+            .collect())
     }
 
     async fn probe_call(
@@ -355,34 +340,6 @@ impl McpProbe for CliMcpProbe {
         // Reporting that as the step's cause keeps the harness honest instead of
         // reporting a pass it cannot verify.
         Err("the isolated probe connection was already dropped".to_string())
-    }
-
-    async fn probe_disconnect(&mut self, _server_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// A probe that is never driven: the management subcommands do not invoke a
-/// tool, and `test` supplies [`CliMcpProbe`] instead.
-struct NeverProbe;
-
-#[async_trait]
-impl McpProbe for NeverProbe {
-    async fn probe_connect(
-        &mut self,
-        _server_id: &str,
-        _config: McpServerConfig,
-    ) -> Result<Vec<ProbeTool>, String> {
-        Err("the management subcommands do not connect an isolated probe".to_string())
-    }
-
-    async fn probe_call(
-        &mut self,
-        _server_id: &str,
-        _tool: &str,
-        _args: serde_json::Value,
-    ) -> Result<String, String> {
-        Err("the management subcommands do not connect an isolated probe".to_string())
     }
 
     async fn probe_disconnect(&mut self, _server_id: &str) -> Result<(), String> {

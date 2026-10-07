@@ -5,7 +5,7 @@
 //! - Status-coloured lines: pending=yellow, in_progress=cyan, completed=green,
 //!   blocked=red.
 //! - `(owner)` suffix appended when owner is set.
-//! - `[blocked by #id, …]` annotation when derived blocked (FR-005).
+//! - `[blocked by #id, ...]` annotation when derived blocked (FR-005).
 //! - `active_form` rendered as indented sub-line beneath subject when
 //!   `in_progress`.
 //! - Scroll, scrollbar, text-selection, and mutual-exclusion behaviour
@@ -119,7 +119,7 @@ fn create_task(
         .expect("create task");
 }
 
-// ── Panel title ─────────────────────────────────────────────────────
+// -- Panel title -----------------------------------------------------
 
 /// Panel header should show "TASKS" (FR-018).
 #[test]
@@ -138,7 +138,7 @@ fn test_tasks_panel_title_shows_tasks() {
     );
 }
 
-// ── Empty placeholder ────────────────────────────────────���──────────
+// -- Empty placeholder ------------------------------------���----------
 
 /// Empty panel should show "No tasks" (not the old placeholder).
 #[test]
@@ -155,7 +155,7 @@ fn test_tasks_panel_empty_shows_no_tasks() {
     );
 }
 
-// ── Status rendering ────────────────────────────────────────────────
+// -- Status rendering ------------------------------------------------
 
 /// "completed" status should render with uppercased prefix (FR-007).
 #[test]
@@ -238,7 +238,7 @@ fn test_tasks_panel_in_progress_status() {
     );
 }
 
-// ── Owner suffix (FR-018) ───────────────────────────────────────────
+// -- Owner suffix (FR-018) -------------------------------------------
 
 /// When owner is set, an `(owner)` suffix should be appended.
 #[test]
@@ -321,7 +321,7 @@ fn test_tasks_panel_empty_owner_no_suffix() {
     );
 }
 
-// ── Blocked-by annotation (FR-005, FR-018) ──────────────────────────
+// -- Blocked-by annotation (FR-005, FR-018) --------------------------
 
 /// When a pending task has an uncompleted blocked_by entry, the panel
 /// should show `[blocked by #id]` annotation (FR-005, FR-018).
@@ -364,7 +364,7 @@ fn test_tasks_panel_blocked_by_annotation() {
 }
 
 /// When a pending task's blocked_by entries are all completed, no
-/// `[blocked by …]` annotation should appear.
+/// `[blocked by ...]` annotation should appear.
 #[test]
 fn test_tasks_panel_completed_blocker_no_annotation() {
     let mut app = support::make_app();
@@ -492,10 +492,10 @@ fn test_tasks_panel_in_progress_not_blocked() {
     );
 }
 
-// ── active_form sub-line (FR-018) ───────────────────────────────────
+// -- active_form sub-line (FR-018) -----------------------------------
 
 /// When a task is in_progress and has active_form, an indented sub-line
-/// with `→` prefix should appear beneath the subject.
+/// with `->` prefix should appear beneath the subject.
 #[test]
 fn test_tasks_panel_active_form_subline() {
     let mut app = support::make_app();
@@ -608,7 +608,7 @@ fn test_tasks_panel_empty_active_form_no_subline() {
     );
 }
 
-// ── Combined: owner + active_form + status ──────────────────────────
+// -- Combined: owner + active_form + status --------------------------
 
 /// A task that is in_progress with both owner and active_form should show
 /// all three: status prefix, owner suffix, and active_form sub-line.
@@ -647,7 +647,7 @@ fn test_tasks_panel_combined_owner_and_active_form() {
     );
 }
 
-// ── Scroll preservation ─────────────────────────────────────────────
+// -- Scroll preservation ---------------------------------------------
 
 /// The panel should still set tasks_max_scroll correctly for overflow.
 #[test]
@@ -690,7 +690,7 @@ fn test_tasks_panel_scroll_max_scroll() {
 /// Tasks uses "lines from bottom" scroll semantics (like the Log and
 /// Profile panels): offset 0 is bottom-pinned, max_scroll is the top.
 /// Dragging the scrollbar track must therefore follow the inverted
-/// formula `offset = (1.0 - fraction) * max_scroll` — dragging to the
+/// formula `offset = (1.0 - fraction) * max_scroll` - dragging to the
 /// bottom of the track must show the BOTTOM of the task list.
 /// Regression test for the drag-vs-render direction inversion where the
 /// drag handler grouped Tasks with the "lines from top" family.
@@ -773,7 +773,7 @@ fn test_tasks_panel_hidden_clears_area() {
     );
 }
 
-// ── Read-only rendering ─────────────────────────────────────────────
+// -- Read-only rendering ---------------------------------------------
 
 /// Rendering the panel must not mutate stored tasks.
 #[test]
@@ -814,7 +814,7 @@ fn test_tasks_panel_does_not_mutate_tasks() {
     assert_eq!(after[0].owner.as_deref(), Some("agent-1"));
 }
 
-// ── Error state ─────────────────────────────────────────────────────
+// -- Error state -----------------------------------------------------
 //
 // When storage query fails, the panel should show "Failed to load tasks"
 // (not "Failed to load tasks").  This is implicitly tested by the existing

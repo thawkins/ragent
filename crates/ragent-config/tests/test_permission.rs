@@ -15,13 +15,13 @@ fn test_permission_from_flat_names() {
 
 #[test]
 fn test_permission_from_namespaced_categories() {
-    // file:read → Read
+    // file:read -> Read
     assert_eq!(Permission::from("file:read"), Permission::Read);
-    // file:write → Edit
+    // file:write -> Edit
     assert_eq!(Permission::from("file:write"), Permission::Edit);
-    // bash:execute → Bash
+    // bash:execute -> Bash
     assert_eq!(Permission::from("bash:execute"), Permission::Bash);
-    // network:fetch → Web
+    // network:fetch -> Web
     assert_eq!(Permission::from("network:fetch"), Permission::Web);
 }
 
@@ -68,7 +68,7 @@ fn test_permission_checker_with_bash_execute() {
         action: PermissionAction::Deny,
     }];
     let checker = PermissionChecker::new(rules);
-    // Should match bash:execute → Bash
+    // Should match bash:execute -> Bash
     assert_eq!(
         checker.check("bash:execute", "ls -la"),
         PermissionAction::Deny

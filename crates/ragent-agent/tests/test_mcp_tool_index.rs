@@ -11,7 +11,7 @@ use ragent_agent::mcp::McpClient;
 use serde_json::json;
 
 /// A config for a disabled server, which `connect` registers without any
-/// transport handshake — enough to populate the server list in tests.
+/// transport handshake - enough to populate the server list in tests.
 fn disabled_config() -> McpServerConfig {
     McpServerConfig {
         disabled: true,
@@ -66,7 +66,7 @@ async fn multiple_servers_are_registered_and_disconnected() {
     );
 }
 
-// ── FR-030: a disabled server is still listed, but inert ────────────────────
+// -- FR-030: a disabled server is still listed, but inert --------------------
 
 /// `register_disabled` records a server that exists but must not be started, so
 /// `/mcp` can list it (and offer to re-enable it) without a child process.
@@ -83,7 +83,7 @@ async fn register_disabled_lists_the_server_with_no_tools() {
     assert!(client.servers()[0].tools.is_empty());
 }
 
-// ── Streamable-HTTP session adoption ────────────────────────────────────────
+// -- Streamable-HTTP session adoption ----------------------------------------
 
 /// A sessionful Streamable-HTTP server refuses `tools/list` unless the request
 /// carries the `mcp-session-id` it issued during `initialize`, so a replaying
@@ -205,7 +205,7 @@ async fn http_client_replays_the_session_id_from_initialize() {
     assert_eq!(seen.total.load(Ordering::SeqCst), 2);
 }
 
-// ── Generic adopt of an already-running MCP server ──────────────────────────
+// -- Generic adopt of an already-running MCP server --------------------------
 
 /// `connect` must adopt a server that is already running at the address its
 /// config declares, instead of spawning a duplicate.
@@ -395,7 +395,7 @@ async fn connect_records_a_config_rejected_before_any_transport() {
     );
 }
 
-// ── Global enable ledger ────────────────────────────────────────────────────
+// -- Global enable ledger ----------------------------------------------------
 
 /// A server id absent from the ledger is enabled, so a newly added MCP server
 /// starts connected without any write; an explicit `false` disables it and

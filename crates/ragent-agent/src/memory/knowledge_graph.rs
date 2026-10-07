@@ -31,7 +31,7 @@ use std::collections::HashMap;
 
 use crate::storage::Storage;
 
-// ── Entity types ──────────────────────────────────────────────────────────────
+// -- Entity types --------------------------------------------------------------
 
 /// The kind of entity extracted from memory content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -235,7 +235,7 @@ pub struct KnowledgeGraph {
     pub relationships: Vec<Relationship>,
 }
 
-// ── Known entity patterns ─────────────────────────────────────────────────────
+// -- Known entity patterns -----------------------------------------------------
 
 /// Languages we recognise for entity extraction.
 const KNOWN_LANGUAGES: &[&str] = &[
@@ -305,7 +305,7 @@ const KNOWN_TOOLS: &[&str] = &[
     "WASM",
 ];
 
-// ── Entity extraction ────────────────────────────────────────────────────────
+// -- Entity extraction --------------------------------------------------------
 
 /// Extract entities and relationships from memory content.
 ///

@@ -392,7 +392,7 @@ async fn test_checkpoint_denies_destructive_call_under_allow_rule() -> Result<()
 }
 
 /// FR-015: with checkpoints disabled in the loop spec, the allow rule
-/// auto-approves the destructive call and it executes — checkpoints only
+/// auto-approves the destructive call and it executes - checkpoints only
 /// apply while the loop has them enabled.
 #[tokio::test]
 async fn test_checkpoints_disabled_restores_allow_rule_behaviour() -> Result<()> {
@@ -439,7 +439,7 @@ async fn test_checkpoints_disabled_restores_allow_rule_behaviour() -> Result<()>
 }
 
 /// FR-024: in auto-approve mode (autopilot/YOLO, `--yes`), the forced
-/// destructive-action checkpoint still applies — the destructive call is
+/// destructive-action checkpoint still applies - the destructive call is
 /// checkpointed and denied, while a non-destructive call auto-approves.
 #[tokio::test]
 async fn test_auto_approve_still_enforces_checkpoint() -> Result<()> {
@@ -530,7 +530,7 @@ async fn test_auto_approve_without_checkpoints_executes() -> Result<()> {
 }
 
 /// FR-015: a checkpoint prompt answered via `PermissionReplied` resolves it
-/// — an approval lets the destructive call execute.
+/// - an approval lets the destructive call execute.
 #[tokio::test]
 async fn test_checkpoint_answered_with_permission_replied() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
@@ -593,7 +593,7 @@ async fn test_checkpoint_answered_with_permission_replied() -> Result<()> {
 }
 
 /// FR-015 (control): a non-destructive call in a checkpointed loop takes the
-/// normal permission path — no checkpoint prompt is raised and the allow
+/// normal permission path - no checkpoint prompt is raised and the allow
 /// rule auto-approves it.
 #[tokio::test]
 async fn test_non_destructive_call_not_checkpointed() -> Result<()> {
@@ -675,7 +675,7 @@ async fn test_checkpoint_reason_and_classifier() -> Result<()> {
 
 /// FR-015 (TC-014 deny path): a checkpoint prompt answered with a denial
 /// keeps the file and surfaces the checkpoint explanation as an observation,
-/// while the loop itself continues and terminates `completed` — a user denial
+/// while the loop itself continues and terminates `completed` - a user denial
 /// is an observation, not an unrecoverable stop condition.
 #[tokio::test]
 async fn test_checkpoint_prompt_denied_by_user_keeps_file_and_continues() -> Result<()> {
@@ -784,7 +784,7 @@ async fn test_checkpoint_prompt_denied_by_user_keeps_file_and_continues() -> Res
     Ok(())
 }
 
-/// FR-024 (TC-019): a hard-deny rule is never overridden by auto-approval —
+/// FR-024 (TC-019): a hard-deny rule is never overridden by auto-approval -
 /// in a checkpointed loop launched with autopilot (`--yes`), the policy deny
 /// blocks the destructive call without prompting, the file survives, and the
 /// denial is surfaced as an observation while the loop completes afterwards.
@@ -832,7 +832,7 @@ async fn test_hard_deny_rule_enforced_under_auto_approve() -> Result<()> {
 
     let events = drain_all(&mut rx);
 
-    // An explicit policy deny resolves without any interactive prompt —
+    // An explicit policy deny resolves without any interactive prompt -
     // auto-approval never overrides the deny verdict.
     assert_eq!(
         events

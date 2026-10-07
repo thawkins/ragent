@@ -314,7 +314,7 @@ const fn mouse_up(col: u16, row: u16) -> MouseEvent {
 #[test]
 fn test_drag_starts_on_message_scrollbar_column() {
     let mut app = make_app();
-    // message area: x=0, y=1, width=80, height=20 → scrollbar at column 79
+    // message area: x=0, y=1, width=80, height=20 -> scrollbar at column 79
     app.message_area = Rect::new(0, 1, 80, 20);
     app.message_max_scroll = 100;
 
@@ -353,7 +353,7 @@ fn test_drag_to_top_scrolls_to_top_of_content() {
     // Click scrollbar, drag to top of pane (row 1)
     app.handle_mouse_event(mouse_down(79, 10));
     app.handle_mouse_event(mouse_drag(79, 1));
-    // Top of content → scroll_offset = max_scroll
+    // Top of content -> scroll_offset = max_scroll
     assert_eq!(app.scroll_offset, 100);
 }
 
@@ -367,14 +367,14 @@ fn test_drag_to_bottom_scrolls_to_bottom_of_content() {
     // Click scrollbar, drag to bottom of pane (row 20 = y + height - 1)
     app.handle_mouse_event(mouse_down(79, 10));
     app.handle_mouse_event(mouse_drag(79, 20));
-    // Bottom of content → scroll_offset = 0
+    // Bottom of content -> scroll_offset = 0
     assert_eq!(app.scroll_offset, 0);
 }
 
 #[test]
 fn test_drag_to_middle_scrolls_to_midpoint() {
     let mut app = make_app();
-    // area: y=0, height=21 → rows 0..20 inclusive, track_height=20
+    // area: y=0, height=21 -> rows 0..20 inclusive, track_height=20
     app.message_area = Rect::new(0, 0, 80, 21);
     app.message_max_scroll = 100;
 
@@ -400,16 +400,16 @@ fn test_drag_release_clears_state() {
 #[test]
 fn test_drag_outside_pane_clamped() {
     let mut app = make_app();
-    // area: y=5, height=10 → rows 5..14
+    // area: y=5, height=10 -> rows 5..14
     app.message_area = Rect::new(0, 5, 80, 10);
     app.message_max_scroll = 100;
 
     app.handle_mouse_event(mouse_down(79, 10));
-    // Drag above the pane (row 0) — should clamp to top
+    // Drag above the pane (row 0) - should clamp to top
     app.handle_mouse_event(mouse_drag(79, 0));
     assert_eq!(app.scroll_offset, 100); // top of content
 
-    // Drag below the pane (row 30) — should clamp to bottom
+    // Drag below the pane (row 30) - should clamp to bottom
     app.handle_mouse_event(mouse_drag(79, 30));
     assert_eq!(app.scroll_offset, 0); // bottom of content
 }
@@ -439,7 +439,7 @@ fn test_drag_ignored_when_no_active_drag() {
     app.message_area = Rect::new(0, 1, 80, 20);
     app.message_max_scroll = 100;
 
-    // Drag without prior mouse down — no scrollbar_drag active
+    // Drag without prior mouse down - no scrollbar_drag active
     app.handle_mouse_event(mouse_drag(79, 5));
     assert_eq!(app.scroll_offset, 0);
 }

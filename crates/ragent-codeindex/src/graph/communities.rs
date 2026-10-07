@@ -51,7 +51,7 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
         return Ok(Vec::new());
     }
 
-    // ── Build the set of all node IDs that appear in edges ───────────────
+    // -- Build the set of all node IDs that appear in edges ---------------
     let mut node_set: Vec<i64> = Vec::new();
     {
         let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -71,13 +71,13 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
         edges.len()
     );
 
-    // ── Map node IDs to contiguous indices for efficient arrays ─────────
+    // -- Map node IDs to contiguous indices for efficient arrays ---------
     let mut id_to_idx: HashMap<i64, usize> = HashMap::with_capacity(node_set.len());
     for (i, &id) in node_set.iter().enumerate() {
         id_to_idx.insert(id, i);
     }
 
-    // ── Build undirected adjacency list ────────────────────────────────
+    // -- Build undirected adjacency list --------------------------------
     let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); node_set.len()];
     for edge in &edges {
         let src = id_to_idx[&edge.source_sym];
@@ -93,10 +93,10 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
         neighbours.dedup();
     }
 
-    // ── Initialise labels: each node starts in its own community ────────
+    // -- Initialise labels: each node starts in its own community --------
     let mut labels: Vec<usize> = (0..node_set.len()).collect();
 
-    // ── Label propagation ───────────────────────────────────────────────
+    // -- Label propagation -----------------------------------------------
     for iteration in 0..MAX_ITERATIONS {
         let mut changed = false;
         for node in 0..node_set.len() {
@@ -129,7 +129,7 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
         }
     }
 
-    // ── Relabel communities to contiguous IDs starting at 0 ─────────────
+    // -- Relabel communities to contiguous IDs starting at 0 -------------
     let mut remap: HashMap<usize, i64> = HashMap::new();
     let mut next_id: i64 = 0;
     for &label in &labels {
@@ -141,18 +141,18 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
     }
     let final_labels: Vec<i64> = labels.iter().map(|l| remap[l]).collect();
 
-    // ── Compute degree per node for auto-labelling ──────────────────────
+    // -- Compute degree per node for auto-labelling ----------------------
     let mut degree: Vec<usize> = vec![0; node_set.len()];
     for (idx, neighbours) in adjacency.iter().enumerate() {
         degree[idx] = neighbours.len();
     }
 
-    // ── Load symbol names for label generation ─────────────────────────
+    // -- Load symbol names for label generation -------------------------
     let all_symbols = store.query_symbols(&SymbolFilter::default())?;
     let sym_name: HashMap<i64, String> =
         all_symbols.iter().map(|s| (s.id, s.name.clone())).collect();
 
-    // ── Persist community assignments and collect member info ───────────
+    // -- Persist community assignments and collect member info -----------
     store.clear_communities()?;
 
     // Group nodes by community.

@@ -89,7 +89,7 @@ fn test_atomic_update_no_tmp_file_left() {
     })
     .unwrap();
 
-    // No stray temp files should remain — only ragent.json and the .lock file.
+    // No stray temp files should remain - only ragent.json and the .lock file.
     let entries: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(std::result::Result::ok)

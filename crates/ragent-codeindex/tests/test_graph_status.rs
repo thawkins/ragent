@@ -39,7 +39,7 @@ fn callee() {
 #[test]
 fn test_graph_status_empty_index() {
     let dir = TempDir::new().unwrap();
-    // No source files written — reindex finds nothing, so the graph is empty.
+    // No source files written - reindex finds nothing, so the graph is empty.
     let config = make_config(&dir);
     let idx = CodeIndex::open(&config).unwrap();
     idx.full_reindex().unwrap();

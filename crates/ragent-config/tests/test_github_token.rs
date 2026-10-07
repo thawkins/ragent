@@ -122,7 +122,7 @@ fn test_resolve_github_token_prefers_env_then_stored() {
         std::env::remove_var("GITHUB_TOKEN");
     }
 
-    // No env token → the stored file is used.
+    // No env token -> the stored file is used.
     assert_eq!(resolve_github_token().as_deref(), Some("ghp_from_file"));
 
     // The environment variable wins outright.

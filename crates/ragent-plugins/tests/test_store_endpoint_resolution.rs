@@ -58,7 +58,7 @@ fn stores_with_empty_endpoint_for(kind: StoreKind) -> PluginStoresConfig {
     }
 }
 
-// ── Precedence: override wins, wholesale (FR-028) ───────────────────────────
+// -- Precedence: override wins, wholesale (FR-028) ---------------------------
 
 #[test]
 fn configured_url_overrides_the_default_for_either_store() {
@@ -101,7 +101,7 @@ fn a_configured_override_is_used_wholesale_without_merging_the_default() {
     }
 }
 
-// ── Precedence: default on absence (FR-027, FR-030) ─────────────────────────
+// -- Precedence: default on absence (FR-027, FR-030) -------------------------
 
 #[test]
 fn absent_stores_block_yields_each_compiled_default() {
@@ -152,7 +152,7 @@ fn empty_and_whitespace_overrides_are_ignored_for_either_store() {
     }
 }
 
-// ── The default path is guarded like the configured path (FR-029) ────────────
+// -- The default path is guarded like the configured path (FR-029) ------------
 
 #[test]
 fn compiled_defaults_pass_the_scheme_guard_on_the_default_path() {
@@ -192,7 +192,7 @@ fn a_refused_override_is_refused_for_either_store() {
     }
 }
 
-// ── No-config launch path (FR-030) and fresh resolution (NFR-002) ────────────
+// -- No-config launch path (FR-030) and fresh resolution (NFR-002) ------------
 
 #[test]
 fn no_config_launch_resolves_both_defaults_without_error() {
@@ -246,7 +246,7 @@ fn resolution_reads_the_config_afresh_on_every_call() {
     }
 }
 
-// ── NFR-001: the default literals live in exactly one source file ────────────
+// -- NFR-001: the default literals live in exactly one source file ------------
 
 /// Recursively collect every `.rs` file under `root`.
 fn rust_sources_under(root: &Path, out: &mut Vec<PathBuf>) {

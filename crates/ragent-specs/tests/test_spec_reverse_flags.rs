@@ -15,7 +15,7 @@
 
 use ragent_specs::SpecCommand;
 
-/// Parse a `/spec reverse …` argument tail (the string after `/spec`).
+/// Parse a `/spec reverse ...` argument tail (the string after `/spec`).
 fn parse_reverse(args: &str) -> SpecCommand {
     SpecCommand::parse(&format!("reverse {args}"))
 }

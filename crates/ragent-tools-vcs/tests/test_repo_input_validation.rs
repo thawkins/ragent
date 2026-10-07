@@ -1,4 +1,4 @@
-//! Tests for `GitHubClient::validate_repo_input` — the FR-016 invalid-input
+//! Tests for `GitHubClient::validate_repo_input` - the FR-016 invalid-input
 //! rejection path. Covers the three named invalid cases (empty, single-word,
 //! three-segment) plus valid inputs and confirms the error messages are
 //! human-readable usage strings.

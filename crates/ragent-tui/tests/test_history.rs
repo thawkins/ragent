@@ -22,13 +22,13 @@ fn test_set_history_file_stores_path() {
     let mut app = support::make_app();
     assert!(app.history_file_path.is_none());
 
-    let path = std::path::PathBuf::from("/tmp/test_history.txt");
+    let path = std::path::PathBuf::from("target/temp/test_history.txt");
     app.set_history_file(path.clone());
     assert_eq!(app.history_file_path, Some(path));
 }
 
 // =========================================================================
-// save_history — happy path
+// save_history - happy path
 // =========================================================================
 
 #[test]
@@ -64,7 +64,7 @@ fn test_save_history_creates_parent_directories() {
 #[test]
 fn test_save_history_no_path_is_noop() {
     let app = support::make_app();
-    // No history_file_path set — save should silently succeed.
+    // No history_file_path set - save should silently succeed.
     assert!(app.save_history().is_ok());
 }
 
@@ -101,7 +101,7 @@ fn test_save_history_overwrites_previous() {
 }
 
 // =========================================================================
-// save_history — error branches
+// save_history - error branches
 // =========================================================================
 
 #[cfg(unix)]
@@ -128,7 +128,7 @@ fn test_save_history_permission_denied() {
 }
 
 // =========================================================================
-// load_history — happy path
+// load_history - happy path
 // =========================================================================
 
 #[test]
@@ -186,7 +186,7 @@ fn test_load_history_missing_file_is_ok() {
     let mut app = support::make_app();
     app.set_history_file(file);
 
-    // Should succeed silently — the file simply doesn't exist yet.
+    // Should succeed silently - the file simply doesn't exist yet.
     assert!(app.load_history().is_ok());
     assert_eq!(app.input_history.len(), 0);
 }
@@ -214,7 +214,7 @@ fn test_load_history_clears_previous_entries() {
 }
 
 // =========================================================================
-// load_history — error branches
+// load_history - error branches
 // =========================================================================
 
 #[cfg(unix)]
@@ -285,7 +285,7 @@ fn test_flush_history_if_due_noop_when_clean() {
     let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec!["hello".into()];
-    // history_dirty is false — flush should be a no-op.
+    // history_dirty is false - flush should be a no-op.
     app.flush_history_if_due();
 
     // File should not exist because no flush happened.
@@ -337,7 +337,7 @@ async fn test_flush_history_if_due_skips_before_deadline() {
 
     app.flush_history_if_due();
 
-    // Dirty flag should still be set — flush was deferred.
+    // Dirty flag should still be set - flush was deferred.
     assert!(app.history_dirty);
     assert!(app.history_save_deadline.is_some());
 

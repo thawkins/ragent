@@ -6,6 +6,7 @@ use super::*;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use std::time::Duration;
 
 fn build_provider() -> (
@@ -57,39 +58,35 @@ fn test_record_rate_limit_updates_gauges() {
 
     let requests_pct: Option<f64> = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.rate_limit.requests_pct")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Gauge<f64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.rate_limit.requests_pct")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::F64(MetricData::Gauge(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|g| g.data_points.iter())
+        .flat_map(|g| g.data_points())
         .find(|dp| {
-            dp.attributes
-                .iter()
+            dp.attributes()
                 .any(|kv| kv.key.as_str() == "provider" && kv.value.as_str() == "openai")
         })
-        .map(|dp| dp.value);
+        .map(|dp| dp.value());
 
     let tokens_pct: Option<f64> = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.rate_limit.tokens_pct")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Gauge<f64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.rate_limit.tokens_pct")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::F64(MetricData::Gauge(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|g| g.data_points.iter())
+        .flat_map(|g| g.data_points())
         .find(|dp| {
-            dp.attributes
-                .iter()
+            dp.attributes()
                 .any(|kv| kv.key.as_str() == "provider" && kv.value.as_str() == "openai")
         })
-        .map(|dp| dp.value);
+        .map(|dp| dp.value());
 
     assert!(
         requests_pct.is_some(),
@@ -161,16 +158,15 @@ fn test_record_cost_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let cost_sum: f64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.cost.estimated")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<f64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.cost.estimated")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::F64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
 
     assert!(
@@ -199,19 +195,17 @@ fn test_record_request_increments_counter() {
     assert!(!metrics.is_empty());
 
     let llm_requests = metrics.iter().flat_map(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.llm.requests")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.llm.requests")
     });
     let mut total: u64 = 0;
     for m in llm_requests {
-        if let Some(sum) = m
-            .data
-            .as_any()
-            .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-        {
-            total += sum.data_points.iter().map(|dp| dp.value).sum::<u64>();
+        if let Some(sum) = match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
+        } {
+            total += sum.data_points().map(|dp| dp.value()).sum::<u64>();
         }
     }
     assert_eq!(total, 3, "should have recorded 3 LLM requests");
@@ -233,16 +227,14 @@ fn test_record_usage_increments_token_counters() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_input = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.tokens.input")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.tokens.input")
     });
     let has_output = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.tokens.output")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.tokens.output")
     });
     assert!(has_input, "should have ragent.tokens.input");
     assert!(has_output, "should have ragent.tokens.output");
@@ -264,10 +256,9 @@ fn test_record_duration_records_histogram() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_duration = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.llm.duration")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.llm.duration")
     });
     assert!(has_duration, "should have ragent.llm.duration");
 }
@@ -288,10 +279,9 @@ fn test_record_ttft_records_histogram() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_ttft = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.llm.time_to_first_token")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.llm.time_to_first_token")
     });
     assert!(has_ttft, "should have ragent.llm.time_to_first_token");
 }
@@ -312,28 +302,24 @@ fn test_attributes_include_model_and_provider() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_attrs = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.llm.requests")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.llm.requests")
             .flat_map(|m| {
-                if let Some(sum) = m
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    sum.data_points.to_vec()
+                if let Some(sum) = match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    sum.data_points().collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .any(|dp| {
-                dp.attributes
-                    .iter()
+                dp.attributes()
                     .any(|kv| kv.key.as_str() == "model" && kv.value.as_str() == "gpt-4")
                     && dp
-                        .attributes
-                        .iter()
+                        .attributes()
                         .any(|kv| kv.key.as_str() == "provider" && kv.value.as_str() == "openai")
             })
     });
@@ -372,16 +358,15 @@ fn test_tool_recorder_record_invocation_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.tool.invocations")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.tool.invocations")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 3, "should have recorded 3 tool invocations");
 }
@@ -402,10 +387,9 @@ fn test_tool_recorder_record_duration_records_histogram() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_duration = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.tool.duration")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.tool.duration")
     });
     assert!(has_duration, "should have ragent.tool.duration");
 }
@@ -426,24 +410,21 @@ fn test_tool_recorder_attributes_include_tool_name() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_attrs = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.tool.invocations")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.tool.invocations")
             .flat_map(|m| {
-                if let Some(sum) = m
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    sum.data_points.to_vec()
+                if let Some(sum) = match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    sum.data_points().collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .any(|dp| {
-                dp.attributes
-                    .iter()
+                dp.attributes()
                     .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "read")
             })
     });
@@ -491,31 +472,29 @@ fn test_session_recorder_record_session_start_increments_counters() {
 
     let active: i64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.sessions.active")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<i64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.sessions.active")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(active, 2, "sessions.active should be 2 after two starts");
 
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.sessions.total")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.sessions.total")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 2, "sessions.total should be 2 after two starts");
 }
@@ -539,16 +518,15 @@ fn test_session_recorder_record_session_end_decrements_active() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let active: i64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.sessions.active")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<i64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.sessions.active")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(
         active, 1,
@@ -572,16 +550,14 @@ fn test_session_recorder_record_agent_loop_records_histograms() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_duration = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.agent_loop.duration")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.agent_loop.duration")
     });
     let has_iterations = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.agent_loop.iterations")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.agent_loop.iterations")
     });
     assert!(has_duration, "should have ragent.agent_loop.duration");
     assert!(has_iterations, "should have ragent.agent_loop.iterations");
@@ -616,31 +592,29 @@ fn test_coordinator_recorder_record_agent_spawn() {
 
     let spawns: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.subagent.spawns")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.subagent.spawns")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(spawns, 2, "subagent.spawns should be 2");
 
     let active: i64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.agents.active")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<i64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.agents.active")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(active, 2, "agents.active should be 2 after two spawns");
 }
@@ -665,16 +639,15 @@ fn test_coordinator_recorder_record_agent_complete() {
 
     let active: i64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.agents.active")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<i64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.agents.active")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(
         active, 1,
@@ -683,16 +656,15 @@ fn test_coordinator_recorder_record_agent_complete() {
 
     let completed: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.agents.completed")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.agents.completed")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(completed, 1, "agents.completed should be 1");
 }
@@ -715,38 +687,34 @@ fn test_coordinator_recorder_record_error() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.errors.total")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.errors.total")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 2, "errors.total should be 2");
 
     let has_component = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.errors.total")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.errors.total")
             .flat_map(|m| {
-                if let Some(sum) = m
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    sum.data_points.to_vec()
+                if let Some(sum) = match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    sum.data_points().collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .any(|dp| {
-                dp.attributes
-                    .iter()
+                dp.attributes()
                     .any(|kv| kv.key.as_str() == "component" && kv.value.as_str() == "coordinator")
             })
     });
@@ -774,21 +742,20 @@ fn test_coordinator_recorder_record_timeout() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.timeouts.total")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.timeouts.total")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 2, "timeouts.total should be 2");
 }
 
-// ── PermissionRecorder tests (T-016, FR-016) ──────────────────────────
+// -- PermissionRecorder tests (T-016, FR-016) --------------------------
 
 #[test]
 fn test_disabled_permission_recorder_is_noop() {
@@ -817,16 +784,15 @@ fn test_permission_recorder_record_approved_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.permission.approved")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.permission.approved")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 3, "permission.approved should be 3");
 }
@@ -850,16 +816,15 @@ fn test_permission_recorder_record_denied_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.permission.denied")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.permission.denied")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 3, "permission.denied should be 3");
 }
@@ -883,24 +848,21 @@ fn test_permission_recorder_attributes_include_tool_name() {
 
     // Check approved has tool.name=bash
     let has_bash = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.permission.approved")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.permission.approved")
             .flat_map(|m| {
-                if let Some(sum) = m
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    sum.data_points.to_vec()
+                if let Some(sum) = match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    sum.data_points().collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .any(|dp| {
-                dp.attributes
-                    .iter()
+                dp.attributes()
                     .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "bash")
             })
     });
@@ -911,24 +873,21 @@ fn test_permission_recorder_attributes_include_tool_name() {
 
     // Check denied has tool.name=edit
     let has_edit = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == "ragent.permission.denied")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == "ragent.permission.denied")
             .flat_map(|m| {
-                if let Some(sum) = m
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    sum.data_points.to_vec()
+                if let Some(sum) = match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    sum.data_points().collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .any(|dp| {
-                dp.attributes
-                    .iter()
+                dp.attributes()
                     .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "edit")
             })
     });
@@ -944,7 +903,7 @@ fn test_permission_recorder_is_clone() {
     let _clone = rec;
 }
 
-// ── CompressionRecorder tests (T-017, FR-017) ──────────────────────────
+// -- CompressionRecorder tests (T-017, FR-017) --------------------------
 
 #[test]
 fn test_disabled_compression_recorder_is_noop() {
@@ -972,16 +931,15 @@ fn test_compression_recorder_record_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.context.compressions")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.context.compressions")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 3, "context.compressions should be 3");
 }
@@ -1002,10 +960,9 @@ fn test_compression_recorder_records_ratio_histogram() {
 
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_ratio = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.context.compression_ratio")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.context.compression_ratio")
     });
     assert!(
         has_ratio,
@@ -1019,7 +976,7 @@ fn test_compression_recorder_is_clone() {
     let _clone = rec;
 }
 
-// ── SnapshotRecorder tests (T-027, FR-029) ─────────────────────────────
+// -- SnapshotRecorder tests (T-027, FR-029) -----------------------------
 
 #[test]
 fn test_disabled_snapshot_recorder_is_noop() {
@@ -1047,16 +1004,15 @@ fn test_snapshot_recorder_record_restore_increments_counter() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.snapshot.restores")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.snapshot.restores")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 3, "snapshot.restores should be 3");
 }
@@ -1080,16 +1036,15 @@ fn test_snapshot_recorder_respects_metric_toggle() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let total: u64 = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == "ragent.snapshot.restores")
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == "ragent.snapshot.restores")
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum();
     assert_eq!(total, 0, "snapshot.restores should be disabled by toggle");
 }

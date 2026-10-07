@@ -2,6 +2,10 @@
 //! operations with refusal guards (spec `connectors` T-009; FR-011, FR-027,
 //! FR-028, FR-029, FR-030).
 
+mod support;
+
+use support::TempTree;
+
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -9,29 +13,6 @@ use ragent_connectors::{
     AddError, ConnectorDescriptor, InstallSource, MANIFEST_FILE, RemoveError, StageError,
     StoreDirs, StoreLedger, add, classify_source, install_descriptor, remove,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/install-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn dirs(tree: &TempTree) -> StoreDirs {
     StoreDirs {

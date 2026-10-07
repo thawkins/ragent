@@ -11,7 +11,7 @@ use ragent_codeindex::types::{
 };
 use serde_json::Value;
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// -- Helpers --------------------------------------------------------------
 
 fn make_entry(path: &str, hash: &str) -> FileEntry {
     FileEntry {
@@ -107,7 +107,7 @@ fn build_store() -> IndexStore {
     store
 }
 
-// ── to_json ─────────────────────────────────────────────────────────────
+// -- to_json -------------------------------------------------------------
 
 #[test]
 fn test_to_json_empty_graph() {
@@ -215,7 +215,7 @@ fn test_to_json_contains_extracted_and_inferred_edges() {
     assert!(has_inferred, "should contain INFERRED edges");
 }
 
-// ── to_report ───────────────────────────────────────────────────────────
+// -- to_report -----------------------------------------------------------
 
 #[test]
 fn test_to_report_empty_graph() {
@@ -292,7 +292,7 @@ fn test_to_report_statistics_counts_are_correct() {
     assert!(report.contains("**Inferred:** 1"), "correct inferred count");
 }
 
-// ── SymbolGraph::export_json / export_report ────────────────────────────
+// -- SymbolGraph::export_json / export_report ----------------------------
 
 #[test]
 fn test_symbol_graph_export_json() {

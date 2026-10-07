@@ -3,7 +3,7 @@
 //! Provides an in-memory [`MockStorage`] that implements
 //! [`ragent_tools_extended::storage::StorageBackend`] for the todo CRUD
 //! methods.  Previously copy-pasted as identical `MockStorage` (in 3 test
-//! files) and `DemoStorage` (in 1 example) — see `DUPPLAN.md` Milestone H.
+//! files) and `DemoStorage` (in 1 example) - see `DUPPLAN.md` Milestone H.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -12,7 +12,7 @@ use ragent_tools_extended::storage::{EmbeddingMatch, MemoryRow, StorageBackend, 
 
 /// In-memory mock storage for testing the todo tool.
 ///
-/// All fields are wrapped in `Arc<Mutex<…>>` so the struct can be cheaply
+/// All fields are wrapped in `Arc<Mutex<...>>` so the struct can be cheaply
 /// cloned (via `Arc`) while keeping interior mutability across async calls.
 #[derive(Clone)]
 pub struct MockStorage {

@@ -367,7 +367,7 @@ async fn test_manager_list_exclude_archived() {
     assert_eq!(with_archived.len(), 2);
 }
 
-// ── transition_with_flags tests (T-036, FR-019) ─────────────────────────
+// -- transition_with_flags tests (T-036, FR-019) -------------------------
 
 #[tokio::test]
 async fn test_transition_with_flags_disabled_allows_clarifications() {
@@ -448,7 +448,7 @@ async fn test_transition_backward_compat_blocks_clarifications() {
     assert!(result.is_err());
 }
 
-// ── Phase -1 gate transition tests (T-017, FR-008) ──────────────────────
+// -- Phase -1 gate transition tests (T-017, FR-008) ----------------------
 
 /// Helper: create a spec dir with a PLAN.md containing the given gate
 /// markdown.

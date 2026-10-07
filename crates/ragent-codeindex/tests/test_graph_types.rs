@@ -4,7 +4,7 @@ use ragent_codeindex::store::IndexStore;
 use ragent_codeindex::types::{Confidence, EdgeKind, GraphEdge};
 use std::str::FromStr;
 
-// ── EdgeKind Display / FromStr round-trip ───────────────────────────────────
+// -- EdgeKind Display / FromStr round-trip -----------------------------------
 
 #[test]
 fn test_edge_kind_display() {
@@ -54,7 +54,7 @@ fn test_edge_kind_round_trip() {
     }
 }
 
-// ── Confidence Display / FromStr round-trip ─────────────────────────────────
+// -- Confidence Display / FromStr round-trip ---------------------------------
 
 #[test]
 fn test_confidence_display() {
@@ -89,7 +89,7 @@ fn test_confidence_round_trip() {
     }
 }
 
-// ── GraphEdge struct ────────────────────────────────────────────────────────
+// -- GraphEdge struct --------------------------------------------------------
 
 #[test]
 fn test_graph_edge_construction() {
@@ -166,7 +166,7 @@ fn test_graph_edge_serde() {
     assert_eq!(edge, deserialized);
 }
 
-// ── Store typed methods ───────────────────────────────────��─────────────────
+// -- Store typed methods -----------------------------------��-----------------
 
 use chrono::Utc;
 use ragent_codeindex::types::{FileEntry, Symbol, SymbolKind, Visibility};

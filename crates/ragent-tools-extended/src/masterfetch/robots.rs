@@ -715,36 +715,25 @@ fn build_path(url: &Url) -> String {
     }
 }
 
-/// Extract the domain (lowercased host) from a URL string.
+/// The single shared domain extractor (T-302).
 ///
-/// Returns `None` if the URL is invalid, has no host, or uses a non-HTTP
-/// scheme.
+/// Re-exported from [`crate::masterfetch::urlnorm::extract_domain`] so the
+/// canonical implementation exists exactly once. Unlike the former local
+/// helper it returns `Option`: an invalid URL, a hostless URL, or a
+/// non-`http`/`https` scheme all yield `None`. Callers that need the failure
+/// kind ([`extract_path`], scheme validation) parse the URL directly.
 ///
 /// # Examples
 ///
 /// ```
 /// use ragent_tools_extended::masterfetch::robots::extract_domain;
 ///
-/// assert_eq!(extract_domain("https://Example.com/path").unwrap(), "example.com");
-/// assert_eq!(extract_domain("http://example.com:8080/page").unwrap(), "example.com");
-/// assert!(extract_domain("file:///etc/passwd").is_err());
-/// assert!(extract_domain("not a url").is_err());
+/// assert_eq!(extract_domain("https://Example.com/path"), Some("example.com".to_string()));
+/// assert_eq!(extract_domain("http://example.com:8080/page"), Some("example.com".to_string()));
+/// assert_eq!(extract_domain("file:///etc/passwd"), None);
+/// assert_eq!(extract_domain("not a url"), None);
 /// ```
-pub fn extract_domain(url: &str) -> Result<String, RobotsError> {
-    let parsed = Url::parse(url).map_err(|e| RobotsError::Parse(e.to_string()))?;
-
-    let scheme = parsed.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(RobotsError::UnsupportedScheme(scheme.to_string()));
-    }
-
-    let host = parsed
-        .host_str()
-        .ok_or(RobotsError::NoHost)?
-        .to_ascii_lowercase();
-
-    Ok(host)
-}
+pub use crate::masterfetch::urlnorm::extract_domain;
 
 /// Extract the URL path (and query string if present) for robots matching.
 ///

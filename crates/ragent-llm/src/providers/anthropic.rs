@@ -64,9 +64,7 @@ impl Provider for AnthropicProvider {
 
     /// Discover available models from Anthropic's `/v1/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("anthropic")
             .context("Anthropic model discovery requires ANTHROPIC_API_KEY")?;
         let models = list_anthropic_models(&api_key, None)
             .await
@@ -398,6 +396,8 @@ impl LlmClient for AnthropicClient {
             // ANTIPAT 3.1/3.2: route the error body through the capped
             // reader so a hostile endpoint cannot buffer an unbounded body.
             let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let body = ragent_types::sanitize::redact_secrets(&body);
             tracing::warn!(
                 url = %url,
                 model = %request.model,

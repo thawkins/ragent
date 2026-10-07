@@ -15,7 +15,7 @@ use std::sync::Arc;
 fn base_ctx() -> ToolContext {
     ToolContext {
         session_id: "session-1".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         agent_manager: None,
@@ -152,7 +152,7 @@ async fn test_ragent_info_json_format_is_structured() {
 
 #[tokio::test]
 async fn test_ragent_info_never_errors_without_model_or_network() {
-    // No active model, no provider registry, no config — must still succeed.
+    // No active model, no provider registry, no config - must still succeed.
     let registry = create_default_registry();
     let tool = registry.get("ragent_info").expect("ragent_info registered");
     let ctx = base_ctx();

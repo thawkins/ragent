@@ -259,13 +259,13 @@ fn file_backed_log_persists_across_reopen() {
 
 #[test]
 fn append_failure_does_not_advance_state() {
-    // FR-017: when an append is rejected, the store does not advance — the
+    // FR-017: when an append is rejected, the store does not advance - the
     // next valid append still uses the correct sequence.
     let log = ActivityLog::open_in_memory().unwrap();
     let run = RunId::from("run-1");
     log.append_new(&run, EventKind::Lifecycle { event: "ok".into() })
         .unwrap();
-    // attempt an out-of-order append — must fail
+    // attempt an out-of-order append - must fail
     let bad = make_event(
         "run-1",
         5,

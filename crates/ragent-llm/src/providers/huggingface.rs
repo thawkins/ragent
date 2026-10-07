@@ -73,11 +73,7 @@ impl Provider for HuggingFaceProvider {
     /// discovery even when no API token is configured.  A token is still required
     /// to actually perform chat completions via [`create_client`].
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("HF_TOKEN")
-            .or_else(|_| std::env::var("HUGGINGFACE_API_KEY"))
-            .or_else(|_| std::env::var("HUGGING_FACE_HUB_TOKEN"))
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("huggingface")
             .unwrap_or_default();
         let models = discover_models(&api_key)
             .await
@@ -551,6 +547,8 @@ impl LlmClient for HuggingFaceClient {
                 );
             }
 
+            // SEC: redact the provider error body before logging or surfacing it.
+            let body_text = ragent_types::sanitize::redact_secrets(&body_text);
             tracing::warn!(
                 url = %url,
                 model = %request.model,

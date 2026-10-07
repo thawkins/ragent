@@ -1,16 +1,16 @@
 //! Regression tests for the detached (`/spawn`) sub-agent path and the
-//! completion-bookkeeping gaps that made `/spawn general … write ANTIPAT.md`
+//! completion-bookkeeping gaps that made `/spawn general ... write ANTIPAT.md`
 //! appear to do nothing.
 //!
 //! Covered regressions (live-observed):
 //!
-//! 1. **`output_file` was never populated** — the task layer never wrote
+//! 1. **`output_file` was never populated** - the task layer never wrote
 //!    `log/subagents/<task-id>.md`, so the durable recovery path documented
 //!    in `wait_agents`/`list_agents` did not exist on disk.
-//! 2. **`finish_reason` was hard-coded `"stop"`** — a run cut by the
+//! 2. **`finish_reason` was hard-coded `"stop"`** - a run cut by the
 //!    provider's silent end-of-stream still claimed a healthy finish in the
 //!    Agents panel and the log line.
-//! 3. **Detached visibility semantics** — a detached task must be invisible
+//! 3. **Detached visibility semantics** - a detached task must be invisible
 //!    to the delegation surface (`list_agents`, `running_background_count`,
 //!    `wait_agents` default wait-set, `drain_completed` injection) while
 //!    still being reaped and still present in `tasks_snapshot` (the Agents
@@ -83,7 +83,7 @@ fn test_processor() -> Arc<SessionProcessor> {
 fn make_ctx(session_id: &str, event_bus: Arc<EventBus>, manager: Arc<AgentManager>) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus,
         storage: None,
         agent_manager: Some(manager),
@@ -165,7 +165,7 @@ fn test_persist_task_output_writes_full_report_file() {
 #[test]
 fn test_persist_task_output_failure_returns_none_not_panic() {
     // A path that cannot be created (child of an existing *file*) must yield
-    // `None`, not an unwrap/panic — the caller then leaves `output_file`
+    // `None`, not an unwrap/panic - the caller then leaves `output_file`
     // unset rather than crashing the completion path.
     let dir = tempfile::tempdir().expect("tempdir");
     let blocker = dir.path().join("not-a-dir");
@@ -275,7 +275,7 @@ async fn test_detached_completed_task_hidden_from_delegation_surface() {
     // (b) running_background_count is unaffected by detached entries.
     assert_eq!(manager.running_background_count().await, 0);
 
-    // (c) wait_agents with omit-task_ids only reports the normal task —
+    // (c) wait_agents with omit-task_ids only reports the normal task -
     //     the detached one is invisible even to the tool's default wait set.
     let ctx = make_ctx(parent, event_bus, Arc::clone(&manager));
     let out = WaitAgentsTool
@@ -312,13 +312,13 @@ async fn test_detached_task_reaped_but_present_in_snapshot() {
     let snapshot = manager.tasks_snapshot().await;
     assert!(snapshot.iter().any(|e| e.id == "general-detached1"));
 
-    // drain_completed returns nothing for the parent (no injection)…
+    // drain_completed returns nothing for the parent (no injection)...
     let drained = manager.drain_completed(parent).await;
     assert!(
         drained.is_empty(),
         "detached completions are reaped, never injected"
     );
-    // …and the entry is reaped from the task map so the registry does not
+    // ...and the entry is reaped from the task map so the registry does not
     // leak completed detached agents for the process lifetime.
     assert!(
         manager.get_task("general-detached1").await.is_none(),

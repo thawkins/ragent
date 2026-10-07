@@ -186,7 +186,7 @@ async fn test_agent_switch_no_event_without_session() {
     let mut rx = bus.subscribe();
     let mut app = make_app(bus);
 
-    // No session set — should not publish
+    // No session set - should not publish
     assert!(app.session_id.is_none());
     press_tab(&mut app).await;
 

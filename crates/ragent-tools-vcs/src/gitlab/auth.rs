@@ -106,10 +106,8 @@ pub fn load_token(storage: &Storage) -> Option<String> {
 /// Returns the underlying storage error when the credential store cannot be
 /// read.
 pub fn load_token_checked(storage: &Storage) -> Result<Option<String>> {
-    // 1. Environment variable
-    if let Ok(token) = std::env::var("GITLAB_TOKEN")
-        && !token.is_empty()
-    {
+    // 1. Environment variable (canonical credential-env helper, audit T-111).
+    if let Some(token) = ragent_config::credential_env::read_credential_env("GITLAB_TOKEN") {
         return Ok(Some(token));
     }
 

@@ -219,7 +219,7 @@ fn from_frontmatter_fails_on_invalid_name() {
     assert!(matches!(err, ResearchItemError::InvalidName(_)));
 }
 
-// ── derive_title ───────────────────────────────────────────────────────
+// -- derive_title -------------------------------------------------------
 
 #[test]
 fn derive_title_uses_full_topic_not_first_word() {
@@ -458,7 +458,7 @@ fn error_display_messages_are_useful() {
     assert!(err.to_string().contains("parse error"));
 }
 
-// ── strip_control_chars / frontmatter sanitization ────────────────────
+// -- strip_control_chars / frontmatter sanitization --------------------
 
 #[test]
 fn strip_control_chars_preserves_newlines_and_tabs() {

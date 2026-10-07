@@ -39,7 +39,7 @@ fn test_todos_table_has_task_columns_after_migration() {
 
 /// Verify that a row created via `create_task_simple` (which does not set the
 /// new columns) gets the safe column defaults when read back via
-/// `list_tasks` — FR-002.
+/// `list_tasks` - FR-002.
 #[test]
 fn test_create_task_simple_gets_safe_defaults_for_new_columns() {
     let storage = Storage::open_in_memory().expect("in-memory storage");
@@ -154,7 +154,7 @@ fn test_list_tasks_with_status_filter_reads_task_columns() {
 }
 
 /// Verify that a legacy `blocked_by` value that is not valid JSON does
-/// not cause a panic — `map_task_row` falls back to an empty Vec.
+/// not cause a panic - `map_task_row` falls back to an empty Vec.
 #[test]
 fn test_blocked_by_invalid_json_falls_back_to_empty() {
     let storage = Storage::open_in_memory().expect("in-memory storage");
@@ -195,7 +195,7 @@ fn test_migration_is_idempotent() {
     std::fs::create_dir_all(&dir).unwrap();
     let db_path = dir.join("test.db");
 
-    // First open — runs migration, adds columns.
+    // First open - runs migration, adds columns.
     {
         let storage = Storage::open(&db_path).expect("open storage");
         storage
@@ -206,7 +206,7 @@ fn test_migration_is_idempotent() {
             .expect("create todo");
     }
 
-    // Second open — migration should be a no-op, no errors.
+    // Second open - migration should be a no-op, no errors.
     {
         let storage = Storage::open(&db_path).expect("reopen storage");
         let todos = storage.list_tasks("sess-1", None).expect("get todos");

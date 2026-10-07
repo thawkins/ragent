@@ -97,7 +97,7 @@ fn full_row(terminal: &Terminal<TestBackend>, y: u16) -> String {
     row_text(terminal, y, 0, width)
 }
 
-// ── Malformed entries are carried and counted (FR-025) ──────────────────────
+// -- Malformed entries are carried and counted (FR-025) ----------------------
 
 #[test]
 fn set_index_carries_the_skipped_malformed_count() {
@@ -134,7 +134,7 @@ fn a_delivered_index_carries_the_skipped_count_into_the_browser() {
     assert_eq!(browser.skipped, 2, "the skipped count survives the poll");
 }
 
-// ── The skipped count is reported in the panel (FR-025) ─────────────────────
+// -- The skipped count is reported in the panel (FR-025) ---------------------
 
 #[test]
 fn a_partial_index_reports_the_skipped_count_in_the_title() {
@@ -201,7 +201,7 @@ fn a_no_match_query_reports_the_skipped_count() {
     );
 }
 
-// ── A failed fetch is formatted inline and stays dismissible (FR-013) ────────
+// -- A failed fetch is formatted inline and stays dismissible (FR-013) --------
 
 #[test]
 fn the_error_body_names_the_malformed_json_cause() {
@@ -246,7 +246,7 @@ fn a_malformed_index_error_polled_from_the_slot_is_contained() {
     assert!(app.plugin_store.is_some(), "no panic closed the panel");
 }
 
-// ── No render path panics on hostile/edge store data (FR-025) ───────────────
+// -- No render path panics on hostile/edge store data (FR-025) ---------------
 
 #[test]
 fn an_out_of_range_cursor_with_no_results_does_not_panic_on_render() {

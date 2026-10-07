@@ -8,7 +8,7 @@ use ragent_types::event::EventBus;
 use std::path::Path;
 use tempfile::TempDir;
 
-// ── PreToolUse inline-command tests (T-001) ─────────────────────────────────
+// -- PreToolUse inline-command tests (T-001) ---------------------------------
 
 #[test]
 fn test_pre_tool_use_exit_code_2_blocks_and_ignores_stdout_allow() {
@@ -235,7 +235,7 @@ fn test_pre_tool_use_no_hooks_returns_no_decision() {
     );
 }
 
-// ── PostToolUse inline-command tests (T-002) ───────────────────────────────
+// -- PostToolUse inline-command tests (T-002) -------------------------------
 
 #[tokio::test]
 async fn test_post_tool_use_exit_code_0_parses_modified_output() {
@@ -494,7 +494,7 @@ async fn test_post_tool_use_flagged_takes_priority_over_warn() {
     assert!(got_flagged, "ToolResultFlagged should have been published");
 }
 
-// ── Hook spawn failure / timeout tests (T-003, FR-016) ─────────────────────
+// -- Hook spawn failure / timeout tests (T-003, FR-016) ---------------------
 
 #[tokio::test]
 async fn test_post_tool_use_timeout_falls_through_to_ok() {
@@ -622,7 +622,7 @@ async fn test_post_tool_use_timeout_does_not_override_flagged() {
     }
 }
 
-// ── PreToolUse fixture-script tests (T-005) ────────────────────────────────
+// -- PreToolUse fixture-script tests (T-005) --------------------------------
 //
 // These tests create actual shell scripts in a temp dir and invoke them via
 // HookConfig, validating the full path from file-based hook scripts through
@@ -810,7 +810,7 @@ fn test_fixture_pre_tool_use_exit_1_warns_and_allows() {
 #[test]
 fn test_fixture_pre_tool_use_exit_2_blocks() {
     let dir = TempDir::new().expect("tempdir");
-    // Exit 2 with stdout allow — stdout JSON must be ignored (FR-003).
+    // Exit 2 with stdout allow - stdout JSON must be ignored (FR-003).
     let script = write_hook_script(
         &dir,
         "block.sh",

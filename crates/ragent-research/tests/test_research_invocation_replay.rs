@@ -10,7 +10,7 @@
 use ragent_research::cli::ResearchCliCommand;
 use ragent_research::{InvocationParseError, ResearchRunRequest};
 
-// ── CLI argv form ─────────────────────────────────────────────────────────
+// -- CLI argv form ---------------------------------------------------------
 
 #[test]
 fn from_invocation_parses_cli_argv_form() {
@@ -55,7 +55,7 @@ fn from_invocation_preserves_model_and_concurrency_flags() {
     assert_eq!(req.evaluate, Some(true));
 }
 
-// ── TUI slash form ────────────────────────────────────────────────────────
+// -- TUI slash form --------------------------------------------------------
 
 #[test]
 fn from_invocation_parses_tui_slash_form() {
@@ -67,7 +67,7 @@ fn from_invocation_parses_tui_slash_form() {
     assert_eq!(req.invocation.as_deref(), Some(recorded));
 }
 
-// ── HTTP summary form ─────────────────────────────────────────────────────
+// -- HTTP summary form -----------------------------------------------------
 
 #[test]
 fn from_invocation_parses_http_summary_form() {
@@ -93,7 +93,7 @@ fn from_invocation_parses_http_summary_with_flags() {
     assert_eq!(req.iterations, Some(2));
 }
 
-// ── Round trip: create → invocation → replay ──────────────────────────────
+// -- Round trip: create -> invocation -> replay ------------------------------
 
 #[test]
 fn replayed_request_builds_the_same_session_config() {
@@ -112,7 +112,7 @@ fn replayed_request_builds_the_same_session_config() {
     assert_eq!(a.local.disable_local, b.local.disable_local);
 }
 
-// ── Error cases ───────────────────────────────────────────────────────────
+// -- Error cases -----------------------------------------------------------
 
 #[test]
 fn from_invocation_rejects_empty_string() {
@@ -137,7 +137,7 @@ fn from_invocation_rejects_create_without_name() {
     assert!(matches!(err, InvocationParseError::MissingName));
 }
 
-// ── `update` verb in the shared parser ────────────────────────────────────
+// -- `update` verb in the shared parser ------------------------------------
 
 #[test]
 fn parse_update_takes_first_positional_name() {

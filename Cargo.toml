@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.128"
+version = "1.0.129"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -158,6 +158,7 @@ ragent-connectors = { path = "crates/ragent-connectors" }
 ragent-llm = { path = "crates/ragent-llm" }
 ragent-plugins = { path = "crates/ragent-plugins" }
 ragent-server = { path = "crates/ragent-server" }
+ragent-surface = { path = "crates/ragent-surface" }
 ragent-tui = { path = "crates/ragent-tui" }
 
 # ── Hashing / file-locking ───────────────────────────────────────────────
@@ -196,7 +197,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # ── HTTP client ──────────────────────────────────────────────────────────
 # default-features = false avoids native-tls; rustls-tls is pure-Rust and auditable.
-reqwest = { version = "0.12", features = ["blocking", "json", "stream", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["blocking", "json", "stream", "rustls", "form", "query"], default-features = false }
 
 # ── WebSocket client (CDP browser automation) ─────────────────────────────
 # rustls-tls: pure-Rust TLS, no native OpenSSL dependency.
@@ -226,7 +227,7 @@ similar = "3"
 regex = "1"
 readability-rs = "0.5"
 base64 = "0.23"
-rand = "0.9"
+rand = "0.10"
 
 # ── ripgrep library crates ───────────────────────────────────────────────
 grep-regex = "0.1"
@@ -257,7 +258,7 @@ quick-xml = { version = "0.39", features = ["serialize"] }
 # default-features = false: only text_layout + raster formats needed.
 printpdf = { version = "0.12", default-features = false, features = ["text_layout", "png", "jpeg"] }
 pdf-extract = "0.10"
-lopdf = "0.39"
+lopdf = "0.44"
 
 url = "2"
 
@@ -286,7 +287,7 @@ ragent-types = { path = "crates/ragent-types" }
 ragent-tools-extended = { path = "crates/ragent-tools-extended" }
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # ── Embeddings (optional, feature-gated) ────────────────────────────────
 ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"] }
@@ -305,12 +306,6 @@ pdf-extract = { path = "vendor/pdf-extract" }
 # `WrappedBlock::flush_word` — upstream 0.16.7 computes `self.width - self.line.len`
 # with plain subtraction. See vendor/html2text/src/render/text_renderer.rs.
 html2text = { path = "vendor/html2text" }
-# Vendored (0.38, the version `pdf-extract` uses) to bound the recursion depth
-# of the array/dictionary object parser. A PDF of a few thousand nested `[`
-# overflowed the native stack; the resulting SIGSEGV is converted to SIGABRT
-# and aborts the process, which `catch_unwind`/thread isolation cannot stop.
-# See vendor/lopdf/src/parser/mod.rs `MAX_OBJECT_DEPTH`.
-lopdf = { path = "vendor/lopdf" }
 
 [[bin]]
 name = "ragent"

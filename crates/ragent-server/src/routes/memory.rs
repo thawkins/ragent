@@ -33,7 +33,7 @@ use super::{AppState, error_response, internal_error_response, serialize_respons
 /// (still representative) view instead of an OOM.
 const MAX_VISUALISATION_MEMORIES: usize = 10_000;
 
-// ── Response types ───────────────────────────────────────────────────
+// -- Response types ---------------------------------------------------
 
 /// JSON representation of a structured memory (API response).
 #[derive(Serialize)]
@@ -65,7 +65,7 @@ pub struct MemoryResponse {
     pub tags: Vec<String>,
 }
 
-// ── Request types ─────────────────────────────────────────────────────
+// -- Request types -----------------------------------------------------
 
 /// Request body for `POST /memory/store`.
 #[derive(Deserialize, Clone)]
@@ -120,7 +120,7 @@ const fn default_limit() -> usize {
     20
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------
 
 /// Convert a `MemoryRow` and its tags into a JSON-friendly response.
 fn memory_row_to_response(
@@ -143,7 +143,7 @@ fn memory_row_to_response(
     }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────
+// -- Handlers ----------------------------------------------------------
 
 /// `GET /memory/search` - search structured memories (FTS5).
 pub async fn search_memories(
@@ -356,7 +356,7 @@ pub async fn forget_memory(
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------
 
 /// Register memory routes on an Axum router.
 pub fn memory_routes() -> axum::Router<AppState> {
@@ -369,7 +369,7 @@ pub fn memory_routes() -> axum::Router<AppState> {
         .route("/visualisation/tags", get(get_visualisation_tags))
         .route("/visualisation/heatmap", get(get_visualisation_heatmap))
 }
-// ─ Visualisation endpoints ──────────────────────────────────────────────────
+// - Visualisation endpoints --------------------------------------------------
 
 /// GET /memory/visualisation - Generate visualisation data for all memories.
 pub async fn get_visualisation(

@@ -91,7 +91,7 @@ tempfile = "3.5"
 # Team runtime / coordination-tool integration tests (relocated from the
 # retired ragent-team crate in ANTIPAT M7.8) exercise BashTool/CommandCatalog.
 ragent-tools-core = { path = "../ragent-tools-core" }
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 axum = { workspace = true }
 [[bench]]
 name = "agent_loop"

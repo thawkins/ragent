@@ -148,7 +148,7 @@ fn test_bottom_pinned_view_shows_last_message_with_wrapping() {
         app.messages.push(msg);
     }
 
-    // Pane: 40 columns x 10 rows → inner width 38, 8 visible rows.
+    // Pane: 40 columns x 10 rows -> inner width 38, 8 visible rows.
     let area = Rect::new(0, 0, 40, 10);
     render_message_area(&mut app, area);
 

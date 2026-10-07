@@ -785,7 +785,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             allowed_tools: None,
             stall_timeout_secs: None,
         },
-        // ── Domain-specific agents ───────────────────────────────────────
+        // -- Domain-specific agents ---------------------------------------
         AgentInfo {
             name: "rust-coder".to_string(),
             description: "Rust coding specialist - idiomatic code, error handling, async"

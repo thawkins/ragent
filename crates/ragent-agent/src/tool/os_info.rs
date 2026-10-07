@@ -944,7 +944,7 @@ impl GpuSection {
 /// Order in which detected graphics APIs are reported (FR-020).
 ///
 /// Direct3D/DirectX are Windows-only, Metal is macOS-only; the remainder are
-/// filtered per platform by [`api_supported`].
+/// filtered per platform by [`api_supported_in`].
 const API_ORDER: &[&str] = &[
     "Direct3D",
     "DirectX",
@@ -1107,28 +1107,42 @@ fn any_dir_has_file(dirs: &[&str]) -> bool {
 /// (needle match) and contribute the API version (FR-020, FR-021).
 #[allow(clippy::type_complexity)]
 fn probe_cache()
--> &'static std::sync::Mutex<Option<std::collections::HashMap<&'static str, Option<ProbeRun>>>> {
+-> &'static std::sync::Mutex<std::collections::HashMap<&'static str, Option<ProbeRun>>> {
     use std::sync::OnceLock;
     static CACHE: OnceLock<
-        std::sync::Mutex<Option<std::collections::HashMap<&'static str, Option<ProbeRun>>>>,
+        std::sync::Mutex<std::collections::HashMap<&'static str, Option<ProbeRun>>>,
     > = OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(None))
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
 /// Run one diagnostic at most once, returning its cached `(success, text)`.
 ///
 /// A `None` result means the tool could not be spawned or timed out (FR-011).
+///
+/// The probe may spawn a subprocess and block for up to the diagnostic's timeout
+/// (~2s), so the cache mutex is held only to read an existing entry and, on
+/// completion, to insert the new one. The (potentially blocking) [`run_probe`]
+/// runs with the lock released so concurrent `os_info` calls are not serialised
+/// behind it.
 fn probe_result(probe: &Probe) -> Option<(bool, String)> {
-    let mut guard = match probe_cache().lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let cache = guard.get_or_insert_with(std::collections::HashMap::new);
-    if let Some(entry) = cache.get(probe.name) {
-        return entry.clone();
+    let cache = probe_cache();
+    {
+        let guard = match cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(entry) = guard.get(probe.name) {
+            return entry.clone();
+        }
     }
     let result = run_probe(probe);
-    cache.insert(probe.name, result.clone());
+    {
+        let mut guard = match cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.insert(probe.name, result.clone());
+    }
     result
 }
 
@@ -1640,7 +1654,13 @@ fn split_hex_name(line: &str) -> Option<(String, String)> {
     if !id.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
-    let name = parts.collect::<Vec<_>>().join(" ");
+    let mut name = String::new();
+    for part in parts {
+        if !name.is_empty() {
+            name.push(' ');
+        }
+        name.push_str(part);
+    }
     if name.is_empty() {
         return None;
     }

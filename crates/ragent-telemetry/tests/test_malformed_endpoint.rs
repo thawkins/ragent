@@ -7,7 +7,7 @@
 //! endpoint and verifies that:
 //!
 //! 1. Subsystem construction either succeeds (gated to a no-op/safe provider)
-//!    or returns an `Err` — it never panics.
+//!    or returns an `Err` - it never panics.
 //! 2. Recording metrics through the resulting provider is still non-blocking
 //!    and does not panic.
 //! 3. Flush and shutdown complete without panicking, even if they return an

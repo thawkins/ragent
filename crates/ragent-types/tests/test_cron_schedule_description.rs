@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use ragent_types::{CronForm, CronSchedule};
 
-// ── OneShot form ──────────────────────────────────────────────────
+// -- OneShot form --------------------------------------------------
 
 #[test]
 fn test_human_readable_one_shot() {
@@ -39,7 +39,7 @@ fn test_human_readable_one_shot_includes_timestamp() {
     );
 }
 
-// ── RepeatNow form ───────────────────────────────────────────────
+// -- RepeatNow form -----------------------------------------------
 
 #[test]
 fn test_human_readable_repeat_now_minutes() {
@@ -86,7 +86,7 @@ fn test_human_readable_repeat_now_no_start_at() {
     );
 }
 
-// ── RepeatFrom form ──────────────────────────────────────────────
+// -- RepeatFrom form ----------------------------------------------
 
 #[test]
 fn test_human_readable_repeat_from() {
@@ -141,7 +141,7 @@ fn test_human_readable_repeat_from_includes_both_parts() {
     );
 }
 
-// ── Duration-to-string edge cases ─────────────────────────────────
+// -- Duration-to-string edge cases ---------------------------------
 
 #[test]
 fn test_human_readable_multi_hour_duration() {
@@ -177,7 +177,7 @@ fn test_human_readable_one_minute() {
     assert_eq!(sched.human_readable(), "every 1m");
 }
 
-// ── Form field consistency ────────────────────────────────────────
+// -- Form field consistency ----------------------------------------
 
 #[test]
 fn test_human_readable_form_in_description() {
@@ -203,7 +203,7 @@ fn test_human_readable_form_in_description() {
     assert!(repeat_from.human_readable().contains(" from "));
 }
 
-// ── CronForm matches ─────────────────────────────────────────────
+// -- CronForm matches ---------------------------------------------
 
 #[test]
 fn test_cron_form_one_shot_in_readable() {

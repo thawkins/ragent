@@ -341,7 +341,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     // inside code spans, fenced blocks, and existing Markdown links untouched.
     let mut body = linkify_urls(&body);
 
-    // ── Self-Evaluation Scorecard (FR-008 / T-015) ────────────────────────
+    // -- Self-Evaluation Scorecard (FR-008 / T-015) ------------------------
     // Insert the rendered scorecard before the References Index when available,
     // so it appears as a regular body section rather than inside frontmatter.
     if let Some(scorecard) = doc
@@ -357,7 +357,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
         }
     }
 
-    // ── CORPA.md companion document ──────────────────────────────────────
+    // -- CORPA.md companion document --------------------------------------
     // The QA render sections are split into this separate per-research
     // `CORPA.md` file so RESEARCH.md keeps its narrative focus (spec
     // corpusAnalysis). It reuses the same references table so `[#N]` source
@@ -414,7 +414,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 fn assemble_corpa_body(doc: &ResearchDocument) -> String {
     let mut body = String::new();
 
-    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
+    // -- Contradiction Graph (FR-005, T-007) -----------------------------
     if let Some(graph) = &doc.contradiction_graph {
         body.push_str("## Contradiction Graph\n\n");
         if graph.is_empty() {
@@ -446,7 +446,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
         }
     }
 
-    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
+    // -- Loci Analysis (FR-005, T-008) -----------------------------------
     if let Some(loci) = &doc.loci {
         body.push_str("## Loci Analysis\n\n");
         if loci.is_empty() {
@@ -457,11 +457,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
             body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
             body.push_str("|-------|---------|----------|-------------------------|\n");
             for locus in &loci.loci {
-                let indices: Vec<String> = locus
-                    .source_indices
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect();
+                let indices = format_source_refs(&locus.source_indices);
                 let snippets = if locus.snippets.is_empty() {
                     "-".to_string()
                 } else {
@@ -475,7 +471,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
                 body.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
                     escape_pipe(&locus.label),
-                    escape_pipe(&indices.join(", ")),
+                    escape_pipe(&indices),
                     locus.mentions,
                     escape_pipe(&snippets)
                 ));
@@ -484,7 +480,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
         }
     }
 
-    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
+    // -- Depth Investigation (FR-005, T-008) -------------------------------
     if let Some(investigations) = &doc.depth_investigation {
         body.push_str("## Depth Investigation\n\n");
         if investigations.is_empty() {
@@ -493,12 +489,7 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
             body.push_str("| Locus | Depth | Sources | Note |\n");
             body.push_str("|-------|-------|---------|------|\n");
             for inv in investigations {
-                let sources = inv
-                    .representative_sources
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let sources = format_source_refs(&inv.representative_sources);
                 body.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
                     escape_pipe(&inv.label),
@@ -511,31 +502,55 @@ fn assemble_corpa_body(doc: &ResearchDocument) -> String {
         }
     }
 
-    // ── Cross-Locus Reconcile (FR-005, T-009) ───────────────────────────
+    // -- Cross-Locus Reconcile (FR-005, T-009) ---------------------------
     if let Some(reconcile) = &doc.cross_locus_reconcile {
         body.push_str("## Cross-Locus Reconcile\n\n");
         body.push_str(&render_cross_locus_reconcile(reconcile));
     }
 
-    // ── Source Tensions (FR-005, T-009) ────────────────────────────────
+    // -- Source Tensions (FR-005, T-009) --------------------------------
     if let Some(tensions) = &doc.source_tensions {
         body.push_str("## Source Tensions\n\n");
         body.push_str(&render_source_tensions(tensions));
     }
 
-    // ── Synthesis Audit (FR-005, T-012) ─────────────────────────────────
+    // -- Synthesis Audit (FR-005, T-012) ---------------------------------
     if let Some(audit) = &doc.synthesis_audit {
         body.push_str("## Synthesis Audit\n\n");
         body.push_str(&render_synthesis_audit(audit));
     }
 
-    // ── Corpus Critic (FR-005, T-010) ───────────────────────────────────
+    // -- Corpus Critic (FR-005, T-010) -----------------------------------
     if let Some(report) = &doc.corpus_critic {
         body.push_str("## Corpus Critic\n\n");
         body.push_str(&render_corpus_critic(report));
     }
 
     body
+}
+
+/// Format a slice of source indices as a comma-separated list of `#N`
+/// reference tokens (e.g. `&[1, 3]` -> `"#1, #3"`).
+fn format_source_refs(indices: &[usize]) -> String {
+    indices
+        .iter()
+        .map(|i| format!("#{i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Return the strength of the strongest contradiction edge in `graph`, or `0`
+/// when the graph has no edges.
+///
+/// Both the Data Quality summary and the scoreboard use this helper so their
+/// strongest-edge figures always agree.
+fn strongest_edge_strength(graph: &ContradictionGraph) -> u32 {
+    graph
+        .edges
+        .iter()
+        .map(|e| u32::from(e.strength))
+        .max()
+        .unwrap_or(0)
 }
 
 /// Render the synthesis audit as a concise markdown section.
@@ -590,12 +605,7 @@ fn render_evidence_digest(digest: &EvidenceDigest) -> String {
     out.push_str("| Claim | Support | Contested | Note |\n");
     out.push_str("|-------|---------|-----------|------|\n");
     for claim in &digest.claims {
-        let sources = claim
-            .source_indices
-            .iter()
-            .map(|i| format!("#{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let sources = format_source_refs(&claim.source_indices);
         let contested = if claim.contested { "yes" } else { "no" };
         out.push_str(&format!(
             "| {} | {} ({}) | {} | {} |\n",
@@ -623,12 +633,7 @@ fn render_triple_draft(draft: &TripleDraft) -> String {
             candidate.label,
             escape_pipe(&candidate.note),
             strip_control_chars(&candidate.body).trim(),
-            candidate
-                .source_indices
-                .iter()
-                .map(|i| format!("#{i}"))
-                .collect::<Vec<_>>()
-                .join(", ")
+            format_source_refs(&candidate.source_indices)
         ));
     }
     out
@@ -644,12 +649,7 @@ fn render_cross_locus_reconcile(reconcile: &CrossLocusReconcile) -> String {
     out.push_str("| Locus A | Locus B | Shared Sources | Conflicts | Note |\n");
     out.push_str("|---------|---------|----------------|-----------|------|\n");
     for pair in &reconcile.pairs {
-        let shared = pair
-            .shared_source_indices
-            .iter()
-            .map(|i| format!("#{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let shared = format_source_refs(&pair.shared_source_indices);
         out.push_str(&format!(
             "| {} | {} | {} | {} | {} |\n",
             escape_pipe(&pair.locus_a),
@@ -673,12 +673,7 @@ fn render_source_tensions(tensions: &SourceTensions) -> String {
     out.push_str("| Kind | Label | Sources | Note |\n");
     out.push_str("|------|-------|---------|------|\n");
     for t in &tensions.tensions {
-        let sources = t
-            .source_indices
-            .iter()
-            .map(|i| format!("#{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let sources = format_source_refs(&t.source_indices);
         out.push_str(&format!(
             "| {} | {} | {} | {} |\n",
             escape_pipe(t.kind.as_str()),
@@ -731,14 +726,10 @@ fn render_corpus_critic(report: &crate::corpus_critic::CorpusCriticReport) -> St
         ));
     }
     if !report.isolated_sources.is_empty() {
-        let indices: Vec<String> = report
-            .isolated_sources
-            .iter()
-            .map(|i| format!("#{i}"))
-            .collect();
+        let indices = format_source_refs(&report.isolated_sources);
         out.push_str(&format!(
             "**Isolated sources:** {}\n\n",
-            escape_pipe(&indices.join(", "))
+            escape_pipe(&indices)
         ));
     }
     out
@@ -788,7 +779,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
 
     let mut out = String::new();
 
-    // ── Verdict line ──────────────────────────────────────────────────────
+    // -- Verdict line ------------------------------------------------------
     // Prefer the synthesis-audit recommendation; fall back to the corpus-critic
     // pass/fail status; finally emit a neutral line when only the graph or
     // tensions are present.
@@ -806,7 +797,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
     };
     out.push_str(&format!("**Overall verdict:** {}\n\n", verdict));
 
-    // ── Metrics table ─────────────────────────────────────────────────────
+    // -- Metrics table -----------------------------------------------------
     // Only rows with data are emitted, so a sparse QA run produces a compact
     // table rather than a row of placeholders.
     let mut rows: Vec<(String, String, String)> = Vec::new();
@@ -830,7 +821,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
         let count = graph.edges.len();
         // Use the true maximum so the Data Quality row agrees with the
         // scoreboard's strongest-edge computation below.
-        let strongest = graph.edges.iter().map(|e| e.strength).max().unwrap_or(0);
+        let strongest = strongest_edge_strength(graph);
         rows.push((
             "Contradictions".into(),
             format!("{count} edge(s)"),
@@ -908,7 +899,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
         out.push('\n');
     }
 
-    // ── Key concerns ──────────────────────────────────────────────────────
+    // -- Key concerns ------------------------------------------------------
     // Collect the most salient issue from each artifact so the reader can scan
     // the headline problems without opening each detailed section.
     let mut concerns: Vec<String> = Vec::new();
@@ -929,12 +920,7 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
     }
     if let Some(tensions) = &doc.source_tensions {
         for t in tensions.tensions.iter().take(2) {
-            let sources = t
-                .source_indices
-                .iter()
-                .map(|i| format!("#{i}"))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let sources = format_source_refs(&t.source_indices);
             concerns.push(format!(
                 "Tension ({}): {} [{}] - {}",
                 t.kind.as_str(),
@@ -1197,7 +1183,7 @@ fn render_scoreboard(doc: &ResearchDocument) -> String {
     let mut out = String::new();
     out.push_str("## Corpus Quality Scoreboard\n\n");
 
-    // ── Score line + meter bar (FR-002, FR-003, FR-006, FR-007) ─────────
+    // -- Score line + meter bar (FR-002, FR-003, FR-006, FR-007) ---------
     // Score precedence is corpus critic, then synthesis audit (FR-006).
     let score = doc
         .corpus_critic
@@ -1219,7 +1205,7 @@ fn render_scoreboard(doc: &ResearchDocument) -> String {
         }
     }
 
-    // ── Critic subscore line (FR-005, suppressed in abbreviated formats) ─
+    // -- Critic subscore line (FR-005, suppressed in abbreviated formats) -
     if !abbreviated && let Some(report) = &doc.corpus_critic {
         out.push_str(&format!(
             "- Critic: {} (coverage {} | evidence {} | balance {} | tension {})\n",
@@ -1231,7 +1217,7 @@ fn render_scoreboard(doc: &ResearchDocument) -> String {
         ));
     }
 
-    // ── Source-facts line (FR-004, FR-014) ──────────────────────────────
+    // -- Source-facts line (FR-004, FR-014) ------------------------------
     let cited = cited_source_indices(doc);
     let cited_count = cited.len();
     let full_text = sources.iter().filter(|s| s.has_body()).count();
@@ -1251,20 +1237,20 @@ fn render_scoreboard(doc: &ResearchDocument) -> String {
     }
     out.push('\n');
 
-    // ── Cited date-span line (FR-004) ───────────────────────────────────
+    // -- Cited date-span line (FR-004) -----------------------------------
     if let Some((earliest, latest, undated)) = cited_date_span(doc, &cited) {
         out.push_str(&format!(
             "- Cited date span: {earliest}-{latest} ({undated} undated)\n"
         ));
     }
 
-    // ── Tension/citation line (FR-009, FR-010, suppressed by FR-013) ────
+    // -- Tension/citation line (FR-009, FR-010, suppressed by FR-013) ----
     if !abbreviated {
         let mut tension_parts: Vec<String> = Vec::new();
         if let Some(graph) = &doc.contradiction_graph
             && !graph.edges.is_empty()
         {
-            let strongest = graph.edges.iter().map(|e| e.strength).max().unwrap_or(0);
+            let strongest = strongest_edge_strength(graph);
             tension_parts.push(format!(
                 "Contradictions: {} edges (strongest {strongest}/100)",
                 graph.edges.len()
@@ -1562,7 +1548,7 @@ use layout::{
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
-    // ── Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) ──
+    // -- Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) --
     // Rendered immediately after the title and before the first body section
     // (## Topic). Omitted entirely for skeleton documents with no gathered
     // sources and no QA artifacts. The detailed Data Quality & Consistency
@@ -1574,30 +1560,30 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     body.push_str(topic.trim());
     body.push_str("\n\n");
 
-    // ── Research Brief (FR-004 / T-004) ───────────────────────────────
+    // -- Research Brief (FR-004 / T-004) -------------------------------
     if let Some(brief) = doc.brief.as_deref().filter(|b| !b.is_empty()) {
         body.push_str("## Research Brief\n\n");
         body.push_str(&strip_control_chars(brief).trim());
         body.push_str("\n\n");
     }
 
-    // ── Search Queries ─────────────────────────────────────────────────
+    // -- Search Queries -------------------------------------------------
     push_search_queries(&mut body, doc, 1);
 
-    // ── Search Engine Summary ──────────────────────────────────────────
+    // -- Search Engine Summary ------------------------------------------
     // Per-engine breakdown of acquired web sources by media type (pages,
     // PDFs, videos). Rendered as a `###` sub-section under Search Queries
     // even in the legacy layout (pre-existing behaviour).
     push_search_engine_summary(&mut body, doc, 2);
 
-    // ── Search Provider Requests ────────────────────────────────────────
+    // -- Search Provider Requests ----------------------------------------
     // Per-provider search-request totals for the run (how many requests were
     // sent to each search tool/engine), rendered as a `###` sub-section
     // (pre-existing behaviour) only when the session recorded at least one
     // provider call.
     push_provider_requests(&mut body, doc, 2);
 
-    // ── Executive Summary ─────────────────────────────────────────────────
+    // -- Executive Summary -------------------------------------------------
     body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
         body.push_str("_(no executive summary recorded yet - run a gathering pass to populate)_\n");
@@ -1607,7 +1593,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     }
     body.push('\n');
 
-    // ── Top 10 Implications ──────────────────────────────────────────────
+    // -- Top 10 Implications ----------------------------------------------
     body.push_str("## Top 10 Implications\n\n");
     if doc.top_implications.is_empty() {
         body.push_str(
@@ -1622,10 +1608,10 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
-    // ── Open Questions ──────────────────────────────────────────────────
+    // -- Open Questions --------------------------------------------------
     push_open_questions(&mut body, doc, 1);
 
-    // ── Data Quality & Consistency ──────────────────────────────────────
+    // -- Data Quality & Consistency --------------------------------------
     // Synthesized overview of the QA artifacts, placed between the Top 10
     // Implications and Findings so the reader sees the quality summary before
     // diving into the detailed sections. Omitted entirely when no QA data
@@ -1636,7 +1622,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str(&dq_summary);
     }
 
-    // ── Concepts (spec researchcluster) ────────────────────────────────
+    // -- Concepts (spec researchcluster) --------------------------------
     // LLM-extracted concept list from the gathered corpus, rendered directly
     // above Findings so the reader sees the cross-source theme map before the
     // per-finding detail. Omitted entirely when concept extraction did not
@@ -1650,7 +1636,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     // -- Findings ---------------------------------------------------------
     body.push_str("## Findings\n\n");
     push_findings(&mut body, doc);
-    // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
+    // -- Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ------------
     body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
     // NOTE: the QA render sections (Contradiction Graph, Loci Analysis,
     // Depth Investigation, Cross-Locus Reconcile, Source Tensions,
@@ -1663,10 +1649,10 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
     // Corpus Critic also moved to CORPA.md (`assemble_corpa_body`).
 
-    // ── In-Project Cross-References ─────────────────────────────────────
+    // -- In-Project Cross-References -------------------------------------
     push_cross_references(&mut body, doc, 1);
 
-    // ── References Index (FR-011) ────────────────────────────────────────
+    // -- References Index (FR-011) ----------------------------------------
     push_references_index(&mut body, doc);
 
     body
@@ -1680,14 +1666,14 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
 fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
-    // ── Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) ──
+    // -- Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) --
     // Rendered immediately after the title and before the Abstract (IMRaD
     // layout). Omitted entirely for skeleton documents with no gathered
     // sources and no QA artifacts. The detailed Data Quality & Consistency
     // subsection inside Discussion below is untouched (FR-012).
     body.push_str(&render_scoreboard(doc));
 
-    // ── Abstract (FR-005) ───────────────────────────────────────────────
+    // -- Abstract (FR-005) -----------------------------------------------
     body.push_str("## Abstract\n\n");
     if doc.summary.trim().is_empty() {
         body.push_str(
@@ -1698,14 +1684,14 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("\n\n");
     }
 
-    // ── Introduction (FR-006) ─────────────────────────────────────────────
+    // -- Introduction (FR-006) ---------------------------------------------
     body.push_str("## Introduction\n\n");
     if topic.trim().is_empty() {
         body.push_str("_(no research topic specified)_\n\n");
     } else {
         body.push_str(strip_control_chars(topic).trim());
         body.push_str("\n\n");
-        // ── Research Brief (FR-004 / T-004) ──────────────────────────────
+        // -- Research Brief (FR-004 / T-004) ------------------------------
         if let Some(brief) = doc.brief.as_deref().filter(|b| !b.is_empty()) {
             body.push_str("### Research Brief\n\n");
             body.push_str(&strip_control_chars(brief).trim());
@@ -1719,16 +1705,16 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         );
     }
 
-    // ── Methods (FR-007) ─────────────────────────────────────────────────
+    // -- Methods (FR-007) -------------------------------------------------
     body.push_str("## Methods\n\n");
     push_search_queries(&mut body, doc, 2);
 
-    // ── Search Engine Summary (IMRaD Methods sub-section) ─────────────
+    // -- Search Engine Summary (IMRaD Methods sub-section) -------------
     // Per-engine breakdown of acquired web sources by media type. Only
     // emitted when at least one web source has a non-empty search_engine.
     push_search_engine_summary(&mut body, doc, 2);
 
-    // ── Search Provider Requests (IMRaD Methods sub-section) ───────────
+    // -- Search Provider Requests (IMRaD Methods sub-section) -----------
     // Per-provider search-request totals for the run, rendered only when
     // the session recorded at least one provider call.
     push_provider_requests(&mut body, doc, 2);
@@ -1741,7 +1727,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                  produced by the gathering pass.\n\n",
     );
 
-    // ── Concepts (spec researchcluster) ───────────────────────────────
+    // -- Concepts (spec researchcluster) -------------------------------
     // In the IMRaD layout the concept list is a Results sub-section rendered
     // directly above the Findings subsection.
     if let Some(concepts) = &doc.concepts {
@@ -1754,16 +1740,16 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     body.push_str("## Results\n\n");
     body.push_str("### Findings\n\n");
     push_findings(&mut body, doc);
-    // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012). In the
+    // -- Findings Relationship Diagram (FR-001 / FR-002 / FR-012). In the
     // IMRaD layout it is a sub-section of Results, so we use a `###` heading
     // and ask the diagram renderer to return only the body.
     body.push_str("### Findings Relationship Diagram\n\n");
     body.push_str(&crate::diagram::render_findings_diagram_body(&doc.findings));
 
-    // ── Discussion (FR-009) ────────────────────────────────────────────────
+    // -- Discussion (FR-009) ------------------------------------------------
     body.push_str("## Discussion\n\n");
 
-    // ── Data Quality & Consistency ──────────────────────────────────────
+    // -- Data Quality & Consistency --------------------------------------
     // Synthesized QA overview at the start of Discussion, before the detailed
     // contradiction/reconcile/audit subsections. Omitted entirely when no QA
     // data is present.
@@ -1786,7 +1772,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     push_cross_references(&mut body, doc, 2);
     push_open_questions(&mut body, doc, 2);
 
-    // ── References Index (FR-010) ─────────────────────────────────────────
+    // -- References Index (FR-010) -----------------------------------------
     push_references_index(&mut body, doc);
 
     body
@@ -1808,7 +1794,7 @@ fn assemble_comparison_table_body(doc: &ResearchDocument, topic: &str) -> String
         body.push_str("\n\n");
     }
 
-    // ── Executive Summary ──────────────────────────────────────────────
+    // -- Executive Summary ----------------------------------------------
     // Rendered before the comparison table (like the report layout places it
     // before the findings) so readers see the synthesis at the top of the
     // artifact instead of after the entity profiles.
@@ -2338,14 +2324,10 @@ pub fn mask_url_credentials(url: &str) -> String {
 /// char boundary, and append a marker so the reader knows content was capped.
 #[must_use]
 pub fn truncate_body_to_bytes(body: &str, max_bytes: usize) -> String {
-    let bytes = body.as_bytes();
-    if bytes.len() <= max_bytes {
+    if body.len() <= max_bytes {
         return body.to_string();
     }
-    let mut cut = max_bytes;
-    while cut > 0 && !body.is_char_boundary(cut) {
-        cut -= 1;
-    }
+    let cut = ragent_types::strutil::floor_char_boundary(body, max_bytes);
     let mut out = String::with_capacity(cut + 64);
     out.push_str(&body[..cut]);
     out.push_str("\n\n... _(truncated - body exceeded the per-source size cap)_\n");
@@ -2552,7 +2534,15 @@ fn split_analysis_sentences(body: &str) -> String {
     let body = strip_inline_text_attributes(body);
 
     // Collapse all whitespace (including embedded newlines) to single spaces.
-    let collapsed: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut collapsed = String::with_capacity(body.len());
+    let mut first = true;
+    for word in body.split_whitespace() {
+        if !first {
+            collapsed.push(' ');
+        }
+        collapsed.push_str(word);
+        first = false;
+    }
     let collapsed = collapsed.trim();
     if collapsed.is_empty() {
         return String::new();

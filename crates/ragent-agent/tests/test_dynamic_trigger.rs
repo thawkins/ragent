@@ -2,7 +2,7 @@
 //!
 //! These tests verify the dynamic trigger engine's public API: parsing,
 //! rule creation, polling, fire-once vs repeating, persistence, configuration,
-//! and promote_to_chat propagation. No real LLM or sub-agent is required —
+//! and promote_to_chat propagation. No real LLM or sub-agent is required -
 //! `SimpleConditionEvaluator` and `NoopActionDispatcher` stand in for those
 //! dependencies.
 
@@ -17,7 +17,7 @@ use ragent_agent::trigger::runtime::{TriggerRuntime, TriggerRuntimeConfig};
 use ragent_config::TriggerConfig;
 use ragent_types::trigger::TriggerRuleStatus;
 
-// ── Helper: build a default engine with the given evaluator and dispatcher ──
+// -- Helper: build a default engine with the given evaluator and dispatcher --
 
 fn make_engine(
     evaluator: Arc<SimpleConditionEvaluator>,
@@ -43,7 +43,7 @@ fn make_engine_with_config(
     DynamicTriggerEngine::new(runtime, config, evaluator, dispatcher)
 }
 
-// ── Parsing tests ────────────────────────────────────────��─────────────────
+// -- Parsing tests ----------------------------------------��-----------------
 
 #[test]
 fn test_parse_when_comma() {
@@ -88,7 +88,7 @@ fn test_parse_empty_action_fails() {
     assert!(parse_trigger_request("when something, ").is_err());
 }
 
-// ��─ Rule creation tests ────────────────────────────────────────────────────
+// ��- Rule creation tests ----------------------------------------------------
 
 #[test]
 fn test_create_rule_from_request() {
@@ -123,7 +123,7 @@ fn test_create_repeating_rule() {
         .create_rule("when file exists, run tests", true, false)
         .unwrap();
     let rule = engine.list_rules().into_iter().next().unwrap();
-    assert!(!rule.fire_once); // repeating → fire_once = false
+    assert!(!rule.fire_once); // repeating -> fire_once = false
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn test_create_rule_parse_failed() {
     assert!(matches!(result, Err(DynamicTriggerError::ParseFailed(_))));
 }
 
-// ── Polling tests ──────────────────────────────────────────────────────────
+// -- Polling tests ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_poll_fires_matching_rule() {
@@ -210,7 +210,7 @@ async fn test_poll_fires_matching_rule() {
 #[tokio::test]
 async fn test_poll_skips_non_matching_rule() {
     let evaluator = Arc::new(SimpleConditionEvaluator::new());
-    // No matching conditions added — nothing will match.
+    // No matching conditions added - nothing will match.
     let dispatcher = Arc::new(NoopActionDispatcher::new());
     let engine = make_engine(evaluator, dispatcher.clone());
 
@@ -324,7 +324,7 @@ async fn test_poll_disabled_config_noops() {
     assert_eq!(fired, 0);
 }
 
-// ── Rule management tests ─────────────────────────────────────────────────
+// -- Rule management tests -------------------------------------------------
 
 #[test]
 fn test_enable_disable_rule() {
@@ -365,7 +365,7 @@ fn test_remove_rule() {
     assert!(!engine.remove_rule(id.as_str()));
 }
 
-// ── Persistence tests ─────────────────────────────────────────────────────
+// -- Persistence tests -----------------------------------------------------
 
 #[test]
 fn test_serialize_restore_rules() {
@@ -438,7 +438,7 @@ fn test_restore_rules_clears_existing() {
     assert_eq!(rules[0].condition, "x exists");
 }
 
-// ── Configuration tests ────────────────────────────────────────────────────
+// -- Configuration tests ----------------------------------------------------
 
 #[test]
 fn test_config_poll_interval() {

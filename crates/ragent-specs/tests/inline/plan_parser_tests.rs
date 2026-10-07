@@ -390,7 +390,7 @@ fn test_filter_for_resume_blocked_unblocked() {
     assert_eq!(tasks[resumed[0]].id, "T-002");
 }
 
-// ── Phase -1 Gates tests (T-015, FR-008) ──────────────────────────────
+// -- Phase -1 Gates tests (T-015, FR-008) ------------------------------
 
 #[test]
 fn test_parse_gates_all_checked() {

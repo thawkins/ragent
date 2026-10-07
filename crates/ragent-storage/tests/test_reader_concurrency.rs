@@ -2,8 +2,8 @@
 //!
 //! Before PERF-069 every read and write shared a single `Mutex<Connection>`,
 //! so a reader (and even an *unrelated* reader) could not proceed while a write
-//! transaction was open.  A dedicated read-only connection — combined with the
-//! WAL journal already enabled by `Storage::open` — lets reads complete
+//! transaction was open.  A dedicated read-only connection - combined with the
+//! WAL journal already enabled by `Storage::open` - lets reads complete
 //! concurrently with an open write transaction.
 //!
 //! These tests pin three contracts:

@@ -28,28 +28,14 @@ fn resolve_api_key(provider_id: &str, storage: Option<&Arc<Storage>>) -> Result<
         return Ok(String::new());
     }
     if provider_id == "ollama" {
-        return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
+        return Ok(
+            ragent_config::credential_env::read_credential_env("OLLAMA_API_KEY")
+                .unwrap_or_default(),
+        );
     }
 
-    let env_vars: &[&str] = match provider_id {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "gemini" => &["GEMINI_API_KEY"],
-        "huggingface" => &["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
-        "generic_openai" => &["GENERIC_OPENAI_API_KEY", "OPENAI_API_KEY"],
-        "ollama_cloud" => &["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
-        "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        "copilot" => &["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
-        _ => &[],
-    };
-
-    for var in env_vars {
-        if let Ok(key) = std::env::var(var)
-            && !key.is_empty()
-        {
-            return Ok(key);
-        }
+    if let Some(key) = crate::provider::env_key::provider_env_key(provider_id) {
+        return Ok(key);
     }
 
     if let Some(storage) = storage {

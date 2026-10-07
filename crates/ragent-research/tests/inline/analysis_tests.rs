@@ -169,7 +169,7 @@ fn truncate_body_adds_ellipsis_when_cut() {
     assert!(truncated.contains("... (truncated for prompt size)"));
 }
 
-// ── researchprompt T-011: builder + parser/fallback tests ─────────────
+// -- researchprompt T-011: builder + parser/fallback tests -------------
 
 /// Helper: build a minimal [`SourceBody`] with the given index and
 /// optional publication date.
@@ -618,7 +618,7 @@ fn parse_with_outcome_strips_control_chars_from_fallback() {
     }
 }
 
-// ── Milestone E-001: SourceSummarizer / HeuristicSummarizer tests ────
+// -- Milestone E-001: SourceSummarizer / HeuristicSummarizer tests ----
 
 #[test]
 fn heuristic_summarizer_returns_body_unchanged_when_within_budget() {
@@ -679,7 +679,7 @@ fn summarize_source_bodies_preserves_metadata() {
     assert!(summarized[0].body.chars().count() < 200);
 }
 
-// ── Milestone E-002: chunking + merge tests ───────────────────────────
+// -- Milestone E-002: chunking + merge tests ---------------------------
 
 #[test]
 fn total_body_chars_sums_all_bodies() {

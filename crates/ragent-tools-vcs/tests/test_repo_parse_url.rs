@@ -233,7 +233,7 @@ fn test_parse_www_github_com_url() {
 }
 
 // ---------------------------------------------------------------------------
-// Invalid inputs (FR-016) — all must return None
+// Invalid inputs (FR-016) - all must return None
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -254,7 +254,7 @@ fn test_parse_single_word_returns_none() {
 
 #[test]
 fn test_parse_single_word_with_at_prefix_returns_none() {
-    // Not a valid SSH URL — no github.com host.
+    // Not a valid SSH URL - no github.com host.
     assert!(GitHubClient::parse_repo_url("@justoneword").is_none());
 }
 
@@ -286,7 +286,7 @@ fn test_parse_bare_hostname_with_query_returns_none() {
 
 #[test]
 fn test_parse_owner_only_url_returns_none() {
-    // https://github.com/owner — only one path segment.
+    // https://github.com/owner - only one path segment.
     assert!(GitHubClient::parse_repo_url("https://github.com/octocat").is_none());
     assert!(GitHubClient::parse_repo_url("https://github.com/octocat/").is_none());
 }
@@ -301,7 +301,7 @@ fn test_parse_shorthand_owner_only_returns_none() {
 #[test]
 fn test_parse_non_github_url_returns_none() {
     // A URL on a different host with only two segments would parse as
-    // shorthand if it has no github.com marker — but with github.com absent
+    // shorthand if it has no github.com marker - but with github.com absent
     // and no slash, it's a single word.
     assert!(GitHubClient::parse_repo_url("https://gitlab.com/octocat/Hello-World").is_none());
 }

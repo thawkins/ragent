@@ -158,7 +158,7 @@ fn empty_input_returns_empty() {
     assert!(ordered.is_empty());
 }
 
-// ── T-002: AnalysisConfig carries the two output limits ───────────────────
+// -- T-002: AnalysisConfig carries the two output limits -------------------
 
 /// `AnalysisConfig::default()` must seed both limits from the shared constants
 /// (FR-002, FR-014) so a run that sets neither flag is capped identically
@@ -170,7 +170,7 @@ fn analysis_config_defaults_to_the_spec_limits() {
     assert_eq!(cfg.max_findings, DEFAULT_MAX_FINDINGS);
 }
 
-// ── T-003: cap_findings_to_limit orders then truncates and renumbers ───────
+// -- T-003: cap_findings_to_limit orders then truncates and renumbers -------
 
 /// The cap keeps the most-relevant findings, drops the least-relevant ones,
 /// and renumbers the survivors contiguously from 1 (FR-003, FR-010).

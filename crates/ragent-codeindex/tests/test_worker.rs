@@ -126,7 +126,7 @@ fn test_worker_channel_disconnect_stops() {
 
     let mut handle = IndexWorker::start(index, rx, WorkerConfig::default());
 
-    // Drop the sender — should cause worker to exit.
+    // Drop the sender - should cause worker to exit.
     drop(tx);
 
     // Give the worker time to notice.

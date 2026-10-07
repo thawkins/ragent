@@ -8,50 +8,23 @@
 //! and can be told to fail a named server or tool, so the per-step,
 //! containment, and teardown behaviour is asserted without a real MCP process.
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use ragent_config::ConnectorsConfig;
 use ragent_connectors::{
     ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer, HarnessError,
-    InMemoryCredentialStore, MANIFEST_FILE, MapEnv, McpProbe, ProbeTool, StepOutcome, StoreDirs,
-    StoreLedger, render_report, run_connector_subcommand_async, run_harness, sample_for_schema,
-    store_dirs_at, store_secret, test_connector,
+    InMemoryCredentialStore, MANIFEST_FILE, MapEnv, McpProbe, ProbeTool, StepOutcome, StoreLedger,
+    render_report, run_connector_subcommand_async, run_harness, sample_for_schema, store_secret,
+    test_connector,
 };
 use serde_json::{Value as JsonValue, json};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII scratch tree under `target/temp/`.
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/harness-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/connectors")
-    }
-
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A descriptor with the given id and servers.
 fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
@@ -194,7 +167,7 @@ fn step<'a>(
         .unwrap_or_else(|| panic!("step '{name}' missing from {:?}", report.steps))
 }
 
-// ── FR-015: happy path ─────────────────────────────────────────────────────
+// -- FR-015: happy path -----------------------------------------------------
 
 #[tokio::test]
 async fn harness_connects_invokes_one_tool_and_disconnects() {
@@ -329,7 +302,7 @@ async fn harness_exercises_every_server_of_a_multi_server_connector() {
     assert_eq!(probe.call_calls().len(), 2);
 }
 
-// ── FR-016: failure containment ────────────────────────────────────────────
+// -- FR-016: failure containment --------------------------------------------
 
 #[tokio::test]
 async fn harness_reports_connect_failure_and_makes_no_change_to_the_session() {
@@ -548,7 +521,7 @@ async fn harness_reports_unsupported_capabilities_and_keeps_running() {
     assert!(rendered.contains("Unsupported capabilities:"));
 }
 
-// ── FR-015: the harness never touches the live session or the store ────────
+// -- FR-015: the harness never touches the live session or the store --------
 
 #[tokio::test]
 async fn harness_never_writes_the_store_ledger() {
@@ -616,7 +589,7 @@ async fn run_harness_refuses_when_the_subsystem_is_disabled() {
     assert!(rendered.contains("disabled"), "{rendered}");
 }
 
-// ── FR-015: the shared async dispatcher ────────────────────────────────────
+// -- FR-015: the shared async dispatcher ------------------------------------
 
 #[tokio::test]
 async fn async_dispatcher_runs_test_and_ignores_other_subcommands() {
@@ -679,7 +652,7 @@ async fn async_dispatcher_renders_the_usage_error_for_a_missing_id() {
     assert!(report.contains("[err] Missing argument."), "{report}");
 }
 
-// ── sample argument generation ─────────────────────────────────────────────
+// -- sample argument generation ---------------------------------------------
 
 #[test]
 fn sample_for_schema_generates_typed_values() {

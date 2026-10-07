@@ -1,3 +1,8 @@
+//! Convenience wrappers over the file-ops batch-edit API.
+//!
+//! Keeps higher-level skills (such as `/simplify`) simple by delegating
+//! staging and commit semantics to the core [`crate::file_ops`] module.
+
 use crate::file_ops::{CommitResult, apply_batch_edits};
 use anyhow::Result;
 use std::path::PathBuf;

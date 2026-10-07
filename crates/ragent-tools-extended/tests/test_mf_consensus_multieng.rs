@@ -178,7 +178,7 @@ fn test_share_limit_bounds_dominant_engine() {
 /// highest-scoring skipped entries (full budget preserved).
 #[test]
 fn test_share_limit_refills_leftover_slots() {
-    // 10 openalex results + 1 wikipedia result; cap 6 → openalex share 3,
+    // 10 openalex results + 1 wikipedia result; cap 6 -> openalex share 3,
     // wikipedia contributes 1, remaining 2 slots refill with openalex.
     let reports = vec![
         openalex_report(10),

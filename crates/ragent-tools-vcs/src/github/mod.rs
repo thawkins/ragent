@@ -12,13 +12,13 @@ pub use client::{
     GitHubClient, README_MAX_CHARS, RepoMetadata, build_reverse_prompt, classify_api_error,
     extract_download_url, extract_rate_limit_reset, format_reset_time, parse_root_tree,
 };
-pub use github_actions::GithubGetActionsTool;
+pub use github_actions::GitHubGetActionsTool;
 pub use github_issues::{
-    GithubCloseIssueTool, GithubCommentIssueTool, GithubCreateIssueTool, GithubGetIssueTool,
-    GithubListIssuesTool,
+    GitHubCloseIssueTool, GitHubCommentIssueTool, GitHubCreateIssueTool, GitHubGetIssueTool,
+    GitHubListIssuesTool,
 };
 pub use github_prs::{
-    GithubCreatePrTool, GithubGetPrTool, GithubListPrsTool, GithubMergePrTool, GithubReviewPrTool,
+    GitHubCreatePrTool, GitHubGetPrTool, GitHubListPrsTool, GitHubMergePrTool, GitHubReviewPrTool,
     parse_merge_method,
 };
 

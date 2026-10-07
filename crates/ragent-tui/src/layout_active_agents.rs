@@ -205,7 +205,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── header (with button columns) ──────────────────────────────────────
+    // -- header (with button columns) --------------------------------------
     lines.push(Line::from(vec![Span::styled(
         format!(
             "  {:<10} {:<28}{:<8} {:>8} {:>7}  {:>3} {:>3}",
@@ -216,7 +216,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             .add_modifier(Modifier::DIM),
     )]));
 
-    // ── primary agent ─────────────────────────────────────────────────────
+    // -- primary agent -----------------------------------------------------
     let mut primary_spans = vec![
         Span::styled("* ", Style::default().fg(Color::Green)),
         Span::styled(
@@ -249,7 +249,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     }
     lines.push(Line::from(primary_spans));
 
-    // ── sub-agents ─────────────────────────────────────────────────────────
+    // -- sub-agents ---------------------------------------------------------
     let mut button_areas: Vec<Rect> = Vec::new();
     let mut kill_areas: Vec<Rect> = Vec::new();
     let mut button_task_ids: Vec<String> = Vec::new();
@@ -269,7 +269,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         &mut kill_task_ids,
     );
 
-    // ── background shell tasks (bg tool) ─────────────────────────────────
+    // -- background shell tasks (bg tool) ---------------------------------
     if !app.bg_tasks.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             " Background shell tasks ",

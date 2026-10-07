@@ -57,7 +57,7 @@ fn installed(ids: &[&str]) -> std::collections::BTreeSet<String> {
     ids.iter().map(|id| (*id).to_string()).collect()
 }
 
-// ── Launch and close API (FR-007, FR-012, FR-020) ───────────────────────────
+// -- Launch and close API (FR-007, FR-012, FR-020) ---------------------------
 
 #[test]
 fn open_sets_a_loading_browser_for_the_requested_store() {
@@ -144,7 +144,7 @@ fn opening_the_panel_leaves_a_running_turn_and_the_queue_untouched() {
     assert_eq!(app.input_queue.len(), 1);
 }
 
-// ── Key routing while the panel is open (FR-008, FR-009, FR-010, FR-015) ────
+// -- Key routing while the panel is open (FR-008, FR-009, FR-010, FR-015) ----
 
 #[tokio::test]
 async fn a_printable_key_types_into_the_panel_query_not_the_input_buffer() {
@@ -283,7 +283,7 @@ async fn an_unhandled_key_is_swallowed_and_changes_nothing() {
     assert_eq!(app.input, "draft");
 }
 
-// ── Status transitions (FR-013, FR-016, FR-017) ─────────────────────────────
+// -- Status transitions (FR-013, FR-016, FR-017) -----------------------------
 
 #[test]
 fn a_loaded_entry_list_moves_the_browser_to_ready() {
@@ -340,7 +340,7 @@ fn selected_returns_the_highlighted_entry_and_none_when_empty() {
     assert_eq!(browser.selected().expect("selected").id, "b");
 }
 
-// ── Installed set and ENTER routing (T-007; FR-005, FR-014, FR-015) ───────────
+// -- Installed set and ENTER routing (T-007; FR-005, FR-014, FR-015) -----------
 
 #[test]
 fn a_new_browser_starts_with_an_empty_installed_set() {

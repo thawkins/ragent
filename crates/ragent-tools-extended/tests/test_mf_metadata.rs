@@ -1,4 +1,4 @@
-//! Integration tests for `masterfetch::metadata` — metadata extraction
+//! Integration tests for `masterfetch::metadata` - metadata extraction
 //! (T-031, FR-006, NFR-003).
 //!
 //! Covers: `OpenGraph` extraction, JSON-LD parsing, canonical URL, `<title>`
@@ -817,10 +817,10 @@ fn test_citation_author_meta_extracted() {
 
 #[test]
 fn test_malformed_html_does_not_panic() {
-    // Unclosed tags, stray brackets — must not panic.
+    // Unclosed tags, stray brackets - must not panic.
     let html = r#"<html><head><meta property="og:title" content="Broken<br>head><body"#;
     let md = extract_metadata(html);
-    // We don't assert a specific outcome — just that it didn't panic.
+    // We don't assert a specific outcome - just that it didn't panic.
     let _ = md;
 }
 

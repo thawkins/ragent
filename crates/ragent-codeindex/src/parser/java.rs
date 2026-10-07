@@ -53,7 +53,7 @@ impl LanguageParser for JavaParser {
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Walk ────────────────────────────────────────────────────────────────────
+// -- Walk --------------------------------------------------------------------
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
@@ -80,7 +80,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Class ───────────────────────────────────────────────────────────────────
+// -- Class -------------------------------------------------------------------
 
 fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -126,7 +126,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String
     }
 }
 
-// ── Interface ───────────────────────────────────────────────────────────────
+// -- Interface ---------------------------------------------------------------
 
 fn extract_interface(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -166,7 +166,7 @@ fn extract_interface(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[St
     }
 }
 
-// ── Enum ────────────────────────────────────────────────────────────────────
+// -- Enum --------------------------------------------------------------------
 
 fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -230,7 +230,7 @@ fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]
     }
 }
 
-// ── Method / Constructor ────────────────────────────────────────────────────
+// -- Method / Constructor ----------------------------------------------------
 
 fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -263,7 +263,7 @@ fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Strin
     });
 }
 
-// ── Field ───────────────────────────────────────────────────────────────────
+// -- Field -------------------------------------------------------------------
 
 fn extract_field(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let visibility = extract_java_visibility(ctx, node);
@@ -297,7 +297,7 @@ fn extract_field(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String
     }
 }
 
-// ── Constants (interface-level) ─────────────────────────────────────────────
+// -- Constants (interface-level) ---------------------------------------------
 
 fn extract_constant(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let type_text = field_text(ctx, node, "type").unwrap_or_default();
@@ -329,7 +329,7 @@ fn extract_constant(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Str
     }
 }
 
-// ── Annotation type ─────────────────────────────────────────────────────────
+// -- Annotation type ---------------------------------------------------------
 
 fn extract_annotation_type(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -360,7 +360,7 @@ fn extract_annotation_type(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope
     });
 }
 
-// ── Imports ─────────────────────────────────────────────────────────────────
+// -- Imports -----------------------------------------------------------------
 
 fn extract_import(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
@@ -397,7 +397,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn extract_java_visibility(ctx: &Ctx, node: Node) -> Visibility {
     let cursor = &mut node.walk();
@@ -490,4 +490,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

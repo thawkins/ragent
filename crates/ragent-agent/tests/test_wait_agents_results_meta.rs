@@ -95,7 +95,7 @@ async fn test_wait_agents_returns_when_background_task_panics() {
             "explore",
             "do the thing",
             None,
-            &PathBuf::from("/tmp"),
+            &PathBuf::from("target/temp"),
         )
         .await
         .expect("spawn should succeed");
@@ -172,7 +172,7 @@ fn make_ctx(
 ) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus,
         storage: None,
         agent_manager: Some(agent_manager),
@@ -233,7 +233,7 @@ async fn test_wait_agents_results_meta_contains_full_output() {
     let parent_sid = "parent-sess";
     let task_id = "task-alpha-0000";
     // Deliberately longer than a single chunk of text the agent actually
-    // writes — ensures the results[] path carries the whole report, not a
+    // writes - ensures the results[] path carries the whole report, not a
     // truncated preview.
     let long_report = format!(
         "FINDINGS: {}\n\nDetailed report body end.",

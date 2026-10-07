@@ -34,7 +34,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::{MentionSpan, short_session_id};
+use crate::app::helpers::{MentionSpan, short_id, short_session_id};
 
 // Re-export status types from theme
 use crate::theme::{StatusCategory, StatusMessage};
@@ -259,11 +259,7 @@ impl App {
             .ok()
             .flatten()
             .filter(|k| !k.is_empty())
-            .or_else(|| {
-                std::env::var("OLLAMA_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-            })
+            .or_else(|| ragent_config::credential_env::read_credential_env("OLLAMA_API_KEY"))
     }
 
     /// Compute the token size of the visible toolset catalog.
@@ -3463,7 +3459,7 @@ impl App {
             LogLevel::Info,
             format!(
                 "Resumed session {} ({} messages)",
-                &session_id[..8.min(session_id.len())],
+                short_id(session_id),
                 msg_count
             ),
         );

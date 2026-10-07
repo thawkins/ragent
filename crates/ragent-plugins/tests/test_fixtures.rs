@@ -8,6 +8,10 @@
 //! a fixture copy into a sandboxed temp store (`target/temp/`, per AGENTS.md)
 //! via the real `add` path, then drives discovery / enable / disable / test.
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,72 +20,10 @@ use std::time::{Duration, Instant};
 use ragent_config::PluginsConfig;
 use ragent_plugins::{
     HarnessReport, LifecycleState, PluginCommandAdapter, PluginSession, PluginSurface,
-    PluginToolAdapter, StepOutcome, StoreDirs, add, run_test_command, scan_dirs, store_dirs_at,
-    test_plugin,
+    PluginToolAdapter, StepOutcome, run_test_command, scan_dirs, test_plugin,
 };
 use ragent_tools_core::Tool;
 use serde_json::json;
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// Workspace fixture root: `assets/plugins/fixtures/`.
-fn fixtures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/plugins/fixtures")
-}
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/fixtures-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// Store dirs pinned to this tree's project store (no global leg).
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-
-    /// Install fixture `name` through the real `add` path and return its id.
-    fn install(&self, name: &str) -> String {
-        let source = fixtures_root().join(name);
-        let outcome = add(&self.dirs(), &self.0, source.to_str().expect("utf8"), false)
-            .unwrap_or_else(|e| panic!("install fixture {name}: {e}"));
-        outcome.parsed.descriptor.id
-    }
-
-    /// Install fixture `name` then mark it **disabled** in the ledger.
-    ///
-    /// Enable-focused acceptance tests use this so the explicit
-    /// `PluginSession::enable` under test is the call that loads the plugin: a
-    /// plain `add` now records the plugin enabled (FR-007), so a subsequent
-    /// `PluginSession::start` would already load it and the explicit enable
-    /// would then collide with the tool it had registered.
-    fn install_disabled(&self, name: &str) -> String {
-        let id = self.install(name);
-        let mut ledger = ragent_plugins::StoreLedger::load(&self.store());
-        ledger.state_mut(&id).enabled = false;
-        ledger.save(&self.store()).expect("ledger saved");
-        id
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A test surface recording registrations/deregistrations.
 #[derive(Default)]
@@ -128,7 +70,7 @@ fn harness_step<'a>(report: &'a HarnessReport, name: &str) -> &'a ragent_plugins
         .unwrap_or_else(|| panic!("step '{name}' missing from {:?}", report.steps))
 }
 
-// ── fixture inventory ───────────────────────────────────────────────────────
+// -- fixture inventory -------------------------------------------------------
 
 #[test]
 fn all_documented_fixtures_are_present_and_recognised() {
@@ -142,7 +84,7 @@ fn all_documented_fixtures_are_present_and_recognised() {
         ("collider", "codex"),
     ];
     for (name, dialect) in expected {
-        let root = fixtures_root().join(name);
+        let root = TempTree::fixtures_root().join(name);
         assert!(root.is_dir(), "fixture {name} must exist at {root:?}");
         let matched = ragent_plugins::detect_dialect(&root)
             .unwrap_or_else(|e| panic!("detect {name}: {e}"))
@@ -150,7 +92,7 @@ fn all_documented_fixtures_are_present_and_recognised() {
         assert_eq!(matched.dialect.to_string(), dialect, "fixture {name}");
     }
     // The malformed fixture is intentionally unparseable but still recognised.
-    let bad = fixtures_root().join("bad-manifest");
+    let bad = TempTree::fixtures_root().join("bad-manifest");
     assert!(bad.is_dir(), "fixture bad-manifest must exist");
     assert!(
         ragent_plugins::parse_plugin_dir(&bad).is_err(),
@@ -158,7 +100,7 @@ fn all_documented_fixtures_are_present_and_recognised() {
     );
 }
 
-// ── acceptance criterion 1: install both dialects, listed enabled ───────────
+// -- acceptance criterion 1: install both dialects, listed enabled -----------
 
 #[test]
 fn acceptance_1_installs_both_dialects_and_lists_them_enabled() {
@@ -191,7 +133,7 @@ fn acceptance_1_installs_both_dialects_and_lists_them_enabled() {
     assert!(versions.contains("0.3.0"), "claude version: {versions:?}");
 }
 
-// ── acceptance criterion 2: enable loads, tool returns canned JSON ──────────
+// -- acceptance criterion 2: enable loads, tool returns canned JSON ----------
 
 #[test]
 fn acceptance_2_enable_loads_and_tool_returns_canned_json() {
@@ -223,7 +165,7 @@ fn acceptance_2_enable_loads_and_tool_returns_canned_json() {
     assert!(output.content.contains("clear skies"), "{}", output.content);
 }
 
-// ── acceptance criterion 3: disable deregisters the tool ────────────────────
+// -- acceptance criterion 3: disable deregisters the tool --------------------
 
 #[test]
 fn acceptance_3_disable_deregisters_the_tool() {
@@ -254,7 +196,7 @@ fn acceptance_3_disable_deregisters_the_tool() {
     assert!(result.is_err(), "disabled plugin tool must be unavailable");
 }
 
-// ── acceptance criterion 4: isolated harness on the Claude fixture ──────────
+// -- acceptance criterion 4: isolated harness on the Claude fixture ----------
 
 #[test]
 fn acceptance_4_harness_passes_every_step_without_touching_the_session() {
@@ -298,7 +240,7 @@ fn acceptance_4_harness_passes_every_step_without_touching_the_session() {
     );
 }
 
-// ── acceptance criterion 5: infinite loop contained by the entry budget ─────
+// -- acceptance criterion 5: infinite loop contained by the entry budget -----
 
 #[test]
 fn acceptance_5_infinite_loop_is_contained_by_the_entry_budget() {
@@ -332,7 +274,7 @@ fn acceptance_5_infinite_loop_is_contained_by_the_entry_budget() {
     );
 }
 
-// ── acceptance criterion 6: filesystem escape denied ────────────────────────
+// -- acceptance criterion 6: filesystem escape denied ------------------------
 
 #[test]
 fn acceptance_6_filesystem_escape_is_denied() {
@@ -365,7 +307,7 @@ fn acceptance_6_filesystem_escape_is_denied() {
     assert!(!output.content.contains("SENTINEL-DO-NOT-READ"));
 }
 
-// ── acceptance criterion 7: help / bare / bogus share one usage block ───────
+// -- acceptance criterion 7: help / bare / bogus share one usage block -------
 
 #[test]
 fn acceptance_7_usage_block_is_shared_and_ascii_only() {
@@ -416,7 +358,7 @@ fn dir_entries(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-// ── acceptance criterion 8: `plugins.enabled: false` is inert ───────────────
+// -- acceptance criterion 8: `plugins.enabled: false` is inert ---------------
 
 #[test]
 fn acceptance_8_master_switch_disables_the_subsystem() {
@@ -450,7 +392,7 @@ fn acceptance_8_master_switch_disables_the_subsystem() {
     }
 }
 
-// ── acceptance criterion 9: newer host-API version refused ──────────────────
+// -- acceptance criterion 9: newer host-API version refused ------------------
 
 #[test]
 fn acceptance_9_newer_api_version_is_refused_at_enable_and_test() {
@@ -475,7 +417,7 @@ fn acceptance_9_newer_api_version_is_refused_at_enable_and_test() {
     );
 }
 
-// ── TC-013: unsupported capabilities reported, not dropped ──────────────────
+// -- TC-013: unsupported capabilities reported, not dropped ------------------
 
 #[test]
 fn tc_013_unsupported_capabilities_are_reported() {
@@ -497,7 +439,7 @@ fn tc_013_unsupported_capabilities_are_reported() {
     assert!(rendered.contains("mcp server transports"), "{rendered}");
 }
 
-// ── TC-014: duplicate tool name is a real registry collision ────────────────
+// -- TC-014: duplicate tool name is a real registry collision ----------------
 
 #[test]
 fn tc_014_duplicate_tool_name_is_rejected_and_leaves_the_surface_intact() {
@@ -524,7 +466,7 @@ fn tc_014_duplicate_tool_name_is_rejected_and_leaves_the_surface_intact() {
     assert!(surface.tools.contains("bash"), "built-in bash is untouched");
 }
 
-// ── NFR: discovery under 2 s for 50 installed plugins ───────────────────────
+// -- NFR: discovery under 2 s for 50 installed plugins -----------------------
 
 #[test]
 fn nfr_discovery_of_fifty_plugins_is_under_two_seconds() {
@@ -558,7 +500,7 @@ fn nfr_discovery_of_fifty_plugins_is_under_two_seconds() {
     );
 }
 
-// ── NFR: `/plugins test` on a 10-tool plugin under 15 s ─────────────────────
+// -- NFR: `/plugins test` on a 10-tool plugin under 15 s ---------------------
 
 #[test]
 fn nfr_test_of_ten_tool_plugin_is_under_fifteen_seconds() {

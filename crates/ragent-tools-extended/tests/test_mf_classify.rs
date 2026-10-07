@@ -1,15 +1,15 @@
-//! Unit tests for `masterfetch::crawl::classify` — content-adaptive page
+//! Unit tests for `masterfetch::crawl::classify` - content-adaptive page
 //! classification and extraction (T-018, FR-012, FR-029, NFR-003).
 //!
 //! Covers:
-//! - Article detection → readability extraction, `content_ok=true`.
-//! - Docs detection → readability extraction, `content_ok=true`.
-//! - List/index detection → structured link list output.
-//! - JS shell detection → honest report, `content_ok=false`.
-//! - Auth wall detection → honest report, `content_ok=false`.
-//! - Paywall detection → honest report, `content_ok=false`.
-//! - Redirect detection → content from redirect target.
-//! - Unknown fallback → extractor output.
+//! - Article detection -> readability extraction, `content_ok=true`.
+//! - Docs detection -> readability extraction, `content_ok=true`.
+//! - List/index detection -> structured link list output.
+//! - JS shell detection -> honest report, `content_ok=false`.
+//! - Auth wall detection -> honest report, `content_ok=false`.
+//! - Paywall detection -> honest report, `content_ok=false`.
+//! - Redirect detection -> content from redirect target.
+//! - Unknown fallback -> extractor output.
 //! - Summary computation (metadata description, first sentence).
 //! - Link-list formatting (absolute URL resolution, dedup, `max_links` cap).
 //! - Non-HTML content (raw passthrough, no classification).
@@ -466,7 +466,7 @@ fn test_unknown_page_with_minimal_html() {
         "text/html",
         &ClassifyOptions::default(),
     );
-    // Minimal text → content_ok is false.
+    // Minimal text -> content_ok is false.
     assert!(!result.content_ok);
 }
 
@@ -495,7 +495,7 @@ fn test_non_html_content_passthrough() {
         "application/json",
         &ClassifyOptions::default(),
     );
-    // Non-HTML → returned as raw. Page type may be Json or Unknown.
+    // Non-HTML -> returned as raw. Page type may be Json or Unknown.
     assert!(result.content.contains("key"));
 }
 
@@ -653,7 +653,7 @@ fn test_relative_urls_resolved() {
         &ClassifyOptions::default(),
     );
     assert_eq!(result.page_type, PageType::List);
-    // ../page1 from https://example.com/sub/links → https://example.com/page1
+    // ../page1 from https://example.com/sub/links -> https://example.com/page1
     assert!(result.content.contains("https://example.com/page1"));
 }
 
@@ -720,7 +720,7 @@ fn test_default_options_work() {
 }
 
 // ---------------------------------------------------------------------------
-// Integration with focus (conceptual — classify output can be focused)
+// Integration with focus (conceptual - classify output can be focused)
 // ---------------------------------------------------------------------------
 
 #[test]

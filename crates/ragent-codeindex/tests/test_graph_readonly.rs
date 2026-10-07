@@ -60,10 +60,10 @@ fn make_symbol(name: &str, kind: SymbolKind, file_id: i64, start: u32, end: u32)
 fn build_store() -> IndexStore {
     let store = IndexStore::open_in_memory().unwrap();
 
-    // ── indexed_files ──
+    // -- indexed_files --
     let file_id = store.upsert_file(&make_entry("a.rs", "h1")).unwrap();
 
-    // ── symbols ──
+    // -- symbols --
     let symbols = vec![
         make_symbol("hub", SymbolKind::Function, file_id, 1, 5),
         make_symbol("sat1", SymbolKind::Function, file_id, 6, 10),
@@ -76,7 +76,7 @@ fn build_store() -> IndexStore {
     let sat1 = stored.iter().find(|s| s.name == "sat1").unwrap().id;
     let sat2 = stored.iter().find(|s| s.name == "sat2").unwrap().id;
 
-    // ── imports ──
+    // -- imports --
     store
         .upsert_imports(
             file_id,
@@ -91,7 +91,7 @@ fn build_store() -> IndexStore {
         )
         .unwrap();
 
-    // ── symbol_refs ──
+    // -- symbol_refs --
     store
         .upsert_refs(
             file_id,
@@ -106,12 +106,12 @@ fn build_store() -> IndexStore {
         )
         .unwrap();
 
-    // ── file_deps ──
+    // -- file_deps --
     store
         .set_file_deps(file_id, &[("b.rs".to_string(), "use".to_string())])
         .unwrap();
 
-    // ── graph_edges ──
+    // -- graph_edges --
     for (src, tgt) in [(hub, sat1), (hub, sat2)] {
         store
             .upsert_edge_typed(&GraphEdge {
@@ -125,13 +125,13 @@ fn build_store() -> IndexStore {
             .unwrap();
     }
 
-    // ── communities ──
+    // -- communities --
     store.upsert_community(hub, 0, Some("core")).unwrap();
 
     store
 }
 
-// ── Helper: snapshot existing-table state ──────────────────────────────
+// -- Helper: snapshot existing-table state ------------------------------
 
 struct TableSnapshot {
     file_count: u64,
@@ -140,7 +140,7 @@ struct TableSnapshot {
     ref_count: u64,
     file_deps: Vec<(String, String)>, // (target_path, kind)
     schema_version: i64,
-    // graph tables — NOT part of the "existing tables" check, but useful
+    // graph tables - NOT part of the "existing tables" check, but useful
     edge_count: u64,
     community_count: u64,
 }
@@ -169,7 +169,7 @@ fn snapshot(store: &IndexStore) -> TableSnapshot {
     }
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────
+// -- Tests --------------------------------------------------------------
 
 #[test]
 fn test_graph_build_does_not_modify_existing_tables() {
@@ -254,7 +254,7 @@ fn test_explain_does_not_modify_any_table() {
 
     let after = snapshot(&store);
 
-    // Explain is read-only — nothing should change.
+    // Explain is read-only - nothing should change.
     assert_eq!(after.file_count, before.file_count);
     assert_eq!(after.symbol_count, before.symbol_count);
     assert_eq!(after.ref_count, before.ref_count);
@@ -313,7 +313,7 @@ fn test_graph_layer_only_writes_to_graph_edges_and_communities() {
 
     let after = snapshot(&store);
 
-    // ── Existing tables: MUST be unchanged ──────────────────────────
+    // -- Existing tables: MUST be unchanged --------------------------
     assert_eq!(after.file_count, before.file_count, "indexed_files");
     assert_eq!(after.symbol_count, before.symbol_count, "symbols count");
     assert_eq!(after.symbols, before.symbols, "symbols content");
@@ -323,7 +323,7 @@ fn test_graph_layer_only_writes_to_graph_edges_and_communities() {
         "schema_version"
     );
 
-    // ── Graph tables: MAY change ────────────────────────────────────
+    // -- Graph tables: MAY change ------------------------------------
     // graph_edges should have edges (build re-derives them).
     assert!(
         after.edge_count > 0,

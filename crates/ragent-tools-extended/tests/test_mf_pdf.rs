@@ -1,4 +1,4 @@
-//! Integration tests for `masterfetch::pdf` — PDF text and title extraction.
+//! Integration tests for `masterfetch::pdf` - PDF text and title extraction.
 //!
 //! These tests generate minimal PDFs with `printpdf` and exercise the
 //! `extract_pdf_text` and `extract_pdf_title` helpers used by `mf_fetch`.

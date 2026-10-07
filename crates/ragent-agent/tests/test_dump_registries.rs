@@ -2,7 +2,7 @@
 //! `commands_info` JSON payloads to `target/temp/` so they can be bulk-loaded
 //! into MongoDB (`ragent.tools` / `ragent.slashcommands`).
 //!
-//! Run with: `cargo test -p ragent-agent --test dump_registries -- --nocapture --include-ignored`
+//! Run with: `cargo test -p ragent-agent --test test_dump_registries -- --nocapture --include-ignored`
 
 use ragent_agent::tool::{ToolContext, create_default_registry};
 use serde_json::json;

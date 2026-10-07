@@ -5,7 +5,7 @@
 //!
 //! Covers spec tuiopt T-012 (FR-001, FR-003):
 //! Each panel is benchmarked at varying message/agent/team counts in both
-//! **cold** (cache empty — first render) and **warm** (cache populated —
+//! **cold** (cache empty - first render) and **warm** (cache populated -
 //! subsequent render with unchanged state) modes, demonstrating the
 //! per-frame cost reduction delivered by the FR-003 derived-data caches.
 
@@ -290,7 +290,7 @@ fn bench_teams_panel(c: &mut Criterion) {
 
         // Warm: caches are already populated (dirty = false, counts in
         // memory), so the render path reads exclusively from in-memory state
-        // (FR-009 cache hit — no disk reads per frame).
+        // (FR-009 cache hit - no disk reads per frame).
         group.bench_with_input(BenchmarkId::new("warm", count), &count, |b, &n| {
             let members = build_team_members(n);
             let mut app = make_app();

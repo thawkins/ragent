@@ -7,7 +7,11 @@
 //! the usage/attribution renderers, and the shared dispatcher are exercised
 //! crate-side with no live session.
 
-use std::path::{Path, PathBuf};
+mod support;
+
+use support::TempTree;
+
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use ragent_config::ConnectorsConfig;
@@ -17,8 +21,6 @@ use ragent_connectors::{
     disabled_subsystem_report, is_known_subcommand, parse_connector_command, render_help,
     run_connector_subcommand, store_and_config, subcommand_of,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Serialise cwd-mutating tests in this binary.
 fn cwd_test_lock() -> &'static Mutex<()> {
@@ -32,31 +34,6 @@ struct CwdGuard(PathBuf);
 impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
-    }
-}
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/commands-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(path.join(".ragent")).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

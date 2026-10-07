@@ -2,7 +2,7 @@
 //!
 //! Two failure modes from live use are covered:
 //!
-//! 1. **Silent end-of-stream truncation** — some providers (Ollama, some
+//! 1. **Silent end-of-stream truncation** - some providers (Ollama, some
 //!    Copilot models) stop a long completion mid-sentence *without* an
 //!    explicit `finish_reason`, leaving the sub-agent's "final message" as
 //!    a cut-off exploration narrative. The parent then sees the fragment
@@ -20,7 +20,7 @@
 //!      `log/subagents/wait-batch-<ts>.md` and a per-task index (with
 //!      `output_file` paths and previews) is handed back instead.
 //!
-//! 2. **Combined-batch context truncation** — even when every individual
+//! 2. **Combined-batch context truncation** - even when every individual
 //!    report is intact, concatenating ~10 of them overflows the 12k tool
 //!    result budget, so earlier sessions lost the middle reports. The
 //!    exempt path tested below bypasses the generic truncation for
@@ -40,7 +40,7 @@ fn test_wait_agents_short_result_passes_through_unchanged() {
 }
 
 /// Above the exempt inline budget the full text is diverted to disk and a
-/// per-task index is returned — nothing is silently dropped from the
+/// per-task index is returned - nothing is silently dropped from the
 /// middle, and every task's `output_file` path is surfaced.
 #[test]
 fn test_wait_agents_long_result_diverts_to_batch_file() {
@@ -68,7 +68,7 @@ fn test_wait_agents_long_result_diverts_to_batch_file() {
             "report_status": "complete",
         }));
     }
-    // ~6 × 6.2k = ~37k — comfortably over the 32k inline budget.
+    // ~6 × 6.2k = ~37k - comfortably over the 32k inline budget.
     assert!(content.len() > 32_000);
 
     let metadata = json!({ "results": results });

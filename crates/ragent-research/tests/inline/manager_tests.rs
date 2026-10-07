@@ -179,7 +179,7 @@ async fn refresh_index_writes_index_md_with_one_row() {
     assert!(body.contains("tokio-runtime"));
 }
 
-// ── Milestone G: search index cache tests ───────────────────────────────
+// -- Milestone G: search index cache tests -------------------------------
 
 #[tokio::test]
 async fn g001_refresh_index_writes_index_json_cache() {

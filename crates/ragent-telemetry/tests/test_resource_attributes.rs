@@ -2,7 +2,7 @@
 //!
 //! These tests use the OTEL SDK's [`InMemoryMetricExporter`] with a
 //! [`PeriodicReader`] (inside a Tokio runtime) to collect metrics in-memory
-//! and inspect the `Resource` attributes — without requiring a live OTLP
+//! and inspect the `Resource` attributes - without requiring a live OTLP
 //! collector.
 //!
 //! FR-004: `service.name`, `service.version`, and `host.name` are attached
@@ -18,6 +18,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use ragent_telemetry::InstrumentRegistry;
 
 /// Build a provider with an `InMemoryMetricExporter` and ragent resource
@@ -47,7 +48,7 @@ fn build_provider(
     (provider, exporter, rt)
 }
 
-/// Best-effort hostname — mirrors the private `hostname_str` in subsystem.rs.
+/// Best-effort hostname - mirrors the private `hostname_str` in subsystem.rs.
 fn hostname_str() -> Option<String> {
     if let Ok(h) = std::env::var("HOSTNAME")
         && !h.is_empty()
@@ -84,7 +85,7 @@ fn test_resource_has_service_name() {
         "should have collected at least one batch"
     );
     let service_name = metrics[0]
-        .resource
+        .resource()
         .get(&opentelemetry::Key::from("service.name"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
@@ -112,7 +113,7 @@ fn test_resource_has_service_version() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     assert!(!metrics.is_empty());
     let version = metrics[0]
-        .resource
+        .resource()
         .get(&opentelemetry::Key::from("service.version"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
@@ -145,7 +146,7 @@ fn test_resource_has_host_name() {
 
     if let Some(expected) = hostname_str() {
         let host = metrics[0]
-            .resource
+            .resource()
             .get(&opentelemetry::Key::from("host.name"))
             .map(|v| v.as_str().to_string());
         assert_eq!(host, Some(expected), "host.name must match (FR-004)");
@@ -170,7 +171,7 @@ fn test_resource_has_custom_attributes() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     assert!(!metrics.is_empty());
     let env = metrics[0]
-        .resource
+        .resource()
         .get(&opentelemetry::Key::from("deployment.environment"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
@@ -205,9 +206,9 @@ fn test_session_id_is_metric_attribute_not_resource() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     assert!(!metrics.is_empty(), "should have collected metrics");
 
-    // The resource should NOT contain session.id — it's dynamic.
+    // The resource should NOT contain session.id - it's dynamic.
     let session_in_resource = metrics[0]
-        .resource
+        .resource()
         .get(&opentelemetry::Key::from("session.id"));
     assert!(
         session_in_resource.is_none(),
@@ -217,15 +218,14 @@ fn test_session_id_is_metric_attribute_not_resource() {
     // The metric data point should contain session.id as an attribute.
     let mut found_session_attr = false;
     for rm in &metrics {
-        for scope_metrics in &rm.scope_metrics {
-            for metric in &scope_metrics.metrics {
-                if let Some(sum) = metric
-                    .data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                {
-                    for data_point in &sum.data_points {
-                        if data_point.attributes.iter().any(|kv| {
+        for scope_metrics in rm.scope_metrics() {
+            for metric in scope_metrics.metrics() {
+                if let Some(sum) = match metric.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for data_point in sum.data_points() {
+                        if data_point.attributes().any(|kv| {
                             kv.key.as_str() == "session.id" && kv.value.as_str() == "sess-abc-123"
                         }) {
                             found_session_attr = true;
@@ -256,7 +256,7 @@ fn test_resource_default_service_name() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     assert!(!metrics.is_empty());
     let name = metrics[0]
-        .resource
+        .resource()
         .get(&opentelemetry::Key::from("service.name"))
         .map(|v| v.as_str().to_string());
     assert_eq!(name, Some("ragent".to_string()));

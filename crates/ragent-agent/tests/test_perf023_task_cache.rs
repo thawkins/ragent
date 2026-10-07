@@ -9,7 +9,7 @@
 //! - `claim_next_task` / `complete_task` keep the cache consistent.
 //!
 //! These tests construct a `TeamManager` without a live `SessionProcessor`
-//! by calling the (private) `TeamManager::new` via a thin test shim — we
+//! by calling the (private) `TeamManager::new` via a thin test shim - we
 //! instead exercise the cache through the public `task_list` /
 //! `apply_to_task_list` / `claim_next_task` / `complete_task` methods, which
 //! only need `team_dir` (no session processor is required for the task
@@ -116,7 +116,7 @@ fn test_task_list_caches_after_first_load() {
 
     let first = fixture.task_list().expect("first load");
     assert_eq!(first.tasks.len(), 1);
-    // Second call should be a cache hit — the list is the same.
+    // Second call should be a cache hit - the list is the same.
     let second = fixture.task_list().expect("second load");
     assert_eq!(second.tasks.len(), 1);
     assert_eq!(second.tasks[0].id, first.tasks[0].id);

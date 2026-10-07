@@ -1,13 +1,13 @@
 //! Tests for GitHub API error handling (FR-014, FR-015, FR-017).
 //!
 //! Covers `classify_api_error`, `extract_rate_limit_reset`, and
-//! `format_reset_time` — the pure helpers behind the /spec reverse command's
+//! `format_reset_time` - the pure helpers behind the /spec reverse command's
 //! error reporting.
 
 use ragent_tools_vcs::github::{classify_api_error, format_reset_time};
 
 // ---------------------------------------------------------------------------
-// FR-014 — Non-success status: message includes HTTP status code + repo ID
+// FR-014 - Non-success status: message includes HTTP status code + repo ID
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -70,7 +70,7 @@ fn test_classify_empty_body_no_response_line() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-017 — 404 not-found: specific message, no subsequent fetches
+// FR-017 - 404 not-found: specific message, no subsequent fetches
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -105,7 +105,7 @@ fn test_classify_404_does_not_include_body() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-015 — 403/429 rate limit: includes reset time if available
+// FR-015 - 403/429 rate limit: includes reset time if available
 // ---------------------------------------------------------------------------
 
 #[test]

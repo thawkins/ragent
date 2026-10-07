@@ -78,7 +78,7 @@ use std::time::{Duration, Instant};
 use url::Url;
 
 use super::super::CrawlPage;
-use super::super::urlnorm::normalise_url;
+use super::super::urlnorm::{extract_domain, normalise_url};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -477,25 +477,6 @@ pub fn normalize_and_dedup(urls: &[String]) -> Vec<String> {
     }
 
     result
-}
-
-/// Extract the domain (host) from a URL string.
-///
-/// Returns `None` for invalid URLs or URLs without a host.
-///
-/// # Examples
-///
-/// ```
-/// use ragent_tools_extended::masterfetch::crawl::extract_domain;
-///
-/// assert_eq!(extract_domain("https://example.com/page"), Some("example.com".to_string()));
-/// assert_eq!(extract_domain("not a url"), None);
-/// ```
-#[must_use]
-pub fn extract_domain(url: &str) -> Option<String> {
-    Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
 }
 
 // ---------------------------------------------------------------------------

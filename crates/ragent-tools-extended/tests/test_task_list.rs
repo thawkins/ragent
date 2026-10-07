@@ -36,7 +36,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     }
 }
 
-// ── Basic listing ───────────────────────────────────────────────────
+// -- Basic listing ---------------------------------------------------
 
 /// List with no tasks should return "No tasks found".
 #[tokio::test]
@@ -113,7 +113,7 @@ async fn test_task_list_multiple() {
     assert_eq!(tasks.len(), 3);
 }
 
-// ── FR-015 fields ───────────────────────────────────────────────────
+// -- FR-015 fields ---------------------------------------------------
 
 /// Each entry should include id, subject, status, owner, blocked_by.
 #[tokio::test]
@@ -195,7 +195,7 @@ async fn test_task_list_excludes_extra_fields() {
     assert!(!obj.contains_key("updated_at"));
 }
 
-// ── Status filtering ────────────────────────────────────────────────
+// -- Status filtering ------------------------------------------------
 
 /// Filter by "pending" should return only pending tasks.
 #[tokio::test]
@@ -330,7 +330,7 @@ async fn test_task_list_blocked_not_valid_filter() {
     assert!(err.to_string().contains("Invalid status"), "error: {err}");
 }
 
-// ── Ordering by created_at (FR-015) ─────────────────────────────────
+// -- Ordering by created_at (FR-015) ---------------------------------
 
 /// Tasks should be ordered by created_at ascending.
 #[tokio::test]
@@ -353,13 +353,13 @@ async fn test_task_list_ordered_by_created_at() {
 
     let meta = out.metadata.expect("metadata present");
     let tasks = meta["tasks"].as_array().expect("tasks array");
-    // Should be ordered: t1 (08:00) → t2 (09:00) → t3 (10:00).
+    // Should be ordered: t1 (08:00) -> t2 (09:00) -> t3 (10:00).
     assert_eq!(tasks[0]["id"], "t1");
     assert_eq!(tasks[1]["id"], "t2");
     assert_eq!(tasks[2]["id"], "t3");
 }
 
-// ── Session scoping (FR-001) ────────────────────────────────────────
+// -- Session scoping (FR-001) ----------------------------------------
 
 /// Tasks from other sessions should not appear.
 #[tokio::test]
@@ -381,7 +381,7 @@ async fn test_task_list_session_scoped() {
     assert_eq!(tasks[0]["id"], "t2");
 }
 
-// ── Error cases ─────────────────────────────────────────────────────
+// -- Error cases -----------------------------------------------------
 
 /// No storage backend should error.
 #[tokio::test]
@@ -408,7 +408,7 @@ async fn test_task_list_no_storage() {
     assert!(err.to_string().contains("Storage"), "error: {err}");
 }
 
-// ── Human-readable content ──────────────────────────────────────────
+// -- Human-readable content ------------------------------------------
 
 /// Content should include task IDs.
 #[tokio::test]
@@ -535,7 +535,7 @@ async fn test_task_list_empty_unfiltered_content() {
     );
 }
 
-// ── Tool metadata ────────────────────────────────────────────────��──
+// -- Tool metadata ------------------------------------------------��--
 
 /// Tool name should be "task_list".
 #[test]
@@ -571,7 +571,7 @@ fn test_task_list_tool_permission_category() {
     assert_eq!(tool.permission_category(), "task");
 }
 
-// ── Registry registration ───────────────────────────────────────────
+// -- Registry registration -------------------------------------------
 
 /// `task_list` should be registered in the extended registry.
 #[test]

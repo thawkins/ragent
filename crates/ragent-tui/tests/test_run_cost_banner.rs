@@ -124,7 +124,7 @@ async fn test_run_cost_banner_printable_char_not_consumed() {
     app.session_id = Some("s1".to_string());
     app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
 
-    // A plain printable character — no control/alt modifiers.
+    // A plain printable character - no control/alt modifiers.
     let key = crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Char('h'),
         crossterm::event::KeyModifiers::NONE,

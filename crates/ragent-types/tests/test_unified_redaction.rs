@@ -1,8 +1,8 @@
 //! Regression tests for the unified redaction implementation (SECTASKS MS-05,
 //! T-069).
 //!
-//! Every disclosure surface — `GET /config`, telemetry attributes, log lines,
-//! the SSE stream, and tool output — must share one redaction implementation.
+//! Every disclosure surface - `GET /config`, telemetry attributes, log lines,
+//! the SSE stream, and tool output - must share one redaction implementation.
 //! These tests pin the shared chokepoint (`ragent_types::sanitize`) and the
 //! credential-bearing `Event` `Debug` hand-impl, so a future crate cannot
 //! silently re-introduce a private registry or a leaking derive.

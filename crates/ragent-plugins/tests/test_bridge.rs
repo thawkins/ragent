@@ -4,45 +4,18 @@
 //! Every test is offline and rooted under `target/temp/` (no `/tmp`, per
 //! AGENTS.md).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_config::{McpServerConfig, McpTransport};
 use ragent_plugins::{
     StoreDirs, extract_mcp_servers, extract_skill_dirs, plugin_agent_files, plugin_mcp_servers,
     plugin_skill_dirs, plugin_skill_names, scanned_plugin_agent_files, scanned_plugin_hooks,
-    scanned_plugin_mcp_servers, scanned_plugin_skill_dirs, store_dirs_at,
+    scanned_plugin_mcp_servers, scanned_plugin_skill_dirs,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII scratch tree under `target/temp/`.
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/bridge-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Stage a Claude-dialect skill+MCP plugin under `parent/mongodb`.
 fn stage_plugin(parent: &Path) -> PathBuf {
@@ -80,7 +53,7 @@ fn enable(dirs: &StoreDirs, plugin_id: &str) {
     ledger.save(store).expect("ledger save");
 }
 
-// ── Manifest extraction helpers ─────────────────────────────────────────────
+// -- Manifest extraction helpers ---------------------------------------------
 
 #[test]
 fn extract_skill_dirs_accepts_string_and_array() {
@@ -111,7 +84,7 @@ fn extract_mcp_servers_maps_object_entries_and_counts_unbridged() {
     assert_eq!(servers[0].env.get("K").map(String::as_str), Some("V"));
 }
 
-// ── Path resolution ─────────────────────────────────────────────────────────
+// -- Path resolution ---------------------------------------------------------
 
 #[test]
 fn plugin_skill_dirs_resolve_relative_and_refuse_escape() {
@@ -163,7 +136,7 @@ fn plugin_skill_names_lists_skill_subdirectories_only() {
     assert!(plugin_skill_names(&plugin, &[]).is_empty());
 }
 
-// ── MCP mapping ─────────────────────────────────────────────────────────────
+// -- MCP mapping -------------------------------------------------------------
 
 #[test]
 fn plugin_mcp_servers_bridges_inline_object() {
@@ -210,7 +183,7 @@ fn plugin_mcp_servers_reads_external_file() {
     assert_eq!(mapped[0].1.url, None);
 }
 
-// ── Store-level bridge (enabled filter) ─────────────────────────────────────
+// -- Store-level bridge (enabled filter) -------------------------------------
 
 #[test]
 fn scanned_plugin_skill_dirs_only_include_enabled_plugins() {
@@ -272,7 +245,7 @@ fn scanned_plugin_mcp_contributions_attribute_each_server_to_its_plugin() {
     assert_eq!(deduped[0].0, contributions[0].server_id);
 }
 
-// ── FR-032: agents bridge ───────────────────────────────────────────────────
+// -- FR-032: agents bridge ---------------------------------------------------
 
 #[test]
 fn plugin_agent_files_resolve_bare_names_and_refuse_escape() {
@@ -322,7 +295,7 @@ fn scanned_plugin_agent_files_only_from_enabled_plugins() {
     assert!(files[0].ends_with("pack/agents/reviewer.md"));
 }
 
-// ── FR-033: hooks bridge ────────────────────────────────────────────────────
+// -- FR-033: hooks bridge ----------------------------------------------------
 
 #[test]
 fn scanned_plugin_hooks_only_from_enabled_plugins() {

@@ -96,6 +96,32 @@ pub fn normalise_url(raw: &str) -> Result<String, UrlNormError> {
     Ok(url.to_string())
 }
 
+/// Extract the domain (lowercased host) from a URL string.
+///
+/// Returns `None` if the URL cannot be parsed, has no host, or does not use an
+/// `http`/`https` scheme. This is the single shared implementation used by the
+/// crawl orchestrator, the robots checker, and the archdoc URL source (T-302).
+///
+/// # Examples
+///
+/// ```
+/// use ragent_tools_extended::masterfetch::urlnorm::extract_domain;
+///
+/// assert_eq!(extract_domain("https://Example.com/path"), Some("example.com".to_string()));
+/// assert_eq!(extract_domain("http://example.com:8080/page"), Some("example.com".to_string()));
+/// assert_eq!(extract_domain("file:///etc/passwd"), None);
+/// assert_eq!(extract_domain("not a url"), None);
+/// ```
+#[must_use]
+pub fn extract_domain(url: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    parsed.host_str().map(str::to_ascii_lowercase)
+}
+
 /// Normalise a list of URLs and return the deduplicated set, preserving the
 /// order of first occurrence.
 ///
@@ -157,15 +183,19 @@ fn strip_trailing_slash(url: &mut Url) {
 /// entries in [`TRACKING_PARAM_KEYS`]. If all parameters are removed, the
 /// query string is cleared entirely (no trailing `?`).
 fn strip_tracking_params(url: &mut Url) {
-    // Collect the surviving key-value pairs.
-    let surviving: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(key, _)| !is_tracking_param(key))
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
+    // Filter the pairs in a single pass, tracking whether anything was removed
+    // so unchanged queries skip the copy and rebuild entirely.
+    let mut surviving: Vec<(String, String)> = Vec::new();
+    let mut changed = false;
+    for (key, value) in url.query_pairs() {
+        if is_tracking_param(&key) {
+            changed = true;
+        } else {
+            surviving.push((key.into_owned(), value.into_owned()));
+        }
+    }
 
-    // If nothing was filtered, no mutation is needed.
-    if surviving.len() == url.query_pairs().count() {
+    if !changed {
         return;
     }
 
@@ -190,6 +220,10 @@ fn strip_tracking_params(url: &mut Url) {
 /// covering `utm_source`, `utm_medium`, `utm_campaign`, etc.) or exactly
 /// matches one of the keys in [`TRACKING_PARAM_KEYS`] (case-insensitive).
 fn is_tracking_param(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    lower.starts_with("utm") || TRACKING_PARAM_KEYS.iter().any(|&t| lower == t)
+    // Compare without allocating; `get(..3)` keeps the byte slice on a char
+    // boundary so a multibyte key cannot panic the index.
+    key.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("utm"))
+        || TRACKING_PARAM_KEYS
+            .iter()
+            .any(|&t| key.eq_ignore_ascii_case(t))
 }

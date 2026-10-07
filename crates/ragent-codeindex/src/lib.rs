@@ -250,7 +250,7 @@ impl CodeIndex {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    // ── Query Methods ───────────────────────────────────────────────────
+    // -- Query Methods ---------------------------------------------------
 
     /// Search the index using full-text search combined with structured filters.
     pub fn search(&self, query: &SearchQuery) -> Result<Vec<SearchResult>> {
@@ -859,7 +859,7 @@ impl CodeIndex {
         Ok(())
     }
 
-    // ── Mutation Methods ────────────────────────────────────────────────
+    // -- Mutation Methods ------------------------------------------------
 
     /// Index a single file: scan, parse, and store.
     ///
@@ -937,7 +937,7 @@ impl CodeIndex {
             return Ok(());
         }
 
-        // ── Read and hash the file ────────────────────────────────────────
+        // -- Read and hash the file ----------------------------------------
         let content = std::fs::read(&abs_path)
             .with_context(|| format!("cannot read file: {}", abs_path.display()))?;
         // SEC-ragent-codeindex-005 (SECTASKS T-060): re-check the size against
@@ -982,7 +982,7 @@ impl CodeIndex {
             }
         };
 
-        // ── Store the file entry ──────────────────────────────────────────
+        // -- Store the file entry ------------------------------------------
         let file_id = {
             let store = self.store_guard();
             let entry = FileEntry {
@@ -997,7 +997,7 @@ impl CodeIndex {
             store.upsert_file(&entry)?
         };
 
-        // ── Collect old symbol IDs before upsert (for edge cleanup) ────
+        // -- Collect old symbol IDs before upsert (for edge cleanup) ----
         let old_symbol_ids: Vec<i64> = {
             let store = self.store_guard();
             store
@@ -1007,7 +1007,7 @@ impl CodeIndex {
                 .collect()
         };
 
-        // ── Parse and store symbols/imports/refs ─────────────────────────
+        // -- Parse and store symbols/imports/refs -------------------------
         if let Some(ref lang) = language
             && let Some(parser) = self.parsers.get(lang)
         {
@@ -1071,7 +1071,7 @@ impl CodeIndex {
             }
         }
 
-        // ── Update graph edges for this file (FR-008) ──────────────────
+        // -- Update graph edges for this file (FR-008) ------------------
         // Delete edges involving this file's symbols, then re-derive
         // edges for those symbols.
         {
@@ -1311,7 +1311,7 @@ impl CodeIndex {
         }
         let fts_sync_ms = fts_sync_start.elapsed().as_millis();
 
-        // ── Build semantic edge graph (FR-007) ──────────────────────────
+        // -- Build semantic edge graph (FR-007) --------------------------
         // The graph phase is reported separately from FTS indexing via the
         // graph_busy flag + graph progress counters so the UI can label it
         // ("graph building") distinctly from "indexing".  Like build_graph,
@@ -1427,7 +1427,7 @@ impl CodeIndex {
     }
 }
 
-// ── Watch Session ──────────────────────────────────────────────────────────
+// -- Watch Session ----------------------------------------------------------
 
 /// An active file-watching session that automatically re-indexes files when
 /// they change on disk.
@@ -1522,7 +1522,7 @@ pub fn start_watching(
     })
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 /// Shared body of [`CodeIndex::dependencies`] and
 /// [`CodeIndex::try_dependencies`]. Requires the caller to hold the store

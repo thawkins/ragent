@@ -2327,7 +2327,7 @@ fn select_top_relevance_sources_includes_low_relevance_when_in_pool() {
     );
 }
 
-// ── Milestone H-001: per-phase timeout tests ──────────────────────
+// -- Milestone H-001: per-phase timeout tests ----------------------
 
 #[tokio::test]
 async fn h001_web_phase_timeout_keeps_partial_sources_and_proceeds() {

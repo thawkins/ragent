@@ -15,7 +15,7 @@ use ragent_agent::team::{
 mod team_support;
 use team_support::setup_workspace;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     dir.join(name)
@@ -27,7 +27,7 @@ fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberS
     store.add_member(member).expect("add_member");
 }
 
-// ── M6-T1: watchdog marks Failed after timeout ────────────────────────────
+// -- M6-T1: watchdog marks Failed after timeout ----------------------------
 
 #[tokio::test]
 async fn test_watchdog_marks_teammate_failed_after_timeout() {
@@ -58,7 +58,7 @@ async fn test_watchdog_marks_teammate_failed_after_timeout() {
     );
 }
 
-// ── M6-T2: adopt_orphaned_tasks ────────────────────────────────────────────
+// -- M6-T2: adopt_orphaned_tasks --------------------------------------------
 
 #[tokio::test]
 async fn test_adopt_orphaned_tasks_reassigns_in_progress_for_old_lead() {
@@ -107,7 +107,7 @@ async fn test_adopt_orphaned_tasks_reassigns_in_progress_for_old_lead() {
     assert_eq!(t3.status, TaskStatus::Pending);
 }
 
-// ── M6-T3: idempotent completion ───────────────────────────────────────────
+// -- M6-T3: idempotent completion -------------------------------------------
 
 #[tokio::test]
 async fn test_complete_idempotent_same_agent() {
@@ -124,7 +124,7 @@ async fn test_complete_idempotent_same_agent() {
         .expect("claim");
     task_store.complete("task-001", "tm-001").expect("complete");
 
-    // Same agent completes again — should be a no-op success.
+    // Same agent completes again - should be a no-op success.
     let result = task_store.complete("task-001", "tm-001");
     assert!(result.is_ok(), "same agent re-completion should succeed");
     let task = result.unwrap();
@@ -147,7 +147,7 @@ async fn test_complete_rejects_different_agent() {
         .expect("claim");
     task_store.complete("task-001", "tm-001").expect("complete");
 
-    // Different agent tries to complete — should be rejected.
+    // Different agent tries to complete - should be rejected.
     let err = task_store
         .complete("task-001", "tm-002")
         .expect_err("different agent should be rejected");
@@ -174,7 +174,7 @@ async fn test_claim_idempotent_same_agent() {
         .expect("claim 1");
     assert_eq!(t1.status, TaskStatus::InProgress);
 
-    // Same agent claims again — should be a no-op success.
+    // Same agent claims again - should be a no-op success.
     let t2 = task_store
         .claim_specific("task-001", "tm-001")
         .expect("claim 2");
@@ -182,7 +182,7 @@ async fn test_claim_idempotent_same_agent() {
     assert_eq!(t2.assigned_to.as_deref(), Some("tm-001"));
 }
 
-// ── M6-T5: mailbox corruption recovery ─────────────────────────────────────
+// -- M6-T5: mailbox corruption recovery -------------------------------------
 
 #[tokio::test]
 async fn test_mailbox_corruption_recovery_read_all() {
@@ -265,7 +265,7 @@ async fn test_mailbox_valid_messages_still_work_after_recovery() {
     // This triggers recovery.
     let _ = mailbox.read_all().expect("recover");
 
-    // Now write a valid message — it should work.
+    // Now write a valid message - it should work.
     mailbox
         .push(
             MailboxMessage::new("lead", "tm-001", MessageType::Message, "hello")

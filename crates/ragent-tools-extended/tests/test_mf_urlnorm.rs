@@ -1,4 +1,4 @@
-//! Integration tests for `masterfetch::urlnorm` — URL normalisation (T-029,
+//! Integration tests for `masterfetch::urlnorm` - URL normalisation (T-029,
 //! FR-027, NFR-003).
 //!
 //! Covers: host lowercasing, default port stripping, trailing slash removal,

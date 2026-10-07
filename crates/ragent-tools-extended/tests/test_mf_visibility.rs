@@ -90,7 +90,7 @@ fn test_iter_switches_includes_masterfetch() {
 }
 
 // ---------------------------------------------------------------------------
-// effective_hidden_tools: switch ON (default) → no mf_* tools hidden
+// effective_hidden_tools: switch ON (default) -> no mf_* tools hidden
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -108,7 +108,7 @@ fn test_effective_hidden_tools_masterfetch_on_hides_no_mf_tools() {
 }
 
 // ---------------------------------------------------------------------------
-// effective_hidden_tools: switch OFF → all six mf_* tools hidden
+// effective_hidden_tools: switch OFF -> all six mf_* tools hidden
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -364,7 +364,7 @@ fn test_effective_hidden_tools_masterfetch_off_does_not_affect_other_families() 
 
     let hidden = config.effective_hidden_tools();
     // No GitHub tools should be hidden (github defaults to false, so they ARE hidden).
-    // Wait — github defaults to false! So github tools ARE hidden by default.
+    // Wait - github defaults to false! So github tools ARE hidden by default.
     // Let's check that codeindex tools are NOT hidden (codeindex defaults to true).
     assert!(
         !hidden.iter().any(|h| h == "codeindex_search"),

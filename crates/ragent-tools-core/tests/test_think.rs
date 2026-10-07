@@ -18,11 +18,11 @@ async fn test_think_tool_returns_full_thought_in_metadata() {
     let tool = ThinkTool;
     let ctx = ToolContext {
         session_id: "session-1".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         read_timestamps: Arc::new(RwLock::new(HashMap::new())),
         canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
-        allowed_roots: vec![PathBuf::from("/tmp")],
+        allowed_roots: vec![PathBuf::from("target/temp")],
     };
     let thought = "This is the full reasoning content that should remain visible.";
 

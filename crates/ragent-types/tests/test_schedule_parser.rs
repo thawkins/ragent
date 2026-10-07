@@ -1,9 +1,9 @@
 //! Unit tests for the schedule parser covering all three forms (FR-008, FR-009).
 //!
 //! Tests the `parse_schedule` function for:
-//! - `at <timestamp>` — one-shot form
-//! - `every <duration>` — repeat-from-now form (FR-008)
-//! - `from <timestamp> every <duration>` — repeat-from-start form (FR-009)
+//! - `at <timestamp>` - one-shot form
+//! - `every <duration>` - repeat-from-now form (FR-008)
+//! - `from <timestamp> every <duration>` - repeat-from-start form (FR-009)
 //!
 //! Also covers error cases and edge conditions.
 
@@ -13,9 +13,9 @@ use ragent_types::{
     CronForm, CronSchedule, DurationParseError, ScheduleParseError, parse_schedule,
 };
 
-// ─────────────────────────────────────────────────────────────────
-// Form 1: `at <timestamp>` — OneShot
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
+// Form 1: `at <timestamp>` - OneShot
+// -----------------------------------------------------------------
 
 #[test]
 fn test_at_one_shot_basic() {
@@ -108,9 +108,9 @@ fn test_at_whitespace_only_timestamp_error() {
     ));
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Form 2: `every <duration>` — RepeatNow (FR-008)
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
+// Form 2: `every <duration>` - RepeatNow (FR-008)
+// -----------------------------------------------------------------
 
 #[test]
 fn test_every_repeat_now_basic() {
@@ -259,9 +259,9 @@ fn test_every_empty_duration_error() {
     ));
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Form 3: `from <timestamp> every <duration>` — RepeatFrom (FR-009)
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
+// Form 3: `from <timestamp> every <duration>` - RepeatFrom (FR-009)
+// -----------------------------------------------------------------
 
 #[test]
 fn test_from_repeat_from_basic() {
@@ -443,9 +443,9 @@ fn test_from_bad_unit_rejected() {
     ));
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // General parser tests
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 #[test]
 fn test_empty_expression_error() {

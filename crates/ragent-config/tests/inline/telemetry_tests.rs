@@ -115,7 +115,7 @@ fn test_telemetry_config_merge_unions_resource_attributes() {
     );
 }
 
-// ── OtelConfig::validate tests ───────────────────────────────────────
+// -- OtelConfig::validate tests ---------------------------------------
 
 #[test]
 fn test_validate_disabled_config_has_no_problems() {
@@ -187,7 +187,7 @@ fn test_validate_rejects_non_http_endpoint() {
     );
 }
 
-// ── TelemetryConfig::apply_legacy_flag tests ────────────────────────
+// -- TelemetryConfig::apply_legacy_flag tests ------------------------
 
 #[test]
 fn test_apply_legacy_flag_enables_when_otel_disabled() {

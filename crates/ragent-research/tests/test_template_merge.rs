@@ -1,5 +1,5 @@
 //! FR-007 / T-006: when a `--template` is supplied, the template body is
-//! merged with the standard `RESEARCH.md` sections — it must NOT replace the
+//! merged with the standard `RESEARCH.md` sections - it must NOT replace the
 //! Findings section or its five required labeled paragraphs.
 //!
 //! These tests exercise [`ragent_research::document::assemble_document`]

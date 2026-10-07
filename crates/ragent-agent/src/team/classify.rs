@@ -5,7 +5,7 @@
 //! back to keyword matching when the LLM omits the field or returns a value
 //! that does not correspond to a registered agent.
 
-// ── Classification schema ───────────────────────────────────────────────────
+// -- Classification schema ---------------------------------------------------
 
 /// Default agent type used when no explicit or inferred type is available.
 pub const DEFAULT_AGENT_TYPE: &str = "general";
@@ -128,7 +128,7 @@ const KEYWORD_MAP: &[(&[&str], &str)] = &[
     ),
 ];
 
-// ── Classification API ──────────────────────────────────────────────────────
+// -- Classification API ------------------------------------------------------
 
 /// Extract an explicit agent type hint embedded in task text.
 ///
@@ -259,4 +259,4 @@ pub fn is_known_agent_type(agent_type: &str) -> bool {
         .any(|known| known.eq_ignore_ascii_case(agent_type))
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// -- Tests ---------------------------------------------------------------------

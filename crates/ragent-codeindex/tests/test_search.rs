@@ -229,7 +229,7 @@ fn test_open_on_disk() {
 /// The old implementation constructed a new writer (and re-allocated its heap)
 /// for every `add_symbols` / `batch_update` / `remove_file` call. This test
 /// drives several batches and then checks that a single writer can observe all
-/// of them — if a new writer were created per call, an earlier batch's commit
+/// of them - if a new writer were created per call, an earlier batch's commit
 /// would already be visible, but the in-process sequence would still pass; the
 /// real contract is that no per-call failure occurs and each batch is visible
 /// after its own commit through the shared reader.

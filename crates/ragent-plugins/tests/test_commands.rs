@@ -1,39 +1,20 @@
 //! Tests for the `/plugins add` and `/plugins remove` command glue
 //! (spec `plugins` T-011; FR-007, FR-010).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{
     StoreArgError, StoreCommand, StoreDirs, parse_store_command, run_store_command, scan_dirs,
 };
 
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
 /// Enabled default plugin configuration (the tests here exercise the store
 /// operations, not the master switch).
 fn config() -> ragent_config::PluginsConfig {
     ragent_config::PluginsConfig::default()
-}
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/commands-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 fn dirs(tree: &TempTree) -> StoreDirs {
@@ -54,7 +35,7 @@ fn stage_codex_plugin(root: &Path, dir_name: &str) -> PathBuf {
     plugin
 }
 
-// ── parse_store_command ──────────────────────────────────────────────────────
+// -- parse_store_command ------------------------------------------------------
 
 #[test]
 fn parse_add_extracts_source_and_force() {
@@ -142,7 +123,7 @@ fn arg_error_reports_are_actionable() {
     assert!(remove.contains("Usage"));
 }
 
-// ── run_store_command ────────────────────────────────────────────────────────
+// -- run_store_command --------------------------------------------------------
 
 #[test]
 fn run_add_installs_and_reports() {

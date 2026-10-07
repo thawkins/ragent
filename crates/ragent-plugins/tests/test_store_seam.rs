@@ -30,7 +30,7 @@ fn default_index(kind: StoreKind) -> ragent_plugins::StoreIndex {
         .unwrap_or_else(|e| panic!("fixture index for {}: {e}", kind.token()))
 }
 
-// ── The fixture fetcher serves both compiled defaults (FR-032, NFR-004) ──────
+// -- The fixture fetcher serves both compiled defaults (FR-032, NFR-004) ------
 
 #[test]
 fn the_fixture_fetcher_serves_both_compiled_default_endpoints() {
@@ -114,7 +114,7 @@ fn the_claude_fixture_matches_the_compiled_default_and_an_installed_fixture() {
     assert!(time.tags.is_empty());
 }
 
-// ── Unknown / oversized / malformed endpoints are contained (FR-025) ─────────
+// -- Unknown / oversized / malformed endpoints are contained (FR-025) ---------
 
 #[test]
 fn an_endpoint_with_no_registered_fixture_is_a_contained_error() {
@@ -163,7 +163,7 @@ fn a_registered_fixture_is_served_for_its_exact_endpoint_only() {
     assert_eq!(index.entries[0].id, "a");
 }
 
-// ── The seam is production-transparent (FR-037) ──────────────────────────────
+// -- The seam is production-transparent (FR-037) ------------------------------
 
 #[test]
 fn the_default_fetcher_is_the_network_fetcher() {
@@ -219,7 +219,7 @@ fn a_closure_is_a_valid_fetch_seam() {
         .expect("closure seam serves an index");
     assert_eq!(index.store.as_deref(), Some("injected"));
 }
-// ── The on-disk store fixtures parse and match the compiled defaults ─────────
+// -- The on-disk store fixtures parse and match the compiled defaults ---------
 
 /// The on-disk fixture store-index path for `kind`
 /// (`assets/plugins/fixtures/stores/<token>.json`).

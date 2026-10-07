@@ -8,14 +8,14 @@
 //!
 //! ```text
 //! Parent Session
-//!   │
-//!   ├─ new_agent(agent: "explore", background: false)  <- blocks until done
-//!   │   └─ TaskEntry { status: Completed, result: "..." }
-//!   │
-//!   └─ new_agent(agent: "build", background: true)     <- returns immediately
-//!       └─ TaskEntry { status: Running }
+//!   |
+//!   |- new_agent(agent: "explore", background: false)  <- blocks until done
+//!   |   \- TaskEntry { status: Completed, result: "..." }
+//!   |
+//!   \- new_agent(agent: "build", background: true)     <- returns immediately
+//!       \- TaskEntry { status: Running }
 //!           v (later)
-//!       └─ SubagentComplete event published
+//!       \- SubagentComplete event published
 //! ```
 
 use std::path::PathBuf;
@@ -191,16 +191,25 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+impl TaskStatus {
+    /// Canonical lowercase string for this status, shared by the `Display`
+    /// impl and status-filter comparisons so the mapping lives in one place.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Suspended => "suspended",
+            Self::Terminating => "terminating",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 impl std::fmt::Display for TaskStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Running => write!(f, "running"),
-            Self::Completed => write!(f, "completed"),
-            Self::Failed => write!(f, "failed"),
-            Self::Suspended => write!(f, "suspended"),
-            Self::Terminating => write!(f, "terminating"),
-            Self::Cancelled => write!(f, "cancelled"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -1092,18 +1101,18 @@ impl AgentManager {
                 tracing::debug!(
                     task_id,
                     waiter_count = entry.waiter_count,
-                    "M7-T3: Incremented waiter count (task still running)"
+                    "Incremented waiter count (task still running)"
                 );
                 return true;
             }
             tracing::debug!(
                 task_id,
                 status = %entry.status,
-                "M7-T3: increment_waiter skipped - task already completed"
+                "increment_waiter skipped - task already completed"
             );
             return false;
         }
-        tracing::debug!(task_id, "M7-T3: increment_waiter skipped - task not found");
+        tracing::debug!(task_id, "increment_waiter skipped - task not found");
         false
     }
 
@@ -1124,13 +1133,13 @@ impl AgentManager {
                 tracing::debug!(
                     task_id,
                     waiter_count = entry.waiter_count,
-                    "M7-T3: Decremented waiter count"
+                    "Decremented waiter count"
                 );
             } else {
                 tracing::debug!(
                     task_id,
                     waiter_count = entry.waiter_count,
-                    "M7-T3: decrement_waiter skipped - count already 0 (no spurious decrement)"
+                    "decrement_waiter skipped - count already 0 (no spurious decrement)"
                 );
             }
         }

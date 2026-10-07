@@ -48,7 +48,7 @@ pub mod resolve;
 /// BFS shortest-path, explain, and god-node queries.
 pub mod traverse;
 
-// ── Explain Result ──────────────────────────────────────────────────────────
+// -- Explain Result ----------------------------------------------------------
 
 /// The result of an `explain` query: a symbol's metadata plus its
 /// connections.
@@ -85,7 +85,7 @@ pub struct Connection {
     pub line: Option<u32>,
 }
 
-// ── Path Result ─────────────────────────────────────────────────────────────
+// -- Path Result -------------------------------------------------------------
 
 /// The result of a `path` query: the shortest path between two symbols.
 #[derive(Debug, Clone)]
@@ -99,7 +99,7 @@ pub struct PathResult {
     pub steps: Vec<(String, Option<String>)>,
 }
 
-// ── God Node ────────────────────────────────────────────────────────────────
+// -- God Node ----------------------------------------------------------------
 
 /// A high-degree (hub) symbol.
 #[derive(Debug, Clone)]
@@ -112,7 +112,7 @@ pub struct GodNode {
     pub degree: usize,
 }
 
-// ── Community Info ───────────────────────────────────────────────────────────
+// -- Community Info -----------------------------------------------------------
 
 /// Information about a detected community.
 #[derive(Debug, Clone)]
@@ -125,7 +125,7 @@ pub struct CommunityInfo {
     pub member_count: usize,
 }
 
-// ── Symbol Graph ────────────────────────────────────────────────────────────
+// -- Symbol Graph ------------------------------------------------------------
 
 /// The semantic code graph built from indexed symbols.
 ///
@@ -146,7 +146,7 @@ impl<'a> SymbolGraph<'a> {
         Self { store }
     }
 
-    // ── Build ────────────────────────────────────────────────────────────
+    // -- Build ------------------------------------------------------------
 
     /// Build (or rebuild) the semantic edge graph.
     ///
@@ -164,7 +164,7 @@ impl<'a> SymbolGraph<'a> {
         edges::derive_and_store_for_language(self.store, language)
     }
 
-    // ── Queries ──────────────────────────────────────────────────────────
+    // -- Queries ----------------------------------------------------------
 
     /// Explain a symbol: show its node metadata and connections.
     ///
@@ -244,7 +244,7 @@ impl<'a> SymbolGraph<'a> {
         Ok(nodes)
     }
 
-    // ── Export ───────────────────────────────────────────────────────────
+    // -- Export -----------------------------------------------------------
 
     /// Serialise the graph to a JSON string.
     pub fn export_json(&self) -> Result<String> {
@@ -256,7 +256,7 @@ impl<'a> SymbolGraph<'a> {
         export::to_report(self.store)
     }
 
-    // ── Stats ────────────────────────────────────────────────────────────
+    // -- Stats ------------------------------------------------------------
 
     /// Return the total number of edges in the graph.
     pub fn edge_count(&self) -> Result<u64> {
@@ -274,7 +274,7 @@ impl<'a> SymbolGraph<'a> {
     }
 }
 
-// ── Build Result ────────────────────────────────────────────────────────────
+// -- Build Result ------------------------------------------------------------
 
 /// Summary of a graph build operation.
 #[derive(Debug, Clone, Default)]

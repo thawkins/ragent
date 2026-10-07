@@ -190,7 +190,7 @@ fn test_substitute_quoted_args() {
 #[test]
 fn test_substitute_dollar_not_variable() {
     let result = substitute_args("Price is $50 dollars", "args", "s1", Path::new("/skills"));
-    // $5 matches positional $5 (out of bounds → empty), "0" stays
+    // $5 matches positional $5 (out of bounds -> empty), "0" stays
     // Actually $50 is parsed as index 50, which is out of bounds
     assert_eq!(result, "Price is  dollars");
 }

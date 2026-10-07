@@ -1,7 +1,7 @@
 //! Integration tests for `ragent-storage` discovered-models cache.
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/storage.rs`
-//! (T-004 of the testconsolidate spec, FR-004 — this crate previously had no
+//! (T-004 of the testconsolidate spec, FR-004 - this crate previously had no
 //! `tests/` directory).
 
 use ragent_storage::Storage;

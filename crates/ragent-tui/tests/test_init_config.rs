@@ -124,7 +124,7 @@ async fn test_slash_init_config_skips_when_config_exists() {
 }
 
 /// `/init config` should produce a user-facing message even when no config
-/// directory can be determined.  This is a defensive check — on real platforms
+/// directory can be determined.  This is a defensive check - on real platforms
 /// `dirs::config_dir()` always returns `Some`, but the branch should still
 /// produce a clean status rather than panicking.
 #[tokio::test]

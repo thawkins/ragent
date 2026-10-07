@@ -74,7 +74,7 @@ fn store_dirs(root: &Path) -> StoreDirs {
     }
 }
 
-// ── Parser ──────────────────────────────────────────────────────────────────
+// -- Parser ------------------------------------------------------------------
 
 #[test]
 fn parse_git_source_reads_url_ref_and_subpath() {
@@ -118,7 +118,7 @@ fn parse_git_source_normalises_a_dot_slash_subpath() {
     assert_eq!(spec.subpath.as_deref(), Some("plugins/z"));
 }
 
-// ── End-to-end install through `add` (offline, file:// remote) ──────────────
+// -- End-to-end install through `add` (offline, file:// remote) --------------
 
 #[test]
 fn add_installs_a_plugin_from_a_git_subdirectory_source() {
@@ -205,7 +205,7 @@ fn add_failed_git_subdir_install_leaves_no_staging_directory() {
     );
 }
 
-// ── SEC-ragent-plugins-001: a `-`-prefixed ref/subpath is a git option ──────
+// -- SEC-ragent-plugins-001: a `-`-prefixed ref/subpath is a git option ------
 
 /// A `git+` fragment is untrusted content, and `git` parses a leading `-` as an
 /// option rather than a positional. `--upload-pack=<cmd>` (and friends) execute

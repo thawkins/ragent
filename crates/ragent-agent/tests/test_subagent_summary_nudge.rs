@@ -2,8 +2,8 @@
 //! without findings" truncation pattern).
 //!
 //! When a sub-agent that was actively calling tools produces a SHORT text-only
-//! response (narration like "Now let me check …") without a tool call, the
-//! agent loop used to treat that as the final answer — silently accepting a
+//! response (narration like "Now let me check ...") without a tool call, the
+//! agent loop used to treat that as the final answer - silently accepting a
 //! fragment as the deliverable. The fix injects a one-shot "summary nudge"
 //! that asks the model to produce its complete findings report, then
 //! continues the loop. The next text-only response (the actual findings)
@@ -11,9 +11,9 @@
 //!
 //! This test uses a mock LLM client that returns different responses based
 //! on the call number:
-//! - Call 1: a `think` tool call + `Finish(ToolUse)` — step 1 does tool work
-//! - Call 2: a short text-only narration + `Finish(Stop)` — triggers the nudge
-//! - Call 3: a long text findings report + `Finish(Stop)` — the deliverable
+//! - Call 1: a `think` tool call + `Finish(ToolUse)` - step 1 does tool work
+//! - Call 2: a short text-only narration + `Finish(Stop)` - triggers the nudge
+//! - Call 3: a long text findings report + `Finish(Stop)` - the deliverable
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -55,7 +55,7 @@ impl LlmClient for NarrationMockClient {
             .push(request);
         let call = self.call_count.fetch_add(1, Ordering::Relaxed);
         let events = match call {
-            // Call 0: a `think` tool call — step 1 does real tool work.
+            // Call 0: a `think` tool call - step 1 does real tool work.
             0 => vec![
                 StreamEvent::ToolCallStart {
                     id: "toolu_narr_001".to_string(),
@@ -72,7 +72,7 @@ impl LlmClient for NarrationMockClient {
                     reason: LlmFinishReason::ToolUse,
                 },
             ],
-            // Call 1: short text-only narration — triggers the summary nudge.
+            // Call 1: short text-only narration - triggers the summary nudge.
             1 => vec![
                 StreamEvent::TextDelta {
                     text: "Now let me check the remaining spots: next_task_id \
@@ -83,7 +83,7 @@ impl LlmClient for NarrationMockClient {
                     reason: LlmFinishReason::Stop,
                 },
             ],
-            // Call 2 (after nudge): the actual findings report — the deliverable.
+            // Call 2 (after nudge): the actual findings report - the deliverable.
             _ => vec![
                 StreamEvent::TextDelta {
                     text: "## Findings\n\n### H1. Blocking I/O on async path\n\
@@ -261,7 +261,7 @@ async fn test_subagent_narration_nudge_produces_findings() {
 
     let output = reply.text_content();
 
-    // The model was called 3 times: tool call → narration → findings.
+    // The model was called 3 times: tool call -> narration -> findings.
     assert_eq!(
         call_count.load(Ordering::Relaxed),
         3,
@@ -289,7 +289,7 @@ async fn test_subagent_narration_nudge_produces_findings() {
 }
 
 /// A primary (non-subagent) agent that produces a short text-only response
-/// after tool work should NOT be nudged — the nudge is subagent-only.
+/// after tool work should NOT be nudged - the nudge is subagent-only.
 #[tokio::test]
 async fn test_primary_agent_short_response_not_nudged() {
     let event_bus = Arc::new(EventBus::new(64));
@@ -300,7 +300,7 @@ async fn test_primary_agent_short_response_not_nudged() {
         .expect("session should be created");
 
     let mut agent = AgentInfo::new("general", "General");
-    // Primary mode — the nudge must NOT fire.
+    // Primary mode - the nudge must NOT fire.
     agent.mode = AgentMode::Primary;
     agent.model = Some(ModelRef {
         provider_id: "ollama".to_string(),
@@ -319,7 +319,7 @@ async fn test_primary_agent_short_response_not_nudged() {
 
     let output = reply.text_content();
 
-    // Primary agent: only 2 calls (tool call → short text). No nudge, no
+    // Primary agent: only 2 calls (tool call -> short text). No nudge, no
     // third call for findings.
     assert_eq!(
         call_count.load(Ordering::Relaxed),

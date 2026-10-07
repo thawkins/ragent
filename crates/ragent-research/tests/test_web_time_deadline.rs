@@ -3,7 +3,7 @@
 //!
 //! The deadline bounds the *search stage*: when it elapses, no new searches
 //! are issued and the pass proceeds with whatever was found. The fetch stage
-//! is never deadline-bounded — fetches are never gated on or cancelled by the
+//! is never deadline-bounded - fetches are never gated on or cancelled by the
 //! deadline; each fetch runs to completion or its own `fetch_timeout`.
 
 use std::sync::{Arc, Mutex};
@@ -418,7 +418,7 @@ async fn test_phase_start_notification_emitted_once_with_deadline() {
 }
 
 /// FR-009: with the deadline disabled (`--web-time 0`), no phase-start
-/// notification is emitted — the UI must not render a countdown.
+/// notification is emitted - the UI must not render a countdown.
 #[tokio::test]
 async fn test_phase_start_notification_absent_when_deadline_disabled() {
     let web = WebGatherer::new(
@@ -589,8 +589,8 @@ async fn test_no_search_issued_after_deadline() {
         0,
         "no search may be issued after the deadline"
     );
-    // The truncated search stage yields no hits, so the fetch stage — which
-    // only starts from search hits — must never run at all.
+    // The truncated search stage yields no hits, so the fetch stage - which
+    // only starts from search hits - must never run at all.
     assert_eq!(
         fetch.calls(),
         0,
@@ -638,7 +638,7 @@ async fn test_fetches_run_to_completion_past_deadline() {
 
     // The phase now waits for all fetches: 3 x 1500 ms fetches run
     // concurrently under the default concurrency, so the phase takes at
-    // least ~1.5 s — well past the 500 ms deadline — and never truncates
+    // least ~1.5 s - well past the 500 ms deadline - and never truncates
     // them.
     assert!(
         elapsed >= std::time::Duration::from_millis(1400),

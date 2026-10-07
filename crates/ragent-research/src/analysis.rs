@@ -693,7 +693,7 @@ pub fn build_source_bodies<S: AsRef<str>>(
         .collect()
 }
 
-// ── E-001: SourceSummarizer trait + heuristic implementation ──────────────
+// -- E-001: SourceSummarizer trait + heuristic implementation --------------
 
 /// Trait for collapsing a source body to a fixed character budget before it
 /// enters the synthesis prompt (Milestone E-001).

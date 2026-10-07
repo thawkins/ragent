@@ -7,7 +7,7 @@
 //! `get_messages`).  Each call must return successfully; if any
 //! operation is mistakenly moved onto the async runtime, the
 //! `get_messages` call after a long `tokio::time::sleep` would still
-//! see the new message — proving the closure ran.
+//! see the new message - proving the closure ran.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

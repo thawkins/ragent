@@ -107,7 +107,7 @@ impl LanguageParser for TypeScriptParser {
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive walk ──────────────────────────────────────────────────────────
+// -- Recursive walk ----------------------------------------------------------
 
 fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
     let Some(_depth_guard) = super::util::TreeDepthGuard::enter(node) else {
@@ -154,7 +154,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], export
     }
 }
 
-// ── Function ────────────────────────────────────────────────────────────────
+// -- Function ----------------------------------------------------------------
 
 fn extract_function(
     ctx: &mut Ctx,
@@ -197,7 +197,7 @@ fn extract_function(
     });
 }
 
-// ── Class ───────────────────────────────────────────────────────────────────
+// -- Class -------------------------------------------------------------------
 
 fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -241,7 +241,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String
     }
 }
 
-// ── Interface ───────────────────────────────────────────────────────────────
+// -- Interface ---------------------------------------------------------------
 
 fn extract_interface(
     ctx: &mut Ctx,
@@ -283,7 +283,7 @@ fn extract_interface(
     });
 }
 
-// ── Enum ────────────────────────────────────────────────────────────────────
+// -- Enum --------------------------------------------------------------------
 
 fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -353,7 +353,7 @@ fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]
     }
 }
 
-// ── Type alias ──────────────────────────────────────────────────────────────
+// -- Type alias --------------------------------------------------------------
 
 fn extract_type_alias(
     ctx: &mut Ctx,
@@ -394,7 +394,7 @@ fn extract_type_alias(
     });
 }
 
-// ── Variable declarations (const/let/var, arrow functions) ──────────────────
+// -- Variable declarations (const/let/var, arrow functions) ------------------
 
 fn extract_variable_decl(
     ctx: &mut Ctx,
@@ -478,7 +478,7 @@ fn extract_variable_decl(
     }
 }
 
-// ── Method (inside class body) ──────────────────────────────────────────────
+// -- Method (inside class body) ----------------------------------------------
 
 fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -509,7 +509,7 @@ fn extract_method(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Strin
     });
 }
 
-// ── Imports ─────────────────────────────────────────────────────────────────
+// -- Imports -----------------------------------------------------------------
 
 fn extract_import(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
@@ -583,7 +583,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn extract_jsdoc(ctx: &Ctx, node: Node) -> Option<String> {
     let mut sib = node.prev_sibling();
@@ -648,4 +648,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

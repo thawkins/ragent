@@ -515,7 +515,7 @@ fn action_close(storage: &Storage, project: &str, input: &Value) -> Result<ToolO
     })
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------
 
 /// Require the `id` parameter for a given action.
 fn require_id(input: &Value, action: &str) -> Result<String> {
@@ -579,7 +579,7 @@ fn render_full(row: &InitiativeRow) -> String {
     out
 }
 
-// ── System-prompt section ───────────────────────────────────────────
+// -- System-prompt section -------------------------------------------
 
 /// Build the `## Active Initiatives` system-prompt section.
 ///

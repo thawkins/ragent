@@ -92,7 +92,7 @@ fn add_auth(req: axum::http::request::Builder, token: &str) -> axum::http::reque
     req.header("Authorization", format!("Bearer {token}"))
 }
 
-// ── Memory Block Endpoints ────────────────────────────────────────────
+// -- Memory Block Endpoints --------------------------------------------
 
 #[tokio::test]
 async fn test_memory_search_requires_auth() {

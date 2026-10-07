@@ -1,5 +1,5 @@
 #![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
-//! Unit tests for `masterfetch::crawl::orchestrator` — best-first crawl
+//! Unit tests for `masterfetch::crawl::orchestrator` - best-first crawl
 //! orchestration (T-019, FR-011, FR-013, FR-014, NFR-001, NFR-003).
 //!
 //! The pure functions (`score_url`, `is_same_domain`, `normalize_and_dedup`,
@@ -234,7 +234,7 @@ fn test_score_depth_boost_decreases() {
     // Each deeper level gets half the boost.
     let d0 = score_url("https://example.com/page", None, 0);
     let d1 = score_url("https://example.com/page", None, 1);
-    // depth 0 → +1.0, depth 1 → +0.5
+    // depth 0 -> +1.0, depth 1 -> +0.5
     let diff = d0 - d1;
     assert!(
         (diff - 0.5).abs() < 0.01,
@@ -260,7 +260,7 @@ fn test_score_docs_higher_than_login() {
 fn test_score_plain_page_neutral() {
     // A plain page with no boost/penalty segments.
     let score = score_url("https://example.com/some/page", None, 1);
-    // depth 1 → +0.5 boost, no content segments → 0.
+    // depth 1 -> +0.5 boost, no content segments -> 0.
     assert!(
         (score - 0.5).abs() < 0.01,
         "plain page at depth 1 should score ~0.5: {score}"
@@ -621,7 +621,7 @@ async fn test_crawl_max_depth_cap() {
         )
         .with_page("https://example.com/d2", "Depth 2", &[]);
 
-    // max_depth = 1 → only depth 0 and 1 are crawled.
+    // max_depth = 1 -> only depth 0 and 1 are crawled.
     let config = CrawlConfig {
         max_depth: 1,
         ..CrawlConfig::default()
@@ -656,14 +656,14 @@ async fn test_crawl_max_total_chars_cap() {
     let orchestrator = CrawlOrchestrator::new(config);
     let result = orchestrator.crawl("https://example.com/", &fetcher).await;
 
-    // First page = 100 chars, second = 100 → total 200 > 150.
+    // First page = 100 chars, second = 100 -> total 200 > 150.
     assert!(result.truncated);
     assert_eq!(result.truncated_by, Some(TruncatedBy::MaxTotalChars));
 }
 
 #[tokio::test]
 async fn test_crawl_does_not_revisit() {
-    // Page A links to B, B links back to A — should not loop.
+    // Page A links to B, B links back to A - should not loop.
     let fetcher = MockFetcher::new()
         .with_page(
             "https://example.com/a",
@@ -870,7 +870,7 @@ async fn test_deadline_truncates_crawl() {
     }
 
     let config = CrawlConfig {
-        deadline_ms: 1, // 1ms — will almost certainly be exceeded.
+        deadline_ms: 1, // 1ms - will almost certainly be exceeded.
         ..CrawlConfig::default()
     };
     let orchestrator = CrawlOrchestrator::new(config);

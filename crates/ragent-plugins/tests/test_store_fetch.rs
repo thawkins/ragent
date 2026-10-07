@@ -34,7 +34,7 @@ fn spec_index() -> Vec<u8> {
     .to_vec()
 }
 
-// ── StoreIndex parse: shapes (FR-003) ───────────────────────────────────────
+// -- StoreIndex parse: shapes (FR-003) ---------------------------------------
 
 #[test]
 fn parses_the_spec_object_shape_and_captures_the_store_token() {
@@ -112,7 +112,7 @@ fn rejects_non_object_non_array_roots() {
     }
 }
 
-// ── Per-entry validation: skip and count (FR-013, FR-025) ───────────────────
+// -- Per-entry validation: skip and count (FR-013, FR-025) -------------------
 
 #[test]
 fn skips_malformed_entries_and_counts_them() {
@@ -148,7 +148,7 @@ fn a_single_malformed_entry_does_not_fail_the_whole_index() {
     assert_eq!(index.skipped, 1);
 }
 
-// ── read_capped: the streamed byte ceiling (FR-013, FR-025) ─────────────────
+// -- read_capped: the streamed byte ceiling (FR-013, FR-025) -----------------
 
 #[test]
 fn read_capped_returns_the_full_body_under_the_ceiling() {
@@ -177,7 +177,7 @@ fn read_capped_handles_an_empty_body() {
     assert!(out.is_empty());
 }
 
-// ── FetchLimits (FR-016; config wiring) ─────────────────────────────────────
+// -- FetchLimits (FR-016; config wiring) -------------------------------------
 
 #[test]
 fn fetch_limits_defaults_are_the_compiled_values() {
@@ -214,7 +214,7 @@ fn fetch_limits_are_derived_from_the_stores_config() {
     assert_eq!(defaults, FetchLimits::default());
 }
 
-// ── Failure containment: endpoint guard (FR-024, FR-025) ────────────────────
+// -- Failure containment: endpoint guard (FR-024, FR-025) --------------------
 
 #[test]
 fn endpoint_errors_convert_into_store_errors() {
@@ -236,7 +236,7 @@ fn store_labels_name_each_store() {
     assert_eq!(store_label(StoreKind::Claude), "Claude");
 }
 
-// ── Live fetch failure containment (FR-013, FR-024, FR-025) ─────────────────
+// -- Live fetch failure containment (FR-013, FR-024, FR-025) -----------------
 
 #[test]
 fn fetch_reports_a_network_failure_without_panicking() {
@@ -254,7 +254,7 @@ fn fetch_reports_a_network_failure_without_panicking() {
     );
 }
 
-// ── The byte cap is enforced before JSON parse (FR-013, FR-025) ─────────────
+// -- The byte cap is enforced before JSON parse (FR-013, FR-025) -------------
 
 #[test]
 fn an_oversized_body_never_reaches_the_parser() {

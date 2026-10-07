@@ -4,7 +4,7 @@
 //! These tests verify the adapter's public API: server registration,
 //! notification normalization, inject_summary / inject_and_run modes,
 //! deduplication, cycle suppression, raw payload privacy, and
-//! multi-server independence. No real MCP server or LLM is required —
+//! multi-server independence. No real MCP server or LLM is required -
 //! `RecordingNotificationInjector` stands in for the injection mechanism.
 
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use ragent_config::McpNotificationMode;
 use ragent_types::trigger::{TriggerActionKind, TriggerEnvelope, TriggerSourceKind};
 use serde_json::json;
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 fn make_adapter() -> (
     McpNotificationAdapter,
@@ -44,7 +44,7 @@ fn make_message_notification(server: &str, data: &str) -> McpNotification {
     )
 }
 
-// ── Server registration tests ──────────────────────────────────────────────
+// -- Server registration tests ----------------------------------------------
 
 #[test]
 fn test_register_server() {
@@ -81,7 +81,7 @@ fn test_unregister_unknown_server_is_noop() {
     assert_eq!(adapter.server_count(), 0);
 }
 
-// ── Notification normalization tests ───────────────────────────────────────
+// -- Notification normalization tests ---------------------------------------
 
 #[tokio::test]
 async fn test_message_notification_summary_contains_data() {
@@ -162,7 +162,7 @@ async fn test_generic_notification_summary() {
     );
 }
 
-// ── Injection mode tests ────────────────────────────────────────────────────
+// -- Injection mode tests ----------------------------------------------------
 
 #[tokio::test]
 async fn test_inject_summary_calls_injector() {
@@ -224,7 +224,7 @@ async fn test_inject_and_run_uses_correct_action_kind() {
     assert_eq!(fired.envelope.action_kind, TriggerActionKind::InjectAndRun);
 }
 
-// ── Error handling tests ────────────────────────────────────────────────────
+// -- Error handling tests ----------------------------------------------------
 
 #[tokio::test]
 async fn test_unregistered_server_returns_error() {
@@ -247,7 +247,7 @@ async fn test_mode_none_returns_error() {
     assert!(matches!(result, Err(McpNotificationError::ModeNone { .. })));
 }
 
-// ── Deduplication tests ──────────────────────���──────────────────────────────
+// -- Deduplication tests ----------------------���------------------------------
 
 #[tokio::test]
 async fn test_duplicate_notification_suppressed() {
@@ -293,7 +293,7 @@ async fn test_different_servers_not_suppressed() {
     assert_eq!(injector.count(), 2);
 }
 
-// ── Cycle suppression tests ─────────────────────────────────────────────────
+// -- Cycle suppression tests -------------------------------------------------
 
 #[tokio::test]
 async fn test_cycle_suppression_kicks_in() {
@@ -346,7 +346,7 @@ async fn test_cycle_resets_on_content_change() {
     assert_eq!(injector.count(), 4);
 }
 
-// ── Envelope property tests ─────────────────────────────────────────────────
+// -- Envelope property tests -------------------------------------------------
 
 #[tokio::test]
 async fn test_envelope_source_kind_is_mcp_notification() {
@@ -436,7 +436,7 @@ async fn test_raw_payload_not_in_envelope() {
     assert!(!fired.envelope.summary.contains("secret_token_123"));
 }
 
-// ── Multi-server independence tests ─────────────────────────────────────────
+// -- Multi-server independence tests -----------------------------------------
 
 #[tokio::test]
 async fn test_multiple_servers_independent_injection() {
@@ -472,7 +472,7 @@ async fn test_same_content_different_servers_both_pass() {
     assert_eq!(injector.count(), 2);
 }
 
-// ── Shared runtime tests ─────────────────────────────────────────────────────
+// -- Shared runtime tests -----------------------------------------------------
 
 #[tokio::test]
 async fn test_adapter_shares_runtime_with_dynamic_rules() {

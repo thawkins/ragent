@@ -101,7 +101,7 @@ fn pruned_tool_results_zero_omits_all() {
 #[test]
 fn pruned_tool_results_preserves_full_projection() {
     // FR-009: pruning does NOT delete events from the log or modify the
-    // projection — it only affects the returned slice.
+    // projection - it only affects the returned slice.
     let events = [
         ev(
             0,

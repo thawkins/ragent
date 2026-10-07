@@ -9,7 +9,7 @@ use ragent_plugins::{
 };
 use serde_json::json;
 
-// ── StoreKind (FR-001) ──────────────────────────────────────────────────────
+// -- StoreKind (FR-001) ------------------------------------------------------
 
 #[test]
 fn store_kinds_are_codex_then_claude() {
@@ -35,7 +35,7 @@ fn store_kind_from_token_is_case_insensitive_and_trims() {
     assert_eq!(StoreKind::from_token(""), None);
 }
 
-// ── StoreEndpoint scheme guard (FR-024, FR-029) ─────────────────────────────
+// -- StoreEndpoint scheme guard (FR-024, FR-029) -----------------------------
 
 #[test]
 fn store_endpoint_accepts_https_with_host() {
@@ -102,7 +102,7 @@ fn store_endpoint_try_from_matches_parse() {
     assert!(StoreEndpoint::try_from("http://example.org/i.json").is_err());
 }
 
-// ── StoreCatalog (FR-001) ───────────────────────────────────────────────────
+// -- StoreCatalog (FR-001) ---------------------------------------------------
 
 #[test]
 fn empty_catalog_reports_empty_and_no_endpoints() {
@@ -147,7 +147,7 @@ fn catalog_insert_replaces_existing_endpoint() {
     );
 }
 
-// ── configured_url (FR-019, FR-028) ─────────────────────────────────────────
+// -- configured_url (FR-019, FR-028) -----------------------------------------
 
 #[test]
 fn configured_url_is_none_when_the_block_is_absent() {
@@ -186,7 +186,7 @@ fn configured_url_returns_an_empty_override_verbatim() {
     assert_eq!(StoreKind::Codex.configured_url(&stores), Some(""));
 }
 
-// ── effective_endpoint resolution (FR-027, FR-028, FR-029, NFR-002) ──────────
+// -- effective_endpoint resolution (FR-027, FR-028, FR-029, NFR-002) ----------
 
 #[test]
 fn default_url_returns_the_compiled_default_per_store() {
@@ -292,7 +292,7 @@ fn effective_endpoint_is_resolved_afresh_on_each_call() {
     );
 }
 
-// ── StoreEntry model (FR-003, FR-025) ───────────────────────────────────────
+// -- StoreEntry model (FR-003, FR-025) ---------------------------------------
 
 #[test]
 fn store_entry_parses_required_and_optional_fields() {
@@ -400,7 +400,7 @@ fn store_entry_rejects_non_object_values() {
     }
 }
 
-// ── Compiled default endpoints (FR-027, FR-029, NFR-001) ────────────────────
+// -- Compiled default endpoints (FR-027, FR-029, NFR-001) --------------------
 
 #[test]
 fn default_endpoints_are_distinct_and_non_empty() {

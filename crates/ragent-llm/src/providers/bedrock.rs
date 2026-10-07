@@ -1183,6 +1183,8 @@ async fn handle_bedrock_error(
         .or_else(|| error_json.get("error").and_then(|e| e.get("message")))
         .and_then(Value::as_str)
         .unwrap_or(&body_text);
+    // SEC: redact the provider error message before logging or surfacing it.
+    let message = ragent_types::sanitize::redact_secrets(message);
 
     match error_type {
         // FR-027: Throttling -> retryable error

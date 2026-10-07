@@ -20,7 +20,9 @@ use ragent_llm::provider::http_client::{
     DEFAULT_STREAM_TIMEOUT_SECS, STREAM_CHUNK_IDLE_TIMEOUT_SECS,
 };
 use ragent_llm::provider::openai_responses::ResponsesApiClient;
-use ragent_llm::{AnthropicProvider, GeminiProvider, OllamaCloudProvider, Provider};
+use ragent_llm::{
+    AnthropicProvider, GeminiProvider, OllamaCloudProvider, OllamaProvider, Provider,
+};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
@@ -56,6 +58,27 @@ async fn spawn_sse_server(content_type: &str, body: String) -> anyhow::Result<St
         };
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nConnection: close\r\n\r\n{body}"
+        );
+        let _ = socket.write_all(response.as_bytes()).await;
+        let _ = socket.shutdown().await;
+    });
+
+    Ok(format!("http://{addr}"))
+}
+
+/// Serves a single error response with the given status and body.
+async fn spawn_error_server(status: u16, body: String) -> anyhow::Result<String> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let body = body.replace('\n', " ");
+
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let response = format!(
+            "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
         );
         let _ = socket.write_all(response.as_bytes()).await;
         let _ = socket.shutdown().await;
@@ -115,6 +138,43 @@ async fn test_gemini_create_client_registers_secret_via_constructor() {
     assert!(
         !ragent_types::sanitize::redact_secrets(UNIQUE_KEY).contains(UNIQUE_KEY),
         "gemini create_client must register its key with the redaction registry"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 3.6 provider error-body redaction (audit T-107)
+// ---------------------------------------------------------------------------
+
+/// A key-shaped token that the regex layer of `redact_secrets` masks but the
+/// registry does not need to know about. It mimics a credential a provider
+/// might echo back inside an HTTP error body.
+const KEY_SHAPED_TOKEN: &str = "sk-proj-3f8a2b1c9d0e4f5a6b7c8d9e0f1a2b3c";
+
+#[tokio::test]
+async fn test_ollama_error_body_is_redacted() {
+    // The error body a provider echoes can carry a credential; it must never
+    // reach the surfaced `anyhow::Error` in cleartext.
+    let body = format!("{{\"error\":{{\"message\":\"invalid api key {KEY_SHAPED_TOKEN}\"}}}}");
+    let url = spawn_error_server(401, body).await.expect("server");
+
+    let client = OllamaProvider::new()
+        .create_client("test-key", Some(&url), &HashMap::new())
+        .await
+        .expect("ollama client");
+
+    let err = client
+        .chat(make_request("llama3"))
+        .await
+        .err()
+        .expect("chat must fail on a 401 response");
+    let message = err.to_string();
+    assert!(
+        !message.contains(KEY_SHAPED_TOKEN),
+        "provider error body must be redacted before surfacing: {message}"
+    );
+    assert!(
+        message.contains("[REDACTED]"),
+        "redacted error should mark the masked span: {message}"
     );
 }
 

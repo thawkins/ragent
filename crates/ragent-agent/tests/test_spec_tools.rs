@@ -13,7 +13,7 @@ fn base_ctx() -> ToolContext {
     use std::path::PathBuf;
     ToolContext {
         session_id: "session-1".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         agent_manager: None,
@@ -285,7 +285,7 @@ async fn test_spec_task_update_status_transitions() {
 
     let mgr = SpecManager::new(specs_root);
 
-    // Transition: pending → in_progress
+    // Transition: pending -> in_progress
     let mut ctx = base_ctx();
     ctx.spec_manager = Some(Arc::new(mgr.clone()));
     let tool = SpecTaskUpdateTool;
@@ -302,7 +302,7 @@ async fn test_spec_task_update_status_transitions() {
     let task = spec.tasks.iter().find(|t| t.id == "T-001").unwrap();
     assert_eq!(task.status, ragent_specs::spec::TaskStatus::InProgress);
 
-    // Transition: in_progress → completed
+    // Transition: in_progress -> completed
     let result = tool
         .execute(
             json!({"spec_id": "testspec", "task_id": "T-001", "status": "completed"}),

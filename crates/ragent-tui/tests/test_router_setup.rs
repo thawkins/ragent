@@ -64,7 +64,7 @@ fn seed_router_provider_models(storage: &Storage) {
         .expect("seed openai discovered models");
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
+// -- helpers ----------------------------------------------------------------
 
 fn mem_storage() -> Arc<Storage> {
     Arc::new(Storage::open_in_memory().expect("in-memory storage"))
@@ -137,7 +137,7 @@ fn make_app() -> App {
     make_app_with_storage(mem_storage())
 }
 
-// ── FR-004: configured-provider query helper excludes router ───────────────
+// -- FR-004: configured-provider query helper excludes router ---------------
 
 #[test]
 fn test_get_configured_providers_for_router_excludes_router() {
@@ -159,7 +159,7 @@ fn test_get_configured_providers_for_router_excludes_router() {
     );
 }
 
-// ── FR-003 / FR-006: router setup state initialisation ─────────────────────
+// -- FR-003 / FR-006: router setup state initialisation ---------------------
 
 #[test]
 fn test_router_setup_step_defaults() {
@@ -189,7 +189,7 @@ fn test_router_setup_step_defaults() {
     }
 }
 
-// ── FR-010: router config report formatting ────────────────────────────────
+// -- FR-010: router config report formatting --------------------------------
 
 #[test]
 fn test_router_config_report_renders_tiers() {
@@ -249,7 +249,7 @@ fn test_router_config_report_includes_entries() {
     );
 }
 
-// ── FR-020: status bar label when router enabled ───────────────────────────
+// -- FR-020: status bar label when router enabled ---------------------------
 
 #[test]
 fn test_provider_model_label_shows_router() {
@@ -265,7 +265,7 @@ fn test_provider_model_label_shows_router() {
     );
 }
 
-// ── FR-024: router setup helper excludes router provider ───────────────────
+// -- FR-024: router setup helper excludes router provider -------------------
 
 #[test]
 fn test_router_setup_providers_list_never_contains_router() {
@@ -284,7 +284,7 @@ fn test_router_setup_providers_list_never_contains_router() {
     );
 }
 
-// ── FR-002: provider picker list contains router ───────────────────────────
+// -- FR-002: provider picker list contains router ---------------------------
 
 #[test]
 fn test_provider_list_includes_router() {
@@ -292,7 +292,7 @@ fn test_provider_list_includes_router() {
     assert!(PROVIDER_LIST.iter().any(|(id, _)| id == &"router"));
 }
 
-// ── FR-003: router model picker preserves provider selection on Enter/Esc ────
+// -- FR-003: router model picker preserves provider selection on Enter/Esc ----
 
 fn router_setup_with_providers(storage: Arc<Storage>) -> App {
     storage
@@ -1024,8 +1024,8 @@ async fn test_router_model_picker_esc_preserves_providers() {
         _ => panic!("expected SetupRouter after Esc"),
     }
 }
-// ── FR-025: selecting "Model Router" from the provider picker opens the
-// router cluster setup panel (not the generic API-key dialog) ──────────────
+// -- FR-025: selecting "Model Router" from the provider picker opens the
+// router cluster setup panel (not the generic API-key dialog) --------------
 
 #[tokio::test]
 async fn test_provider_picker_router_opens_setup_router() {
@@ -1109,7 +1109,7 @@ async fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
     );
 }
 
-// ── FR-006 (revised): buckets render in a 2×2 grid with full tier names ──────
+// -- FR-006 (revised): buckets render in a 2×2 grid with full tier names ------
 
 /// Render the router setup panel and return the flattened buffer text so tests
 /// can assert on what the user actually sees.
@@ -1217,7 +1217,7 @@ async fn test_router_model_picker_renders_property_columns() {
     );
 }
 
-// ── Re-opening setup seeds the draft from the persisted config ───────────
+// -- Re-opening setup seeds the draft from the persisted config -----------
 
 #[tokio::test]
 async fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
@@ -1422,7 +1422,7 @@ async fn test_router_setup_delete_on_last_model_adjusts_index() {
     }
 }
 
-// ── Regression: router save confirmation modal must render on top ────────────
+// -- Regression: router save confirmation modal must render on top ------------
 
 #[tokio::test]
 async fn test_router_save_confirmation_renders_above_setup_dialog() {
@@ -1455,8 +1455,8 @@ async fn test_router_save_confirmation_renders_above_setup_dialog() {
     );
 }
 
-// ── Regression: selecting an already-configured Model Router from the provider
-// picker must open the router setup UI, not the single-entry model picker. ───
+// -- Regression: selecting an already-configured Model Router from the provider
+// picker must open the router setup UI, not the single-entry model picker. ---
 
 #[tokio::test]
 async fn test_provider_picker_already_configured_router_opens_setup_router() {

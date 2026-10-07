@@ -83,7 +83,7 @@ fn append_rejects_empty_event_id() {
 
 #[test]
 fn append_rejects_duplicate_event_id() {
-    // FR-002: a second event reusing an already-committed id is rejected —
+    // FR-002: a second event reusing an already-committed id is rejected -
     // ids are immutable and globally unique.
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");

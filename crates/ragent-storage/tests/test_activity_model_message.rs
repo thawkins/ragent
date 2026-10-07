@@ -1,6 +1,6 @@
 //! Tests for recording model-message events (maka spec T-004, FR-001).
 //!
-//! FR-001 requires that every execution event — including a model message —
+//! FR-001 requires that every execution event - including a model message -
 //! is persisted to the append-only event log *before* it is projected into
 //! any user-facing or derived state. These tests verify the
 //! [`ActivityLog::record_model_message`] convenience path persists a

@@ -1,4 +1,4 @@
-//! Integration tests for [`SessionProcessor::compact_session`] — the dedicated
+//! Integration tests for [`SessionProcessor::compact_session`] - the dedicated
 //! compaction runner entry point used by the TUI `/compact` command and
 //! pre-send auto-compaction.
 //!
@@ -225,7 +225,7 @@ async fn test_compact_session_single_llm_call_and_history_replacement() {
         .await
         .expect("compact_session should succeed");
 
-    // Exactly ONE LLM request was made — no agent loop, no init
+    // Exactly ONE LLM request was made - no agent loop, no init
     // acknowledgement, no second (in-loop trigger) summarisation.
     let captured = captured_requests.lock().expect("captured requests lock");
     assert_eq!(
@@ -329,7 +329,7 @@ async fn test_compact_session_unknown_provider_errors() {
 }
 
 /// A cancel raised between the entry check and the LLM call still aborts
-/// (or, if it lands too late, the run stays a single summarisation call —
+/// (or, if it lands too late, the run stays a single summarisation call -
 /// never a double one).
 #[tokio::test]
 async fn test_compact_session_cancel_flag_raced_mid_run() {

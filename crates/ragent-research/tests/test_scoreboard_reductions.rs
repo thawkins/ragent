@@ -7,138 +7,17 @@
 //! FR-014: local-only runs (zero web sources) omit the distinct-domain count
 //! and the average-relevance figures from the source-facts line.
 
-use chrono::Utc;
+#[path = "support/scoreboard_fixture.rs"]
+mod scoreboard_fixture;
+
 use ragent_research::OutputFormat;
-use ragent_research::cite_checker::CitationCheckResult;
-use ragent_research::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-use ragent_research::corpus_critic::CorpusCriticReport;
-use ragent_research::document::{ResearchDocument, assemble_document};
-use ragent_research::item::ResearchItem;
-use ragent_research::research_name::ResearchName;
-use ragent_research::source::Source;
-use std::path::PathBuf;
+use ragent_research::contradiction::ContradictionGraph;
+use ragent_research::document::assemble_document;
 
-/// Build a minimal [`ResearchItem`] for tests.
-fn sample_item() -> ResearchItem {
-    let name = ResearchName::new("scoreboard-reduct").expect("valid name");
-    ResearchItem::new(name, "Scoreboard Test", "scoreboard verification")
-}
-
-/// Build an empty [`ResearchDocument`] with the given output format.
-fn empty_doc(item: ResearchItem, output_format: OutputFormat) -> ResearchDocument {
-    ResearchDocument {
-        item,
-        summary: String::new(),
-        findings: Vec::new(),
-        top_implications: Vec::new(),
-        cross_references: Vec::new(),
-        open_questions: Vec::new(),
-        concepts: None,
-        contradiction_graph: None,
-        loci: None,
-        depth_investigation: None,
-        evidence_digest: None,
-        triple_draft: None,
-        cross_locus_reconcile: None,
-        source_tensions: None,
-        synthesis_audit: None,
-        template_body: None,
-        corpus_critic: None,
-        gap_fetch: None,
-        surgical_patch: None,
-        cite_check: None,
-        polish: None,
-        readability_audit: None,
-        decomposed_queries: Vec::new(),
-        output_format,
-        brief: None,
-        comparison_table: None,
-        evaluation_scorecard: None,
-        provider_stats: None,
-    }
-}
-
-/// Build a `Source::Web` with controlled relevance, body, and date fields.
-fn web_source(
-    domain: &str,
-    relevance: &str,
-    body: &str,
-    published_at: Option<chrono::DateTime<Utc>>,
-) -> Source {
-    Source::Web {
-        url: format!("https://{domain}/article"),
-        title: format!("Article on {domain}"),
-        captured_at: Utc::now(),
-        published_at,
-        body_path: PathBuf::from("sources/web-01.md"),
-        body: body.to_string(),
-        relevance: relevance.to_string(),
-        search_tool: "mf_search".into(),
-        search_engine: "openalex".into(),
-        content_type: None,
-        page_type: None,
-        media_type: "page".into(),
-        language: None,
-        oa_recovery: None,
-        author: None,
-    }
-}
-
-/// Corpus critic report pre-configured for the spec example (74, pass).
-fn sample_critic() -> CorpusCriticReport {
-    CorpusCriticReport {
-        score: 74,
-        coverage_score: 60,
-        evidence_score: 80,
-        balance_score: 70,
-        tension_score: 100,
-        issues: Vec::new(),
-        gaps: Vec::new(),
-        recommendations: Vec::new(),
-        contested_ratio: 0,
-        shallow_dimensions: Vec::new(),
-        isolated_sources: Vec::new(),
-        passed: true,
-    }
-}
-
-fn scoreboard_slice(body: &str, next_section: &str) -> String {
-    let start = body
-        .find("## Corpus Quality Scoreboard")
-        .expect("scoreboard section must be present");
-    let end = body[start + 1..]
-        .find(next_section)
-        .map(|offset| start + 1 + offset)
-        .unwrap_or(body.len());
-    body[start..end].to_string()
-}
-
-/// All artifacts set, so a full-layout scoreboard would show every line.
-fn fully_populated(doc: &mut ResearchDocument) {
-    doc.corpus_critic = Some(sample_critic());
-    let claim_a = ContradictionClaim {
-        text: "Claim A".into(),
-        source_index: 1,
-        source_kind: "web".into(),
-        source_path: "https://example.com/article".into(),
-    };
-    let claim_b = ContradictionClaim {
-        text: "Claim B".into(),
-        source_index: 1,
-        source_kind: "web".into(),
-        source_path: "https://example.com/article".into(),
-    };
-    doc.contradiction_graph = Some(ContradictionGraph {
-        edges: vec![ContradictionEdge {
-            claim_a,
-            claim_b,
-            dimension: "mortality".into(),
-            note: "conflicting claims".into(),
-            strength: 78,
-        }],
-    });
-    doc.cite_check = Some(CitationCheckResult::empty());
-}
+use scoreboard_fixture::{
+    empty_doc, fully_populated, local_source, sample_cite_check, sample_critic, sample_item,
+    scoreboard_slice, web_source,
+};
 
 #[test]
 fn test_abbreviated_executive_summary_omits_critic_and_tension_lines() {
@@ -239,20 +118,12 @@ fn test_imrad_keeps_critic_and_tension_lines_despite_artifacts() {
 
 #[test]
 fn test_abbreviated_local_only_reduces_lines_and_facts() {
-    let name = ResearchName::new("scoreboard-local-abbrev").expect("valid name");
-    let mut item = ResearchItem::new(name, "Scoreboard Test", "local only");
-    item.sources = vec![Source::Local {
-        path: "src/lib.rs".into(),
-        kind: ragent_research::source::LocalSourceKind::InProject,
-        captured_at: Utc::now(),
-        body_path: PathBuf::from("sources/local-01.md"),
-        relevance: "High".into(),
-        body: "fn main() {}".into(),
-    }];
+    let mut item = sample_item();
+    item.sources = vec![local_source()];
     let mut doc = empty_doc(item, OutputFormat::ExecutiveSummary);
     doc.corpus_critic = Some(sample_critic());
     doc.contradiction_graph = Some(ContradictionGraph::empty());
-    doc.cite_check = Some(CitationCheckResult::empty());
+    doc.cite_check = Some(sample_cite_check());
     let assembled = assemble_document(&doc);
     let sb = scoreboard_slice(&assembled.body, "## Topic");
     assert!(

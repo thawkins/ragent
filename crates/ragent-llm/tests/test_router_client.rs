@@ -446,7 +446,7 @@ async fn test_router_continuation_reuses_cached_model_without_reclassifying() {
 
     let client = RouterClient::new(config_with_known_models(), Some(registry), None);
 
-    // First call: a fresh user prompt — should classify into SIMPLE and
+    // First call: a fresh user prompt - should classify into SIMPLE and
     // delegate to the simple-tier model.
     let result = client.chat(request_with_prompt("hi")).await;
     assert!(result.is_ok(), "first call should succeed");
@@ -457,7 +457,7 @@ async fn test_router_continuation_reuses_cached_model_without_reclassifying() {
         "first call should select the simple-tier model"
     );
 
-    // Second call: a continuation — last user message is tool results.
+    // Second call: a continuation - last user message is tool results.
     // The router should reuse the cached simple-tier model WITHOUT
     // re-classifying. We verify this by checking the downstream model is
     // still the simple-tier one.
@@ -722,7 +722,7 @@ async fn test_router_vision_fallback_warms_all_tiers_for_dynamic_providers() {
             timeout_ms: None,
         },
     );
-    // MEDIUM is intentionally empty — this is where classification lands.
+    // MEDIUM is intentionally empty - this is where classification lands.
     config.tiers.insert(
         Tier::Medium.to_string(),
         TierConfig {

@@ -56,7 +56,7 @@ version = "0.20.5"
 version = "0.4.22"
 
 [dependencies.lopdf]
-version = "0.38"
+version = "0.44"
 default-features = false
 
 [dependencies.type1-encoding-parser]

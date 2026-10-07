@@ -393,7 +393,7 @@ fn add_prompt_contains_existing_content_and_numbering() {
     assert!(!p.contains("---END---"));
 }
 
-// ── JTBD parser tests ─────────────────────────────────────────────────────────
+// -- JTBD parser tests ---------------------------------------------------------
 
 #[test]
 fn parse_jtbd_basic() {
@@ -448,13 +448,13 @@ fn parse_jtbd_agent_without_name() {
 
 #[test]
 fn parse_jtbd_missing_spec_id() {
-    // FR-008: missing spec name → Unknown("jtbd")
+    // FR-008: missing spec name -> Unknown("jtbd")
     assert!(matches!(SpecCommand::parse("jtbd"), SpecCommand::Unknown(s) if s == "jtbd"));
 }
 
 #[test]
 fn parse_jtbd_empty_args() {
-    // FR-008: empty argument string after subcommand → Unknown
+    // FR-008: empty argument string after subcommand -> Unknown
     assert!(matches!(SpecCommand::parse("jtbd   "), SpecCommand::Unknown(s) if s == "jtbd"));
 }
 
@@ -470,7 +470,7 @@ fn help_message_contains_jtbd() {
     assert!(help.contains("/spec jtbd"));
 }
 
-// ── JTBD builder helper tests ─────────────────────────────────────────────────
+// -- JTBD builder helper tests -------------------------------------------------
 
 #[test]
 fn jtbd_status_is_well_formed() {
@@ -543,7 +543,7 @@ fn jtbd_prompt_contains_traceability_instruction() {
     assert!(p.contains("NFR-NNN"));
     assert!(p.contains("untraced"));
 }
-// ── /spec add prompt tests (edit-tool based, no post-processing) ────────────
+// -- /spec add prompt tests (edit-tool based, no post-processing) ------------
 
 #[test]
 fn build_add_prompt_includes_spec_md_and_plan_md_content() {

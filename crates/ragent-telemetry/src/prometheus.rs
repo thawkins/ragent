@@ -46,10 +46,10 @@ use opentelemetry::Value;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::Pipeline;
 use opentelemetry_sdk::metrics::data::{
-    Gauge, Histogram, HistogramDataPoint, ResourceMetrics, Sum,
+    AggregatedMetrics, Gauge, Histogram, HistogramDataPoint, MetricData, ResourceMetrics, Sum,
 };
 use opentelemetry_sdk::metrics::reader::MetricReader;
-use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, MetricResult, Temporality};
+use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, Temporality};
 
 /// Size of the HTTP request read buffer used by the scrape server (LOW-2).
 ///
@@ -57,7 +57,7 @@ use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, MetricResult, Tem
 /// from any other path, so a 1 KiB buffer is sufficient for the request head.
 const HTTP_READ_BUF: usize = 1024;
 
-// ── SharedManualReader ───────────────────────────────────────────────────
+// -- SharedManualReader ---------------------------------------------------
 
 /// A newtype wrapper around `Arc<ManualReader>` that implements
 /// [`MetricReader`], so the same reader instance can be registered on a
@@ -103,7 +103,7 @@ impl MetricReader for SharedManualReader {
         self.0.register_pipeline(pipeline);
     }
 
-    fn collect(&self, rm: &mut ResourceMetrics) -> MetricResult<()> {
+    fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
         self.0.collect(rm)
     }
 
@@ -111,8 +111,8 @@ impl MetricReader for SharedManualReader {
         self.0.force_flush()
     }
 
-    fn shutdown(&self) -> OTelSdkResult {
-        self.0.shutdown()
+    fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
     }
 
     fn temporality(&self, kind: InstrumentKind) -> Temporality {
@@ -120,7 +120,7 @@ impl MetricReader for SharedManualReader {
     }
 }
 
-// ── Renderer ──────────────────────────────────────────────────────────────
+// -- Renderer --------------------------------------------------------------
 
 /// Render a metric snapshot from the given reader as Prometheus text
 /// format (FR-028).
@@ -138,10 +138,7 @@ impl MetricReader for SharedManualReader {
 /// crashing the server task.
 #[must_use]
 pub fn render_prometheus_text(reader: &ManualReader) -> String {
-    let mut rm = ResourceMetrics {
-        resource: opentelemetry_sdk::Resource::builder_empty().build(),
-        scope_metrics: Vec::new(),
-    };
+    let mut rm = ResourceMetrics::default();
     if reader.collect(&mut rm).is_err() {
         return String::new();
     }
@@ -154,15 +151,12 @@ fn format_resource_metrics(rm: &ResourceMetrics) -> String {
 
     // Resource attributes become a synthetic `target_info` line per the
     // Prometheus OTEL exposition convention.
-    if !rm.resource.is_empty() {
+    let resource = rm.resource();
+    if !resource.is_empty() {
         out.push_str("# HELP target_info Target metadata\n");
         out.push_str("# TYPE target_info gauge\n");
         out.push_str("target_info");
-        let mut kvs: Vec<(opentelemetry::Key, opentelemetry::Value)> = rm
-            .resource
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let mut kvs: Vec<(&opentelemetry::Key, &opentelemetry::Value)> = resource.iter().collect();
         kvs.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         for (k, v) in &kvs {
             out.push_str(&format!(
@@ -174,9 +168,9 @@ fn format_resource_metrics(rm: &ResourceMetrics) -> String {
         out.push_str(" 1\n");
     }
 
-    for scope in &rm.scope_metrics {
-        for metric in &scope.metrics {
-            render_metric(&mut out, metric.name.as_ref(), metric.data.as_any());
+    for scope in rm.scope_metrics() {
+        for metric in scope.metrics() {
+            render_metric(&mut out, metric.name(), metric.data());
         }
     }
 
@@ -184,91 +178,67 @@ fn format_resource_metrics(rm: &ResourceMetrics) -> String {
 }
 
 /// Render a single metric (all its data points) into `out`.
-fn render_metric(out: &mut String, name: &str, data: &dyn std::any::Any) {
-    if let Some(sum) = data.downcast_ref::<Sum<u64>>() {
-        render_sum_u64(out, name, sum);
-    } else if let Some(sum) = data.downcast_ref::<Sum<i64>>() {
-        render_sum_i64(out, name, sum);
-    } else if let Some(sum) = data.downcast_ref::<Sum<f64>>() {
-        render_sum_f64(out, name, sum);
-    } else if let Some(gauge) = data.downcast_ref::<Gauge<u64>>() {
-        render_gauge_u64(out, name, gauge);
-    } else if let Some(gauge) = data.downcast_ref::<Gauge<i64>>() {
-        render_gauge_i64(out, name, gauge);
-    } else if let Some(gauge) = data.downcast_ref::<Gauge<f64>>() {
-        render_gauge_f64(out, name, gauge);
-    } else if let Some(hist) = data.downcast_ref::<Histogram<u64>>() {
-        render_histogram_u64(out, name, hist);
-    } else if let Some(hist) = data.downcast_ref::<Histogram<f64>>() {
-        render_histogram_f64(out, name, hist);
-    }
-    // Unknown aggregation types are silently skipped (FR-033: never crash).
-}
-
-// ── Sum renderers ────────────────────────────────────────────────────────
-
-fn render_sum_u64(out: &mut String, name: &str, sum: &Sum<u64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} counter\n"));
-    for dp in &sum.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
+///
+/// The OTEL SDK 0.33 exposes aggregation data as a typed enum rather than a
+/// `dyn Any`, so the numeric type is matched once here and dispatched to the
+/// type-specific renderer. Unknown aggregation types (e.g. exponential
+/// histograms) are silently skipped (FR-033: never crash).
+fn render_metric(out: &mut String, name: &str, data: &AggregatedMetrics) {
+    match data {
+        AggregatedMetrics::U64(MetricData::Sum(sum)) => render_sum_u64(out, name, sum),
+        AggregatedMetrics::I64(MetricData::Sum(sum)) => render_sum_i64(out, name, sum),
+        AggregatedMetrics::F64(MetricData::Sum(sum)) => render_sum_f64(out, name, sum),
+        AggregatedMetrics::U64(MetricData::Gauge(gauge)) => render_gauge_u64(out, name, gauge),
+        AggregatedMetrics::I64(MetricData::Gauge(gauge)) => render_gauge_i64(out, name, gauge),
+        AggregatedMetrics::F64(MetricData::Gauge(gauge)) => render_gauge_f64(out, name, gauge),
+        AggregatedMetrics::U64(MetricData::Histogram(hist)) => {
+            render_histogram_u64(out, name, hist)
+        }
+        AggregatedMetrics::F64(MetricData::Histogram(hist)) => {
+            render_histogram_f64(out, name, hist)
+        }
+        AggregatedMetrics::U64(MetricData::ExponentialHistogram(_))
+        | AggregatedMetrics::I64(MetricData::ExponentialHistogram(_))
+        | AggregatedMetrics::F64(MetricData::ExponentialHistogram(_))
+        | AggregatedMetrics::I64(MetricData::Histogram(_)) => {
+            // FR-033: never crash on an aggregation type we cannot render, but
+            // leave a trace so a misconfigured instrument is diagnosable.
+            tracing::debug!(metric = %name, "prometheus: unsupported aggregation type skipped");
+        }
     }
 }
 
-fn render_sum_i64(out: &mut String, name: &str, sum: &Sum<i64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} gauge\n"));
-    for dp in &sum.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
-    }
+// -- Sum / Gauge renderers ------------------------------------------------
+
+/// Generates a renderer for a scalar aggregation (`Sum`/`Gauge`) whose
+/// exposition body differs only by the `TYPE` word. Avoids six byte-identical
+/// hand-written copies that would otherwise drift.
+macro_rules! render_scalar {
+    ($fn_name:ident, $metric_ty:ty, $type_word:literal) => {
+        fn $fn_name(out: &mut String, name: &str, metric: &$metric_ty) {
+            out.push_str(&format!("# HELP {name} ragent metric\n"));
+            out.push_str(&format!("# TYPE {name} {}\n", $type_word));
+            for dp in metric.data_points() {
+                let labels = build_labels(dp.attributes());
+                out.push_str(&format!("{name}{labels} {}\n", dp.value()));
+            }
+        }
+    };
 }
 
-fn render_sum_f64(out: &mut String, name: &str, sum: &Sum<f64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} counter\n"));
-    for dp in &sum.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
-    }
-}
+render_scalar!(render_sum_u64, Sum<u64>, "counter");
+render_scalar!(render_sum_i64, Sum<i64>, "gauge");
+render_scalar!(render_sum_f64, Sum<f64>, "counter");
+render_scalar!(render_gauge_u64, Gauge<u64>, "gauge");
+render_scalar!(render_gauge_i64, Gauge<i64>, "gauge");
+render_scalar!(render_gauge_f64, Gauge<f64>, "gauge");
 
-// ── Gauge renderers ──────────────────────────────────────────────────────
-
-fn render_gauge_u64(out: &mut String, name: &str, gauge: &Gauge<u64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} gauge\n"));
-    for dp in &gauge.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
-    }
-}
-
-fn render_gauge_i64(out: &mut String, name: &str, gauge: &Gauge<i64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} gauge\n"));
-    for dp in &gauge.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
-    }
-}
-
-fn render_gauge_f64(out: &mut String, name: &str, gauge: &Gauge<f64>) {
-    out.push_str(&format!("# HELP {name} ragent metric\n"));
-    out.push_str(&format!("# TYPE {name} gauge\n"));
-    for dp in &gauge.data_points {
-        let labels = build_labels(&dp.attributes);
-        out.push_str(&format!("{name}{labels} {}\n", dp.value));
-    }
-}
-
-// ── Histogram renderers ──────────────────────────────────────────────────
+// -- Histogram renderers --------------------------------------------------
 
 fn render_histogram_u64(out: &mut String, name: &str, hist: &Histogram<u64>) {
     out.push_str(&format!("# HELP {name} ragent histogram\n"));
     out.push_str(&format!("# TYPE {name} histogram\n"));
-    for dp in &hist.data_points {
+    for dp in hist.data_points() {
         render_histogram_point(out, name, dp);
     }
 }
@@ -276,7 +246,7 @@ fn render_histogram_u64(out: &mut String, name: &str, hist: &Histogram<u64>) {
 fn render_histogram_f64(out: &mut String, name: &str, hist: &Histogram<f64>) {
     out.push_str(&format!("# HELP {name} ragent histogram\n"));
     out.push_str(&format!("# TYPE {name} histogram\n"));
-    for dp in &hist.data_points {
+    for dp in hist.data_points() {
         render_histogram_point(out, name, dp);
     }
 }
@@ -285,17 +255,21 @@ fn render_histogram_point<T>(out: &mut String, name: &str, dp: &HistogramDataPoi
 where
     T: Copy + std::fmt::Display,
 {
-    let base_labels = build_labels(&dp.attributes);
-    let total_count: u64 = dp.bucket_counts.iter().sum();
-    let sum = &dp.sum;
+    let base_labels = build_labels(dp.attributes());
+    let bounds: Vec<f64> = dp.bounds().collect();
+    let bucket_counts: Vec<u64> = dp.bucket_counts().collect();
+    let total_count: u64 = bucket_counts.iter().sum();
+    let sum = dp.sum();
 
-    // Bucket counts with le="..." labels.
-    for (i, bound) in dp.bounds.iter().enumerate() {
-        let count: u64 = dp.bucket_counts[..=i].iter().sum();
+    // Bucket counts with le="..." labels. Accumulate the cumulative count in a
+    // running total so this stays O(n) rather than re-summing a growing prefix.
+    let mut cumulative: u64 = 0;
+    for (bound, &bucket_count) in bounds.iter().zip(bucket_counts.iter()) {
+        cumulative += bucket_count;
         // Append le="bound" to the base labels.
         let le_label = format!("le=\"{bound}\"");
         let labels = append_le_label(&base_labels, &le_label);
-        out.push_str(&format!("{name}_bucket{labels} {count}\n"));
+        out.push_str(&format!("{name}_bucket{labels} {cumulative}\n"));
     }
     let le_inf = "le=\"+Inf\"";
     let labels = append_le_label(&base_labels, le_inf);
@@ -315,14 +289,17 @@ fn append_le_label(base: &str, le: &str) -> String {
     }
 }
 
-/// Build the Prometheus label string `{k1="v1",k2="v2"}` from a slice of
-/// `KeyValue` pairs, sorted by key.
-fn build_labels(attrs: &[opentelemetry::KeyValue]) -> String {
-    if attrs.is_empty() {
+/// Build the Prometheus label string `{k1="v1",k2="v2"}` from an iterator of
+/// borrowed `KeyValue` pairs, sorted by key.
+fn build_labels<'a, I>(attrs: I) -> String
+where
+    I: IntoIterator<Item = &'a opentelemetry::KeyValue>,
+{
+    let mut kvs: Vec<(&opentelemetry::Key, &Value)> =
+        attrs.into_iter().map(|kv| (&kv.key, &kv.value)).collect();
+    if kvs.is_empty() {
         return String::new();
     }
-    let mut kvs: Vec<(&opentelemetry::Key, &Value)> =
-        attrs.iter().map(|kv| (&kv.key, &kv.value)).collect();
     kvs.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     let mut s = String::from("{");
     for (i, (k, v)) in kvs.iter().enumerate() {
@@ -342,12 +319,21 @@ fn build_labels(attrs: &[opentelemetry::KeyValue]) -> String {
 /// Escape a label value per the Prometheus exposition format: backslash
 /// and double-quote are escaped, newline becomes `\n`.
 fn escape_label_value(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
+    // Escape in a single pass rather than chaining three `str::replace` calls,
+    // each of which allocates an intermediate String.
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
-// ── HTTP server ───────────────────────────────────────────────────────────
+// -- HTTP server -----------------------------------------------------------
 
 /// Spawn a Prometheus text endpoint on `127.0.0.1:<port>` (FR-028).
 ///
@@ -390,7 +376,10 @@ pub async fn serve(
             let mut buf = [0u8; HTTP_READ_BUF];
             let n = match sock.read(&mut buf).await {
                 Ok(n) => n,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::debug!(error = %e, "prometheus: scrape request read failed");
+                    continue;
+                }
             };
             let req = String::from_utf8_lossy(&buf[..n]);
             let is_metrics = req
@@ -427,7 +416,7 @@ pub async fn serve(
     Ok(handle)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+// -- Tests -----------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "../tests/inline/prometheus_tests.rs"]

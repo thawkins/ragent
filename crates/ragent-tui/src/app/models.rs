@@ -43,10 +43,10 @@ impl App {
         if trimmed.is_empty() {
             return false;
         }
-        // A run of `─` (optionally broken by top/bottom junctions) is a
-        // horizontal border emitted by html2text; the left-`┬`, join-`┼`, and
-        // right-`┴` variants all qualify as borders.  A row containing any
-        // vertical bar (`│`) is treated as a data row.
+        // A run of `-` (optionally broken by top/bottom junctions) is a
+        // horizontal border emitted by html2text; the left-`+`, join-`+`, and
+        // right-`+` variants all qualify as borders.  A row containing any
+        // vertical bar (`|`) is treated as a data row.
         if trimmed.contains('│') {
             return true;
         }
@@ -678,43 +678,15 @@ impl App {
                 .filter(|key| !key.is_empty())
         };
 
-        match provider_id {
-            "anthropic" => from_storage().or_else(|| {
-                std::env::var("ANTHROPIC_API_KEY")
-                    .ok()
-                    .filter(|key| !key.is_empty())
-            }),
-            "gemini" => from_storage()
-                .or_else(|| {
-                    std::env::var("GEMINI_API_KEY")
-                        .ok()
-                        .filter(|key| !key.is_empty())
-                })
-                .or_else(|| {
-                    std::env::var("GOOGLE_API_KEY")
-                        .ok()
-                        .filter(|key| !key.is_empty())
-                }),
-            "huggingface" => from_storage()
-                .or_else(|| std::env::var("HF_TOKEN").ok().filter(|key| !key.is_empty()))
-                .or_else(|| {
-                    std::env::var("HUGGING_FACE_HUB_TOKEN")
-                        .ok()
-                        .filter(|key| !key.is_empty())
-                }),
-            "xai" => from_storage().or_else(|| {
-                std::env::var("XAI_API_KEY")
-                    .ok()
-                    .filter(|key| !key.is_empty())
-            }),
-            "ollama_cloud" => self.ollama_cloud_api_key(),
-            "azure_foundry" => from_storage().or_else(|| {
-                std::env::var("AZURE_AI_FOUNDRY_API_KEY")
-                    .ok()
-                    .filter(|key| !key.is_empty())
-            }),
-            _ => from_storage(),
+        if provider_id == "ollama_cloud" {
+            return self.ollama_cloud_api_key();
         }
+
+        // Env-var resolution goes through the canonical credential-env helper
+        // (audit T-111) so the variable set and blank/trim policy stay in one
+        // place across crates.
+        from_storage()
+            .or_else(|| ragent_config::credential_env::provider_credential_env(provider_id))
     }
 
     pub(crate) fn calculate_cost_tier(
@@ -855,36 +827,6 @@ impl App {
                 continue;
             }
             let found = match pid {
-                "anthropic" => std::env::var("ANTHROPIC_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                "openai" => std::env::var("OPENAI_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                "gemini" => std::env::var("GEMINI_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .or_else(|| {
-                        std::env::var("GOOGLE_API_KEY")
-                            .ok()
-                            .filter(|k| !k.is_empty())
-                    })
-                    .map(|_| ProviderSource::EnvVar),
-                "huggingface" => std::env::var("HF_TOKEN")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .or_else(|| {
-                        std::env::var("HUGGING_FACE_HUB_TOKEN")
-                            .ok()
-                            .filter(|k| !k.is_empty())
-                    })
-                    .map(|_| ProviderSource::EnvVar),
-                "xai" => std::env::var("XAI_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
                 "bedrock" => {
                     // Bedrock is "configured" when AWS static credentials are present
                     // (access key + secret). Profile-based auth is handled at request
@@ -903,40 +845,7 @@ impl App {
                         None
                     }
                 }
-                "generic_openai" => {
-                    if let Ok(key) = std::env::var("GENERIC_OPENAI_API_KEY") {
-                        if !key.is_empty() {
-                            Some(ProviderSource::EnvVar)
-                        } else {
-                            None
-                        }
-                    } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-                        if !key.is_empty() {
-                            Some(ProviderSource::EnvVar)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-                "copilot" => std::env::var("GITHUB_COPILOT_TOKEN")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
                 "ollama" => std::env::var("OLLAMA_HOST")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                "ollama_cloud" => std::env::var("OLLAMA_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                "openrouter" => std::env::var("OPENROUTER_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
@@ -951,7 +860,10 @@ impl App {
                         });
                     config_path.map(|_| ProviderSource::Database)
                 }
-                _ => None,
+                // Everything else is "configured" when its canonical credential-env
+                // variable is set (audit T-111: single source of truth).
+                _ => ragent_config::credential_env::provider_credential_env(pid)
+                    .map(|_| ProviderSource::EnvVar),
             };
             if let Some(source) = found {
                 push(pid, pname, source);

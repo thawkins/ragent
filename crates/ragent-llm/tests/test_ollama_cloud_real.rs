@@ -8,6 +8,7 @@
 use ragent_llm::{OllamaCloudProvider, Provider};
 
 #[tokio::test]
+#[ignore = "live network: hits the public Ollama Cloud API; run with --ignored"]
 async fn test_ollama_cloud_discovers_models_without_api_key() {
     // Ollama Cloud's /api/tags and /api/show endpoints are publicly readable,
     // so model discovery must succeed even without an API key.
@@ -32,6 +33,7 @@ async fn test_ollama_cloud_discovers_models_without_api_key() {
 }
 
 #[tokio::test]
+#[ignore = "live network: hits the public Ollama Cloud API; run with --ignored"]
 async fn test_ollama_cloud_discovers_models_with_api_key() {
     let api_key = std::env::var("OLLAMA_API_KEY").unwrap_or_default();
     if api_key.is_empty() {

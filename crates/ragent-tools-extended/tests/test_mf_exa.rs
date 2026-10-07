@@ -261,7 +261,7 @@ fn test_parse_response_json_fallback_title_from_url() {
     });
     let results = parse_response_json(&value);
     assert_eq!(results.len(), 1);
-    // No title field — should fall back to URL
+    // No title field - should fall back to URL
     assert_eq!(results[0].title, "https://example.com/no-title");
 }
 
@@ -273,7 +273,7 @@ fn test_parse_response_json_fallback_title_untitled_when_no_url_or_title() {
         ]
     });
     let results = parse_response_json(&value);
-    // No url → filtered out entirely
+    // No url -> filtered out entirely
     assert!(results.is_empty());
 }
 
@@ -438,7 +438,7 @@ fn test_parse_response_json_empty_highlights_array() {
     });
     let results = parse_response_json(&value);
     assert_eq!(results.len(), 1);
-    // Empty highlights array → fallback to metadata
+    // Empty highlights array -> fallback to metadata
     assert!(results[0].snippet.contains("2024-01-01"));
 }
 
@@ -749,7 +749,7 @@ fn test_date_string_leap_year() {
 }
 
 // ===========================================================================
-// Live integration test (network — #[ignore])
+// Live integration test (network - #[ignore])
 //
 // Requires a real Exa API key in the EXA_API_KEY environment variable.
 // Run with: cargo test -p ragent-tools-extended --test test_mf_exa \

@@ -7,7 +7,7 @@ use ragent_specs::spec::{Spec, SpecId};
 use ragent_specs::validate::{SddFlags, validate_with_flags};
 use std::time::Instant;
 
-// ── Synthetic spec generator ───────────────────────────────────────────────
+// -- Synthetic spec generator -----------------------------------------------
 
 /// Generate a spec markdown string with `n_fr` functional requirements and
 /// `n_nfr` non-functional requirements, each using valid EARS syntax.
@@ -96,7 +96,7 @@ fn build_benchmark_spec() -> Spec {
     spec
 }
 
-// ── Benchmark tests ────────────────────────────────────────────────────────
+// -- Benchmark tests --------------------------------------------------------
 
 #[test]
 fn test_validate_50_requirements_under_500ms_all_enabled() {

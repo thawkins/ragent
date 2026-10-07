@@ -64,7 +64,7 @@ fn test_cycle_direct_self_include() {
     assert!(content.contains("include cycle skipped"));
 }
 
-/// A mutual include (A↔B) is detected and does not loop forever.
+/// A mutual include (A<->B) is detected and does not loop forever.
 #[test]
 fn test_cycle_mutual_include() {
     let dir = TempDir::new().unwrap();

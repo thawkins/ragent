@@ -2,48 +2,18 @@
 //! register tools and commands, record telemetry, and deregister on shutdown
 //! (spec `plugins` T-016; FR-008, FR-022).
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ragent_plugins::{
     LifecycleState, PluginCommandAdapter, PluginManager, PluginSession, PluginSurface,
-    PluginToolAdapter, StoreLedger, store_dirs_at,
+    PluginToolAdapter, StoreLedger,
 };
 use ragent_tools_core::Tool;
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/session-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// Store dirs pinned to this tree's project store (no global leg).
-    fn dirs(&self) -> ragent_plugins::StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin with an explicit id so `enable`/load match.
 fn write_plugin(tree: &TempTree, id: &str, entry: &str) {

@@ -130,7 +130,7 @@ fn test_codeindex_off_persists_when_original_config_omitted_enabled() {
     unsafe { std::env::remove_var("RAGENT_CONFIG") };
     unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
 
-    // Project config: no code_index section → defaults to enabled.
+    // Project config: no code_index section -> defaults to enabled.
     write_project_config(&project, r#"{ "memory": { "enabled": true } }"#);
 
     std::env::set_current_dir(&project).expect("cwd into project");

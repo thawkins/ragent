@@ -39,7 +39,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     }
 }
 
-// ── T-017 / FR-005: Reject status=blocked ─────────────────────────────
+// -- T-017 / FR-005: Reject status=blocked -----------------------------
 
 /// `status=blocked` must be rejected with a clear error (FR-005, T-017).
 #[tokio::test]
@@ -133,7 +133,7 @@ async fn test_task_update_reject_done_status() {
     assert!(err.to_string().contains("Valid statuses"));
 }
 
-// ── T-017 / FR-009: Reject foreign/non-existent blocked_by ────────────
+// -- T-017 / FR-009: Reject foreign/non-existent blocked_by ------------
 
 /// `add_blocked_by` with a non-existent task ID must be rejected (FR-009).
 #[tokio::test]
@@ -193,7 +193,7 @@ async fn test_task_update_add_blocked_by_partial_invalid() {
 }
 
 /// `add_blocked_by` referencing a task in a different session must be
-/// rejected (FR-009 — no cross-session leakage).
+/// rejected (FR-009 - no cross-session leakage).
 #[tokio::test]
 async fn test_task_update_add_blocked_by_cross_session() {
     let storage = MockStorage::new();
@@ -240,7 +240,7 @@ async fn test_task_update_blocked_by_reject_no_mutation() {
     );
 }
 
-// ── Valid updates ─────────────────────────────────────────────────────
+// -- Valid updates -----------------------------------------------------
 
 /// Update status to `in_progress` should succeed.
 #[tokio::test]
@@ -463,7 +463,7 @@ async fn test_task_update_metadata_not_object() {
     );
 }
 
-// ── add_blocked_by merge semantics ────────────────────────────────────
+// -- add_blocked_by merge semantics ------------------------------------
 
 /// `add_blocked_by` with valid IDs should merge into existing blocked_by.
 #[tokio::test]
@@ -575,7 +575,7 @@ async fn test_task_update_complete_blocker_derives_available() {
     assert_eq!(meta["status"], "completed");
 }
 
-// ── Edge cases ────────────────────────────────────────────────────────
+// -- Edge cases --------------------------------------------------------
 
 /// Missing `task_id` parameter should error.
 #[tokio::test]
@@ -685,7 +685,7 @@ async fn test_task_update_add_blocked_by_not_array() {
     );
 }
 
-// ── Tool metadata ─────────────────────────────────────────────────────
+// -- Tool metadata -----------------------------------------------------
 
 /// Tool name should be "task_update".
 #[test]
@@ -746,7 +746,7 @@ fn test_task_update_tool_permission_category() {
     assert_eq!(tool.permission_category(), "task");
 }
 
-// ── T-008: add_blocks tests ───────────────────────────────────────────
+// -- T-008: add_blocks tests -------------------------------------------
 
 /// `add_blocks` should add this task's ID to the target's blocked_by list.
 #[tokio::test]
@@ -929,10 +929,10 @@ async fn test_task_update_add_blocks_not_array() {
     );
 }
 
-// ── T-008 / FR-004: Cycle detection tests ─────────────────────────────
+// -- T-008 / FR-004: Cycle detection tests -----------------------------
 
 /// Adding a `blocked_by` edge that would create a 2-node cycle must be
-/// rejected (t1 → t2, t2 → t1).
+/// rejected (t1 -> t2, t2 -> t1).
 #[tokio::test]
 async fn test_task_update_cycle_via_add_blocked_by() {
     let storage = MockStorage::new();
@@ -951,7 +951,7 @@ async fn test_task_update_cycle_via_add_blocked_by() {
     let ctx = test_ctx(Arc::new(storage.clone()));
     let tool = TaskUpdateTool;
 
-    // Try to make t1 depend on t2 → cycle: t1 → t2 → t1.
+    // Try to make t1 depend on t2 -> cycle: t1 -> t2 -> t1.
     let err = tool
         .execute(json!({"task_id": "t1", "add_blocked_by": ["t2"]}), &ctx)
         .await
@@ -997,7 +997,7 @@ async fn test_task_update_cycle_via_add_blocks() {
     let tool = TaskUpdateTool;
 
     // Try to make t1 block t2 (i.e. add t1 to t2's blocked_by).
-    // This creates cycle: t1 → t2 → t1.
+    // This creates cycle: t1 -> t2 -> t1.
     let err = tool
         .execute(json!({"task_id": "t1", "add_blocks": ["t2"]}), &ctx)
         .await
@@ -1019,7 +1019,7 @@ async fn test_task_update_cycle_via_add_blocks() {
 }
 
 /// A 3-node cycle via add_blocked_by must be rejected
-/// (t1 → t2 → t3 → t1).
+/// (t1 -> t2 -> t3 -> t1).
 #[tokio::test]
 async fn test_task_update_cycle_three_nodes() {
     let storage = MockStorage::new();
@@ -1048,7 +1048,7 @@ async fn test_task_update_cycle_three_nodes() {
     let ctx = test_ctx(Arc::new(storage.clone()));
     let tool = TaskUpdateTool;
 
-    // Try to make t1 depend on t2 → cycle: t1 → t2 → t3 → t1.
+    // Try to make t1 depend on t2 -> cycle: t1 -> t2 -> t3 -> t1.
     let err = tool
         .execute(json!({"task_id": "t1", "add_blocked_by": ["t2"]}), &ctx)
         .await
@@ -1084,7 +1084,7 @@ async fn test_task_update_no_cycle_valid_chain() {
     let ctx = test_ctx(Arc::new(storage));
     let tool = TaskUpdateTool;
 
-    // t3 depends on t2 — no cycle (t3 → t2 → t1, all forward).
+    // t3 depends on t2 - no cycle (t3 -> t2 -> t1, all forward).
     let out = tool
         .execute(json!({"task_id": "t3", "add_blocked_by": ["t2"]}), &ctx)
         .await
@@ -1095,7 +1095,7 @@ async fn test_task_update_no_cycle_valid_chain() {
     assert!(blocked_by.contains(&json!("t2")));
 }
 
-// ── T-008 / FR-003: Auto-unblock on completion ────────────────────────
+// -- T-008 / FR-003: Auto-unblock on completion ------------------------
 
 /// Completing a task should report which dependent tasks became available.
 #[tokio::test]
@@ -1179,7 +1179,7 @@ async fn test_task_update_complete_partial_unblock() {
     let ctx = test_ctx(Arc::new(storage));
     let tool = TaskUpdateTool;
 
-    // Complete t2 — t1 should NOT be unblocked (t3 is still pending).
+    // Complete t2 - t1 should NOT be unblocked (t3 is still pending).
     let out = tool
         .execute(json!({"task_id": "t2", "status": "completed"}), &ctx)
         .await
@@ -1229,7 +1229,7 @@ async fn test_task_update_non_completion_no_unblocked() {
     );
 }
 
-// ── T-008: Schema tests for add_blocks ────────────────────────────────
+// -- T-008: Schema tests for add_blocks --------------------------------
 
 /// Tool schema should include add_blocks property.
 #[test]

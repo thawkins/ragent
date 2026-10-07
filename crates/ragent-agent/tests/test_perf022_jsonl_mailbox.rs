@@ -140,7 +140,7 @@ fn test_legacy_file_migrates_to_jsonl_on_push() {
     assert!(!all[1].read, "new message should be unread");
 }
 
-/// `push` must not rewrite lines that are unrelated to it — append only.
+/// `push` must not rewrite lines that are unrelated to it - append only.
 /// We detect this by writing two messages and asserting the byte offset
 /// of the first message's content is unchanged after the second push.
 #[test]

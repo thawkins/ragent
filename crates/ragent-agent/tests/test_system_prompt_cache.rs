@@ -85,7 +85,7 @@ fn system_prompt_cache_is_singleton() {
     let processor = test_processor();
     let a = processor.system_prompt_cache();
     let b = processor.system_prompt_cache();
-    // Same Arc — same underlying allocation.
+    // Same Arc - same underlying allocation.
     assert!(Arc::ptr_eq(&a, &b));
 }
 
@@ -108,7 +108,7 @@ fn invalidate_system_prompt_cache_clears_entries() {
         })
         .expect("cache hit on unchanged registry");
     assert_eq!(second, "## Available Tools\n\n- `read`\n");
-    // Invalidate and try again — the compute fn runs again.
+    // Invalidate and try again - the compute fn runs again.
     processor.invalidate_system_prompt_cache();
     let after_invalidate =
         cache.get_tool_reference(&processor.tool_registry, |_r| "fresh".to_string());

@@ -1465,7 +1465,7 @@ fn assemble_document_splits_analysis_sentences_onto_separate_lines() {
     );
 }
 
-// ── Data Quality & Consistency summary ────────────────────────────────
+// -- Data Quality & Consistency summary --------------------------------
 
 /// Build a `ResearchDocument` with all five QA artifacts populated so the
 /// Data Quality & Consistency summary has something to synthesize.

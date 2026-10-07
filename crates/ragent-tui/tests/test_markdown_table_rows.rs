@@ -32,7 +32,7 @@ fn test_normalize_tables_drops_whitespace_only_row() {
 #[test]
 fn test_normalize_tables_duplicate_bottom_border_removed() {
     let app = support::make_app();
-    // A table whose html2text output ends on the `┴` bottom border used to get
+    // A table whose html2text output ends on the `+` bottom border used to get
     // one extra closing border line below it (the "empty row at the bottom").
     let input = "───┬────┬──\n\
                  │ID│Name│Val│\n\

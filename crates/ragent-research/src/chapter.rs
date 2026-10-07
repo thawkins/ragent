@@ -120,7 +120,11 @@ fn build_plan_from_segments(segments: &[String], count: usize) -> ChapterPlan {
         let title = if group_len == 1 {
             group[0].clone()
         } else {
-            format!("{} ... {}", group[0], group.last().unwrap())
+            format!(
+                "{} ... {}",
+                group[0],
+                group.last().map_or("", String::as_str)
+            )
         };
         chapters.push(Chapter {
             title,

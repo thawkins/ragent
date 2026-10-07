@@ -196,7 +196,7 @@ fn test_imrad_layout_omits_concepts_when_none() {
     assert!(!assembled.body.contains("### Concepts"));
 }
 
-// ── T-004: concept ordering, cap, and contiguous renumbering ────────────────
+// -- T-004: concept ordering, cap, and contiguous renumbering ----------------
 
 #[test]
 fn test_concepts_section_orders_and_caps_by_reverse_relevance() {

@@ -3,7 +3,7 @@
 //! The Gemini provider's streaming parser had a `continue` in the inner
 //! buffer-parsing loop when `serde_json::from_str` failed. The unparseable
 //! line was prepended back into the buffer with a `\n`, and `continue`
-//! re-entered the same inner loop — which immediately found the `\n` it
+//! re-entered the same inner loop - which immediately found the `\n` it
 //! just inserted, extracted the same line, failed to parse it again, and
 //! repeated forever. This burned 100% CPU.
 //!

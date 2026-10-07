@@ -2,7 +2,7 @@
 //!
 //! Gemini's final frame commonly carries BOTH `finishReason` and the
 //! `functionCall` part. The parser used to process the finish reason first,
-//! clear the pending buffer, and only then buffer the tool call — which was
+//! clear the pending buffer, and only then buffer the tool call - which was
 //! then never emitted. The fix parses parts before the finish-reason flush
 //! and adds an end-of-stream flush, so the call is emitted exactly once.
 //!

@@ -47,7 +47,7 @@ fn test_t017_classify_rejects_query_less_bare_domain_as_local() {
 }
 
 // ===========================================================================
-// Budget: depth cap, and the budget→reason mapping (FR-016, NFR-002)
+// Budget: depth cap, and the budget->reason mapping (FR-016, NFR-002)
 // ===========================================================================
 
 /// A mock fetcher driven purely by discovered links.
@@ -131,7 +131,7 @@ async fn test_t017_depth_cap_stops_child_pages() {
 #[tokio::test]
 async fn test_t017_overlapping_page_and_deadline_caps_report_page_first() {
     // FR-016: when the page cap and the deadline are both reached the page
-    // cap wins — the engine truncates by MaxPages before the wall clock runs
+    // cap wins - the engine truncates by MaxPages before the wall clock runs
     // out, and the corpus reports the page cap (T-006 precedence).
     let fetcher = LinkFetcher::new()
         .with_page(

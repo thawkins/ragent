@@ -23,6 +23,7 @@ use std::time::Duration;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use ragent_telemetry::{OtelConfig, TelemetryState, TelemetrySubsystem, shutdown::ShutdownGuard};
 
 fn build_subsystem() -> (
@@ -54,16 +55,15 @@ fn build_subsystem() -> (
 fn sum_u64(metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics], name: &str) -> u64 {
     metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
-        .filter(|m| m.name == name)
-        .filter_map(|m| {
-            m.data
-                .as_any()
-                .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
+        .filter(|m| m.name() == name)
+        .filter_map(|m| match m.data() {
+            AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+            _ => None,
         })
-        .flat_map(|sum| sum.data_points.iter())
-        .map(|dp| dp.value)
+        .flat_map(|sum| sum.data_points())
+        .map(|dp| dp.value())
         .sum()
 }
 
@@ -130,14 +130,15 @@ fn test_shutdown_guard_drop_does_not_panic_and_flushes() {
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_sessions_total = metrics
         .iter()
-        .flat_map(|rm| rm.scope_metrics.iter())
-        .flat_map(|sm| sm.metrics.iter())
+        .flat_map(|rm| rm.scope_metrics())
+        .flat_map(|sm| sm.metrics())
         .any(|m| {
-            m.name == "ragent.sessions.total"
-                && m.data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
-                    .is_some()
+            m.name() == "ragent.sessions.total"
+                && match m.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                }
+                .is_some()
         });
 
     assert!(

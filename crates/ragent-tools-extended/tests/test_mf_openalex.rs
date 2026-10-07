@@ -43,7 +43,7 @@ fn test_truncate_query_unicode_boundaries() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — per_page clamping (FR-012)
+// build_request - per_page clamping (FR-012)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -75,7 +75,7 @@ fn test_build_request_per_page_clamps_to_max() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — pagination (FR-008)
+// build_request - pagination (FR-008)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -97,7 +97,7 @@ fn test_build_request_page_advance() {
 
 #[test]
 fn test_build_request_uses_cursor_for_deep_paging() {
-    // page=1000, per_page=200 → estimated_offset = 200_000 > 10_000
+    // page=1000, per_page=200 -> estimated_offset = 200_000 > 10_000
     let opts = SearchOptions::new(200).with_page(1000);
     let (_, params) = build_request("rust", &opts, "");
     let map = params_to_map(&params);
@@ -106,7 +106,7 @@ fn test_build_request_uses_cursor_for_deep_paging() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — site filter (FR-004)
+// build_request - site filter (FR-004)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -127,7 +127,7 @@ fn test_build_request_site_filter() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — freshness filter (FR-005)
+// build_request - freshness filter (FR-005)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -151,7 +151,7 @@ fn test_build_request_freshness_week_adds_date_range() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — mailto (FR-007)
+// build_request - mailto (FR-007)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -179,7 +179,7 @@ fn test_build_request_mailto_whitespace_trimmed() {
 }
 
 // ---------------------------------------------------------------------------
-// build_request — URL
+// build_request - URL
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -278,7 +278,7 @@ fn test_parse_response_skips_entries_without_title_and_url() {
     let results = parse_response(&value);
     // The second entry has no title and no landing_page_url; it falls back to
     // its `id` URI as the URL but has no title. Since url is non-empty it
-    // passes the filter, but title is empty — it should still be emitted
+    // passes the filter, but title is empty - it should still be emitted
     // (url is present). Verify both are returned.
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].title, "Valid");

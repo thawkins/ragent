@@ -17,7 +17,7 @@ fn no_attachments() -> AttachmentInfo {
     AttachmentInfo::default()
 }
 
-// ── Dimension scorer tests ──────────────────────────────────────────
+// -- Dimension scorer tests ------------------------------------------
 
 #[test]
 fn test_score_token_count_short() {
@@ -285,7 +285,7 @@ fn test_score_mathematical_complexity_proof() {
     );
 }
 
-// ── Image attachment dimension tests ───────────────────────────────
+// -- Image attachment dimension tests -------------------------------
 
 #[test]
 fn test_score_image_attachment_no_attachments() {
@@ -334,7 +334,7 @@ fn test_attachment_info_has_media() {
     );
 }
 
-// ── Composite and tier selection tests ──────────────────────────────
+// -- Composite and tier selection tests ------------------------------
 
 #[test]
 fn test_classify_simple_prompt() {

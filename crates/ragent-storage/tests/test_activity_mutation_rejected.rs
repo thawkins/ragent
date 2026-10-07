@@ -103,7 +103,7 @@ fn try_delete_nonexistent_event_rejects_without_audit() {
         err,
         AppendError::MutationRejected { target_seq: 99, .. }
     ));
-    // No events at all — no audit recorded for a non-existent target.
+    // No events at all - no audit recorded for a non-existent target.
     assert_eq!(log.count(&run).unwrap(), 0);
 }
 

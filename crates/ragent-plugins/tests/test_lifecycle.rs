@@ -2,51 +2,14 @@
 //! states, and the consecutive-failure auto-unload threshold (spec `plugins`
 //! T-009; FR-008, FR-011, FR-012, FR-016, FR-019).
 
-use std::path::PathBuf;
+mod support;
+
+use support::TempTree;
 
 use ragent_plugins::{
     DEFAULT_AUTO_UNLOAD_THRESHOLD, LifecycleState, PluginError, PluginManager, StoreLedger,
     store_dirs_at,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/lifecycle-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// A fresh manager bound to this tree's project store (no global leg).
-    /// The `store_dir` override pins the project leg to the actual store so
-    /// discovery does not depend on the store living under a workdir-shaped
-    /// layout.
-    fn manager(&self) -> PluginManager {
-        PluginManager::new(
-            store_dirs_at(&self.0, Some(&self.store()), None),
-            ragent_config::PluginsConfig::default(),
-        )
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin into the tree's project store.
 fn write_plugin(tree: &TempTree, dir_name: &str, manifest: &str, entry: &str) {
@@ -64,7 +27,7 @@ ragent.register_command({ name: "weather", description: "Weather command" });
 ragent.message.info("weather entry ran");
 "#;
 
-// ── FR-008/FR-011: enable loads immediately ────────────────────────────────
+// -- FR-008/FR-011: enable loads immediately --------------------------------
 
 #[test]
 fn enable_loads_plugin_and_persists_enabled_state() {
@@ -108,7 +71,7 @@ fn enable_unknown_plugin_is_an_error_and_changes_no_state() {
     assert!(ledger.state("no-such-plugin").is_none());
 }
 
-// ── FR-008/FR-016: session start loads enabled only ───────────────────────
+// -- FR-008/FR-016: session start loads enabled only -----------------------
 
 #[test]
 fn load_all_enabled_loads_only_enabled_plugins() {
@@ -138,7 +101,7 @@ fn load_all_enabled_loads_only_enabled_plugins() {
     assert_eq!(restarted.state_of("codex-weather"), LifecycleState::Loaded);
 }
 
-// ── FR-015/FR-019: failure states ──────────────────────────────────────────
+// -- FR-015/FR-019: failure states ------------------------------------------
 
 #[test]
 fn entry_exception_marks_errored_and_discards_registrations() {
@@ -243,7 +206,7 @@ fn infinite_loop_entry_times_out_and_is_errored() {
     );
 }
 
-// ── FR-012: disable unloads and reports deregistration counts ─────────────
+// -- FR-012: disable unloads and reports deregistration counts -------------
 
 #[test]
 fn disable_unloads_and_reports_deregistration_counts() {
@@ -288,7 +251,7 @@ fn disable_unknown_plugin_is_an_error() {
     assert!(matches!(err, PluginError::UnknownPlugin(_)));
 }
 
-// ── Auto-unload threshold ──────────────────────────────────────────────────
+// -- Auto-unload threshold --------------------------------------------------
 
 #[test]
 fn consecutive_failures_auto_unload_at_threshold() {
@@ -359,7 +322,7 @@ fn default_threshold_is_three_per_spec() {
     assert_eq!(DEFAULT_AUTO_UNLOAD_THRESHOLD, 3);
 }
 
-// ── FR-020: permission gate wiring from config ─────────────────────────────
+// -- FR-020: permission gate wiring from config -----------------------------
 
 #[test]
 fn config_grants_gate_the_host_api_surface() {

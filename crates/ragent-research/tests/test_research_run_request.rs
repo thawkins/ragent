@@ -1,5 +1,5 @@
 //! Tests for the shared [`ResearchRunRequest`] / [`build_session_config`] builder
-//! (RESEARCHPLAN.md Phase 4 — R-001/R-032 convergence).
+//! (RESEARCHPLAN.md Phase 4 - R-001/R-032 convergence).
 //!
 //! All three front-ends (CLI, TUI, HTTP) construct a `ResearchRunRequest` and
 //! call `build_session_config` to produce a `SessionConfig`. These tests
@@ -14,7 +14,7 @@ use ragent_research::{
     session::DEFAULT_WEB_PHASE_TIMEOUT_SECS,
 };
 
-// ── Defaults ───────────────────────────────────────────────────────────
+// -- Defaults -----------------------------------------------------------
 
 #[test]
 fn build_session_config_applies_defaults_with_no_overrides() {
@@ -50,8 +50,8 @@ fn build_session_config_applies_defaults_with_no_overrides() {
 
     // Local
     assert!(cfg.local.max_local_sources > 0);
-    assert!(cfg.local.disable_local); // use_local defaults false → disabled
-    assert!(cfg.local.disable_specs); // use_specs defaults false → disabled
+    assert!(cfg.local.disable_local); // use_local defaults false -> disabled
+    assert!(cfg.local.disable_specs); // use_specs defaults false -> disabled
 
     // Analysis
     assert!(cfg.analysis.depth.is_none());
@@ -80,7 +80,7 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(!cfg.clarify);
 }
 
-// ── Explicit overrides ─────────────────────────────────────────────────
+// -- Explicit overrides -------------------------------------------------
 
 #[test]
 fn build_session_config_maps_all_explicit_fields() {
@@ -158,8 +158,8 @@ fn build_session_config_maps_all_explicit_fields() {
 
     // Local
     assert_eq!(cfg.local.max_local_sources, 30);
-    assert!(!cfg.local.disable_local); // use_local=true → enabled
-    assert!(!cfg.local.disable_specs); // use_specs=true → enabled
+    assert!(!cfg.local.disable_local); // use_local=true -> enabled
+    assert!(!cfg.local.disable_specs); // use_specs=true -> enabled
     assert_eq!(cfg.local.local_concurrency, 16);
     assert_eq!(cfg.local.local_phase_timeout_secs, Some(90));
 
@@ -203,7 +203,7 @@ fn build_session_config_maps_all_explicit_fields() {
     assert!(cfg.clarify);
 }
 
-// ── Concept/finding limits (spec researchmax FR-012, FR-014) ────────────
+// -- Concept/finding limits (spec researchmax FR-012, FR-014) ------------
 
 #[test]
 fn build_session_config_uses_research_config_limits() {
@@ -531,7 +531,7 @@ fn session_event_json_config_snapshot_is_valid_json() {
         Some("report")
     );
 }
-// ── Competitive mode implies comparison-table format ─────────────────────
+// -- Competitive mode implies comparison-table format ---------------------
 
 #[test]
 fn build_session_config_competitive_defaults_to_comparison_table() {
@@ -583,7 +583,7 @@ fn build_session_config_no_mode_still_defaults_to_report() {
     assert_eq!(cfg.output.output_format, OutputFormat::Report);
     assert_eq!(cfg.engine.mode, ResearchMode::Tiered);
 }
-// ── `research.exclude_academic_engines` config precedence (FR-012) ──────
+// -- `research.exclude_academic_engines` config precedence (FR-012) ------
 
 #[test]
 fn build_session_config_scholarly_excluded_by_default() {

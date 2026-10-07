@@ -160,7 +160,7 @@ fn test_code_index_busy_clears_when_no_index_attached() {
 }
 
 /// Test 2: render cost must NOT scale with transcript length. Render the
-/// same viewport twice — short transcript vs 500-message transcript — after
+/// same viewport twice - short transcript vs 500-message transcript - after
 /// warming caches, and assert steady-state per-frame cost stays bounded.
 /// Regression for the whole-transcript Paragraph wrap that dominated perf
 /// profiles after long agent turns.
@@ -209,7 +209,7 @@ fn test_render_cost_bounded_by_viewport_not_transcript() {
     );
 }
 
-/// Test 3: auto-scroll must still show the newest message — the scroll
+/// Test 3: auto-scroll must still show the newest message - the scroll
 /// window slice must expose the tail of the transcript, not blank content.
 #[test]
 fn test_auto_scroll_shows_tail_after_slice_fix() {

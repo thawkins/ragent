@@ -4,7 +4,7 @@
 //! `SdkMeterProvider` backed by OTLP exporters (HTTP and gRPC) when the
 //! `telemetry` feature is enabled and a valid endpoint is configured.
 //!
-//! They do **not** require a live OTLP collector — the exporter and
+//! They do **not** require a live OTLP collector - the exporter and
 //! `PeriodicReader` are constructed but no export is triggered (the export
 //! interval is long enough that no background export fires during the test).
 //! Tonic uses `connect_lazy()`, so gRPC construction does not attempt a

@@ -453,7 +453,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 17 focused crates:
+The project is a Cargo workspace built from 18 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -468,6 +468,7 @@ The project is a Cargo workspace built from 17 focused crates:
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
 | `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
 | `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
+| `ragent-surface`        | Shared surface helpers for the plugin/connector command families (attribution, subcommand tokeniser, store-dir resolution, harness steps, schema samples)                                        |
 | `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
 | `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
 | `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
@@ -522,13 +523,26 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.128** — The core architecture, tool system (152 tools across 23 categories), TUI,
+**v1.0.129** — The core architecture, tool system (152 tools across 23 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **v1.0.129 — code-audit remediation complete (M5-M9) and dependency
+  upkeep** — the `docs/plans/code-audit.md` plan is executed through M9. A new
+  `ragent-surface` crate (18th workspace crate) owns the shared
+  `/plugins`/`/connectors` surface glue; the stale, unreferenced
+  `ragent-agent::snapshot` module and the duplicated inline schema test suite are
+  deleted; and the workspace converges on `thiserror 2`, `reqwest 0.13`,
+  `rand 0.10`, and `criterion 0.8` while clearing the yanked `yoke-derive` and
+  migrating `lopdf` 0.44 (the `vendor/lopdf` crate is deleted) and
+  `opentelemetry` 0.33. Test scratch paths move to `target/temp`, diagnostic and
+  live-network tests are `#[ignore]`-gated, new suites cover the calculator, the
+  small tools, the Azure AI Foundry provider, the agent-loop step harness, and
+  the orchestrator `Coordinator`, and `.gitignore` gains the SQLite-sidecar and
+  certificate/credential patterns with a tracked `.env.example` template.
 - **v1.0.128 — config durability, bounded MCP connect, and
   non-blocking startup** — `ragent.json` writes are now atomic (temp file + `fsync`
   + rename) so an interrupted write can no longer silently reset a persisted YOLO

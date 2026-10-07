@@ -169,7 +169,7 @@ fn research_config_is_included_when_non_default() {
     );
 }
 
-// ── `exclude_academic_engines` (spec `researchnoacc` FR-012) ─────────────────
+// -- `exclude_academic_engines` (spec `researchnoacc` FR-012) -----------------
 
 #[test]
 fn research_config_exclude_academic_engines_deserializes() {
@@ -236,7 +236,7 @@ fn research_config_exclude_academic_engines_included_when_non_default() {
     );
 }
 
-// ── Concept/finding limits (spec `researchmax` FR-008, FR-017) ──────────────
+// -- Concept/finding limits (spec `researchmax` FR-008, FR-017) --------------
 
 #[test]
 fn research_config_output_limits_default_to_spec_values() {

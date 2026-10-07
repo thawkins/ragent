@@ -147,7 +147,7 @@ async fn test_extract_status() {
     let draft_fm = "---\nstatus: draft\n---\n";
     assert_eq!(SpecIo::extract_status(draft_fm), Some(SpecStatus::Draft));
 }
-// ── FEEDBACK.md I/O tests (T-031, FR-017) ──────────────────────────────────
+// -- FEEDBACK.md I/O tests (T-031, FR-017) ----------------------------------
 
 #[tokio::test]
 async fn test_read_spec_loads_feedback_md() {

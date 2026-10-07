@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 /// Create a temp directory with sample Rust files for indexing.
 fn create_project() -> TempDir {
@@ -97,7 +97,7 @@ fn open_index(dir: &TempDir) -> CodeIndex {
     CodeIndex::open(&config).unwrap()
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------
 
 #[test]
 fn test_full_reindex() {
@@ -295,7 +295,7 @@ fn test_incremental_after_file_change() {
     let idx = open_index(&dir);
     idx.full_reindex().unwrap();
 
-    // Modify server.rs — add a new function.
+    // Modify server.rs - add a new function.
     let server_path = dir.path().join("src/server.rs");
     let mut content = fs::read_to_string(&server_path).unwrap();
     content.push_str("\n/// A brand new function.\npub fn new_endpoint() {}\n");

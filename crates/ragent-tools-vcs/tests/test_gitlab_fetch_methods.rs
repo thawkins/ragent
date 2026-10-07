@@ -109,7 +109,7 @@ async fn test_fetch_project_metadata_languages_endpoint_failure_defaults_empty()
         .mount(&server)
         .await;
 
-    // The /languages endpoint returns 500 — should NOT propagate; language
+    // The /languages endpoint returns 500 - should NOT propagate; language
     // defaults to empty string (FR-009).
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Fproject/languages"))

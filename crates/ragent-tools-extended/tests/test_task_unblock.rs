@@ -36,7 +36,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     }
 }
 
-// ── task_get: is_available / is_blocked metadata ────────────────────
+// -- task_get: is_available / is_blocked metadata --------------------
 
 /// A pending task with no blocked_by and no owner should be available.
 #[tokio::test]
@@ -83,7 +83,7 @@ async fn test_task_get_available_after_blocker_completed() {
         .expect("task_get should succeed");
 
     let meta = out.metadata.expect("metadata present");
-    // t2's only blocker (t1) is completed → available.
+    // t2's only blocker (t1) is completed -> available.
     assert_eq!(meta["is_available"], true, "t2 should be available");
     assert_eq!(meta["is_blocked"], false, "t2 should not be blocked");
 }
@@ -145,7 +145,7 @@ async fn test_task_get_blocked_partial_completion() {
         .expect("task_get should succeed");
 
     let meta = out.metadata.expect("metadata present");
-    // t2 is still pending → t3 is blocked.
+    // t2 is still pending -> t3 is blocked.
     assert_eq!(meta["is_available"], false);
     assert_eq!(meta["is_blocked"], true);
 }
@@ -175,7 +175,7 @@ async fn test_task_get_owner_prevents_available() {
         .expect("task_get should succeed");
 
     let meta = out.metadata.expect("metadata present");
-    // All blockers done but owner is set → not available, not blocked.
+    // All blockers done but owner is set -> not available, not blocked.
     assert_eq!(meta["is_available"], false, "owner prevents available");
     assert_eq!(
         meta["is_blocked"], false,
@@ -239,7 +239,7 @@ async fn test_task_get_completed_not_available() {
     assert_eq!(meta["is_blocked"], false);
 }
 
-// ── task_get: content annotations ───────────────────────────────────
+// -- task_get: content annotations -----------------------------------
 
 /// task_get content should show [available] for an available task.
 #[tokio::test]
@@ -348,7 +348,7 @@ async fn test_task_get_content_blocked_multiple_annotation() {
     );
 }
 
-// ── task_list: is_available / is_blocked metadata ───────────────────
+// -- task_list: is_available / is_blocked metadata -------------------
 
 /// task_list should include is_available=true for a task whose
 /// blockers are all completed (FR-003).
@@ -424,7 +424,7 @@ async fn test_task_list_blocked_flag() {
 #[tokio::test]
 async fn test_task_list_filtered_dag_correct() {
     let storage = MockStorage::new();
-    // t1 completed — won't appear in pending filter, but t2's
+    // t1 completed - won't appear in pending filter, but t2's
     // is_available depends on knowing t1's status.
     storage.seed("t1", "test-session", "Setup", "completed");
     storage.seed_task(
@@ -455,7 +455,7 @@ async fn test_task_list_filtered_dag_correct() {
     assert_eq!(tasks[0]["is_blocked"], false);
 }
 
-// ── task_list: content annotations ──────────────────────────────────
+// -- task_list: content annotations ----------------------------------
 
 /// task_list content should show [available] for unblocked tasks.
 #[tokio::test]
@@ -522,7 +522,7 @@ async fn test_task_list_content_blocked() {
     );
 }
 
-// ── Auto-unblock scenario: multi-step ───────────────────────────────
+// -- Auto-unblock scenario: multi-step -------------------------------
 
 /// Simulate the full auto-unblock lifecycle: t1 blocks t2; t1 is
 /// completed; task_get/task_list now show t2 as available.
@@ -587,7 +587,7 @@ async fn test_auto_unblock_lifecycle() {
     assert_eq!(t2["is_blocked"], false);
 }
 
-/// Auto-unblock with a chain: t1 → t2 → t3.  Completing t1 unblocks t2
+/// Auto-unblock with a chain: t1 -> t2 -> t3.  Completing t1 unblocks t2
 /// (which can start), but t3 remains blocked until t2 is also completed.
 #[tokio::test]
 async fn test_auto_unblock_chain_partial() {
@@ -636,7 +636,7 @@ async fn test_auto_unblock_chain_partial() {
     assert_eq!(meta["is_available"], false);
 }
 
-/// Auto-unblock with diamond: t1 → {t2, t3} → t4.  Completing t1
+/// Auto-unblock with diamond: t1 -> {t2, t3} -> t4.  Completing t1
 /// unblocks t2 and t3, but t4 remains blocked until both are done.
 #[tokio::test]
 async fn test_auto_unblock_diamond() {

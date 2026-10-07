@@ -35,7 +35,7 @@ fn test_create_and_list_run_cost_summary() {
     let summaries = storage.list_run_cost_summaries("sess-1").unwrap();
     assert_eq!(summaries.len(), 2);
     // Ordered by created_at ASC; both created ~now, but id ordering is not
-    // guaranteed by SQL — assert by collecting ids.
+    // guaranteed by SQL - assert by collecting ids.
     let ids: Vec<&str> = summaries.iter().map(|s| s.id.as_str()).collect();
     assert!(ids.contains(&"rc-1"));
     assert!(ids.contains(&"rc-2"));
@@ -63,7 +63,7 @@ fn test_list_run_cost_summaries_is_session_scoped() {
 
     assert_eq!(storage.list_run_cost_summaries("sess-a").unwrap().len(), 1);
     assert_eq!(storage.list_run_cost_summaries("sess-b").unwrap().len(), 1);
-    // Unknown session → empty, no error.
+    // Unknown session -> empty, no error.
     assert!(
         storage
             .list_run_cost_summaries("sess-unknown")

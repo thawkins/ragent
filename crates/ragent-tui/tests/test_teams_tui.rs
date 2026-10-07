@@ -31,7 +31,7 @@ fn unique_team_name(prefix: &str) -> String {
     format!("{prefix}-{nanos}")
 }
 
-// ── /team status ─────────────────────────────────────────────────────────────
+// -- /team status -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_status_no_active_team() {
@@ -93,7 +93,7 @@ async fn test_team_status_no_args_defaults_to_status() {
     assert_eq!(app.status, "team: status");
 }
 
-// ── /team create ─────────────────────────────────────────────────────────────
+// -- /team create -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_create_no_name_shows_usage() {
@@ -109,7 +109,7 @@ async fn test_team_create_no_name_shows_usage() {
     );
 }
 
-// ── /team show ───────────────────────────────────────────────────────────────
+// -- /team show ---------------------------------------------------------------
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -167,7 +167,7 @@ async fn test_team_show_no_name_empty_registry_message() {
     // flaky environment-dependent failure.
     //
     // The workspace forbids `unsafe_code`, so we cannot use
-    // `std::env::set_var("HOME", …)` (Rust 2024 marks it `unsafe`). Instead,
+    // `std::env::set_var("HOME", ...)` (Rust 2024 marks it `unsafe`). Instead,
     // point the project-local teams directory at an empty tempdir and assert
     // on the "empty registry" path by creating NO teams in it. If the global
     // registry happens to contain teams, the `/team show` status will be
@@ -188,7 +188,7 @@ async fn test_team_show_no_name_empty_registry_message() {
             "should show empty message: {text}"
         );
     } else {
-        // Global registry non-empty on this machine — the empty-registry
+        // Global registry non-empty on this machine - the empty-registry
         // branch cannot be exercised here. Print a diagnostic so the skip is
         // visible in `--nocapture` runs.
         eprintln!(
@@ -292,7 +292,7 @@ async fn test_teams_alias_show_no_name_lists_all_registered_teams() {
     );
 }
 
-// ── /team help ───────────────────────────────────────────────────────────────
+// -- /team help ---------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_help_shows_command_reference() {
@@ -355,7 +355,7 @@ async fn test_team_help_creates_session_when_missing() {
     );
 }
 
-// ── /team close ──────────────────────────────────────────────────────────────
+// -- /team close --------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_close_no_active_team() {
@@ -384,7 +384,7 @@ async fn test_team_close_clears_active_team_state() {
     assert_eq!(app.status, "team closed");
 }
 
-// ── /team delete ─────────────────────────────────────────────────────────────
+// -- /team delete -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_delete_no_name_shows_usage() {
@@ -557,7 +557,7 @@ async fn test_team_create_sets_active_team() {
     );
 }
 
-// ── /team tasks ───────────────────────────────────────────────────────────────
+// -- /team tasks ---------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_tasks_no_active_team() {
@@ -628,7 +628,7 @@ async fn test_team_tasks_renders_table_with_status() {
     assert!(text.contains("tm-001"), "should show assignee: {text}");
 }
 
-// ── /team clear ───────────────────────────────────────────────────────────────
+// -- /team clear ---------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_clear_no_active_team() {
@@ -680,7 +680,7 @@ async fn test_team_clear_removes_tasks_for_active_team() {
     assert_eq!(app.status, "team tasks cleared");
 }
 
-// ── /team message ─────────────────────────────────────────────────────────────
+// -- /team message -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_message_no_active_team() {
@@ -721,7 +721,7 @@ async fn test_team_message_missing_text_shows_usage() {
     );
 }
 
-// ── /team cleanup ─────────────────────────────────────────────────────────────
+// -- /team cleanup -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_team_cleanup_no_active_team() {
@@ -746,7 +746,7 @@ async fn test_team_cleanup_clears_state() {
         .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
-    // Team dir does not exist on disk — cleanup should still clear in-memory state.
+    // Team dir does not exist on disk - cleanup should still clear in-memory state.
     app.execute_slash_command("/team cleanup").await;
 
     assert!(app.active_team.is_none(), "active_team should be cleared");
@@ -780,7 +780,7 @@ async fn test_team_cleanup_blocked_when_teammates_active() {
     assert!(app.active_team.is_some(), "team should not be removed");
 }
 
-// ── /team unknown subcommand ──────────────────────────────────────────────────
+// -- /team unknown subcommand --------------------------------------------------
 
 #[tokio::test]
 async fn test_team_unknown_subcommand_shows_error() {
@@ -800,7 +800,7 @@ async fn test_team_unknown_subcommand_shows_error() {
     );
 }
 
-// ── [T] badge — team_members drives badge rendering ───────────────────────────
+// -- [T] badge - team_members drives badge rendering ---------------------------
 
 #[test]
 fn test_team_members_drives_t_badge_set() {
@@ -824,7 +824,7 @@ fn test_team_members_drives_t_badge_set() {
     );
 }
 
-// ── Event handling — TeammateSpawned ─────────────────────────────────────────
+// -- Event handling - TeammateSpawned -----------------------------------------
 
 #[tokio::test]
 async fn test_event_teammate_spawned_adds_member_and_shows_panel() {
@@ -954,7 +954,7 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
     assert!(app.show_teams, "teams panel should be visible");
 }
 
-// ── Event handling — TeammateIdle ────────────────────────────────────────────
+// -- Event handling - TeammateIdle --------------------------------------------
 
 #[tokio::test]
 async fn test_event_teammate_idle_updates_status() {
@@ -980,7 +980,7 @@ async fn test_event_teammate_idle_updates_status() {
     );
 }
 
-// ── Event handling — TeamTaskClaimed / Completed ─────────────────────────────
+// -- Event handling - TeamTaskClaimed / Completed -----------------------------
 
 #[tokio::test]
 async fn test_event_team_task_claimed_sets_current_task() {
@@ -1029,7 +1029,7 @@ async fn test_event_team_task_completed_clears_current_task() {
     );
 }
 
-// ── Event handling — TeamCleanedUp ────────────────────────────────────────────
+// -- Event handling - TeamCleanedUp --------------------------------------------
 
 #[tokio::test]
 async fn test_event_team_cleaned_up_resets_state() {
@@ -1327,7 +1327,7 @@ fn test_agents_popup_renders_tidy_table_columns() {
     );
 }
 
-// ── Event handling — TeammateMessage ─────────────────────────────────────────
+// -- Event handling - TeammateMessage -----------------------------------------
 
 #[tokio::test]
 async fn test_event_teammate_message_logs_preview() {
@@ -1381,7 +1381,7 @@ async fn test_event_teammate_message_increments_receiver_counter() {
     );
 }
 
-// ── SEC-ragent-tui-004: team-name validation at the TUI boundary (SECTASKS T-004) ─
+// -- SEC-ragent-tui-004: team-name validation at the TUI boundary (SECTASKS T-004) -
 
 /// `/team create <bp> <name>` must refuse a name that is not a single safe path
 /// component before it reaches `TeamStore::create` (which joins it onto the

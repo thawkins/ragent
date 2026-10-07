@@ -4,6 +4,26 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.129)
+
+- **Code-audit remediation complete** — the `docs/plans/code-audit.md` plan is
+  executed through M9 as uncommitted working-tree work: the new `ragent-surface`
+  crate (18th workspace crate) owns the shared `/plugins`/`/connectors` surface
+  glue; the unreferenced `ragent-agent::snapshot` module and the duplicated inline
+  schema test suite are deleted; the workspace converges on `thiserror 2`,
+  `reqwest 0.13`, `rand 0.10`, and `criterion 0.8`; the yanked `yoke-derive` is
+  cleared; `lopdf` converges on `0.44` (the `vendor/lopdf` crate is deleted);
+  `opentelemetry` moves to 0.33; and `notify`, `rquickjs`, `tree-sitter`,
+  `chacha20poly1305`, and `which` all advance a major/minor line.
+- **Test hygiene** — scratch paths use `target/temp`; shared `TempTree` helpers
+  replace copy-pasted sandboxes; diagnostic/live-network tests are
+  `#[ignore]`-gated; and new suites cover the calculator, the small tools, the
+  Azure AI Foundry provider, the agent-loop step harness, and the orchestrator
+  `Coordinator`.
+- **Secret hardening** — `.gitignore` gains `*.db-wal`/`*.db-shm` and the
+  certificate/credential patterns, and a tracked `.env.example` template lists
+  every credential env var ragent reads.
+
 ## Highlights (v1.0.128)
 
 - **Startup no longer blocks on MCP** — the TUI adopts whatever state the

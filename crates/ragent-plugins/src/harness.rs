@@ -28,8 +28,6 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use serde_json::Value as JsonValue;
-
 use crate::error::PluginError;
 use crate::help::attribution;
 use crate::host_api::{HostApiInstall, HostCalls, PluginMessage};
@@ -39,30 +37,9 @@ use crate::runtime::{RuntimePool, SandboxBudget, SandboxContext};
 use crate::store::{StoreDirs, scan_dirs};
 use crate::tool_adapter::dispatch_sandbox;
 
-/// Outcome of one harness step (FR-013).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StepOutcome {
-    /// The step completed successfully.
-    Pass,
-    /// The step failed; the string is the cause (SPEC error-handling policy).
-    Fail(String),
-}
-
-/// One reported harness step: a name, its outcome, the wall-clock time it took,
-/// and an optional detail line (contributed names, generated sample arguments,
-/// invocation result).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HarnessStep {
-    /// Step label (`discovery`, `manifest validation`, `version check`,
-    /// `entry execution`, `sample invocation <tool>`).
-    pub name: String,
-    /// Pass/fail plus the cause on failure.
-    pub outcome: StepOutcome,
-    /// Wall-clock time spent in this step.
-    pub elapsed: Duration,
-    /// Optional human-readable detail appended to the rendered line.
-    pub detail: Option<String>,
-}
+// Shared harness primitives (T-505): the step model, schema sample generator,
+// and truncation helper have one implementation in `ragent-surface`.
+pub use ragent_surface::harness::{HarnessStep, StepOutcome, sample_for_schema, step, truncate};
 
 /// Full result of a `/plugins test` run (FR-013).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,70 +261,6 @@ fn contributed_tools(
         .collect()
 }
 
-/// Generate a schema-valid sample value for a tool's `parameters` JSON schema
-/// (FR-013). Honours `const`, `default`, `examples`, and `enum` when present,
-/// otherwise produces a typed placeholder for `type`, recursing into objects
-/// and arrays.
-#[must_use]
-pub fn sample_for_schema(schema: &JsonValue) -> JsonValue {
-    match schema {
-        JsonValue::Object(map) => {
-            for key in ["const", "default"] {
-                if let Some(value) = map.get(key) {
-                    return value.clone();
-                }
-            }
-            for key in ["examples", "enum"] {
-                if let Some(first) = map
-                    .get(key)
-                    .and_then(JsonValue::as_array)
-                    .and_then(|values| values.first())
-                {
-                    return first.clone();
-                }
-            }
-            match schema_type(map) {
-                "object" => {
-                    let mut out = serde_json::Map::new();
-                    if let Some(properties) = map.get("properties").and_then(JsonValue::as_object) {
-                        for (name, sub) in properties {
-                            out.insert(name.clone(), sample_for_schema(sub));
-                        }
-                    }
-                    JsonValue::Object(out)
-                }
-                "array" => match map.get("items") {
-                    Some(items) => JsonValue::Array(vec![sample_for_schema(items)]),
-                    None => JsonValue::Array(Vec::new()),
-                },
-                "string" => JsonValue::String("sample".to_string()),
-                "integer" => JsonValue::from(0),
-                "number" => JsonValue::from(0.0),
-                "boolean" => JsonValue::Bool(false),
-                "null" => JsonValue::Null,
-                _ => JsonValue::Null,
-            }
-        }
-        JsonValue::Bool(_) => JsonValue::Bool(false),
-        JsonValue::Number(_) => JsonValue::from(0),
-        JsonValue::String(_) => JsonValue::String("sample".to_string()),
-        JsonValue::Array(_) => JsonValue::Array(Vec::new()),
-        JsonValue::Null => JsonValue::Null,
-    }
-}
-
-/// The `type` keyword of a JSON schema object, tolerating the array form
-/// (`"type": ["string", "null"]`) by taking the first string entry.
-fn schema_type(map: &serde_json::Map<String, JsonValue>) -> &str {
-    match map.get("type") {
-        Some(JsonValue::String(name)) => name.as_str(),
-        Some(JsonValue::Array(names)) => {
-            names.iter().find_map(JsonValue::as_str).unwrap_or("object")
-        }
-        _ => "object",
-    }
-}
-
 /// Render a [`HarnessReport`] as the `/plugins test` message body (FR-013): one
 /// `[ ok ]`/`[fail]` line per step with wall-clock milliseconds, unsupported
 /// capabilities (FR-025), the captured messages, and a summary line.
@@ -493,30 +406,5 @@ fn cause_of(error: &PluginError) -> String {
         PluginError::MemoryLimit => "memory-limit: plugin memory limit exceeded".to_string(),
         PluginError::Script { detail, .. } => format!("script: {detail}"),
         other => other.to_string(),
-    }
-}
-
-/// Build a step record.
-fn step(
-    name: impl Into<String>,
-    outcome: StepOutcome,
-    elapsed: Duration,
-    detail: Option<String>,
-) -> HarnessStep {
-    HarnessStep {
-        name: name.into(),
-        outcome,
-        elapsed,
-        detail,
-    }
-}
-
-/// Truncate `text` to at most `max` characters for the report.
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        let cut: String = text.chars().take(max).collect();
-        format!("{cut}...")
     }
 }

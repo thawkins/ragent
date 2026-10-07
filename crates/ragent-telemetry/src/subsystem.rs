@@ -482,7 +482,7 @@ impl std::fmt::Debug for TelemetrySubsystem {
     }
 }
 
-// ── Provider construction (feature-gated) ──────────────────────────────
+// -- Provider construction (feature-gated) ------------------------------
 
 #[cfg(feature = "telemetry")]
 use opentelemetry::KeyValue;

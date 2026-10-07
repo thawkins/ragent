@@ -10,7 +10,7 @@ use ragent_specs::manager::SpecManager;
 use ragent_specs::spec::{Spec, SpecId, SpecStatus};
 use ragent_specs::validate::{Category, SddFlags, validate, validate_with_flags};
 
-// ── Helper: create a minimal legacy spec ───────────────────────────────────
+// -- Helper: create a minimal legacy spec -----------------------------------
 
 /// Markdown for a minimal legacy spec that predates the SDD back-fill.
 /// Contains only the sections required by the core validator.
@@ -78,7 +78,7 @@ async fn create_legacy_spec(root: &std::path::Path, id: &str) -> std::path::Path
     dir
 }
 
-// ── Tests: validate with SDD flags disabled ────────────────────────────────
+// -- Tests: validate with SDD flags disabled --------------------------------
 
 #[test]
 fn test_legacy_spec_validates_with_sdd_disabled_no_sdd_issues() {
@@ -160,7 +160,7 @@ fn test_legacy_spec_legacy_validate_function_works() {
     );
 }
 
-// ── Tests: discover, list, read, search ────────────────────────────────────
+// -- Tests: discover, list, read, search ------------------------------------
 
 #[tokio::test]
 async fn test_legacy_spec_discover() {
@@ -220,7 +220,7 @@ async fn test_legacy_spec_search() {
     assert_eq!(results[0].spec.id.as_str(), "legacy-search");
 }
 
-// ── Tests: status transitions with SDD flags disabled ──────────────────────
+// -- Tests: status transitions with SDD flags disabled ----------------------
 
 #[tokio::test]
 async fn test_legacy_spec_transition_to_in_progress_not_blocked() {
@@ -236,7 +236,7 @@ async fn test_legacy_spec_transition_to_in_progress_not_blocked() {
         .await
         .unwrap();
 
-    // Transition: Draft → InReview → Approved → InProgress
+    // Transition: Draft -> InReview -> Approved -> InProgress
     let flags = SddFlags::all_disabled();
     mgr.transition_with_flags(&mut spec, SpecStatus::InReview, "tester", &flags)
         .await
@@ -281,7 +281,7 @@ async fn test_legacy_spec_transition_to_approved_not_blocked() {
     assert_eq!(spec.status, SpecStatus::Approved);
 }
 
-// ── Tests: real-world fixture ───────────────────────────────────────────────
+// -- Tests: real-world fixture -----------------------------------------------
 
 #[test]
 fn test_real_fixture_validates_with_sdd_disabled() {

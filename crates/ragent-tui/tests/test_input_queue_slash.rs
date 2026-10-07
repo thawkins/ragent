@@ -36,7 +36,7 @@ async fn type_and_submit(app: &mut App, text: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// FR-017 amendment — a slash command is enqueued while busy
+// FR-017 amendment - a slash command is enqueued while busy
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -143,7 +143,7 @@ async fn test_slash_command_enqueue_clears_slash_menu() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-017 amendment — a queued slash command drains at the turn boundary
+// FR-017 amendment - a queued slash command drains at the turn boundary
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

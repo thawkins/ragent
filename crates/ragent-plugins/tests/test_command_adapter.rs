@@ -1,49 +1,17 @@
 //! Tests for `PluginCommandAdapter` and `PluginManager::execute_command`
 //! (spec `plugins` T-012; FR-004, FR-024, FR-026).
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use ragent_plugins::{
     LifecycleState, PluginCommandAdapter, PluginCommandDecl, PluginCommandDef, PluginError,
-    PluginManager, StoreLedger, dispatch_command_sandbox, store_dirs_at,
+    PluginManager, StoreLedger, dispatch_command_sandbox,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/command-adapter-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// A fresh manager bound to this tree's project store (no global leg).
-    fn manager(&self) -> PluginManager {
-        PluginManager::new(
-            store_dirs_at(&self.0, Some(&self.store()), None),
-            ragent_config::PluginsConfig::default(),
-        )
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin into the tree's project store with explicit
 /// id so `manager.enable(id)` matches (derived ids come from `name`).
@@ -72,7 +40,7 @@ fn load_and_register(
     (names, registered)
 }
 
-// ── FR-004: adapter metadata surface ───────────────────────────────────────
+// -- FR-004: adapter metadata surface ---------------------------------------
 
 #[test]
 fn adapter_surfaces_declared_name_description_and_usage() {
@@ -154,7 +122,7 @@ fn register_command_stashes_handler_and_declaration_together() {
     assert_eq!(result.expect("handler dispatched"), "added: buy milk");
 }
 
-// ── FR-024: collision rejection ────────────────────────────────────────────
+// -- FR-024: collision rejection --------------------------------------------
 
 #[test]
 fn registration_rejects_collision_with_builtin_slash_command() {
@@ -277,7 +245,7 @@ fn registering_unloaded_or_errored_plugin_fails_without_panicking() {
     assert!(matches!(unknown, Err(PluginError::UnknownPlugin(_))));
 }
 
-// ── FR-004/FR-026: invocation, marshalling, containment ───────────────────
+// -- FR-004/FR-026: invocation, marshalling, containment -------------------
 
 #[test]
 fn argument_string_reaches_the_handler_verbatim() {
@@ -394,7 +362,7 @@ fn infinite_loop_command_times_out_without_hanging() {
 
     // The dispatch wrapper rearms the interrupt per invocation, so an
     // infinite handler trips within this call's own budget window (default
-    // `max_execution_ms` in `PluginsConfig`) — the call must return rather
+    // `max_execution_ms` in `PluginsConfig`) - the call must return rather
     // than hang (FR-026). The wall-clock bound is generous for slow CI; the
     // contract is "finite".
     let started = std::time::Instant::now();
@@ -468,7 +436,7 @@ fn errored_plugin_commands_are_not_invocable() {
     );
 }
 
-// ── direct sandbox dispatch (used by the T-015 harness too) ───────────────
+// -- direct sandbox dispatch (used by the T-015 harness too) ---------------
 
 #[test]
 fn dispatch_command_sandbox_invokes_stashed_handlers_directly() {

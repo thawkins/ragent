@@ -15,7 +15,7 @@
 
 use ragent_storage::storage::{Storage, TaskRow, compute_task_dag};
 
-// ── Helper: build a TaskRow with sensible defaults ─────────────────
+// -- Helper: build a TaskRow with sensible defaults -----------------
 
 fn make_task(id: &str, status: &str, blocked_by: &[&str]) -> TaskRow {
     TaskRow {
@@ -39,7 +39,7 @@ fn make_task_with_owner(id: &str, status: &str, blocked_by: &[&str], owner: &str
     t
 }
 
-// ── compute_task_dag: blocks (inverse edges) ───────────────────────
+// -- compute_task_dag: blocks (inverse edges) -----------------------
 
 /// Verify that `blocks` is correctly derived as the inverse of
 /// `blocked_by`.
@@ -96,7 +96,7 @@ fn test_dag_blocks_no_duplicates() {
     assert_eq!(a.blocks.len(), 2);
 }
 
-// ── compute_task_dag: is_blocked (FR-005) ──────────────────────────
+// -- compute_task_dag: is_blocked (FR-005) --------------------------
 
 /// A pending task with no deps is NOT blocked.
 #[test]
@@ -196,7 +196,7 @@ fn test_dag_completed_never_blocked() {
     assert!(!b.is_blocked);
 }
 
-// ── compute_task_dag: is_available ─────────────────────────────────
+// -- compute_task_dag: is_available ---------------------------------
 
 /// A pending task with no deps and no owner is available.
 #[test]
@@ -276,10 +276,10 @@ fn test_dag_completed_not_available() {
     assert!(!a.is_available);
 }
 
-// ── compute_task_dag: edge cases ───────────────────────────────────
+// -- compute_task_dag: edge cases -----------------------------------
 
 /// A blocked_by reference to a non-existent task ID is treated as
-/// "not completed" — the task stays blocked.
+/// "not completed" - the task stays blocked.
 #[test]
 fn test_dag_dangling_blocked_by_reference_treated_as_blocked() {
     let tasks = vec![make_task("a", "pending", &["nonexistent"])];
@@ -308,7 +308,7 @@ fn test_dag_single_task_no_deps() {
     assert!(solo.is_available);
 }
 
-/// Chain A→B→C (C blocked_by B, B blocked_by A):
+/// Chain A->B->C (C blocked_by B, B blocked_by A):
 /// - A is available, not blocked, blocks B
 /// - B is blocked, not available, blocks C
 /// - C is blocked, not available, blocks nothing
@@ -337,7 +337,7 @@ fn test_dag_chain_a_b_c() {
     assert!(c.blocks.is_empty());
 }
 
-/// Diamond dependency: A→B, A→C, B→D, C→D.
+/// Diamond dependency: A->B, A->C, B->D, C->D.
 /// When A is completed, B and C become available.
 /// When B and C are also completed, D becomes available.
 #[test]
@@ -363,7 +363,7 @@ fn test_dag_diamond_dependency() {
     assert_eq!(dag.get("c").unwrap().blocks, vec!["d"]);
 }
 
-// ── Storage::get_task_view ─────────────────────────────────────────
+// -- Storage::get_task_view -----------------------------------------
 
 /// Verify `get_task_view` returns the task with derived DAG fields.
 #[test]
@@ -413,7 +413,7 @@ fn test_get_task_view_with_derived_fields() {
     // B blocks nothing.
     assert!(view.derived.blocks.is_empty());
 
-    // Check A's view — A should block B.
+    // Check A's view - A should block B.
     let view_a = storage
         .get_task_view("a", "sess-gv")
         .expect("get view")
@@ -438,7 +438,7 @@ fn test_get_task_view_nonexistent() {
     assert!(view.is_none());
 }
 
-// ── Storage::list_task_views ───────────────────────────────────────
+// -- Storage::list_task_views ---------------------------------------
 
 /// Verify `list_task_views` returns all tasks with derived fields.
 #[test]
@@ -528,7 +528,7 @@ fn test_list_task_views_status_filter_dag_from_full_set() {
         )
         .expect("create b");
 
-    // Filter to only pending — B should still show correct DAG (A's
+    // Filter to only pending - B should still show correct DAG (A's
     // completion status is known even though A is filtered out).
     let pending = storage
         .list_task_views("sess-filt", Some("pending"))
@@ -597,7 +597,7 @@ fn test_list_task_views_empty_session() {
     assert!(views.is_empty());
 }
 
-// ── Integration: create → update → re-derive ───────────────────────
+// -- Integration: create -> update -> re-derive -----------------------
 
 /// Verify that completing a blocker updates the derived state of
 /// dependent tasks when re-read.

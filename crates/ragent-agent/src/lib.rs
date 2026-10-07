@@ -40,7 +40,6 @@ pub mod loop_state;
 pub mod sanitize;
 pub mod session;
 pub mod skill;
-pub mod snapshot;
 pub mod storage;
 pub mod task;
 pub mod team;

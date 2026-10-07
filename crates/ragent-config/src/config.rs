@@ -1846,10 +1846,6 @@ impl Config {
                 .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
         };
 
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
 
@@ -2160,14 +2156,39 @@ impl Config {
     /// the next start (the intermittent "YOLO keeps going off" report).
     fn write_config_if_changed(path: &Path, json: &str) -> anyhow::Result<()> {
         let changed = match std::fs::read_to_string(path) {
-            Ok(existing) => {
-                let existing_value: serde_json::Value =
-                    serde_json::from_str(&existing).unwrap_or(serde_json::Value::Null);
-                let new_value: serde_json::Value =
-                    serde_json::from_str(json).unwrap_or(serde_json::Value::Null);
-                existing_value != new_value
+            Ok(existing) => match (
+                serde_json::from_str::<serde_json::Value>(&existing),
+                serde_json::from_str::<serde_json::Value>(json),
+            ) {
+                (Ok(existing_value), Ok(new_value)) => existing_value != new_value,
+                (Err(e), _) => {
+                    // A corrupt existing file must not be silently folded to
+                    // Null and treated as equal to the new content: log it and
+                    // force a rewrite so the persisted state is repaired.
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "config: existing file is not valid JSON; rewriting"
+                    );
+                    true
+                }
+                (_, Err(e)) => {
+                    tracing::warn!(
+                        error = %e,
+                        "config: serialised config is not valid JSON; rewriting"
+                    );
+                    true
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "config: failed to read existing file; rewriting"
+                );
+                true
             }
-            Err(_) => true,
         };
 
         if !changed {
@@ -2259,7 +2280,6 @@ impl Config {
             key,
             value,
             path = %path.display(),
-            backtrace = %std::backtrace::Backtrace::force_capture(),
             "setting user-global config key"
         );
 
@@ -2794,7 +2814,7 @@ impl Config {
     }
 }
 
-// ── Memory configuration ─────────────────────────────────────────────────────
+// -- Memory configuration -----------------------------------------------------
 
 /// Memory system configuration.
 ///
@@ -3174,7 +3194,7 @@ fn default_project_override() -> bool {
     true
 }
 
-// ── GitLab integration configuration ─────────────────────────────────────────
+// -- GitLab integration configuration -----------------------------------------
 
 /// GitLab integration configuration.
 ///
@@ -3466,7 +3486,7 @@ impl SddConfig {
     }
 }
 
-// ── Pie gap feature toggles ─────────────────────────────────────────────────────
+// -- Pie gap feature toggles -----------------------------------------------------
 
 /// Pie feature gap toggles (spec `piegap` FR-016, FR-018).
 ///
@@ -3569,7 +3589,7 @@ impl PieGapConfig {
     }
 }
 
-// ── Research subsystem configuration ─────────────────────────────────────────────
+// -- Research subsystem configuration ---------------------------------------------
 
 /// Research subsystem configuration (spec `hyperresearch` FR-011, FR-012).
 ///

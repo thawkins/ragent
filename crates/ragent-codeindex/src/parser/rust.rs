@@ -55,7 +55,7 @@ impl LanguageParser for RustParser {
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive extraction ────────────────────────────────────────────────────
+// -- Recursive extraction ----------------------------------------------------
 
 /// Walk a tree-sitter node, extracting symbols and imports.
 fn extract_node(
@@ -220,7 +220,7 @@ fn extract_field_reference(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Function / Method extraction ────────────────────────────────────────────
+// -- Function / Method extraction --------------------------------------------
 
 fn extract_function(
     ctx: &mut Ctx,
@@ -269,7 +269,7 @@ fn extract_function(
     });
 }
 
-// ── Struct extraction ───────────────────────────────────────────────────────
+// -- Struct extraction -------------------------------------------------------
 
 fn extract_struct(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -344,7 +344,7 @@ fn extract_fields(ctx: &mut Ctx, list_node: Node, parent_id: i64, scope: &[Strin
     }
 }
 
-// ── Enum extraction ─────────────────────────────────────────────────────────
+// -- Enum extraction ---------------------------------------------------------
 
 fn extract_enum(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -417,7 +417,7 @@ fn extract_enum_variants(ctx: &mut Ctx, list_node: Node, parent_id: i64, scope: 
     }
 }
 
-// ── Trait extraction ────────────────────────────────────────────────────────
+// -- Trait extraction --------------------------------------------------------
 
 fn extract_trait(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -458,7 +458,7 @@ fn extract_trait(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Impl extraction ─────────────────────────────────────────────────────────
+// -- Impl extraction ---------------------------------------------------------
 
 fn extract_impl(ctx: &mut Ctx, node: Node, _parent_id: Option<i64>, scope: &[String]) {
     // Build impl name from "type" field and optional trait.
@@ -504,7 +504,7 @@ fn extract_impl(ctx: &mut Ctx, node: Node, _parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Const / Static ──────────────────────────────────────────────────────────
+// -- Const / Static ----------------------------------------------------------
 
 fn extract_const_or_static(
     ctx: &mut Ctx,
@@ -548,7 +548,7 @@ fn extract_const_or_static(
     });
 }
 
-// ── Module ──────────────────────────────────────────────────────────────────
+// -- Module ------------------------------------------------------------------
 
 fn extract_module(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -588,7 +588,7 @@ fn extract_module(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[St
     }
 }
 
-// ── Type Alias ──────────────────────────────────────────────────────────────
+// -- Type Alias --------------------------------------------------------------
 
 fn extract_type_alias(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -620,7 +620,7 @@ fn extract_type_alias(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
     });
 }
 
-// ── Macro ───────────────────────────────────────────────────────────────────
+// -- Macro -------------------------------------------------------------------
 
 fn extract_macro(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
@@ -651,7 +651,7 @@ fn extract_macro(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     });
 }
 
-// ── Use / Import ────────────────────────────────────────────────────────────
+// -- Use / Import ------------------------------------------------------------
 
 fn extract_use(ctx: &mut Ctx, node: Node) {
     let full_text = ctx.text(node).trim().to_string();
@@ -697,7 +697,7 @@ fn extract_use(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Helper functions ────────────────────────────────────────────────────────
+// -- Helper functions --------------------------------------------------------
 
 /// Get the text of a named child field.
 fn child_by_field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {

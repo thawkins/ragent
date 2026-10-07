@@ -221,7 +221,7 @@ async fn test_apply_patch_rejects_crlf_context_mismatch() {
         .expect("initial LF patch should apply");
     assert!(out.content.contains("Applied"));
 
-    // Convert the file to CRLF — the bytes no longer match the LF-only context.
+    // Convert the file to CRLF - the bytes no longer match the LF-only context.
     let lf = std::fs::read_to_string(&path).unwrap();
     let crlf = lf.replace('\n', "\r\n");
     std::fs::write(&path, &crlf).unwrap();
@@ -248,7 +248,7 @@ async fn test_apply_patch_rejects_crlf_context_mismatch() {
     );
 }
 
-// ── Edit-log instrumentation for apply_patch ────────────────────────────────
+// -- Edit-log instrumentation for apply_patch --------------------------------
 
 use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 

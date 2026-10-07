@@ -3,7 +3,7 @@
 //! These tests pin the engine-layer behaviour that previously surfaced as
 //! "only LangSearch results" in `/websearch search`: transient engine
 //! failures (HTTP 429, 5xx, transport timeouts) must be retried at the engine
-//! level — not patched per caller — and the orchestrator must stagger engine
+//! level - not patched per caller - and the orchestrator must stagger engine
 //! starts so parallel fan-out does not burst keyless backends past their
 //! rate limiters.
 
@@ -81,7 +81,7 @@ impl SearchEngine for TransientFiveXx {
     }
 }
 
-/// Engine whose report has an empty error and no results — not transient.
+/// Engine whose report has an empty error and no results - not transient.
 struct EmptyOk;
 
 #[async_trait::async_trait]
@@ -366,7 +366,7 @@ fn test_openalex_daily_quota_429_is_not_retried() {
         "openalex",
         "rate-limited: Insufficient budget. This request costs $0.001 but you only have $0 remaining. Resets at midnight UTC."
     )));
-    // …but Wikipedia's plain per-IP limiter IS transient.
+    // ...but Wikipedia's plain per-IP limiter IS transient.
     assert!(report_is_transient(&EngineReport::blocked(
         "wikipedia",
         "rate-limited"

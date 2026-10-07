@@ -57,6 +57,6 @@ async fn test_serve_dir_feature_enabled() {
     // Verify tower-http fs feature is enabled by checking ServeDir can be imported
     // This is a compile-time check - if the feature wasn't enabled, compilation would fail
     use tower_http::services::ServeDir;
-    let path = std::path::PathBuf::from("/tmp");
+    let path = std::path::PathBuf::from("target/temp");
     let _serve = ServeDir::new(path);
 }

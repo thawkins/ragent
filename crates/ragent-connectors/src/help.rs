@@ -96,12 +96,7 @@ connect its servers now in a session that is already running.";
 /// bare `/connectors`).
 #[must_use]
 pub fn attribution(sub: &str) -> String {
-    let sub = sub.trim();
-    if sub.is_empty() {
-        "From: /connectors".to_string()
-    } else {
-        format!("From: /connectors {sub}")
-    }
+    ragent_surface::help::attribution("/connectors", sub)
 }
 
 /// Render the `/connectors` usage block (FR-017). `sub` is the invoked
@@ -120,5 +115,5 @@ pub fn render_help(sub: &str) -> String {
 /// `help` or anything it does not recognise.
 #[must_use]
 pub fn subcommand_of(args: &str) -> &str {
-    args.split_whitespace().next().unwrap_or("")
+    ragent_surface::help::subcommand_of(args)
 }

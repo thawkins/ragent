@@ -179,7 +179,7 @@ pub(crate) fn validate_citations_and_dates(
         .collect();
 
     for finding in findings.iter_mut() {
-        // ── Citation range validation ──────────────────────────────────────
+        // -- Citation range validation --------------------------------------
         let mut new_finding = String::with_capacity(finding.len());
         let mut last_end = 0;
         for cap in citation_re.captures_iter(finding) {
@@ -202,8 +202,8 @@ pub(crate) fn validate_citations_and_dates(
         new_finding.push_str(&finding[last_end..]);
         *finding = new_finding;
 
-        // ── Date claim validation (only inside the Sources Cited / Date
-        // Spread paragraph, to avoid rewriting prose dates) ─────────────────
+        // -- Date claim validation (only inside the Sources Cited / Date
+        // Spread paragraph, to avoid rewriting prose dates) -----------------
         if let Some(spread_start) = finding.find("**Sources Cited / Date Spread:**") {
             let spread = &finding[spread_start..];
             let mut validated_spread = String::with_capacity(spread.len());

@@ -22,7 +22,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::{hard_break_lines, short_session_id, summarise_error};
+use crate::app::helpers::{hard_break_lines, short_id, short_session_id, summarise_error};
 use crate::app::session_ops::recover_poisoned;
 use crate::widgets::message_widget::truncate_str;
 
@@ -176,10 +176,7 @@ impl App {
                     .insert(short_sid, self.agent_name.clone());
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!(
-                        "session created: {}",
-                        &session_id[..8.min(session_id.len())]
-                    ),
+                    format!("session created: {}", short_id(session_id)),
                 );
                 telemetry_counters::increment_sessions_total(1);
                 telemetry_counters::add_sessions_active(1);
@@ -466,10 +463,7 @@ impl App {
                 telemetry_counters::increment_messages_user(1);
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!(
-                        "response started ({})",
-                        &message_id[..8.min(message_id.len())]
-                    ),
+                    format!("response started ({})", short_id(message_id)),
                 );
             }
             Event::MessageEnd {
@@ -1388,7 +1382,7 @@ impl App {
                         "{} Task completed{} ({}): {}",
                         icon,
                         suffix,
-                        &task_id[..8.min(task_id.len())],
+                        short_id(task_id),
                         summary
                     ),
                     None,
@@ -1404,20 +1398,14 @@ impl App {
                     self.active_tasks.remove(idx);
                     self.push_log_for(
                         LogLevel::Info,
-                        format!(
-                            "[cancel] Task cancelled ({})",
-                            &task_id[..8.min(task_id.len())]
-                        ),
+                        format!("[cancel] Task cancelled ({})", short_id(task_id)),
                         None,
                         Some(child_session_id),
                     );
                 } else {
                     self.push_log_no_agent(
                         LogLevel::Info,
-                        format!(
-                            "[cancel] Task cancelled ({})",
-                            &task_id[..8.min(task_id.len())]
-                        ),
+                        format!("[cancel] Task cancelled ({})", short_id(task_id)),
                     );
                 }
             }
@@ -1431,10 +1419,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!(
-                        "[pause] Task suspended ({})",
-                        &task_id[..8.min(task_id.len())]
-                    ),
+                    format!("[pause] Task suspended ({})", short_id(task_id)),
                     None,
                     Some(child_session_id.clone()),
                 );
@@ -1449,7 +1434,7 @@ impl App {
                 }
                 self.push_log_for(
                     LogLevel::Info,
-                    format!("> Task resumed ({})", &task_id[..8.min(task_id.len())]),
+                    format!("> Task resumed ({})", short_id(task_id)),
                     None,
                     Some(child_session_id.clone()),
                 );
@@ -1466,11 +1451,7 @@ impl App {
                 let label = if force { "Force-killed" } else { "Killed" };
                 self.push_log_for(
                     LogLevel::Info,
-                    format!(
-                        "[kill] {} task ({})",
-                        label,
-                        &task_id[..8.min(task_id.len())]
-                    ),
+                    format!("[kill] {} task ({})", label, short_id(task_id)),
                     None,
                     Some(child_session_id.clone()),
                 );
@@ -1492,7 +1473,7 @@ impl App {
                     LogLevel::Info,
                     format!(
                         "[bg]  Background task started: {} ({})",
-                        &task_id[..8.min(task_id.len())],
+                        short_id(task_id),
                         command
                     ),
                 );
@@ -1530,7 +1511,7 @@ impl App {
                     format!(
                         "{} Background task completed ({}): {}",
                         icon,
-                        &task_id[..8.min(task_id.len())],
+                        short_id(task_id),
                         status
                     ),
                 );
@@ -1778,7 +1759,7 @@ impl App {
             Event::UserInput { ref session_id, .. } if self.is_current_session(session_id) => {
                 self.set_status_working("processing");
             }
-            // ── Structured-memory cache invalidation ───────────────────────
+            // -- Structured-memory cache invalidation -----------------------
             // Memory tools modify the SQLite store directly, so the TUI panel
             // cache must be marked stale when these events arrive.  The next
             // `render_memory_panel` call will then refresh from disk.
@@ -1790,7 +1771,7 @@ impl App {
             {
                 self.memory_cache_dirty = true;
             }
-            // ── Provider model-list loading (spinner popup) ──────────────────
+            // -- Provider model-list loading (spinner popup) ------------------
             Event::ProviderLoadingStarted {
                 ref provider_id,
                 ref provider_name,
@@ -1902,7 +1883,7 @@ impl App {
                         tier, model, composite_score, prompt_display, dims, fallback_note
                     ),
                 );
-            } // ── Model download progress (progress bar popup) ───────────────
+            } // -- Model download progress (progress bar popup) ---------------
             Event::ModelDownloadStarted {
                 ref provider_id,
                 ref model_id,
@@ -1966,7 +1947,7 @@ impl App {
                         format!("Download finished for {}/{}", provider_id, model_id),
                     );
                 }
-            } // ── Service start errors (local runtime failed to start) ──
+            } // -- Service start errors (local runtime failed to start) --
             Event::ServiceStartError {
                 ref session_id,
                 ref service,
@@ -2070,7 +2051,7 @@ impl App {
             });
         }
 
-        // ── GitHub device-flow complete ──────────────────────────────────
+        // -- GitHub device-flow complete ----------------------------------
         if let Event::GithubDeviceFlowComplete { success, ref error } = event {
             self.provider_setup = None;
             if success {
@@ -2092,7 +2073,7 @@ impl App {
             }
         }
 
-        // ── GitLab setup complete ────────────────────────────────────────
+        // -- GitLab setup complete ----------------------------------------
         if let Event::GitLabSetupComplete { success, ref error } = event {
             if success {
                 self.provider_setup = None;

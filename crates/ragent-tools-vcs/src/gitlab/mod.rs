@@ -13,16 +13,16 @@ pub use auth::{
 };
 pub use client::GitLabClient;
 pub use gitlab_issues::{
-    GitlabCloseIssueTool, GitlabCommentIssueTool, GitlabCreateIssueTool, GitlabGetIssueTool,
-    GitlabListIssuesTool,
+    GitLabCloseIssueTool, GitLabCommentIssueTool, GitLabCreateIssueTool, GitLabGetIssueTool,
+    GitLabListIssuesTool,
 };
 pub use gitlab_mrs::{
-    GitlabApproveMrTool, GitlabCreateMrTool, GitlabGetMrTool, GitlabListMrsTool, GitlabMergeMrTool,
+    GitLabApproveMrTool, GitLabCreateMrTool, GitLabGetMrTool, GitLabListMrsTool, GitLabMergeMrTool,
 };
 pub use gitlab_pipelines::{
-    GitlabCancelJobTool, GitlabCancelPipelineTool, GitlabGetJobLogTool, GitlabGetJobTool,
-    GitlabGetPipelineTool, GitlabListJobsTool, GitlabListPipelinesTool, GitlabRetryJobTool,
-    GitlabRetryPipelineTool,
+    GitLabCancelJobTool, GitLabCancelPipelineTool, GitLabGetJobLogTool, GitLabGetJobTool,
+    GitLabGetPipelineTool, GitLabListJobsTool, GitLabListPipelinesTool, GitLabRetryJobTool,
+    GitLabRetryPipelineTool,
 };
 
 pub use crate::{Tool, ToolContext, ToolOutput};

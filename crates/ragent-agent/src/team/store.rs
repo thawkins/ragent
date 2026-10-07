@@ -19,7 +19,7 @@ use crate::team::config::{TeamConfig, TeamMember};
 use crate::team::mailbox::Mailbox;
 use crate::team::task::{Task, TaskList, TaskStore};
 
-// ── Directory discovery ───────────────────────────────────────────────────────
+// -- Directory discovery -------------------------------------------------------
 
 /// Return the user-global teams base directory: `~/.config/ragent/teams/`.
 #[must_use]
@@ -179,7 +179,7 @@ pub fn find_team_dir(working_dir: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
-// ── TeamStore ─────────────────────────────────────────────────────────────────
+// -- TeamStore -----------------------------------------------------------------
 
 /// Manages the on-disk representation of one team.
 pub struct TeamStore {
@@ -190,7 +190,7 @@ pub struct TeamStore {
 }
 
 impl TeamStore {
-    // ── Lifecycle ──────────────────────────────────────────────────────────
+    // -- Lifecycle ----------------------------------------------------------
 
     /// Create a brand-new team directory and write the initial `config.json`.
     ///
@@ -369,7 +369,7 @@ impl TeamStore {
         })
     }
 
-    // ── Discovery ─────────────────────────────────────────────────────────
+    // -- Discovery ---------------------------------------------------------
 
     /// List all teams visible from `working_dir`.
     ///
@@ -413,7 +413,7 @@ impl TeamStore {
         results
     }
 
-    // ── Convenience helpers ────────────────────────────────────────────────
+    // -- Convenience helpers ------------------------------------------------
 
     /// Return the `TaskStore` for this team.
     pub fn task_store(&self) -> Result<TaskStore> {
@@ -480,7 +480,7 @@ impl TeamStore {
         self.config.created_at = Utc::now();
     }
 
-    // ── PERF-016: async `spawn_blocking` wrappers ──────────────────────────────
+    // -- PERF-016: async `spawn_blocking` wrappers ------------------------------
     //
     // `TeamStore::load` / `save` perform synchronous `fs::read_to_string` /
     // `fs::write` + `serde_json` (de)serialisation under a `flock`. On the

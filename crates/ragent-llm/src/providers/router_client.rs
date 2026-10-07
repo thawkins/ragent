@@ -549,27 +549,7 @@ fn format_active_dimensions(dimension_scores: &[f64; 15]) -> String {
 /// used as a fallback. This mirrors the resolution path used when the
 /// provider is selected directly.
 fn resolve_env_api_key(provider_id: &str) -> String {
-    let vars: &[&str] = match provider_id {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "gemini" => &["GEMINI_API_KEY"],
-        "huggingface" => &["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
-        "generic_openai" => &["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
-        "ollama_cloud" => &["OLLAMA_API_KEY"],
-        "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        "xai" => &["XAI_API_KEY"],
-        "ollama" => &["OLLAMA_API_KEY"],
-        _ => &[],
-    };
-    for var in vars {
-        if let Ok(key) = std::env::var(var)
-            && !key.is_empty()
-        {
-            return key;
-        }
-    }
-    String::new()
+    super::env_key::provider_env_key(provider_id).unwrap_or_default()
 }
 
 impl RouterClient {

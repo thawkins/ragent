@@ -21,7 +21,7 @@ fn stdio(args: &[&str]) -> McpServerConfig {
     }
 }
 
-// ── Declared-port extraction ────────────────────────────────────────────────
+// -- Declared-port extraction ------------------------------------------------
 
 /// `/npx -y mongodb-mcp-server` declares no port, so nothing is probed.
 #[test]
@@ -73,7 +73,7 @@ fn stdio_ignores_non_port_values() {
     assert_eq!(parse_port("99999"), None);
 }
 
-// ── Declared-transport candidates ───────────────────────────────────────────
+// -- Declared-transport candidates -------------------------------------------
 
 /// An `http` entry's configured URL is its only candidate.
 #[test]
@@ -89,7 +89,7 @@ fn http_transport_uses_the_configured_url() {
     );
 }
 
-// ── Orphaned stdio child matching ───────────────────────────────────────────
+// -- Orphaned stdio child matching -------------------------------------------
 
 /// The real MongoDB MCP start line (`npx -y mongodb-mcp-server@<3`): both the
 /// `npx` launcher argv and the node child argv (which shows the package name
@@ -191,7 +191,7 @@ fn exe_suffix_and_path_components_are_stripped() {
     ));
 }
 
-// ── Orphan detection: ppid gate ─────────────────────────────────────────────
+// -- Orphan detection: ppid gate ---------------------------------------------
 
 /// The ppid is read from field 4 of `/proc/<pid>/stat`, with the `comm` field
 /// skipped by splitting after the *last* `)` so hostile comms (spaces, `)`)
@@ -237,7 +237,7 @@ fn read_ppid_of_reads_this_process_and_rejects_missing_pids() {
     assert_eq!(read_ppid_of(4_194_304), None);
 }
 
-// ── Orphan sweep: process-group identity ────────────────────────────────────
+// -- Orphan sweep: process-group identity ------------------------------------
 
 /// The sweep must reclaim a launcher's tree: `npm exec <pkg>` leads its own
 /// group and forks the real `node` server, then the *leader* exits, leaving the

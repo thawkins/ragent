@@ -5,9 +5,9 @@
 //! helper was deleted). This file now provides the helper-level coverage for
 //! the strict exact-byte matcher and the slimmed failure diagnostics:
 //!
-//! - `find_exact_replacement_range` — exact match, not-found, multiple-matches
+//! - `find_exact_replacement_range` - exact match, not-found, multiple-matches
 //! - slimmed `FindDiag` constructors (`not_found()` / `multiple(n)`)
-//! - `format_match_failure` — actionable re-read + context hints, exact
+//! - `format_match_failure` - actionable re-read + context hints, exact
 //!   byte-for-byte wording, path mention.
 //!
 //! The `#[path]` re-import of `multiedit.rs` (previously needed to reach the
@@ -135,7 +135,7 @@ fn format_match_failure_multiple_matches_asks_for_more_context() {
     );
 }
 
-// ── collapse_whitespace: flexible matcher (opt-in) ─────────────────────────
+// -- collapse_whitespace: flexible matcher (opt-in) -------------------------
 
 #[test]
 fn test_decode_escapes_basic() {
@@ -247,7 +247,7 @@ fn test_flexible_matcher_exact_hit_still_requires_uniqueness() {
 
 #[test]
 fn test_flexible_matcher_ambiguous_flexible_hits_rejected() {
-    // Two locations that both match under whitespace-collapse → ambiguous.
+    // Two locations that both match under whitespace-collapse -> ambiguous.
     let content = "a  b\na    b\n";
     let err = find_flexible_replacement_range(content, "a b", "X").unwrap_err();
     assert!(
@@ -263,7 +263,7 @@ fn test_flexible_matcher_not_found() {
     assert!(matches!(err, FindError::NotFound));
 }
 
-// ── Match cascade (editplan P2) ──────────────────────────────────────────────
+// -- Match cascade (editplan P2) ----------------------------------------------
 
 #[test]
 fn cascade_exact_lane_wins_when_present() {
@@ -359,7 +359,7 @@ fn nearest_window_finds_close_block() {
     assert!(nearest_window(content, needle).is_none());
 
     let needle2 = "line b\nline c\nline d\n";
-    // Exact match — nearest_window is not needed, but the helper should still
+    // Exact match - nearest_window is not needed, but the helper should still
     // find a 100 % window when called (callers only invoke it on NotFound).
     let (line, _n, matched, total, snippet) =
         nearest_window(content, needle2).expect("100 % match should hint");

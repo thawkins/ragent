@@ -36,7 +36,7 @@ fn make_symbol(name: &str, kind: SymbolKind, file_id: i64, vis: Visibility) -> S
     }
 }
 
-// ── Basic resolution ────────────────────────────────────────────────────
+// -- Basic resolution ----------------------------------------------------
 
 #[test]
 fn test_resolve_symbol_not_found() {
@@ -232,7 +232,7 @@ fn test_resolve_prefers_same_language() {
     assert_eq!(resolved.file_id, rust_file, "should prefer same language");
 }
 
-// ── resolve_all_symbols ───────────────���────────────────────────────────
+// -- resolve_all_symbols ---------------���--------------------------------
 
 #[test]
 fn test_resolve_all_symbols_empty() {
@@ -294,7 +294,7 @@ fn test_resolve_all_symbols_sorted_by_rank() {
         .upsert_file(&make_entry("tests/mod.rs", "h2", Some("rust")))
         .unwrap();
 
-    // same_dir has pub, diff_dir has pub — same_dir should rank higher due
+    // same_dir has pub, diff_dir has pub - same_dir should rank higher due
     // to same module.
     store
         .upsert_symbols(
@@ -324,7 +324,7 @@ fn test_resolve_all_symbols_sorted_by_rank() {
     assert_eq!(result[0].file_id, same_dir, "same-module should rank first");
 }
 
-// ── is_definition_kind ────────────────────────────────────────────────
+// -- is_definition_kind ------------------------------------------------
 
 #[test]
 fn test_is_definition_kind() {
@@ -336,7 +336,7 @@ fn test_is_definition_kind() {
     assert!(!resolve::is_definition_kind(SymbolKind::Unknown));
 }
 
-// ── ResolvedSymbol same_file flag ──────────────────────────────────────
+// -- ResolvedSymbol same_file flag --------------------------------------
 
 #[test]
 fn test_resolved_symbol_same_file_flag() {

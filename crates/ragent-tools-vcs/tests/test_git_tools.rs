@@ -1337,7 +1337,7 @@ async fn test_git_merge_ff_only_abort() {
     run_shell("git add main.txt", tmp.path());
     run_shell("git commit -m 'Add main'", tmp.path());
 
-    // Try ff-only merge — should abort
+    // Try ff-only merge - should abort
     let tool = GitMergeTool;
     let out = tool
         .execute(

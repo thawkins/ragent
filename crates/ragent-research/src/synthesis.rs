@@ -138,7 +138,7 @@ pub fn build_synthesis_audit(
     }
 }
 
-// ── Individual critic subagents ───────────────────────────────────────────
+// -- Individual critic subagents -------------------------------------------
 
 /// Coverage critic: score based on how many detected loci appear in the final
 /// findings / implications. Penalizes missing dimensions and emits them as
@@ -372,7 +372,7 @@ fn readability_critic(analysis: &AnalysisResult) -> CriticReport {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// -- Helpers --------------------------------------------------------------
 
 /// Concatenate all synthesis text into a single lower-case string for keyword
 /// searches.

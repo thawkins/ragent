@@ -133,7 +133,7 @@ pub struct SearchHit {
     pub path: PathBuf,
 }
 
-// ── Search index cache (Milestone G) ─────────────────────────────────────────
+// -- Search index cache (Milestone G) -----------------------------------------
 
 /// One entry in the derived `research/.index.json` search cache.
 ///
@@ -256,7 +256,7 @@ impl ResearchManager {
         &self.research_root
     }
 
-    // ── Create (T-007) ────────────────────────────────────────────────────
+    // -- Create (T-007) ----------------------------------------------------
 
     /// Create a fresh research item with skeleton `RESEARCH.md`.
     ///
@@ -314,7 +314,7 @@ impl ResearchManager {
         Ok(item)
     }
 
-    // ── List (T-008) ──────────────────────────────────────────────────────
+    // -- List (T-008) ------------------------------------------------------
 
     /// Discover every research item under the root.
     pub async fn list(&self, include_archived: bool) -> Result<Vec<ResearchItem>> {
@@ -363,7 +363,7 @@ impl ResearchManager {
         Ok(items)
     }
 
-    // ── Show (T-009) ──────────────────────────────────────────────────────
+    // -- Show (T-009) ------------------------------------------------------
 
     /// Read a single research item by name. Returns
     /// [`ResearchError::NotFound`] when the directory doesn't exist.
@@ -377,7 +377,7 @@ impl ResearchManager {
         self.read_item_cached(&path).await
     }
 
-    // ── Delete (T-010) ────────────────────────────────────────────────────
+    // -- Delete (T-010) ----------------------------------------------------
 
     /// Recursively delete a research item.
     pub async fn delete(&self, name: &str) -> Result<()> {
@@ -392,7 +392,7 @@ impl ResearchManager {
         Ok(())
     }
 
-    // ── Archive (T-011) ───────────────────────────────────────────────────
+    // -- Archive (T-011) ---------------------------------------------------
 
     /// Mark a research item as `Archived` (FR-013).
     pub async fn archive(&self, name: &str) -> Result<()> {
@@ -434,7 +434,7 @@ impl ResearchManager {
         Ok(())
     }
 
-    // ── Search (T-030) ────────────────────────────────────────────────────
+    // -- Search (T-030) ----------------------------------------------------
 
     /// Perform a case-insensitive substring search across every
     /// `RESEARCH.md`. Returns at most `max_hits` items in modified-desc order.
@@ -580,7 +580,7 @@ impl ResearchManager {
         Ok(Some(out))
     }
 
-    // ── Document assembly helpers (T-019, T-020, T-021, T-022) ────────────
+    // -- Document assembly helpers (T-019, T-020, T-021, T-022) ------------
 
     /// Assemble and write a fully-populated `RESEARCH.md` for an existing
     /// research item. The item's `sources` are persisted as numbered
@@ -707,7 +707,7 @@ impl ResearchManager {
         Ok(state)
     }
 
-    // ── INDEX.md (T-012) + .index.json cache (Milestone G) ───────────────
+    // -- INDEX.md (T-012) + .index.json cache (Milestone G) ---------------
 
     /// Regenerate `research/INDEX.md` and `research/.index.json` from the
     /// on-disk state. Cheap; safe to call after any mutation.
@@ -783,7 +783,7 @@ impl ResearchManager {
         Ok(())
     }
 
-    // ── Internal helpers ──────────────────────────────────────────────────
+    // -- Internal helpers --------------------------------------------------
 
     /// Read a research item from disk, using the mtime-keyed cache to skip
     /// redundant file reads and YAML parsing when the file hasn't changed
@@ -861,7 +861,7 @@ impl ResearchManager {
     }
 }
 
-// ── Free helpers ─────────────────────────────────────────────────────────
+// -- Free helpers ---------------------------------------------------------
 
 /// Suggest up to three closest names from `candidates` to `target`. Exposed
 /// as a free function so the closest-matches logic can be unit-tested

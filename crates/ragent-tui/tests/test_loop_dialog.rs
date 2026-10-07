@@ -78,7 +78,7 @@ async fn tab_n(app: &mut App, n: usize) {
     }
 }
 
-// ── FR-002: agent picker navigation ─────────────────────────────
+// -- FR-002: agent picker navigation -----------------------------
 #[test]
 fn test_dialog_opens_with_agent_picker_focused() {
     let mut app = support::make_app();
@@ -122,7 +122,7 @@ async fn test_agent_picker_arrow_keys_wrap() {
     assert_eq!(after_down2, (start + 1) % len);
 }
 
-// ── FR-002: text fields ─────────────────────────────
+// -- FR-002: text fields -----------------------------
 #[tokio::test]
 async fn test_tab_moves_between_fields_and_chars_route_to_active_field() {
     let mut app = support::make_app();
@@ -196,7 +196,7 @@ async fn test_arrow_keys_move_fields_and_toggle_checkpoints() {
     );
 }
 
-// ── FR-004: Esc cancels without starting, values preserved ─────────────────────────────
+// -- FR-004: Esc cancels without starting, values preserved -----------------------------
 #[tokio::test]
 async fn test_esc_cancels_without_starting_and_preserves_values() {
     let mut app = support::make_app();
@@ -261,7 +261,7 @@ async fn test_fresh_open_after_confirm_does_not_restore_draft() {
     assert_eq!(dialog_goal(&app), "");
 }
 
-// ── FR-005: empty goal rejected ─────────────────────────────
+// -- FR-005: empty goal rejected -----------------------------
 #[tokio::test]
 async fn test_confirm_with_empty_goal_returns_to_dialog_with_error() {
     let mut app = support::make_app();
@@ -275,7 +275,7 @@ async fn test_confirm_with_empty_goal_returns_to_dialog_with_error() {
     assert!(app.cancel_flag.is_none(), "no loop started");
 }
 
-// ── FR-002: confirm starts the loop ─────────────────────────────
+// -- FR-002: confirm starts the loop -----------------------------
 #[derive(Clone)]
 struct ScriptedProvider {
     /// Shared with the created clients so all requests land in one list.
@@ -599,7 +599,7 @@ async fn test_confirm_uses_spec_agent_preset() -> Result<()> {
     };
     Ok(())
 }
-// ── T-015: `/loop` slash-command registration (FR-001, FR-003, FR-005) ──────
+// -- T-015: `/loop` slash-command registration (FR-001, FR-003, FR-005) ------
 
 /// FR-001: `/loop` with no arguments opens the setup dialog.
 #[tokio::test]
@@ -691,8 +691,8 @@ async fn test_slash_loop_empty_goal_shows_error() -> Result<()> {
     Ok(())
 }
 /// T-024 (FR-003): the one-shot form `/loop <agent> <goal>` activates the
-/// documented defaults — config step limit (25), config cost limit (none),
-/// checkpoints on, no verification command, no restrictions — before the
+/// documented defaults - config step limit (25), config cost limit (none),
+/// checkpoints on, no verification command, no restrictions - before the
 /// first iteration. The spec is captured as soon as it is registered because
 /// termination removes it from the tracker map.
 #[tokio::test]
@@ -756,7 +756,7 @@ async fn test_slash_loop_one_shot_starts_with_documented_defaults() -> Result<()
 }
 
 /// T-024 (FR-025 + NFR-003): a one-shot loop run records the agent-loop
-/// telemetry exactly once — one `LoopTerminated` event, the final iteration
+/// telemetry exactly once - one `LoopTerminated` event, the final iteration
 /// count, and the exactly-once flag flipped after the run.
 #[tokio::test]
 async fn test_slash_loop_one_shot_records_telemetry_once() -> Result<()> {
@@ -906,7 +906,7 @@ fn test_parse_loop_flags_rejects_bad_values() {
         "negative timeout rejected"
     );
 
-    // Unknown dashed tokens are NOT flags — they stay in the remaining
+    // Unknown dashed tokens are NOT flags - they stay in the remaining
     // tokens (an agent preset or goal text may legitimately contain dashes).
     let tokens: Vec<String> = ["--unknown", "5"]
         .iter()
@@ -917,7 +917,7 @@ fn test_parse_loop_flags_rejects_bad_values() {
     assert_eq!(overrides, LoopOverrides::default());
 }
 
-/// FR-003: overrides land on the spec — `apply_loop_overrides` only sets
+/// FR-003: overrides land on the spec - `apply_loop_overrides` only sets
 /// the fields the user actually passed.
 #[test]
 fn test_apply_loop_overrides_sets_only_passed_flags() {

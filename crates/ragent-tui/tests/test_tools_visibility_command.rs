@@ -243,7 +243,7 @@ async fn test_slash_tools_lists_disabled_tools_separately() {
         "missing disabled heading in: {body}"
     );
     // Red was removed: the separate section carries the meaning, so no row may
-    // be wrapped in the TUI's `[red]…[/red]` span markers.
+    // be wrapped in the TUI's `[red]...[/red]` span markers.
     assert!(
         !body.contains("[red]") && !body.contains("[/red]"),
         "disabled rows should no longer be wrapped in red: {body}"

@@ -39,7 +39,7 @@ use async_trait::async_trait;
 use ragent_config::ConnectorsConfig;
 
 use crate::add::{InstallSource, add, classify_source};
-use crate::auth::{AuthState, CredentialStore, EnvSource, NullCredentialStore, ProcessEnv};
+use crate::auth::{AuthState, CredentialStore, EnvSource};
 use crate::browse::CategoryFilter;
 use crate::descriptor::ConnectorDescriptor;
 use crate::fetch::{CatalogueCache, CatalogueLimits, default_fetcher, now_unix_secs};
@@ -586,18 +586,17 @@ pub enum AuthOutcomeError {
 ///
 /// This is the async twin of [`run_connector_subcommand`]: the management
 /// subcommands (`list`, `search`, `enable`, `disable`, `connect`, `disconnect`,
-/// `auth`) and the isolated harness (`test`) are served here, while the pure
-/// store subcommands (`add`, `remove`, `stores`, `help`) continue to be served by
-/// the synchronous entry point. The caller supplies the session environment and
-/// the isolated MCP probe, so the dispatcher borrows no live client of its own.
+/// `auth`) are served here, while the pure store subcommands (`add`, `remove`,
+/// `stores`, `help`) continue to be served by the synchronous entry point and
+/// the isolated harness (`test`) by [`run_connector_subcommand_async`]. The
+/// caller supplies the session environment, so the dispatcher borrows no live
+/// client of its own.
 ///
 /// The master switch is honoured first: a disabled subsystem reports that fact
 /// for every subcommand other than `help` and attempts no connection or fetch
 /// (FR-021).
 pub async fn run_connector_subcommand_env(
-    workdir: &Path,
     env: &mut (impl ConnectorCommandEnv + Send + ?Sized),
-    probe: &mut dyn McpProbe,
     sub: &str,
     rest: &str,
 ) -> Option<String> {
@@ -665,22 +664,10 @@ pub async fn run_connector_subcommand_env(
             Ok(outcome) => auth_report(&outcome),
             Err(err) => format!("{}\n\n[err] {err}", attribution(&format!("auth {id}"))),
         },
-        ConnectorCommand::Test { id } => {
-            let id = resolve_connector_reference(workdir, &id);
-            match run_harness(
-                workdir,
-                env.config(),
-                &NullCredentialStore,
-                &ProcessEnv,
-                probe,
-                &id,
-            )
-            .await
-            {
-                Ok(report) => report,
-                Err(err) => err.report(&id),
-            }
-        }
+        // The `test` harness is served by `run_connector_subcommand_async`,
+        // which owns the isolated probe; reaching it here means the caller
+        // skipped that entry point, so it has no handler on this surface.
+        ConnectorCommand::Test { .. } => return None,
         // `stores --check` probes each catalogue over a blocking HTTP client,
         // which must run off the async worker thread (see
         // `run_connector_subcommand_stores_check`). A plain `stores` performs no

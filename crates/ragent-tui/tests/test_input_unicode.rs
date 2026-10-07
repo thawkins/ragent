@@ -19,10 +19,10 @@ fn test_cursor_byte_pos_ascii() {
 #[test]
 fn test_cursor_byte_pos_emoji() {
     let mut app = support::make_app();
-    // 🦀 is 4 bytes in UTF-8
+    //  is 4 bytes in UTF-8
     app.input = "a🦀b".into();
     assert_eq!(app.cursor_byte_pos_at_char_index(0), 0); // before 'a'
-    assert_eq!(app.cursor_byte_pos_at_char_index(1), 1); // before '🦀'
+    assert_eq!(app.cursor_byte_pos_at_char_index(1), 1); // before ''
     assert_eq!(app.cursor_byte_pos_at_char_index(2), 5); // before 'b'
     assert_eq!(app.cursor_byte_pos_at_char_index(3), 6); // end
 }
@@ -65,7 +65,7 @@ fn test_cursor_byte_pos_empty_string() {
 }
 
 // =========================================================================
-// insert_char_at_cursor — Unicode
+// insert_char_at_cursor - Unicode
 // =========================================================================
 
 #[test]
@@ -99,7 +99,7 @@ fn test_insert_char_at_end_of_unicode() {
 }
 
 // =========================================================================
-// insert_text_at_cursor — Unicode
+// insert_text_at_cursor - Unicode
 // =========================================================================
 
 #[test]
@@ -129,18 +129,18 @@ fn test_insert_text_mixed_emoji() {
     app.input_cursor = 0;
     app.insert_text_at_cursor("Hi 🌍!");
     assert_eq!(app.input, "Hi 🌍!");
-    assert_eq!(app.input_cursor, 5); // H i space 🌍 !
+    assert_eq!(app.input_cursor, 5); // H i space  !
 }
 
 // =========================================================================
-// delete_prev_char — Unicode boundaries
+// delete_prev_char - Unicode boundaries
 // =========================================================================
 
 #[test]
 fn test_delete_prev_char_removes_emoji() {
     let mut app = support::make_app();
     app.input = "a🦀b".into();
-    app.input_cursor = 2; // after '🦀'
+    app.input_cursor = 2; // after ''
     app.delete_prev_char();
     assert_eq!(app.input, "ab");
     assert_eq!(app.input_cursor, 1);
@@ -167,14 +167,14 @@ fn test_delete_prev_char_at_start_is_noop() {
 }
 
 // =========================================================================
-// delete_next_char — Unicode boundaries
+// delete_next_char - Unicode boundaries
 // =========================================================================
 
 #[test]
 fn test_delete_next_char_removes_emoji() {
     let mut app = support::make_app();
     app.input = "a🦀b".into();
-    app.input_cursor = 1; // before '🦀'
+    app.input_cursor = 1; // before ''
     app.delete_next_char();
     assert_eq!(app.input, "ab");
     assert_eq!(app.input_cursor, 1);
@@ -201,7 +201,7 @@ fn test_delete_next_char_cjk() {
 }
 
 // =========================================================================
-// remove_input_char_range — boundaries and Unicode
+// remove_input_char_range - boundaries and Unicode
 // =========================================================================
 
 #[test]
@@ -229,7 +229,7 @@ fn test_remove_char_range_beyond_bounds() {
     let mut app = support::make_app();
     app.input = "abc".into();
     app.input_cursor = 3;
-    // Range extends past input length — should clamp gracefully.
+    // Range extends past input length - should clamp gracefully.
     app.remove_input_char_range(1, 100);
     assert_eq!(app.input, "a");
     assert_eq!(app.input_cursor, 1);
@@ -246,7 +246,7 @@ fn test_remove_char_range_entire_string() {
 }
 
 // =========================================================================
-// input_len_chars — Unicode
+// input_len_chars - Unicode
 // =========================================================================
 
 #[test]
@@ -267,5 +267,5 @@ fn test_input_len_chars_emoji() {
 fn test_input_len_chars_mixed() {
     let mut app = support::make_app();
     app.input = "café🦀".into();
-    assert_eq!(app.input_len_chars(), 5); // c a f é 🦀
+    assert_eq!(app.input_len_chars(), 5); // c a f é 
 }

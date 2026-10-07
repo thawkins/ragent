@@ -19,7 +19,7 @@ fn slash_rs_path() -> PathBuf {
 }
 
 /// The core "not active" message text (without the emoji prefix, which varies
-/// between literal ⚠️ and \u{26a0}\u{fe0f} escape sequences).
+/// between literal  and \u{26a0}\u{fe0f} escape sequences).
 const NOT_ACTIVE_MARKER: &str = "Code index is not active. Enable it first with `/codeindex on`";
 
 #[test]
@@ -69,7 +69,7 @@ fn test_not_active_message_matches_existing_subcommands() {
     // existing codeindex sub-commands (e.g. reindex, rebuild).
     let source = std::fs::read_to_string(slash_rs_path()).expect("read slash.rs");
 
-    // Count occurrences of the marker — there should be at least 6
+    // Count occurrences of the marker - there should be at least 6
     // (reindex, graph build, godnodes, explain, path, communities, rebuild).
     let count = source.matches(NOT_ACTIVE_MARKER).count();
     assert!(

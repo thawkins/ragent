@@ -158,7 +158,7 @@ fn test_git_init_commit_works_without_global_identity() {
     git(root.path(), &["config", "--unset", "user.name"]);
     git(root.path(), &["config", "--unset", "user.email"]);
     // Note: global config may still resolve; the assertion below tolerates
-    // both paths — the commit must not fail regardless.
+    // both paths - the commit must not fail regardless.
 
     let report = init_and_commit(root.path(), "Initial scaffold").expect("init+commit");
     assert!(report.committed);

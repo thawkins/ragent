@@ -289,7 +289,7 @@ fn load_agent_file(path: &Path, is_project_local: bool) -> Result<CustomAgentDef
     })
 }
 
-// ── Markdown agent profiles (.md) ────────────────────────────────────────────
+// -- Markdown agent profiles (.md) --------------------------------------------
 
 /// JSON frontmatter fields for a `.md` agent profile.
 ///
@@ -450,7 +450,7 @@ pub fn record_to_agent_info(
     record: &OasfAgentRecord,
     source_path: &Path,
 ) -> Result<Arc<AgentInfo>, String> {
-    // ── Validate core fields ───────────────────────────────────────────────
+    // -- Validate core fields -----------------------------------------------
     if record.name.is_empty() || record.name.contains(' ') {
         return Err("agent name must be non-empty and contain no spaces".to_string());
     }
@@ -459,7 +459,7 @@ pub fn record_to_agent_info(
         return Err("description must not be empty".to_string());
     }
 
-    // ── Extract ragent/agent/v1 module ─────────────────────────────────────
+    // -- Extract ragent/agent/v1 module -------------------------------------
     let ragent_module = record
         .modules
         .iter()
@@ -470,7 +470,7 @@ pub fn record_to_agent_info(
     let payload: RagentAgentPayload = serde_json::from_value(ragent_module.payload.clone())
         .map_err(|e| format!("invalid '{RAGENT_MODULE_TYPE}' payload: {e}"))?;
 
-    // ── Validate payload fields ────────────────────────────────────────────
+    // -- Validate payload fields --------------------------------------------
     if payload.system_prompt.trim().is_empty() {
         return Err("system_prompt must not be empty".to_string());
     }
@@ -533,7 +533,7 @@ pub fn record_to_agent_info(
         return Err("max_steps must be greater than 0".to_string());
     }
 
-    // ── Parse permissions ──────────────────────────────────────────────────
+    // -- Parse permissions --------------------------------------------------
     let permission = if let Some(ref rules) = payload.permissions {
         rules
             .iter()
@@ -559,7 +559,7 @@ pub fn record_to_agent_info(
         crate::agent::default_permissions()
     };
 
-    // ── Parse provider options ─────────────────────────────────────────────
+    // -- Parse provider options ---------------------------------------------
     let options: HashMap<String, serde_json::Value> = payload
         .options
         .as_ref()
@@ -567,7 +567,7 @@ pub fn record_to_agent_info(
         .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
 
-    // ── Parse memory scope ──────────────────────────────────────────────────
+    // -- Parse memory scope --------------------------------------------------
     let memory = match payload.memory.as_deref() {
         Some("user") => crate::team::config::MemoryScope::User,
         Some("project") => crate::team::config::MemoryScope::Project,
@@ -579,7 +579,7 @@ pub fn record_to_agent_info(
         }
     };
 
-    // ── Build AgentInfo ────────────────────────────────────────────────────
+    // -- Build AgentInfo ----------------------------------------------------
     // Store the raw system_prompt with template variables intact; substitution
     // happens at invocation time in build_system_prompt().
     let _ = source_path; // used only for error context by caller

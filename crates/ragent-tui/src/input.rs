@@ -2050,7 +2050,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
         },
 
-        // ── GitLab setup (multi-field form) ──────────────────────────────
+        // -- GitLab setup (multi-field form) ------------------------------
         ProviderSetupStep::GitLabSetup {
             mut url_input,
             mut url_cursor,
@@ -2223,7 +2223,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
         }
 
-        // ── Telemetry setup (multi-field form) ───────────────────────────
+        // -- Telemetry setup (multi-field form) ---------------------------
         ProviderSetupStep::TelemetrySetup {
             mut endpoint_field,
             mut protocol,

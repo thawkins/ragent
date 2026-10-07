@@ -154,7 +154,7 @@ fn test_skillgen_overwrites_existing() {
     let skill_md = result1.dest.join("SKILL.md");
     let first_content = fs::read_to_string(&skill_md).expect("read first SKILL.md");
 
-    // Run again — should report already_existed.
+    // Run again - should report already_existed.
     let result2 =
         ragent_tui::app::skillgen::generate_graphify_skill_in(&skills_dir).expect("second run");
     assert!(

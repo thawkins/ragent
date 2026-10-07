@@ -33,13 +33,21 @@ fn status_icon(status: &str) -> &str {
     }
 }
 
-// -- GitlabListPipelinesTool --------------------------------------------------
+/// Format a duration field from a GitLab JSON value as seconds with one
+/// decimal place, or the supplied placeholder when the value is absent/null.
+fn format_duration(value: &Value, empty: &str) -> String {
+    value
+        .as_f64()
+        .map_or_else(|| empty.to_string(), |d| format!("{d:.1}s"))
+}
+
+// -- GitLabListPipelinesTool --------------------------------------------------
 
 /// Tool that lists pipelines in a GitLab project.
-pub struct GitlabListPipelinesTool;
+pub struct GitLabListPipelinesTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabListPipelinesTool {
+impl Tool for GitLabListPipelinesTool {
     fn name(&self) -> &'static str {
         "gitlab_list_pipelines"
     }
@@ -116,7 +124,7 @@ impl Tool for GitlabListPipelinesTool {
             let status = p["status"].as_str().unwrap_or("?");
             let git_ref = p["ref"].as_str().unwrap_or("?");
             let sha = p["sha"].as_str().unwrap_or("?");
-            let short_sha = if sha.len() >= 8 { &sha[..8] } else { sha };
+            let short_sha = sha.get(..8).unwrap_or(sha);
             let source = p["source"].as_str().unwrap_or("?");
             let created = p["created_at"].as_str().unwrap_or("?");
             lines.push(format!(
@@ -132,13 +140,13 @@ impl Tool for GitlabListPipelinesTool {
     }
 }
 
-// -- GitlabGetPipelineTool ----------------------------------------------------
+// -- GitLabGetPipelineTool ----------------------------------------------------
 
 /// Tool that retrieves details of a specific pipeline.
-pub struct GitlabGetPipelineTool;
+pub struct GitLabGetPipelineTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabGetPipelineTool {
+impl Tool for GitLabGetPipelineTool {
     fn name(&self) -> &'static str {
         "gitlab_get_pipeline"
     }
@@ -186,9 +194,7 @@ impl Tool for GitlabGetPipelineTool {
         let created = pipeline["created_at"].as_str().unwrap_or("?");
         let started = pipeline["started_at"].as_str().unwrap_or("not started");
         let finished = pipeline["finished_at"].as_str().unwrap_or("not finished");
-        let duration = pipeline["duration"]
-            .as_f64()
-            .map_or_else(|| "N/A".to_string(), |d| format!("{d:.1}s"));
+        let duration = format_duration(&pipeline["duration"], "N/A");
         let web_url = pipeline["web_url"].as_str().unwrap_or("?");
         let user = pipeline["user"]["username"].as_str().unwrap_or("?");
 
@@ -213,13 +219,13 @@ impl Tool for GitlabGetPipelineTool {
     }
 }
 
-// -- GitlabListJobsTool -------------------------------------------------------
+// -- GitLabListJobsTool -------------------------------------------------------
 
 /// Tool that lists jobs for a pipeline.
-pub struct GitlabListJobsTool;
+pub struct GitLabListJobsTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabListJobsTool {
+impl Tool for GitLabListJobsTool {
     fn name(&self) -> &'static str {
         "gitlab_list_jobs"
     }
@@ -329,9 +335,7 @@ impl Tool for GitlabListJobsTool {
             let name = job["name"].as_str().unwrap_or("?");
             let stage = job["stage"].as_str().unwrap_or("?");
             let status = job["status"].as_str().unwrap_or("?");
-            let duration = job["duration"]
-                .as_f64()
-                .map_or_else(|| "-".to_string(), |d| format!("{d:.1}s"));
+            let duration = format_duration(&job["duration"], "-");
             let runner = job["runner"]["description"].as_str().unwrap_or("no runner");
             lines.push(format!(
                 "  {} [{stage}] {name} (id:{id}) - {status}, {duration}, runner:{runner}",
@@ -346,13 +350,13 @@ impl Tool for GitlabListJobsTool {
     }
 }
 
-// -- GitlabGetJobTool ---------------------------------------------------------
+// -- GitLabGetJobTool ---------------------------------------------------------
 
 /// Tool that retrieves details of a specific job.
-pub struct GitlabGetJobTool;
+pub struct GitLabGetJobTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabGetJobTool {
+impl Tool for GitLabGetJobTool {
     fn name(&self) -> &'static str {
         "gitlab_get_job"
     }
@@ -397,9 +401,7 @@ impl Tool for GitlabGetJobTool {
         let created = job["created_at"].as_str().unwrap_or("?");
         let started = job["started_at"].as_str().unwrap_or("not started");
         let finished = job["finished_at"].as_str().unwrap_or("not finished");
-        let duration = job["duration"]
-            .as_f64()
-            .map_or_else(|| "N/A".to_string(), |d| format!("{d:.1}s"));
+        let duration = format_duration(&job["duration"], "N/A");
         let web_url = job["web_url"].as_str().unwrap_or("?");
         let runner_desc = job["runner"]["description"].as_str().unwrap_or("none");
         let pipeline_id = job["pipeline"]["id"].as_u64().unwrap_or(0);
@@ -446,13 +448,13 @@ impl Tool for GitlabGetJobTool {
     }
 }
 
-// -- GitlabGetJobLogTool ------------------------------------------------------
+// -- GitLabGetJobLogTool ------------------------------------------------------
 
 /// Tool that downloads the log (trace) output of a job.
-pub struct GitlabGetJobLogTool;
+pub struct GitLabGetJobLogTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabGetJobLogTool {
+impl Tool for GitLabGetJobLogTool {
     fn name(&self) -> &'static str {
         "gitlab_get_job_log"
     }
@@ -541,13 +543,13 @@ impl Tool for GitlabGetJobLogTool {
     }
 }
 
-// -- GitlabRetryJobTool -------------------------------------------------------
+// -- GitLabRetryJobTool -------------------------------------------------------
 
 /// Tool that retries a failed or cancelled job.
-pub struct GitlabRetryJobTool;
+pub struct GitLabRetryJobTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabRetryJobTool {
+impl Tool for GitLabRetryJobTool {
     fn name(&self) -> &'static str {
         "gitlab_retry_job"
     }
@@ -599,13 +601,13 @@ impl Tool for GitlabRetryJobTool {
     }
 }
 
-// -- GitlabCancelJobTool ------------------------------------------------------
+// -- GitLabCancelJobTool ------------------------------------------------------
 
 /// Tool that cancels a running or pending job.
-pub struct GitlabCancelJobTool;
+pub struct GitLabCancelJobTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCancelJobTool {
+impl Tool for GitLabCancelJobTool {
     fn name(&self) -> &'static str {
         "gitlab_cancel_job"
     }
@@ -656,13 +658,13 @@ impl Tool for GitlabCancelJobTool {
     }
 }
 
-// -- GitlabRetryPipelineTool --------------------------------------------------
+// -- GitLabRetryPipelineTool --------------------------------------------------
 
 /// Tool that retries all failed jobs in a pipeline.
-pub struct GitlabRetryPipelineTool;
+pub struct GitLabRetryPipelineTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabRetryPipelineTool {
+impl Tool for GitLabRetryPipelineTool {
     fn name(&self) -> &'static str {
         "gitlab_retry_pipeline"
     }
@@ -714,13 +716,13 @@ impl Tool for GitlabRetryPipelineTool {
     }
 }
 
-// -- GitlabCancelPipelineTool -------------------------------------------------
+// -- GitLabCancelPipelineTool -------------------------------------------------
 
 /// Tool that cancels all running/pending jobs in a pipeline.
-pub struct GitlabCancelPipelineTool;
+pub struct GitLabCancelPipelineTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCancelPipelineTool {
+impl Tool for GitLabCancelPipelineTool {
     fn name(&self) -> &'static str {
         "gitlab_cancel_pipeline"
     }

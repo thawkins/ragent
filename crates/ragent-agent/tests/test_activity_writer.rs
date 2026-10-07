@@ -108,7 +108,7 @@ async fn writer_drains_queued_activity_events() {
 }
 
 /// PERF-040: when no writer has been started, `record_activity_event` is a
-/// no-op — no panic, no task spawned, no events persisted.
+/// no-op - no panic, no task spawned, no events persisted.
 #[tokio::test]
 async fn no_writer_drops_events_without_panicking() {
     ragent_config::activity_log::set_enabled(true);

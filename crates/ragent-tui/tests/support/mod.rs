@@ -1,6 +1,6 @@
 //! Shared test-support helpers for `ragent-tui` integration tests and benches.
 //!
-//! Provides [`make_app`] — the standard `App` constructor used across ~20 test
+//! Provides [`make_app`] - the standard `App` constructor used across ~20 test
 //! files and 3 bench files.  Previously copy-pasted verbatim into every test
 //! (see `DUPPLAN.md` Milestone G, `cargo dupes` groups 2 and 34).
 

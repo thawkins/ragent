@@ -77,7 +77,7 @@ fn test_plan_template_has_task_table() {
     );
     assert!(md.contains("| T-001 |"));
 }
-// ── Quality checklist tests (T-010, FR-006) ──────────────────────────────────
+// -- Quality checklist tests (T-010, FR-006) ----------------------------------
 
 #[test]
 fn test_spec_template_with_checklist_contains_section() {
@@ -141,7 +141,7 @@ fn test_spec_template_with_research_and_checklist() {
         "should have quality checklist section"
     );
 }
-// ── Plan quality checklist tests (T-011, FR-006) ─────────────────────────────
+// -- Plan quality checklist tests (T-011, FR-006) -----------------------------
 
 #[test]
 fn test_plan_template_with_checklist_contains_section() {
@@ -190,7 +190,7 @@ fn test_plan_template_generate_has_no_checklist_by_default() {
         "generate() should NOT contain Quality Checklist by default"
     );
 }
-// ── FeedbackTemplate tests (T-031, FR-017) ──────────────────────────────────
+// -- FeedbackTemplate tests (T-031, FR-017) ----------------------------------
 
 #[test]
 fn test_feedback_template_contains_header() {
@@ -212,7 +212,7 @@ fn test_feedback_template_contains_advisory_note() {
     assert!(md.contains("advisory"));
     assert!(md.contains("do not block validation"));
 }
-// ── Edge-case tests for templates (T-041, NFR-004) ────────────────────────────
+// -- Edge-case tests for templates (T-041, NFR-004) ----------------------------
 
 #[test]
 fn test_feedback_template_empty_title() {
@@ -244,7 +244,7 @@ fn test_plan_template_checklist_has_dependency_item() {
     );
 }
 
-// ── Comprehensive checklist embedding tests (T-012, FR-006, NFR-004) ──────────
+// -- Comprehensive checklist embedding tests (T-012, FR-006, NFR-004) ----------
 
 /// Verify the spec checklist includes the "no missing requirements" item.
 #[test]
@@ -418,7 +418,7 @@ fn test_spec_template_generate_with_research_has_no_checklist() {
     );
 }
 
-// ── File Creation Order tests (T-024, FR-014) ──────────────────────────────
+// -- File Creation Order tests (T-024, FR-014) ------------------------------
 
 /// Verify the plan template includes a `## File Creation Order` section.
 #[test]
@@ -587,7 +587,7 @@ fn test_plan_template_file_order_placement() {
     );
 }
 
-// ── ConstitutionTemplate tests (T-014, FR-007) ─────────────────────────────
+// -- ConstitutionTemplate tests (T-014, FR-007) -----------------------------
 
 /// Verify the constitution template has a `# Constitution` header.
 #[test]

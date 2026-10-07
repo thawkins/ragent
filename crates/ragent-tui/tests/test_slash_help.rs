@@ -575,7 +575,7 @@ async fn test_toolchain_list_json_unknown_language_warns_without_json() {
 async fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
     let mut app = make_app();
     let text = last_output_after(&mut app, "/toolchain list").await;
-    // FR-016: the wait indicator is transient — once the report lands the
+    // FR-016: the wait indicator is transient - once the report lands the
     // status bar reads `toolchain: list`, and the full table rendered (the
     // blocking-thread walk completed with every language row).
     assert_eq!(app.status, "toolchain: list");
@@ -592,7 +592,7 @@ async fn test_toolchain_list_runs_probes_off_the_event_loop_with_wait_status() {
 }
 
 /// NFR-001 / FR-016: the probe walk is non-blocking up to a generous
-/// harness ceiling — the full 50-row walk plus report lands well inside a
+/// harness ceiling - the full 50-row walk plus report lands well inside a
 /// 5 s ceiling even on CI machines where dozens of child-process version
 /// probes serialise across blocking threads.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -617,7 +617,7 @@ async fn test_toolchain_list_within_responsiveness_budget() {
 
 /// FR-010/FR-015: the full walk returns one row per `SUPPORTED_LANGUAGES`
 /// entry even when runtimes are absent (`missing`, `nim`, `ocaml` are
-/// install-absent on the test box); the report table carries every row —
+/// install-absent on the test box); the report table carries every row -
 /// absent runtimes never abort or truncate the walk.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
@@ -634,7 +634,7 @@ async fn test_toolchain_list_absent_runtimes_do_not_truncate_report() {
         data_rows, 50,
         "walk must emit one row per language even with absent runtimes: {text}"
     );
-    // FR-012: probe failure containment keeps failing versions readable —
+    // FR-012: probe failure containment keeps failing versions readable -
     // `unknown`/`timeout`/`not installed` render in-place without panicking
     // or dropping later rows.
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -697,7 +697,7 @@ async fn test_toolchain_list_table_renders_at_fixed_column_widths() {
 }
 
 /// FR-017 word-wrap: version text wider than the 50-char Version column
-/// wraps onto continuation grid lines instead of being clipped — no version
+/// wraps onto continuation grid lines instead of being clipped - no version
 /// text is dropped (the report still renders every row's status, and any
 /// continuation line carries text only in the Version column).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -736,7 +736,7 @@ async fn test_toolchain_list_filtered_table_renders_at_fixed_column_widths() {
 async fn test_toolchain_list_probe_failure_keeps_row_with_placeholder() {
     let mut app = make_app();
     // `r` (the R language) reports via `R --version` first line; on hosts
-    // without R the PATH probe reports `not installed` — either way the row
+    // without R the PATH probe reports `not installed` - either way the row
     // renders with a single line version cell.
     let text = last_output_after(&mut app, "/toolchain list r").await;
     // The TUI markdown pipeline may narrow-wrap the `r` id onto its own
@@ -770,7 +770,7 @@ async fn test_toolchain_list_probe_failure_keeps_row_with_placeholder() {
 // ---------------------------------------------------------------------------
 
 /// FR-013: no `/toolchain` invocation writes files, mutates config, or
-/// touches working-tree state — it only probes PATH and spawns (read-only)
+/// touches working-tree state - it only probes PATH and spawns (read-only)
 /// version commands. Verify by snapshotting the working tree's recursive
 /// file list plus every visible file's len before and after running the
 /// full command surface.
@@ -800,7 +800,7 @@ async fn test_toolchain_commands_leave_working_tree_untouched() {
             Ok(())
         }
         // Unreachable IO errors are surfaced as an empty snapshot, which the
-        // test will flag as a tree mutation — a loud failure is the right
+        // test will flag as a tree mutation - a loud failure is the right
         // outcome for a read-only guarantee probe.
         let _ = walk(root, root, &mut entries);
         entries.sort();
@@ -869,7 +869,7 @@ fn test_toolchain_slash_menu_matches_tool_prefix() {
 
 /// FR-001: the toolchain entry's autocomplete suggestions are exactly the
 /// registered subcommands (`list`, `help`) from `get_command_suggestions`
-/// (TC-014 step 5 equivalent — the menu closes on space, so suggestions
+/// (TC-014 step 5 equivalent - the menu closes on space, so suggestions
 /// surface on the matching entry while the user completes the trigger).
 #[test]
 fn test_toolchain_subcommand_suggestions_offer_list_and_help() {

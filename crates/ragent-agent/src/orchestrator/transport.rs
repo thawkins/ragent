@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 
 use super::{AgentId, OrchestrationMessage, Router};
 
-// ── Remote agent descriptor ──────────────────────────────────────────────────
+// -- Remote agent descriptor --------------------------------------------------
 
 /// Metadata for an agent hosted on a remote endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ struct RemoteAgentResponse {
     result: String,
 }
 
-// ── HttpRouter ───────────────────────────────────────────────────────────────
+// -- HttpRouter ---------------------------------------------------------------
 
 /// Routes orchestration messages to remote agents via HTTP POST.
 ///
@@ -152,7 +152,7 @@ impl Router for HttpRouter {
     }
 }
 
-// ── RouterComposite ──────────────────────────────────────────────────────────
+// -- RouterComposite ----------------------------------------------------------
 
 /// Tries a sequence of [`Router`]s in order, returning the first success.
 ///

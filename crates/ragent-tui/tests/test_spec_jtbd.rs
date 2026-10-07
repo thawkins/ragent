@@ -19,7 +19,7 @@ use ragent_agent::{
 use ragent_tui::App;
 use ragent_tui::app::LogLevel;
 
-// ── App construction helpers (mirrors test_slash_commands.rs) ──────────────
+// -- App construction helpers (mirrors test_slash_commands.rs) --------------
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -90,7 +90,7 @@ fn make_app() -> App {
     )
 }
 
-// ── CWD helpers ────────────────────────────────────────────────────────────
+// -- CWD helpers ------------------------------------------------------------
 
 struct CwdGuard(std::path::PathBuf);
 
@@ -120,7 +120,7 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
 /// deleted (otherwise `current_dir` fails on a ghost path).
 ///
 /// **Caller must hold `cwd_lock()`** to serialise cwd manipulation across
-/// tests — this function does not acquire the lock itself (to avoid
+/// tests - this function does not acquire the lock itself (to avoid
 /// double-lock deadlocks when the caller already holds it).
 fn temp_cwd() -> (tempfile::TempDir, CwdGuard) {
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -156,7 +156,7 @@ const SAMPLE_SPEC_MD: &str = "\
 **The system shall** respond within 200ms.
 ";
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// -- Tests ------------------------------------------------------------------
 
 /// FR-008: `/spec jtbd` with no spec ID should be treated as a usage error.
 /// The dispatch for `SpecCommand::Unknown("jtbd")` sets a status string but
@@ -169,7 +169,7 @@ async fn test_spec_jtbd_no_args_shows_usage() {
 
     app.execute_slash_command("/spec jtbd").await;
 
-    // Usage-error subcommand → status reports the usage hint.
+    // Usage-error subcommand -> status reports the usage hint.
     assert!(
         app.status.contains("Usage") && app.status.contains("jtbd"),
         "status should report jtbd usage: {}",
@@ -358,7 +358,7 @@ async fn test_spec_jtbd_starts_generation() {
 
     app.execute_slash_command("/spec jtbd validspec").await;
 
-    // FR-011: status parity — should be a "spec jtbd: …" status string
+    // FR-011: status parity - should be a "spec jtbd: ..." status string
     assert!(
         app.status.contains("spec jtbd") && app.status.contains("validspec"),
         "status should indicate jtbd generation: {}",
@@ -369,7 +369,7 @@ async fn test_spec_jtbd_starts_generation() {
         "should set is_processing for a valid spec"
     );
 
-    // FR-011: message parity — should contain build_jtbd_message content
+    // FR-011: message parity - should contain build_jtbd_message content
     assert!(
         !app.messages.is_empty(),
         "should push the jtbd task message"
@@ -381,7 +381,7 @@ async fn test_spec_jtbd_starts_generation() {
     );
     assert!(text.contains("JTBD"), "message should mention JTBD: {text}");
 
-    // FR-011: log parity — an Info-level log entry referencing JTBD should exist
+    // FR-011: log parity - an Info-level log entry referencing JTBD should exist
     let has_jtbd_log = app
         .log_entries
         .iter()

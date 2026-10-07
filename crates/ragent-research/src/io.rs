@@ -10,16 +10,16 @@
 //!
 //! ```text
 //! research/
-//! ├── INDEX.md                       (derived cache, regenerated on change)
-//! ├── <name>/
-//! │   ├── RESEARCH.md                (frontmatter + body, 8 sections)
-//! │   └── sources/
-//! │       ├── web-NN.md
-//! │       ├── local-NN.md
-//! │       ├── spec-NN.md
-//! │       └── other-NN.md
-//! └── _templates/                    (optional research templates, FR-020)
-//!     └── <name>.md
+//! |-- INDEX.md                       (derived cache, regenerated on change)
+//! |-- <name>/
+//! |   |-- RESEARCH.md                (frontmatter + body, 8 sections)
+//! |   \-- sources/
+//! |       |-- web-NN.md
+//! |       |-- local-NN.md
+//! |       |-- spec-NN.md
+//! |       \-- other-NN.md
+//! \-- _templates/                    (optional research templates, FR-020)
+//!     \-- <name>.md
 //! ```
 
 use crate::research_name::ResearchName;

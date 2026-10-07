@@ -1,47 +1,17 @@
 //! Tests for the `/plugins test` isolated harness (spec `plugins` T-015;
 //! FR-013, FR-026).
 
-use std::path::PathBuf;
+mod support;
+
+use support::TempTree;
+
 use std::time::Duration;
 
 use ragent_plugins::{
     HarnessReport, StepOutcome, StoreLedger, parse_test_command, render_report, run_test_command,
-    sample_for_schema, store_dirs_at, test_plugin,
+    sample_for_schema, test_plugin,
 };
 use serde_json::{Value as JsonValue, json};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/harness-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// Store dirs pinned to this tree's project store (no global leg).
-    fn dirs(&self) -> ragent_plugins::StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin with an explicit id and an inline entry.
 fn write_plugin(tree: &TempTree, id: &str, entry: &str) {
@@ -74,7 +44,7 @@ fn step<'a>(report: &'a HarnessReport, name: &str) -> &'a ragent_plugins::Harnes
         .unwrap_or_else(|| panic!("step '{name}' missing from {:?}", report.steps))
 }
 
-// ── FR-013: happy path ─────────────────────────────────────────────────────
+// -- FR-013: happy path -----------------------------------------------------
 
 #[test]
 fn harness_runs_discovery_validation_version_entry_and_sample_invocation() {
@@ -217,7 +187,7 @@ fn harness_captures_plugin_messages() {
     assert!(rendered.contains("info: hello from plugin"));
 }
 
-// ── FR-013/FR-026: failure containment ─────────────────────────────────────
+// -- FR-013/FR-026: failure containment -------------------------------------
 
 #[test]
 fn harness_reports_invalid_manifest_at_validation() {
@@ -326,7 +296,7 @@ fn harness_reports_unknown_plugin_as_discovery_failure() {
     assert!(!report.passed());
 }
 
-// ── FR-013: isolation — live session and store untouched ───────────────────
+// -- FR-013: isolation - live session and store untouched -------------------
 
 #[test]
 fn harness_does_not_write_the_store_ledger_or_enable_the_plugin() {
@@ -354,7 +324,7 @@ fn harness_does_not_write_the_store_ledger_or_enable_the_plugin() {
     );
 }
 
-// ── FR-025: unsupported capabilities reported ──────────────────────────────
+// -- FR-025: unsupported capabilities reported ------------------------------
 
 #[test]
 fn harness_reports_unsupported_capabilities() {
@@ -384,7 +354,7 @@ fn harness_reports_unsupported_capabilities() {
     assert!(rendered.contains("mcp server transports"), "{rendered}");
 }
 
-// ── FR-013: `run_test_command` / parse glue ───────────────────────────────
+// -- FR-013: `run_test_command` / parse glue -------------------------------
 
 #[test]
 fn run_test_command_refuses_when_subsystem_disabled() {
@@ -440,7 +410,7 @@ fn run_test_command_missing_id_renders_usage_error() {
     );
 }
 
-// ── sample argument generation ─────────────────────────────────────────────
+// -- sample argument generation ---------------------------------------------
 
 #[test]
 fn sample_for_schema_generates_typed_values() {

@@ -2,20 +2,20 @@
 //! hot path.
 //!
 //! These benches exercise the per-turn and per-step operations that
-//! Milestones A–E optimised, so regressions are caught before they ship.
+//! Milestones A-E optimised, so regressions are caught before they ship.
 //! They run hermetically (no network, no real LLM) using synthetic fixtures
 //! and the [`ragent_bench::MockLlmClient`] for the streaming path.
 //!
 //! Run with: `cargo bench -p ragent-bench --bench agent_loop`
 //!
 //! Covered scenarios:
-//! - `history_to_chat_messages` — per-turn history→ChatMessage conversion
+//! - `history_to_chat_messages` - per-turn history->ChatMessage conversion
 //!   (P-22-adjacent; the function awaits image reads so it stays async).
-//! - `tool_result_content_for_llm` — per-tool-call result truncation (P-16).
-//! - `estimate_request_bytes` — per-step request-size estimate (P-7).
-//! - `estimate_tool_definition_bytes` — one-time tool-definition byte sum.
-//! - `interim_save_hash` — per-step change-detection hash (P-12).
-//! - `mock_llm_chat_stream` — `MockLlmClient` stream throughput (F-1).
+//! - `tool_result_content_for_llm` - per-tool-call result truncation (P-16).
+//! - `estimate_request_bytes` - per-step request-size estimate (P-7).
+//! - `estimate_tool_definition_bytes` - one-time tool-definition byte sum.
+//! - `interim_save_hash` - per-step change-detection hash (P-12).
+//! - `mock_llm_chat_stream` - `MockLlmClient` stream throughput (F-1).
 
 #![allow(missing_docs)]
 
@@ -171,12 +171,12 @@ fn bench_history_to_chat_messages(c: &mut Criterion) {
 
 fn bench_tool_result_content_for_llm(c: &mut Criterion) {
     let mut group = c.benchmark_group("tool_result_content_for_llm");
-    // Short result — fast path (no truncation).
+    // Short result - fast path (no truncation).
     let short = "hello world\n".to_string();
     group.bench_function("short", |b| {
         b.iter(|| black_box(tool_result_content_for_llm("bash", &short, None)));
     });
-    // Long result — truncation path.
+    // Long result - truncation path.
     let long: String = "x".repeat(50_000);
     group.bench_function("long", |b| {
         b.iter(|| black_box(tool_result_content_for_llm("bash", &long, None)));
@@ -235,7 +235,7 @@ fn bench_interim_save_hash(c: &mut Criterion) {
 fn bench_mock_llm_chat_stream(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut group = c.benchmark_group("mock_llm_chat_stream");
-    // Text-only script — measures TTFT + stream drain.
+    // Text-only script - measures TTFT + stream drain.
     let text_script = MockLlmScript::text_only("hello from the mock");
     let text_client = MockLlmClient::new(text_script);
     group.bench_function("text_only", |b| {
@@ -255,7 +255,7 @@ fn bench_mock_llm_chat_stream(c: &mut Criterion) {
             });
         });
     });
-    // Tool-call script — measures tool-call assembly throughput.
+    // Tool-call script - measures tool-call assembly throughput.
     let tool_script = MockLlmScript::single_tool_call("bash", r#"{"command":"echo hi"}"#);
     let tool_client = MockLlmClient::new(tool_script);
     group.bench_function("single_tool_call", |b| {

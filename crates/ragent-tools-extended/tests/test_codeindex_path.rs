@@ -11,7 +11,7 @@ use ragent_tools_extended::Tool;
 use ragent_tools_extended::codeindex_path::CodeIndexPathTool;
 use serde_json::json;
 
-// ── Tool metadata ─────��─────────────────────────────────────────────────
+// -- Tool metadata -----��-------------------------------------------------
 
 #[test]
 fn test_tool_name() {
@@ -37,7 +37,7 @@ fn test_tool_parameters_schema_has_required_from_and_to() {
     assert!(required.contains(&json!("to")));
 }
 
-// ── Registry registration ────────────────────────────────────────────────
+// -- Registry registration ------------------------------------------------
 
 #[test]
 fn test_path_tool_registered_in_extended_registry() {
@@ -57,7 +57,7 @@ fn test_path_tool_registered_with_correct_permission_category() {
     assert_eq!(tool.permission_category(), "codeindex:read");
 }
 
-// ── CodeIndex::path / try_path ────────────────────────────────────────────
+// -- CodeIndex::path / try_path --------------------------------------------
 
 /// Build an in-memory CodeIndex with a small graph:
 ///   hub --calls--> mid --calls--> leaf
@@ -168,7 +168,7 @@ fn test_codeindex_path_direct_edge_is_one_hop() {
 #[test]
 fn test_codeindex_path_no_path_returns_none() {
     let idx = build_graph_index();
-    // "isolated" has no edges — no path to/from it.
+    // "isolated" has no edges - no path to/from it.
     let result = idx.path("isolated", "hub").unwrap();
     assert!(result.is_none(), "no path from isolated to hub");
 }
@@ -221,7 +221,7 @@ fn test_codeindex_try_path_returns_none_when_locked() {
     );
 }
 
-// ── Tool execute ─────────────────────────────────────────────────────────
+// -- Tool execute ---------------------------------------------------------
 
 fn make_ctx(idx: Option<CodeIndex>) -> ragent_tools_extended::ToolContext {
     use ragent_tools_extended::ToolContext;

@@ -119,9 +119,7 @@ pub(super) async fn handle_connectors_command(app: &mut crate::app::App, args: &
     // `/tools` would keep reporting the stale surface until the next startup
     // (T-008, FR-012, FR-020).
     let mut env = TuiConnectorEnv::build(app).await;
-    if let Some(report) =
-        run_connector_subcommand_env(&app.cwd_path, &mut env, &mut NoProbe, sub, rest).await
-    {
+    if let Some(report) = run_connector_subcommand_env(&mut env, sub, rest).await {
         if matches!(sub, "enable" | "connect" | "disable" | "disconnect") {
             app.register_mcp_tools().await;
             app.refresh_connector_statuses().await;
@@ -373,36 +371,6 @@ fn connector_env(connect: &mut TuiMcpConnect) -> ConnectorEnv<'_> {
     }
 }
 
-/// The no-op isolated probe used when the harness runs without a probe client.
-///
-/// Reached only for a `test` invocation that did not take the probe branch; it
-/// refuses every connection rather than silently reporting a pass.
-struct NoProbe;
-
-#[async_trait]
-impl McpProbe for NoProbe {
-    async fn probe_connect(
-        &mut self,
-        _server_id: &str,
-        _config: McpServerConfig,
-    ) -> Result<Vec<ProbeTool>, String> {
-        Err("the isolated probe client is unavailable".to_string())
-    }
-
-    async fn probe_call(
-        &mut self,
-        _server_id: &str,
-        _tool: &str,
-        _args: serde_json::Value,
-    ) -> Result<String, String> {
-        Err("the isolated probe client is unavailable".to_string())
-    }
-
-    async fn probe_disconnect(&mut self, _server_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 /// The MCP connect/disconnect seam over the TUI's shared client (FR-008,
 /// FR-012, FR-013, FR-019).
 struct TuiMcpConnect {
@@ -462,27 +430,12 @@ impl McpProbe for TuiMcpProbe {
         server_id: &str,
         config: McpServerConfig,
     ) -> Result<Vec<ProbeTool>, String> {
-        let mut client = ragent_agent::mcp::McpClient::new();
-        client
-            .connect(server_id, config)
-            .await
-            .map_err(|error| format!("{error:#}"))?;
-        let tools = client
-            .servers()
-            .iter()
-            .find(|server| server.id == server_id)
-            .map(|server| {
-                server
-                    .tools
-                    .iter()
-                    .map(|tool| ProbeTool {
-                        name: tool.name.clone(),
-                        parameters: tool.parameters.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(tools)
+        // Shared isolated connect-and-list helper (T-309).
+        let tools = ragent_agent::mcp::probe::connect_and_list(server_id, config).await?;
+        Ok(tools
+            .into_iter()
+            .map(|(name, parameters)| ProbeTool { name, parameters })
+            .collect())
     }
 
     async fn probe_call(

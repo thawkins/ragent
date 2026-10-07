@@ -2,8 +2,8 @@
 
 /// Logo lines rendered using Unicode block characters.
 ///
-/// The logo spells "ragent" in a chunky block style using full-block (█),
-/// half-block (▀, ▄), and shadow characters.
+/// The logo spells "ragent" in a chunky block style using full-block (#),
+/// half-block (^, v), and shadow characters.
 ///
 /// This is the original size version.
 pub const LOGO: &[&str] = &[

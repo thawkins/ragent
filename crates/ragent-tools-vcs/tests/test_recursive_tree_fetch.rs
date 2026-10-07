@@ -182,7 +182,7 @@ async fn test_github_recursive_dir_fetch_failure_tolerated() {
         .mount(&server)
         .await;
 
-    // src/ fails with 500 — should be tolerated.
+    // src/ fails with 500 - should be tolerated.
     Mock::given(method("GET"))
         .and(path("/repos/owner/repo/contents/src"))
         .respond_with(ResponseTemplate::new(500).set_body_string("error"))
@@ -288,7 +288,7 @@ async fn test_gitlab_recursive_depth_1_dirs_get_trailing_slash() {
 async fn test_gitlab_recursive_depth_2_expands_directories() {
     let server = MockServer::start().await;
 
-    // src/ contents — uses ?path= query param. Mounted BEFORE the root mock so
+    // src/ contents - uses ?path= query param. Mounted BEFORE the root mock so
     // wiremock's first-match-wins ordering does not let the root mock (which
     // matches any query string) swallow the src/ request.
     Mock::given(method("GET"))
@@ -301,7 +301,7 @@ async fn test_gitlab_recursive_depth_2_expands_directories() {
         .mount(&server)
         .await;
 
-    // Root level — mounted last so it only matches the no-query root request.
+    // Root level - mounted last so it only matches the no-query root request.
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Fproject/repository/tree"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -329,7 +329,7 @@ async fn test_gitlab_recursive_depth_2_expands_directories() {
 async fn test_gitlab_recursive_depth_3_deep_nesting() {
     let server = MockServer::start().await;
 
-    // Deepest level first — query_param matching is exact, so the specific
+    // Deepest level first - query_param matching is exact, so the specific
     // mocks do not cross-match each other; the root mock (no query_param) is
     // mounted last so it only catches the no-query root request.
     Mock::given(method("GET"))
@@ -414,7 +414,7 @@ async fn test_gitlab_recursive_only_blobs_no_trees() {
 async fn test_gitlab_recursive_dir_fetch_failure_tolerated() {
     let server = MockServer::start().await;
 
-    // src/ fails with 500 — mounted first so it matches the ?path=src request.
+    // src/ fails with 500 - mounted first so it matches the ?path=src request.
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Fproject/repository/tree"))
         .and(query_param("path", "src"))
@@ -422,7 +422,7 @@ async fn test_gitlab_recursive_dir_fetch_failure_tolerated() {
         .mount(&server)
         .await;
 
-    // Root succeeds — mounted last so it only matches the no-query root request.
+    // Root succeeds - mounted last so it only matches the no-query root request.
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Fproject/repository/tree"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -448,7 +448,7 @@ async fn test_gitlab_recursive_dir_fetch_failure_tolerated() {
 async fn test_gitlab_recursive_mixed_tree_structure() {
     let server = MockServer::start().await;
 
-    // Specific (query_param) mocks first — exact query matching means they
+    // Specific (query_param) mocks first - exact query matching means they
     // only catch their own path; the root mock goes last.
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Fproject/repository/tree"))

@@ -166,7 +166,7 @@ async fn test_terminate_loop_is_idempotent_tracker_removed() {
         .terminate_loop("s1", StopCondition::UnrecoverableError, None, None)
         .await;
     assert_eq!(first, Some(StopCondition::GoalAchieved));
-    // FR-017: no stage runs after termination — the tracker is gone, so a
+    // FR-017: no stage runs after termination - the tracker is gone, so a
     // second termination has nothing to act on.
     assert_eq!(second, None);
     assert!(!processor.loop_active("s1").await);

@@ -106,12 +106,40 @@ pub fn target_is_allowed(url: &str) -> bool {
     }
 }
 
+/// Whether a resolved credential has a plausible shape.
+///
+/// Tokens, PATs, webhook URLs, chat ids, and client ids never contain ASCII
+/// whitespace or control characters. A value that does indicates the
+/// `env:VAR` indirection resolved to something that is not credential material
+/// (e.g. it points at `$HOME` or a multi-line value), so it is rejected rather
+/// than forwarded verbatim into an authenticated request (audit T-110).
+#[must_use]
+pub fn is_plausible_secret(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && !trimmed.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
 /// Resolve a config credential value. Values prefixed with `env:` are read
 /// from the named environment variable at send time.
+///
+/// An env-sourced value whose shape is not plausible credential material is
+/// rejected (see [`is_plausible_secret`]) and a warning is logged naming the
+/// variable - never its value.
 pub fn resolve_secret(config_value: Option<&str>) -> Option<String> {
     let value = config_value?;
     if let Some(var) = value.strip_prefix("env:") {
-        std::env::var(var.trim()).ok().filter(|v| !v.is_empty())
+        let var = var.trim();
+        match std::env::var(var) {
+            Ok(resolved) if is_plausible_secret(&resolved) => Some(resolved),
+            Ok(_) => {
+                tracing::warn!(
+                    var = %var,
+                    "env-sourced credential has an implausible shape; ignoring"
+                );
+                None
+            }
+            Err(_) => None,
+        }
     } else if value.is_empty() {
         None
     } else {

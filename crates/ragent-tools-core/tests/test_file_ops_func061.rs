@@ -1,4 +1,4 @@
-//! Regression tests for FUNC-061: file-operation correctness — self-copy
+//! Regression tests for FUNC-061: file-operation correctness - self-copy
 //! refusal, move leaving no orphan directories, and append flush.
 
 use std::path::{Path, PathBuf};
@@ -132,7 +132,7 @@ async fn func061_append_is_flushed_and_visible() {
         .await;
     assert!(out.is_ok(), "append should succeed: {out:?}");
 
-    // Read back immediately — the bytes must be flushed, not pending in a
+    // Read back immediately - the bytes must be flushed, not pending in a
     // dropped buffer.
     assert_eq!(
         std::fs::read_to_string(dir.join("log.txt")).unwrap(),

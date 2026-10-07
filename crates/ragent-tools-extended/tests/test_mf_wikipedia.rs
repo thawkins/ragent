@@ -1,7 +1,7 @@
 //! Unit tests for the Wikipedia search backend's pure functions.
 //!
 //! These tests exercise `build_search_request`, `parse_search_response`,
-//! `parse_summary_response`, `build_summary_url`, and `truncate_query` — all
+//! `parse_summary_response`, `build_summary_url`, and `truncate_query` - all
 //! of which are pure functions that accept plain inputs and return plain
 //! outputs, enabling tests without network I/O (NFR-002).
 
@@ -356,7 +356,7 @@ fn test_truncate_query_unicode_boundaries() {
 }
 
 // ---------------------------------------------------------------------------
-// FUNC-035: partition_summary_outcomes — a fully dead engine must surface an
+// FUNC-035: partition_summary_outcomes - a fully dead engine must surface an
 // error, not a silent zero-result success.
 // ---------------------------------------------------------------------------
 
@@ -386,7 +386,7 @@ fn func035_some_successes_are_kept() {
 
 #[test]
 fn func035_empty_success_is_not_an_error() {
-    // All fetches succeeded but yielded no parseable summary — a legitimately
+    // All fetches succeeded but yielded no parseable summary - a legitimately
     // empty result, not a dead engine.
     let outcomes = vec![Ok(None), Ok(None)];
     let result = partition_summary_outcomes(outcomes).expect("empty success is ok");

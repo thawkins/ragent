@@ -210,7 +210,7 @@ fn expire_runs_older_than_expires_old_runs() {
     assert_eq!(log.list_runs().unwrap().len(), 2);
 
     // Expire runs older than 0 seconds (everything is older than "now minus
-    // 0", which is everything written before this instant — both runs
+    // 0", which is everything written before this instant - both runs
     // should expire since they were written moments ago, which is before
     // "now - 0s" is technically "now" so runs written before now are older).
     // Actually, "older than 0 seconds" means cutoff = now, so any event with

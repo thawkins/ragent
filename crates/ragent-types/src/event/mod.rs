@@ -294,7 +294,7 @@ pub enum Event {
         reason: String,
     },
 
-    // ── Provider model-list loading (TUI spinner) ────────────────────────
+    // -- Provider model-list loading (TUI spinner) ------------------------
     /// The TUI has started loading the model list for a provider.
     ProviderLoadingStarted {
         /// Provider identifier (e.g. `"ollama"`).
@@ -315,7 +315,7 @@ pub enum Event {
         error: Option<String>,
     },
 
-    // ── Model Router classification logging ────────────────────────────
+    // -- Model Router classification logging ----------------------------
     /// The Model Router has classified a prompt and chosen a downstream
     /// model. Published so the TUI can log the bucket, model, prompt, and
     /// dimension scores regardless of the tracing filter level.
@@ -342,7 +342,7 @@ pub enum Event {
         dimensions: Vec<(String, f64)>,
     },
 
-    // ── Goal-driven loop lifecycle (spec `agentloop`) ───────────────────
+    // -- Goal-driven loop lifecycle (spec `agentloop`) -------------------
     /// A goal-driven loop run has terminated (spec `agentloop`, FR-010).
     ///
     /// Published exactly once when a loop stop condition fires; `status` is
@@ -395,7 +395,7 @@ pub enum Event {
         files: Vec<String>,
     },
 
-    // ── Model download progress (e.g. local providers) ─────────────────
+    // -- Model download progress (e.g. local providers) -----------------
     /// A local provider started downloading a model.
     ModelDownloadStarted {
         /// Provider identifier.
@@ -623,7 +623,7 @@ pub enum Event {
         reason: String,
     },
 
-    // ── Sub-agent lifecycle events (F13/F14) ────────────────────
+    // -- Sub-agent lifecycle events (F13/F14) --------------------
     /// A sub-agent task has been spawned.
     SubagentStart {
         /// Parent session that spawned the task.
@@ -696,7 +696,7 @@ pub enum Event {
         task_id: String,
     },
 
-    // ── Background shell task events (M3) ────────────────────────────────
+    // -- Background shell task events (M3) --------------------------------
     /// A background shell task was spawned.
     BackgroundTaskSpawned {
         /// Session this task belongs to.
@@ -731,7 +731,7 @@ pub enum Event {
         exit_code: Option<i32>,
     },
 
-    // ── Team lifecycle events ────────────────────────────────────────────
+    // -- Team lifecycle events --------------------------------------------
     /// A new teammate session was spawned into a team.
     TeammateSpawned {
         /// Lead session ID.
@@ -850,7 +850,7 @@ pub enum Event {
         preview: String,
     },
 
-    // ── Shell state events ───────────────────────────────────────────────
+    // -- Shell state events -----------------------------------------------
     /// The shell working directory changed after a bash command.
     ShellCwdChanged {
         /// Session this event belongs to.
@@ -869,7 +869,7 @@ pub enum Event {
         markdown: String,
     },
 
-    // ── User input events ────────────────────────────────────────────────
+    // -- User input events ------------------------------------------------
     /// The user submitted generic free-text input to the running session.
     UserInput {
         /// Session this response belongs to.

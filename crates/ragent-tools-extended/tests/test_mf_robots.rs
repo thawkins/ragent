@@ -1,4 +1,4 @@
-//! Integration tests for `masterfetch::robots` — robots.txt fetch + parse +
+//! Integration tests for `masterfetch::robots` - robots.txt fetch + parse +
 //! per-domain cache (T-010, FR-028, NFR-003).
 //!
 //! These tests exercise the pure parsing, path matching, cache TTL, and
@@ -13,7 +13,7 @@ use ragent_tools_extended::masterfetch::robots::{
 };
 
 // ---------------------------------------------------------------------------
-// parse_robots_txt — parsing
+// parse_robots_txt - parsing
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -196,12 +196,12 @@ fn test_parse_extra_whitespace_around_values() {
 #[test]
 fn test_parse_only_user_agent_no_rules() {
     let rules = parse_robots_txt("User-agent: *\n");
-    // Has a group but no rules → allow all.
+    // Has a group but no rules -> allow all.
     assert!(rules.is_allowed("*", "/anything"));
 }
 
 // ---------------------------------------------------------------------------
-// path_matches — RFC 9309 § 2.2.2
+// path_matches - RFC 9309 § 2.2.2
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -268,7 +268,7 @@ fn test_path_matches_exact_path_with_query() {
 }
 
 // ---------------------------------------------------------------------------
-// RobotsRules.is_allowed — integration of parse + match
+// RobotsRules.is_allowed - integration of parse + match
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -293,16 +293,16 @@ User-agent: GoodBot
 Allow: /private/
 ";
     let rules = parse_robots_txt(raw);
-    // GoodBot has its own group with Allow /private/ → allowed.
+    // GoodBot has its own group with Allow /private/ -> allowed.
     assert!(rules.is_allowed("GoodBot", "/private/page"));
-    // Other bots use * group → disallowed.
+    // Other bots use * group -> disallowed.
     assert!(!rules.is_allowed("OtherBot", "/private/page"));
 }
 
 #[test]
 fn test_is_allowed_no_matching_group_allows() {
     let rules = parse_robots_txt("User-agent: SpecificBot\nDisallow: /\n");
-    // No * group, no match for OtherBot → allow.
+    // No * group, no match for OtherBot -> allow.
     assert!(rules.is_allowed("OtherBot", "/anything"));
 }
 
@@ -358,7 +358,7 @@ Disallow: /c/
 }
 
 // ---------------------------------------------------------------------------
-// RobotsCache — TTL and eviction (FR-028: TTL 3600s)
+// RobotsCache - TTL and eviction (FR-028: TTL 3600s)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -410,7 +410,7 @@ fn test_cache_entry_just_before_ttl_is_fresh() {
 fn test_cache_entry_at_exact_ttl_is_expired() {
     let mut cache = RobotsCache::new();
     let rules = parse_robots_txt("User-agent: *\nDisallow: /private/\n");
-    // Exactly at TTL → elapsed >= TTL → expired.
+    // Exactly at TTL -> elapsed >= TTL -> expired.
     let exact = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap();
     cache.insert_with_timestamp("example.com", rules, exact);
     assert!(cache.get("example.com").is_none());
@@ -486,41 +486,41 @@ fn test_cache_multiple_domains() {
 #[test]
 fn test_extract_domain_basic() {
     assert_eq!(
-        extract_domain("https://example.com/path").unwrap(),
-        "example.com"
+        extract_domain("https://example.com/path"),
+        Some("example.com".to_string())
     );
 }
 
 #[test]
 fn test_extract_domain_lowercases() {
     assert_eq!(
-        extract_domain("https://Example.COM/Path").unwrap(),
-        "example.com"
+        extract_domain("https://Example.COM/Path"),
+        Some("example.com".to_string())
     );
 }
 
 #[test]
 fn test_extract_domain_strips_port() {
     assert_eq!(
-        extract_domain("http://example.com:8080/page").unwrap(),
-        "example.com"
+        extract_domain("http://example.com:8080/page"),
+        Some("example.com".to_string())
     );
 }
 
 #[test]
 fn test_extract_domain_rejects_file_scheme() {
-    assert!(extract_domain("file:///etc/passwd").is_err());
+    assert_eq!(extract_domain("file:///etc/passwd"), None);
 }
 
 #[test]
 fn test_extract_domain_rejects_ftp_scheme() {
-    assert!(extract_domain("ftp://example.com").is_err());
+    assert_eq!(extract_domain("ftp://example.com"), None);
 }
 
 #[test]
 fn test_extract_domain_rejects_invalid_url() {
-    assert!(extract_domain("not a url").is_err());
-    assert!(extract_domain("").is_err());
+    assert_eq!(extract_domain("not a url"), None);
+    assert_eq!(extract_domain(""), None);
 }
 
 #[test]
@@ -551,7 +551,7 @@ fn test_extract_path_rejects_non_http() {
 }
 
 // ---------------------------------------------------------------------------
-// RobotsChecker — with_cache (no network, NFR-003)
+// RobotsChecker - with_cache (no network, NFR-003)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -606,7 +606,7 @@ async fn test_checker_caches_uncached_domain_result() {
     cache.insert("cached.com", RobotsRules::default());
     let checker = RobotsChecker::with_cache(cache);
 
-    // Uncached domain → allowed + cached as empty rules.
+    // Uncached domain -> allowed + cached as empty rules.
     assert!(
         checker
             .is_allowed("https://new.com/page", "*")
@@ -707,7 +707,7 @@ async fn test_checker_multiple_domains_independent() {
 }
 
 // ---------------------------------------------------------------------------
-// RobotsChecker — network tests (gated with #[ignore], NFR-003)
+// RobotsChecker - network tests (gated with #[ignore], NFR-003)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -719,7 +719,7 @@ async fn test_checker_fetch_live_robots_txt() {
         .is_allowed("https://example.com/anything", "*")
         .await;
     assert!(result.is_ok(), "is_allowed should not error for valid URLs");
-    // example.com allows all → should be true.
+    // example.com allows all -> should be true.
     assert!(result.unwrap(), "example.com should allow all paths");
     // Verify it was cached.
     assert!(checker.cache_len() > 0);
@@ -747,7 +747,7 @@ async fn test_checker_fetch_caches_result() {
 #[ignore = "requires network access — run with: cargo test -- --ignored"]
 async fn test_checker_nonexistent_domain_allows_by_default() {
     let checker = RobotsChecker::new();
-    // A domain that likely doesn't resolve → fetch fails → allow by default.
+    // A domain that likely doesn't resolve -> fetch fails -> allow by default.
     let result = checker
         .is_allowed(
             "https://this-domain-definitely-does-not-exist-xyz.invalid/page",

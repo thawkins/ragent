@@ -106,7 +106,7 @@ pub const VERSION_PROBE_ARGS_OVERRIDES: &[(&str, &[&str])] =
 /// (guaranteed by T-002's exhaustiveness check); ids are the canonical
 /// scanner ids, not user aliases.
 pub const LANGUAGE_RUNTIMES: &[(&str, LanguageClass, Option<LanguageRuntime>)] = &[
-    // ── Application languages ────────────────────────────────────────────
+    // -- Application languages --------------------------------------------
     (
         "rust",
         LanguageClass::Application,
@@ -258,7 +258,7 @@ pub const LANGUAGE_RUNTIMES: &[(&str, LanguageClass, Option<LanguageRuntime>)] =
         LanguageClass::Application,
         Some(LanguageRuntime::many(&["perl"])),
     ),
-    // ── Data / markup / build-DSL formats (no runtime probed) ────────────
+    // -- Data / markup / build-DSL formats (no runtime probed) ------------
     ("toml", LanguageClass::DataFormat, None),
     ("yaml", LanguageClass::DataFormat, None),
     ("json", LanguageClass::DataFormat, None),

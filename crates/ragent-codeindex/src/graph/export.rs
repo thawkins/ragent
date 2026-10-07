@@ -24,7 +24,7 @@ use std::collections::HashMap;
 /// "Top God-Nodes" table (ANTIPAT M5.3 / audit 3.3).
 const REPORT_TOP_GOD_NODES: usize = 20;
 
-// ── JSON Export (FR-020) ───────────────────────────────────────────────────
+// -- JSON Export (FR-020) ---------------------------------------------------
 
 /// Serialise the graph to a JSON string.
 ///
@@ -120,7 +120,7 @@ pub fn to_json(store: &IndexStore) -> Result<String> {
     Ok(serde_json::to_string_pretty(&graph)?)
 }
 
-// ── Markdown Report (FR-010) ───────────────────────────────────────────────
+// -- Markdown Report (FR-010) -----------------------------------------------
 
 /// Generate a `GRAPH_REPORT.md` report.
 ///
@@ -146,7 +146,7 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
     let mut report = String::new();
     report.push_str("# Graph Report\n\n");
 
-    // ── Statistics ──────────────────────────────────────────────────────
+    // -- Statistics ------------------------------------------------------
     let extracted_count = edges
         .iter()
         .filter(|e| e.confidence == Confidence::Extracted)
@@ -166,7 +166,7 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
     }
     report.push('\n');
 
-    // ── Top God-Nodes (by degree) ───────────────────────────────────────
+    // -- Top God-Nodes (by degree) ---------------------------------------
     let mut degree_map: HashMap<i64, usize> = HashMap::new();
     for edge in &edges {
         *degree_map.entry(edge.source_sym).or_default() += 1;
@@ -213,7 +213,7 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
         report.push('\n');
     }
 
-    // ── Community Breakdown ───────────────────────────────────────────
+    // -- Community Breakdown -------------------------------------------
     if !communities.is_empty() {
         // Group symbols by community.
         let mut comm_groups: HashMap<i64, Vec<(i64, Option<String>)>> = HashMap::new();
@@ -247,7 +247,7 @@ pub fn to_report(store: &IndexStore) -> Result<String> {
         report.push('\n');
     }
 
-    // ── Edge Kind Distribution ─────────────────────────────────────────
+    // -- Edge Kind Distribution -----------------------------------------
     let mut kind_counts: HashMap<String, usize> = HashMap::new();
     for edge in &edges {
         *kind_counts.entry(edge.kind.to_string()).or_default() += 1;

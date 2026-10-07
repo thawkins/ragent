@@ -289,7 +289,7 @@ impl FtsIndex {
         Ok(searcher.num_docs())
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────
+    // -- Private helpers -------------------------------------------------
 
     /// Escape Tantivy query-parser special characters so that raw
     /// code identifiers such as `Widget::new`, `std::io`, or `foo<T>`

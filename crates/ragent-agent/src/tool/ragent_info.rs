@@ -232,7 +232,7 @@ fn execution_text_lines(exec: &ExecutionInfo) -> Vec<String> {
         String::new(),
         "## ragent Execution Information".to_string(),
         format!("- **PID**: {}", exec.pid),
-        format!("- **Parent PID**: {}", opt_u32(exec.parent_pid)),
+        format!("- **Parent PID**: {}", opt(exec.parent_pid)),
         format!("- **Started At**: {}", opt_str(exec.started_at.as_deref())),
         format!(
             "- **Uptime**: {}",
@@ -255,20 +255,15 @@ fn execution_text_lines(exec: &ExecutionInfo) -> Vec<String> {
             "- **Virtual Memory**: {}",
             opt_bytes(exec.virtual_memory_bytes)
         ),
-        format!("- **Threads**: {}", opt_usize(exec.threads)),
+        format!("- **Threads**: {}", opt(exec.threads)),
     ]
 }
 
 /// Placeholder for a value the host did not expose.
 const UNKNOWN: &str = "unknown";
 
-/// Render an optional `u32` or the `unknown` placeholder.
-fn opt_u32(value: Option<u32>) -> String {
-    value.map_or_else(|| UNKNOWN.to_string(), |v| v.to_string())
-}
-
-/// Render an optional `usize` or the `unknown` placeholder.
-fn opt_usize(value: Option<usize>) -> String {
+/// Render an optional displayable value, or the `unknown` placeholder.
+fn opt<T: std::fmt::Display>(value: Option<T>) -> String {
     value.map_or_else(|| UNKNOWN.to_string(), |v| v.to_string())
 }
 

@@ -16,7 +16,7 @@ fn parse_data(event: &Event) -> (String, Value) {
     (name.to_string(), val)
 }
 
-// ── Session lifecycle ────────────────────────────────────────────────────
+// -- Session lifecycle ----------------------------------------------------
 
 #[test]
 fn test_session_created() {
@@ -36,7 +36,7 @@ fn test_session_updated() {
     assert_eq!(v["session_id"], "s2");
 }
 
-// ── Message events ───────────────────────────────────────────────────────
+// -- Message events -------------------------------------------------------
 
 #[test]
 fn test_message_start() {
@@ -98,7 +98,7 @@ fn test_model_response() {
     assert_eq!(v["output_tokens"], 24);
 }
 
-// ── Tool events ──────────────────────────────────────────────────────────
+// -- Tool events ----------------------------------------------------------
 
 #[test]
 fn test_tool_call_start() {
@@ -196,7 +196,7 @@ fn test_tools_sent() {
     assert_eq!(arr[0], "read");
 }
 
-// ── Permission events ────────────────────────────────────────────────────
+// -- Permission events ----------------------------------------------------
 
 #[test]
 fn test_permission_requested() {
@@ -249,7 +249,7 @@ fn test_question_answered() {
     assert_eq!(v["response"], "a");
 }
 
-// ── Agent events ─────────────────────────────────────────────────────────
+// -- Agent events ---------------------------------------------------------
 
 #[test]
 fn test_agent_switched() {
@@ -296,7 +296,7 @@ fn test_agent_error() {
     assert_eq!(v["error"], "model timeout");
 }
 
-// ── Infrastructure events (no session_id) ────────────────────────────────
+// -- Infrastructure events (no session_id) --------------------------------
 
 #[test]
 fn test_mcp_status_changed() {
@@ -357,7 +357,7 @@ fn test_github_device_flow_complete_failure() {
     assert_eq!(v["error"], "Device code expired.");
 }
 
-// ── Quota / usage events ─────────────────────────────────────────────────
+// -- Quota / usage events -------------------------------------------------
 
 #[test]
 fn test_run_cost_summary() {
@@ -412,7 +412,7 @@ fn test_session_aborted() {
     assert_eq!(v["reason"], "user_requested");
 }
 
-// ── Sub-agent events ─────────────────────────────────────────────────────
+// -- Sub-agent events -----------------------------------------------------
 
 #[test]
 fn test_subagent_start() {
@@ -456,7 +456,7 @@ fn test_subagent_cancelled() {
     assert_eq!(v["task_id"], "t1");
 }
 
-// ── Team events ──────────────────────────────────────────────────────────
+// -- Team events ----------------------------------------------------------
 
 #[test]
 fn test_teammate_spawned() {
@@ -533,7 +533,7 @@ fn test_team_cleaned_up() {
     assert_eq!(v["team_name"], "code-review");
 }
 
-// ── Secret redaction tests ───────────────────────────────────────────────
+// -- Secret redaction tests -----------------------------------------------
 
 #[test]
 fn test_tool_result_redacts_api_key() {

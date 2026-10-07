@@ -125,7 +125,7 @@ fn test_max_teammates_default_and_active_count() {
 
 #[test]
 fn test_resolve_memory_dir_rejects_unsafe_agent_names() {
-    let working_dir = PathBuf::from("/tmp/ms03-workdir");
+    let working_dir = PathBuf::from("target/temp/ms03-workdir");
     for bad in ["..", "../evil", "/etc/passwd", "a/b", ""] {
         assert!(
             resolve_memory_dir(MemoryScope::Project, bad, &working_dir).is_none(),

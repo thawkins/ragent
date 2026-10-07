@@ -12,6 +12,10 @@
 // 2024. It is a single-threaded test that restores the previous value.
 #![allow(unsafe_code)]
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use ragent_config::{PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
@@ -38,31 +42,7 @@ fn stores_overriding(kind: StoreKind, url: &str) -> PluginStoresConfig {
     }
 }
 
-/// RAII temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(std::path::PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = std::process::id();
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/stores-report-{name}-{unique}"
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn path(&self) -> &std::path::Path {
-        &self.0
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-// ── Provenance resolution (FR-031) ──────────────────────────────────────────
+// -- Provenance resolution (FR-031) ------------------------------------------
 
 #[test]
 fn effective_endpoint_with_source_tags_an_override_as_config() {
@@ -92,7 +72,7 @@ fn effective_endpoint_with_source_tags_the_fallback_as_default() {
     }
 }
 
-// ── Report rendering (FR-031, FR-038) ───────────────────────────────────────
+// -- Report rendering (FR-031, FR-038) ---------------------------------------
 
 #[test]
 fn report_attributes_to_the_stores_subcommand() {
@@ -187,7 +167,7 @@ fn a_refused_override_is_reported_inline_not_omitted() {
     assert!(report.contains("- claude: [default]"), "{report}");
 }
 
-// ── Shared dispatch ladder ──────────────────────────────────────────────────
+// -- Shared dispatch ladder --------------------------------------------------
 
 #[test]
 fn run_plugin_subcommand_handles_stores_without_a_session() {

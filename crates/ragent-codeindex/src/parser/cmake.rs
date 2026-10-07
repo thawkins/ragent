@@ -57,13 +57,13 @@ impl LanguageParser for CmakeParser {
     }
 }
 
-// ── Extraction context ─────────────────────────────────────────────────────
+// -- Extraction context -----------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive walk ──────────────────────────────────────────────────────────
+// -- Recursive walk ----------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting `CMake` symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -88,7 +88,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Function definition (`function(name ...) ... endfunction()`) ────────────────
+// -- Function definition (`function(name ...) ... endfunction()`) ----------------
 
 /// Extract a `CMake` `function()` definition.
 ///
@@ -137,7 +137,7 @@ fn extract_function_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Macro definition (`macro(name ...) ... endmacro()`) ─────────────────────────
+// -- Macro definition (`macro(name ...) ... endmacro()`) -------------------------
 
 /// Extract a `CMake` `macro()` definition.
 fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -182,7 +182,7 @@ fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Block definition (`block() ... endblock()`) ───────────────────────────────
+// -- Block definition (`block() ... endblock()`) -------------------------------
 
 /// Extract a `CMake` `block()` scope definition (`CMake` 3.25+).
 fn extract_block_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -219,7 +219,7 @@ fn extract_block_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Foreach loop ───────────────────────────────────────────────────────────
+// -- Foreach loop -----------------------------------------------------------
 
 /// Extract a `CMake` `foreach()` loop.
 fn extract_foreach_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -256,7 +256,7 @@ fn extract_foreach_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── While loop ─────────────────────────────────────────────────────────────
+// -- While loop -------------------------------------------------------------
 
 /// Extract a `CMake` `while()` loop.
 fn extract_while_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -293,7 +293,7 @@ fn extract_while_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── If condition ───────────────────────────────────────────────────────────
+// -- If condition -----------------------------------------------------------
 
 /// Extract a `CMake` `if()` conditional.
 fn extract_if_condition(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -330,7 +330,7 @@ fn extract_if_condition(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Normal command ─────────────────────────────────────────────────────────
+// -- Normal command ---------------------------------------------------------
 
 /// Extract a `CMake` normal command as a call reference.
 ///
@@ -371,7 +371,7 @@ fn extract_normal_command(ctx: &mut Ctx, node: Node, _parent_id: Option<i64>) {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Find the first child of a node matching the given kind.
 fn find_child<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
@@ -405,4 +405,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

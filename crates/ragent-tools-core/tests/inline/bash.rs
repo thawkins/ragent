@@ -3,7 +3,7 @@
 
 use super::*;
 
-// ── Safe command tests ──────────────────────────────────────────────
+// -- Safe command tests ----------------------------------------------
 
 #[test]
 fn test_safe_command_exact_match() {
@@ -61,7 +61,7 @@ fn test_compound_commands_are_not_safe() {
     assert!(!is_safe_command("cat < /etc/shadow"));
 }
 
-// ── Banned command tests ─────────────────────────────────────────────
+// -- Banned command tests ---------------------------------------------
 
 #[test]
 fn test_banned_command_exact() {
@@ -77,7 +77,7 @@ fn test_banned_command_word_boundary() {
     assert!(!contains_banned_command("uncle"));
 }
 
-// ── Denied command tests ─────────────────────────────────────────────
+// -- Denied command tests ---------------------------------------------
 
 #[test]
 fn test_denied_command_mkfs() {
@@ -91,7 +91,7 @@ fn test_denied_command_sudo() {
     assert!(contains_denied_command("sudo\tapt install foo"));
 }
 
-// ── Directory escape tests ───────────────────────────────────────────
+// -- Directory escape tests -------------------------------------------
 
 #[test]
 fn test_directory_escape_parent() {
@@ -124,14 +124,14 @@ fn test_directory_escape_subpath_ok() {
     assert!(!is_directory_escape_attempt("cd ./src", wd));
 }
 
-// ── Obfuscation detection tests ──────────────────────────────────────
+// -- Obfuscation detection tests --------------------------------------
 
 #[test]
 fn test_obfuscation_base64() {
     assert!(validate_no_obfuscation("echo dGVzdA== | base64 -d | bash").is_err());
 }
 
-// ── Windows directory escape tests (inner function, testable on any OS) ──
+// -- Windows directory escape tests (inner function, testable on any OS) --
 
 #[test]
 fn test_windows_directory_escape_drive_letter() {
@@ -173,7 +173,7 @@ fn test_directory_escape_pushd() {
     assert!(is_directory_escape_attempt("pushd ~", wd));
 }
 
-// ── Obfuscation detection tests (continued) ──────────────────────────
+// -- Obfuscation detection tests (continued) --------------------------
 #[test]
 fn test_obfuscation_python_exec() {
     assert!(validate_no_obfuscation("python -c exec('code')").is_err());
@@ -194,7 +194,7 @@ fn test_obfuscation_clean_command() {
     assert!(validate_no_obfuscation("ls -la").is_ok());
 }
 
-// ── Shell discovery tests (Unix-only) ───────────────────────────────
+// -- Shell discovery tests (Unix-only) -------------------------------
 
 #[test]
 fn test_is_unix_returns_bash() {
@@ -216,7 +216,7 @@ fn test_shell_cache_is_consistent() {
     assert!(matches!(shell1, ShellType::Bash) || is_windows());
 }
 
-// ── State file path tests ────────────────────────────────────────────
+// -- State file path tests --------------------------------------------
 
 #[test]
 fn test_state_file_path_format() {
@@ -266,7 +266,7 @@ fn test_safe_session_id() {
     assert_eq!(safe_session_id("abc/123"), "abc_123");
 }
 
-// ── Windows path helpers ─────────────────────────────────────────────
+// -- Windows path helpers ---------------------------------------------
 
 #[test]
 fn test_to_posix_path() {
@@ -277,7 +277,7 @@ fn test_to_posix_path() {
     assert_eq!(to_posix_path("/tmp/test.sh"), "/tmp/test.sh");
 }
 
-// ── Heredoc handling tests ───────────────────────────────────────────
+// -- Heredoc handling tests -------------------------------------------
 
 #[test]
 fn test_strip_heredoc_bodies() {
@@ -289,7 +289,7 @@ fn test_strip_heredoc_bodies() {
     assert!(stripped.contains("EOF"));
 }
 
-// ── Extract command names tests ──────────────────────────────────────
+// -- Extract command names tests --------------------------------------
 
 #[test]
 fn test_extract_command_names_simple() {
@@ -309,7 +309,7 @@ fn test_extract_command_names_chained() {
     assert_eq!(names, vec!["cd", "mkfs"]);
 }
 
-// ── PowerShell wrapper tests ─────────────────────────────────────────
+// -- PowerShell wrapper tests -----------------------------------------
 
 #[test]
 fn test_powershell_wrapper_contains_invoke() {
@@ -326,7 +326,7 @@ fn test_posix_wrapper_structure() {
     assert!(wrapper.contains("EXIT_CODE"));
 }
 
-// ── Script file path tests ──────────────────────────────────────────
+// -- Script file path tests ------------------------------------------
 
 #[test]
 fn test_script_file_path_bash_extension() {
@@ -361,7 +361,7 @@ fn test_script_file_path_gitbash_extension() {
     );
 }
 
-// ── run_with_output: grandchild-holds-pipe regression test ──────────────
+// -- run_with_output: grandchild-holds-pipe regression test --------------
 
 /// FUNC-014: `kill_process_group` must refuse a `pgid` of `0` (or any
 /// non-positive value) rather than signalling ragent's own process group. A
@@ -489,7 +489,7 @@ async fn test_run_with_output_captures_normal_output() {
     );
 }
 
-// ── BashTool timeout regression test ────────────────────────────────────
+// -- BashTool timeout regression test ------------------------------------
 
 /// A command that runs past the configured timeout must be reported as a
 /// *failure* (`Err`), not a clean success, and the partial output it produced

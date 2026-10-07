@@ -433,7 +433,7 @@ impl SourceVault {
         Ok(())
     }
 
-    // ── Async wrappers (FUNC-017) ───────────────────────────────────────
+    // -- Async wrappers (FUNC-017) ---------------------------------------
     //
     // The synchronous methods above take a blocking `std::sync::Mutex` and do
     // blocking SQLite + filesystem I/O. Calling them from an async task parks a

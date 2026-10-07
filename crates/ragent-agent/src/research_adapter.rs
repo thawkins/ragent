@@ -206,32 +206,14 @@ fn resolve_base_url(
 }
 
 /// Resolve a provider API key for research engines: environment variables
-/// first (same table and precedence as [`SessionProcessor::resolve_api_key`]),
-/// then the encrypted credential store when `storage` is available.
+/// first (via the single resolver in [`ragent_llm::provider::env_key`]), then
+/// the encrypted credential store when `storage` is available.
 ///
 /// Returning `None` leaves the engine keyless, which is valid for local
 /// providers such as `ollama`.
 fn resolve_api_key(provider_id: &str, storage: Option<&Storage>) -> Option<String> {
-    let env_vars: &[&str] = match provider_id {
-        "anthropic" => &["ANTHROPIC_API_KEY"],
-        "openai" => &["OPENAI_API_KEY"],
-        "gemini" => &["GEMINI_API_KEY"],
-        "huggingface" => &["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
-        "generic_openai" => &["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
-        "ollama_cloud" => &["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
-        "ollama" => &["OLLAMA_API_KEY"],
-        "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
-        "openrouter" => &["OPENROUTER_API_KEY"],
-        "copilot" => &["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
-        _ => &[],
-    };
-
-    for var in env_vars {
-        if let Ok(key) = std::env::var(var)
-            && !key.is_empty()
-        {
-            return Some(key);
-        }
+    if let Some(key) = ragent_llm::provider::env_key::provider_env_key(provider_id) {
+        return Some(key);
     }
 
     storage.and_then(|s| s.get_provider_auth(provider_id).ok().flatten())

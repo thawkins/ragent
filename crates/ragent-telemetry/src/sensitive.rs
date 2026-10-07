@@ -86,14 +86,14 @@ pub const MIN_B64_RUN_LEN: usize = 20;
 /// ```
 #[must_use]
 pub fn looks_sensitive(value: &str) -> bool {
-    // ── Length guard ──────────────────────────────────────────────────────
+    // -- Length guard ------------------------------------------------------
     // Legitimate identifiers are short; a very long value is almost
     // certainly a pasted blob (file content, prompt, long token).
     if value.len() > MAX_ATTR_VALUE_LEN {
         return true;
     }
 
-    // ── Whitespace guard ──────────────────────────────────────────────────
+    // -- Whitespace guard --------------------------------------------------
     // Newlines, tabs, and carriage returns never appear in legitimate
     // model/provider/tool/session identifiers. Their presence indicates
     // multi-line content (file contents, a pasted prompt).
@@ -101,7 +101,7 @@ pub fn looks_sensitive(value: &str) -> bool {
         return true;
     }
 
-    // ── Known API-key prefixes ────────────────────────────────────────────
+    // -- Known API-key prefixes --------------------------------------------
     // These are the common prefixes used by the providers ragent supports
     // and by the major cloud platforms. Matching is case-insensitive for
     // the alphabetic prefixes (Bearer, AKIA, AIza, xoxb) because real
@@ -130,7 +130,7 @@ pub fn looks_sensitive(value: &str) -> bool {
         }
     }
 
-    // ── "key:secret" shape ────────────────────────────────────────────────
+    // -- "key:secret" shape ------------------------------------------------
     // A single colon separating two runs of >=4 alphanumeric chars is the
     // classic credential shape (username:password, key:secret). Legitimate
     // model names can contain colons (e.g. "ollama:qwen3:1.7b") so we only
@@ -157,7 +157,7 @@ pub fn looks_sensitive(value: &str) -> bool {
         }
     }
 
-    // ── Inline "token=..." shape ───────────────────────────────────────────
+    // -- Inline "token=..." shape -------------------------------------------
     // An `=` followed by a run of >=20 base64-like characters is a common
     // shape for inline credentials. Legitimate identifiers never contain
     // `=` at all (OTEL attribute keys/values in ragent are simple strings).

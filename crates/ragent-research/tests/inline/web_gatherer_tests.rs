@@ -1736,7 +1736,7 @@ async fn gather_counts_pdf_and_youtube_sources() {
     assert_eq!(result.sources.len(), 2);
 }
 
-// ── Milestone H-002: search retry tests ───────────────────────────
+// -- Milestone H-002: search retry tests ---------------------------
 
 /// Search tool that fails the first N calls then succeeds.
 struct FailNTimes {

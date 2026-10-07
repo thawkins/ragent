@@ -522,10 +522,8 @@ pub fn init_github_remote_with_token(
 /// precedence without a cross-crate dependency; the TUI cannot be consulted
 /// here because this module must stay testable without storage.
 pub fn load_gitlab_token() -> Option<String> {
-    if let Ok(token) = std::env::var("GITLAB_TOKEN")
-        && !token.trim().is_empty()
-    {
-        return Some(token.trim().to_owned());
+    if let Some(token) = ragent_config::credential_env::read_credential_env("GITLAB_TOKEN") {
+        return Some(token);
     }
     let path = ragent_config::user_dirs::global_gitlab_token_path()?;
     let raw = std::fs::read_to_string(path).ok()?;

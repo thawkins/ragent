@@ -4,18 +4,16 @@
 //! streaming responses, tool calls, and usage tracking.
 
 use anyhow::{Context, Result, bail};
-use futures::StreamExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
-use super::thinking::{openai_thinking_levels_for_model, reasoning_effort_from_request};
-use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::openai_compat::OpenAiCompat;
+use super::thinking::openai_thinking_levels_for_model;
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
-use ragent_types::event::FinishReason;
 
 /// Default API base URL for OpenAI-compatible endpoints.
 pub const OPENAI_API_BASE: &str = "https://api.openai.com";
@@ -116,9 +114,7 @@ impl Provider for OpenAiProvider {
 
     /// Discover available models from the OpenAI `/v1/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("openai")
             .context("OpenAI model discovery requires OPENAI_API_KEY")?;
         let models = discover_openai_models(&api_key, OPENAI_API_BASE, "openai")
             .await
@@ -198,139 +194,24 @@ impl OpenAiClient {
 
     /// Build the JSON request body for the `OpenAI` Chat Completions API.
     ///
+    /// The message packing, base body, sampling fields, cached tool list, and
+    /// trailing `reasoning_effort` are produced by the shared
+    /// [`OpenAiCompat`] builder (audit T-401); this method only applies the
+    /// OpenAI dialect and the OpenAI-specific reasoning tail.
+    ///
     /// # Errors
     ///
     /// This function is infallible.
     pub fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut messages = Vec::new();
-
-        // Add system message if present
-        if let Some(system) = &request.system {
-            messages.push(json!({
-                "role": "system",
-                "content": &**system
-            }));
+        let mut compat = OpenAiCompat::base_body(
+            request,
+            super::openai_compat::OpenAiCompatSpec::openai(),
+            &request.tools,
+        );
+        if let Some(reasoning_effort) = super::thinking::reasoning_effort_from_request(request) {
+            compat.body_mut()["reasoning_effort"] = json!(reasoning_effort);
         }
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({
-                                "type": "text",
-                                "text": text
-                            })),
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult {
-                                tool_use_id: _,
-                                content: _,
-                            } => None,
-                            ContentPart::ToolUse { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1 {
-                        // Unwrap single text to string
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
-                    }
-                }
-            };
-
-            // Handle tool results as separate messages in OpenAI format
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        // Assistant message with tool calls
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": input.to_string()
-                                    }
-                                })),
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } = result
-                            {
-                                messages.push(json!({
-                                    "role": "tool",
-                                    "tool_call_id": tool_use_id,
-                                    "content": content
-                                }));
-                            }
-                        }
-                    } else {
-                        messages.push(json!({
-                            "role": msg.role,
-                            "content": content
-                        }));
-                    }
-                }
-                _ => {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true,
-            "stream_options": { "include_usage": true }
-        });
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !request.tools.is_empty() {
-            // H2: reuse the cached serialised tool list instead of building
-            // a fresh `Vec<Value>` of `json!` tool objects on every call.
-            let cached = cached_tools(ToolFormat::OpenAi, &request.tools);
-            body["tools"] = cached.openai_tools_array();
-        }
-        if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
-            body["reasoning_effort"] = json!(reasoning_effort);
-        }
-
-        body
+        compat.finish()
     }
 }
 #[async_trait::async_trait]
@@ -363,6 +244,8 @@ impl LlmClient for OpenAiClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let body = ragent_types::sanitize::redact_secrets(&body);
             tracing::warn!(
                 provider = %self.provider_name,
                 url = %url,
@@ -374,295 +257,25 @@ impl LlmClient for OpenAiClient {
             bail!("OpenAI API error ({status}): {body}");
         }
 
-        self.parse_sse_stream(response).await
+        Ok(self.parse_sse_stream(response))
     }
 }
 
 impl OpenAiClient {
     /// Parse an SSE stream from an already-successful HTTP response.
     ///
-    /// Extracted so that Azure Foundry (and other OpenAI-compatible providers)
-    /// can reuse the exact same event-parsing logic after sending their own
-    /// authenticated request.
-    pub(crate) async fn parse_sse_stream(
+    /// Delegates to the shared [`super::sse::parse_openai_sse_stream`] parser
+    /// (audit T-402) so the OpenAI, Azure Foundry, and OpenRouter clients all
+    /// run the same event-mapping logic. Kept as a method so existing callers
+    /// (Azure Foundry) are unchanged.
+    pub(crate) fn parse_sse_stream(
         &self,
         response: reqwest::Response,
-    ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
-        let status = response.status();
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown")
-            .to_string();
-        let rate_limit_event = parse_openai_rate_limit_headers(response.headers());
-        let stream = response.bytes_stream();
-        let provider_name = self.provider_name.clone();
-
-        tracing::debug!(
-            provider = %provider_name,
-            status = %status,
-            content_type = %content_type,
-            "Parsing SSE stream"
-        );
-
-        let event_stream = async_stream::stream! {
-            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
-            // not repeatedly realloc/copy as it grows.
-            let mut buffer = String::with_capacity(8 * 1024);
-            // FUNC-033: hold an incomplete trailing multibyte character from the
-            // previous chunk so a UTF-8 sequence split across TCP chunks is not
-            // corrupted.
-            let mut pending_utf8: Vec<u8> = Vec::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut yielded_event = false;
-            // A2: indices whose ToolCallStart has already been emitted, so a
-            // provider repeating `function.name` across delta frames cannot
-            // produce duplicate Start events.
-            let mut started_tool_call_indices: std::collections::HashSet<u64> =
-                std::collections::HashSet::new();
-
-            if let Some(ev) = rate_limit_event {
-                yield ev;
-                yielded_event = true;
-            }
-
-            futures::pin_mut!(stream);
-
-            loop {
-                let chunk = match tokio::time::timeout(
-                    std::time::Duration::from_secs(
-                        super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS,
-                    ),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(r)) => match r {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!(
-                                provider = %provider_name,
-                                status = %status,
-                                content_type = %content_type,
-                                yielded_events = yielded_event,
-                                error = %e,
-                                "SSE stream decode error"
-                            );
-                            let err_text = e.to_string();
-                            let is_decode_failure =
-                                err_text.to_lowercase().contains("error decoding response body");
-                            // A successful HTTP status with an immediate decode failure
-                            // almost always means the endpoint returned an empty or
-                            // non-stream body (e.g. a local model that is not loaded).
-                            // Surface that as a clear, non-retryable error instead of
-                            // the raw reqwest diagnostic.
-                            let message = if is_decode_failure
-                                && !yielded_event
-                                && status.is_success()
-                            {
-                                format!(
-                                    "{} returned an empty/malformed event stream (status {}, content-type {}). \
-                                     For local OpenAI-compatible providers this usually means the requested model is not loaded.",
-                                    provider_name, status, content_type
-                                )
-                            } else {
-                                err_text
-                            };
-                            yield StreamEvent::Error { message };
-                            break;
-                        }
-                    },
-                    Ok(None) => break,
-                    Err(_) => {
-                        yield StreamEvent::Error {
-                            message: format!(
-                                "{}: stream stalled - no data received for {}s",
-                                provider_name,
-                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
-                            ),
-                        };
-                        break;
-                    }
-                };
-
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
-                // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
-                // peer dribbles bytes without ever emitting a newline instead
-                // of letting the accumulation buffer grow without bound.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "SSE accumulation buffer exceeded the cap; aborting the stream"
-                    );
-                    yield StreamEvent::Error {
-                        message: format!(
-                            "SSE buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
-                    };
-                    return;
-                }
-
-                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    let data = match line.strip_prefix("data: ") {
-                        Some(d) => d.trim(),
-                        None => continue,
-                    };
-
-                    if data == "[DONE]" {
-                        yield StreamEvent::Finish { reason: FinishReason::Stop };
-                        return;
-                    }
-
-                    let parsed: Value = match serde_json::from_str(data) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // FUNC-032: a corrupt frame must be logged, not
-                            // silently dropped - it can carry tool-call deltas.
-                            tracing::warn!(
-                                error = %e,
-                                frame = %data,
-                                "OpenAI: dropping malformed SSE data frame"
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Handle usage info (sent with stream_options.include_usage)
-                    if let Some(usage) = parsed.get("usage")
-                        && !usage.is_null()
-                    {
-                        let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
-                        let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
-                        if input_tokens > 0 || output_tokens > 0 {
-                            yield StreamEvent::Usage { input_tokens, output_tokens };
-                        }
-                    }
-
-                    let choices = match parsed["choices"].as_array() {
-                        Some(c) => c,
-                        None => continue,
-                    };
-
-                    for choice in choices {
-                        let delta = &choice["delta"];
-
-                        // Text content
-                        if let Some(content) = delta["content"].as_str()
-                            && !content.is_empty()
-                        {
-                            yield StreamEvent::TextDelta { text: content.to_string() };
-                            yielded_event = true;
-                        }
-
-                        // Tool calls
-                        if let Some(tool_calls) = delta["tool_calls"].as_array() {
-                            for tc in tool_calls {
-                                // FUNC-032: require an explicit `index`. The old
-                                // `unwrap_or(0)` mapped every missing index onto
-                                // stream 0, merging distinct parallel tool calls.
-                                let Some(index) = tc["index"].as_u64() else {
-                                    tracing::warn!(
-                                        frame = %parsed,
-                                        "OpenAI: tool_call delta without an index; skipping frame"
-                                    );
-                                    continue;
-                                };
-
-                                if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
-                                }
-
-                                if let Some(function) = tc.get("function") {
-                                    let tc_id = tool_call_ids
-                                        .get(&index)
-                                        .cloned()
-                                        .unwrap_or_else(|| format!("tc_{index}"));
-                                    if let Some(name) = function["name"].as_str() {
-                                        // A2: guard against duplicate Start
-                                        // events when `function.name` repeats
-                                        // across delta frames for the same
-                                        // index. Scoped to the Start emission
-                                        // only so a repeated-name frame that
-                                        // also carries arguments still yields
-                                        // its delta below.
-                                        if started_tool_call_indices.insert(index) {
-                                            yield StreamEvent::ToolCallStart {
-                                                id: tc_id.clone(),
-                                                name: name.to_string(),
-                                            };
-                                            yielded_event = true;
-                                        }
-                                    }
-
-                                    // F4: accept both argument forms. String
-                                    // form preserves delta semantics; object
-                                    // form (llama.cpp / vLLM servers) is
-                                    // serialised whole - the previous
-                                    // `.as_str()`-only read yielded empty
-                                    // args for those servers.
-                                    let args_json = super::tool_cache::tool_arguments_json(function);
-                                    if let Some(args) =
-                                        args_json.filter(|args| !args.is_empty())
-                                    {
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args,
-                                        };
-                                        yielded_event = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Finish reason
-                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End any pending tool calls in index order so
-                            // consumers pairing Start/End events by sequence
-                            // see a deterministic order (HashMap iteration is
-                            // arbitrary).
-                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                            ends.sort_unstable_by_key(|(idx, _)| *idx);
-                            for (_, id) in ends {
-                                yield StreamEvent::ToolCallEnd { id };
-                            }
-
-                            let reason = match finish_reason {
-                                "tool_calls" => FinishReason::ToolUse,
-                                "length" => FinishReason::Length,
-                                "content_filter" => FinishReason::ContentFilter,
-                                _ => FinishReason::Stop,
-                            };
-                            yield StreamEvent::Finish { reason };
-                            yielded_event = true;
-                        }
-                    }
-                }
-            }
-
-            if !yielded_event {
-                tracing::warn!(
-                    provider = %provider_name,
-                    status = %status,
-                    content_type = %content_type,
-                    "SSE stream ended without yielding any events"
-                );
-                let message = format!(
-                    "{} response stream ended without producing any events (status {}, content-type {}). \
-                     For local OpenAI-compatible providers this usually means the requested model is not loaded or the service returned an empty body.",
-                    provider_name, status, content_type
-                );
-                yield StreamEvent::Error { message };
-            }
-        };
-        Ok(Box::pin(event_stream))
+    ) -> Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>> {
+        super::sse::parse_openai_sse_stream(
+            response,
+            super::sse::OpenAiSseSpec::openai(self.provider_name.clone()),
+        )
     }
 }
 
@@ -686,21 +299,16 @@ pub(crate) fn parse_openai_rate_limit_headers(
     let tok_limit = header_u64("x-ratelimit-limit-tokens");
     let tok_remaining = header_u64("x-ratelimit-remaining-tokens");
 
-    let requests_used_pct = req_limit.zip(req_remaining).map(|(limit, remaining)| {
+    let used_pct = |limit: u64, remaining: u64| {
         if limit == 0 {
             0.0f32
         } else {
             ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
         }
-    });
+    };
 
-    let tokens_used_pct = tok_limit.zip(tok_remaining).map(|(limit, remaining)| {
-        if limit == 0 {
-            0.0f32
-        } else {
-            ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
-        }
-    });
+    let requests_used_pct = req_limit.zip(req_remaining).map(|(l, r)| used_pct(l, r));
+    let tokens_used_pct = tok_limit.zip(tok_remaining).map(|(l, r)| used_pct(l, r));
 
     if requests_used_pct.is_some() || tokens_used_pct.is_some() {
         Some(crate::llm::StreamEvent::RateLimit {
@@ -753,12 +361,13 @@ pub async fn discover_openai_models(
         .filter(|id| is_openai_chat_model_id(id))
         .map(|id| {
             let model_id = id.to_string();
-            let reasoning = !openai_thinking_levels_for_model(&model_id).is_empty();
             let vision = model_id.contains("vision") || model_id.contains("gpt-4o");
+            let thinking_levels = openai_thinking_levels_for_model(&model_id);
+            let reasoning = !thinking_levels.is_empty();
             ModelInfo {
                 id: model_id.clone(),
                 provider_id: provider_id.to_string(),
-                name: model_id.clone(),
+                name: model_id,
                 cost: Cost {
                     input: 0.0,
                     output: 0.0,
@@ -768,7 +377,7 @@ pub async fn discover_openai_models(
                     streaming: true,
                     vision,
                     tool_use: true,
-                    thinking_levels: openai_thinking_levels_for_model(&model_id),
+                    thinking_levels,
                 },
                 context_window: DEFAULT_DISCOVERED_CONTEXT_WINDOW,
                 max_output: Some(DEFAULT_DISCOVERED_MAX_OUTPUT),

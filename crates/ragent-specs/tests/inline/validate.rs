@@ -472,7 +472,7 @@ fn test_report_count_by_severity() {
     assert_eq!(report.count_by_severity(Severity::Info), 0);
 }
 
-// ── Clarification marker detection tests (T-007, FR-002) ──────────────────
+// -- Clarification marker detection tests (T-007, FR-002) ------------------
 
 #[test]
 fn test_detect_clarification_markers_single() {
@@ -517,7 +517,7 @@ fn test_detect_clarification_markers_none() {
 fn test_category_clarification_display() {
     assert_eq!(format!("{}", Category::Clarification), "Clarification");
 }
-// ── Ambiguity detection tests (T-026, FR-015) ──────────────────────────────
+// -- Ambiguity detection tests (T-026, FR-015) ------------------------------
 
 #[test]
 fn test_detect_ambiguity_vague_terms() {
@@ -657,7 +657,7 @@ fn test_ambiguity_kind_display() {
         "undefined acronym"
     );
 }
-// ── Edge-case tests for clarification markers (T-041, NFR-004) ──────────────
+// -- Edge-case tests for clarification markers (T-041, NFR-004) --------------
 
 #[test]
 fn test_detect_clarification_markers_multiple_same_line() {
@@ -697,7 +697,7 @@ Line 5: no marker
     assert_eq!(markers[1].question, "line 4 question?");
 }
 
-// ── Clarification reporting in Report tests (T-008, FR-002) ────────────────
+// -- Clarification reporting in Report tests (T-008, FR-002) ----------------
 
 #[test]
 fn test_validate_clarifications_adds_warning_issues() {
@@ -870,7 +870,7 @@ fn test_report_has_clarifications() {
     assert_eq!(report.clarification_count(), 1);
 }
 
-// ── Contradiction detection tests (T-027, FR-015) ──────────────────────────
+// -- Contradiction detection tests (T-027, FR-015) --------------------------
 
 #[test]
 fn test_detect_contradictions_negation_conflict() {
@@ -1178,7 +1178,7 @@ fn test_detect_contradictions_opposite_enable_disable() {
     assert!(issues[0].term.contains("disable"));
 }
 
-// ── Gap detection tests (T-028, FR-015) ─────────────────────────────────────
+// -- Gap detection tests (T-028, FR-015) -------------------------------------
 
 #[test]
 fn test_detect_gaps_vague_outcome() {
@@ -1461,7 +1461,7 @@ FR-001. The system shall be scalable.
     assert_eq!(issues[0].kind, GapKind::VagueOutcome);
 }
 
-// ── SDD flag-gated validation tests (T-036, FR-019) ───────────────────────
+// -- SDD flag-gated validation tests (T-036, FR-019) -----------------------
 
 #[test]
 fn test_sdd_flags_all_enabled() {
@@ -1758,7 +1758,7 @@ In scope.
 1. Must use Rust.
 "
     .to_string();
-    spec.plan_md = String::new(); // empty plan → should produce error
+    spec.plan_md = String::new(); // empty plan -> should produce error
 
     let flags = SddFlags::all_disabled();
     let report = validate_with_flags(&spec, &flags);
@@ -1807,7 +1807,7 @@ fn test_validate_with_flags_selective_enable() {
     );
 }
 
-// ── Phase -1 Gate validation tests (FR-008, T-016) ───────────────────────
+// -- Phase -1 Gate validation tests (FR-008, T-016) -----------------------
 
 /// Spec helper with a PLAN.md containing all required Phase -1 gates checked.
 fn spec_with_all_gates_checked() -> Spec {
@@ -2169,7 +2169,7 @@ fn validate_phase_minus_one_gates_standalone(spec: &Spec) -> Report {
     validate_phase_minus_one_gates(spec, &mut report);
     report
 }
-// ── Consistency-check Report tests (T-029, FR-015) ───────────────────────
+// -- Consistency-check Report tests (T-029, FR-015) -----------------------
 
 #[test]
 fn test_report_has_consistency_issues() {
@@ -2368,9 +2368,9 @@ A plan.
     };
     let report = validate_with_flags(&spec, &flags);
 
-    // Should have ambiguity (vague term "robust" → VagueOutcome gap)
+    // Should have ambiguity (vague term "robust" -> VagueOutcome gap)
     // Should have contradiction (FR-001 vs FR-002 - negation conflict)
-    // Should have gap (FR-003 "shall be robust" → VagueOutcome)
+    // Should have gap (FR-003 "shall be robust" -> VagueOutcome)
     assert!(
         report.has_consistency_issues(),
         "should have consistency issues: {report:?}"

@@ -51,6 +51,10 @@ use crate::descriptor::ConnectorDescriptor;
 use crate::help::attribution;
 use crate::store::{StoreDirs, scan_dirs, store_dirs};
 
+// Shared harness primitives (T-505): the step model, schema sample generator,
+// and truncation helper have one implementation in `ragent-surface`.
+pub use ragent_surface::harness::{HarnessStep, StepOutcome, sample_for_schema, step, truncate};
+
 /// One tool a probed server advertised: the name to invoke and the JSON schema
 /// the harness generates schema-valid sample arguments from (FR-015).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,31 +106,6 @@ pub trait McpProbe: Send {
     /// Returns the teardown failure cause when the connection cannot be
     /// dropped.
     async fn probe_disconnect(&mut self, server_id: &str) -> Result<(), String>;
-}
-
-/// Outcome of one harness step (FR-015).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StepOutcome {
-    /// The step completed successfully.
-    Pass,
-    /// The step failed; the string is the cause (SPEC error-handling policy).
-    Fail(String),
-}
-
-/// One reported harness step: a name, its outcome, the wall-clock time it took,
-/// and an optional detail line (the server's tool set, the generated sample
-/// arguments, the invocation result).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HarnessStep {
-    /// Step label (`discovery`, `validation`, `auth`, `connect <server>`,
-    /// `sample invocation <tool>` on `<server>`, `disconnect <server>`).
-    pub name: String,
-    /// Pass/fail plus the cause on failure.
-    pub outcome: StepOutcome,
-    /// Wall-clock time spent in this step.
-    pub elapsed: Duration,
-    /// Optional human-readable detail appended to the rendered line.
-    pub detail: Option<String>,
 }
 
 /// Full result of a `/connectors test` run (FR-015).
@@ -218,17 +197,17 @@ pub async fn test_connector(
 
     // Validation: an unexpressible connector records its cause (FR-025).
     let started = Instant::now();
-    if let Err(error) = descriptor.validate() {
+    let validation = descriptor.validate();
+    report.unsupported = descriptor.unsupported.clone();
+    if let Err(error) = validation {
         report.steps.push(step(
             "validation",
             StepOutcome::Fail(error.to_string()),
             started.elapsed(),
             None,
         ));
-        report.unsupported = descriptor.unsupported.clone();
         return report;
     }
-    report.unsupported = descriptor.unsupported.clone();
     let served = descriptor.supported_servers().len();
     report.steps.push(step(
         "validation",
@@ -346,21 +325,21 @@ pub async fn test_connector(
             )),
             Some(tool) => {
                 let args = sample_for_schema(&tool.parameters);
-                let (outcome, detail) =
-                    match probe.probe_call(&bridged, &tool.name, args.clone()).await {
-                        Ok(result) => (
-                            StepOutcome::Pass,
-                            format!(
-                                "tool {} args: {args}; result: {}",
-                                tool.name,
-                                truncate(&result, 80)
-                            ),
+                let args_detail = args.to_string();
+                let (outcome, detail) = match probe.probe_call(&bridged, &tool.name, args).await {
+                    Ok(result) => (
+                        StepOutcome::Pass,
+                        format!(
+                            "tool {} args: {args_detail}; result: {}",
+                            tool.name,
+                            truncate(&result, 80)
                         ),
-                        Err(cause) => (
-                            StepOutcome::Fail(cause),
-                            format!("tool {} args: {args}", tool.name),
-                        ),
-                    };
+                    ),
+                    Err(cause) => (
+                        StepOutcome::Fail(cause),
+                        format!("tool {} args: {args_detail}", tool.name),
+                    ),
+                };
                 report.steps.push(step(
                     format!("sample invocation {} on {bridged}", tool.name),
                     outcome,
@@ -418,72 +397,6 @@ fn with_secret(
         }
     }
     out
-}
-
-/// Generate a schema-valid sample value for a tool's `inputSchema` (FR-015).
-///
-/// Honours `const`, `default`, `examples`, and `enum` when present, otherwise
-/// produces a typed placeholder for `type`, recursing into objects and arrays.
-/// Mirrors `ragent_plugins::harness::sample_for_schema` so the two `/test`
-/// surfaces generate the same arguments for the same schema.
-#[must_use]
-pub fn sample_for_schema(schema: &JsonValue) -> JsonValue {
-    match schema {
-        JsonValue::Object(map) => {
-            for key in ["const", "default"] {
-                if let Some(value) = map.get(key) {
-                    return value.clone();
-                }
-            }
-            for key in ["examples", "enum"] {
-                if let Some(first) = map
-                    .get(key)
-                    .and_then(JsonValue::as_array)
-                    .and_then(|values| values.first())
-                {
-                    return first.clone();
-                }
-            }
-            match schema_type(map) {
-                "object" => {
-                    let mut out = serde_json::Map::new();
-                    if let Some(properties) = map.get("properties").and_then(JsonValue::as_object) {
-                        for (name, sub) in properties {
-                            out.insert(name.clone(), sample_for_schema(sub));
-                        }
-                    }
-                    JsonValue::Object(out)
-                }
-                "array" => match map.get("items") {
-                    Some(items) => JsonValue::Array(vec![sample_for_schema(items)]),
-                    None => JsonValue::Array(Vec::new()),
-                },
-                "string" => JsonValue::String("sample".to_string()),
-                "integer" => JsonValue::from(0),
-                "number" => JsonValue::from(0.0),
-                "boolean" => JsonValue::Bool(false),
-                "null" => JsonValue::Null,
-                _ => JsonValue::Null,
-            }
-        }
-        JsonValue::Bool(_) => JsonValue::Bool(false),
-        JsonValue::Number(_) => JsonValue::from(0),
-        JsonValue::String(_) => JsonValue::String("sample".to_string()),
-        JsonValue::Array(_) => JsonValue::Array(Vec::new()),
-        JsonValue::Null => JsonValue::Null,
-    }
-}
-
-/// The `type` keyword of a JSON schema object, tolerating the array form
-/// (`"type": ["string", "null"]`) by taking the first string entry.
-fn schema_type(map: &serde_json::Map<String, JsonValue>) -> &str {
-    match map.get("type") {
-        Some(JsonValue::String(name)) => name.as_str(),
-        Some(JsonValue::Array(names)) => {
-            names.iter().find_map(JsonValue::as_str).unwrap_or("object")
-        }
-        _ => "object",
-    }
 }
 
 /// Render a [`HarnessReport`] as the `/connectors test` message body (FR-015):
@@ -584,30 +497,4 @@ pub async fn run_harness(
     Ok(render_report(
         &test_connector(dirs, config, credentials, env, probe, connector_id).await,
     ))
-}
-
-/// Build a step record.
-fn step(
-    name: impl Into<String>,
-    outcome: StepOutcome,
-    elapsed: Duration,
-    detail: Option<String>,
-) -> HarnessStep {
-    HarnessStep {
-        name: name.into(),
-        outcome,
-        elapsed,
-        detail,
-    }
-}
-
-/// Truncate `text` to at most `max` characters for the report.
-///
-/// A single char-iteration: `char_indices().nth(max)` is `Some` only when the
-/// text is longer than `max`, so no separate length pass is needed.
-fn truncate(text: &str, max: usize) -> String {
-    match text.char_indices().nth(max) {
-        Some((idx, _)) => format!("{}...", &text[..idx]),
-        None => text.to_string(),
-    }
 }

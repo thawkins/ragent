@@ -1,6 +1,6 @@
 //! Integration tests for the history-version cache.
 //!
-//! Validates that `AgentPerf` T-007 / FR-006 — the agent loop skips
+//! Validates that `AgentPerf` T-007 / FR-006 - the agent loop skips
 //! `history_to_chat_messages` when the history version has not changed
 //! since the previous step.
 

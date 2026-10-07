@@ -50,7 +50,7 @@ fn last_assistant_text(app: &App) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// FR-013 — /queue is registered as a slash command
+// FR-013 - /queue is registered as a slash command
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -67,7 +67,7 @@ fn test_queue_command_is_registered() {
 }
 
 // ---------------------------------------------------------------------------
-// /queue list — names the entries in order
+// /queue list - names the entries in order
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -125,7 +125,7 @@ async fn test_queue_list_empty_reports_empty() {
 }
 
 // ---------------------------------------------------------------------------
-// /queue clear — empties the queue without dispatching
+// /queue clear - empties the queue without dispatching
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -186,7 +186,7 @@ async fn test_queue_clear_on_empty_queue_is_a_noop() {
 }
 
 // ---------------------------------------------------------------------------
-// /queue next — dispatches the oldest entry when free
+// /queue next - dispatches the oldest entry when free
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

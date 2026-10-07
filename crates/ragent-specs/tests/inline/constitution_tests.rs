@@ -133,7 +133,7 @@ This is a core principle.
     assert!(c.articles[0].body.contains("core principle"));
 }
 
-// ── Edge-case tests (T-041, NFR-004) ────────────────────────────────────
+// -- Edge-case tests (T-041, NFR-004) ------------------------------------
 
 #[test]
 fn test_parse_article_empty_body() {
@@ -202,7 +202,7 @@ Prefer small libraries.
     );
 }
 
-// ── Amendment Process tests (T-030, FR-016) ──────────────────────────
+// -- Amendment Process tests (T-030, FR-016) --------------------------
 
 #[test]
 fn test_apply_amendment_creates_new_section() {

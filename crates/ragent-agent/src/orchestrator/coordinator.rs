@@ -1,3 +1,9 @@
+//! Orchestration coordinator.
+//!
+//! Owns the job lifecycle: it selects agents via the policy layer, spawns and
+//! tracks jobs (synchronous, first-success, and asynchronous), emits job
+//! events on a broadcast channel, and records coordination metrics.
+
 use anyhow::Result;
 use dashmap::DashMap;
 use serde::Serialize;
@@ -125,6 +131,16 @@ impl Metrics {
 /// (including on panic or cancellation), preventing stuck "running" jobs.
 struct ActiveJobsGuard {
     active_jobs: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl ActiveJobsGuard {
+    /// Increment the active-job counter and return a guard that decrements it
+    /// on drop. Call this *before* spawning the job task so the counter is
+    /// balanced regardless of task panics or cancellation.
+    fn enter(active_jobs: Arc<std::sync::atomic::AtomicU64>) -> Self {
+        active_jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self { active_jobs }
+    }
 }
 
 impl Drop for ActiveJobsGuard {
@@ -262,9 +278,7 @@ impl Coordinator {
         tracing::info!(job_id = %desc.id, "start_job_sync");
         // R-24: Guard ensures `active_jobs` is decremented on every exit path,
         // including the empty-match early-return below.
-        let _active_guard = ActiveJobsGuard {
-            active_jobs: Arc::clone(&self.metrics.active_jobs),
-        };
+        let _active_guard = ActiveJobsGuard::enter(Arc::clone(&self.metrics.active_jobs));
         let matches = self
             .registry
             .match_agents(&desc.required_capabilities)
@@ -349,9 +363,7 @@ impl Coordinator {
         let _enter = span.enter();
         tracing::info!(job_id = %desc.id, "start_job_first_success");
         // R-24: Guard ensures `active_jobs` is decremented on every exit path.
-        let _active_guard = ActiveJobsGuard {
-            active_jobs: Arc::clone(&self.metrics.active_jobs),
-        };
+        let _active_guard = ActiveJobsGuard::enter(Arc::clone(&self.metrics.active_jobs));
         let matches = self
             .registry
             .match_agents(&desc.required_capabilities)
@@ -381,6 +393,7 @@ impl Coordinator {
                 }
                 Err(e) => {
                     self.metrics.record_send_error(&e);
+                    tracing::warn!(error = %e, "agent send error");
                     continue;
                 }
             }
@@ -410,14 +423,9 @@ impl Coordinator {
         let desc_clone = desc.clone();
         let job_id_for_spawn = job_id.clone();
         let metrics = self.metrics.clone();
-        metrics
-            .active_jobs
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // R-20: Store the JoinHandle in the JobEntry so it can be aborted on
         // shutdown. A Drop guard ensures metrics are updated even on panic.
-        let metrics_guard = ActiveJobsGuard {
-            active_jobs: Arc::clone(&metrics.active_jobs),
-        };
+        let metrics_guard = ActiveJobsGuard::enter(Arc::clone(&metrics.active_jobs));
         let handle = tokio::spawn(async move {
             let _guard = metrics_guard;
             // publish JobStarted
@@ -471,6 +479,7 @@ impl Coordinator {
                             success: false,
                         });
                         metrics.record_send_error(&e);
+                        tracing::warn!(error = %e, "agent send error");
                     }
                 }
             }

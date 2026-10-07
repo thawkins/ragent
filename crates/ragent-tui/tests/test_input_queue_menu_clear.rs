@@ -42,7 +42,7 @@ fn user_message_count(app: &App) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// FR-033 — selecting Clear opens the confirmation dialog and closes the menu
+// FR-033 - selecting Clear opens the confirmation dialog and closes the menu
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -93,7 +93,7 @@ async fn test_dialog_opens_even_with_an_empty_queue() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-028 / FR-037 — the queue is untouched until the user confirms
+// FR-028 / FR-037 - the queue is untouched until the user confirms
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -127,7 +127,7 @@ async fn test_clear_row_does_not_dispatch_any_entry() {
 }
 
 // ---------------------------------------------------------------------------
-// Non-mutation — input buffer, attachments, and the running turn are untouched
+// Non-mutation - input buffer, attachments, and the running turn are untouched
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -175,7 +175,7 @@ async fn test_clear_row_leaves_the_running_turn_untouched() {
 }
 
 // ---------------------------------------------------------------------------
-// NFR-008 — the action repaints on the next frame
+// NFR-008 - the action repaints on the next frame
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

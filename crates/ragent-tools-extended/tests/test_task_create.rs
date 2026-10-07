@@ -32,7 +32,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     }
 }
 
-// ── Basic creation ───────────────────────────────────────────────────
+// -- Basic creation ---------------------------------------------------
 
 /// Create a task with only the required fields; status should be "pending".
 #[tokio::test]
@@ -123,7 +123,7 @@ async fn test_task_create_full() {
     assert_eq!(meta["is_available"], false);
 }
 
-// ── Required parameter validation ────────────────────────────────────
+// -- Required parameter validation ------------------------------------
 
 /// Missing `subject` should error.
 #[tokio::test]
@@ -179,7 +179,7 @@ async fn test_task_create_missing_both_required() {
     );
 }
 
-// ── Storage availability ─────────────────────────────────────────────
+// -- Storage availability ---------------------------------------------
 
 /// No storage should produce a clear error.
 #[tokio::test]
@@ -208,7 +208,7 @@ async fn test_task_create_no_storage() {
     );
 }
 
-// ── FR-009: blocked_by validation ────────────────────────────────────
+// -- FR-009: blocked_by validation ------------------------------------
 
 /// blocked_by referencing a non-existent task should error (FR-009).
 #[tokio::test]
@@ -315,7 +315,7 @@ async fn test_task_create_blocked_by_all_valid() {
 
     let meta = out.metadata.expect("metadata present");
     assert_eq!(meta["blocked_by"], json!(["t1", "t2"]));
-    // t1 is pending → is_blocked should be true.
+    // t1 is pending -> is_blocked should be true.
     assert_eq!(meta["is_blocked"], true);
     assert_eq!(meta["is_available"], false);
 }
@@ -344,7 +344,7 @@ async fn test_task_create_empty_blocked_by() {
     assert_eq!(meta["is_available"], true);
 }
 
-// ── FR-008: metadata validation ──────────────────────────────────────
+// -- FR-008: metadata validation --------------------------------------
 
 /// metadata that is not a JSON object should error.
 #[tokio::test]
@@ -467,7 +467,7 @@ async fn test_task_create_metadata_nested() {
     assert_eq!(meta["metadata"]["nested"]["key"], "val");
 }
 
-// ── FR-012: status defaults to pending ───────────────────────────────
+// -- FR-012: status defaults to pending -------------------------------
 
 /// The created task must always have status "pending".
 #[tokio::test]
@@ -494,7 +494,7 @@ async fn test_task_create_status_always_pending() {
     );
 }
 
-// ── ID generation ────────────────────────────────────────────────────
+// -- ID generation ----------------------------------------------------
 
 /// Generated ID should start with "task-" prefix.
 #[tokio::test]
@@ -545,7 +545,7 @@ async fn test_task_create_unique_ids() {
     assert_ne!(id1, id2, "two tasks should get different IDs");
 }
 
-// ── FR-006: owner ────────────────────────────────────────────────────
+// -- FR-006: owner ----------------------------------------------------
 
 /// Owner is stored and returned.
 #[tokio::test]
@@ -572,7 +572,7 @@ async fn test_task_create_owner() {
     assert_eq!(meta["is_available"], false);
 }
 
-// ── FR-007: active_form ──────────────────────────────────────────────
+// -- FR-007: active_form ----------------------------------------------
 
 /// active_form is stored and returned.
 #[tokio::test]
@@ -603,7 +603,7 @@ async fn test_task_create_active_form() {
     );
 }
 
-// ── Tool metadata ────────────────────────────────────────────────────
+// -- Tool metadata ----------------------------------------------------
 
 /// Tool name should be "task_create".
 #[test]
@@ -655,7 +655,7 @@ fn test_task_create_tool_permission_category() {
     assert_eq!(tool.permission_category(), "task");
 }
 
-// ── blocks derivation on create ──────────────────────────────────────
+// -- blocks derivation on create --------------------------------------
 
 /// Creating a task with blocked_by should set `blocks` on the referenced tasks.
 /// The new task's own `blocks` should be empty.
@@ -683,7 +683,7 @@ async fn test_task_create_blocks_derived_empty() {
     assert_eq!(meta["blocks"], json!([]));
 }
 
-// ── Content format ───────────────────────────────────────────────────
+// -- Content format ---------------------------------------------------
 
 /// Content should contain the task header and subject.
 #[tokio::test]

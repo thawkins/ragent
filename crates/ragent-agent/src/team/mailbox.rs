@@ -48,7 +48,7 @@ use uuid::Uuid;
 /// above any legitimate coordination message.
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 
-// ── Message type ─────────────────────────────────────────────────────────────
+// -- Message type -------------------------------------------------------------
 
 /// The semantic category of a mailbox message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +72,7 @@ pub enum MessageType {
     ShutdownAck,
 }
 
-// ── Message ───────────────────────────────────────────────────────────────────
+// -- Message -------------------------------------------------------------------
 
 /// A single mailbox message.
 ///
@@ -188,7 +188,7 @@ impl MailboxMessage {
     }
 }
 
-// ── Lock-file helpers ────────────────────────────────────────────────────────
+// -- Lock-file helpers --------------------------------------------------------
 
 /// Return the companion lock file for a data file (e.g. `foo.json` ->
 /// `foo.json.lock`).  The lock file is a stable file whose inode never
@@ -222,7 +222,7 @@ fn acquire_lock(path: &Path, exclusive: bool) -> Result<File> {
     Ok(file)
 }
 
-// ── Mailbox notifier registry ───────────────────────────────────────────────
+// -- Mailbox notifier registry -----------------------------------------------
 
 type NotifyKey = (PathBuf, String);
 
@@ -262,7 +262,7 @@ fn signal_notifier(team_dir: &Path, agent_id: &str) {
     }
 }
 
-// ── Mailbox ───────────────────────────────────────────────────────────────────
+// -- Mailbox -------------------------------------------------------------------
 
 /// File-backed per-agent mailbox stored at `mailbox/{agent-id}.json`.
 ///
@@ -321,7 +321,7 @@ impl Mailbox {
                 tracing::warn!(
                     path = %self.path.display(),
                     error = %e,
-                    "M6-T5: mailbox is corrupt; moving aside and returning empty"
+                    "mailbox is corrupt; moving aside and returning empty"
                 );
                 // M6-T5: move the corrupt file aside so the inbox can recover.
                 let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
@@ -489,7 +489,7 @@ impl Mailbox {
                 tracing::warn!(
                     path = %self.path.display(),
                     error = %e,
-                    "M6-T5: mailbox is corrupt (peek_unread); moving aside"
+                    "mailbox is corrupt (peek_unread); moving aside"
                 );
                 let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
                 let corrupt_path = self.path.with_extension(format!("corrupt.{ts}.json"));
@@ -530,7 +530,7 @@ impl Mailbox {
                 tracing::warn!(
                     path = %self.path.display(),
                     error = %e,
-                    "M6-T5: mailbox is corrupt (drain_unread); moving aside"
+                    "mailbox is corrupt (drain_unread); moving aside"
                 );
                 drop(lock);
                 let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");

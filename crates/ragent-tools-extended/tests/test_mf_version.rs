@@ -1,4 +1,4 @@
-//! Integration tests for `mf_version` tool — version info (T-025, FR-017,
+//! Integration tests for `mf_version` tool - version info (T-025, FR-017,
 //! FR-022, FR-026, NFR-003).
 //!
 //! Covers: tool name, permission category, version content, structured
@@ -59,7 +59,7 @@ fn test_parameters_schema_is_empty_object() {
 }
 
 // ---------------------------------------------------------------------------
-// Execute — version content
+// Execute - version content
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -122,7 +122,7 @@ async fn test_execute_mentions_http_only_mode() {
 }
 
 // ---------------------------------------------------------------------------
-// Execute — structured metadata
+// Execute - structured metadata
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -170,12 +170,12 @@ async fn test_execute_metadata_has_tool_count() {
 }
 
 // ---------------------------------------------------------------------------
-// Execute — robustness
+// Execute - robustness
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_execute_succeeds_with_arbitrary_input() {
-    // The tool ignores input — it should succeed with any JSON.
+    // The tool ignores input - it should succeed with any JSON.
     let tool = MfVersionTool;
     let output = tool
         .execute(serde_json::json!({"foo": "bar"}), &ctx())

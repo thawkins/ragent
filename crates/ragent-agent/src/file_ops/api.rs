@@ -1,3 +1,9 @@
+//! High-level batch-edit API.
+//!
+//! Applies a collection of `(path, new_content)` edits through the
+//! [`EditStaging`] flow; this is the entry point used by tools and skills that
+//! need concurrent multi-file edits.
+
 use super::{CommitResult, EditStaging};
 use anyhow::Result;
 use std::path::PathBuf;

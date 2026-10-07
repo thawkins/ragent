@@ -13,12 +13,11 @@
 //! - **denylist** entries are substring patterns.  If any entry is found anywhere in the
 //!   command string the command is rejected unconditionally.
 
-use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-// ── Global state ─────────────────────────────────────────────────────────────
+// -- Global state -------------------------------------------------------------
 
 /// In-memory snapshot of the merged bash allowlist and denylist.
 #[derive(Debug, Clone, Default)]
@@ -35,7 +34,7 @@ fn global() -> &'static RwLock<BashLists> {
     BASH_LISTS.get_or_init(|| RwLock::new(BashLists::default()))
 }
 
-// ── Initialisation ────────────────────────────────────────────────────────────
+// -- Initialisation ------------------------------------------------------------
 
 /// Load the bash lists from the merged global + project config.
 ///
@@ -61,7 +60,7 @@ pub fn load_from_config() {
     *guard = lists;
 }
 
-// ── Read accessors ────────────────────────────────────────────────────────────
+// -- Read accessors ------------------------------------------------------------
 
 /// Returns a snapshot of the current allowlist.
 #[must_use]
@@ -119,26 +118,10 @@ pub fn matches_denylist(command: &str) -> Option<String> {
     }
 }
 
-// ── Mutation helpers ──────────────────────────────────────────────────────────
+// -- Mutation helpers ----------------------------------------------------------
 
-/// The config scope targeted by a mutation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
-    /// Write to `./.ragent/ragent.json` (project-level config).
-    Project,
-    /// Write to `~/.config/ragent/ragent.json` (global config).
-    Global,
-}
-
-impl Scope {
-    fn config_path(self) -> Result<PathBuf> {
-        match self {
-            Self::Project => Ok(PathBuf::from(".ragent").join("ragent.json")),
-            Self::Global => crate::Config::global_config_path()
-                .context("Cannot determine global config directory"),
-        }
-    }
-}
+/// The config scope targeted by a mutation (shared with `dir_lists`, T-306).
+pub use crate::list_config::Scope;
 
 /// Add `entry` to the allowlist.  Persists to the chosen config file.
 pub fn add_allowlist(entry: &str, scope: Scope) -> Result<()> {
@@ -150,7 +133,7 @@ pub fn add_allowlist(entry: &str, scope: Scope) -> Result<()> {
             g.allowlist.push(entry.to_string());
         }
     }
-    patch_config(scope, |bash| {
+    crate::list_config::patch_config(scope, "bash", &["allowlist", "denylist"], |bash| {
         if let Some(arr) = bash["allowlist"].as_array_mut() {
             let val = serde_json::Value::String(entry.to_string());
             if !arr.contains(&val) {
@@ -170,7 +153,7 @@ pub fn remove_allowlist(entry: &str, scope: Scope) -> Result<bool> {
         g.allowlist.retain(|e| e != entry);
         g.allowlist.len() < before
     };
-    patch_config(scope, |bash| {
+    crate::list_config::patch_config(scope, "bash", &["allowlist", "denylist"], |bash| {
         if let Some(arr) = bash["allowlist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(entry));
         }
@@ -188,7 +171,7 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
             g.denylist.push(pattern.to_string());
         }
     }
-    patch_config(scope, |bash| {
+    crate::list_config::patch_config(scope, "bash", &["allowlist", "denylist"], |bash| {
         if let Some(arr) = bash["denylist"].as_array_mut() {
             let val = serde_json::Value::String(pattern.to_string());
             if !arr.contains(&val) {
@@ -208,57 +191,10 @@ pub fn remove_denylist(pattern: &str, scope: Scope) -> Result<bool> {
         g.denylist.retain(|e| e != pattern);
         g.denylist.len() < before
     };
-    patch_config(scope, |bash| {
+    crate::list_config::patch_config(scope, "bash", &["allowlist", "denylist"], |bash| {
         if let Some(arr) = bash["denylist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(pattern));
         }
     })?;
     Ok(removed)
-}
-
-// ── Config file I/O ───────────────────────────────────────────────────────────
-
-/// Read the target config as a JSON Value, apply `mutate` to the `bash` sub-object,
-/// then write the result back.  Creates the file (and parent dirs) if absent.
-fn patch_config<F>(scope: Scope, mutate: F) -> Result<()>
-where
-    F: FnOnce(&mut serde_json::Value),
-{
-    let path = scope.config_path()?;
-
-    // Read existing content (empty object if file absent)
-    let mut root: serde_json::Value = if path.exists() {
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("Reading {}", path.display()))?;
-        serde_json::from_str(&text).with_context(|| format!("Parsing {}", path.display()))?
-    } else {
-        serde_json::json!({})
-    };
-
-    // Ensure the `bash` key is an object
-    if !root["bash"].is_object() {
-        root["bash"] = serde_json::json!({ "allowlist": [], "denylist": [] });
-    }
-    // Ensure both arrays exist
-    if !root["bash"]["allowlist"].is_array() {
-        root["bash"]["allowlist"] = serde_json::json!([]);
-    }
-    if !root["bash"]["denylist"].is_array() {
-        root["bash"]["denylist"] = serde_json::json!([]);
-    }
-
-    mutate(&mut root["bash"]);
-
-    // Write back
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Creating directory {}", parent.display()))?;
-    }
-    let text = serde_json::to_string_pretty(&root).context("Serialising updated config")?;
-    std::fs::write(&path, text).with_context(|| format!("Writing {}", path.display()))?;
-
-    tracing::info!(path = %path.display(), "bash_lists: config updated");
-    Ok(())
 }

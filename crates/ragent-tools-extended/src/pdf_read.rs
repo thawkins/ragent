@@ -207,7 +207,17 @@ fn extract_pages_text(
     let mut result = Vec::new();
     for page_num in start..=end {
         let text = if let Some(&page_id) = pages.get(&(page_num as u32)) {
-            extract_page_text(doc, page_id).unwrap_or_default()
+            match extract_page_text(doc, page_id) {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::debug!(
+                        page = page_num,
+                        error = %e,
+                        "pdf_read: per-page text extraction failed; treating page as empty"
+                    );
+                    String::new()
+                }
+            }
         } else {
             String::new()
         };
@@ -242,7 +252,7 @@ fn extract_pages_text(
 
 /// Extract text from a single page using lopdf content streams.
 fn extract_page_text(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> Result<String> {
-    let content = doc.get_page_content(page_id)?;
+    let content = doc.get_page_content(page_id);
 
     let mut text = String::new();
     let ops = lopdf::content::Content::decode(&content)?.operations;

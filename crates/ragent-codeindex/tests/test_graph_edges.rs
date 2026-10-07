@@ -42,8 +42,8 @@ fn build_test_graph() -> IndexStore {
     let store = IndexStore::open_in_memory().unwrap();
     let file_id = store.upsert_file(&make_entry("a.rs", "h1")).unwrap();
 
-    // A → B → C → D  (chain)
-    // A → C (shortcut, making A→C 1 hop instead of 2)
+    // A -> B -> C -> D  (chain)
+    // A -> C (shortcut, making A->C 1 hop instead of 2)
     let symbols = vec![
         make_symbol("A", SymbolKind::Function, file_id, 1, 5),
         make_symbol("B", SymbolKind::Function, file_id, 7, 10),
@@ -106,7 +106,7 @@ fn build_test_graph() -> IndexStore {
     store
 }
 
-// ── Basic path tests ────────────────────────────────────────────────────
+// -- Basic path tests ----------------------------------------------------
 
 #[test]
 fn test_path_direct_edge() {
@@ -127,7 +127,7 @@ fn test_path_direct_edge() {
 fn test_path_shortest_via_shortcut() {
     let store = build_test_graph();
     let graph = SymbolGraph::new(&store);
-    // A→C should be 1 hop (direct shortcut), not 2 (A→B→C)
+    // A->C should be 1 hop (direct shortcut), not 2 (A->B->C)
     let result = graph.path("A", "C").unwrap();
     assert!(result.is_some());
     let path = result.unwrap();
@@ -141,7 +141,7 @@ fn test_path_shortest_via_shortcut() {
 fn test_path_multi_hop() {
     let store = build_test_graph();
     let graph = SymbolGraph::new(&store);
-    // A→D should be 2 hops (A→C→D)
+    // A->D should be 2 hops (A->C->D)
     let result = graph.path("A", "D").unwrap();
     assert!(result.is_some());
     let path = result.unwrap();
@@ -168,7 +168,7 @@ fn test_path_same_symbol() {
 fn test_path_no_path_exists() {
     let store = build_test_graph();
     let graph = SymbolGraph::new(&store);
-    // D has no outgoing edges, so D→A has no path.
+    // D has no outgoing edges, so D->A has no path.
     let result = graph.path("D", "A").unwrap();
     assert!(result.is_none(), "D→A should have no path");
 }
@@ -211,7 +211,7 @@ fn test_path_no_edges() {
     assert!(result.is_none(), "no path without edges");
 }
 
-// ── Edge kind in path ──────────────────────────────────────────────────
+// -- Edge kind in path --------------------------------------------------
 
 #[test]
 fn test_path_records_edge_kind() {
@@ -245,7 +245,7 @@ fn test_path_records_edge_kind() {
     assert_eq!(path.steps[1].1.as_deref(), Some("imports"));
 }
 
-// ── Longer path preference ─────────────────────────────────────────────
+// -- Longer path preference ---------------------------------------------
 
 #[test]
 fn test_path_prefers_shorter_over_longer() {
@@ -262,8 +262,8 @@ fn test_path_prefers_shorter_over_longer() {
     let stored = store.get_file_symbols(file_id).unwrap();
     let ids: Vec<i64> = stored.iter().map(|s| s.id).collect();
 
-    // Long path: A→B→C→D→E (4 hops)
-    // Short path: A→D→E (2 hops)
+    // Long path: A->B->C->D->E (4 hops)
+    // Short path: A->D->E (2 hops)
     for (src, tgt) in [(0, 1), (1, 2), (2, 3), (3, 4), (0, 3), (3, 4)] {
         store
             .upsert_edge_typed(&GraphEdge {
@@ -287,7 +287,7 @@ fn test_path_prefers_shorter_over_longer() {
     assert_eq!(path.steps[2].0, "E");
 }
 
-// ── Disconnected components ────────────────────────────────────────────
+// -- Disconnected components --------------------------------------------
 
 #[test]
 fn test_path_disconnected_components() {
@@ -303,7 +303,7 @@ fn test_path_disconnected_components() {
     let x_id = stored[0].id;
     let y_id = stored[1].id;
 
-    // Only X→Y edge; Z is disconnected.
+    // Only X->Y edge; Z is disconnected.
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: x_id,
@@ -316,10 +316,10 @@ fn test_path_disconnected_components() {
         .unwrap();
 
     let graph = SymbolGraph::new(&store);
-    // X→Z should have no path.
+    // X->Z should have no path.
     assert!(graph.path("X", "Z").unwrap().is_none());
-    // Z→X should have no path.
+    // Z->X should have no path.
     assert!(graph.path("Z", "X").unwrap().is_none());
-    // X→Y should have a path.
+    // X->Y should have a path.
     assert!(graph.path("X", "Y").unwrap().is_some());
 }

@@ -57,12 +57,7 @@ Existing plugins with the same id are not overwritten unless `--force` is given.
 /// bare `/plugins`).
 #[must_use]
 pub fn attribution(sub: &str) -> String {
-    let sub = sub.trim();
-    if sub.is_empty() {
-        "From: /plugins".to_string()
-    } else {
-        format!("From: /plugins {sub}")
-    }
+    ragent_surface::help::attribution("/plugins", sub)
 }
 
 /// Render the `/plugins` usage block (FR-014). `sub` is the invoked subcommand
@@ -81,5 +76,5 @@ pub fn render_help(sub: &str) -> String {
 /// is `help` or anything it does not recognise.
 #[must_use]
 pub fn subcommand_of(args: &str) -> &str {
-    args.split_whitespace().next().unwrap_or("")
+    ragent_surface::help::subcommand_of(args)
 }

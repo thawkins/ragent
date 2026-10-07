@@ -211,7 +211,7 @@ impl Tool for EditTool {
     /// - The file was modified after it was read by the session (FR-003)
     /// - The file cannot be written after the edit
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        // ── Parameter extraction (canonical + legacy names) ───────────────────
+        // -- Parameter extraction (canonical + legacy names) -------------------
         let path_str = input["file_path"]
             .as_str()
             .or_else(|| input["path"].as_str())
@@ -252,12 +252,12 @@ impl Tool for EditTool {
         // Acquire file lock to serialize concurrent edits to the same file.
         let _lock = super::file_lock::lock_file(&path).await;
 
-        // ── Create operation (FR-006): empty old_string ───────────────────────
+        // -- Create operation (FR-006): empty old_string -----------------------
         if old_string.is_empty() {
             return create_file(&path, new_string, ctx, used_legacy_params, dry_run).await;
         }
 
-        // ── No-change rejection (FR-007) ──────────────────────────────────────
+        // -- No-change rejection (FR-007) --------------------------------------
         if old_string == new_string {
             let outcome = format!("no-change rejected in {}", path.display());
             log_edit_operation(
@@ -276,7 +276,7 @@ impl Tool for EditTool {
             );
         }
 
-        // ── Read the file ────────────────────────────────────────────────────
+        // -- Read the file ----------------------------------------------------
         // F-5: read bytes and validate UTF-8 explicitly so an encoding
         // failure gets a precise, corrective message (the blanket
         // "file may not exist" context buried the actual cause and sent the
@@ -303,7 +303,7 @@ impl Tool for EditTool {
             Some(stripped) => (true, stripped.to_string()),
             None => (false, content),
         };
-        // ── Stale-file detection (FR-003) ─────────────────────────────────────
+        // -- Stale-file detection (FR-003) -------------------------------------
         if let Err(e) = check_stale_file(&path, ctx) {
             // P1.3: refresh the session's read timestamp once so the model's
             // next attempt starts from the live content instead of being
@@ -330,7 +330,7 @@ impl Tool for EditTool {
             );
         }
 
-        // ── Replacement (editplan P2: exact -> flexible -> indent-normalised) ──
+        // -- Replacement (editplan P2: exact -> flexible -> indent-normalised) --
         let (lane, start, end, new_str) = if collapse_whitespace {
             // Collapse-whitespace opt-in: run only the flexible lane.
             match find_flexible_replacement_range(&content, old_string, new_string) {
@@ -471,7 +471,7 @@ impl Tool for EditTool {
             });
         }
 
-        // ── Apply the replacement ────────────────────────────────────────────────────────────────
+        // -- Apply the replacement ----------------------------------------------------------------
         // F-3: the splice offsets come from the matcher lanes, which are
         // char-boundary-safe by construction; assert it so a future lane
         // regression panics in debug builds instead of slicing mid-char.
@@ -508,7 +508,7 @@ impl Tool for EditTool {
         // the read baseline (P1.2) so the next edit sees the post-write content.
         record_edit_timestamp(&path, ctx);
 
-        // ── Build the result snippet (FR-008) ────────────────────────────────
+        // -- Build the result snippet (FR-008) --------------------------------
         let snippet = build_snippet(&new_content, start, start + new_str.len());
 
         // `old_string` may be the user-provided text; report the replaced byte span size.
@@ -746,4 +746,4 @@ pub fn byte_offset_to_line(content: &str, offset: usize) -> usize {
     line
 }
 
-// ── Unit tests ──────────────────────────────────────────────────────────────
+// -- Unit tests --------------------------------------------------------------

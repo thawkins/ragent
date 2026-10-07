@@ -5,16 +5,16 @@
 //! wiring) or the inline module tests (estimator, runner `select`, serializer,
 //! prompt builder). It exercises:
 //!
-//! 1. The `compact` overflow guard — the summarisation prompt itself must not
+//! 1. The `compact` overflow guard - the summarisation prompt itself must not
 //!    exceed `context_window - summary_output` (FR-005).
-//! 2. `emergency_compact` at the function level — it converts provider-facing
+//! 2. `emergency_compact` at the function level - it converts provider-facing
 //!    `ChatMessage`s, runs summarisation, and replaces the slice in place with
 //!    `[compaction_msg, ...recent]` (FR-004).
-//! 3. `select` with a single very long turn — the last message is always kept
+//! 3. `select` with a single very long turn - the last message is always kept
 //!    verbatim even when its serialised form exceeds `keep_tokens`.
 //! 4. A session whose total tokens exceed a small context window: verify the
 //!    compaction message is produced and the subsequent turn loads only from
-//!    the compaction point forward (FR-005 / FR-007) — the real conversation
+//!    the compaction point forward (FR-005 / FR-007) - the real conversation
 //!    request that follows compaction begins with the compaction summary.
 //! 5. Prompt construction with and without a previous summary (FR-010) is
 //!    covered at the unit level in `prompt.rs`; here we assert the prompt
@@ -48,9 +48,9 @@ fn chat_text(msg: &ChatMessage) -> String {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // 1. Overflow guard inside `compact`
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
@@ -249,9 +249,9 @@ async fn test_emergency_compact_leaves_chat_messages_unchanged_on_error() {
     );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // 3. `select` with a single very long turn
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 
 #[test]
 fn test_select_keeps_last_message_even_when_it_exceeds_keep_budget() {
@@ -293,9 +293,9 @@ fn test_select_single_long_turn_with_zero_budget() {
     assert_eq!(split.recent_messages.len(), 1);
 }
 
-// ───────────────────────────────────────────────��────────────────────────────
+// -----------------------------------------------��----------------------------
 // 4. Prompt construction with / without previous summary (FR-010)
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 
 #[test]
 fn test_build_prompt_without_previous_summary_asks_for_new() {

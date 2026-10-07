@@ -286,14 +286,11 @@ impl GmailTool {
             }
         }
         if resolved.client_id.is_none() {
-            resolved.client_id = std::env::var("GMAIL_CLIENT_ID")
-                .ok()
-                .filter(|v| !v.is_empty());
+            resolved.client_id = super::channels::resolve_secret(Some("env:GMAIL_CLIENT_ID"));
         }
         if resolved.client_secret.is_none() {
-            resolved.client_secret = std::env::var("GMAIL_CLIENT_SECRET")
-                .ok()
-                .filter(|v| !v.is_empty());
+            resolved.client_secret =
+                super::channels::resolve_secret(Some("env:GMAIL_CLIENT_SECRET"));
         }
         // SEC-tools-extended-008 (SECTASKS T-066): both endpoints are
         // config-derived and were used for authenticated requests without an

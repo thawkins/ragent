@@ -156,7 +156,7 @@ fn test_load_session_clears_the_input_queue() {
     );
 }
 
-// ── T-004: two-digit queue counter render ────────────────────────────────
+// -- T-004: two-digit queue counter render --------------------------------
 
 #[test]
 fn test_prompt_is_bare_when_queue_is_empty() {

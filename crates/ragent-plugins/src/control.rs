@@ -161,7 +161,7 @@ pub fn disabled_subsystem_report(sub: &str) -> String {
     )
 }
 
-// ── `/plugins list` (FR-009, FR-022, FR-025) ─────────────────────────────────
+// -- `/plugins list` (FR-009, FR-022, FR-025) ---------------------------------
 
 /// One rendered `/plugins list` row.
 struct Row {
@@ -626,7 +626,7 @@ fn telemetry_line(row: &Row) -> String {
     )
 }
 
-// ── `/plugins enable` / `/plugins disable` reports (FR-011, FR-012) ──────────
+// -- `/plugins enable` / `/plugins disable` reports (FR-011, FR-012) ----------
 
 /// Render the success-or-error report for `/plugins enable` (FR-011). The
 /// declared permissions are stated before the outcome, matching the security

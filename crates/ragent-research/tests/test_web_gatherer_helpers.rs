@@ -16,7 +16,7 @@ use title::{
     MAX_WEB_SOURCE_TITLE_CHARS, clean_title_text, clean_web_source_title, truncate_title_words,
 };
 
-// ── title tests ───────────────────────────────────────────────────────────
+// -- title tests -----------------------------------------------------------
 
 #[test]
 fn clean_title_strips_markdown_reference_links() {
@@ -116,7 +116,7 @@ fn truncate_title_words_returns_empty_for_empty_input() {
     assert!(out.is_empty());
 }
 
-// ── relevance tests ───────────────────────────────────────────────────────
+// -- relevance tests -------------------------------------------------------
 
 #[test]
 fn normalize_query_terms_deduplicates_and_drops_stopwords() {
@@ -134,7 +134,7 @@ fn normalize_query_terms_deduplicates_and_drops_stopwords() {
     assert_eq!(tokio_count, 1);
 }
 
-// ── morphological term-matching tests ─────────────────────────────────────
+// -- morphological term-matching tests -------------------------------------
 
 #[test]
 fn term_matches_literal_substring() {
@@ -176,7 +176,7 @@ fn term_matches_no_false_positive_for_unrelated_terms() {
     assert!(!term_matches("quantum", "classical computing"));
 }
 
-// ── classify tests ────────────────────────────────────────────────────────
+// -- classify tests --------------------------------------------------------
 
 #[test]
 fn classify_web_source_detects_pdf_by_content_type() {
@@ -214,13 +214,13 @@ fn classify_web_source_defaults_to_page() {
     );
 }
 
-// ── relevance-label tests ─────────────────────────────────────────────────
+// -- relevance-label tests -------------------------------------------------
 
 #[test]
 fn relevance_label_rescues_two_title_term_hits_on_verbose_queries() {
     // Reproduces the 2026-09-13 gather-log exclusion: the decomposed
     // sub-query has 6 terms, the on-topic title matches only 2 ("agent",
-    // "loops") for ratio 0.33 — below the 0.35 Medium floor but clearly
+    // "loops") for ratio 0.33 - below the 0.35 Medium floor but clearly
     // topical via the title signal.
     let (label, retained) = compute_relevance_label(
         "how to write goals and configure AI agent loops",
@@ -271,7 +271,7 @@ fn relevance_label_low_ratio_without_title_signal_stays_rejected() {
     assert!(!retained);
 }
 
-// ── prepared-query equivalence tests (PERF-068) ──────────────────────────
+// -- prepared-query equivalence tests (PERF-068) --------------------------
 
 #[test]
 fn prepared_query_matches_compute_relevance_label() {

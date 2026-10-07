@@ -902,7 +902,7 @@ fn parse_attrs(s: &str) -> Vec<HtmlAttr> {
                 }
             }
             if let Some('"' | '\'') = chars.peek().map(|&(_, ch)| ch) {
-                let quote = chars.next().unwrap().1;
+                let quote = chars.next().map_or('"', |(_, ch)| ch);
                 let val_start = chars.peek().map_or(s.len(), |&(j, _)| j);
                 while let Some(&(_, ch)) = chars.peek() {
                     if ch == quote {

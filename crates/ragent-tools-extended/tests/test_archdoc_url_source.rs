@@ -1,4 +1,4 @@
-//! Unit tests for `archdoc::url_source` — bounded URL acquisition for
+//! Unit tests for `archdoc::url_source` - bounded URL acquisition for
 //! `/spec govcreate` (spec `govdoc` T-006, FR-004, FR-016, NFR-002, NFR-003).
 //!
 //! The budget and its exhaustion check are pure and tested without any I/O.

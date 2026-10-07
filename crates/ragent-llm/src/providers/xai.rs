@@ -238,9 +238,7 @@ impl Provider for XaiProvider {
 
     /// Discover available models from the xAI `/v1/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("XAI_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("xai")
             .context("xAI model discovery requires XAI_API_KEY")?;
         let base_url = std::env::var(XAI_API_BASE_ENV)
             .ok()

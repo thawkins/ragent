@@ -175,6 +175,16 @@ fn test_parse_rejects_non_object_content() {
     assert!(parse_architecture_response("[1, 2, 3]").is_none());
     assert!(parse_architecture_response("\"not an object\"").is_none());
     assert!(parse_architecture_response("42").is_none());
+    // A rejected parse must surface as the deterministic fallback, not an error.
+    let recovered = fallback_structure(&populated_corpus());
+    assert!(
+        recovered.from_fallback,
+        "rejection must take the fallback path"
+    );
+    assert!(
+        !recovered.components.is_empty(),
+        "fallback must still name components from the corpus"
+    );
 }
 
 #[test]
@@ -182,6 +192,16 @@ fn test_parse_rejects_garbage() {
     assert!(parse_architecture_response("").is_none());
     assert!(parse_architecture_response("the model rambled with no braces at all").is_none());
     assert!(parse_architecture_response("{unclosed").is_none());
+    // The rescue path recovers a usable structure from the same corpus.
+    let recovered = fallback_structure(&populated_corpus());
+    assert!(
+        recovered.from_fallback,
+        "garbage must take the fallback path"
+    );
+    assert!(
+        !recovered.components.is_empty(),
+        "fallback must still name components from the corpus"
+    );
 }
 
 #[test]
@@ -190,6 +210,13 @@ fn test_parse_rejects_unknown_fields() {
     // fallback, not silent acceptance.
     let drifted = r#"{"components": [], "bogus": true}"#;
     assert!(parse_architecture_response(drifted).is_none());
+    // Drift surfaces as the fallback, not silent acceptance.
+    let recovered = fallback_structure(&populated_corpus());
+    assert!(recovered.from_fallback, "drift must take the fallback path");
+    assert!(
+        !recovered.components.is_empty(),
+        "fallback must still name components from the corpus"
+    );
 }
 
 #[test]
@@ -210,7 +237,7 @@ fn test_parse_omitted_fields_default_to_empty() {
 #[test]
 fn test_fallback_names_components_from_sources() {
     let structure = fallback_structure(&populated_corpus());
-    assert!(structure.from_fallback);
+    assert!(structure.from_fallback, "expected the fallback path");
     let names: Vec<&str> = structure
         .components
         .iter()
@@ -266,8 +293,15 @@ fn test_fallback_sanitises_and_empties() {
 #[test]
 fn test_fallback_on_empty_corpus_is_empty_structure() {
     let structure = fallback_structure(&corpus(Vec::new()));
-    assert!(structure.from_fallback);
-    assert!(structure.components.is_empty());
+    assert!(
+        structure.from_fallback,
+        "an empty corpus still takes the fallback path"
+    );
+    assert!(
+        structure.components.is_empty(),
+        "an empty corpus yields no components, got {:?}",
+        structure.components
+    );
     assert!(structure.is_empty());
 }
 
@@ -282,8 +316,15 @@ fn test_fallback_never_panics_on_minimal_corpus() {
     });
     minimal.sources.push(source("/", "root", ""));
     let structure = fallback_structure(&minimal);
-    assert!(structure.from_fallback);
-    assert!(structure.components.is_empty());
+    assert!(
+        structure.from_fallback,
+        "a contentless corpus still takes the fallback path"
+    );
+    assert!(
+        structure.components.is_empty(),
+        "an unnameable locator yields no components, got {:?}",
+        structure.components
+    );
 }
 
 // ===========================================================================

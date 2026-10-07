@@ -9,7 +9,7 @@ use crate::types::{ImportEntry, Symbol, SymbolKind, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::{Node, Parser};
 
-// ── C Parser ────────────────────────────────────────────────────────────────
+// -- C Parser ----------------------------------------------------------------
 
 /// Tree-sitter parser for the C programming language.
 pub struct CParser {
@@ -53,7 +53,7 @@ impl LanguageParser for CParser {
     }
 }
 
-// ── C++ Parser ──────────────────────────────────────────────────────────────
+// -- C++ Parser --------------------------------------------------------------
 
 /// Tree-sitter parser for the C++ programming language.
 pub struct CppParser {
@@ -97,7 +97,7 @@ impl LanguageParser for CppParser {
     }
 }
 
-// ── Shared implementation ───────────────────────────────────────────────────
+// -- Shared implementation ---------------------------------------------------
 
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
@@ -139,7 +139,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Function ────────────────────────────────────────────────────────────────
+// -- Function ----------------------------------------------------------------
 
 fn extract_function(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     // The declarator child contains the function name.
@@ -175,7 +175,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Str
     });
 }
 
-// ── Declaration (may be function prototype or variable) ─────────────────────
+// -- Declaration (may be function prototype or variable) ---------------------
 
 fn extract_declaration(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let text = ctx.text(node).trim().to_string();
@@ -219,7 +219,7 @@ fn extract_declaration(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[
     }
 }
 
-// ── Struct ──────────────────────────────────────────────────────────────────
+// -- Struct ------------------------------------------------------------------
 
 fn extract_struct(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -290,7 +290,7 @@ fn extract_c_fields(ctx: &mut Ctx, body: Node, parent_id: i64, scope: &[String])
     }
 }
 
-// ── Enum ────────────────────────────────────────────────────────────────────
+// -- Enum --------------------------------------------------------------------
 
 fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -351,7 +351,7 @@ fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]
     }
 }
 
-// ── Typedef ─────────────────────────────────────────────────────────────────
+// -- Typedef -----------------------------------------------------------------
 
 fn extract_typedef(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let declarator = node.child_by_field_name("declarator");
@@ -385,7 +385,7 @@ fn extract_typedef(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[Stri
     });
 }
 
-// ── #include ────────────────────────────────────────────────────────────────
+// -- #include ----------------------------------------------------------------
 
 fn extract_include(ctx: &mut Ctx, node: Node) {
     let line = node.start_position().row as u32 + 1;
@@ -410,7 +410,7 @@ fn extract_include(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── C++ Class ───────────────────────────────────────────────────────────────
+// -- C++ Class ---------------------------------------------------------------
 
 fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -450,7 +450,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String
     }
 }
 
-// ── C++ Namespace ───────────────────────────────────────────────────────────
+// -- C++ Namespace -----------------------------------------------------------
 
 fn extract_namespace(ctx: &mut Ctx, node: Node, _parent: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
@@ -493,7 +493,7 @@ fn extract_namespace(ctx: &mut Ctx, node: Node, _parent: Option<i64>, scope: &[S
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn find_identifier(ctx: &Ctx, node: Node) -> Option<String> {
     if node.kind() == "identifier"

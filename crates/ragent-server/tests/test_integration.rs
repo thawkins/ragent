@@ -83,7 +83,7 @@ fn test_state(token: &str) -> AppState {
     }
 }
 
-// ── Auth middleware tests ─────────────────────────────────────────────────
+// -- Auth middleware tests -------------------------------------------------
 
 #[tokio::test]
 async fn test_health_no_auth_required() {
@@ -144,7 +144,7 @@ async fn test_protected_route_accepts_valid_token() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-// ── Rate limiter tests ───────────────────────────────────────────────────
+// -- Rate limiter tests ---------------------------------------------------
 
 #[tokio::test]
 async fn test_rate_limiter_allows_under_limit() {
@@ -204,7 +204,7 @@ async fn test_rate_limiter_resets_after_window() {
     let rate_limiter = state.rate_limiter.clone();
     {
         let mut lim = rate_limiter.lock().await;
-        // 100 requests but the window started 61 seconds ago → should reset.
+        // 100 requests but the window started 61 seconds ago -> should reset.
         let old = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(61))
             .unwrap();
@@ -220,11 +220,11 @@ async fn test_rate_limiter_resets_after_window() {
         .body(Body::from(r#"{"content":"hi"}"#))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    // Window expired → count resets → request allowed.
+    // Window expired -> count resets -> request allowed.
     assert_ne!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
-// ── SSE stream tests ─────────────────────────────────────────────────────
+// -- SSE stream tests -----------------------------------------------------
 
 #[tokio::test]
 async fn test_events_stream_requires_auth() {
@@ -261,13 +261,13 @@ async fn test_events_stream_returns_sse() {
         "expected SSE content-type, got: {ct}"
     );
 
-    // Publish an event — the stream should eventually contain it.
+    // Publish an event - the stream should eventually contain it.
     bus.publish(Event::SessionCreated {
         session_id: "test-sse".into(),
     });
 }
 
-// ── Case-insensitive Bearer tests ────────────────────────────────────────
+// -- Case-insensitive Bearer tests ----------------------------------------
 
 #[tokio::test]
 async fn test_auth_accepts_lowercase_bearer() {
@@ -305,7 +305,7 @@ async fn test_auth_accepts_mixed_case_bearer() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-// ── create_session validation tests ──────────────────────────────────────
+// -- create_session validation tests --------------------------------------
 
 #[tokio::test]
 async fn test_create_session_invalid_path() {
@@ -352,7 +352,7 @@ async fn test_create_session_success() {
     assert_eq!(resp.status(), StatusCode::CREATED);
 }
 
-// ── FUNC-066: token comparison + rate-limit boundary ────────────────────────
+// -- FUNC-066: token comparison + rate-limit boundary ------------------------
 
 #[tokio::test]
 async fn func066_auth_accepts_token_of_any_length_and_rejects_others() {
@@ -384,7 +384,7 @@ async fn func066_auth_accepts_token_of_any_length_and_rejects_others() {
 
 #[tokio::test]
 async fn func066_rate_limiter_enforces_exactly_60() {
-    // 59 prior requests → the 60th is allowed.
+    // 59 prior requests -> the 60th is allowed.
     let state = test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
     {
@@ -404,7 +404,7 @@ async fn func066_rate_limiter_enforces_exactly_60() {
         StatusCode::TOO_MANY_REQUESTS
     );
 
-    // 60 prior requests → the next (61st) is rejected.
+    // 60 prior requests -> the next (61st) is rejected.
     let state = test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
     {

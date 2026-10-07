@@ -25,7 +25,7 @@ use serde_json::json;
 /// The `PATH` swap is process-global, so the two tests in this file must not
 /// run concurrently: one test's guard dropping would restore `PATH` mid-run of
 /// the other. A blocking guard is held across the test's awaits (the shim
-/// spawns a subprocess), which is intentional — the test is single-threaded by
+/// spawns a subprocess), which is intentional - the test is single-threaded by
 /// construction.
 static SHIM_LOCK: Mutex<()> = Mutex::new(());
 

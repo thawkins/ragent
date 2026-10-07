@@ -2,7 +2,7 @@
 //! (`TaskGetTool`).
 //!
 //! Verifies FR-014: when `task_get` is called with a `task_id`, the
-//! system returns the full task record — `id`, `subject`,
+//! system returns the full task record - `id`, `subject`,
 //! `description`, `active_form`, `status`, `owner`, `metadata`,
 //! `blocked_by`, `blocks` (derived), `created_at`, `updated_at`.
 
@@ -35,7 +35,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     }
 }
 
-// ── Basic retrieval ─────────────────────────────────────────────────
+// -- Basic retrieval -------------------------------------------------
 
 /// Retrieve a simple task with only the legacy fields populated.
 #[tokio::test]
@@ -103,7 +103,7 @@ async fn test_task_get_full_record() {
     assert_eq!(meta["blocks"], json!([]));
 }
 
-// ── Derived blocks field ────────────────────────────────────────────
+// -- Derived blocks field --------------------------------------------
 
 /// `blocks` should list all tasks that depend on this task.
 #[tokio::test]
@@ -167,11 +167,11 @@ async fn test_task_get_blocks_empty() {
 }
 
 /// `blocks` should include tasks that transitively depend on this one
-/// (directly — `blocks` is the direct inverse, not transitive).
+/// (directly - `blocks` is the direct inverse, not transitive).
 #[tokio::test]
 async fn test_task_get_blocks_direct_only() {
     let storage = MockStorage::new();
-    // t1 → t2 → t3 (t3 depends on t2, t2 depends on t1)
+    // t1 -> t2 -> t3 (t3 depends on t2, t2 depends on t1)
     storage.seed("t1", "test-session", "First", "completed");
     storage.seed_task(
         "t2",
@@ -213,7 +213,7 @@ async fn test_task_get_blocks_direct_only() {
     assert_eq!(meta["blocks"], json!(["t3"]));
 }
 
-// ── Error cases ─────────────────────────────────────────────────────
+// -- Error cases -----------------------------------------------------
 
 /// Missing `task_id` parameter should error.
 #[tokio::test]
@@ -271,7 +271,7 @@ async fn test_task_get_no_storage() {
     assert!(err.to_string().contains("Storage"), "error: {err}");
 }
 
-// ── Session scoping (FR-001) ────────────────────────────────────────
+// -- Session scoping (FR-001) ----------------------------------------
 
 /// Tasks from other sessions should not be visible.
 #[tokio::test]
@@ -282,14 +282,14 @@ async fn test_task_get_session_scoped() {
     let ctx = test_ctx(Arc::new(storage));
     let tool = TaskGetTool;
 
-    // t1 belongs to "other-session" — should not be found.
+    // t1 belongs to "other-session" - should not be found.
     let err = tool
         .execute(json!({"task_id": "t1"}), &ctx)
         .await
         .expect_err("should not find task from other session");
     assert!(err.to_string().contains("not found"), "error: {err}");
 
-    // t2 belongs to "test-session" — should be found.
+    // t2 belongs to "test-session" - should be found.
     let out = tool
         .execute(json!({"task_id": "t2"}), &ctx)
         .await
@@ -297,7 +297,7 @@ async fn test_task_get_session_scoped() {
     assert_eq!(out.metadata.unwrap()["id"], "t2");
 }
 
-// ── Human-readable content ──────────────────────────────────────────
+// -- Human-readable content ------------------------------------------
 
 /// Content should include active_form when present.
 #[tokio::test]
@@ -425,7 +425,7 @@ async fn test_task_get_content_description() {
     );
 }
 
-// ── Tool metadata ───────────────────────────────────────────────────
+// -- Tool metadata ---------------------------------------------------
 
 /// Tool name should be "task_get".
 #[test]
@@ -463,7 +463,7 @@ fn test_task_get_tool_permission_category() {
     assert_eq!(tool.permission_category(), "task");
 }
 
-// ── Status display ───���──────────────────────────────────────────────
+// -- Status display ---���----------------------------------------------
 
 /// Completed status should display correctly.
 #[tokio::test]
@@ -511,7 +511,7 @@ async fn test_task_get_in_progress_status() {
     );
 }
 
-// ── Registry registration ───────────────────────────────────────────
+// -- Registry registration -------------------------------------------
 
 /// `task_get` should be registered in the extended registry.
 #[test]
@@ -523,7 +523,7 @@ fn test_task_get_registered() {
     );
 }
 
-// ── Empty session ───────────────────────────────────────────────────
+// -- Empty session ---------------------------------------------------
 
 /// Getting a task from an empty session should error.
 #[tokio::test]

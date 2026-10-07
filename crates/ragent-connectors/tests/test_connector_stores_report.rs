@@ -54,7 +54,7 @@ const ONE_ENTRY_CATALOGUE: &str = r#"{
   ]
 }"#;
 
-// ── Provenance tags (FR-036) ────────────────────────────────────────────────
+// -- Provenance tags (FR-036) ------------------------------------------------
 
 #[test]
 fn fresh_install_tags_the_claude_endpoint_default() {
@@ -125,7 +125,7 @@ fn the_tag_comes_from_the_same_resolution_the_fetch_uses() {
     }
 }
 
-// ── Refusals, not substitution (FR-037) ─────────────────────────────────────
+// -- Refusals, not substitution (FR-037) -------------------------------------
 
 #[test]
 fn a_non_https_override_is_reported_not_substituted() {
@@ -155,7 +155,7 @@ fn a_malformed_override_is_reported_as_malformed() {
     );
 }
 
-// ── Wording (FR-006) ────────────────────────────────────────────────────────
+// -- Wording (FR-006) --------------------------------------------------------
 
 #[test]
 fn the_report_is_prefixed_and_ascii_only() {
@@ -170,7 +170,7 @@ fn the_report_is_prefixed_and_ascii_only() {
     );
 }
 
-// ── The `--check` probe (FR-036, NFR-003) ───────────────────────────────────
+// -- The `--check` probe (FR-036, NFR-003) -----------------------------------
 
 #[test]
 fn check_requested_matches_the_flag_anywhere() {

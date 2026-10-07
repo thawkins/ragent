@@ -108,7 +108,7 @@ async fn test_azure_anthropic_create_client_branches_correctly() {
     // the client was created without error.  A more thorough test would require
     // a mock HTTP server (see T-009 in PLAN.md).  For now, creation success
     // confirms the branch logic works.
-    // Just verify creation succeeded — we cannot downcast dyn LlmClient.
+    // Just verify creation succeeded - we cannot downcast dyn LlmClient.
     let _ = client;
 }
 

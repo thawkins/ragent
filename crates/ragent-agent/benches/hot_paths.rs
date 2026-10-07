@@ -1,5 +1,5 @@
 //! Criterion benchmarks for hot-path functions optimised in the agentopt
-//! spec (FR-002 — regression/performance benchmarks).
+//! spec (FR-002 - regression/performance benchmarks).
 //!
 //! Run with:
 //! ```text
@@ -17,7 +17,7 @@ use ragent_agent::skill::args::substitute_args;
 use ragent_agent::task::TaskEntry;
 use ragent_types::message::{Message, MessagePart, Role};
 
-// ── TaskEntry clone (T-012, FR-006/FR-016) ────────────────────────────────
+// -- TaskEntry clone (T-012, FR-006/FR-016) --------------------------------
 
 fn bench_task_entry_clone(c: &mut Criterion) {
     let mut group = c.benchmark_group("task_entry_clone");
@@ -54,7 +54,7 @@ fn bench_task_entry_clone(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Skill argument substitution (T-017, FR-011) ──────────────────────────
+// -- Skill argument substitution (T-017, FR-011) --------------------------
 
 fn bench_substitute_args(c: &mut Criterion) {
     let body = "Deploy $ARGUMENTS to $0 environment. Session: ${RAGENT_SESSION_ID}. \
@@ -74,7 +74,7 @@ fn bench_substitute_args(c: &mut Criterion) {
     });
 }
 
-// ── Goal evaluation context builder (T-018, FR-012) ──────────────────────
+// -- Goal evaluation context builder (T-018, FR-012) ----------------------
 
 fn bench_build_evaluation_context(c: &mut Criterion) {
     let mut messages = Vec::new();
@@ -101,7 +101,7 @@ fn bench_build_evaluation_context(c: &mut Criterion) {
     });
 }
 
-// ── CanonicalPathCache (T-014, FR-017) ───────────────────────────────────
+// -- CanonicalPathCache (T-014, FR-017) -----------------------------------
 
 fn bench_canonical_path_cache(c: &mut Criterion) {
     let dir = tempfile::tempdir().unwrap();
@@ -131,7 +131,7 @@ fn bench_canonical_path_cache(c: &mut Criterion) {
         });
     });
 
-    // Benchmark cached (pre-populated cache — simulates second call in same step).
+    // Benchmark cached (pre-populated cache - simulates second call in same step).
     let warm_cache = ragent_tools_core::CanonicalPathCache::new();
     ragent_tools_core::check_path_within_root_cached(&file_path, &root, &warm_cache).unwrap();
 

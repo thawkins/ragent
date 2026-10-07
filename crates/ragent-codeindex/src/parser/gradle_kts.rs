@@ -53,13 +53,13 @@ impl LanguageParser for GradleKtsParser {
     }
 }
 
-// ── Extraction context ──────────────────────────────────────────────────────
+// -- Extraction context ------------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive walk ──────────────────────────────────────────────────────────
+// -- Recursive walk ----------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting Kotlin/Gradle KTS symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -85,7 +85,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Class declaration ───────────────────────────────────────────────────────
+// -- Class declaration -------------------------------------------------------
 
 /// Extract a Kotlin class declaration.
 ///
@@ -128,7 +128,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Object declaration ────────────────────────────────────────────────────
+// -- Object declaration ----------------------------------------------------
 
 /// Extract a Kotlin object declaration.
 fn extract_object(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -168,7 +168,7 @@ fn extract_object(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[St
     }
 }
 
-// ── Companion object ───────────────────────────────────────────────────────
+// -- Companion object -------------------------------------------------------
 
 /// Extract a Kotlin companion object.
 fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -202,7 +202,7 @@ fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
     }
 }
 
-// ── Function declaration ───────────────────────────────────────────────────
+// -- Function declaration ---------------------------------------------------
 
 /// Extract a Kotlin function declaration.
 ///
@@ -248,7 +248,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     });
 }
 
-// ── Property declaration ────────────────────────────────────────────────────
+// -- Property declaration ----------------------------------------------------
 
 /// Extract a Kotlin property declaration.
 fn extract_property(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -305,7 +305,7 @@ fn extract_single_property(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, sc
     });
 }
 
-// ── Type alias ──────────────────────────────────────────────────────────────
+// -- Type alias --------------------------------------------------------------
 
 /// Extract a Kotlin type alias.
 fn extract_type_alias(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -337,7 +337,7 @@ fn extract_type_alias(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
     });
 }
 
-// ── Import ──────────────────────────────────────────────────────────────────
+// -- Import ------------------------------------------------------------------
 
 /// Extract a Kotlin import statement.
 fn extract_import(ctx: &mut Ctx, node: Node) {
@@ -365,7 +365,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Call expression (Gradle DSL blocks) ─────────────────────────────────────
+// -- Call expression (Gradle DSL blocks) -------------------------------------
 
 /// Extract a call expression as a reference.
 ///
@@ -417,7 +417,7 @@ fn extract_call(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Get the text of a named field child from a tree-sitter node.
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
@@ -532,4 +532,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

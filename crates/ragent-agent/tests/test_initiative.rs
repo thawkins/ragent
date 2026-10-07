@@ -34,7 +34,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
     }
 }
 
-// ── Tool identity ───────────────────────────────────────────────────
+// -- Tool identity ---------------------------------------------------
 
 #[test]
 fn test_initiative_identity() {
@@ -63,7 +63,7 @@ fn test_initiative_schema_actions() {
     );
 }
 
-// ── Create + read ───────────────────────────────────────────────────
+// -- Create + read ---------------------------------------------------
 
 #[tokio::test]
 async fn test_initiative_create_then_read() {
@@ -174,7 +174,7 @@ async fn test_initiative_create_requires_title() {
     assert!(err.to_string().contains("title"), "err: {err}");
 }
 
-// ── Checkpoint (T-070 acceptance) ───────────────────────────────────
+// -- Checkpoint (T-070 acceptance) -----------------------------------
 
 #[tokio::test]
 async fn test_initiative_checkpoint_updates_progress() {
@@ -321,7 +321,7 @@ async fn test_initiative_checkpoint_on_closed_rejected() {
     assert!(err.to_string().contains("completed"), "err: {err}");
 }
 
-// ── Update / close / delete behaviour via storage ───────────────────
+// -- Update / close / delete behaviour via storage -------------------
 
 #[tokio::test]
 async fn test_initiative_update_title_and_status() {
@@ -454,7 +454,7 @@ async fn test_initiative_close_invalid_status_rejected() {
     assert!(err.to_string().contains("completed"), "err: {err}");
 }
 
-// ── List ────────────────────────────────────────────────────────────
+// -- List ------------------------------------------------------------
 
 #[tokio::test]
 async fn test_initiative_list_active_by_default() {
@@ -533,7 +533,7 @@ async fn test_initiative_list_invalid_filter_rejected() {
     );
 }
 
-// ── Cross-session durability ────────────────────────────────────────
+// -- Cross-session durability ----------------------------------------
 
 #[tokio::test]
 async fn test_initiative_visible_from_another_session() {
@@ -570,7 +570,7 @@ async fn test_initiative_isolated_per_project() {
     .await
     .expect("create");
 
-    // Same storage, different working dir → not visible.
+    // Same storage, different working dir -> not visible.
     let mut ctx_other = ctx_with_storage(Arc::clone(&storage), "sess-B");
     ctx_other.working_dir = PathBuf::from("/test/other-project");
     let err = tool
@@ -580,7 +580,7 @@ async fn test_initiative_isolated_per_project() {
     assert!(err.to_string().contains("not found"), "err: {err}");
 }
 
-// ── Errors ──────────────────────────���───────────────────────────────
+// -- Errors --------------------------���-------------------------------
 
 #[tokio::test]
 async fn test_initiative_missing_storage_graceful() {
@@ -627,7 +627,7 @@ async fn test_initiative_unknown_action_rejected() {
     );
 }
 
-// ── Direct storage coverage ─────────────────────────────────────────
+// -- Direct storage coverage -----------------------------------------
 
 #[test]
 fn test_storage_initiative_round_trip() {
@@ -679,7 +679,7 @@ fn test_storage_initiative_round_trip() {
     assert!(!storage.delete_initiative("g1", WD).expect("delete again"));
 }
 
-// ── System-prompt section ───────────────────────────────────────────
+// -- System-prompt section -------------------------------------------
 
 #[test]
 fn test_build_initiatives_prompt_section_empty() {

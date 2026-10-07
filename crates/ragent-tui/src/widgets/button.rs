@@ -245,7 +245,7 @@ impl<'a> Button<'a> {
     /// Get the styled label text for rendering
     ///
     /// Includes accessibility annotations for screen reader support:
-    /// - ⣿ prefix indicates button role
+    /// - # prefix indicates button role
     pub fn styled_label(&self) -> Line<'_> {
         let fg = self.fg_color();
         let bg = self.bg_color();
@@ -276,7 +276,7 @@ impl<'a> Button<'a> {
 
     /// Get the styled label with button role indicator for accessibility
     ///
-    /// Includes "⣿" prefix to indicate button role for screen readers.
+    /// Includes "#" prefix to indicate button role for screen readers.
     /// Use this in contexts where multiple element types are displayed together.
     pub fn styled_label_with_role(&self) -> Line<'_> {
         use crate::theme::accessibility;

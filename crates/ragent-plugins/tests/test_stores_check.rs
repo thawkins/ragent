@@ -22,7 +22,7 @@ fn available_fetcher() -> FixtureStoreFetcher {
     FixtureStoreFetcher::new().with_default_endpoints()
 }
 
-// ── Flag parsing ────────────────────────────────────────────────────────────
+// -- Flag parsing ------------------------------------------------------------
 
 #[test]
 fn check_flag_is_recognised_anywhere_in_the_argument_text() {
@@ -40,7 +40,7 @@ fn check_flag_is_recognised_anywhere_in_the_argument_text() {
     }
 }
 
-// ── Probing (FR-031 --check) ────────────────────────────────────────────────
+// -- Probing (FR-031 --check) ------------------------------------------------
 
 #[test]
 fn probe_reports_both_default_stores_available_with_their_entry_counts() {
@@ -108,7 +108,7 @@ fn probe_is_aligned_with_the_store_order_codex_then_claude() {
     assert_eq!(fetcher.endpoints(), vec![DEFAULT_CODEX_STORE_URL]);
 }
 
-// ── Report rendering with probes ────────────────────────────────────────────
+// -- Report rendering with probes --------------------------------------------
 
 #[test]
 fn report_appends_an_available_marker_and_count_per_store() {
@@ -191,7 +191,7 @@ fn the_default_report_carries_no_probe_suffix() {
     );
 }
 
-// ── Seam sanity ─────────────────────────────────────────────────────────────
+// -- Seam sanity -------------------------------------------------------------
 
 #[test]
 fn the_probe_uses_the_injected_seam_not_the_network() {

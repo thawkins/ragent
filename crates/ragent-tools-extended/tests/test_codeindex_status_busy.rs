@@ -2,7 +2,7 @@
 //!
 //! The status tool must respond immediately when the store/FTS lock is held by
 //! a background reindex or graph build: a single `try_status()` probe, and on
-//! `None` an immediate busy report built from the lock-free progress atomics —
+//! `None` an immediate busy report built from the lock-free progress atomics -
 //! never a retry-and-wait loop.
 
 // The tests intentionally hold the store MutexGuard across await points: that
@@ -124,7 +124,7 @@ async fn test_status_tool_reports_normal_stats_when_lock_free() {
 #[test]
 fn test_status_tool_uses_single_try_probe() {
     // Source-level guard: the status tool must not use with_retry (the
-    // blocking retry loop) — it must answer immediately.
+    // blocking retry loop) - it must answer immediately.
     let source = include_str!("../src/codeindex_status.rs");
     assert!(
         !source.contains("with_retry"),

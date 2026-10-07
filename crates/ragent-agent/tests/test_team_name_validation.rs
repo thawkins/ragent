@@ -70,7 +70,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
     }
 }
 
-// ── The guard itself ────────────────────────────────────────────────────────
+// -- The guard itself --------------------------------------------------------
 
 #[test]
 fn validate_team_name_rejects_traversal_and_absolute_names() {
@@ -102,7 +102,7 @@ fn validate_team_name_accepts_ordinary_names() {
     }
 }
 
-// ── Create path ─────────────────────────────────────────────────────────────
+// -- Create path -------------------------------------------------------------
 
 #[test]
 fn team_store_create_rejects_a_traversal_name() {
@@ -128,7 +128,7 @@ fn team_store_create_rejects_a_traversal_name() {
     );
 }
 
-// ── Lookup paths ────────────────────────────────────────────────────────────
+// -- Lookup paths ------------------------------------------------------------
 
 #[test]
 fn find_team_dir_rejects_invalid_names() {
@@ -168,7 +168,7 @@ fn find_team_dir_cached_rejects_invalid_names() {
     );
 }
 
-// ── Cleanup sink ────────────────────────────────────────────────────────────
+// -- Cleanup sink ------------------------------------------------------------
 
 #[tokio::test]
 async fn team_cleanup_refuses_a_traversal_name() {

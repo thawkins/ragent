@@ -58,7 +58,7 @@ pub fn build_comparison_table_body(
 
     let mut body = String::new();
 
-    // ── Comparison Criteria ───────────────────────────────────────────────
+    // -- Comparison Criteria -----------------------------------------------
     body.push_str("## Comparison Criteria\n\n");
     if criteria.is_empty() {
         body.push_str(
@@ -71,7 +71,7 @@ pub fn build_comparison_table_body(
         body.push('\n');
     }
 
-    // ── Comparison Table ────────────────────────────────────────────────
+    // -- Comparison Table ------------------------------------------------
     body.push_str("## Comparison Table\n\n");
     body.push_str("| Entity |");
     for criterion in criteria {
@@ -124,7 +124,7 @@ pub fn build_comparison_table_body(
     }
     body.push('\n');
 
-    // ── Entity Profiles ─────────────────────────────────────────────────
+    // -- Entity Profiles -------------------------------------------------
     body.push_str("## Entity Profiles\n\n");
     for entity in entities {
         let profile = by_entity.get(entity.name.as_str()).copied();

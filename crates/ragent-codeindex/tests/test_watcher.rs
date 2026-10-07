@@ -49,7 +49,7 @@ fn test_watcher_receives_create_event() {
     let file_path = dir.path().join("hello.rs");
     fs::write(&file_path, "fn main() {}").unwrap();
 
-    // Wait for events — FS notifications can be slow.
+    // Wait for events - FS notifications can be slow.
     let mut got_create = false;
     for _ in 0..20 {
         match rx.recv_timeout(Duration::from_millis(200)) {
@@ -85,7 +85,7 @@ fn test_watcher_filters_git_events() {
 
     std::thread::sleep(Duration::from_millis(200));
 
-    // Create a file inside .git — should be filtered.
+    // Create a file inside .git - should be filtered.
     fs::write(git_dir.join("test"), "data").unwrap();
 
     // Should not receive any events.

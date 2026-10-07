@@ -34,30 +34,41 @@ impl TierRouterObserver for NoopTierRouterObserver {
     fn on_done(&self, _completed: usize, _skipped: usize, _failed: usize) {}
 }
 
-/// Simple observer that collects step transitions into a vector for inspection.
-#[cfg(test)]
+/// Observer that records every step transition for later inspection.
+///
+/// Used by tests and headless harnesses that need to assert on the exact
+/// sequence of [`RunStep`]/[`StepStatus`] events the router emits.
+#[derive(Debug, Default)]
 pub struct CollectingTierRouterObserver {
     events: std::sync::Mutex<Vec<(RunStep, StepStatus, Option<String>)>>,
 }
 
-#[cfg(test)]
 impl CollectingTierRouterObserver {
-    fn new() -> Self {
+    /// Create an empty observer.
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             events: std::sync::Mutex::new(Vec::new()),
         }
     }
 
-    fn events(&self) -> Vec<(RunStep, StepStatus, Option<String>)> {
-        self.events.lock().unwrap().clone()
+    /// Snapshot the transitions recorded so far.
+    #[must_use]
+    pub fn events(&self) -> Vec<(RunStep, StepStatus, Option<String>)> {
+        self.events
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 }
 
-#[cfg(test)]
 impl TierRouterObserver for CollectingTierRouterObserver {
     fn on_step(&self, step: RunStep, status: StepStatus, detail: Option<String>) {
-        self.events.lock().unwrap().push((step, status, detail));
+        if let Ok(mut guard) = self.events.lock() {
+            guard.push((step, status, detail));
+        }
     }
+
     fn on_done(&self, _completed: usize, _skipped: usize, _failed: usize) {}
 }
 

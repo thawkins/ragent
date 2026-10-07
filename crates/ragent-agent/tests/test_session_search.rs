@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         agent_manager: None,
@@ -36,8 +36,12 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
 #[tokio::test]
 async fn test_session_search_finds_messages_across_sessions() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-a", "/tmp/project-a").unwrap();
-    storage.create_session("sess-b", "/tmp/project-b").unwrap();
+    storage
+        .create_session("sess-a", "target/temp/project-a")
+        .unwrap();
+    storage
+        .create_session("sess-b", "target/temp/project-b")
+        .unwrap();
     storage
         .create_message(&Message::user_text("sess-a", "database migration plan"))
         .unwrap();
@@ -72,8 +76,12 @@ async fn test_session_search_finds_messages_across_sessions() {
 #[tokio::test]
 async fn test_session_search_filters_by_session_id() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-a", "/tmp/project-a").unwrap();
-    storage.create_session("sess-b", "/tmp/project-b").unwrap();
+    storage
+        .create_session("sess-a", "target/temp/project-a")
+        .unwrap();
+    storage
+        .create_session("sess-b", "target/temp/project-b")
+        .unwrap();
     storage
         .create_message(&Message::user_text("sess-a", "database migration"))
         .unwrap();
@@ -95,7 +103,7 @@ async fn test_session_search_filters_by_session_id() {
 #[tokio::test]
 async fn test_session_search_filters_by_role() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-a", "/tmp").unwrap();
+    storage.create_session("sess-a", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-a", "migration question"))
         .unwrap();
@@ -117,8 +125,8 @@ async fn test_session_search_filters_by_role() {
 #[tokio::test]
 async fn test_session_search_max_per_session() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-a", "/tmp").unwrap();
-    storage.create_session("sess-b", "/tmp").unwrap();
+    storage.create_session("sess-a", "target/temp").unwrap();
+    storage.create_session("sess-b", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-a", "migration one"))
         .unwrap();
@@ -146,7 +154,7 @@ async fn test_session_search_max_per_session() {
 #[tokio::test]
 async fn test_session_search_no_match() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-a", "/tmp").unwrap();
+    storage.create_session("sess-a", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-a", "hello"))
         .unwrap();

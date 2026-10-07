@@ -5,7 +5,8 @@
 
 use ragent_agent::trigger::{TriggerRuntime, TriggerRuntimeConfig};
 use ragent_types::trigger::{
-    TriggerActionKind, TriggerEnvelope, TriggerRule, TriggerRuleId, TriggerSourceKind,
+    TriggerActionKind, TriggerEnvelope, TriggerRule, TriggerRuleId, TriggerRuleStatus,
+    TriggerSourceKind,
 };
 use std::time::Duration;
 
@@ -31,13 +32,21 @@ fn make_dynamic_envelope(rule_id: &str, condition: &str, action: &str) -> Trigge
     )
 }
 
-// ── Deduplication tests ───────────────────────────────────────────────────
+// -- Deduplication tests ---------------------------------------------------
 
 #[test]
 fn test_first_envelope_is_dispatched() {
     let rt = TriggerRuntime::default();
     let env = make_mcp_envelope("srv-1", "build done", "report");
-    assert!(rt.process(env).is_some());
+    let fired = rt.process(env).expect("first envelope must dispatch");
+    assert_eq!(fired.envelope.source_id, "srv-1");
+    assert_eq!(fired.envelope.summary, "build done");
+    assert_eq!(fired.envelope.action_prompt, "report");
+    assert_eq!(
+        fired.envelope.source_kind,
+        TriggerSourceKind::McpNotification
+    );
+    assert!(fired.rule_id.is_none(), "MCP envelopes carry no rule id");
 }
 
 #[test]
@@ -45,8 +54,10 @@ fn test_duplicate_envelope_is_suppressed() {
     let rt = TriggerRuntime::default();
     let env1 = make_mcp_envelope("srv-1", "build done", "report");
     let env2 = make_mcp_envelope("srv-1", "build done", "report");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_none());
+    let fired = rt.process(env1).expect("first envelope must dispatch");
+    assert_eq!(fired.envelope.source_id, "srv-1");
+    assert_eq!(fired.envelope.summary, "build done");
+    assert!(rt.process(env2).is_none(), "duplicate must be suppressed");
 }
 
 #[test]
@@ -54,8 +65,11 @@ fn test_different_content_passes_dedup() {
     let rt = TriggerRuntime::default();
     let env1 = make_mcp_envelope("srv-1", "build done", "report");
     let env2 = make_mcp_envelope("srv-1", "build failed", "report");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_some());
+    let first = rt.process(env1).expect("first envelope must dispatch");
+    assert_eq!(first.envelope.summary, "build done");
+    let second = rt.process(env2).expect("different content must pass dedup");
+    assert_eq!(second.envelope.summary, "build failed");
+    assert_eq!(second.envelope.source_id, "srv-1");
 }
 
 #[test]
@@ -63,11 +77,13 @@ fn test_different_source_passes_dedup() {
     let rt = TriggerRuntime::default();
     let env1 = make_mcp_envelope("srv-1", "build done", "report");
     let env2 = make_mcp_envelope("srv-2", "build done", "report");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_some());
+    let first = rt.process(env1).expect("first envelope must dispatch");
+    assert_eq!(first.envelope.source_id, "srv-1");
+    let second = rt.process(env2).expect("different source must pass dedup");
+    assert_eq!(second.envelope.source_id, "srv-2");
 }
 
-// ── Cycle suppression tests ───────────────────────────────────────────────
+// -- Cycle suppression tests -----------------------------------------------
 
 #[test]
 fn test_cycle_suppression_kicks_in() {
@@ -77,9 +93,13 @@ fn test_cycle_suppression_kicks_in() {
     };
     let rt = TriggerRuntime::new(config);
 
-    for _ in 0..3 {
+    for cycle in 1..=3 {
         let env = make_mcp_envelope("srv-1", "same", "same");
-        assert!(rt.process(env).is_some());
+        let fired = rt
+            .process(env)
+            .unwrap_or_else(|| panic!("cycle {cycle} should pass within max_cycles boundary"));
+        assert_eq!(fired.envelope.source_id, "srv-1");
+        assert_eq!(fired.envelope.summary, "same");
     }
 
     let env = make_mcp_envelope("srv-1", "same", "same");
@@ -95,20 +115,24 @@ fn test_cycle_resets_on_content_change() {
     let rt = TriggerRuntime::new(config);
 
     let env = make_mcp_envelope("srv-1", "A", "act");
-    assert!(rt.process(env).is_some());
+    let first = rt.process(env).expect("first A must pass");
+    assert_eq!(first.envelope.summary, "A");
     let env = make_mcp_envelope("srv-1", "A", "act");
-    assert!(rt.process(env).is_some());
+    let second = rt.process(env).expect("second A must pass");
+    assert_eq!(second.envelope.summary, "A");
 
     // Different content resets cycle
     let env = make_mcp_envelope("srv-1", "B", "act");
-    assert!(rt.process(env).is_some());
+    let reset = rt.process(env).expect("B must reset the cycle");
+    assert_eq!(reset.envelope.summary, "B");
 
     // Original content should pass again after reset
     let env = make_mcp_envelope("srv-1", "A", "act");
-    assert!(rt.process(env).is_some());
+    let after_reset = rt.process(env).expect("A must pass again after the reset");
+    assert_eq!(after_reset.envelope.summary, "A");
 }
 
-// ── Rule management tests ─────────────────────────────────────────────────
+// -- Rule management tests -------------------------------------------------
 
 #[test]
 fn test_rule_lifecycle() {
@@ -116,10 +140,27 @@ fn test_rule_lifecycle() {
     let rule = TriggerRule::new("cond", "act");
     let id = rt.add_rule(rule);
     assert_eq!(rt.rule_count(), 1);
-    assert!(rt.get_rule(id.as_str()).is_some());
+    let rule = rt
+        .get_rule(id.as_str())
+        .expect("the added rule must be retrievable");
+    assert_eq!(rule.condition, "cond");
+    assert_eq!(rule.action, "act");
+    assert_eq!(rule.status(), TriggerRuleStatus::Active);
 
     assert!(rt.disable_rule(id.as_str()));
+    assert_eq!(
+        rt.get_rule(id.as_str())
+            .expect("rule still present")
+            .status(),
+        TriggerRuleStatus::Disabled
+    );
     assert!(rt.enable_rule(id.as_str()));
+    assert_eq!(
+        rt.get_rule(id.as_str())
+            .expect("rule still present")
+            .status(),
+        TriggerRuleStatus::Active
+    );
 
     assert!(rt.remove_rule(id.as_str()));
     assert_eq!(rt.rule_count(), 0);
@@ -134,7 +175,7 @@ fn test_rule_list_returns_all() {
     assert_eq!(rt.list_rules().len(), 2);
 }
 
-// ── Dynamic trigger firing tests ─────────────────────────────────────────
+// -- Dynamic trigger firing tests -----------------------------------------
 
 #[test]
 fn test_dynamic_envelope_marks_rule_fired() {
@@ -148,7 +189,13 @@ fn test_dynamic_envelope_marks_rule_fired() {
     assert_eq!(fired.rule_id.unwrap().as_str(), "rule-1");
 
     let r = rt.get_rule("rule-1").unwrap();
-    assert!(r.fired_at.is_some());
+    // The runtime stamps `fired_at` with the firing envelope's timestamp.
+    assert_eq!(
+        r.fired_at,
+        Some(fired.envelope.timestamp),
+        "fired_at must record the firing timestamp"
+    );
+    assert_eq!(r.status(), TriggerRuleStatus::Fired);
 }
 
 #[test]
@@ -157,9 +204,11 @@ fn test_mcp_envelope_has_no_rule_id() {
     let env = make_mcp_envelope("srv-1", "msg", "act");
     let fired = rt.process(env).expect("should fire");
     assert!(fired.rule_id.is_none());
+    assert_eq!(fired.envelope.source_id, "srv-1");
+    assert_eq!(fired.envelope.summary, "msg");
 }
 
-// ── Maintenance tests ─────────────────────────────────────────────────────
+// -- Maintenance tests -----------------------------------------------------
 
 #[test]
 fn test_purge_removes_expired_entries() {
@@ -195,7 +244,7 @@ fn test_clear_resets_all_state() {
     assert_eq!(rt.cycle_tracker_size(), 0);
 }
 
-// ── Shared state (Arc clone) tests ──────────────────────────────────────
+// -- Shared state (Arc clone) tests --------------------------------------
 
 #[test]
 fn test_clone_shares_state() {
@@ -203,5 +252,10 @@ fn test_clone_shares_state() {
     let rt2 = rt.clone();
     let id = rt.add_rule(TriggerRule::new("c", "a"));
     assert_eq!(rt2.rule_count(), 1);
-    assert!(rt2.get_rule(id.as_str()).is_some());
+    let shared = rt2
+        .get_rule(id.as_str())
+        .expect("the clone must see the rule added via the original");
+    assert_eq!(shared.condition, "c");
+    assert_eq!(shared.action, "a");
+    assert_eq!(shared.status(), TriggerRuleStatus::Active);
 }

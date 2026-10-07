@@ -7,8 +7,8 @@
 //! branch:
 //!
 //! ```text
-//!   Draft ──> InProgress ──> Complete
-//!                                │
+//!   Draft --> InProgress --> Complete
+//!                                |
 //!                                v
 //!                            Archived
 //! ```

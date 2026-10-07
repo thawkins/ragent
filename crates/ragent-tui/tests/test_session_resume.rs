@@ -197,12 +197,12 @@ fn test_load_session_empty_history() {
 #[test]
 fn test_load_session_updates_cwd() {
     let (mut app, mgr) = make_app_with_manager();
-    let dir = std::path::PathBuf::from("/tmp/test-project");
+    let dir = std::path::PathBuf::from("target/temp/test-project");
     let session = mgr.create_session(dir).expect("create session");
 
     app.load_session(&session.id).unwrap();
 
-    assert_eq!(app.cwd, "/tmp/test-project");
+    assert_eq!(app.cwd, "target/temp/test-project");
 }
 
 #[test]

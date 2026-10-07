@@ -9,7 +9,7 @@ use ragent_tools_extended::Tool;
 use ragent_tools_extended::codeindex_godnodes::CodeIndexGodnodesTool;
 use serde_json::json;
 
-// ── Tool metadata ───────────────────────────────────────────────────────
+// -- Tool metadata -------------------------------------------------------
 
 #[test]
 fn test_tool_name() {
@@ -34,7 +34,7 @@ fn test_tool_parameters_schema_has_optional_n() {
     assert!(required.is_none() || required.unwrap().is_empty());
 }
 
-// ── Registry registration ───────────────────────────────────────────────
+// -- Registry registration -----------------------------------------------
 
 #[test]
 fn test_godnodes_tool_registered_in_extended_registry() {
@@ -54,10 +54,10 @@ fn test_godnodes_tool_registered_with_correct_permission_category() {
     assert_eq!(tool.permission_category(), "codeindex:read");
 }
 
-// ── CodeIndex::godnodes / try_godnodes ───────────────────────────────────
+// -- CodeIndex::godnodes / try_godnodes -----------------------------------
 
 /// Build an in-memory CodeIndex with a small graph:
-///   hub → sat1, hub → sat2, hub → sat3  (hub degree = 3, sats degree = 1)
+///   hub -> sat1, hub -> sat2, hub -> sat3  (hub degree = 3, sats degree = 1)
 fn build_graph_index() -> CodeIndex {
     let config = CodeIndexConfig::default();
     let idx = CodeIndex::open_in_memory(&config).unwrap();
@@ -153,7 +153,7 @@ fn test_codeindex_godnodes_returns_sorted_by_degree() {
     let idx = build_graph_index();
     let nodes = idx.godnodes(10).unwrap();
     assert!(!nodes.is_empty());
-    // Hub has degree 3 (outgoing) + 0 (incoming) = 3 — but actually degree
+    // Hub has degree 3 (outgoing) + 0 (incoming) = 3 - but actually degree
     // counts all incident edges. hub has 3 outgoing, sats have 1 incoming each.
     // So hub degree = 3, sats degree = 1.
     assert_eq!(nodes[0].name, "hub");
@@ -200,7 +200,7 @@ fn test_codeindex_try_godnodes_returns_none_when_locked() {
     );
 }
 
-// ── Tool execute with no code index ──────────────────────────────────────
+// -- Tool execute with no code index --------------------------------------
 
 #[tokio::test]
 async fn test_godnodes_tool_returns_disabled_when_no_code_index() {

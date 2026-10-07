@@ -43,7 +43,7 @@ fn test_milestone_groups_group_by_milestone() {
     let execution_order = vec![0, 1, 2];
     let runner = SpecImplRunner {
         spec_name: "test".into(),
-        specs_root: PathBuf::from("/tmp"),
+        specs_root: PathBuf::from("target/temp"),
         tasks,
         execution_order,
         options: ImplOptions::default(),
@@ -84,7 +84,7 @@ fn test_milestone_groups_unmapped_tasks_are_grouped() {
     let execution_order = vec![0, 1];
     let runner = SpecImplRunner {
         spec_name: "test".into(),
-        specs_root: PathBuf::from("/tmp"),
+        specs_root: PathBuf::from("target/temp"),
         tasks,
         execution_order,
         options: ImplOptions::default(),

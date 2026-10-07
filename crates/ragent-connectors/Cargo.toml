@@ -12,13 +12,14 @@ async-trait = { workspace = true }
 flate2 = "1"
 hex = { workspace = true }
 ragent-config = { path = "../ragent-config" }
+ragent-surface = { path = "../ragent-surface" }
 ragent-types = { path = "../ragent-types" }
 reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tar = "0.4"
-thiserror = "1"
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }

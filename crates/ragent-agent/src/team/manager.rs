@@ -7,12 +7,12 @@
 //!
 //! ```text
 //! TeamManager (Arc-shared)
-//!   ├─ spawn_teammate()   -> creates child session, injects team system prompt,
-//!   │                       starts mailbox polling loop
-//!   ├─ mailbox_poll_loop  -> tokio::spawn per teammate; drains unread messages,
-//!   │                       publishes Event::TeammateMessage etc.
-//!   ├─ run_hook()         -> exec shell hook, interpret exit code
-//!   └─ shutdown_teammate()-> writes shutdown_request mailbox message, marks Stopped
+//!   |- spawn_teammate()   -> creates child session, injects team system prompt,
+//!   |                       starts mailbox polling loop
+//!   |- mailbox_poll_loop  -> tokio::spawn per teammate; drains unread messages,
+//!   |                       publishes Event::TeammateMessage etc.
+//!   |- run_hook()         -> exec shell hook, interpret exit code
+//!   \- shutdown_teammate()-> writes shutdown_request mailbox message, marks Stopped
 //! ```
 
 use std::collections::HashMap;
@@ -127,7 +127,7 @@ pub fn teammate_retry_backoff(attempt: u32) -> std::time::Duration {
     )
 }
 
-// ── System prompt addition for teammate sessions ──────────────────────────────
+// -- System prompt addition for teammate sessions ------------------------------
 
 /// Build the team-context section injected into every teammate's system prompt.
 ///
@@ -208,7 +208,7 @@ pub fn apply_teammate_model_override(
     }
 }
 
-// ── Persistent memory injection ────────────────────────────────────────────────
+// -- Persistent memory injection ------------------------------------------------
 
 /// Maximum number of memories to inject from the team's structured memory store.
 const TEAM_MEMORY_LIMIT: usize = 25;
@@ -279,7 +279,7 @@ fn load_team_memory_block(
     lines.join("\n")
 }
 
-// ── Hook runner ───────────────────────────────────────────────────────────────
+// -- Hook runner ---------------------------------------------------------------
 
 /// Exit-code protocol for quality-gate hooks.
 #[derive(Debug, PartialEq, Eq)]
@@ -482,7 +482,7 @@ pub async fn run_team_hook(
     run_hook(&hook.command, &[], stdin_json).await
 }
 
-// ── TeamManager ───────────────────────────────────────────────────────────────
+// -- TeamManager ---------------------------------------------------------------
 
 /// Tracks the runtime state of one teammate.
 struct TeammateHandle {
@@ -661,11 +661,11 @@ impl TeamManager {
                 team = %name,
                 old_lead = %store.config.lead_session_id,
                 new_lead = %lead_sid,
-                "M6-T2: adopting team from previous lead session"
+                "adopting team from previous lead session"
             );
             // Reassign InProgress tasks for the old lead to Pending.
             if let Err(e) = Self::adopt_orphaned_tasks(&team_dir, &store.config.lead_session_id) {
-                tracing::warn!(team = %name, error = %e, "M6-T2: failed to reassign orphaned tasks");
+                tracing::warn!(team = %name, error = %e, "failed to reassign orphaned tasks");
             }
             // Update the config to reflect the new lead.
             if let Ok(mut new_store) = TeamStore::load(&team_dir) {
@@ -742,20 +742,24 @@ impl TeamManager {
                         )> = {
                             // PERF-025: DashMap - no async read guard; we just
                             // check `contains_key` on each candidate's agent_id.
-                            store.config.members.iter()
-                                                          .filter(|m| m.status == crate::team::config::MemberStatus::Spawning)
-                                                          .filter(|m| {
-                                                              if m.session_id.is_some() {
-                                                                  tracing::debug!(team = %manager.team_name, teammate = %m.name, "Skipping queued teammate: already has session_id");
-                                                                  return false;
-                                                              }
-                                                              if manager.handles.contains_key(&m.agent_id) {
-                                                                  tracing::debug!(team = %manager.team_name, teammate = %m.name, agent_id = %m.agent_id, "Skipping queued teammate: handle already exists");
-                                                                  return false;
-                                                              }
-                                                                                        true
-                                                                                    })                                .map(|m| (m.name.clone(), m.agent_type.clone(), m.spawn_prompt.clone().unwrap_or_default(), m.model_override.clone()))
-                                                          .collect()
+                            store
+                                .config
+                                .members
+                                .iter()
+                                .filter(|m| {
+                                    m.status == MemberStatus::Spawning
+                                        && m.session_id.is_none()
+                                        && !manager.handles.contains_key(&m.agent_id)
+                                })
+                                .map(|m| {
+                                    (
+                                        m.name.clone(),
+                                        m.agent_type.clone(),
+                                        m.spawn_prompt.clone().unwrap_or_default(),
+                                        m.model_override.clone(),
+                                    )
+                                })
+                                .collect()
                         };
                         if to_spawn.is_empty() {
                             tracing::info!(team = %manager.team_name, attempt, "No queued spawning members found; reconciliation complete");
@@ -811,7 +815,7 @@ impl TeamManager {
         });
     }
 
-    // ── Spawn ────────────────────────────────────────────────────────────
+    // -- Spawn ------------------------------------------------------------
 
     /// Spawn a new teammate session.
     ///
@@ -859,7 +863,7 @@ impl TeamManager {
                 DEFAULT_AGENT_TYPE.to_string()
             };
 
-        // ── PERF-024: spawn_lock held only for the config + agent-ID write ──
+        // -- PERF-024: spawn_lock held only for the config + agent-ID write --
         //
         // This is the only section that must be serialised: it reads the
         // shared `config.json`, allocates a fresh `tm-NNN` agent ID, records
@@ -920,7 +924,7 @@ impl TeamManager {
             .create_session(working_dir.to_path_buf())?;
         let child_sid = child_session.id.clone();
 
-        // ── Single config reload: update session, build roster, read memory ─
+        // -- Single config reload: update session, build roster, read memory -
         //
         // PERF-024: this second config write does not need the spawn_lock:
         // it only updates the *this* agent's* own member record (looked up
@@ -977,7 +981,7 @@ impl TeamManager {
         let base = agent.prompt.as_deref().unwrap_or("");
         Arc::make_mut(&mut agent).prompt = Some(Arc::from(format!("{base}\n{team_addition}")));
 
-        // ── Persistent memory injection ────────────────────────────────────
+        // -- Persistent memory injection ------------------------------------
         // Resolve memory scope: member-level config (from blueprint) takes
         // priority, then the agent profile's setting, then None.
         let effective_scope = if memory_scope == super::config::MemoryScope::None {
@@ -1168,7 +1172,7 @@ impl TeamManager {
         Ok(agent_id)
     }
 
-    // ── Mailbox polling ───────────────────────────────────────────────────
+    // -- Mailbox polling ---------------------------------------------------
 
     /// Start a tokio background task that polls `agent_id`'s mailbox and
     /// publishes events when new messages arrive.
@@ -1242,7 +1246,7 @@ impl TeamManager {
         })
     }
 
-    // ── Shutdown ──────────────────────────────────────────────────────────
+    // -- Shutdown ----------------------------------------------------------
 
     /// Suspend (pause) a running teammate by agent ID.
     ///
@@ -1343,7 +1347,7 @@ impl TeamManager {
     /// Missing in-memory handles (e.g. a teammate whose agent loop already
     /// exited) are tolerated: only the on-disk status is updated.
     pub async fn shutdown_teammate(&self, agent_id: &str, graceful: bool) -> Result<()> {
-        // ── Handle-level cancellation (immediate path only) ───────────────
+        // -- Handle-level cancellation (immediate path only) ---------------
         if !graceful {
             // PERF-025: DashMap - `.get()` returns a short-lived shard guard,
             // so there's no async read lock to hold/drop.
@@ -1369,7 +1373,7 @@ impl TeamManager {
             deregister_notifier(&self.team_dir, agent_id);
         }
 
-        // ── Mailbox: push ShutdownRequest (both paths) ────────────────────
+        // -- Mailbox: push ShutdownRequest (both paths) --------------------
         // For graceful, this is the primary signal. For immediate, it is a
         // fallback for an agent loop that checks its mailbox before observing
         // the cancel flag.
@@ -1389,7 +1393,7 @@ impl TeamManager {
             &correlation_id,
         ))?;
 
-        // ── On-disk status update ─────────────────────────────────────────
+        // -- On-disk status update -----------------------------------------
         let mut store = TeamStore::load(&self.team_dir)?;
         if let Some(member) = store.config.member_by_id_mut(agent_id) {
             member.status = if graceful {
@@ -1455,7 +1459,7 @@ impl TeamManager {
         Ok(())
     }
 
-    // ── Watchdog (M6-T1) & leader recovery (M6-T2) ──────────────────────
+    // -- Watchdog (M6-T1) & leader recovery (M6-T2) ----------------------
 
     /// M6-T1: Start the teammate watchdog.
     ///
@@ -1549,7 +1553,7 @@ impl TeamManager {
                         team = %manager.team_name,
                         agent_id = %agent_id,
                         ?last_progress,
-                        "M6-T1 watchdog: no progress for teammate within timeout; marking Failed"
+                        "watchdog: no progress for teammate within timeout; marking Failed"
                     );
 
                     // Set cancel flags so any live agent loop terminates.
@@ -1603,7 +1607,7 @@ impl TeamManager {
                 tracing::info!(
                     task_id = %t.id,
                     old_lead = old_lead_sid,
-                    "M6-T2: reassigning orphaned InProgress task to Pending"
+                    "reassigning orphaned InProgress task to Pending"
                 );
                 let tid = t.id.clone();
                 let _ = task_store.update_task(&tid, |task| {
@@ -1616,7 +1620,7 @@ impl TeamManager {
         Ok(())
     }
 
-    // ── PERF-023: in-memory TaskList cache with write-through persistence ──
+    // -- PERF-023: in-memory TaskList cache with write-through persistence --
 
     /// Return the current [`TaskList`] for this team, using the in-memory
     /// cache when the on-disk `tasks.json` `mtime` has not advanced.
@@ -1771,7 +1775,7 @@ impl TeamManager {
         }
     }
 
-    // ── Plan approval ─────────────────────────────────────────────────────
+    // -- Plan approval -----------------------------------------------------
 
     /// Approve a plan for a teammate (shorthand used by the plan approval tool).
     pub fn approve_plan(&self, agent_id: &str, approved: bool) -> Result<()> {
@@ -1832,7 +1836,7 @@ impl TeamManager {
     }
 }
 
-// ── TeamManagerInterface impl ────────────────────────────────────────────────
+// -- TeamManagerInterface impl ------------------------------------------------
 
 #[async_trait::async_trait]
 impl TeamManagerInterface for TeamManager {
@@ -1870,7 +1874,7 @@ impl TeamManagerInterface for TeamManager {
     }
 }
 
-// ── Helper ────────────────────────────────────────────────────────────────────
+// -- Helper --------------------------------------------------------------------
 
 /// Translate an inbound mailbox message into the appropriate `Event`.
 fn publish_message_event(

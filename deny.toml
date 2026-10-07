@@ -12,21 +12,15 @@ ignore = [
     # (RUSTSEC-2026-0002 is no longer ignored: the affected lru 0.12.5 copy is
     #  gone, and the remaining 0.16.4 copy pulled by tantivy is >= the 0.16.3
     #  patched floor.)
-    # RUSTSEC-2024-0384: `instant` is unmaintained (no direct upgrade path).
-    # Pulled by notify-types 1.0 -> notify 7 (ragent-codeindex file watcher).
-    { id = "RUSTSEC-2024-0384", reason = "transitive via notify 7 / notify-types; no maintained alternative in that line" },
-    # RUSTSEC-2025-0134: rustls-pemfile is unmaintained.
-    # Pulled by tonic 0.12 -> opentelemetry-otlp 0.29. Tonic 0.13+ drops it,
-    # but otlp 0.30+ gates the Prometheus reader behind an experimental
-    # feature and changes the `metrics::data` field visibility ragent relies
-    # on; migration is tracked separately.
-    { id = "RUSTSEC-2025-0134", reason = "transitive via tonic 0.12 (opentelemetry-otlp 0.29); OTEL 0.30 migration tracked separately" },
-    # RUSTSEC-2026-0192: ttf-parser unmaintained.
-    # ttf-parser is a transitive dep (via printpdf); functionality unaffected.
-    { id = "RUSTSEC-2026-0192", reason = "transitive via printpdf; functionality unaffected" },
-    # RUSTSEC-2026-0187: lopdf stack overflow via deeply nested PDF objects.
-    # lopdf 0.39 is a direct dep; upgrade to 0.42+ requires ooxmlsdk/quick-xml break.
-    { id = "RUSTSEC-2026-0187", reason = "direct dep blocked by ooxmlsdk/quick-xml compatibility; trusted PDF input" },
+    # (RUSTSEC-2024-0384 is no longer ignored: `instant` is absent from the
+    #  current tree; the notify-types dependency line that pulled it is gone.)
+    # (RUSTSEC-2025-0134 is no longer ignored: rustls-pemfile is absent now that
+    #  the opentelemetry-otlp / tonic migration moved off tonic 0.12.)
+    # (RUSTSEC-2026-0187 is no longer ignored: the affected lopdf 0.39 copy is
+    #  gone; the tree now carries lopdf 0.44.0, above the >= 0.42.0 patched
+    #  floor.)
+    # (RUSTSEC-2026-0192 is no longer ignored: ttf-parser is absent from the
+    #  current tree.)
     # RUSTSEC-2026-0194: quick-xml quadratic duplicate-attribute check.
     # quick-xml 0.39 is a direct dep; upgrade blocked by ooxmlsdk 0.3 compatibility.
     { id = "RUSTSEC-2026-0194", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },

@@ -31,6 +31,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use rand::RngExt;
 
 use ragent_types::message::{Message, MessagePart, Role};
 
@@ -139,6 +140,16 @@ const BUSY_TIMEOUT_MS: i64 = 30_000;
 /// hours.
 const WAL_AUTOCHECKPOINT_PAGES: i64 = 500;
 
+/// Fill an `N`-byte array with cryptographically secure random bytes.
+///
+/// Centralises the `rand::rng().fill(..)` pattern used for the credential key
+/// and the AEAD nonce.
+fn fill_random<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
+    rand::rng().fill(&mut bytes[..]);
+    bytes
+}
+
 /// Per-installation 32-byte AEAD key.
 ///
 /// SEC-ragent-storage-001 (SECTASKS T-017): the previous scheme keyed an
@@ -150,6 +161,15 @@ const WAL_AUTOCHECKPOINT_PAGES: i64 = 500;
 /// key makes existing credentials unreadable, which is the intended trade-off
 /// for a credential store that can no longer be decrypted from the database
 /// file alone.
+///
+/// Ordering invariant (audit T-112): [`load_or_create_credential_key`] creates
+/// the file with `mode(0o600)` via `OpenOptionsExt` *before* writing the key
+/// bytes and *before* returning, so the file is never world-readable and this
+/// key is never used to encrypt/decrypt anything until the `0600` file exists
+/// and has been written. The `#[cfg(unix)]` arm is the authoritative path; the
+/// non-unix fallback uses the process ACLs. The path is derived from
+/// `dirs::data_dir()` (the OS user's private state directory), not from a
+/// world-writable location.
 static CREDENTIAL_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     if let Some(key) = load_or_create_credential_key() {
         return key;
@@ -163,14 +183,17 @@ static CREDENTIAL_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
         "credential key file could not be persisted; using a per-process key. \
          Stored credentials will not survive a restart."
     );
-    let mut key = [0u8; 32];
-    rand::Rng::fill(&mut rand::thread_rng(), &mut key);
-    key
+    fill_random()
 });
 
 /// Load the per-install credential key, generating it on first use.
 ///
 /// Returns `None` when the key file cannot be read or created.
+///
+/// Ordering invariant (audit T-112): the unix path creates the file with
+/// `mode(0o600)` *before* the `write_all` of the key bytes; on any failure the
+/// key is not returned, so no encryption ever happens under a world-readable
+/// or unwritten key file.
 fn load_or_create_credential_key() -> Option<[u8; 32]> {
     let dir = credential_key_dir()?;
     if std::fs::create_dir_all(&dir).is_err() {
@@ -180,13 +203,10 @@ fn load_or_create_credential_key() -> Option<[u8; 32]> {
     if let Ok(existing) = std::fs::read(&path)
         && existing.len() == 32
     {
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&existing);
-        return Some(key);
+        return existing.as_slice().try_into().ok();
     }
 
-    let mut key = [0u8; 32];
-    rand::Rng::fill(&mut rand::thread_rng(), &mut key);
+    let key = fill_random();
 
     // Write 0600 from creation on unix; ignore the mode elsewhere.
     #[cfg(unix)]
@@ -348,11 +368,9 @@ pub fn encrypt_key(key: &str) -> String {
 #[must_use]
 pub fn encrypt_key_with_context(plaintext: &str, context: &[u8]) -> String {
     use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-    use rand::Rng;
 
     let cipher = chacha20poly1305::ChaCha20Poly1305::new((&*CREDENTIAL_KEY).into());
-    let mut nonce = [0u8; 12];
-    rand::thread_rng().fill(&mut nonce);
+    let nonce: [u8; 12] = fill_random();
 
     let payload = Payload {
         msg: plaintext.as_bytes(),
@@ -1146,7 +1164,7 @@ impl Storage {
 
         Ok(())
     }
-    // ── Session CRUD ──────────────────────────────────────────────
+    // -- Session CRUD ----------------------------------------------
 
     /// Inserts a new session row with the given `id` and `directory`.
     ///
@@ -1361,7 +1379,7 @@ impl Storage {
         Ok(())
     }
 
-    // ── Message CRUD ──────────────────────────────────────────────
+    // -- Message CRUD ----------------------------------------------
 
     /// Persists a new message and bumps the parent session's `updated_at`.
     ///
@@ -1609,7 +1627,7 @@ impl Storage {
         Ok(n)
     }
 
-    // ── Run-cost summaries (FR-018) ────────────────────────────────────
+    // -- Run-cost summaries (FR-018) ------------------------------------
 
     /// Inserts a persisted run-cost summary row (FR-018).
     ///
@@ -1708,7 +1726,7 @@ impl Storage {
         Ok(rows)
     }
 
-    // ── Provider Auth ─────────────────────────────────────────────
+    // -- Provider Auth ---------------------------------------------
 
     /// Stores or replaces the API key for the given provider.
     ///
@@ -1911,7 +1929,7 @@ impl Storage {
         Ok(())
     }
 
-    // ── Settings (key-value) ──────────────────────────────────────
+    // -- Settings (key-value) --------------------------------------
 
     /// Stores or replaces a setting value.
     ///
@@ -2030,7 +2048,7 @@ impl Storage {
         Ok(())
     }
 
-    // ── Todo CRUD ───────────────────────────────────────────────────
+    // -- Todo CRUD ---------------------------------------------------
 
     /// Creates a new TODO item in the given session.
     pub fn create_task_simple(
@@ -2156,7 +2174,7 @@ impl Storage {
         Ok(changed)
     }
 
-    // ── Task CRUD (todo2tasks T-003) ───────────────────────────────
+    // -- Task CRUD (todo2tasks T-003) -------------------------------
 
     /// Creates a new Task row in the `todos` table with all Task-model
     /// columns populated.
@@ -2352,7 +2370,7 @@ impl Storage {
         Ok(changed > 0)
     }
 
-    // ── Task DAG derivation (todo2tasks T-004) ─────────────────────
+    // -- Task DAG derivation (todo2tasks T-004) ---------------------
 
     /// Fetches a single Task with derived DAG fields (`blocks`, `is_blocked`,
     /// `is_available`) computed from the full session task set.
@@ -2411,7 +2429,7 @@ impl Storage {
             .collect())
     }
 
-    // ── Durable Initiatives (JCODEPLAN M8) ──────────────────────────
+    // -- Durable Initiatives (JCODEPLAN M8) --------------------------
 
     /// Inserts a new durable initiative.
     ///
@@ -2574,7 +2592,7 @@ impl Storage {
         Ok(changed > 0)
     }
 
-    // ── Cron Events CRUD (spec agentchron T-006) ─────────────────────
+    // -- Cron Events CRUD (spec agentchron T-006) ---------------------
 
     /// Insert a new cron event into the `cron_events` table (FR-001, FR-002).
     ///
@@ -2742,7 +2760,7 @@ impl Storage {
         Ok(changed > 0)
     }
 
-    // ── Structured Memory CRUD ──────────────────────────────────────
+    // -- Structured Memory CRUD --------------------------------------
 
     /// Inserts a new structured memory with category, tags, and confidence.
     ///
@@ -3499,7 +3517,7 @@ impl Storage {
         Ok(results)
     }
 
-    // ── Session message embeddings (M5) ────────────────────────────────
+    // -- Session message embeddings (M5) --------------------------------
 
     /// Stores or updates an embedding vector for a session message.
     ///
@@ -3639,7 +3657,7 @@ impl Storage {
         Ok(results)
     }
 
-    // ── Knowledge Graph CRUD ────────────────────────────────────────────
+    // -- Knowledge Graph CRUD --------------------------------------------
 
     /// Insert or update a knowledge graph entity.
     ///
@@ -4140,7 +4158,7 @@ impl Storage {
         Ok(conn.execute(&sql, param_refs.as_slice())?)
     }
 
-    // ── M5: Session message search ──────────────────────────────────────
+    // -- M5: Session message search --------------------------------------
 
     /// Searches the current session's messages using the FTS5 full-text index.
     ///
@@ -4568,7 +4586,7 @@ pub struct SessionRow {
     pub summary: Option<String>,
 }
 
-// ── Initiatives (JCODEPLAN M8) ──────────────────────────────────────
+// -- Initiatives (JCODEPLAN M8) --------------------------------------
 
 /// A serialisable milestone within a durable initiative.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -4752,7 +4770,7 @@ pub struct TaskUpdateParams<'a> {
     pub blocked_by: Option<&'a [String]>,
 }
 
-// ── Task DAG derivation (todo2tasks T-004) ────────────────────────────
+// -- Task DAG derivation (todo2tasks T-004) ----------------------------
 
 /// Derived/computed DAG fields for a single task (todo2tasks T-004,
 /// FR-005).
@@ -4883,7 +4901,7 @@ pub fn compute_task_dag(tasks: &[TaskRow]) -> std::collections::HashMap<String, 
     dag
 }
 
-// ── Cycle detection (todo2tasks T-005, FR-004) ────────────────────────
+// -- Cycle detection (todo2tasks T-005, FR-004) ------------------------
 
 /// Error returned when adding a dependency edge would create a cycle
 /// in the session task graph (todo2tasks T-005, FR-004).
@@ -5205,7 +5223,7 @@ pub struct BackgroundTaskRow {
     pub completed_at: Option<String>,
 }
 
-// ── M5: Session message search types ───────────────────────────────────────
+// -- M5: Session message search types ---------------------------------------
 
 /// A single message search result from the `messages_fts` full-text index.
 ///
@@ -5261,7 +5279,7 @@ pub struct SessionSearchParams {
     pub session_id: Option<String>,
 }
 
-// ── Cron Events (spec agentchron T-006) ──────────────────────────────
+// -- Cron Events (spec agentchron T-006) ------------------------------
 
 /// Row representation of a cron event as stored in `SQLite`.
 ///

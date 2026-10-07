@@ -2,7 +2,7 @@
 
 use super::*;
 
-// ── Slash prefix tests ─────────────────────────────────────────────
+// -- Slash prefix tests ---------------------------------------------
 
 #[test]
 fn test_slash_simple() {
@@ -81,7 +81,7 @@ fn test_slash_advanced() {
     assert_eq!(result.remaining_prompt, "optimise");
 }
 
-// ── Bracket prefix tests ────────────────────────────────────────────
+// -- Bracket prefix tests --------------------------------------------
 
 #[test]
 fn test_bracket_simple() {
@@ -111,7 +111,7 @@ fn test_bracket_no_space() {
     assert_eq!(result.remaining_prompt, "prove this");
 }
 
-// ── Word prefix tests ──────────────────────────────────────────────
+// -- Word prefix tests ----------------------------------------------
 
 #[test]
 fn test_word_deep_mode_colon() {
@@ -155,7 +155,7 @@ fn test_word_medium_mode_colon() {
     assert_eq!(result.remaining_prompt, "explain");
 }
 
-// ── No modifier (fall-through) tests ────────────────────────────────
+// -- No modifier (fall-through) tests --------------------------------
 
 #[test]
 fn test_no_modifier_plain() {
@@ -179,7 +179,7 @@ fn test_no_modifier_bracket_other() {
     assert!(detect_modifier("[note] something").is_none());
 }
 
-// ── Stripping tests ────────────────────────────────────────────────
+// -- Stripping tests ------------------------------------------------
 
 #[test]
 fn test_modifier_stripped_from_slash() {
@@ -202,7 +202,7 @@ fn test_modifier_stripped_from_word() {
     assert_eq!(result.remaining_prompt, "prove this");
 }
 
-// ── Edge cases ──────────────────────────────────────────────────────
+// -- Edge cases ------------------------------------------------------
 
 #[test]
 fn test_slash_with_leading_whitespace() {
@@ -234,13 +234,13 @@ fn test_alias_mixed_case() {
     assert_eq!(result.remaining_prompt, "refactor");
 }
 
-// ── Extended modifier detection tests (T-028) ───────────────────────────
+// -- Extended modifier detection tests (T-028) ---------------------------
 
-// ── FR-016: Slash prefix modifier tests ──────────────────────────────
+// -- FR-016: Slash prefix modifier tests ------------------------------
 
 #[test]
 fn test_slash_all_simple_aliases() {
-    // FR-019: simple, basic, cheap → SIMPLE
+    // FR-019: simple, basic, cheap -> SIMPLE
     for alias in &["simple", "basic", "cheap"] {
         let prompt = format!("/{} hello world", alias);
         let result = detect_modifier(&prompt)
@@ -252,7 +252,7 @@ fn test_slash_all_simple_aliases() {
 
 #[test]
 fn test_slash_all_medium_aliases() {
-    // FR-019: medium, balanced → MEDIUM
+    // FR-019: medium, balanced -> MEDIUM
     for alias in &["medium", "balanced"] {
         let prompt = format!("/{} explain this", alias);
         let result = detect_modifier(&prompt)
@@ -264,7 +264,7 @@ fn test_slash_all_medium_aliases() {
 
 #[test]
 fn test_slash_all_complex_aliases() {
-    // FR-019: complex, advanced → COMPLEX
+    // FR-019: complex, advanced -> COMPLEX
     for alias in &["complex", "advanced"] {
         let prompt = format!("/{} deep analysis", alias);
         let result = detect_modifier(&prompt)
@@ -281,7 +281,7 @@ fn test_slash_all_complex_aliases() {
 
 #[test]
 fn test_slash_all_reasoning_aliases() {
-    // FR-019: max, reasoning, think, deep → REASONING
+    // FR-019: max, reasoning, think, deep -> REASONING
     for alias in &["max", "reasoning", "think", "deep"] {
         let prompt = format!("/{} prove theorem", alias);
         let result = detect_modifier(&prompt)
@@ -322,7 +322,7 @@ fn test_slash_case_insensitive_all() {
     }
 }
 
-// ── FR-017: Bracket prefix modifier tests ────────────────────────────
+// -- FR-017: Bracket prefix modifier tests ----------------------------
 
 #[test]
 fn test_bracket_all_tiers() {
@@ -376,7 +376,7 @@ fn test_bracket_with_spaces() {
     assert_eq!(result.remaining_prompt, "multiple  spaces");
 }
 
-// ── FR-018: Word prefix modifier tests ───────────────────────────────
+// -- FR-018: Word prefix modifier tests -------------------------------
 
 #[test]
 fn test_word_all_tiers_with_colon() {
@@ -428,7 +428,7 @@ fn test_word_case_insensitive() {
     }
 }
 
-// ── FR-020: Modifiers must be stripped ───────────────────────────────
+// -- FR-020: Modifiers must be stripped -------------------------------
 
 #[test]
 fn test_slash_modifier_fully_stripped() {
@@ -460,7 +460,7 @@ fn test_word_modifier_fully_stripped() {
     assert!(!result.remaining_prompt.starts_with("deep"));
 }
 
-// ── Non-modifier edge cases ──────────────────────────────────────────
+// -- Non-modifier edge cases ------------------------------------------
 
 #[test]
 fn test_no_modifier_regular_slash() {

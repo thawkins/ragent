@@ -45,7 +45,7 @@ fn user_message_count(app: &App) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// FR-025 / FR-029 — Stop halts exactly like CancelAgent and never advances
+// FR-025 / FR-029 - Stop halts exactly like CancelAgent and never advances
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -134,7 +134,7 @@ async fn test_stop_row_leaves_input_buffer_and_attachments_untouched() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-026 — the halt row's label switches Stop -> Resume
+// FR-026 - the halt row's label switches Stop -> Resume
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -190,7 +190,7 @@ fn test_halt_label_is_stop_while_compaction_runs() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-027 — selecting Resume resumes the interrupted work
+// FR-027 - selecting Resume resumes the interrupted work
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -280,7 +280,7 @@ async fn test_resume_row_without_a_session_reports_no_active_session() {
 }
 
 // ---------------------------------------------------------------------------
-// NFR-008 — the action repaints on the next frame
+// NFR-008 - the action repaints on the next frame
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

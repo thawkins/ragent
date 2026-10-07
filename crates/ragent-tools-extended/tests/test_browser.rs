@@ -1,4 +1,4 @@
-//! Integration tests for the `browser` tool — JCODEPLAN M4 (T-033).
+//! Integration tests for the `browser` tool - JCODEPLAN M4 (T-033).
 //!
 //! Covers:
 //! - Tool identity (name, permission category, description)
@@ -203,7 +203,7 @@ fn test_default_cdp_endpoint() {
 }
 
 // ---------------------------------------------------------------------------
-// Graceful degradation — no browser available
+// Graceful degradation - no browser available
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -214,7 +214,7 @@ async fn test_status_returns_honest_error_when_no_browser() {
 
     let result = tool.execute(json!({"action": "status"}), &ctx).await;
 
-    // The tool should not return an Err — it should return a ToolOutput
+    // The tool should not return an Err - it should return a ToolOutput
     // with an honest "not available" message (graceful degradation).
     let output = result.expect("status should degrade gracefully, not error");
 
@@ -361,7 +361,7 @@ async fn test_unknown_action_returns_error() {
     // With no browser, it should either error or degrade gracefully.
     // An unknown action after connection check should error.
     // But since no browser is available, it degrades first.
-    // Either way is acceptable — just check it doesn't panic.
+    // Either way is acceptable - just check it doesn't panic.
     let _ = result;
 }
 
@@ -602,7 +602,7 @@ fn test_first_page_target_no_page_returns_error() {
 }
 
 // ---------------------------------------------------------------------------
-// Conditional CDP tests — only run when Chrome is available at port 9222
+// Conditional CDP tests - only run when Chrome is available at port 9222
 // ---------------------------------------------------------------------------
 
 /// Check if a CDP endpoint is available at the default port.

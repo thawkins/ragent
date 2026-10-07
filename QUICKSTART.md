@@ -1855,6 +1855,37 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.129
+
+- **Code-audit remediation complete (M5-M9)** — the `docs/plans/code-audit.md`
+  plan is now executed through M9. Dead-code/stale-duplicate removal (M5) deletes
+  the unreferenced `ragent-agent::snapshot` module and the duplicated inline
+  schema test suite, replaces the placeholder `test_precompiled_regexes` bodies
+  with real assertions, drops the dead connector `NeverProbe`/`NoProbe` fallbacks,
+  and extracts the new 18th `ragent-surface` crate (shared `/plugins`/`/connectors`
+  attribution, subcommand tokeniser, store-dir resolution, and harness step model).
+- **Dependency upkeep** — the yanked `yoke-derive` is cleared; the workspace
+  converges on `thiserror 2`, `reqwest 0.13` (the `ragent-llm` pin now inherits
+  the workspace), `rand 0.10`, and `criterion 0.8`; `ragent-storage` moves from
+  `rand 0.8` to `0.10`; `lopdf` converges on `0.44` and the dedicated
+  `vendor/lopdf` crate is deleted; `opentelemetry` 0.29 -> 0.33 (the Prometheus
+  scrape endpoint enables `experimental_metrics_custom_reader`); and `notify` 8.2,
+  `rquickjs` 0.14, `tree-sitter` 0.27, `chacha20poly1305` 0.11, and `which` 8 land.
+- **Test hygiene and new coverage** — test scratch paths move off `/tmp` to
+  `target/temp`; shared `tests/support` `TempTree` helpers replace copy-pasted
+  sandboxes; diagnostic and live-network tests are `#[ignore]`-gated; the config
+  API-key test triples collapse to one table-driven `test_api_key_config_fields.rs`;
+  and new suites cover the calculator, `agent_complete`/`bash_reset`/`xlsx`/`get_env`,
+  the Azure AI Foundry provider, the agent-loop step harness, and the orchestrator
+  `Coordinator` (fixing an `active_jobs` underflow).
+- **Standards cleanup and secret hardening** — GitHub/GitLab acronym casing is
+  standardised across `ragent-tools-vcs`, the three user-facing/external-input
+  unwraps and production-source emoji/box-drawing glyphs are removed, the six
+  named modules gain `//!` headers, `MultiPlEAdapter` becomes `MultipleAdapter`,
+  and `test_codeindex_backward_compat` asserts against the `SLASH_COMMANDS` data
+  model. `.gitignore` gains `*.db-wal`/`*.db-shm` and the certificate/credential
+  patterns, and a tracked `.env.example` template lists every credential env var.
+
 ## Version 1.0.128
 
 - **Config durability and atomic writes** — every `ragent.json` write (`Config::save`,

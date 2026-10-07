@@ -13,6 +13,8 @@
 mod mock_session {
     use std::time::Duration;
 
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
@@ -46,32 +48,30 @@ mod mock_session {
     fn sum_u64(metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics], name: &str) -> u64 {
         metrics
             .iter()
-            .flat_map(|rm| rm.scope_metrics.iter())
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == name)
-            .filter_map(|m| {
-                m.data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == name)
+            .filter_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                _ => None,
             })
-            .flat_map(|sum| sum.data_points.iter())
-            .map(|dp| dp.value)
+            .flat_map(|sum| sum.data_points())
+            .map(|dp| dp.value())
             .sum()
     }
 
     fn sum_i64(metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics], name: &str) -> i64 {
         metrics
             .iter()
-            .flat_map(|rm| rm.scope_metrics.iter())
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == name)
-            .filter_map(|m| {
-                m.data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<i64>>()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == name)
+            .filter_map(|m| match m.data() {
+                AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+                _ => None,
             })
-            .flat_map(|sum| sum.data_points.iter())
-            .map(|dp| dp.value)
+            .flat_map(|sum| sum.data_points())
+            .map(|dp| dp.value())
             .sum()
     }
 
@@ -80,15 +80,15 @@ mod mock_session {
         name: &str,
     ) -> bool {
         metrics.iter().any(|rm| {
-            rm.scope_metrics
-                .iter()
-                .flat_map(|sm| sm.metrics.iter())
-                .filter(|m| m.name == name)
+            rm.scope_metrics()
+                .flat_map(|sm| sm.metrics())
+                .filter(|m| m.name() == name)
                 .any(|m| {
-                    m.data
-                        .as_any()
-                        .downcast_ref::<opentelemetry_sdk::metrics::data::Histogram<f64>>()
-                        .is_some()
+                    match m.data() {
+                        AggregatedMetrics::F64(MetricData::Histogram(agg)) => Some(agg),
+                        _ => None,
+                    }
+                    .is_some()
                 })
         })
     }
@@ -98,15 +98,15 @@ mod mock_session {
         name: &str,
     ) -> bool {
         metrics.iter().any(|rm| {
-            rm.scope_metrics
-                .iter()
-                .flat_map(|sm| sm.metrics.iter())
-                .filter(|m| m.name == name)
+            rm.scope_metrics()
+                .flat_map(|sm| sm.metrics())
+                .filter(|m| m.name() == name)
                 .any(|m| {
-                    m.data
-                        .as_any()
-                        .downcast_ref::<opentelemetry_sdk::metrics::data::Histogram<u64>>()
-                        .is_some()
+                    match m.data() {
+                        AggregatedMetrics::U64(MetricData::Histogram(agg)) => Some(agg),
+                        _ => None,
+                    }
+                    .is_some()
                 })
         })
     }
@@ -270,16 +270,15 @@ mod mock_session {
     fn sum_f64(metrics: &[opentelemetry_sdk::metrics::data::ResourceMetrics], name: &str) -> f64 {
         metrics
             .iter()
-            .flat_map(|rm| rm.scope_metrics.iter())
-            .flat_map(|sm| sm.metrics.iter())
-            .filter(|m| m.name == name)
-            .filter_map(|m| {
-                m.data
-                    .as_any()
-                    .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<f64>>()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
+            .filter(|m| m.name() == name)
+            .filter_map(|m| match m.data() {
+                AggregatedMetrics::F64(MetricData::Sum(agg)) => Some(agg),
+                _ => None,
             })
-            .flat_map(|sum| sum.data_points.iter())
-            .map(|dp| dp.value)
+            .flat_map(|sum| sum.data_points())
+            .map(|dp| dp.value())
             .sum()
     }
 }

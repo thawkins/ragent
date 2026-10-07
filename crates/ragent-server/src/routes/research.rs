@@ -112,7 +112,7 @@ fn first_out_of_root_path(paths: &[String], root: &StdPath) -> Option<String> {
     None
 }
 
-// ── GET /research ────────────────────────────────────────────────────────
+// -- GET /research --------------------------------------------------------
 
 async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
     let manager = ResearchManager::new(research_root());
@@ -174,7 +174,7 @@ impl ResearchItemRow {
     }
 }
 
-// ── POST /research ───────────────────────────────────────────────────────
+// -- POST /research -------------------------------------------------------
 
 #[derive(Deserialize)]
 struct CreateResearchRequest {
@@ -663,7 +663,7 @@ async fn create_research(
     )
         .into_response()
 }
-// ── SSE broadcast observer (shared by POST + PUT) ────────────────────────
+// -- SSE broadcast observer (shared by POST + PUT) ------------------------
 
 /// [`SessionObserver`] that fans research session events out over a
 /// tokio broadcast channel so SSE subscribers of
@@ -707,7 +707,7 @@ impl SessionObserver for BroadcastObserver {
     }
 }
 
-// ── PUT /research/{name} ─────────────────────────────────────────────────
+// -- PUT /research/{name} -------------------------------------------------
 
 /// Replay the invocation recorded in a research item's frontmatter and
 /// overwrite `RESEARCH.md` (and the associated supporting files) with a
@@ -868,7 +868,7 @@ async fn update_research(
         .into_response()
 }
 
-// ── GET /research/{name} ────────────────────────────────────────────────
+// -- GET /research/{name} ------------------------------------------------
 
 /// Query parameters for `GET /research/{name}`.
 #[derive(Deserialize)]
@@ -930,7 +930,7 @@ async fn show_research(
     }
 }
 
-// ── DELETE /research/{name} ─────────────────────────────────────────────
+// -- DELETE /research/{name} ---------------------------------------------
 
 #[derive(Deserialize)]
 struct DeleteResearchQuery {
@@ -963,9 +963,9 @@ async fn delete_research(
     }
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────
+// -- helpers -------------------------------------------------------------
 
-// ── GET /research/{name}/events ──────────────────────────────────────────
+// -- GET /research/{name}/events ------------------------------------------
 //
 // SSE endpoint that streams live research events for a background research
 // run. The client connects to this URL after receiving a 202 Accepted from

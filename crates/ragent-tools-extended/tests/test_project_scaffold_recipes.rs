@@ -137,7 +137,7 @@ fn test_recipes_registry_matches_codeindex_language_list() {
 
 #[test]
 fn test_recipes_lookup_by_all_enum_variants() {
-    // Every `Language` variant must resolve — the help surface and renderer
+    // Every `Language` variant must resolve - the help surface and renderer
     // both iterate the enum, so a missing recipe would break them.
     for language in Language::all() {
         assert!(recipe_for(*language).is_some(), "no recipe for {language}");
@@ -150,7 +150,7 @@ fn test_recipes_lookup_by_all_enum_variants() {
 #[test]
 fn test_recipes_every_language_has_all_app_types() {
     // Every application language defines the four core app-type starters. The
-    // `webapp` starter is optional — only the languages with a web idiom define
+    // `webapp` starter is optional - only the languages with a web idiom define
     // one (asserted separately below); the rest degrade to a manifest-only
     // layout via `plan_app_layout`.
     for (language, name) in APPLICATION_LANGUAGES {

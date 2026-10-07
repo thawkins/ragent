@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ── Decomposition schema ─────────────────────────────────────────────────────
+// -- Decomposition schema -----------------------------------------------------
 
 /// A single subtask produced by the LLM decomposition step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +70,7 @@ pub struct SwarmState {
     pub default_agent_type: Option<String>,
 }
 
-// ── Decomposition prompt ────────────────────────────────────────────────────
+// -- Decomposition prompt ----------------------------------------------------
 
 /// System prompt sent to the LLM to decompose a user goal into subtasks.
 pub const DECOMPOSITION_SYSTEM_PROMPT: &str = r#"You are a task decomposition engine for a multi-agent coding system.

@@ -12,12 +12,12 @@
 //!
 //! The guarantee has three layers, each tested below:
 //!
-//! 1. **Recording is non-blocking** — `Counter::add`, `Histogram::record`, and
+//! 1. **Recording is non-blocking** - `Counter::add`, `Histogram::record`, and
 //!    `Gauge::record` are synchronous atomic operations that never touch the
 //!    network. They complete in nanoseconds regardless of exporter state.
-//! 2. **Periodic export is asynchronous** — the `PeriodicReader` runs exports on
+//! 2. **Periodic export is asynchronous** - the `PeriodicReader` runs exports on
 //!    a background tokio task; the agent loop never waits for it.
-//! 3. **Error handling never panics** — `flush()`, `shutdown()`, and
+//! 3. **Error handling never panics** - `flush()`, `shutdown()`, and
 //!    `ShutdownGuard::drop` log exporter errors at `warn` level and return
 //!    `Err` (or swallow them in the case of `Drop`) rather than panicking.
 //!
@@ -35,7 +35,7 @@ use ragent_telemetry::{
     InstrumentRegistry, OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsystem,
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 /// Build an `OtelConfig` pointing at an unreachable endpoint with a 1-second
 /// export timeout.
@@ -45,7 +45,7 @@ fn unreachable_config() -> OtelConfig {
         // Port 1 is reserved and refuses connections immediately (ECONNREFUSED).
         endpoint: "http://127.0.0.1:1".to_string(),
         protocol: OtelProtocol::Http,
-        // 1 second — the minimum allowed. Clamped by build_metric_exporter.
+        // 1 second - the minimum allowed. Clamped by build_metric_exporter.
         export_timeout_seconds: 1,
         // Long interval so no background export fires during the test.
         export_interval_seconds: 3600,
@@ -53,7 +53,7 @@ fn unreachable_config() -> OtelConfig {
     }
 }
 
-// ── 1. Recording is non-blocking ──────────────────────────────────────────
+// -- 1. Recording is non-blocking ------------------------------------------
 
 /// Recording metrics through a live `InstrumentRegistry` does not block on
 /// network I/O, even when the exporter endpoint is unreachable (FR-031).
@@ -113,9 +113,9 @@ fn test_recording_noop_registry_is_instantaneous() {
     );
 }
 
-// ── 2. flush()/shutdown() against an unreachable endpoint never panic ─────
+// -- 2. flush()/shutdown() against an unreachable endpoint never panic -----
 
-/// `flush()` against an unreachable endpoint does not panic — it returns a
+/// `flush()` against an unreachable endpoint does not panic - it returns a
 /// `Result` that the caller handles (FR-033).
 ///
 /// This mirrors `test_subsystem_flush_does_not_panic_without_collector` in
@@ -158,7 +158,7 @@ fn test_disabled_flush_shutdown_never_panic() {
     assert!(sub.shutdown().is_ok(), "disabled shutdown must succeed");
 }
 
-// ── 3. ShutdownGuard::drop is infallible ─────────────────────────────────
+// -- 3. ShutdownGuard::drop is infallible ---------------------------------
 
 /// `ShutdownGuard::drop` does not panic even when the endpoint is unreachable
 /// and flush/shutdown fail (FR-031, FR-033).
@@ -183,7 +183,7 @@ fn test_shutdown_guard_drop_does_not_panic_on_unreachable_endpoint() {
         let guard = ragent_telemetry::shutdown::ShutdownGuard::new(std::sync::Arc::new(sub));
         // Use the guard so it's not optimised away.
         assert_eq!(guard.subsystem().state(), TelemetryState::Enabled);
-        // guard drops here — must not panic.
+        // guard drops here - must not panic.
     }
     // If we reach this point, the guard's Drop did not panic.
 }
@@ -196,9 +196,9 @@ fn test_shutdown_guard_drop_disabled_is_clean() {
     drop(guard); // must not panic or hang
 }
 
-// ── 4. Recording after a failed export still works (retry semantics) ──────
+// -- 4. Recording after a failed export still works (retry semantics) ------
 
-/// After a failed export (unreachable endpoint), recording still works — the
+/// After a failed export (unreachable endpoint), recording still works - the
 /// SDK does not poison instruments (FR-033: "retried on the next export
 /// interval").
 #[test]
@@ -213,7 +213,7 @@ fn test_recording_still_works_after_failed_flush() {
 
     // Record, attempt a flush (which may fail), then record again.
     registry.llm_requests.add(1, &[]);
-    // flush may fail — that's fine, we swallow it.
+    // flush may fail - that's fine, we swallow it.
     let _ = sub.flush();
     // Recording must still work after a failed flush (FR-033 retry semantics).
     registry.llm_requests.add(1, &[]);
@@ -221,7 +221,7 @@ fn test_recording_still_works_after_failed_flush() {
     // If we got here without panicking, the guarantee holds.
 }
 
-// ── 5. Export timeout is configurable and clamped ─────────────────────────
+// -- 5. Export timeout is configurable and clamped -------------------------
 
 /// The default export timeout is 10 seconds (matching the OTEL SDK default).
 #[test]
@@ -281,7 +281,7 @@ fn test_validate_rejects_zero_export_timeout() {
     );
 }
 
-// ── 6. flush_on_signal_arc never panics on install ────────────────────────
+// -- 6. flush_on_signal_arc never panics on install ------------------------
 
 /// `flush_on_signal_arc` installs a signal handler without panicking (FR-031,
 /// FR-033).
@@ -329,7 +329,7 @@ fn test_flush_on_signal_arc_disabled_installs_cleanly() {
     drop(rt);
 }
 
-// ── 7. Concurrent recording does not deadlock or panic ────────────────────
+// -- 7. Concurrent recording does not deadlock or panic --------------------
 
 /// Recording from multiple threads concurrently against an unreachable
 /// endpoint does not deadlock or panic (FR-031).
@@ -382,7 +382,7 @@ fn test_concurrent_recording_does_not_deadlock() {
     );
 }
 
-// ── 8. No-op recorder methods never panic ───────────���─────────────────────
+// -- 8. No-op recorder methods never panic -----------���---------------------
 
 /// All no-op recorder methods (used when the `telemetry` feature is off or the
 /// subsystem is disabled) never panic and complete instantly (FR-022).
@@ -420,7 +420,7 @@ fn test_noop_recorder_methods_never_panic() {
     // If we got here, none of the no-op methods panicked.
 }
 
-// ── 9. Error path in TelemetrySubsystem::new is non-panicking ─────────────
+// -- 9. Error path in TelemetrySubsystem::new is non-panicking -------------
 
 /// An invalid endpoint returns an `Err` rather than panicking (FR-033).
 #[test]

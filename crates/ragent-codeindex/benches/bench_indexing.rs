@@ -6,7 +6,7 @@ use ragent_codeindex::types::{CodeIndexConfig, SearchQuery};
 use std::path::Path;
 use tempfile::tempdir;
 
-// ── Sample sources for each language ──────────────────────────────────────────
+// -- Sample sources for each language ------------------------------------------
 
 const RUST_SRC: &str = r"
 pub struct Config { name: String, value: i32 }
@@ -92,7 +92,7 @@ public class Config {
 }
 ";
 
-// ── Benchmarks ────────────────────────────────────────────────────────────────
+// -- Benchmarks ----------------------------------------------------------------
 
 fn bench_parse_single(c: &mut Criterion) {
     let registry = ParserRegistry::new();

@@ -68,7 +68,7 @@ fn test_graph_busy_clears_after_build() {
 #[test]
 fn test_graph_busy_clears_after_failed_build() {
     let dir = TempDir::new().unwrap();
-    // No files indexed — the build itself succeeds with zero edges, but the
+    // No files indexed - the build itself succeeds with zero edges, but the
     // flag must still clear. Use a store poisoned by holding the guard... not
     // possible via public API; instead assert on the empty-index path.
     let idx = CodeIndex::open(&make_config(&dir)).unwrap();
@@ -171,7 +171,7 @@ fn test_spawn_graph_build_refuses_when_busy() {
     assert!(CodeIndex::spawn_graph_build(Arc::clone(&idx)).is_ok());
 }
 
-// ── FR-026: phased graph build keeps the store lock free during derivation ──
+// -- FR-026: phased graph build keeps the store lock free during derivation --
 
 #[test]
 fn test_search_available_during_long_graph_derivation() {
@@ -209,7 +209,7 @@ fn test_search_available_during_long_graph_derivation() {
 #[test]
 fn test_graph_progress_counters_reset_after_direct_build() {
     // build_graph sets graph_done/graph_total for live progress and must
-    // return them to (0, 0) when idle — matching the full_reindex phase and
+    // return them to (0, 0) when idle - matching the full_reindex phase and
     // the pre-phased direct-build behaviour.
     let dir = TempDir::new().unwrap();
     write_rust_file(&dir);

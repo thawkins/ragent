@@ -18,6 +18,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::strutil::truncate_chars;
+
 /// Typed identifier for a trigger rule.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TriggerRuleId(pub String);
@@ -224,18 +226,7 @@ pub struct TriggerFired {
     pub rule_id: Option<TriggerRuleId>,
 }
 
-// ─── Internal helpers ──────────────────────────────────────────────────
-
-/// Truncates a string to at most `max` characters, appending an ellipsis
-/// if truncation occurred.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
-        format!("{truncated}...")
-    }
-}
+// --- Internal helpers --------------------------------------------------
 
 /// Computes a stable non-cryptographic hash for deduplication.
 ///

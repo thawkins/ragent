@@ -1,4 +1,4 @@
-//! Integration test for FR-009: `from <past> every <d>` → next_due advanced to future.
+//! Integration test for FR-009: `from <past> every <d>` -> next_due advanced to future.
 //!
 //! FR-009 (event-driven): When a user adds an event with the
 //! `from <timestamp> every <duration>` form, the system shall set the start
@@ -6,8 +6,8 @@
 //! (or, if the timestamp is in the past, advance by whole duration intervals
 //! until `next_due` is in the future).
 //!
-//! This test exercises the full flow from schedule expression → parsed
-//! schedule → `CronEvent` construction, verifying that:
+//! This test exercises the full flow from schedule expression -> parsed
+//! schedule -> `CronEvent` construction, verifying that:
 //!
 //! - `start_at` preserves the original past timestamp (not advanced).
 //! - `next_due` is advanced to a strictly future time.
@@ -19,9 +19,9 @@ use chrono::{Duration, Utc};
 
 use ragent_types::{CronEvent, CronForm, parse_schedule};
 
-// ────────────────────────────────────────────────��────────────────
+// ------------------------------------------------��----------------
 // Parser-level: next_due is strictly in the future
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 /// A start time 5 hours in the past with a 1h interval should produce a
 /// `next_due` that is strictly after `now`.
@@ -63,11 +63,11 @@ fn test_from_past_form_is_repeat_from() {
     assert!(!parsed.schedule.is_one_shot());
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // Exact advancement arithmetic
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
-/// Start exactly 3h ago, interval 1h: advance 4 intervals (3+1) → next_due
+/// Start exactly 3h ago, interval 1h: advance 4 intervals (3+1) -> next_due
 /// = start + 4h = now + 1h.
 #[test]
 fn test_from_past_exact_3h_ago_1h_interval() {
@@ -80,7 +80,7 @@ fn test_from_past_exact_3h_ago_1h_interval() {
     assert!(parsed.next_due > now);
 }
 
-/// Start 90m ago, interval 30m: advance 4 intervals (3+1) → next_due
+/// Start 90m ago, interval 30m: advance 4 intervals (3+1) -> next_due
 /// = start + 120m = now + 30m.
 #[test]
 fn test_from_past_90m_ago_30m_interval() {
@@ -93,7 +93,7 @@ fn test_from_past_90m_ago_30m_interval() {
     assert!(parsed.next_due > now);
 }
 
-/// Start 2 days ago, interval 1d: advance 3 intervals (2+1) → next_due
+/// Start 2 days ago, interval 1d: advance 3 intervals (2+1) -> next_due
 /// = start + 3d = now + 1d.
 #[test]
 fn test_from_past_2d_ago_1d_interval() {
@@ -106,7 +106,7 @@ fn test_from_past_2d_ago_1d_interval() {
     assert!(parsed.next_due > now);
 }
 
-/// Start 2 weeks ago, interval 1w: advance 3 intervals (2+1) → next_due
+/// Start 2 weeks ago, interval 1w: advance 3 intervals (2+1) -> next_due
 /// = start + 3w = now + 1w.
 #[test]
 fn test_from_past_2w_ago_1w_interval() {
@@ -132,9 +132,9 @@ fn test_from_past_2mo_ago_1mo_interval() {
     assert!(parsed.next_due > now);
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // Advancement stays within one interval of now
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 /// The advanced `next_due` should be within one duration interval of `now`.
 #[test]
@@ -164,9 +164,9 @@ fn test_from_past_large_gap_within_one_interval() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // Full CronEvent construction from past-start schedule
-// ──────────────────────────────────────────────��──────────────────
+// ----------------------------------------------��------------------
 
 /// Construct a `CronEvent` from a `from <past> every <d>` schedule and verify
 /// all fields including the advanced `next_due`.
@@ -201,9 +201,9 @@ fn test_from_past_cron_event_next_due_advanced() {
     assert_eq!(event.schedule.form, CronForm::RepeatFrom);
 }
 
-// ──────────────────────────────��──────────────────────────────────
+// ------------------------------��----------------------------------
 // Edge: start exactly at now (boundary between past and future)
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 /// A start time exactly at `now` should not be advanced (start >= now).
 #[test]
@@ -216,9 +216,9 @@ fn test_from_now_start_not_advanced() {
     assert_eq!(parsed.schedule.start_at, Some(now));
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // Edge: start 1 second in the past (minimal past gap)
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 /// A start time 1 second in the past with a 1-minute interval should advance
 /// by 1 interval (0 full intervals + 1).
@@ -234,9 +234,9 @@ fn test_from_past_one_second_ago() {
     assert!(parsed.next_due > now);
 }
 
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 // Edge: start far in the past with large interval
-// ─────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------
 
 /// Start 1 year ago, interval 1mo: next_due should be within one month of now.
 #[test]

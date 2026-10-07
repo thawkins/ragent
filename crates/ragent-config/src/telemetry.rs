@@ -249,7 +249,7 @@ impl TelemetryConfig {
     }
 }
 
-// ── Serde default functions ─────────────────────────────────────────────
+// -- Serde default functions ---------------------------------------------
 
 const fn default_export_interval() -> u64 {
     30

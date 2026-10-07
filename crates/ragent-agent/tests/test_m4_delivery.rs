@@ -20,7 +20,7 @@ use serde_json::json;
 mod team_support;
 use team_support::setup_workspace;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     dir.join(name)
@@ -69,7 +69,7 @@ fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberS
     store.add_member(member).expect("add_member");
 }
 
-// ── M4-T1: peek_unread + acknowledge ───────────────────────────────────────
+// -- M4-T1: peek_unread + acknowledge ---------------------------------------
 
 #[tokio::test]
 async fn test_peek_unread_does_not_mark_read() {
@@ -88,7 +88,7 @@ async fn test_peek_unread_does_not_mark_read() {
     assert_eq!(unread.len(), 1);
     assert_eq!(unread[0].content, "hello");
 
-    // peek must not mark read — a second peek returns the same message.
+    // peek must not mark read - a second peek returns the same message.
     let unread2 = mailbox.peek_unread().expect("peek again");
     assert_eq!(unread2.len(), 1, "peek should not mark messages read");
 }
@@ -137,12 +137,12 @@ async fn test_drain_unread_still_marks_read_for_backward_compat() {
     let unread = mailbox.drain_unread().expect("drain");
     assert_eq!(unread.len(), 1);
 
-    // drain_unread marks read — a subsequent peek returns nothing.
+    // drain_unread marks read - a subsequent peek returns nothing.
     let unread2 = mailbox.peek_unread().expect("peek after drain");
     assert!(unread2.is_empty(), "drain_unread should mark messages read");
 }
 
-// ── M4-T2: team_assign_task notifies the assigned teammate ───────────────
+// -- M4-T2: team_assign_task notifies the assigned teammate ---------------
 
 #[tokio::test]
 async fn test_team_assign_task_pushs_notification_to_assignee_mailbox() {
@@ -216,7 +216,7 @@ async fn test_team_assign_task_rejects_dead_assignee() {
     );
 }
 
-// ── M4-T3: team_broadcast per-recipient results ───────────────────────────
+// -- M4-T3: team_broadcast per-recipient results ---------------------------
 
 #[tokio::test]
 async fn test_team_broadcast_reports_per_recipient_success() {
@@ -280,7 +280,7 @@ async fn test_team_broadcast_skips_stopped_teammates() {
     assert_eq!(succeeded[0], "tm-001");
 }
 
-// ── M4-T4: team_message validates recipient state ─────────────────────────
+// -- M4-T4: team_message validates recipient state -------------------------
 
 #[tokio::test]
 async fn test_team_message_rejects_stopped_recipient() {
@@ -303,7 +303,7 @@ async fn test_team_message_rejects_stopped_recipient() {
         "expected stopped error, got: {err}"
     );
 
-    // Mailbox should be empty — no message was pushed.
+    // Mailbox should be empty - no message was pushed.
     let team_dir = team_dir_for(&dir, "msg-stop-team");
     let m = Mailbox::open(&team_dir, "tm-001")
         .expect("open")
@@ -357,7 +357,7 @@ async fn test_team_message_delivers_to_active_recipient() {
     assert_eq!(m[0].content, "hi alice");
 }
 
-// ── M4-T5: team_read_messages output schema ───────────────────────────────
+// -- M4-T5: team_read_messages output schema -------------------------------
 
 #[tokio::test]
 async fn test_team_read_messages_emits_snake_case_type_and_to_read_fields() {
@@ -453,7 +453,7 @@ async fn test_team_read_messages_redelivers_on_partial_ack_failure_is_safe() {
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     let peeked = mailbox.peek_unread().expect("peek");
     assert_eq!(peeked.len(), 1);
-    // Do NOT acknowledge — simulate failure.
+    // Do NOT acknowledge - simulate failure.
     let still_unread = mailbox.peek_unread().expect("peek again");
     assert_eq!(
         still_unread.len(),

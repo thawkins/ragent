@@ -19,13 +19,14 @@ use std::pin::Pin;
 use super::thinking::{
     binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
 };
-use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::llm::{ChatRequest, LlmClient, StreamEvent, ToolDefinition};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::ThinkingConfig;
 use ragent_types::event::FinishReason;
+
+use super::ollama_shared::estimate_context_window;
 
 /// Default Ollama server address.
 const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
@@ -152,30 +153,6 @@ struct OllamaModelDetails {
     family: String,
 }
 
-/// Estimates the context window size based on parameter count.
-///
-/// Modern local models (Llama 3.2 1B/3B, Phi4-mini, Qwen2.5, Gemma 2, etc.)
-/// commonly support 128k-token contexts regardless of parameter size. The
-/// old size-based tiers (8k/32k/64k/128k) under-report capacity for current
-/// small models and caused the TUI context panel to display nonsensical
-/// ">100% full" percentages. We now default to 128k for any model with at
-/// least 1B parameters, falling back to 32k only for sub-1B models.
-fn estimate_context_window(parameter_size: &str) -> usize {
-    let size = parameter_size
-        .trim_end_matches('B')
-        .trim_end_matches('b')
-        .parse::<f64>()
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                parameter_size,
-                "failed to parse Ollama parameter size; defaulting context window to 128k"
-            );
-            7.0
-        });
-
-    if size >= 1.0 { 131_072 } else { 32_768 }
-}
-
 #[async_trait::async_trait]
 impl Provider for OllamaProvider {
     /// Returns `"ollama"`.
@@ -261,168 +238,42 @@ struct OllamaClient {
 
 impl OllamaClient {
     /// Builds the JSON request body in `OpenAI` chat completions format.
+    ///
+    /// Message packing and the base body come from the shared [`OpenAiCompat`]
+    /// builder (audit T-401) with the Ollama dialect: tool results carry both
+    /// `tool_call_id` (OpenAI-compat) and `tool_name` (native Ollama format),
+    /// `stream_options` is set after the tools block, and Ollama adds
+    /// `tool_choice: "auto"` plus the native `think` flag.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
-        let mut messages = Vec::new();
+        let mut compat = super::openai_compat::OpenAiCompat::base_body(
+            request,
+            super::openai_compat::OpenAiCompatSpec::ollama(),
+            tools,
+        );
+        {
+            let body = compat.body_mut();
+            if !tools.is_empty() {
+                // Explicitly tell Ollama-compatible models they may use tools.
+                //
+                // F3 note (capability gating): the Ollama `/api/tags` catalog does
+                // not report tool capability and discovered models are declared
+                // `tool_use: true` by default, so per-model gating is not possible
+                // here. A local model without tool support narrates the invocation
+                // as text; the agent loop's text-format recovery pass is the
+                // fallback for those models.
+                //
+                // Some models (e.g. Ornith) narrate their reasoning as text
+                // unless tool_choice is set.
+                body["tool_choice"] = json!("auto");
+            }
+            // Request usage in the final stream frame like OpenAI.
+            body["stream_options"] = json!({ "include_usage": true });
 
-        // Build a map of tool_use_id -> tool_name so we can include both
-        // `tool_call_id` (OpenAI-compat) and `tool_name` (native Ollama format).
-        let mut tool_id_to_name: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        for msg in request.messages.iter() {
-            if let ChatContent::Parts(parts) = &msg.content {
-                for part in parts {
-                    if let ContentPart::ToolUse { id, name, .. } = part {
-                        tool_id_to_name.insert(id.clone(), name.clone());
-                    }
-                }
+            if let Some(think) = think_flag_from_request(request) {
+                body["think"] = json!(think);
             }
         }
-
-        if let Some(system) = &request.system {
-            messages.push(json!({
-                "role": "system",
-                "content": &**system
-            }));
-        }
-
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => {
-                                Some(json!({                                "type": "text",
-                                    "text": text
-                                }))
-                            }
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1 {
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
-                    }
-                }
-            };
-
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": input.to_string()
-                                    }
-                                })),
-                                // FUNC-043: the filter above guarantees only
-                                // ToolUse parts reach here; skip (do not panic)
-                                // if that invariant changes.
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } = result
-                            {
-                                // Include both `tool_call_id` (OpenAI-compat) and
-                                // `tool_name` (native Ollama format) so whichever
-                                // format the model expects is satisfied.
-                                let mut tool_msg = json!({
-                                    "role": "tool",
-                                    "tool_call_id": tool_use_id,
-                                    "content": content
-                                });
-                                if let Some(name) = tool_id_to_name.get(tool_use_id) {
-                                    tool_msg["tool_name"] = json!(name);
-                                }
-                                messages.push(tool_msg);
-                            }
-                        }
-                    } else {
-                        messages.push(json!({
-                            "role": msg.role,
-                            "content": content
-                        }));
-                    }
-                }
-                _ => {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true
-        });
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !tools.is_empty() {
-            // H2: reuse the cached serialised OpenAI-compatible tool list
-            // instead of building a fresh `Vec<Value>` on every call.
-            let cached = cached_tools(ToolFormat::OpenAi, tools);
-            body["tools"] = cached.openai_tools_array();
-            // Explicitly tell Ollama-compatible models they may use tools.
-            //
-            // F3 note (capability gating): the Ollama `/api/tags` catalog does
-            // not report tool capability and discovered models are declared
-            // `tool_use: true` by default, so per-model gating is not possible
-            // here. A local model without tool support narrates the invocation
-            // as text; the agent loop's text-format recovery pass is the
-            // fallback for those models.
-            //
-            // Some models (e.g. Ornith) narrate their reasoning as text
-            // unless tool_choice is set.
-            body["tool_choice"] = json!("auto");
-        }
-        // Request usage in the final stream frame like OpenAI.
-        body["stream_options"] = json!({ "include_usage": true });
-
-        if let Some(think) = think_flag_from_request(request) {
-            body["think"] = json!(think);
-        }
-
-        body
+        compat.finish()
     }
 }
 
@@ -470,6 +321,8 @@ impl LlmClient for OllamaClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let error_body = ragent_types::sanitize::redact_secrets(&error_body);
             tracing::warn!(
                 provider = "ollama",
                 url = %url,
@@ -582,7 +435,9 @@ impl LlmClient for OllamaClient {
                     }                      let parsed: Value = match serde_json::from_str(data) {
                           Ok(v) => v,
                           Err(e) => {
-                              tracing::warn!(provider = "ollama", line = %data, error = %e, "failed to parse SSE line");
+                              // SEC: the raw SSE frame carries streamed model output;
+                              // redact before logging.
+                              tracing::warn!(provider = "ollama", line = %ragent_types::sanitize::redact_secrets(data), error = %e, "failed to parse SSE line");
                               continue;
                           }
                       };

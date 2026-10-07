@@ -89,7 +89,7 @@ fn test_detect_provider_preferred_from_db() {
 fn test_detect_provider_preferred_unknown_id_ignored() {
     let storage = mem_storage();
 
-    // Set preferred to a non-existent provider — should be ignored gracefully.
+    // Set preferred to a non-existent provider - should be ignored gracefully.
     storage
         .set_setting("preferred_provider", "nonexistent_provider")
         .expect("store preferred");
@@ -158,14 +158,14 @@ fn test_detect_provider_disabled_flag_any_value_disables() {
 }
 
 // =========================================================================
-// Multiple DB keys — first in PROVIDER_LIST wins
+// Multiple DB keys - first in PROVIDER_LIST wins
 // =========================================================================
 
 #[test]
 fn test_detect_provider_db_keys_follow_provider_list_order() {
     let storage = mem_storage();
 
-    // Store keys for both via provider_auth — anthropic appears first in PROVIDER_LIST.
+    // Store keys for both via provider_auth - anthropic appears first in PROVIDER_LIST.
     storage
         .set_provider_auth("anthropic", "sk-ant-test")
         .expect("store anthropic key");
@@ -197,7 +197,7 @@ fn test_detect_provider_db_keys_follow_provider_list_order() {
 fn test_detect_provider_preferred_without_db_key() {
     let storage = mem_storage();
 
-    // Set preferred to openai but don't store a key — the preferred provider
+    // Set preferred to openai but don't store a key - the preferred provider
     // should NOT be surfaced unless it also has a credential (env var or DB key).
     // With no credentials at all, preferred is simply ignored.
     storage
@@ -205,12 +205,12 @@ fn test_detect_provider_preferred_without_db_key() {
         .expect("store preferred");
 
     let result = App::detect_provider(&storage);
-    // Result depends on ambient environment — just verify no panic.
+    // Result depends on ambient environment - just verify no panic.
     // If OPENAI_API_KEY is set in env, it'll find openai (and move it to front).
     // Otherwise, openai is NOT pushed because it has no credential.
     if let Some(p) = &result {
         // If the result is openai, it must be because OPENAI_API_KEY is set.
-        // If it's another provider, that's fine — preferred just reorders.
+        // If it's another provider, that's fine - preferred just reorders.
         assert_ne!(
             p.source,
             ProviderSource::AutoDiscovered,
@@ -244,7 +244,7 @@ fn test_detect_provider_fast_path_uses_cheap_source_without_gh() {
 
     // A provider detected from an explicit credential (env/DB) must be
     // returned by detect_provider.  No `gh auth token` subprocess is ever
-    // spawned — detection only uses env vars and secure storage.
+    // spawned - detection only uses env vars and secure storage.
     storage
         .set_provider_auth("anthropic", "sk-ant-test")
         .expect("store key");

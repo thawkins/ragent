@@ -1,31 +1,12 @@
 //! Tests for `/plugins remove` store operation (spec `plugins` T-011; FR-010).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{RemoveError, StoreDirs, StoreLedger, add, remove, scan_dirs, store_dirs_at};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/remove-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn dirs(tree: &TempTree) -> StoreDirs {
     StoreDirs {
@@ -59,7 +40,7 @@ fn install(tree: &TempTree, dir_name: &str) -> PathBuf {
     outcome.installed_dir
 }
 
-// ── FR-010: remove a disabled plugin ────────────────────────────────────────
+// -- FR-010: remove a disabled plugin ----------------------------------------
 
 #[test]
 fn remove_disabled_plugin_deletes_dir_and_clears_ledger_row() {

@@ -19,9 +19,9 @@ use std::path::PathBuf;
 /// `src/app/slash.rs` whose replacement should be an `.await`, paired with the
 /// surrounding async fn name so drift is detected.
 const AWAITED_EXEMPTIONS: &[(&str, &str)] = &[
-    // /mcp discover — McpClient::discover()
+    // /mcp discover - McpClient::discover()
     ("mcp_discover", "McpClient::discover().await"),
-    // /mcp connect|disconnect — set_mcp_server_enabled
+    // /mcp connect|disconnect - set_mcp_server_enabled
     (
         "mcp_connect_disconnect",
         "self.set_mcp_server_enabled(id, sub == \"connect\").await",

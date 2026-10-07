@@ -184,7 +184,7 @@ fn test_global_config_path_helpers_resolve_consistently() {
     );
 }
 
-// ── Naming format (FR-003) ─────────────────────────────────────────────
+// -- Naming format (FR-003) ---------------------------------------------
 
 #[test]
 fn test_backup_name_strictly_matches_pattern() {
@@ -251,7 +251,7 @@ fn test_backup_name_uses_hyphens_in_time_not_colons() {
     );
 }
 
-// ── Directory creation (FR-003) ────────────────────────────────────────
+// -- Directory creation (FR-003) ----------------------------------------
 
 #[test]
 fn test_backup_creates_saves_dir_when_absent() {
@@ -282,7 +282,7 @@ fn test_backup_creates_saves_dir_when_absent() {
 #[test]
 fn test_backup_reuses_existing_saves_dir_without_clearing() {
     // FR-003: when `saves/` already exists with prior content, a new backup is
-    // added alongside the existing files — the directory is never wiped.
+    // added alongside the existing files - the directory is never wiped.
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
     write_global_config(dir, r#"{"defaultAgent":"coder"}"#);
@@ -312,7 +312,7 @@ fn test_backup_reuses_existing_saves_dir_without_clearing() {
 
 #[test]
 fn test_backup_always_lands_in_saves_subfolder() {
-    // FR-003: the backup never lands directly in the config dir — it is always
+    // FR-003: the backup never lands directly in the config dir - it is always
     // nested inside `saves/`, even on the very first save.
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
@@ -428,7 +428,7 @@ fn test_restore_global_config_does_not_overwrite_non_global_target() {
 
 #[test]
 fn test_backup_restore_round_trip_preserves_config() {
-    // T-010: a complete save → list → restore lifecycle. Back up an original
+    // T-010: a complete save -> list -> restore lifecycle. Back up an original
     // config, overwrite the global file, then restore the backup and verify the
     // original content is back.
     let tmp = tempfile::tempdir().expect("tempdir");

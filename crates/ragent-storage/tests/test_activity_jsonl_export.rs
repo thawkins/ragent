@@ -14,7 +14,7 @@ use ragent_types::id::RunId;
 
 #[test]
 fn export_jsonl_produces_one_line_per_event() {
-    // NFR-004: the export is JSON Lines — one JSON object per line.
+    // NFR-004: the export is JSON Lines - one JSON object per line.
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");
     log.record_model_message(&run, "user", "hi", None)
@@ -43,7 +43,7 @@ fn export_jsonl_produces_one_line_per_event() {
 
 #[test]
 fn exported_lines_deserialize_back_to_events() {
-    // NFR-004: the export is machine-readable — each line deserializes to an
+    // NFR-004: the export is machine-readable - each line deserializes to an
     // ActivityEvent matching the stored event.
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");

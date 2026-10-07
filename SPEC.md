@@ -146,8 +146,18 @@ current state of all subsystems.
   `Cleared N memory entries for this project.` in the transcript. The
   `command_catalog` and `SLASH_COMMANDS` `/memory` entries list exactly the
   implemented subcommands (`show`, `clear`, `help`).
+- **Shared surface helpers (spec `plugins`/`connectors`, plan `code-audit` M5
+  T-505)** — a new `ragent-surface` crate gives the `/plugins` and `/connectors`
+  command families one implementation of the surface glue that had drifted into
+  parallel copies: the `From: <trigger> <subcommand>` attribution line and the
+  first-token subcommand tokeniser (`ragent_surface::help`), the two-root
+  store-directory resolution and the symlink-containment guard
+  (`ragent_surface::store`), and the harness step model with its schema-sample
+  generator and result truncator (`ragent_surface::harness`). `ragent-plugins`
+  and `ragent-connectors` delegate to it, so the two `/test` and `help` surfaces
+  cannot diverge.
 - **Connector system (spec `connectors`, §19C)** — a new `ragent-connectors`
-  crate (the workspace advances from 16 to 17 crates) adds a
+  crate adds a
   Claude-connector-equivalent integration catalogue over MCP: a connector is a
   named integration (Google Drive, Slack, GitHub, Git, Postgres, Puppeteer, and
   the wider community catalogue) carrying a category, an auth shape, and one or
@@ -546,6 +556,7 @@ graph TB
         N[ragent-tui]
         O[ragent-types]
         P[ragent-research]
+        S[ragent-surface]
     end
 
     Q[src/main.rs CLI entry]
@@ -599,6 +610,7 @@ graph TB
 | `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
 | `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
 | `ragent-plugins` | Plugin discovery, dialect manifests, sandboxed JS runtime, lifecycle, skills/MCP/commands/agents/hooks bridges, `/plugins` surface | ~6,200 |
+| `ragent-surface` | Shared surface helpers for the plugin/connector families: attribution, subcommand tokeniser, store-dir resolution, harness step model, schema samples | ~440 |
 
 ### 2.2 Crate Dependency Graph
 
@@ -620,6 +632,7 @@ graph TD
     B[ragent-bench]
     PL[ragent-plugins]
     CN[ragent-connectors]
+    SU[ragent-surface]
 
     T --> D
     T --> S
@@ -652,7 +665,9 @@ graph TD
     B --> SV
     PL --> A
     PL --> TU
+    PL --> SU
     CN --> TU
+    CN --> SU
 ```
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
@@ -3710,6 +3725,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.129 | 2026-10-07 | Code-audit remediation complete through M9 (`docs/plans/code-audit.md`), landed as uncommitted working-tree work. **M5 dead-code removal:** the unreferenced `ragent-agent::snapshot` module (a stale near-copy of `ragent-storage::snapshot`) and the duplicated inline `ragent-tools-core` schema test suite are deleted; the placeholder `test_precompiled_regexes` bodies gain real assertions; the dead connector `NeverProbe`/`NoProbe` fallbacks and the `probe`/`workdir` parameters they alone used are removed, and `run_connector_subcommand_env` now takes `(&mut env, sub, rest)`; and the new 18th workspace crate `ragent-surface` owns the shared `/plugins`/`/connectors` surface glue (`ragent_surface::help` attribution + subcommand tokeniser, `ragent_surface::store` two-root store-dir resolution + symlink-containment guard, `ragent_surface::harness` step model with `sample_for_schema`/`schema_type`/`truncate`/`step`). **M6 test hygiene:** test scratch paths move off `/tmp` to `target/temp` (31 sites / 24 files); `ragent-plugins` and `ragent-connectors` each gain one `tests/support` `TempTree` (replacing 18 and 10 copy-pasted definitions); `test_mf_orchestrator_diag`/`test_fts_diag` and the live-network `test_ollama_cloud_real` are `#[ignore]`-gated; the three per-key config test files collapse to the table-driven `test_api_key_config_fields.rs`; the three scoreboard tests share `tests/support/scoreboard_fixture.rs`; weak `.is_some()` assertions bind concrete values; and four test files are renamed to `test_<component>_<scenario>`. **M7 new coverage:** new `tests/` suites for the calculator (24 tests), `agent_complete`/`bash_reset`/`xlsx`, the Azure AI Foundry provider (5 tests), the agent-loop step harness (3 tests), and the orchestrator `Coordinator` (13 tests) - the last fixing a real production bug where `active_jobs` was incremented after spawning and never on the synchronous paths, underflowing `AtomicU64` to `u64::MAX` (new `ActiveJobsGuard::enter` increments exactly once before the guard is installed). **M8 standards:** GitHub/GitLab acronym casing standardised across `ragent-tools-vcs` (31 tool types + shared helpers), the three user-facing/external-input unwraps removed, emoji/box-drawing glyphs stripped from production-source comments, six named modules gain `//!` headers, `MultiPlEAdapter` -> `MultipleAdapter`, the four `Regex::new(...)` sites in `slash.rs` use `.expect("valid ... regex")`, the `CollectingTierRouterObserver` test double is a real `pub` type, and `test_codeindex_backward_compat` asserts against the `SLASH_COMMANDS` data model instead of scraping source. **M9 dependency upkeep:** the yanked `yoke-derive@0.8.3` is cleared; the workspace converges on `thiserror 2`, `reqwest 0.13` (the `ragent-llm` pin now uses `workspace = true`), `rand 0.10`, and `criterion 0.8`; `ragent-storage` moves from `rand 0.8` to `0.10`; `lopdf` converges on `0.44` and the dedicated `vendor/lopdf` crate is deleted (the `MAX_OBJECT_DEPTH` recursion guard is no longer needed); `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp` migrate 0.29 -> 0.33 (the Prometheus scrape endpoint enables `experimental_metrics_custom_reader`); and `notify` 7 -> 8.2, `rquickjs` 0.10 -> 0.14, `tree-sitter` 0.26 -> 0.27, `chacha20poly1305` 0.10 -> 0.11, and `which` 7 -> 8 land. **M1 secret hardening:** `.gitignore` gains `*.db-wal`/`*.db-shm` (SQLite sidecars can hold plaintext credential-store and session pages) and the certificate/credential patterns `*.pem`, `*.p12`, `*.pfx`, `service-account.json`, `credentials.json`; a tracked `.env.example` template lists every credential env var ragent reads. Also fixes `Config::write_config_if_changed` folding a corrupt existing file to `Value::Null` (now logs and forces a rewrite). |
 | v1.0.128 | 2026-10-06 | Config durability, bounded MCP connect, and non-blocking TUI startup. (1) Atomic config writes: every `ragent.json` write (`Config::save`, `Config::save_to_source`, the runtime-flag toggles, `/config save`) now lands in a uniquely named temp file in the config directory, is `fsync`-ed, and is renamed over the target, so a crash/kill/power-loss between truncate and write can no longer leave a partial config that `Config::load` silently falls back on (the intermittent "YOLO keeps going off after a few restarts" report). (2) Runtime-flag persistence edits only the single top-level key in the raw global file (`Config::set_global_bool_key`), so the project overlay and unmodelled keys are never folded into the user's global config; every such write logs the key, value, path, and a forced backtrace, and startup logs the effective `yolo`/`edit_log`/`activity_log`/`gcf` state with the contributing config paths. (3) Bounded MCP connect: every `McpClient::connect` runs under a per-attempt timeout (default 30 s, `RAGENT_MCP_CONNECT_TIMEOUT_SECS`) and is retried once on timeout only, tearing down a partially-started stdio child before the retry. (4) MCP connect failures are recorded as `McpStatus::Failed { error }` on every failure path and reported in the startup report and `/mcp`. (5) TUI startup no longer blocks on the MCP connect loop: `run_tui` adopts whatever state the loop has published and prints its one-shot per-server report off the loop's completion sentinel; every event-loop read of the shared client is non-blocking (`try_read`). (6) `ragent_info` now reports runtime execution details (pid, parent pid, start time, uptime, executable, working directory, user, resident/virtual memory, thread count) alongside build metadata. (7) `/config list` restore drops the cached config, re-reads it, and resyncs runtime flags. (8) `/spec reverse --folder` runs the local scaffold before the GitHub token gate so a token-less runner still populates the target folder. |
 | v1.0.126 | 2026-10-04 | Office / LibreOffice document tools removed. The six `office_*` / `libre_*` tools and their module set (`office_common`, `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`, `libreoffice_info`) are deleted; only the two PDF tools (`pdf_read`, `pdf_write`) remain, sharing a new `pdf_common` helper module. The `tool_visibility.office` switch and its `ToolVisibilityConfig` / `ToolVisibilitySpecified` fields, the unused `docio` helper, and the OOXML/ODF `DocumentFormat` variants are removed, and the dependencies `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped. Registered tool count falls 158 -> 152 (23 categories); `assets/officedocs/testword1.docx` is deleted; `/tools` switch lists and `tool_visibility` tables drop `office`; configs carrying `office` are ignored. A `/simplify all` pass over the changed set fixes a `pdf_write` image-path containment hole (SEC-tools-extended-002), halves `pdf_read` PDF parsing, computes `os_info` JSON once, scopes the TUI `/memory clear` delete to `self.cwd_path`, and makes `connectors::store::descriptor_by_id` a single allocating pass. |
 | v1.0.125 | 2026-10-04 | `os_info` host-introspection tool and `/osinfo` slash command family, plus the research scholarly-engine default flip. `os_info` (registry 171 -> 172, spec `osinfo` FR-019..FR-025) reports OS identity and Linux distribution, CPU, graphics adapters (`/sys/class/drm` + `pci.ids`, integrated/discrete/virtual classification), graphics-API support with best-effort versions (`Direct3D`, `DirectX`, `Metal`, `OpenGL`, `OpenGL ES`, `Mesa`, `Vulkan`, `OptiX`, `CUDA`, `ROCm`), physical hardware (DMI system/chassis/motherboard/BIOS identity, `/sys/block` storage devices, `/sys/class/net` interfaces), memory, uptime, and the process environment. The `probe` parameter defaults to `true`, so the fixed, timeout-bounded allowlisted graphics diagnostics (`vulkaninfo`, `glxinfo -B`, `nvidia-smi`, `rocminfo`, `system_profiler`) confirm support and supply versions for OpenGL, OpenGL ES, and Mesa; `{"probe": false}` (or `/osinfo show --no-probe`) is the fully process-free path. Read-only throughout: no writes, no network, and never serial numbers, UUIDs, or asset tags. `/osinfo show [--no-probe]` renders through the tool's own collector/renderer, `/osinfo help` documents both modes, and autocomplete offers `show`, `--no-probe`, `help`. Research: scholarly backends (OpenAlex) are excluded from the web sweep by default; `--papers` replaces `--no-papers`/`--no-scholarly` at every entry point (root CLI, TUI, `POST /research`), `ResearchRunRequest` carries `papers`, and `research.exclude_academic_engines` only persists the exclusion. Three new tracked research items (`codemigrate`, `connectors`, `vendormarketplace`). |

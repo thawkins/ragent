@@ -92,7 +92,7 @@ fn think_tool_call_part() -> MessagePart {
 
 /// The cache must hold one copy of the rendered rows while nothing advances
 /// (same-width frame, unchanged counters) and must rebuild when the agent's
-/// tool-call counter advances — the same counter the Agents panel shows.
+/// tool-call counter advances - the same counter the Agents panel shows.
 #[tokio::test]
 async fn test_output_view_cache_invalidates_on_agent_progress() {
     let mut app = support::make_app();
@@ -191,7 +191,7 @@ async fn test_output_view_shows_mid_run_tool_call_rows() {
     assert!(screen_text(&app).contains("Think"));
 }
 
-/// A storage-backed target (a session other than the live one — exactly the
+/// A storage-backed target (a session other than the live one - exactly the
 /// path a running sub-agent's overlay takes) renders its persisted transcript,
 /// and the counter mix must not corrupt the content on rebuild.
 #[tokio::test]
@@ -244,7 +244,7 @@ async fn test_output_view_empty_child_session_cache_is_stable() {
 }
 
 /// The `Arc<Message>` round-trip through storage keeps the tool-call part
-/// serialisable — a cheap sanity check that the seeded shape matches what the
+/// serialisable - a cheap sanity check that the seeded shape matches what the
 /// interim save writes (`MessagePart::ToolCall` with a completed state).
 #[test]
 fn test_seeded_tool_call_part_serialises_like_interim_save() {

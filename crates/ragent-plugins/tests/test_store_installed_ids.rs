@@ -6,32 +6,13 @@
 //! so a broken directory is not counted as installed and no second install
 //! registry is kept (A5).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{StoreDirs, installed_ids, store_dirs_at};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/installed-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a minimal codex-dialect plugin directory carrying `id`.
 fn write_codex_plugin(root: &Path, dir_name: &str, id: &str) {
@@ -49,7 +30,7 @@ fn write_broken_dir(root: &Path, dir_name: &str) {
     std::fs::write(plugin_dir.join("codex-plugin.json"), "{ not valid json").expect("writable");
 }
 
-// ── installed_ids (FR-005, A5) ──────────────────────────────────────────────
+// -- installed_ids (FR-005, A5) ----------------------------------------------
 
 #[test]
 fn an_absent_store_derives_an_empty_installed_set() {

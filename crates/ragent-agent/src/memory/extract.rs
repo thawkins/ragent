@@ -53,7 +53,7 @@ use crate::event::EventBus;
 use crate::storage::Storage;
 use ragent_config::AutoExtractConfig;
 
-// ── MemoryCandidate ──────────────────────────────────────────────────────────
+// -- MemoryCandidate ----------------------------------------------------------
 
 /// A proposed memory entry awaiting user or agent confirmation.
 ///
@@ -85,7 +85,7 @@ pub struct MemoryCandidate {
     pub reason: String,
 }
 
-// ── ExtractionEngine ──────────────────────────────────────────────────────────
+// -- ExtractionEngine ----------------------------------------------------------
 
 /// Engine for automatically extracting memories from tool usage and sessions.
 ///
@@ -248,7 +248,7 @@ impl ExtractionEngine {
         self.clear_failures(session_id);
     }
 
-    // ── Pattern extraction from file edits ──────────────────────────────
+    // -- Pattern extraction from file edits ------------------------------
 
     /// Extract a coding pattern from a file edit tool result.
     ///
@@ -426,7 +426,7 @@ impl ExtractionEngine {
         }
     }
 
-    // ── Error resolution extraction ─────────────────────────────────────
+    // -- Error resolution extraction -------------------------------------
 
     /// Track a failed tool call for later error-resolution detection.
     fn track_failure(
@@ -532,7 +532,7 @@ impl ExtractionEngine {
         })
     }
 
-    // ── Session summary extraction ──────────────────────────────────────
+    // -- Session summary extraction --------------------------------------
 
     /// Extract key learnings from the session's conversation history.
     ///
@@ -620,7 +620,7 @@ impl ExtractionEngine {
         candidates
     }
 
-    // ── Deduplication ───────────────────────────────────────────────────
+    // -- Deduplication ---------------------------------------------------
 
     /// Check whether a candidate with similar content already exists in
     /// either the proposed set or the stored memories.
@@ -714,7 +714,7 @@ impl ExtractionEngine {
         STOP_WORDS.contains(&word.to_lowercase().as_str())
     }
 
-    // ── Candidate processing ───────────────────────────────────────────
+    // -- Candidate processing -------------------------------------------
 
     /// Process a candidate: auto-store or emit event depending on config.
     fn process_candidate(
@@ -790,7 +790,7 @@ impl ExtractionEngine {
     }
 }
 
-// ── Session message summary ──────────────────────────────────────────────────
+// -- Session message summary --------------------------------------------------
 
 /// Summary of a message in the session, used for session-end extraction.
 ///
@@ -815,7 +815,7 @@ pub struct ToolCallSummary {
     pub success: bool,
 }
 
-// ── Confidence decay ──────────────────────────────────────────────────────────
+// -- Confidence decay ----------------------------------------------------------
 
 /// Apply time-based confidence decay to all memories.
 ///

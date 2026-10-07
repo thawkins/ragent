@@ -82,7 +82,7 @@ module housing() {
 
 #[test]
 fn test_special_variable_skipped() {
-    // $fn, $fa, $fs are OpenSCAD special variables — should not be
+    // $fn, $fa, $fs are OpenSCAD special variables - should not be
     // extracted as user-defined constants.
     let src = "$fn = 64;";
     let pf = parse_scad(src);

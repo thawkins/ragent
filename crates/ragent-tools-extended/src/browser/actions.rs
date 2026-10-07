@@ -718,7 +718,7 @@ pub async fn action_screenshot(conn: &CdpConnection, full_page: bool) -> Result<
     }))
 }
 
-// ── Helper functions ─────────────────────────────────────────────────────
+// -- Helper functions -----------------------------------------------------
 
 /// Resolve a CSS selector to a DOM node.
 ///

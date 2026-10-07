@@ -26,7 +26,7 @@ use tokio::process::Command;
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 /// Derive a filesystem-safe identifier from a session ID.
 ///
@@ -45,7 +45,7 @@ pub fn safe_session_id(session_id: &str) -> String {
         .collect()
 }
 
-// ── Platform detection ─────────────────────────────────────────────────────
+// -- Platform detection -----------------------------------------------------
 
 /// Returns `true` when running on Windows.
 #[must_use]
@@ -53,7 +53,7 @@ pub const fn is_windows() -> bool {
     cfg!(target_os = "windows")
 }
 
-// ── Shell type ─────────────────────────────────────────────────────────────
+// -- Shell type -------------------------------------------------------------
 
 /// The type of shell discovered on the system.
 #[derive(Debug, Clone)]
@@ -73,7 +73,7 @@ impl ShellType {
     }
 }
 
-// ── Shell discovery ───────────────────────────────────────────────────────
+// -- Shell discovery -------------------------------------------------------
 
 /// Well-known installation paths for Git Bash on Windows.
 const GIT_BASH_KNOWN_PATHS: &[&str] = &[
@@ -156,7 +156,7 @@ fn get_shell() -> &'static ShellType {
     SHELL_CACHE.get_or_init(discover_shell)
 }
 
-// ── Windows state/temp directory helpers ───────────────────────────────────
+// -- Windows state/temp directory helpers -----------------------------------
 
 /// Return the base directory for ragent shell state/temp files on Windows.
 ///
@@ -338,7 +338,7 @@ pub fn ps_quote_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-// ── State parsing ──────────────────────────────────────────────────────────
+// -- State parsing ----------------------------------------------------------
 
 /// Parse the current working directory from a state file's contents.
 ///
@@ -358,7 +358,7 @@ fn parse_cwd_from_state(state: &str) -> Option<String> {
     None
 }
 
-// ── BashTool struct ────────────────────────────────────────────────────────
+// -- BashTool struct --------------------------------------------------------
 
 /// Executes shell commands and returns combined stdout/stderr output.
 ///
@@ -948,7 +948,7 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
     }
 }
 
-// ── Wrapper script generation ──────────────────────────────────────────────
+// -- Wrapper script generation ----------------------------------------------
 
 /// Build the wrapper script for a POSIX-compatible shell (Bash or Git Bash).
 ///
@@ -1511,7 +1511,7 @@ impl Tool for BashTool {
             .context("Missing required 'command' parameter")?;
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
-        // ── Determine shell ─────────────────────────────────────────────
+        // -- Determine shell ---------------------------------------------
         let shell = get_shell();
 
         tracing::info!(
@@ -1521,7 +1521,7 @@ impl Tool for BashTool {
             "Executing bash command"
         );
 
-        // ── Security checks (all 7 layers, shell-agnostic) ───────────────
+        // -- Security checks (all 7 layers, shell-agnostic) ---------------
         //
         // ANTIPAT F-13: the ordered security checks live in exactly one place,
         // `validate_shell_command`, shared with the background-spawn path so
@@ -1532,7 +1532,7 @@ impl Tool for BashTool {
         // Acquire a process-spawn permit to bound concurrency.
         let _permit = crate::resource::acquire_process_permit().await?;
 
-        // ── Persistent shell state ───────────────────────────────────────
+        // -- Persistent shell state ---------------------------------------
         let state_file = state_file_path(&ctx.session_id);
         let script_file = script_file_path(&ctx.session_id, shell)?;
 
@@ -1553,7 +1553,7 @@ impl Tool for BashTool {
             ShellType::PowerShell(_) => build_powershell_wrapper(&state_file, &script_file),
         };
 
-        // ── sudo askpass broker ──────────────────────────────────────────
+        // -- sudo askpass broker ------------------------------------------
         // On POSIX systems, install an askpass helper so that any `sudo`
         // invocation inside the command (including in child scripts) routes
         // its password prompt through ragent's question dialog instead of
@@ -1621,7 +1621,7 @@ impl Tool for BashTool {
                         }
                     };
 
-                    // ── Timeout cleanup: kill the whole process group ────────
+                    // -- Timeout cleanup: kill the whole process group --------
                     // `kill_on_drop` only terminates the direct child. If the
                     // command (e.g. `cargo test --workspace`) spawned grandchildren
                     // that inherited the pipes, those survive the drop. SIGKILL the
@@ -1792,7 +1792,7 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
     Ok(())
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+// -- Tests -----------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "../tests/inline/bash.rs"]

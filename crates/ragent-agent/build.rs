@@ -7,10 +7,10 @@
 //! The following environment variables are emitted via `cargo:rustc-env` and
 //! consumed in `crates/ragent-agent/src/tool/ragent_info.rs`:
 //!
-//! - `BUILD_TIME` — always present; captured as `YYYY-MM-DD HH:MM:SS UTC`.
-//! - `GIT_COMMIT` / `GIT_COMMIT_SUBJECT` — best-effort; omitted when `git` is
+//! - `BUILD_TIME` - always present; captured as `YYYY-MM-DD HH:MM:SS UTC`.
+//! - `GIT_COMMIT` / `GIT_COMMIT_SUBJECT` - best-effort; omitted when `git` is
 //!   unavailable or the source tree is not a repository.
-//! - `RUSTC_VERSION` — best-effort; omitted when the compiler cannot be run.
+//! - `RUSTC_VERSION` - best-effort; omitted when the compiler cannot be run.
 
 use std::process::Command;
 use std::time::SystemTime;

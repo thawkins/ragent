@@ -2,9 +2,9 @@
 //! FR-022, NFR-003).
 //!
 //! FR-022 requires:
-//! - `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot` → `"web"`
+//! - `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot` -> `"web"`
 //!   (they make outbound network calls)
-//! - `mf_cache_clear`, `mf_version` → `"system"`
+//! - `mf_cache_clear`, `mf_version` -> `"system"`
 //!   (they do not make outbound network calls)
 //!
 //! This test verifies every tool individually and also checks the full set
@@ -35,7 +35,7 @@ fn assert_category(tool: &dyn Tool, expected: &str) {
     );
 }
 
-// --- Network tools → "web" (FR-022) ----------------------------------------
+// --- Network tools -> "web" (FR-022) ----------------------------------------
 
 #[test]
 fn test_mf_fetch_permission_category_is_web() {
@@ -61,7 +61,7 @@ fn test_mf_screenshot_permission_category_is_web() {
     assert_category(&tool, "web");
 }
 
-// --- Non-network tools → "system" (FR-022) ---------------------------------
+// --- Non-network tools -> "system" (FR-022) ---------------------------------
 
 #[test]
 fn test_mf_cache_clear_permission_category_is_system() {

@@ -58,7 +58,7 @@ fn no_cache_limits() -> CatalogueLimits {
     CatalogueLimits::new(Duration::from_secs(5), 1_048_576, Duration::ZERO)
 }
 
-// ── Resolution guards the fetch (FR-035, FR-037) ────────────────────────────
+// -- Resolution guards the fetch (FR-035, FR-037) ----------------------------
 
 #[test]
 fn effective_endpoint_uses_compiled_default_with_no_connectors_block() {
@@ -101,7 +101,7 @@ fn resolved_endpoint_parses_through_the_https_guard() {
     }
 }
 
-// ── The fetch contacts the resolved effective endpoint ──────────────────────
+// -- The fetch contacts the resolved effective endpoint ----------------------
 
 #[test]
 fn fetch_effective_catalogue_contacts_the_compiled_default_endpoint() {
@@ -202,7 +202,7 @@ fn fetch_refuses_a_refused_endpoint_without_contacting_any_endpoint() {
     );
 }
 
-// ── The store handler rows read the same value as the fetch (FR-036) ────────
+// -- The store handler rows read the same value as the fetch (FR-036) --------
 
 #[test]
 fn stores_report_tags_the_compiled_default() {
@@ -270,7 +270,7 @@ fn stores_report_carries_a_refusal_for_a_non_https_override() {
     ));
 }
 
-// ── The launch registry records the resolved endpoints (NFR-002) ────────────
+// -- The launch registry records the resolved endpoints (NFR-002) ------------
 
 #[test]
 fn resolve_catalog_records_effective_endpoints_and_skips_refusals() {
@@ -303,7 +303,7 @@ fn resolve_catalog_defaults_to_the_compiled_endpoint() {
     );
 }
 
-// ── Resolution is stable per launch and offline (NFR-002, NFR-003) ──────────
+// -- Resolution is stable per launch and offline (NFR-002, NFR-003) ----------
 
 #[test]
 fn resolution_is_stable_across_repeated_calls_within_a_launch() {

@@ -24,7 +24,7 @@ pub struct StatusBarCache {
     /// Pre-built bottom status line (model / tokens / tasks / index / log).
     pub line2: Vec<Span<'static>>,
 
-    // ── Signature fields ──────────────────────────────────────────────────
+    // -- Signature fields --------------------------------------------------
     /// Current status text used to build line1.
     pub status: String,
     /// Current agent name displayed in line1.

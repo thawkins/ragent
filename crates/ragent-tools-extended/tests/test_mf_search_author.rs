@@ -41,7 +41,7 @@ fn test_openalex_parse_response_extracts_authors() {
 }
 
 /// An OpenAlex work with no `authorships` must yield `author: None` rather
-/// than an empty string so renderers apply the `—` placeholder.
+/// than an empty string so renderers apply the `-` placeholder.
 #[test]
 fn test_openalex_parse_response_missing_authors_is_none() {
     let value = serde_json::json!({
@@ -145,7 +145,7 @@ fn test_hits_from_metadata_round_trips_author() {
 }
 
 /// The research adapter's `mf_search` metadata parser must copy the `author`
-/// key onto the emitted `WebSearchHit` (empty/missing → `None`). This mirrors
+/// key onto the emitted `WebSearchHit` (empty/missing -> `None`). This mirrors
 /// the adapter-side unit tests in `research_adapter.rs`; the check lives here
 /// too so the contract is verified from the metadata producer side.
 #[test]

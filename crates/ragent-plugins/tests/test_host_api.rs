@@ -1,6 +1,10 @@
 //! Tests for the versioned `ragent` host-API bridge (spec `plugins` T-008;
 //! FR-004, FR-018, FR-020, FR-027).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,28 +20,6 @@ fn budget() -> SandboxBudget {
         memory_bytes: 16 * 1024 * 1024,
         deadline: Duration::from_secs(2),
         stack_bytes: 256 * 1024,
-    }
-}
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/host-api-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -67,7 +49,7 @@ fn typeof_all(install: &HostApiInstall) -> String {
     .expect("eval")
 }
 
-// ── FR-004: full surface ────────────────────────────────────────────────────
+// -- FR-004: full surface ----------------------------------------------------
 
 #[test]
 fn installs_the_full_v1_surface_without_a_gate() {
@@ -101,7 +83,7 @@ fn api_version_and_plugin_id_are_always_present() {
     assert_eq!(probe, "1|claude-todo");
 }
 
-// ── FR-020: permission gate ─────────────────────────────────────────────────
+// -- FR-020: permission gate -------------------------------------------------
 
 #[test]
 fn ungranted_capabilities_are_absent_from_the_injected_object() {
@@ -173,7 +155,7 @@ fn capability_permission_key_is_scoped_to_domain_plugin_and_id() {
     );
 }
 
-// ── registrations (recorded for T-010 / T-012) ──────────────────────────────
+// -- registrations (recorded for T-010 / T-012) ------------------------------
 
 #[test]
 fn register_tool_and_command_record_declarations_with_json_schemas() {
@@ -205,7 +187,7 @@ fn register_tool_and_command_record_declarations_with_json_schemas() {
     assert_eq!(commands[0].usage.as_deref(), Some("/weather <city>"));
 }
 
-// ── config.get (FR-004) ─────────────────────────────────────────────────────
+// -- config.get (FR-004) -----------------------------------------------------
 
 #[test]
 fn config_get_returns_plugin_scoped_json_text_and_undefined_for_missing_keys() {
@@ -233,7 +215,7 @@ fn config_get_returns_plugin_scoped_json_text_and_undefined_for_missing_keys() {
     assert_eq!(calls.messages()[0].text, "100");
 }
 
-// ── message + log sinks (FR-020, FR-027) ────────────────────────────────────
+// -- message + log sinks (FR-020, FR-027) ------------------------------------
 
 #[test]
 fn message_levels_and_log_lines_are_recorded_in_the_sink() {
@@ -271,7 +253,7 @@ fn message_levels_and_log_lines_are_recorded_in_the_sink() {
     );
 }
 
-// ── plugin.read_text_file (FR-018) ──────────────────────────────────────────
+// -- plugin.read_text_file (FR-018) ------------------------------------------
 
 #[test]
 fn read_text_file_reads_inside_the_plugin_root() {
@@ -321,7 +303,7 @@ fn read_text_file_uncaught_escape_surfaces_as_a_script_error_not_a_panic() {
     }
 }
 
-// ── read_within (pure helper used by the bridge) ────────────────────────────
+// -- read_within (pure helper used by the bridge) ----------------------------
 
 #[test]
 fn read_within_refuses_absolute_and_parent_paths_and_reads_children() {
@@ -349,7 +331,7 @@ fn read_within_refuses_absolute_and_parent_paths_and_reads_children() {
     assert!(err.contains("plugin.read_text_file"), "{err}");
 }
 
-// ── FR-018: no ambient host access ──────────────────────────────────────────
+// -- FR-018: no ambient host access ------------------------------------------
 
 #[test]
 fn installed_context_still_exposes_no_ambient_host_apis() {

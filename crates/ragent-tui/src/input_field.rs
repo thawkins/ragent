@@ -66,7 +66,7 @@ impl InputField {
         self.text.chars().count()
     }
 
-    // ── Cursor helpers ─────────────────────────────────────────────────────
+    // -- Cursor helpers -----------------------------------------------------
 
     fn cursor_byte_pos(&self) -> usize {
         if self.cursor == 0 {
@@ -90,7 +90,7 @@ impl InputField {
             .unwrap_or(self.text.len())
     }
 
-    // ── Basic insertion / deletion ────────────────────────────────────────
+    // -- Basic insertion / deletion ----------------------------------------
 
     /// Insert a character at the cursor, replacing any active selection.
     pub fn insert_char(&mut self, c: char) {
@@ -155,7 +155,7 @@ impl InputField {
         self.cursor = start;
     }
 
-    // ── Cursor movement ────────────────────────────────────────────────────
+    // -- Cursor movement ----------------------------------------------------
 
     /// Move the cursor one character to the left.
     pub fn move_left(&mut self) {
@@ -213,7 +213,7 @@ impl InputField {
         self.cursor = i;
     }
 
-    // ── Selection ─────────────────────────────────────────────────────────
+    // -- Selection ---------------------------------------------------------
 
     /// Start or extend a selection one character to the left.
     pub fn select_left(&mut self) {
@@ -260,7 +260,7 @@ impl InputField {
         Some(self.text.chars().skip(s).take(e - s).collect())
     }
 
-    // ── Clipboard operations ──────────────────────────────────────────────
+    // -- Clipboard operations ----------------------------------------------
 
     /// Copy the current selection to the system clipboard.
     pub fn copy_selection(&self) {
@@ -293,7 +293,7 @@ impl InputField {
         self.paste_text_from_clipboard();
     }
 
-    // ── Key event handler ───────────────────────────────────────────────
+    // -- Key event handler -----------------------------------------------
 
     /// Process a [`KeyEvent`] and return `true` if the event was consumed.
     ///
@@ -418,7 +418,7 @@ impl InputField {
         }
     }
 
-    // ── Extra helpers ─────────────────────────────────────────────────────
+    // -- Extra helpers -----------------------------------------------------
 
     /// Delete the word immediately before the cursor.
     pub fn delete_prev_word(&mut self) {

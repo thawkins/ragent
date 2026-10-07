@@ -17,6 +17,9 @@
 
 use crate::app::state::{App, LogLevel};
 
+// `short_id` truncates a task id to a stable display prefix on a char boundary.
+use crate::app::helpers::short_id;
+
 // Reuse the `/prompt` roster resolver so built-ins (hidden ones included via
 // exact-case) and custom agents resolve identically to `/prompt <agent>`.
 use crate::app::prompt::{AgentResolution, resolve_agent};
@@ -185,10 +188,7 @@ impl App {
         let Some(outcome) = outcome else { return };
         match outcome {
             Ok(task_id) => {
-                self.status = format!(
-                    "spawn: detached task {} running",
-                    &task_id[..8.min(task_id.len())]
-                );
+                self.status = format!("spawn: detached task {} running", short_id(&task_id));
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!("spawn: detached background task launched ({task_id})"),
@@ -200,7 +200,7 @@ impl App {
                      in `list_agents`, and its output will not be injected into \
                      this chat. Track it in the Agents panel or stop it with \
                      `/cancel {}`.\n",
-                    &task_id[..8.min(task_id.len())]
+                    short_id(&task_id)
                 ));
             }
             Err(msg) if msg.is_empty() => {

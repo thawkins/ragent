@@ -33,7 +33,7 @@ fn write_file(dir: &std::path::Path, name: &str, content: &str) -> std::path::Pa
     path
 }
 
-// ── Two edits in one file ─────────────────────────────────────────────────────
+// -- Two edits in one file -----------------------------------------------------
 
 #[tokio::test]
 async fn test_two_edits_one_file() {
@@ -61,7 +61,7 @@ async fn test_two_edits_one_file() {
     assert_eq!(result, "fn a() { 10 }\nfn b() { 2 }\nfn c() { 30 }\n");
 }
 
-// ── Edits across two files ────────────────────────────────────────────────────
+// -- Edits across two files ----------------------------------------------------
 
 #[tokio::test]
 async fn test_edits_across_two_files() {
@@ -85,7 +85,7 @@ async fn test_edits_across_two_files() {
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), "BETA\n");
 }
 
-// ── Overlap detection ─────────────────────────────────────────────────────────
+// -- Overlap detection ---------------------------------------------------------
 
 #[tokio::test]
 async fn test_overlap_detection_rejects() {
@@ -118,7 +118,7 @@ async fn test_overlap_detection_rejects() {
     );
 }
 
-// ── JSON-order independence ───────────────────────────────────────────────────
+// -- JSON-order independence ---------------------------------------------------
 
 #[tokio::test]
 async fn test_json_order_independence() {
@@ -145,7 +145,7 @@ async fn test_json_order_independence() {
         "LINE1\nline2\nLINE3\n"
     );
 
-    // Now reset and supply in forward order — same result.
+    // Now reset and supply in forward order - same result.
     std::fs::write(&path, "line1\nline2\nline3\n").unwrap();
     let input_forward = json!({
         "edits": [
@@ -164,7 +164,7 @@ async fn test_json_order_independence() {
     );
 }
 
-// ── Strict exact-match batch edits (editrenewal FR-004 / FR-009) ──────────────
+// -- Strict exact-match batch edits (editrenewal FR-004 / FR-009) --------------
 
 /// P2.4: with the fallback cascade, a batch edit whose `old_string` differs
 /// only in trailing spaces from the file content is now rescued by the
@@ -271,7 +271,7 @@ async fn test_strict_match_accepts_exact_batch_edit() {
     );
 }
 
-// ── Non-overlapping adjacent edits (touching ranges allowed) ──────────────────
+// -- Non-overlapping adjacent edits (touching ranges allowed) ------------------
 
 #[tokio::test]
 async fn test_adjacent_touching_edits_allowed() {
@@ -295,7 +295,7 @@ async fn test_adjacent_touching_edits_allowed() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "XXYY\n");
 }
 
-// ── NotFound surfaces edit index + path (editrenewal FR-004) ───────────────────
+// -- NotFound surfaces edit index + path (editrenewal FR-004) -------------------
 
 #[tokio::test]
 async fn test_not_found_error_names_edit_and_path() {
@@ -358,7 +358,7 @@ async fn test_multiple_matches_error_reports_count() {
     );
 }
 
-// ── editrenewal T-010: rename/alias multiedit → multi_edit (FR-009) ───────────
+// -- editrenewal T-010: rename/alias multiedit -> multi_edit (FR-009) -----------
 
 /// The tool's canonical name must be `multi_edit` (not the legacy `multiedit`).
 #[tokio::test]
@@ -452,10 +452,10 @@ fn test_multi_edit_schema_declares_canonical_params() {
         "schema should list new_string: {schema}"
     );
 }
-// ── Atomic rollback (editrenewal FR-009, FR-013) ──────────────────────────────
+// -- Atomic rollback (editrenewal FR-009, FR-013) ------------------------------
 
 /// When one edit in a batch fails validation (here: `old_string` not found in
-/// the second file), NO files may be modified — including the first file whose
+/// the second file), NO files may be modified - including the first file whose
 /// edit would have succeeded on its own.
 #[tokio::test]
 async fn test_atomic_rollback_on_validation_failure() {
@@ -605,7 +605,7 @@ async fn test_batch_stale_file_rejected() {
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), original_b);
 }
 
-// ── Edit-log instrumentation for multi_edit (editlog spec) ──────────────────
+// -- Edit-log instrumentation for multi_edit (editlog spec) ------------------
 
 use ragent_tools_core::edit_log::{clear_edit_logs, set_edit_log_enabled};
 use std::sync::Mutex;
@@ -716,7 +716,7 @@ async fn test_multiedit_log_failure_writes_jsonl() {
     clear_edit_logs(tmp.path());
 }
 
-// ── collapse_whitespace (per-edit opt-in) ──────────────────────────────────
+// -- collapse_whitespace (per-edit opt-in) ----------------------------------
 
 #[tokio::test]
 async fn test_multiedit_collapse_whitespace_per_edit() {
@@ -782,7 +782,7 @@ async fn test_multiedit_collapse_whitespace_failure_is_atomic() {
     );
 }
 
-// ── SEC-ragent-tools-core-001: multi_edit path containment (SECTASKS MS-01 T-005) ─
+// -- SEC-ragent-tools-core-001: multi_edit path containment (SECTASKS MS-01 T-005) -
 
 /// `multi_edit` used to resolve each `file_path` and read/write it with no
 /// containment check at all, unlike every sibling file tool: a `..` or absolute

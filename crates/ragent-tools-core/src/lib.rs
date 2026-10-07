@@ -14,6 +14,9 @@ pub mod path_util;
 // Shared stale-file / timestamp helpers used by edit and multi_edit.
 pub(crate) mod edit_common;
 
+// Shared JSONL append / most-recent-file helpers (T-305).
+pub(crate) mod jsonl_log;
+
 // File operation tools
 pub mod append_file;
 pub mod apply_patch;

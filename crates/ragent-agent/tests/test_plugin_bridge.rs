@@ -169,7 +169,7 @@ fn skill_registry_load_includes_plugin_skills() {
     );
 }
 
-// ── FR-031: plugin-contributed slash commands ────────────────────────────────
+// -- FR-031: plugin-contributed slash commands --------------------------------
 
 /// Stage a Claude plugin whose commands live in the `commands/` directory.
 fn stage_command_plugin(tree: &TempTree) -> PathBuf {
@@ -242,7 +242,7 @@ fn plugin_command_colliding_with_a_builtin_is_namespaced() {
     assert_eq!(clean.trigger, "clean_gone");
 }
 
-// ── FR-032: plugin-contributed agent profiles ────────────────────────────────
+// -- FR-032: plugin-contributed agent profiles --------------------------------
 
 /// Stage a plugin contributing a markdown agent profile under `agents/`.
 fn stage_agent_plugin(tree: &TempTree) -> PathBuf {

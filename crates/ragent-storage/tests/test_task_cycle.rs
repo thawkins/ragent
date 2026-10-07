@@ -6,13 +6,13 @@
 //! cycle, the system rejects the update with an error describing the
 //! cycle and does not persist the edge.
 //!
-//! `detect_cycle` is a pure function — no database required.  Tests
+//! `detect_cycle` is a pure function - no database required.  Tests
 //! construct `TaskRow` snapshots directly and check that cycles are
 //! detected (or not) as expected.
 
 use ragent_storage::storage::{CycleError, TaskRow, detect_cycle};
 
-// ── Helper ─────────────────────────────────────────────────────────
+// -- Helper ---------------------------------------------------------
 
 fn make_task(id: &str, blocked_by: &[&str]) -> TaskRow {
     TaskRow {
@@ -30,7 +30,7 @@ fn make_task(id: &str, blocked_by: &[&str]) -> TaskRow {
     }
 }
 
-// ── No-cycle cases ─────────────────────────────────────────────────
+// -- No-cycle cases -------------------------------------------------
 
 /// Adding a blocked_by edge when there are no existing deps is safe.
 #[test]
@@ -39,14 +39,14 @@ fn test_no_cycle_empty_graph() {
     assert!(detect_cycle(&tasks, "a", "b").is_ok());
 }
 
-/// Adding a forward edge A→B when B has no deps is safe.
+/// Adding a forward edge A->B when B has no deps is safe.
 #[test]
 fn test_no_cycle_forward_edge() {
     let tasks = vec![make_task("a", &[]), make_task("b", &[])];
     assert!(detect_cycle(&tasks, "a", "b").is_ok());
 }
 
-/// Adding A→C when B→C already exists is safe (no path from C to A).
+/// Adding A->C when B->C already exists is safe (no path from C to A).
 #[test]
 fn test_no_cycle_independent_deps() {
     let tasks = vec![
@@ -58,7 +58,7 @@ fn test_no_cycle_independent_deps() {
     assert!(detect_cycle(&tasks, "a", "c").is_ok());
 }
 
-/// Chain A→B→C: adding D→A is safe (no path from A to D).
+/// Chain A->B->C: adding D->A is safe (no path from A to D).
 #[test]
 fn test_no_cycle_chain_extension() {
     let tasks = vec![
@@ -71,7 +71,7 @@ fn test_no_cycle_chain_extension() {
     assert!(detect_cycle(&tasks, "d", "a").is_ok());
 }
 
-/// Adding an edge that already exists (duplicate) is safe — no cycle.
+/// Adding an edge that already exists (duplicate) is safe - no cycle.
 #[test]
 fn test_no_cycle_duplicate_edge() {
     let tasks = vec![make_task("a", &["b"]), make_task("b", &[])];
@@ -87,7 +87,7 @@ fn test_no_cycle_empty_tasks() {
     assert!(detect_cycle(&tasks, "a", "b").is_ok());
 }
 
-// ── Self-loop ──────────────────────────────────────────────────────
+// -- Self-loop ------------------------------------------------------
 
 /// A task cannot depend on itself.
 #[test]
@@ -105,22 +105,22 @@ fn test_cycle_self_loop_with_deps() {
     assert_eq!(err.cycle_path, vec!["a", "a"]);
 }
 
-// ── Direct cycle (A→B, adding B→A) ─────────────────────────────────
+// -- Direct cycle (A->B, adding B->A) ---------------------------------
 
-/// Adding B→A when A→B exists creates a 2-node cycle.
+/// Adding B->A when A->B exists creates a 2-node cycle.
 #[test]
 fn test_cycle_direct_two_nodes() {
     let tasks = vec![make_task("a", &["b"]), make_task("b", &[])];
-    // a depends on b.  Adding b to depend on a: b→a, but a→b already.
+    // a depends on b.  Adding b to depend on a: b->a, but a->b already.
     // DFS from a (target): a depends on b (source).  Found!
-    // Cycle: b → a → b
+    // Cycle: b -> a -> b
     let err = detect_cycle(&tasks, "b", "a").unwrap_err();
     assert_eq!(err.cycle_path, vec!["b", "a", "b"]);
 }
 
-// ── Three-node cycle ───────────────────────────────────────────────
+// -- Three-node cycle -----------------------------------------------
 
-/// A→B→C: adding C→A creates a 3-node cycle.
+/// A->B->C: adding C->A creates a 3-node cycle.
 #[test]
 fn test_cycle_three_nodes() {
     let tasks = vec![
@@ -128,20 +128,20 @@ fn test_cycle_three_nodes() {
         make_task("b", &["c"]),
         make_task("c", &[]),
     ];
-    // Adding c to depend on a: c→a.  But a→b→c already.
-    // DFS from a (target): a→b→c.  c is not source (c is source).
+    // Adding c to depend on a: c->a.  But a->b->c already.
+    // DFS from a (target): a->b->c.  c is not source (c is source).
     // Wait, source is "c", target is "a".
     // DFS from "a": a depends on b, b depends on c.  c == source.  Found!
-    // Cycle: c → a → b → c
+    // Cycle: c -> a -> b -> c
     let err = detect_cycle(&tasks, "c", "a").unwrap_err();
     assert_eq!(err.cycle_path[0], "c");
     assert_eq!(err.cycle_path.last().unwrap(), "c");
-    assert_eq!(err.cycle_path.len(), 4); // c → a → b → c
+    assert_eq!(err.cycle_path.len(), 4); // c -> a -> b -> c
 }
 
-// ── Longer chain cycle ───────────────────────────────────────��─────
+// -- Longer chain cycle ---------------------------------------��-----
 
-/// A→B→C→D: adding D→A creates a 4-node cycle.
+/// A->B->C->D: adding D->A creates a 4-node cycle.
 #[test]
 fn test_cycle_four_nodes() {
     let tasks = vec![
@@ -153,13 +153,13 @@ fn test_cycle_four_nodes() {
     let err = detect_cycle(&tasks, "d", "a").unwrap_err();
     assert_eq!(err.cycle_path[0], "d");
     assert_eq!(err.cycle_path.last().unwrap(), "d");
-    assert_eq!(err.cycle_path.len(), 5); // d → a → b → c → d
+    assert_eq!(err.cycle_path.len(), 5); // d -> a -> b -> c -> d
 }
 
-// ── Cycle through diamond ──────────────────────────────────────────
+// -- Cycle through diamond ------------------------------------------
 
-/// Diamond: A→B, A→C, B→D, C→D.
-/// Adding D→A creates a cycle through either path.
+/// Diamond: A->B, A->C, B->D, C->D.
+/// Adding D->A creates a cycle through either path.
 #[test]
 fn test_cycle_diamond() {
     let tasks = vec![
@@ -168,20 +168,20 @@ fn test_cycle_diamond() {
         make_task("c", &["d"]),
         make_task("d", &[]),
     ];
-    // Adding d to depend on a: d→a.  a→b→d or a→c→d.  Found!
+    // Adding d to depend on a: d->a.  a->b->d or a->c->d.  Found!
     let err = detect_cycle(&tasks, "d", "a").unwrap_err();
     assert_eq!(err.cycle_path[0], "d");
     assert_eq!(err.cycle_path.last().unwrap(), "d");
-    // Path should be d → a → (b or c) → d
+    // Path should be d -> a -> (b or c) -> d
     assert_eq!(err.cycle_path.len(), 4);
     assert_eq!(err.cycle_path[1], "a");
     assert!(err.cycle_path[2] == "b" || err.cycle_path[2] == "c");
     assert_eq!(err.cycle_path[3], "d");
 }
 
-// ── No false positive: parallel paths ──────────────────────────────
+// -- No false positive: parallel paths ------------------------------
 
-/// A→B, A→C, B→D, C→D.  Adding D→E is safe (E is not an ancestor of D).
+/// A->B, A->C, B->D, C->D.  Adding D->E is safe (E is not an ancestor of D).
 #[test]
 fn test_no_cycle_diamond_parallel() {
     let tasks = vec![
@@ -194,7 +194,7 @@ fn test_no_cycle_diamond_parallel() {
     assert!(detect_cycle(&tasks, "d", "e").is_ok());
 }
 
-// ── Error message is descriptive ───────────────────────────────────
+// -- Error message is descriptive -----------------------------------
 
 /// The error message contains the cycle path with arrows.
 #[test]
@@ -218,7 +218,7 @@ fn test_cycle_error_self_loop_message() {
     assert!(msg.contains("cycle"), "msg: {msg}");
 }
 
-// ── CycleError is Clone and Debug ──────────────────────────────────
+// -- CycleError is Clone and Debug ----------------------------------
 
 #[test]
 fn test_cycle_error_clone_debug() {
@@ -232,9 +232,9 @@ fn test_cycle_error_clone_debug() {
     assert!(debug_str.contains('a'));
 }
 
-// ── Dangling reference (non-existent target) ───────────────────────
+// -- Dangling reference (non-existent target) -----------------------
 
-/// Target ID doesn't exist in tasks — DFS goes nowhere, no cycle.
+/// Target ID doesn't exist in tasks - DFS goes nowhere, no cycle.
 #[test]
 fn test_no_cycle_nonexistent_target() {
     let tasks = vec![make_task("a", &[])];
@@ -242,7 +242,7 @@ fn test_no_cycle_nonexistent_target() {
     assert!(detect_cycle(&tasks, "a", "nonexistent").is_ok());
 }
 
-/// Source ID doesn't exist — still works, just checks if target
+/// Source ID doesn't exist - still works, just checks if target
 /// reaches source.
 #[test]
 fn test_no_cycle_nonexistent_source() {
@@ -257,17 +257,17 @@ fn test_no_cycle_nonexistent_source() {
 #[test]
 fn test_no_cycle_dangling_blocked_by() {
     let tasks = vec![make_task("a", &["ghost"]), make_task("b", &[])];
-    // a depends on "ghost" which doesn't exist.  Adding a→b is fine.
+    // a depends on "ghost" which doesn't exist.  Adding a->b is fine.
     assert!(detect_cycle(&tasks, "a", "b").is_ok());
 }
 
-// ── Larger graph: no false positive ────────────────────────────────
+// -- Larger graph: no false positive --------------------------------
 
-/// A complex DAG with 10 tasks and multiple paths — verify a safe edge
+/// A complex DAG with 10 tasks and multiple paths - verify a safe edge
 /// is not flagged as a cycle.
 #[test]
 fn test_no_cycle_complex_dag_safe_edge() {
-    // 1→2→3→4→5, 1→6→4, 7→8→9, 3→9
+    // 1->2->3->4->5, 1->6->4, 7->8->9, 3->9
     let tasks = vec![
         make_task("1", &["2", "6"]),
         make_task("2", &["3"]),
@@ -280,13 +280,13 @@ fn test_no_cycle_complex_dag_safe_edge() {
         make_task("9", &[]),
         make_task("10", &[]),
     ];
-    // Adding 10→7 is safe: 7 doesn't depend on 10.
+    // Adding 10->7 is safe: 7 doesn't depend on 10.
     assert!(detect_cycle(&tasks, "10", "7").is_ok());
-    // Adding 5→10 is safe: 10 doesn't depend on 5.
+    // Adding 5->10 is safe: 10 doesn't depend on 5.
     assert!(detect_cycle(&tasks, "5", "10").is_ok());
 }
 
-/// Same complex DAG — adding 5→1 creates a cycle (1→2→3→4→5, 5→1).
+/// Same complex DAG - adding 5->1 creates a cycle (1->2->3->4->5, 5->1).
 #[test]
 fn test_cycle_complex_dag() {
     let tasks = vec![
@@ -300,13 +300,13 @@ fn test_cycle_complex_dag() {
         make_task("8", &["9"]),
         make_task("9", &[]),
     ];
-    // Adding 5→1: does 1 depend on 5?  1→2→3→4→5.  Yes!
+    // Adding 5->1: does 1 depend on 5?  1->2->3->4->5.  Yes!
     let err = detect_cycle(&tasks, "5", "1").unwrap_err();
     assert_eq!(err.cycle_path[0], "5");
     assert_eq!(err.cycle_path.last().unwrap(), "5");
 }
 
-// ── Cycle path starts and ends with source ────────────────���────────
+// -- Cycle path starts and ends with source ----------------���--------
 
 /// Verify that cycle_path always starts and ends with the source node.
 #[test]
@@ -324,7 +324,7 @@ fn test_cycle_path_starts_ends_with_source() {
     assert_eq!(err.cycle_path[1], "a");
 }
 
-// ── Cycle path is a valid path in the graph ────────────────────────
+// -- Cycle path is a valid path in the graph ------------------------
 
 /// Verify every consecutive pair in the cycle path corresponds to an
 /// actual blocked_by edge (or the proposed edge for the first pair).
@@ -337,13 +337,13 @@ fn test_cycle_path_edges_are_valid() {
     ];
     let err = detect_cycle(&tasks, "c", "a").unwrap_err();
     let path = &err.cycle_path;
-    // path: c → a → b → c
+    // path: c -> a -> b -> c
     assert_eq!(path.len(), 4);
 
-    // First edge c→a is the proposed edge (not yet in graph).
+    // First edge c->a is the proposed edge (not yet in graph).
     // Remaining edges must exist in the graph:
-    // a→b: a.blocked_by contains b
-    // b→c: b.blocked_by contains c
+    // a->b: a.blocked_by contains b
+    // b->c: b.blocked_by contains c
     let adj: std::collections::HashMap<&str, &[String]> = tasks
         .iter()
         .map(|t| (t.id.as_str(), t.blocked_by.as_slice()))

@@ -13,7 +13,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// ── Tool metadata ───────────────────────────────────────────────────────
+// -- Tool metadata -------------------------------------------------------
 
 #[test]
 fn test_tool_name() {
@@ -37,7 +37,7 @@ fn test_tool_parameters_schema_is_empty_object() {
     assert!(required.is_none() || required.unwrap().is_empty());
 }
 
-// ── Registry registration ───────────────────────────────────────────────
+// -- Registry registration -----------------------------------------------
 
 #[test]
 fn test_communities_tool_registered_in_extended_registry() {
@@ -57,7 +57,7 @@ fn test_communities_tool_registered_with_correct_permission_category() {
     assert_eq!(tool.permission_category(), "codeindex:read");
 }
 
-// ── CodeIndex::communities / try_communities ────────────────────────────
+// -- CodeIndex::communities / try_communities ----------------------------
 
 /// Build an in-memory CodeIndex with a small graph:
 ///   hub --calls--> sat1
@@ -194,7 +194,7 @@ fn test_codeindex_try_communities_returns_none_when_locked() {
     );
 }
 
-// ── Tool execute ───────────────────────────────────────────────────────
+// -- Tool execute -------------------------------------------------------
 
 fn make_ctx(idx: Option<CodeIndex>) -> ragent_tools_extended::ToolContext {
     use ragent_tools_extended::ToolContext;

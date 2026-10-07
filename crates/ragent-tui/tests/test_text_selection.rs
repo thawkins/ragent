@@ -730,7 +730,7 @@ fn test_context_copy_keeps_selection() {
 fn test_extract_single_line() {
     let lines = vec!["Hello, world!".to_string()];
     // inner_x=1, inner_y=1 (inside border)
-    // select columns 1..6 at row 1 → "Hello,"
+    // select columns 1..6 at row 1 -> "Hello,"
     let text = App::extract_text_from_lines(&lines, 1, 1, 1, 1, 6, 1);
     assert_eq!(text, "Hello,");
 }
@@ -743,7 +743,7 @@ fn test_extract_multi_line() {
         "Line three text".to_string(),
     ];
     // inner_x=1, inner_y=5
-    // select from (1,5) to (8,7) → all of line 0, all of line 1, "Line thr" of line 2
+    // select from (1,5) to (8,7) -> all of line 0, all of line 1, "Line thr" of line 2
     let text = App::extract_text_from_lines(&lines, 1, 5, 1, 5, 8, 7);
     assert_eq!(text, "Line one text\nLine two text\nLine thr");
 }
@@ -752,7 +752,7 @@ fn test_extract_multi_line() {
 fn test_extract_partial_single_line() {
     let lines = vec!["ABCDEFGHIJ".to_string()];
     // inner_x=2, inner_y=0
-    // select col 4..7 → characters at positions 2..5 → "CDEF"
+    // select col 4..7 -> characters at positions 2..5 -> "CDEF"
     let text = App::extract_text_from_lines(&lines, 2, 0, 4, 0, 7, 0);
     assert_eq!(text, "CDEF");
 }
@@ -837,8 +837,8 @@ fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
     app.input_cursor = app.input.chars().count();
     app.text_selection = Some(TextSelection {
         pane: SelectionPane::Input,
-        // Wrapped display lines for "> ab💡cd" (inner_w=4):
-        // row 23: "> ab", row 24: "💡cd"
+        // Wrapped display lines for "> abcd" (inner_w=4):
+        // row 23: "> ab", row 24: "cd"
         anchor: (1, 24),
         endpoint: (1, 24),
     });
@@ -916,7 +916,7 @@ fn test_left_click_outside_file_menu_closes_popup() {
 /// "selection pane Log has no active area".
 ///
 /// Sequence: the log panel is visible with a text selection anchored on it,
-/// then a side-panel toggle (Alt+T → `ToggleTasksPanel`) dismisses the log
+/// then a side-panel toggle (Alt+T -> `ToggleTasksPanel`) dismisses the log
 /// panel (`show_log = false`). The render pass zeroes `log_area`, but the
 /// `text_selection` still references `SelectionPane::Log`. The next mouse
 /// event used to trip `assert_ui_invariants`. The fix
@@ -954,7 +954,7 @@ fn test_prune_stale_selection_after_log_panel_dismissed() {
 }
 
 /// Same scenario but the stale selection is on the Memory pane and a
-/// context menu is open on the Log pane — both should be pruned when the
+/// context menu is open on the Log pane - both should be pruned when the
 /// panels are dismissed.
 #[test]
 fn test_prune_stale_selection_clears_menu_and_selection() {

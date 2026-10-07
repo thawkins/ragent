@@ -54,13 +54,13 @@ impl LanguageParser for OpenScadParser {
     }
 }
 
-// ── Extraction context ─────────────────────────────────────────────────────
+// -- Extraction context -----------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive walk ──────────────────────────────────────────────────────────
+// -- Recursive walk ----------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting `OpenSCAD` symbols and imports.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -85,7 +85,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Module item (`module <name>(...) { ... }`) ──────────────────────────────────
+// -- Module item (`module <name>(...) { ... }`) ----------------------------------
 
 /// Extract an `OpenSCAD` module definition.
 ///
@@ -127,7 +127,7 @@ fn extract_module_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope:
     }
 }
 
-// ── Function item (`function <name>(...) = ...;`) ──────────────────────────────
+// -- Function item (`function <name>(...) = ...;`) ------------------------------
 
 /// Extract an `OpenSCAD` function definition.
 ///
@@ -162,7 +162,7 @@ fn extract_function_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scop
     });
 }
 
-// ── Variable declaration (`var_declaration` wrapping `assignment`) ──────────
+// -- Variable declaration (`var_declaration` wrapping `assignment`) ----------
 
 /// Extract an `OpenSCAD` top-level variable declaration.
 ///
@@ -180,7 +180,7 @@ fn extract_var_declaration(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, sc
     }
 }
 
-// ── Assignment (`name = expr;`) ────────────────────────────────────────────
+// -- Assignment (`name = expr;`) --------------------------------------------
 
 /// Extract an `OpenSCAD` assignment as a constant symbol.
 ///
@@ -219,7 +219,7 @@ fn extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
     });
 }
 
-// ── Include / use statements ───────────────────────────────────────────────
+// -- Include / use statements -----------------------------------------------
 
 /// Extract an `OpenSCAD` include or use statement.
 ///
@@ -254,7 +254,7 @@ fn extract_include_use(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Module call reference ───────────────────────────────────────────────────
+// -- Module call reference ---------------------------------------------------
 
 /// Record a module call as a symbol reference (e.g. `sphere(r=10);`).
 ///
@@ -281,7 +281,7 @@ fn extract_module_call_ref(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Function call reference ────────────────────────────────────────────────
+// -- Function call reference ------------------------------------------------
 
 /// Record a function call as a symbol reference (e.g. `sin(45)`).
 ///
@@ -317,7 +317,7 @@ fn extract_function_call_ref(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Get the text of a named field child from a tree-sitter node.
 fn field_child_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
@@ -354,4 +354,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

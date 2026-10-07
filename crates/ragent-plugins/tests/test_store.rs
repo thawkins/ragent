@@ -1,34 +1,15 @@
 //! Tests for plugin store paths, discovery scan, and the state ledger
 //! (spec `plugins` T-005; FR-001, FR-023).
 
-use std::path::{Path, PathBuf};
+mod support;
+
+use support::TempTree;
+
+use std::path::Path;
 
 use ragent_plugins::{
     LifecycleState, PluginError, STATE_FILE, StoreLedger, scan_dirs, store_dirs_at,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/store-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 const CODEX_MANIFEST: &str = r#"{
     "name": "Weather", "version": "1.0.0", "entry": "index.js"
@@ -45,7 +26,7 @@ fn write_plugin(root: &Path, dir_name: &str, manifest_rel: &str, manifest: &str)
     std::fs::write(manifest_path, manifest).expect("manifest writable");
 }
 
-// ── store_dirs_at (FR-001) ──────────────────────────────────────────────────
+// -- store_dirs_at (FR-001) --------------------------------------------------
 
 #[test]
 fn store_dirs_at_orders_global_then_project() {
@@ -79,7 +60,7 @@ fn store_dirs_at_honours_store_dir_override_for_project_leg() {
     );
 }
 
-// ── scan (FR-001, FR-023) ───────────────────────────────────────────────────
+// -- scan (FR-001, FR-023) ---------------------------------------------------
 
 #[test]
 fn scan_discovers_project_and_global_plugins_project_wins_on_collision() {
@@ -210,7 +191,7 @@ fn scan_skips_symlinks_escaping_the_store() {
     let project_store = tree.0.join("proj/.ragent/plugins");
     std::fs::create_dir_all(&project_store).unwrap();
 
-    // A real plugin outside the store, linked in — must be skipped.
+    // A real plugin outside the store, linked in - must be skipped.
     write_plugin(
         &tree.0,
         "outside-weather",
@@ -265,7 +246,7 @@ fn scan_treats_absent_store_as_empty() {
     assert!(found.is_empty());
 }
 
-// ── ledger ──────────────────────────────────────────────────────────────────
+// -- ledger ------------------------------------------------------------------
 
 #[test]
 fn ledger_round_trips_state_and_counters() {
@@ -307,7 +288,7 @@ fn ledger_corrupt_file_is_renamed_aside_and_restarted() {
     assert!(!store.join(STATE_FILE).exists());
 }
 
-// ── lifecycle state display (FR-009) ────────────────────────────────────────
+// -- lifecycle state display (FR-009) ----------------------------------------
 
 #[test]
 fn lifecycle_state_display_names_match_spec_rows() {

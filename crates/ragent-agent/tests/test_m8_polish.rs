@@ -1,21 +1,21 @@
 //! Tests for `COMMSPLAN.md` Milestone 8 tasks.
 //!
-//! - M8-T1: `SessionProcessor::team_context_cache` — verifies the cache is
+//! - M8-T1: `SessionProcessor::team_context_cache` - verifies the cache is
 //!   populated on resolution, hits within the TTL avoid re-resolution, and
 //!   invalidation clears entries.
-//! - M8-T2: `team_create` blueprint spawn error aggregation — verifies the
+//! - M8-T2: `team_create` blueprint spawn error aggregation - verifies the
 //!   `failed_spawns` metadata field is populated when a blueprint spawn
 //!   prompt fails.
 //! - M8-T3: `team_task_claim` sets `current_task_id` and
 //!   `team_task_complete` clears it.
-//! - M8-T5: `resolve_agent_id` rejects unknown `tm-…` IDs.
+//! - M8-T5: `resolve_agent_id` rejects unknown `tm-...` IDs.
 
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use ragent_agent::tool::TeamContext;
 
-// ── M8-T1: team-context cache ───────────────────────────────────────────────
+// -- M8-T1: team-context cache -----------------------------------------------
 
 /// The cache field exists on `SessionProcessor` and starts empty.
 #[test]
@@ -44,7 +44,7 @@ fn test_team_context_cache_hit_within_ttl() {
         .write()
         .insert(session_id.clone(), (ctx, std::time::Instant::now()));
 
-    // Read within the 5 s TTL — should be a hit.
+    // Read within the 5 s TTL - should be a hit.
     let cached = cache.read().get(&session_id).cloned();
     assert!(
         cached.is_some(),
@@ -153,7 +153,7 @@ fn test_team_context_cache_evicts_when_session_not_in_team() {
     );
 }
 
-// ── M8-T2: blueprint spawn error aggregation ────────────────────────────────
+// -- M8-T2: blueprint spawn error aggregation --------------------------------
 
 /// Verifies the shape of the `failed_spawns` metadata field produced by
 /// `team_create` when a blueprint spawn prompt fails. The test does not
@@ -193,7 +193,7 @@ fn test_team_create_failed_spawns_metadata_schema() {
     assert_eq!(arr[1]["index"], 2);
 }
 
-// ── M8-T3: current_task_id tracking ─────────────────────────────────────────
+// -- M8-T3: current_task_id tracking -----------------------------------------
 
 /// Verifies that claiming a task sets the member's `current_task_id` and
 /// completing it clears the field. The logic lives in the tools, but the

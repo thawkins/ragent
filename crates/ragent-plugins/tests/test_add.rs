@@ -1,32 +1,14 @@
 //! Tests for `/plugins add` source handling (spec `plugins` T-006; FR-007,
 //! FR-010, FR-023).
 
+mod support;
+
+use support::TempTree;
+
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{AddError, MAX_ARCHIVE_BYTES, PluginDialect, StoreDirs, add, scan_dirs};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/add-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn dirs(tree: &TempTree) -> StoreDirs {
     StoreDirs {
@@ -75,7 +57,7 @@ fn make_tar_gz(path: &Path, files: &[(&str, &str)]) {
     builder.into_inner().unwrap().finish().unwrap();
 }
 
-// ── local directory source (FR-007, FR-010) ─────────────────────────────────
+// -- local directory source (FR-007, FR-010) ---------------------------------
 
 #[test]
 fn add_local_directory_installs_enabled_and_reports_id_and_dialect() {
@@ -173,7 +155,7 @@ fn add_directory_with_bad_manifest_is_refused_nothing_installed() {
     assert!(scan_dirs(dirs(&tree)).is_empty());
 }
 
-// ── local archive sources (FR-010) ──────────────────────────────────────────
+// -- local archive sources (FR-010) ------------------------------------------
 
 #[test]
 fn add_local_zip_extracts_and_installs() {
@@ -270,7 +252,7 @@ fn add_oversize_archive_is_refused() {
     );
 }
 
-// ── URL sources (FR-010) ────────────────────────────────────────────────────
+// -- URL sources (FR-010) ----------------------------------------------------
 
 #[test]
 fn add_refuses_http_url() {
@@ -293,7 +275,7 @@ fn add_refuses_other_url_schemes() {
     let err = add(&dirs(&tree), &tree.0, "file:///tmp/w.zip", false).unwrap_err();
     assert!(matches!(err, AddError::NotHttps(_)), "file: {err:?}");
     // Scheme-less strings that are not files are unrecognised sources, not
-    // URLs — the `://`-bearing https check covers the URL family.
+    // URLs - the `://`-bearing https check covers the URL family.
     let err = add(&dirs(&tree), &tree.0, "javascript:alert(1)", false).unwrap_err();
     assert!(
         matches!(err, AddError::UnknownSource(_)),
@@ -315,7 +297,7 @@ fn add_unknown_local_source_is_refused() {
     assert!(matches!(err, AddError::UnknownSource(_)));
 }
 
-// ── staging hygiene ─────────────────────────────────────────────────────────
+// -- staging hygiene ---------------------------------------------------------
 
 #[test]
 fn successful_add_leaves_no_staging_directories() {
@@ -328,7 +310,7 @@ fn successful_add_leaves_no_staging_directories() {
     assert!(tree.0.join("proj/.ragent/plugins/_state.json").exists());
 }
 
-// ── SEC-ragent-plugins-002: an oversized/odd declared id is contained ───────
+// -- SEC-ragent-plugins-002: an oversized/odd declared id is contained -------
 
 /// An install never writes outside the store even if a manifest declares an
 /// id that would traverse or replace the store root: the parser sanitises the
@@ -364,7 +346,7 @@ fn add_confines_a_traversal_declared_id_to_the_store() {
     );
 }
 
-// ── ANTIPAT M0.6: install integrity, aggregate cap, symlink refusal ─────────
+// -- ANTIPAT M0.6: install integrity, aggregate cap, symlink refusal ---------
 
 /// A successful install records the observed content digest in the store
 /// ledger (ANTIPAT H2), and the digest is stable across a reinstall of
@@ -473,7 +455,7 @@ fn add_refuses_a_symlinked_source_entry() {
     );
 }
 
-// ── ANTIPAT M14: the shared identifier predicate backs the install sink ─────
+// -- ANTIPAT M14: the shared identifier predicate backs the install sink -----
 
 /// `confined_dest_dir` (via the `add` sink) must accept a valid id and refuse
 /// a traversal / absolute / multi-component id using the shared guard rule,
@@ -493,7 +475,7 @@ fn add_still_installs_a_legitimate_plugin_id() {
     assert!(outcome.installed_dir.ends_with("weather"));
 }
 
-// ── ANTIPAT M15: Io errors keep their source chain ──────────────────────────
+// -- ANTIPAT M15: Io errors keep their source chain --------------------------
 
 /// The `Io` variants now hold the structured `IoError`, whose `Display`
 /// preserves the underlying chain. A failed git clone surfaces the git detail

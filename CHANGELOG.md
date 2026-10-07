@@ -1,5 +1,250 @@
 # Changelog
 
+## [1.0.129] - 2026-10-07
+
+*Code-audit remediation release. The `docs/plans/code-audit.md` plan is now
+complete through M9; this cycle lands the last four milestones (M5 dead-code
+removal, M6 test hygiene, M7 new test coverage, M8 standards/cosmetic cleanup,
+M9 dependency upkeep) as uncommitted working-tree work on top of the ten
+documented commits below. Headline dependency moves: `reqwest` 0.13,
+`criterion` 0.8, `opentelemetry` 0.33, `lopdf` 0.44 (the vendored
+`vendor/lopdf` crate is deleted), `tree-sitter` 0.27, `notify` 8.2,
+`rquickjs` 0.14, `chacha20poly1305` 0.11, `rand` 0.10 workspace-wide, `which` 8;
+the `thiserror` 1.x line is retired and the yanked `yoke-derive` is cleared. A
+new `ragent-surface` crate (18th workspace crate) is extracted, the `.gitignore`
+gains certificate/SQLite-sidecar rules, and a committed `.env.example` template
+lands.*
+
+### Commits (last 10)
+
+- **`f87e2d95` - Version: 1.0.128.** Release commit for the config-durability,
+  bounded-MCP-connect, and non-blocking-TUI-startup release (full detail in the
+  `[1.0.128]` section below).
+- **`87024938` - Version: 1.0.127.** Release commit. Added `TOOLREP.md`, removed
+  the six Office / LibreOffice document tools and their module set (registered
+  tool count 158 -> 152), the `tool_visibility.office` switch, the unused `docio`
+  helper, the OOXML/ODF `DocumentFormat` variants, and the
+  `docx-rust`/`calamine`/`ooxmlsdk`/`zip`/`spreadsheet-ods` dependencies; plus a
+  `/simplify all` pass over the changed set.
+- **`d0eaa4e1` - Version: 1.0.126.** Office / LibreOffice tool removal and the
+  accompanying `/simplify all` sweep (tool count 158 -> 152).
+- **`b2b46d5d` - Version: 1.0.125.** `os_info` host-introspection tool and the
+  `/osinfo` slash-command family (registry 171 -> 172), the research
+  scholarly-engine default flip (`--papers` replaces `--no-papers`), the `probe`
+  parameter, and three new tracked research items.
+- **`80fac9fb` - Version: 1.0.124.** Connector-system follow-up, `/memory clear`,
+  and TUI render fixes (`/mcp` table rendering, `/tools list`, `split_summary_icon`,
+  the MCP orphan-sweep extension to `systemd --user`).
+- **`f6199c1c` - Version: 1.0.123.** Research system, `ragent-connectors` crate
+  (17th workspace crate), Gmail/communications, osinfo groundwork, and the
+  per-engine research progress table.
+- **`0647d365` - Version: 1.0.122.** Security and anti-pattern remediation sweep
+  folding in the staged working tree on top of `6cf0b60f` (MS-04): `ANTIPAT.md`
+  M0 plus M2-M7, `ragent-team` shim crate removed (17 -> 16 workspace crates),
+  major dependency bumps, and `SECTASKS.md` MS-05 "prevent recurrence" (the
+  `ragent_types::guard` module, the single `sanitize` redaction chokepoint, and
+  the `security-guards` CI job).
+- **`6cf0b60f` - MS-04: defence in depth (`SECTASKS` T-059..T-066).** The 33
+  Low-severity findings closed with the same guard shapes as MS-01..MS-03:
+  `--samples` clamped to `MAX_BENCH_SAMPLES` (100), streamed dataset downloads
+  under `MAX_DOWNLOAD_BYTES`, benchmark manifest path containment, plugin
+  manifest `entry`/`main`/`server.entry` validation, `resolve_memory_dir`
+  rejecting unsafe agent names, a process-private 0700 bash scratch directory,
+  redacted JSON parse-diagnostic source lines, and credential-bearing events
+  redacted on the SSE stream.
+- **`da83d927` - MS-03: network and secret hardening (`SECTASKS` T-025..T-058).**
+  The Medium-severity remediation set: MCP HTTP response bodies under an 8 MiB
+  cap, benchmark download timeouts and size/pagination budgets, LLM provider
+  `Retry-After`/SSE/error-body caps, GitHub/GitLab pagination budgets,
+  `mf_fetch`/`mf_crawl` byte caps and `crawl_urls` SSRF check, secret registry
+  seeded from every credential env var, bash/CI/SSE-argument redaction,
+  HTTP-origin-gated GitHub token, Gmail CRLF stripping, 0600 DB/WAL/activity-log
+  permissions, `http_request` refusing routing/credential headers, codeindex
+  exclusion-glob/FTS-symlink/walker guards, bounded spec numbering, mailbox
+  caps, panic-free `CronSchedule`, and a stderr-spool byte ceiling.
+- **`14c25e1d` - Add research/ folder.** Reverts the `research/` entry in
+  `.gitignore` so the directory is tracked, and commits the accumulated research
+  findings, indexes, and output reports.
+
+### Working tree
+
+The uncommitted M5/M6/M7/M8/M9 work, the M1 `.gitignore`/`.env.example`
+hardening, and the config-write robustness fix are documented in the
+`Uncommitted (working tree)` section immediately below.
+
+## Uncommitted (working tree)
+
+### Added
+
+- **Milestone M7 of `docs/plans/code-audit.md` complete - new test coverage.**
+  Five tasks closing the highest-risk untested modules, all as external `tests/`
+  suites (no inline `#[cfg(test)]` module was added):
+  - **`CalculatorTool` coverage (T-701).** New
+    `crates/ragent-tools-core/tests/test_calculator.rs` (24 tests) exercises the
+    recursive-descent parser directly and through the tool: operator precedence,
+    left-associative `-`/`/`, right-associative `^`, parentheses, unary `+`/`-`,
+    `%`, the `pi`/`e`/`tau` constants, the whitelisted functions, the documented
+    divide-by-zero semantics (`1/0` is `inf`, `0/0` is `NaN` - not an error), and
+    every error path (unexpected character, empty input, trailing input, missing
+    `)`, unknown name/function, arity mismatch, bad argument separator, the
+    4096-character cap, and the 64-level nesting cap).
+  - **Untested small tools (T-702).** New `test_agent_complete_tool.rs`,
+    `test_bash_reset_tool.rs`, and `test_xlsx.rs` cover `AgentCompleteTool`
+    (summary required, `TaskCompleted` event published, metadata surface),
+    `BashResetTool` (deletes a sentinel session state file, no-op when absent),
+    and `write_xlsx` (mixed cell types, multiple/default-named sheets, missing
+    `sheets` error). `get_env` already had `test_get_env_tool.rs`.
+  - **Azure AI Foundry provider (T-703).** New
+    `crates/ragent-llm/tests/test_azure_foundry_provider.rs` (5 tests) stands up a
+    loopback HTTP server and pins the provider's three responsibilities -
+    request build (`POST <base>/openai/v1/chat/completions`, OpenAI-compatible SSE
+    parsing), auth (the Azure `api-key` header, never `Authorization: Bearer`), and
+    model discovery (`GET /openai/models?api-version=2024-10-21`, capability
+    derivation, and redaction of a key-shaped token echoed in an error body).
+  - **Agent-loop step harness (T-704).** New
+    `crates/ragent-agent/tests/test_loop_steps_harness.rs` (3 tests) drives a
+    scripted `Provider` + `LlmClient` through the public `process_message` loop
+    (the only path an external test crate can reach, since the step methods are
+    `pub(crate)`): it asserts that `prepare_client` produces one request carrying
+    the resolved model, system prompt, tool definitions, and user message; that
+    `call_llm_step` accumulates a single text step and a tool-then-text two-step
+    run, publishing `RequestStarted`/`TextDelta`/`TokenUsage`/`ToolCall*`; that the
+    final save persists the assistant message and emits a terminal
+    `MessageEnd { Stop }`; and that a provider error surfaces with an `AgentError`
+    event.
+  - **Orchestrator `Coordinator` harness (T-705).** New
+    `crates/ragent-agent/tests/test_orchestrator_coordinator.rs` (13 tests) uses a
+    deterministic fake `Router` to cover `start_job_sync` (concatenated responses,
+    no-match, all-send-fail, policy resolver, timeout classification),
+    `start_job_first_success` (first non-`error:` response, all-`error:` bail,
+    send-error bail, no-match), `start_job_async` (event emission and stored
+    result, no-match `JobFailed`), the unknown-job error, and `MetricsSnapshot`
+    serialisation.
+
+### Fixed
+
+- **`Coordinator::active_jobs` counter no longer underflows.** The active-job
+  metric was incremented *after* spawning a job in `start_job_async` while the
+  `ActiveJobsGuard` (which decrements on drop) was constructed inside the spawned
+  task, and the synchronous `start_job_sync`/`start_job_first_success` paths
+  installed a guard without ever incrementing. `active_jobs` therefore drifted
+  below zero, wrapping `AtomicU64` to `18446744073709551615`. The increment now
+  happens exactly once, before the guard is installed, via a new
+  `ActiveJobsGuard::enter` constructor used by all three job entry points.
+
+### Changed
+
+- **Milestone M5 of `docs/plans/code-audit.md` complete - dead-code and
+  stale-duplicate removal.** Five tasks:
+  - **Stale agent snapshot deleted (T-501).** `crates/ragent-agent/src/snapshot/`
+    held a byte-near-identical second copy of `crates/ragent-storage/src/snapshot.rs`
+    that had drifted (its `to_full` still cloned the base file map, missing
+    PERF-070, and its diff parser still used the panicking `split_at(1)` that
+    SEC-ragent-storage-006 fixed). Nothing referenced `ragent_agent::snapshot`
+    (live capture/restore uses `ragent_storage::snapshot`), so the module and its
+    `pub mod snapshot;` declaration are gone, and the `recorder.rs` doc-link now
+    points at `ragent_storage::snapshot::restore_snapshot`. The
+    `security-unwrap-baseline.txt` entry for the deleted file is dropped.
+  - **Duplicated schema test suite removed (T-502).** The seven
+    `ragent-tools-core` schema tests existed twice: as an inline `#[path]` body
+    (`tests/inline/schema_tests.rs`, reached through a `#[cfg(test)]` hook in
+    `src/schema.rs`) and as the external `tests/test_schema_validation.rs`. The
+    external public-API copy is kept as the single source; the inline body and its
+    hook are deleted, so each test now runs once.
+  - **Placeholder tests replaced with real assertions (T-503).**
+    `crates/ragent-agent/tests/test_precompiled_regexes.rs` had two empty bodies
+    that only "confirmed the test plumbing". They now assert on concrete values:
+    the stall `RegexSet` is one shared instance (`std::ptr::eq`) that matches a
+    stall phrase and rejects ordinary text; `redact_secrets` masks a key-shaped
+    token deterministically; and the router classifier returns an identical tier
+    and composite score across repeated calls.
+  - **Dead probe fallbacks removed (T-504).** After T-309 the CLI `NeverProbe`
+    and TUI `NoProbe` were never driven: both surfaces serve `test` through
+    `run_connector_subcommand_async` and never reach the `Test` arm of
+    `run_connector_subcommand_env`. That arm, the `probe`/`workdir` parameters it
+    alone used, and both fallback types are deleted; the env dispatcher now takes
+    `(&mut env, sub, rest)` and returns `None` for `test`.
+  - **New `ragent-surface` crate (T-505).** The `/plugins` and `/connectors`
+    families had drifted into parallel copies of their surface glue. A new
+    workspace crate owns the one implementation of the `From: <trigger>
+    <subcommand>` attribution and the first-token subcommand tokeniser
+    (`ragent_surface::help`), the two-root store-directory resolution and the
+    symlink-containment guard (`ragent_surface::store`), and the harness step
+    model with `sample_for_schema`/`schema_type`/`truncate`/`step`
+    (`ragent_surface::harness`). `ragent-plugins` and `ragent-connectors` delegate
+    (their public names are unchanged, so no call site moved), and the new
+    `tests/test_surface_helpers.rs` pins each helper. The workspace advances from
+    17 to 18 crates.
+
+- **Milestone M6 of `docs/plans/code-audit.md` complete - test infrastructure and
+  hygiene.** Eight tasks:
+  - **Test scratch paths moved off `/tmp` (T-601).** 31 sites across 24 files now
+    use `target/temp` per the AGENTS.md temp-file rule.
+  - **Shared `TempTree` sandbox helpers (T-602).** `ragent-plugins` and
+    `ragent-connectors` each gained one `tests/support` `TempTree`, replacing 18
+    and 10 copy-pasted definitions and matching the `ragent-llm`/`ragent-tui`
+    pattern.
+  - **Diagnostic tests gated (T-603).** `test_mf_orchestrator_diag` and
+    `test_fts_diag` are `#[ignore]`-gated so a default `cargo test` does not run
+    them.
+  - **Live-network test gated (T-604).** `test_ollama_cloud_real` is
+    `#[ignore]`-gated so the default run never hits the network.
+  - **Config test triples collapsed (T-605).** The per-key
+    `test_serper_api_key.rs`/`test_perplexity_api_key.rs`/`test_langsearch_api_key.rs`
+    files are replaced by one table-driven `test_api_key_config_fields.rs`.
+  - **Research scoreboard fixture (T-606).** The three scoreboard tests share
+    `tests/support/scoreboard_fixture.rs`.
+  - **Weak assertions strengthened (T-607).** `.is_some()`/presence-only
+    assertions bind and compare concrete values.
+  - **Test file naming (T-608).** `dump_registries.rs`, `session_processor.rs`,
+    `source_vault.rs`, and `structure_types.rs` renamed to the
+    `test_<component>_<scenario>` convention.
+- **Milestone M8 of `docs/plans/code-audit.md` complete - standards and cosmetic
+  cleanup.** T-801..T-811: GitHub/GitLab acronym casing standardised on the
+  canonical form across `ragent-tools-vcs` (all 31 tool types plus the shared
+  helpers); the three user-facing/external-input unwraps removed; emoji and
+  box-drawing glyphs stripped from production-source comments workspace-wide; the
+  six named modules carry `//!` headers; `MultiPlEAdapter` renamed to
+  `MultipleAdapter`; the four `Regex::new(...)` sites in `slash.rs` use
+  `.expect("valid ... regex")`; the `CollectingTierRouterObserver` test double is a
+  real `pub` type; `test_codeindex_backward_compat` asserts against the
+  `SLASH_COMMANDS` data model instead of scraping source.
+
+### Changed
+
+- **Milestone M9 of `docs/plans/code-audit.md` complete - dependency upkeep.**
+  T-901..T-908: the yanked `yoke-derive@0.8.3` is cleared (`cargo audit` reports
+  no yanked crate); all workspace crates converge on `thiserror 2`,
+  `reqwest 0.13` (the `ragent-llm` direct pin now uses `workspace = true`),
+  `rand 0.10`, and `criterion 0.8`; `ragent-storage` moves from `rand 0.8` to the
+  workspace `0.10`; `lopdf` converges on `0.44` and the dedicated
+  `vendor/lopdf` crate is deleted (the `MAX_OBJECT_DEPTH` recursion guard is no
+  longer needed because `pdf-extract`/`lopdf` 0.44 bound depth natively);
+  `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp` migrate 0.29 -> 0.33
+  (the Prometheus scrape endpoint enables the new
+  `experimental_metrics_custom_reader` feature); and `notify` 7 -> 8.2,
+  `rquickjs` 0.10 -> 0.14, `tree-sitter` 0.26 -> 0.27, `chacha20poly1305`
+  0.10 -> 0.11, `which` 7 -> 8 are applied. The residual `thiserror 1.x` lock
+  entry is a stale transitive of a build-dependency edge not exercised on the
+  default target and does not appear in the cargo dependency graph.
+- **Milestone M1 `.gitignore`/`.env.example` hardening (T-101..T-103).**
+  `.gitignore` gains `*.db-wal`/`*.db-shm` (SQLite sidecars can hold plaintext
+  credential-store and session-history pages) and the certificate/credential
+  patterns `*.pem`, `*.p12`, `*.pfx`, `service-account.json`,
+  `credentials.json`; a tracked `.env.example` template lists every credential
+  env var ragent reads (no real values), so the previously dead `!.env.example`
+  rule now resolves.
+
+### Fixed
+
+- **Config-write comparison no longer folds a corrupt file to `Null`.**
+  `Config::write_config_if_changed` parsed the existing and new JSON with
+  `unwrap_or(Value::Null)`, so a corrupt existing file compared equal to a
+  corrupt new one and no rewrite happened. It now distinguishes parse failures
+  (logging them and forcing a rewrite) from a genuine read error, and the dead
+  `create_dir_all(parent)` call before a serialise that cannot need it is
+  dropped.
+
 ## [1.0.128] - 2026-10-06
 
 *Fixes intermittent YOLO-off at startup (atomic config writes), bounds MCP

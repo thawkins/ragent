@@ -44,7 +44,7 @@ async fn app_with_menu_open() -> App {
 }
 
 // ---------------------------------------------------------------------------
-// FR-032 — Esc closes the menu taking no action
+// FR-032 - Esc closes the menu taking no action
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -86,7 +86,7 @@ async fn test_esc_sets_the_redraw_flag() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-031 — the menu never mutates the editable input buffer
+// FR-031 - the menu never mutates the editable input buffer
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -155,7 +155,7 @@ async fn test_esc_leaves_the_running_turn_untouched() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-031 — every other key is swallowed while the menu is open
+// FR-031 - every other key is swallowed while the menu is open
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

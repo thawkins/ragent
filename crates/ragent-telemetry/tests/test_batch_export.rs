@@ -19,7 +19,7 @@
 //!
 //! The `InMemoryMetricExporter`'s `shutdown()` implementation **clears**
 //! its internal metric buffer. This means that after `provider.shutdown()`
-//! returns, `get_finished_metrics()` will be empty — the metrics were
+//! returns, `get_finished_metrics()` will be empty - the metrics were
 //! collected during the shutdown flush and then immediately discarded by
 //! the exporter's own shutdown. This is an artifact of the in-memory test
 //! exporter, not of the real OTLP exporter (which sends data over the
@@ -37,7 +37,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::{InstrumentRegistry, OtelConfig, TelemetryState, TelemetrySubsystem};
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 /// Build a `SdkMeterProvider` backed by an `InMemoryMetricExporter` with a
 /// `PeriodicReader` configured to use a very long export interval so that no
@@ -73,7 +73,7 @@ fn record_llm_request(provider: &SdkMeterProvider, model: &str, provider_name: &
     registry.llm_requests.add(1, attrs);
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+// -- Tests -----------------------------------------------------------------
 
 /// The export interval from `OtelConfig` is applied to the subsystem.
 ///
@@ -107,7 +107,7 @@ fn test_custom_export_interval_preserved() {
 /// Metrics are buffered by the `PeriodicReader` and not exported until
 /// `flush()` is called.
 ///
-/// FR-006: the system batches metric exports — metrics recorded between
+/// FR-006: the system batches metric exports - metrics recorded between
 /// export intervals are accumulated and only sent to the exporter on the
 /// next flush/interval tick.
 #[test]
@@ -125,7 +125,7 @@ fn test_metrics_buffered_until_flush() {
         metrics_before.len()
     );
 
-    // Force flush — now metrics should appear.
+    // Force flush - now metrics should appear.
     rt.block_on(async {
         provider.force_flush().expect("force_flush should succeed");
     });
@@ -140,7 +140,7 @@ fn test_metrics_buffered_until_flush() {
 /// `flush()` on an enabled `TelemetrySubsystem` triggers an immediate
 /// export of all buffered metrics.
 ///
-/// FR-006 + FR-019: "flush all pending exports on process shutdown" — the
+/// FR-006 + FR-019: "flush all pending exports on process shutdown" - the
 /// `flush()` method is the mechanism the shutdown signal handler (T-009)
 /// calls before `shutdown()`.
 #[test]
@@ -162,10 +162,9 @@ fn test_flush_triggers_immediate_export() {
 
     // Verify at least one metric batch contains our counter.
     let has_llm_requests = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.llm.requests")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.llm.requests")
     });
     assert!(
         has_llm_requests,
@@ -178,7 +177,7 @@ fn test_flush_triggers_immediate_export() {
 /// FR-006: "flush all pending exports on process shutdown."
 ///
 /// Note: the `InMemoryMetricExporter` clears its buffer during shutdown,
-/// so we cannot inspect metrics after `shutdown()` — we verify the call
+/// so we cannot inspect metrics after `shutdown()` - we verify the call
 /// succeeds without error, which proves the flush-and-shutdown path
 /// executes.
 #[test]
@@ -228,7 +227,7 @@ fn test_flush_then_shutdown_succeeds() {
 
     record_llm_request(&provider, "gpt-4", "openai");
 
-    // Flush first — metrics should appear in the exporter.
+    // Flush first - metrics should appear in the exporter.
     rt.block_on(async {
         provider.force_flush().expect("first flush should succeed");
     });

@@ -13,7 +13,7 @@ use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
 use crate::memory::store::{ForgetFilter, MEMORY_CATEGORIES, StructuredMemory};
 
-// ── MemoryStoreTool ───────────────────────────────────────────────────────────
+// -- MemoryStoreTool -----------------------------------------------------------
 
 /// Tool for storing structured memories with category, tags, and confidence.
 ///
@@ -146,7 +146,7 @@ impl Tool for MemoryStoreTool {
     }
 }
 
-// ── MemoryRecallTool ──────────────────────────────────────────────────────────
+// -- MemoryRecallTool ----------------------------------------------------------
 
 /// Tool for querying structured memories with FTS5 and filters.
 ///
@@ -297,7 +297,7 @@ impl Tool for MemoryRecallTool {
     }
 }
 
-// ── MemoryForgetTool ──────────────────────────────────────────────────────────
+// -- MemoryForgetTool ----------------------------------------------------------
 
 /// Tool for removing outdated or incorrect structured memories.
 ///

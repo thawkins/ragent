@@ -115,7 +115,7 @@ fn test_sanitize_for_id_length_limit() {
 }
 
 /// The `SubagentComplete` event `summary` remains truncated to 2000
-/// chars for TUI display — this is separate from the full result.
+/// chars for TUI display - this is separate from the full result.
 #[test]
 fn test_event_summary_is_short() {
     let long = "z".repeat(10_000);

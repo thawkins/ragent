@@ -648,7 +648,7 @@ async fn test_out_of_scope_file_operation_denied_with_observation() -> Result<()
 }
 
 /// FR-008: with `tool_set: ["read"]`, the wire tool definitions offered to
-/// the loop are restricted to the set plus the mandatory safety tools —
+/// the loop are restricted to the set plus the mandatory safety tools -
 /// `bash` is not among them while `think` (always allowed) is.
 #[tokio::test]
 async fn test_tool_set_restricts_loop_tool_surface() -> Result<()> {

@@ -28,6 +28,33 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> String {
     format!("{truncated}...")
 }
 
+/// Format a byte count as a compact human-readable string.
+///
+/// Uses binary units (`KB`/`MB`) and one decimal place once the value exceeds
+/// 1 KiB. Byte counts below 1 KiB are rendered verbatim as `"<n> B"`.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::format_size;
+///
+/// assert_eq!(format_size(0), "0 B");
+/// assert_eq!(format_size(512), "512 B");
+/// assert_eq!(format_size(1024), "1.0 KB");
+/// assert_eq!(format_size(1536), "1.5 KB");
+/// assert_eq!(format_size(1024 * 1024), "1.0 MB");
+/// ```
+#[must_use]
+pub fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// Truncate a string to at most `max_bytes` bytes, stepping back from the
 /// cut point until it lands on a valid UTF-8 char boundary, then appending
 /// an ellipsis (`...`) when the string was shortened.
@@ -50,11 +77,7 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &s[..end])
+    format!("{}...", &s[..floor_char_boundary(s, max_bytes)])
 }
 
 /// Truncate a string to at most `max_bytes` bytes, stepping back from the cut
@@ -79,11 +102,7 @@ pub fn truncate_bytes_no_ellipsis(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s[..end].to_string()
+    s[..floor_char_boundary(s, max_bytes)].to_string()
 }
 
 /// Round `index` down to the nearest UTF-8 char boundary in `s` (clamped to

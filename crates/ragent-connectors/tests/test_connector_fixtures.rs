@@ -14,8 +14,11 @@
 //! `assets/connectors/fixtures/stores/`, and the harness cases drive a fake
 //! [`McpProbe`].
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use async_trait::async_trait;
 use ragent_config::{ConnectorsConfig, McpServerConfig};
@@ -24,89 +27,11 @@ use ragent_connectors::{
     CategoryFilter, CategoryFilterState, ConnectorDescriptor, ConnectorError,
     ConnectorLifecycleState, ConnectorStatus, InMemoryCredentialStore, ListInput, ListRow,
     MANIFEST_FILE, MapEnv, McpProbe, ProbeTool, RemoveError, ServerReport, ServerState, StageError,
-    StepOutcome, StoreDirs, StoreLedger, ToolCount, add, auth_report, parse_catalogue,
-    provider_for, read_manifest, remove, render_list, resolve_filter,
-    run_connector_subcommand_async, scan_dirs, store_dirs_at, store_secret, test_connector,
-    write_manifest,
+    StepOutcome, ToolCount, add, auth_report, parse_catalogue, provider_for, read_manifest, remove,
+    render_list, resolve_filter, run_connector_subcommand_async, scan_dirs, store_secret,
+    test_connector, write_manifest,
 };
 use serde_json::json;
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// Workspace fixture root: `assets/connectors/fixtures/`.
-fn fixtures_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/connectors/fixtures")
-}
-
-/// One fixture packaged as an archive, for the packaged-install cases.
-fn archives_root() -> PathBuf {
-    fixtures_root().join("archives")
-}
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/fixtures-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        let store = path.join(".ragent/connectors");
-        std::fs::create_dir_all(&store).expect("store creatable");
-        Self(path)
-    }
-
-    /// The project connector store (`<tree>/.ragent/connectors/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/connectors")
-    }
-
-    /// Store dirs pinned to this tree's project store (no global leg).
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-
-    /// Install fixture `name` through the real `add` path and return its id.
-    fn install(&self, name: &str) -> String {
-        let source = fixtures_root().join(name);
-        let outcome = add(
-            &self.dirs(),
-            &self.0,
-            source.to_str().expect("utf8"),
-            false,
-            &[],
-        )
-        .unwrap_or_else(|e| panic!("install fixture {name}: {e}"));
-        outcome.descriptor.id.as_str().to_string()
-    }
-
-    /// Install archive `name` (e.g. `echo.zip`) and return the id.
-    fn install_archive(&self, name: &str, force: bool) -> String {
-        let source = archives_root().join(name);
-        let outcome = add(
-            &self.dirs(),
-            &self.0,
-            source.to_str().expect("utf8"),
-            force,
-            &[],
-        )
-        .unwrap_or_else(|e| panic!("install archive {name}: {e}"));
-        outcome.descriptor.id.as_str().to_string()
-    }
-
-    /// The store ledger as written by the installs.
-    fn ledger(&self) -> StoreLedger {
-        StoreLedger::load(&self.store())
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A probe whose connect failure is decided per server id.
 #[derive(Default)]
@@ -175,7 +100,7 @@ fn list(tree: &TempTree, statuses: &[ConnectorStatus], filter: &CategoryFilter) 
     .expect("fixture categories resolve")
 }
 
-// ── fixture inventory ───────────────────────────────────────────────────────
+// -- fixture inventory -------------------------------------------------------
 
 #[test]
 fn all_documented_fixtures_are_present_and_parse() {
@@ -191,7 +116,7 @@ fn all_documented_fixtures_are_present_and_parse() {
         ("duplicate", "data", 1),
     ];
     for (name, category, servers) in expected {
-        let dir = fixtures_root().join(name);
+        let dir = TempTree::fixtures_root().join(name);
         assert!(dir.is_dir(), "fixture {name} must exist at {dir:?}");
         let mut descriptor =
             read_manifest(&dir).unwrap_or_else(|e| panic!("read fixture {name}: {e}"));
@@ -228,12 +153,12 @@ fn all_documented_fixtures_are_present_and_parse() {
 #[test]
 fn fixture_archives_are_present_and_readable() {
     for name in ["echo.zip", "needs-token.tar.gz", "escape.zip"] {
-        let path = archives_root().join(name);
+        let path = TempTree::fixtures_root().join("archives").join(name);
         assert!(path.is_file(), "archive fixture {name} must exist");
     }
 }
 
-// ── acceptance criterion 1: usage fallbacks create nothing ──────────────────
+// -- acceptance criterion 1: usage fallbacks create nothing ------------------
 
 #[test]
 fn acceptance_1_usage_fallbacks_print_one_block_and_create_no_files() {
@@ -265,7 +190,7 @@ fn acceptance_1_usage_fallbacks_print_one_block_and_create_no_files() {
     );
 }
 
-// ── acceptance criterion 2: the catalogue parses into a usable set ──────────
+// -- acceptance criterion 2: the catalogue parses into a usable set ----------
 
 #[test]
 fn acceptance_2_catalogue_parses_into_installable_entries() {
@@ -280,7 +205,7 @@ fn acceptance_2_catalogue_parses_into_installable_entries() {
     );
 }
 
-// ── acceptance criterion 3: add installs enabled, connects nothing ──────────
+// -- acceptance criterion 3: add installs enabled, connects nothing ----------
 
 #[test]
 fn acceptance_3_add_installs_enabled_and_connects_nothing() {
@@ -309,7 +234,7 @@ fn acceptance_3_add_installs_enabled_and_connects_nothing() {
     assert!(rendered.contains("enabled"), "{rendered}");
 }
 
-// ── acceptance criterion 4: enable surfaces bridged server ids ──────────────
+// -- acceptance criterion 4: enable surfaces bridged server ids --------------
 
 #[test]
 fn acceptance_4_enable_surfaces_servers_under_the_bridged_id_shape() {
@@ -347,7 +272,7 @@ fn acceptance_4_enable_surfaces_servers_under_the_bridged_id_shape() {
     assert!(served.iter().all(|s| s.state == ServerState::Connected));
 }
 
-// ── acceptance criterion 5: disable deregisters exactly its tools ───────────
+// -- acceptance criterion 5: disable deregisters exactly its tools -----------
 
 #[test]
 fn acceptance_5_disable_reports_the_tools_the_connector_contributed() {
@@ -379,7 +304,7 @@ fn acceptance_5_disable_reports_the_tools_the_connector_contributed() {
     assert_eq!(row.tool_counts.len(), 2);
 }
 
-// ── acceptance criterion 6: auth stores a secret without echoing it ─────────
+// -- acceptance criterion 6: auth stores a secret without echoing it ---------
 
 #[test]
 fn acceptance_6_auth_shape_is_declared_but_no_secret_is_stored_in_the_manifest() {
@@ -414,7 +339,7 @@ fn acceptance_6_auth_shape_is_declared_but_no_secret_is_stored_in_the_manifest()
     assert!(report.contains("authenticated"), "{report}");
 }
 
-// ── acceptance criterion 7: disabled connector lists but starts nothing ─────
+// -- acceptance criterion 7: disabled connector lists but starts nothing -----
 
 #[test]
 fn acceptance_7_a_disabled_connector_lists_as_disabled_and_starts_no_server() {
@@ -437,7 +362,7 @@ fn acceptance_7_a_disabled_connector_lists_as_disabled_and_starts_no_server() {
     );
 }
 
-// ── acceptance criterion 8: unexpressible entry is skipped and labelled ─────
+// -- acceptance criterion 8: unexpressible entry is skipped and labelled -----
 
 #[test]
 fn acceptance_8_an_unexpressible_entry_is_skipped_and_its_label_reported() {
@@ -454,7 +379,8 @@ fn acceptance_8_an_unexpressible_entry_is_skipped_and_its_label_reported() {
     // The raw document still carries the entry: the skip is counted, and the
     // unexpressible aspect is labelled on the descriptor that would have been
     // built (FR-025).
-    let bytes = std::fs::read(fixtures_root().join("stores/index.json")).expect("readable");
+    let bytes =
+        std::fs::read(TempTree::fixtures_root().join("stores/index.json")).expect("readable");
     let origin = url::Url::parse("https://fixtures.example.org/index.json").expect("url");
     let provider = provider_for(CatalogueKind::Claude);
     let normalised = parse_catalogue(&*provider, &bytes, &origin).expect("catalogue parses");
@@ -463,14 +389,14 @@ fn acceptance_8_an_unexpressible_entry_is_skipped_and_its_label_reported() {
         "the grpc entry is counted as skipped"
     );
 
-    let mut descriptor =
-        read_manifest(&fixtures_root().join("unsupported")).expect("unsupported fixture readable");
+    let mut descriptor = read_manifest(&TempTree::fixtures_root().join("unsupported"))
+        .expect("unsupported fixture readable");
     let error = descriptor.validate().expect_err("unexpressible");
     assert!(error.to_string().contains("transport"), "{error}");
     assert!(!descriptor.unsupported.is_empty());
 }
 
-// ── acceptance criterion 9: refusals, with no partial write ─────────────────
+// -- acceptance criterion 9: refusals, with no partial write -----------------
 
 #[test]
 fn acceptance_9_refusals_are_reported_with_a_reason_and_change_nothing() {
@@ -481,7 +407,9 @@ fn acceptance_9_refusals_are_reported_with_a_reason_and_change_nothing() {
         .count();
 
     // (a) an archive entry escaping the store (FR-029)
-    let escape = archives_root().join("escape.zip");
+    let escape = TempTree::fixtures_root()
+        .join("archives")
+        .join("escape.zip");
     let err = add(
         &tree.dirs(),
         &tree.0,
@@ -512,7 +440,7 @@ fn acceptance_9_refusals_are_reported_with_a_reason_and_change_nothing() {
     assert!(err.to_string().contains("http"), "{err}");
 
     // (c) a duplicate id without --force (FR-027)
-    let duplicate = fixtures_root().join("duplicate");
+    let duplicate = TempTree::fixtures_root().join("duplicate");
     let err = add(
         &tree.dirs(),
         &tree.0,
@@ -551,7 +479,7 @@ fn acceptance_9_refusals_are_reported_with_a_reason_and_change_nothing() {
     );
 }
 
-// ── acceptance criterion 10 / TC-024: CLI wording and --category ────────────
+// -- acceptance criterion 10 / TC-024: CLI wording and --category ------------
 
 #[test]
 fn acceptance_10_cli_list_wording_matches_the_tui_spelling_rule() {
@@ -685,7 +613,7 @@ fn tc_024_resolve_filter_accepts_all_and_known_categories_only() {
     );
 }
 
-// ── TC-011 / TC-010: the isolated harness over the fixtures ─────────────────
+// -- TC-011 / TC-010: the isolated harness over the fixtures -----------------
 
 #[tokio::test]
 async fn tc_011_the_harness_connects_invokes_and_tears_down_the_echo_fixture() {
@@ -746,7 +674,7 @@ async fn tc_010_a_failing_server_reports_a_failed_connect_step_without_panicking
     );
 }
 
-// ── packaged install (TC-003) ───────────────────────────────────────────────
+// -- packaged install (TC-003) -----------------------------------------------
 
 #[test]
 fn tc_003_archive_installs_are_enabled_and_surface_the_credential_name() {
@@ -769,7 +697,7 @@ fn tc_003_archive_installs_are_enabled_and_surface_the_credential_name() {
     );
 }
 
-// ── the shared async harness dispatcher over the fixtures ───────────────────
+// -- the shared async harness dispatcher over the fixtures -------------------
 
 #[tokio::test]
 async fn harness_dispatcher_tests_the_echo_fixture_through_the_shared_glue() {
@@ -793,7 +721,7 @@ async fn harness_dispatcher_tests_the_echo_fixture_through_the_shared_glue() {
     assert!(report.contains("[ ok ] connect echo.echo"), "{report}");
 }
 
-// ── fixture store scan (TC-002 / TC-012) ────────────────────────────────────
+// -- fixture store scan (TC-002 / TC-012) ------------------------------------
 
 #[test]
 fn tc_012_an_unexpressible_fixture_installed_raw_scans_with_its_label() {
@@ -801,7 +729,7 @@ fn tc_012_an_unexpressible_fixture_installed_raw_scans_with_its_label() {
     // The `unsupported` fixture cannot be installed through `add` (validation
     // refuses it); write it directly to model a store that already holds it.
     let mut descriptor =
-        read_manifest(&fixtures_root().join("unsupported")).expect("fixture readable");
+        read_manifest(&TempTree::fixtures_root().join("unsupported")).expect("fixture readable");
     descriptor.unsupported = Vec::new();
     write_manifest(&tree.store().join("unsupported"), &descriptor).expect("manifest written");
 
@@ -830,12 +758,12 @@ fn tc_012_an_unexpressible_fixture_installed_raw_scans_with_its_label() {
     );
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
+// -- helpers -----------------------------------------------------------------
 
 /// The fixture catalogue served out of `assets/connectors/fixtures/stores/`,
 /// parsed through the same provider the live fetch uses.
 fn fixture_catalogue(file: &str) -> Vec<ConnectorDescriptor> {
-    let bytes = std::fs::read(fixtures_root().join("stores").join(file))
+    let bytes = std::fs::read(TempTree::fixtures_root().join("stores").join(file))
         .unwrap_or_else(|e| panic!("read catalogue fixture {file}: {e}"));
     let origin = url::Url::parse("https://fixtures.example.org/index.json").expect("url");
     let provider = provider_for(CatalogueKind::Claude);

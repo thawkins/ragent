@@ -78,7 +78,7 @@ fn rejects_starting_with_hyphen() {
     );
 }
 
-// ── FR-017: path-traversal rejection ────────────────────────────────
+// -- FR-017: path-traversal rejection --------------------------------
 
 #[test]
 fn rejects_path_traversal() {

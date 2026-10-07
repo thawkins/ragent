@@ -31,7 +31,7 @@ fn create_sample_project() -> TempDir {
     )
     .unwrap();
 
-    // Binary file (contains NUL bytes — should be skipped)
+    // Binary file (contains NUL bytes - should be skipped)
     fs::write(root.join("image.bin"), b"\x89PNG\r\n\x00\x1a\n").unwrap();
 
     // Empty file (should be skipped)
@@ -41,7 +41,7 @@ fn create_sample_project() -> TempDir {
     fs::create_dir_all(root.join("target/debug")).unwrap();
     fs::write(root.join("target/debug/output"), "should be skipped").unwrap();
 
-    // .gitignore (additional pattern) — needs .git dir for ignore crate to activate
+    // .gitignore (additional pattern) - needs .git dir for ignore crate to activate
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::write(root.join(".gitignore"), "*.log\n").unwrap();
     fs::write(root.join("debug.log"), "log content").unwrap();
@@ -179,7 +179,7 @@ fn test_scan_to_store_round_trip() {
         assert!(entry.byte_size > 0);
     }
 
-    // Step 4: Re-scan — no changes
+    // Step 4: Re-scan - no changes
     let files2 = scan_directory(dir.path(), &config).unwrap();
     let diff2 = store.get_stale_files(&files2).unwrap();
     assert!(

@@ -71,7 +71,7 @@ async fn test_read_num_lines_basic() {
     );
     let out = read_file_with(input, &dir).await;
 
-    // Should contain lines 201–300
+    // Should contain lines 201-300
     assert!(out.content.contains("Line 201"));
     assert!(out.content.contains("Line 300"));
     assert!(!out.content.contains("Line 200"));
@@ -100,7 +100,7 @@ async fn test_read_end_line_takes_precedence_over_num_lines() {
     );
     let out = read_file_with(input, &dir).await;
 
-    // end_line=250 should win, so only lines 201–250
+    // end_line=250 should win, so only lines 201-250
     assert!(out.content.contains("Line 201"));
     assert!(out.content.contains("Line 250"));
     assert!(!out.content.contains("Line 251"));
@@ -127,7 +127,7 @@ async fn test_read_num_lines_clamped_to_total_lines() {
     );
     let out = read_file_with(input, &dir).await;
 
-    // Only 50 lines total, starting at 40 → should read 40–50 (11 lines)
+    // Only 50 lines total, starting at 40 -> should read 40-50 (11 lines)
     assert!(out.content.contains("Line 40"));
     assert!(out.content.contains("Line 50"));
     assert!(!out.content.contains("Line 51"));
@@ -284,7 +284,7 @@ async fn test_read_end_line_zero_is_error() {
     assert!(result.is_err());
 }
 
-// ── editrenewal T-002: read-timestamp tracking (FR-003) ───────────────────────
+// -- editrenewal T-002: read-timestamp tracking (FR-003) -----------------------
 
 /// Reading a file must record its last-modified time in the session
 /// `read_timestamps` map so that edit tools can detect stale-file edits.

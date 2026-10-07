@@ -1,9 +1,9 @@
-//! Tests that a search-author survives the `WebSearchHit` → `WebFetchedPage`
+//! Tests that a search-author survives the `WebSearchHit` -> `WebFetchedPage`
 //! synthesis for scholarly (OpenAlex) and encyclopedia (Wikipedia) hits, and
 //! lands on `Source::Web.author` in the captured source.
 //!
 //! Regression coverage for the bug where the References Index **Author**
-//! column and per-finding **Sources:** bullets always rendered `—` because
+//! column and per-finding **Sources:** bullets always rendered `-` because
 //! the synthetic-page constructors hard-coded `author: None`.
 
 use std::sync::Arc;
@@ -20,7 +20,7 @@ impl WebSearchTool for StaticSearch {
     }
 }
 
-/// A never-called fetch tool — author propagation for synthetic pages must
+/// A never-called fetch tool - author propagation for synthetic pages must
 /// not depend on fetching the URL.
 struct NoFetch;
 

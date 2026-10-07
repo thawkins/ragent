@@ -189,7 +189,7 @@ fn vault_content_path_defaults_to_markdown_for_page_media() {
     assert_eq!(path.extension().and_then(|s| s.to_str()), Some("md"));
 }
 
-// ── FUNC-017: async wrappers must not park a tokio worker ───────────────
+// -- FUNC-017: async wrappers must not park a tokio worker ---------------
 
 /// FUNC-017: concurrent vault calls issued from async tasks must all complete
 /// without starving the runtime. Before the async wrappers existed these calls

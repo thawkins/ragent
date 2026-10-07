@@ -14,7 +14,7 @@ use std::sync::Arc;
 fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         agent_manager: None,
@@ -84,10 +84,10 @@ async fn test_memory_store_persists_content_and_tags() {
     // the project key). Storing only the directory basename would make the
     // memory invisible in the panel and `/memory show`.
     assert_eq!(
-        row.project, "/tmp",
+        row.project, "target/temp",
         "project should be the full working directory path"
     );
-    let listed = storage.list_memories("/tmp", 10).expect("list");
+    let listed = storage.list_memories("target/temp", 10).expect("list");
     assert!(
         listed.iter().any(|r| r.id == id),
         "memory should be listable by full project path"

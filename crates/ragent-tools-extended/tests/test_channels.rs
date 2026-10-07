@@ -1,4 +1,4 @@
-//! Tests for the `send_channel_message` tool — JCODEPLAN M7 (T-061/T-062).
+//! Tests for the `send_channel_message` tool - JCODEPLAN M7 (T-061/T-062).
 //!
 //! Covers:
 //! - Tool identity (name, permission category, description)
@@ -8,6 +8,12 @@
 //! - Graceful degradation without config / when disabled
 //! - Mocked Telegram Bot API delivery (axum test server)
 //! - Mocked Discord webhook delivery (axum test server)
+//!
+//! `std::env::set_var` is `unsafe` in Rust 2024, so this target opts back in
+//! explicitly; env mutation is contained to this test binary and uses unique
+//! variable names.
+
+#![allow(unsafe_code)]
 
 use std::sync::{Arc, Mutex};
 
@@ -187,16 +193,45 @@ fn test_channels_merge_overlay_wins() {
 #[test]
 fn test_resolve_secret_env_indirection() {
     use ragent_tools_extended::channels::resolve_secret;
-    // Not set → None.
+    // Not set -> None.
     assert!(resolve_secret(Some("env:DEFINITELY_UNSET_RAGENT_TEST_VAR")).is_none());
     // Plain value passes through.
     assert_eq!(
         resolve_secret(Some("plain-value")).as_deref(),
         Some("plain-value")
     );
-    // Empty → None.
+    // Empty -> None.
     assert!(resolve_secret(Some("")).is_none());
     assert!(resolve_secret(None).is_none());
+}
+
+/// Audit T-110: an env-sourced credential whose shape is not plausible
+/// credential material must be rejected rather than forwarded verbatim.
+#[test]
+fn test_resolve_secret_rejects_implausible_env_value() {
+    /// `std::env::set_var` is `unsafe` in Rust 2024; contained to this binary.
+    fn set_var(name: &str, value: &str) {
+        // SAFETY: unique name, single-threaded test.
+        unsafe { std::env::set_var(name, value) };
+    }
+
+    use ragent_tools_extended::channels::{is_plausible_secret, resolve_secret};
+
+    assert!(is_plausible_secret("123456:ABC-DEF"));
+    assert!(!is_plausible_secret(""));
+    assert!(!is_plausible_secret("has a space"));
+    assert!(!is_plausible_secret("line1\nline2"));
+
+    // A value with whitespace (e.g. `$HOME` pointed at by mistake) is rejected.
+    set_var("RAGENT_TEST_BAD_CRED", "/home/some user");
+    assert!(resolve_secret(Some("env:RAGENT_TEST_BAD_CRED")).is_none());
+
+    // A plausible value is accepted.
+    set_var("RAGENT_TEST_GOOD_CRED", "123456:ABC-DEF_ghi");
+    assert_eq!(
+        resolve_secret(Some("env:RAGENT_TEST_GOOD_CRED")).as_deref(),
+        Some("123456:ABC-DEF_ghi")
+    );
 }
 
 // ---------------------------------------------------------------------------

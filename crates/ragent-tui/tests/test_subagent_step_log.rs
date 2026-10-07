@@ -3,8 +3,8 @@
 //! The Agents and Teams panels' `steps` column counts one step per
 //! `ToolCallStart` for the session (via `EventBus::increment_tool_calls`,
 //! incremented by the session processor for every session). These tests verify
-//! that each of those tool calls is mirrored into the shared log — tagged with
-//! the owning agent — so the visible log step count matches the panel column.
+//! that each of those tool calls is mirrored into the shared log - tagged with
+//! the owning agent - so the visible log step count matches the panel column.
 
 use ragent_agent::event::Event;
 use ragent_agent::team::{TeamConfig, TeamMember};

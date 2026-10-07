@@ -5,7 +5,7 @@
 use ragent_tui::app::{percent_decode_path, save_clipboard_image_to_temp};
 
 // =========================================================================
-// percent_decode_path — ASCII
+// percent_decode_path - ASCII
 // =========================================================================
 
 #[test]
@@ -35,12 +35,12 @@ fn test_percent_decode_hash_and_percent() {
 }
 
 // =========================================================================
-// percent_decode_path — multi-byte UTF-8
+// percent_decode_path - multi-byte UTF-8
 // =========================================================================
 
 #[test]
 fn test_percent_decode_utf8_accented() {
-    // "café" → c a f %C3%A9
+    // "café" -> c a f %C3%A9
     let path = percent_decode_path("/caf%C3%A9");
     assert_eq!(path, std::path::PathBuf::from("/café"));
 }
@@ -54,32 +54,32 @@ fn test_percent_decode_utf8_cjk() {
 
 #[test]
 fn test_percent_decode_utf8_emoji() {
-    // 🦀 = U+1F980 = F0 9F A6 80 in UTF-8
+    //  = U+1F980 = F0 9F A6 80 in UTF-8
     let path = percent_decode_path("/emoji_%F0%9F%A6%80");
     assert_eq!(path, std::path::PathBuf::from("/emoji_🦀"));
 }
 
 // =========================================================================
-// percent_decode_path — malformed sequences
+// percent_decode_path - malformed sequences
 // =========================================================================
 
 #[test]
 fn test_percent_decode_trailing_percent() {
-    // Lone % at the end — pass through as literal
+    // Lone % at the end - pass through as literal
     let path = percent_decode_path("/file%");
     assert_eq!(path, std::path::PathBuf::from("/file%"));
 }
 
 #[test]
 fn test_percent_decode_percent_single_hex() {
-    // %A (only one hex digit) — pass through as literal
+    // %A (only one hex digit) - pass through as literal
     let path = percent_decode_path("/file%A");
     assert_eq!(path, std::path::PathBuf::from("/file%A"));
 }
 
 #[test]
 fn test_percent_decode_invalid_hex() {
-    // %ZZ is not valid hex — pass through as literal
+    // %ZZ is not valid hex - pass through as literal
     let path = percent_decode_path("/file%ZZname");
     assert_eq!(path, std::path::PathBuf::from("/file%ZZname"));
 }
@@ -93,14 +93,14 @@ fn test_percent_decode_empty() {
 #[test]
 fn test_percent_decode_only_percent() {
     let path = percent_decode_path("%%%");
-    // First % tries to read "%%" as hex → invalid, passed through literally.
-    // Second % has only one char left → passed through literally.
-    // Third % is the last char → passed through literally.
+    // First % tries to read "%%" as hex -> invalid, passed through literally.
+    // Second % has only one char left -> passed through literally.
+    // Third % is the last char -> passed through literally.
     assert_eq!(path, std::path::PathBuf::from("%%%"));
 }
 
 // =========================================================================
-// percent_decode_path — non-UTF-8 on Unix
+// percent_decode_path - non-UTF-8 on Unix
 // =========================================================================
 
 #[cfg(unix)]
@@ -126,7 +126,7 @@ fn test_percent_decode_latin1_sequence() {
 }
 
 // =========================================================================
-// save_clipboard_image_to_temp — happy path
+// save_clipboard_image_to_temp - happy path
 // =========================================================================
 
 #[test]
@@ -200,7 +200,7 @@ fn test_save_clipboard_image_unique_paths() {
 }
 
 // =========================================================================
-// save_clipboard_image_to_temp — size limit
+// save_clipboard_image_to_temp - size limit
 // =========================================================================
 
 #[test]

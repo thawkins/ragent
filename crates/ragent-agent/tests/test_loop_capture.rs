@@ -287,7 +287,7 @@ fn drain_change_summary(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> Vec
 }
 
 /// FR-018: the workspace snapshot is captured BEFORE the first write action
-/// — the pre-existing file's original content is inside the capture, and the
+/// - the pre-existing file's original content is inside the capture, and the
 /// loop's own write (which created the file) is not.
 #[tokio::test]
 async fn test_pre_loop_snapshot_captured_before_first_write() -> Result<()> {
@@ -353,7 +353,7 @@ async fn test_pre_loop_snapshot_captured_before_first_write() -> Result<()> {
     Ok(())
 }
 
-/// FR-018: a loop that never performs a write action never captures — the
+/// FR-018: a loop that never performs a write action never captures - the
 /// capture entry exists with no snapshot, so no summary is published.
 #[tokio::test]
 async fn test_read_only_loop_captures_nothing() -> Result<()> {
@@ -448,7 +448,7 @@ async fn test_non_git_workspace_warns_before_start() -> Result<()> {
     Ok(())
 }
 
-/// FR-019: the change summary counts match the induced file changes — the
+/// FR-019: the change summary counts match the induced file changes - the
 /// loop modifies one pre-existing file and creates another.
 #[tokio::test]
 async fn test_change_summary_counts_match_induced_changes() -> Result<()> {
@@ -617,7 +617,7 @@ async fn test_rollback_restores_pre_loop_contents() -> Result<()> {
 }
 
 /// FR-019 (T-023, deleted-file lane): the change summary counts a file the
-/// loop deleted — 0 modified, 0 created, 1 deleted — and names it among the
+/// loop deleted - 0 modified, 0 created, 1 deleted - and names it among the
 /// affected files; the diffstat charges the deleted file's removed lines.
 /// FR-020: the subsequent rollback restores the deleted file's contents.
 #[tokio::test]
@@ -683,7 +683,7 @@ async fn test_change_summary_counts_deleted_files() -> Result<()> {
         "the deleted file's pre-write contents are captured"
     );
 
-    // FR-019: the summary counts match the induced change — exactly one
+    // FR-019: the summary counts match the induced change - exactly one
     // deletion, no modifications or creations, and the removed lines
     // contribute to the diffstat.
     let summaries = drain_change_summary(&mut rx);
@@ -724,8 +724,8 @@ async fn test_change_summary_counts_deleted_files() -> Result<()> {
     Ok(())
 }
 
-/// FR-020 (T-023, decline lane): declining the rollback offer — what the TUI
-/// handler does by running `clear_loop_captures` — keeps every change the
+/// FR-020 (T-023, decline lane): declining the rollback offer - what the TUI
+/// handler does by running `clear_loop_captures` - keeps every change the
 /// loop made on disk and discards the pending capture so a later rollback
 /// cannot resurrect it.
 #[tokio::test]
@@ -764,7 +764,7 @@ async fn test_rollback_decline_keeps_loop_changes() -> Result<()> {
     // Decline the offer exactly as the TUI handler does.
     processor.clear_loop_captures().await;
 
-    // FR-020: declining keeps the changes — the mutated content survives.
+    // FR-020: declining keeps the changes - the mutated content survives.
     assert_eq!(
         std::fs::read_to_string(working_dir.join("existing.txt")).expect("read"),
         "mutated by the loop",

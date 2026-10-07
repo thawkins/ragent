@@ -46,9 +46,19 @@ EOF
 
 # Database files
 *.db
+# SQLite WAL/SHM sidecars can hold plaintext credential-store and session pages
+*.db-wal
+*.db-shm
 
 # Key files
 *.key
+
+# Certificates and credential files
+*.pem
+*.p12
+*.pfx
+service-account.json
+credentials.json
 
 # Code index data
 .ragent/

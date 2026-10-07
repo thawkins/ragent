@@ -1,34 +1,15 @@
 //! Tests for connector store paths, discovery scan, and the `_state.json`
 //! ledger (spec `connectors` T-003; FR-001).
 
-use std::path::{Path, PathBuf};
+mod support;
+
+use support::TempTree;
+
+use std::path::Path;
 
 use ragent_connectors::{
     ConnectorError, MANIFEST_FILE, STATE_FILE, StoreLedger, read_manifest, scan_dirs, store_dirs_at,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/store-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A minimal, valid connector manifest with one stdio server.
 fn manifest_for(id: &str, name: &str) -> String {
@@ -47,7 +28,7 @@ fn write_connector(store: &Path, dir_name: &str, manifest: &str) {
     std::fs::write(dir.join(MANIFEST_FILE), manifest).expect("manifest writable");
 }
 
-// ── store_dirs_at (FR-001) ──────────────────────────────────────────────────
+// -- store_dirs_at (FR-001) --------------------------------------------------
 
 #[test]
 fn store_dirs_at_orders_global_then_project() {
@@ -81,7 +62,7 @@ fn store_dirs_at_honours_store_dir_override_for_project_leg() {
     );
 }
 
-// ── scan (FR-001) ───────────────────────────────────────────────────────────
+// -- scan (FR-001) -----------------------------------------------------------
 
 #[test]
 fn scan_discovers_project_and_global_connectors_project_wins_on_collision() {
@@ -235,7 +216,7 @@ fn read_manifest_reports_io_error_for_absent_file() {
     ));
 }
 
-// ── ledger ──────────────────────────────────────────────────────────────────
+// -- ledger ------------------------------------------------------------------
 
 #[test]
 fn ledger_round_trips_state_and_counters() {
@@ -277,7 +258,7 @@ fn ledger_corrupt_file_is_renamed_aside_and_restarted() {
     assert!(!store.join(STATE_FILE).exists());
 }
 
-// ── descriptor_by_id: id / slug / display-name resolution (FR-001) ──────────
+// -- descriptor_by_id: id / slug / display-name resolution (FR-001) ----------
 
 /// Build the `StoreDirs` for one project-only temp tree.
 fn dirs_at(tree: &TempTree) -> ragent_connectors::StoreDirs {

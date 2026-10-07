@@ -6,7 +6,7 @@
 
 use ragent_types::{DurationParseError, parse_duration};
 
-// ── FR-014: Valid canonical units ─────────────────────────────────
+// -- FR-014: Valid canonical units ---------------------------------
 
 #[test]
 fn test_duration_canonical_units() {
@@ -17,7 +17,7 @@ fn test_duration_canonical_units() {
     assert_eq!(parse_duration("1mo").unwrap(), 2_592_000);
 }
 
-// ── FR-014: Plural and long-form unit aliases ────────────────────
+// -- FR-014: Plural and long-form unit aliases --------------------
 
 #[test]
 fn test_duration_aliased_units_min() {
@@ -49,7 +49,7 @@ fn test_duration_aliased_units_month() {
     assert_eq!(parse_duration("1months").unwrap(), 2_592_000);
 }
 
-// ── Valid: multi-digit values ──────────────────────────────���─────
+// -- Valid: multi-digit values ------------------------------���-----
 
 #[test]
 fn test_duration_multi_digit_values() {
@@ -60,7 +60,7 @@ fn test_duration_multi_digit_values() {
     assert_eq!(parse_duration("100m").unwrap(), 6_000);
 }
 
-// ── Valid: space between number and unit ──────────────────────────
+// -- Valid: space between number and unit --------------------------
 
 #[test]
 fn test_duration_with_space() {
@@ -69,7 +69,7 @@ fn test_duration_with_space() {
     assert_eq!(parse_duration("1  d").unwrap(), 86_400);
 }
 
-// ── Valid: case-insensitive unit ──────────────────────────────────
+// -- Valid: case-insensitive unit ----------------------------------
 
 #[test]
 fn test_duration_case_insensitive() {
@@ -80,7 +80,7 @@ fn test_duration_case_insensitive() {
     assert_eq!(parse_duration("1W").unwrap(), 604_800);
 }
 
-// ── Valid: leading/trailing whitespace trimmed ───────────────────
+// -- Valid: leading/trailing whitespace trimmed -------------------
 
 #[test]
 fn test_duration_whitespace_trimmed() {
@@ -89,7 +89,7 @@ fn test_duration_whitespace_trimmed() {
     assert_eq!(parse_duration(" 1d ").unwrap(), 86_400);
 }
 
-// ── FR-018: Zero duration rejected ────────────────────────────────
+// -- FR-018: Zero duration rejected --------------------------------
 
 #[test]
 fn test_duration_zero_rejected() {
@@ -131,7 +131,7 @@ fn test_duration_zero_with_alias_rejected() {
     ));
 }
 
-// ── Negative duration rejected ────────────────────────────────────
+// -- Negative duration rejected ------------------------------------
 
 #[test]
 fn test_duration_negative_rejected() {
@@ -157,7 +157,7 @@ fn test_duration_negative_rejected() {
     ));
 }
 
-// ── FR-019: Unknown / bad unit rejected ───────────────────────────
+// -- FR-019: Unknown / bad unit rejected ---------------------------
 
 #[test]
 fn test_duration_unknown_unit_seconds() {
@@ -185,7 +185,7 @@ fn test_duration_unknown_unit_nonsense() {
     ));
 }
 
-// ── FR-019: Error message lists all supported units ──────────────
+// -- FR-019: Error message lists all supported units --------------
 
 #[test]
 fn test_duration_unknown_unit_error_lists_supported() {
@@ -213,7 +213,7 @@ fn test_duration_unknown_unit_error_lists_aliases() {
     assert!(msg.contains("mo"), "error should list 'mo': {msg}");
 }
 
-// ── Edge cases: missing unit ─────────────────────────────────────
+// -- Edge cases: missing unit -------------------------------------
 
 #[test]
 fn test_duration_missing_unit() {
@@ -227,7 +227,7 @@ fn test_duration_missing_unit() {
     ));
 }
 
-// ── Edge cases: empty input ───────────────────────────────────────
+// -- Edge cases: empty input ---------------------------------------
 
 #[test]
 fn test_duration_empty() {
@@ -242,7 +242,7 @@ fn test_duration_empty() {
     ));
 }
 
-// ── Edge cases: no numeric prefix ─────────────────────────────────
+// -- Edge cases: no numeric prefix ---------------------------------
 
 #[test]
 fn test_duration_no_number() {

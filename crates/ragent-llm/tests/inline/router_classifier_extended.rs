@@ -16,7 +16,7 @@ fn no_attachments() -> AttachmentInfo {
     AttachmentInfo::default()
 }
 
-// ── classify_safe fallback tests (FR-039) ────────────────────────────
+// -- classify_safe fallback tests (FR-039) ----------------------------
 
 #[test]
 fn test_classify_safe_normal_input() {
@@ -65,7 +65,7 @@ fn test_classify_safe_unicode_prompt() {
     );
 }
 
-// ── Boundary edge cases (FR-006–FR-009) ──────────────────────────────
+// -- Boundary edge cases (FR-006-FR-009) ------------------------------
 
 #[test]
 fn test_select_tier_exact_boundary_simple_medium() {
@@ -156,7 +156,7 @@ fn test_select_tier_max_score() {
     );
 }
 
-// ── Custom weights (FR-010, FR-024) ──────────────────────────────────
+// -- Custom weights (FR-010, FR-024) ----------------------------------
 
 #[test]
 fn test_classify_with_custom_weights() {
@@ -214,7 +214,7 @@ fn test_classify_with_zeroed_weights() {
     );
 }
 
-// ── Public convenience wrappers ──────────────────────────────────────
+// -- Public convenience wrappers --------------------------------------
 
 #[test]
 fn test_public_convenience_wrappers_match_lower() {
@@ -297,7 +297,7 @@ fn test_mathematical_complexity_convenience_matches_lower() {
     );
 }
 
-// ── Composite score robustness ───────────────────────────────────────
+// -- Composite score robustness ---------------------------------------
 
 #[test]
 fn test_composite_all_zeros() {
@@ -333,7 +333,7 @@ fn test_dimension_scores_in_range() {
     }
 }
 
-// ── NFR-004: Determinism across 100 iterations ────────���──────────────
+// -- NFR-004: Determinism across 100 iterations --------���--------------
 
 #[test]
 fn test_classify_deterministic_100_iterations() {
@@ -369,7 +369,7 @@ fn test_classify_deterministic_100_iterations() {
     }
 }
 
-// ── Context-aware classification ──────────────────────────────────────
+// -- Context-aware classification --------------------------------------
 
 #[test]
 fn test_classify_with_history_increases_context_dependency() {
@@ -395,7 +395,7 @@ fn test_classify_with_history_increases_context_dependency() {
     );
 }
 
-// ── Image attachment and vision routing ─────────────────────��────────
+// -- Image attachment and vision routing ---------------------��--------
 
 #[test]
 fn test_classify_with_image_sets_requires_vision() {

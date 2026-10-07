@@ -14,10 +14,9 @@
 //! toggle.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// The outcome of a single cron event execution.
 ///
@@ -81,49 +80,6 @@ fn log_file_path(log_dir: &Path) -> PathBuf {
     log_dir.join(format!("cron-{timestamp}.jsonl"))
 }
 
-/// Pick the most-recently-modified `cron-*.jsonl` file in `log_dir`, or create
-/// a new timestamped path if none exists.
-///
-/// Mirrors [`crate::edit_log`] `pick_log_file` so that all executions within a
-/// session append to the same file.
-fn pick_log_file(log_dir: &Path) -> PathBuf {
-    let mut latest: Option<PathBuf> = None;
-    let mut latest_mtime: Option<SystemTime> = None;
-
-    if let Ok(entries) = std::fs::read_dir(log_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with("cron-") && name_str.ends_with(".jsonl") {
-                let mtime = entry
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .unwrap_or(SystemTime::UNIX_EPOCH);
-                if latest_mtime.is_none_or(|lm| mtime > lm) {
-                    latest_mtime = Some(mtime);
-                    latest = Some(entry.path());
-                }
-            }
-        }
-    }
-
-    latest.unwrap_or_else(|| log_file_path(log_dir))
-}
-
-/// Append a JSON value as a single line to the given file, creating it if
-/// needed.
-fn append_json_line(path: &Path, value: &Value) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{}", serde_json::to_string(value)?)?;
-    file.flush()?;
-    Ok(())
-}
-
 /// Write a single JSON log entry for a cron event execution.
 ///
 /// This is a best-effort operation: failures are logged with `tracing::warn`
@@ -161,7 +117,8 @@ pub fn log_cron_execution(
         return;
     }
 
-    let path = pick_log_file(&log_dir);
+    let path = crate::jsonl_log::pick_most_recent(&log_dir, "cron-")
+        .unwrap_or_else(|| log_file_path(&log_dir));
 
     let entry = json!({
         "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -174,7 +131,7 @@ pub fn log_cron_execution(
         "run_id": run_id,
     });
 
-    if let Err(e) = append_json_line(&path, &entry) {
+    if let Err(e) = crate::jsonl_log::append_json_line(&path, &entry) {
         tracing::warn!("cron_log: failed to append to {}: {e}", path.display());
     }
 }

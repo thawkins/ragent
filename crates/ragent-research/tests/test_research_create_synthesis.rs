@@ -27,7 +27,7 @@ use ragent_research::{
 };
 use tempfile::TempDir;
 
-// ── Mock analysis engines ────────────────────────────────────────────────
+// -- Mock analysis engines ------------------------------------------------
 
 /// A mock [`AnalysisEngine`] that simulates the real `LlmAnalysisEngine`'s
 /// malformed-output path: its `analyze_with_outcome` override returns
@@ -132,7 +132,7 @@ impl AnalysisEngine for WellFormedMockEngine {
     }
 }
 
-// ── Fakes for the web gathering phase (no network) ───────────────────────
+// -- Fakes for the web gathering phase (no network) -----------------------
 
 #[derive(Debug, Default)]
 struct FakeSearch {

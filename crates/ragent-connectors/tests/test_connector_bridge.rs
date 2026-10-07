@@ -5,44 +5,17 @@
 //! Every test is offline and rooted under `target/temp/` (no `/tmp`, per
 //! AGENTS.md).
 
-use std::path::{Path, PathBuf};
+mod support;
+
+use support::TempTree;
+
+use std::path::Path;
 
 use ragent_config::{McpServerConfig, McpTransport};
 use ragent_connectors::{
     BridgeRefusal, ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer,
-    MANIFEST_FILE, StoreDirs, StoreLedger, resolve_servers, scanned_bridge, store_dirs_at,
+    MANIFEST_FILE, StoreDirs, StoreLedger, resolve_servers, scanned_bridge,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII scratch tree under `target/temp/`.
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/bridge-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/connectors")
-    }
-
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A stdio server with the given id and command.
 fn stdio(id: &str, command: &str) -> ConnectorServer {
@@ -91,7 +64,7 @@ fn enable(dirs: &StoreDirs, connector_id: &str) {
     ledger.save(store).expect("ledger save");
 }
 
-// ── resolve_servers: prefixes, multi-server, conversion (FR-003, FR-020, FR-026) ──
+// -- resolve_servers: prefixes, multi-server, conversion (FR-003, FR-020, FR-026) --
 
 #[test]
 fn two_server_connector_yields_two_prefixed_pairs() {
@@ -170,7 +143,7 @@ fn servers_of_groups_a_multi_server_connector() {
     assert_eq!(plan.servers_of("absent").count(), 0);
 }
 
-// ── resolve_servers: refusals (FR-033) ───────────────────────────────────────
+// -- resolve_servers: refusals (FR-033) ---------------------------------------
 
 #[test]
 fn bridged_id_colliding_with_a_configured_mcp_key_is_refused() {
@@ -237,7 +210,7 @@ fn later_connector_does_not_overwrite_earlier_accepted_server() {
     assert_eq!(plan.refused[0].reason, BridgeRefusal::Duplicate);
 }
 
-// ── scanned_bridge: enabled-only, store-driven (FR-018) ──────────────────────
+// -- scanned_bridge: enabled-only, store-driven (FR-018) ----------------------
 
 #[test]
 fn disabled_connector_contributes_nothing() {

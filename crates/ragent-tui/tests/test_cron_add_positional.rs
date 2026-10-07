@@ -138,7 +138,7 @@ async fn test_cron_add_with_named_id_from_repeat() {
 async fn test_cron_add_missing_cronname_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    // No cronname — prompt is quoted, so before_prompt has at most 1 token.
+    // No cronname - prompt is quoted, so before_prompt has at most 1 token.
     app.execute_slash_command("/cron add general \"Run tests\"")
         .await;
     assert_eq!(app.status, "cron: add missing agent");

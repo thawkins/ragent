@@ -214,7 +214,7 @@ async fn test_new_scaffolds_project_foreground() {
             .await;
         wait_newproj(&mut app);
 
-        // FR-014: foreground — no sub-agent processing state.
+        // FR-014: foreground - no sub-agent processing state.
         assert!(!app.is_processing, "/new must run in the foreground");
 
         // FR-005/FR-006 code artifacts.
@@ -422,7 +422,7 @@ async fn test_new_unknown_stack_warns_and_continues_with_base_layout() {
             .await;
         wait_newproj(&mut app);
 
-        // FR-007: warn and continue with the base layout — the scaffold
+        // FR-007: warn and continue with the base layout - the scaffold
         // still completes.
         let text = last_output(&mut app);
         assert!(text.contains("[warn] unknown stack 'nosuchstack'"));

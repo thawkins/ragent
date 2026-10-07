@@ -21,7 +21,7 @@ const MAILBOX_MESSAGES_PER_WORKER: usize = 25;
 const TASK_WORKERS: usize = 4;
 const TASK_COUNT: usize = 40;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers -------------------------------------------------------------------
 
 fn current_test_binary() -> PathBuf {
     env::current_exe().expect("current test executable path")
@@ -53,7 +53,7 @@ fn wait_for_workers(workers: Vec<std::process::Child>, filter: &str) -> Result<(
     Ok(())
 }
 
-// ── Mailbox concurrent-write test ───────────────────────────────────────────────
+// -- Mailbox concurrent-write test -----------------------------------------------
 
 /// Parent test: verify that many concurrent `Mailbox::push` calls do not lose
 /// messages.
@@ -125,7 +125,7 @@ fn worker_mailbox_push() {
     }
 }
 
-// ── TaskStore concurrent-write test ────────────────────────────────────────────
+// -- TaskStore concurrent-write test --------------------------------------------
 
 /// Parent test: verify that concurrent `claim_next` / `complete` calls do not
 /// drop or double-claim tasks.
@@ -229,7 +229,7 @@ fn worker_task_claimer() {
     }
 }
 
-// ── Direct unit-level regression tests ─────────────────────────────────────────
+// -- Direct unit-level regression tests -----------------------------------------
 
 /// A simpler in-process test that directly checks the atomic-write helper by
 /// interleaving many pushes from multiple threads.  Because `flock` is

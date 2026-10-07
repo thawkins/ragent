@@ -20,7 +20,7 @@ use crate::storage::{MemoryRow, Storage};
 // lint is intentionally suppressed because `Storage::get_all_memory_tags`
 // returns exactly this concrete type and all callers are internal.
 
-// ── Data structures ───────────────────────────────────────────────────────────
+// -- Data structures -----------------------------------------------------------
 
 /// A node in the memory category graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +115,7 @@ pub struct VisualisationData {
     pub heatmap: AccessHeatmap,
 }
 
-// ── Generation functions ─────────────────────────────────────────────────────
+// -- Generation functions -----------------------------------------------------
 
 /// Generate the complete visualisation data for structured memories.
 ///

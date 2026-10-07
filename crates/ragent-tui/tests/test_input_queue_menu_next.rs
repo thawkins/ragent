@@ -2,7 +2,7 @@
 //!
 //! Covers FR-024 (selecting `Next` stops the running turn and dispatches the
 //! oldest queued entry as the next user turn), FR-029 (a stop never advances the
-//! queue on its own — the dispatch is deferred to the turn boundary), FR-030 (the
+//! queue on its own - the dispatch is deferred to the turn boundary), FR-030 (the
 //! action is deferred or refused while a compaction run owns the turn) and
 //! NFR-006 (the action never blocks the UI thread).
 //!
@@ -55,7 +55,7 @@ fn user_message_count(app: &App) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// FR-024 — Next dispatches the oldest entry (immediate when idle)
+// FR-024 - Next dispatches the oldest entry (immediate when idle)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -114,7 +114,7 @@ async fn test_next_row_arms_the_async_dispatch_path() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-024 / FR-029 — Next stops the running turn, deferring the dispatch
+// FR-024 / FR-029 - Next stops the running turn, deferring the dispatch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -210,7 +210,7 @@ async fn test_pending_next_fires_only_once_at_later_boundaries() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-018 — the new cancelled-path condition does not discard entries
+// FR-018 - the new cancelled-path condition does not discard entries
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -235,7 +235,7 @@ async fn test_cancelled_turn_without_pending_next_still_retains_the_queue() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-030 — deferral / refusal while compaction owns the turn
+// FR-030 - deferral / refusal while compaction owns the turn
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -314,7 +314,7 @@ async fn test_pending_next_is_retried_at_the_next_safe_boundary() {
 }
 
 // ---------------------------------------------------------------------------
-// Guard rails — empty queue, menu close, input untouched, redraw
+// Guard rails - empty queue, menu close, input untouched, redraw
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

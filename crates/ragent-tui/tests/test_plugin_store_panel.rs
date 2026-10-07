@@ -121,7 +121,7 @@ fn find_row(terminal: &Terminal<TestBackend>, app: &App, needle: &str) -> Option
 }
 
 // ---------------------------------------------------------------------------
-// FR-004 — bordered, titled modal, ASCII-only
+// FR-004 - bordered, titled modal, ASCII-only
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -187,7 +187,7 @@ fn every_painted_glyph_in_the_panel_is_ascii() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-005 — block cursor and installed colour
+// FR-005 - block cursor and installed colour
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -272,7 +272,7 @@ fn an_installed_row_uses_the_installed_colour_and_marker() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-011 / FR-013 / FR-016 / FR-017 — loading, error, empty states
+// FR-011 / FR-013 / FR-016 / FR-017 - loading, error, empty states
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -335,7 +335,7 @@ fn a_query_that_matches_nothing_renders_the_no_match_line() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-018 — resize re-derives a centred, fully visible panel
+// FR-018 - resize re-derives a centred, fully visible panel
 // ---------------------------------------------------------------------------
 
 #[test]

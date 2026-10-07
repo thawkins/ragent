@@ -41,10 +41,14 @@ pub fn truncate_output(text: String) -> String {
     );
     // Leave room for the suffix when it is appended.
     let max_body = MAX_OUTPUT_BYTES.saturating_sub(suffix.len() + 1);
-    let mut boundary = text.rfind('\n').unwrap_or(text.len());
-    if boundary > max_body {
-        boundary = max_body;
-    }
+    // Only search for the cut newline within the byte budget; scanning the whole
+    // string would always find a newline after `max_body` and then clamp back,
+    // producing a mid-line cut.
+    let search_end = max_body.min(text.len());
+    let search_end = floor_char_boundary(&text, search_end);
+    let boundary = text[..search_end]
+        .rfind('\n')
+        .map_or(max_body, |n| n.min(max_body));
     let boundary = floor_char_boundary(&text, boundary);
     format!("{}{suffix}", &text[..boundary])
 }

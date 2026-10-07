@@ -59,7 +59,7 @@ fn build_explain_store() -> IndexStore {
     let callee1_id = stored.iter().find(|s| s.name == "callee1").unwrap().id;
     let callee2_id = stored.iter().find(|s| s.name == "callee2").unwrap().id;
 
-    // Incoming: caller1 → hub (calls)
+    // Incoming: caller1 -> hub (calls)
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: caller1_id,
@@ -71,7 +71,7 @@ fn build_explain_store() -> IndexStore {
         })
         .unwrap();
 
-    // Incoming: caller2 → hub (imports)
+    // Incoming: caller2 -> hub (imports)
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: caller2_id,
@@ -83,7 +83,7 @@ fn build_explain_store() -> IndexStore {
         })
         .unwrap();
 
-    // Outgoing: hub → callee1 (calls)
+    // Outgoing: hub -> callee1 (calls)
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: hub_id,
@@ -95,7 +95,7 @@ fn build_explain_store() -> IndexStore {
         })
         .unwrap();
 
-    // Outgoing: hub → callee2 (references)
+    // Outgoing: hub -> callee2 (references)
     store
         .upsert_edge_typed(&GraphEdge {
             source_sym: hub_id,
@@ -110,7 +110,7 @@ fn build_explain_store() -> IndexStore {
     store
 }
 
-// ── Basic explain tests ────────────────────────────────────────────────
+// -- Basic explain tests ------------------------------------------------
 
 #[test]
 fn test_explain_found() {
@@ -282,7 +282,7 @@ fn test_explain_symbol_with_no_edges() {
     assert!(explain.outgoing.is_empty());
 }
 
-// ── Connection limit (FR-011: top 50) ──────────────────────────────────
+// -- Connection limit (FR-011: top 50) ----------------------------------
 
 #[test]
 fn test_explain_limits_to_50_connections() {

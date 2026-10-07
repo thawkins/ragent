@@ -11,13 +11,13 @@ use crate::vocab::normalize_gitlab_state;
 // -- helpers ------------------------------------------------------------------
 
 /// Create an authenticated client and detect the project path.
-// -- GitlabListMrsTool ---------------------------------------------------------
+// -- GitLabListMrsTool ---------------------------------------------------------
 
 /// Tool that lists merge requests in a GitLab project.
-pub struct GitlabListMrsTool;
+pub struct GitLabListMrsTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabListMrsTool {
+impl Tool for GitLabListMrsTool {
     fn name(&self) -> &'static str {
         "gitlab_list_mrs"
     }
@@ -104,13 +104,13 @@ impl Tool for GitlabListMrsTool {
     }
 }
 
-// -- GitlabGetMrTool -----------------------------------------------------------
+// -- GitLabGetMrTool -----------------------------------------------------------
 
 /// Tool that retrieves a single GitLab merge request by IID.
-pub struct GitlabGetMrTool;
+pub struct GitLabGetMrTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabGetMrTool {
+impl Tool for GitLabGetMrTool {
     fn name(&self) -> &'static str {
         "gitlab_get_mr"
     }
@@ -196,13 +196,13 @@ impl Tool for GitlabGetMrTool {
     }
 }
 
-// -- GitlabCreateMrTool --------------------------------------------------------
+// -- GitLabCreateMrTool --------------------------------------------------------
 
 /// Tool that creates a new GitLab merge request.
-pub struct GitlabCreateMrTool;
+pub struct GitLabCreateMrTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCreateMrTool {
+impl Tool for GitLabCreateMrTool {
     fn name(&self) -> &'static str {
         "gitlab_create_mr"
     }
@@ -309,13 +309,13 @@ impl Tool for GitlabCreateMrTool {
     }
 }
 
-// -- GitlabMergeMrTool ---------------------------------------------------------
+// -- GitLabMergeMrTool ---------------------------------------------------------
 
 /// Tool that merges a GitLab merge request.
-pub struct GitlabMergeMrTool;
+pub struct GitLabMergeMrTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabMergeMrTool {
+impl Tool for GitLabMergeMrTool {
     fn name(&self) -> &'static str {
         "gitlab_merge_mr"
     }
@@ -393,13 +393,13 @@ impl Tool for GitlabMergeMrTool {
     }
 }
 
-// -- GitlabApproveMrTool ------------------------------------------------------
+// -- GitLabApproveMrTool ------------------------------------------------------
 
 /// Tool that approves a GitLab merge request.
-pub struct GitlabApproveMrTool;
+pub struct GitLabApproveMrTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabApproveMrTool {
+impl Tool for GitLabApproveMrTool {
     fn name(&self) -> &'static str {
         "gitlab_approve_mr"
     }

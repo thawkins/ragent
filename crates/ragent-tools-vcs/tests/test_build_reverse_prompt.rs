@@ -111,7 +111,7 @@ fn test_build_readme_exactly_8000_chars_not_truncated() {
     let readme = "y".repeat(README_MAX_CHARS);
     let prompt = build_reverse_prompt(&md, &tree, Some(&readme), None, None, None);
 
-    // Exactly at the limit — no truncation notice.
+    // Exactly at the limit - no truncation notice.
     assert!(!prompt.contains("[... README truncated"));
     assert!(prompt.contains("## README"));
 }
@@ -180,7 +180,7 @@ fn test_build_tech_stack_none_omitted() {
 
 #[test]
 fn test_build_tech_stack_empty_string_still_included() {
-    // An empty tech string is still a constraint — it's Some("").
+    // An empty tech string is still a constraint - it's Some("").
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
@@ -285,7 +285,7 @@ fn test_build_provider_label_none_omits_source_section() {
 
 #[test]
 fn test_build_provider_label_empty_string_still_emits_section() {
-    // An empty provider label is still Some("") — the section header is emitted.
+    // An empty provider label is still Some("") - the section header is emitted.
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();
@@ -316,7 +316,7 @@ fn test_build_provider_label_section_before_metadata() {
 
 #[test]
 fn test_build_provider_label_with_tech_stack_full_ordering() {
-    // Full ordering: Source → Metadata → Tech → Tree → README.
+    // Full ordering: Source -> Metadata -> Tech -> Tree -> README.
     let md = sample_metadata();
     let tree = sample_tree();
     let readme = "# Hello".to_string();

@@ -63,13 +63,13 @@ impl LanguageParser for HclParser {
     }
 }
 
-// ── Extraction context ──────────────────────────────────────────────────────
+// -- Extraction context ------------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── HCL block types and their mapping to SymbolKinds ────────────────────────
+// -- HCL block types and their mapping to SymbolKinds ------------------------
 
 /// Map an HCL block type string to the appropriate [`SymbolKind`].
 fn block_kind(block_type: &str) -> SymbolKind {
@@ -91,7 +91,7 @@ fn block_kind(block_type: &str) -> SymbolKind {
     }
 }
 
-// ── Recursive walk ─────────────────────────────────────────────────────────
+// -- Recursive walk ---------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting HCL/Terraform symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -111,7 +111,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Block extraction ────────────────────────────────────────────────────────
+// -- Block extraction --------------------------------------------------------
 
 /// Extract an HCL block.
 ///
@@ -206,7 +206,7 @@ fn extract_block(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Attribute extraction (`key = value`) ────────────────────────────────────
+// -- Attribute extraction (`key = value`) ------------------------------------
 
 /// Extract an HCL attribute.
 ///
@@ -248,7 +248,7 @@ fn extract_attribute(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
     });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Check whether a node is inside a `locals` block by walking ancestors.
 fn is_inside_locals_block(node: Node, source: &[u8]) -> bool {
@@ -291,4 +291,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// -- Tests ------------------------------------------------------------------

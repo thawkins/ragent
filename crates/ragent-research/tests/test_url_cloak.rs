@@ -76,7 +76,7 @@ fn doc_with(sources: Vec<Source>, findings: Vec<String>, cloak: bool) -> Researc
     }
 }
 
-// ── cloak_url primitive ──────────────────────────────────────────────────
+// -- cloak_url primitive --------------------------------------------------
 
 #[test]
 fn cloak_url_rewrites_scheme_and_brackets_dots() {
@@ -101,7 +101,7 @@ fn cloak_url_escapes_table_separators() {
     assert_eq!(cloak_url("https://x.com/a|b"), "`hxxps://x[.]com/a\\|b`");
 }
 
-// ── References Index ─────────────────────────────────────────────────────
+// -- References Index -----------------------------------------------------
 
 #[test]
 fn references_index_cloaks_web_urls_when_requested() {
@@ -146,7 +146,7 @@ fn references_index_leaves_non_web_paths_unchanged_under_cloak() {
     );
 }
 
-// ── Sources bullets ──────────────────────────────────────────────────────
+// -- Sources bullets ------------------------------------------------------
 
 #[test]
 fn finding_sources_bullets_cloak_cited_web_urls() {
@@ -194,7 +194,7 @@ fn corpa_sources_reference_cloaks_urls() {
     );
 }
 
-// ── Flag round-trip ──────────────────────────────────────────────────────
+// -- Flag round-trip ------------------------------------------------------
 
 #[test]
 fn from_invocation_round_trips_url_cloak() {
@@ -230,7 +230,7 @@ fn build_session_config_copies_url_cloak() {
     assert!(cfg.output.url_cloak);
 }
 
-// ── Frontmatter persistence (replay support) ─────────────────────────────
+// -- Frontmatter persistence (replay support) -----------------------------
 
 #[test]
 fn frontmatter_records_url_cloak_and_round_trips() {

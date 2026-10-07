@@ -24,7 +24,7 @@ use std::sync::LazyLock;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-// ── Child-process concurrency ────────────────────────────────────
+// -- Child-process concurrency ------------------------------------
 
 /// Maximum number of concurrent child processes the agent may spawn.
 ///
@@ -62,7 +62,7 @@ pub fn available_process_permits() -> usize {
     PROCESS_SEMAPHORE.available_permits()
 }
 
-// ── Tool-execution concurrency ───────────────────────────────────
+// -- Tool-execution concurrency -----------------------------------
 
 /// Maximum number of tool calls that may execute concurrently within
 /// the agent loop.

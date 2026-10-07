@@ -20,7 +20,7 @@ use ragent_tools_core::{Tool, ToolContext};
 use serde_json::json;
 use tempfile::TempDir;
 
-/// Serialise all tests in this binary — the shared context holds a
+/// Serialise all tests in this binary - the shared context holds a
 /// global timestamp map and parallel runs would race on it.
 fn test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -69,7 +69,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
     let path = write_file(tmp.path(), "smoke.txt", "alpha\nbeta\ngamma\n");
     let c = ctx(tmp.path());
 
-    // (a) Successful exact edit — applies new_string verbatim.
+    // (a) Successful exact edit - applies new_string verbatim.
     record_read(&c, &path);
     let out = EditTool
         .execute(
@@ -93,7 +93,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         "edit applies new_string verbatim"
     );
 
-    // (b) Whitespace-mismatched old_string — FR-045 line-structure guard: a
+    // (b) Whitespace-mismatched old_string - FR-045 line-structure guard: a
     // needle ending in a trailing space (no further content) previously
     // folded the file's trailing newline into the whitespace run and spliced
     // new_str with a JOINED line ("nopegamma"). The guard now rejects the

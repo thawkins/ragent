@@ -287,7 +287,12 @@ impl Tool for TeamCreateTool {
                                     )
                                 });
                                 if let Some(tool) = registry.get(tool_name) {
-                                    let args_debug = format!("{args_obj:?}");
+                                    // SEC: tool args are attacker-supplied and may carry
+                                    // secrets - log the argument keys only, never values.
+                                    let arg_keys = args_obj
+                                        .as_object()
+                                        .map(|m| m.keys().cloned().collect::<Vec<_>>().join(","))
+                                        .unwrap_or_default();
                                     tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking seed tool");
                                     // SEC-ragent-team-001: a blueprint is untrusted
                                     // project content, so a seeded tool is dispatched
@@ -299,7 +304,7 @@ impl Tool for TeamCreateTool {
                                             tracing::info!(tool = %tool_name, "Seed tool executed successfully");
                                         }
                                         Err(e) => {
-                                            tracing::error!(tool = %tool_name, error = %e, args = %args_debug, "Seed tool execution failed");
+                                            tracing::error!(tool = %tool_name, error = %e, arg_keys = %arg_keys, "Seed tool execution failed");
                                         }
                                     }
                                 }

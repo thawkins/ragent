@@ -8,7 +8,7 @@
 
 use ragent_storage::storage::{Storage, TaskUpdateParams};
 
-// ── create_task + get_task round-trip ─────────────────────────────
+// -- create_task + get_task round-trip -----------------------------
 
 /// Verify that `create_task` inserts all 11 columns and `get_task`
 /// reads them back correctly.
@@ -96,7 +96,7 @@ fn test_get_task_nonexistent_returns_none() {
     assert!(row.is_none());
 }
 
-/// Verify that `get_task` is session-scoped — a task in session A is
+/// Verify that `get_task` is session-scoped - a task in session A is
 /// not visible from session B (FR-001).
 #[test]
 fn test_get_task_session_scoped() {
@@ -127,7 +127,7 @@ fn test_get_task_session_scoped() {
     assert!(storage.get_task("task-shared", "sess-b").unwrap().is_none());
 }
 
-// ── list_tasks ────────────────────────────────────────────────────
+// -- list_tasks ----------------------------------------------------
 
 /// Verify that `list_tasks` returns all tasks for a session ordered
 /// by created_at (FR-015).
@@ -287,7 +287,7 @@ fn test_list_tasks_includes_task_columns() {
     assert_eq!(t.blocked_by, vec!["dep-1"]);
 }
 
-// ── update_task ───────────────────────────────────────────────────
+// -- update_task ---------------------------------------------------
 
 /// Verify that `update_task` can update the subject (title) and status.
 #[test]
@@ -633,7 +633,7 @@ fn test_update_task_all_fields_at_once() {
     assert_eq!(row.blocked_by, vec!["d1", "d2"]);
 }
 
-// ── Legacy compatibility ──────────────────────────────────────────
+// -- Legacy compatibility ------------------------------------------
 
 /// Verify that a task created via the legacy `create_task_simple` method can
 /// be read via the new `get_task` method with safe defaults (FR-002).
@@ -690,7 +690,7 @@ fn test_task_created_then_updated_via_legacy_update_task_simple() {
         )
         .expect("create task");
 
-    // Update via legacy method — should only touch title/status/description.
+    // Update via legacy method - should only touch title/status/description.
     storage
         .update_task_simple(
             "task-cross",

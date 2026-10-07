@@ -392,6 +392,8 @@ impl LlmClient for AzureAnthropicClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let body_text = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let body_text = ragent_types::sanitize::redact_secrets(&body_text);
             tracing::warn!(
                 url = %url,
                 model = %request.model,

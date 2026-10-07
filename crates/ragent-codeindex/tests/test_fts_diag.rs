@@ -42,6 +42,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
 
 /// Test raw FTS search on actual index
 #[test]
+#[ignore = "diagnostic: reads the live codeindex snapshot; run with --ignored"]
 fn diag_raw_fts_search() {
     let project_root = project_root();
     let fts_path = project_root.join(".ragent/codeindex/fts");
@@ -79,6 +80,7 @@ fn diag_raw_fts_search() {
 
 /// Test `CodeIndex` search (full pipeline)
 #[test]
+#[ignore = "diagnostic: reads the live codeindex snapshot; run with --ignored"]
 fn diag_codeindex_search() {
     let project_root = project_root();
     let live_index_dir = project_root.join(".ragent/codeindex");

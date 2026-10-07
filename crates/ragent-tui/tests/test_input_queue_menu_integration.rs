@@ -4,8 +4,8 @@
 //! The per-task suites exercise each piece in isolation: T-013 covers the
 //! ALT-Q binding, T-014 the three-option render, T-015 the `Next` action,
 //! T-016 the `Stop`/`Resume` action, T-017 the `Clear` action, and T-018 the
-//! `Esc` dismissal. This suite composes them into the full user journey —
-//! open the menu with `ALT-Q`, select a row, and observe the effect — so the
+//! `Esc` dismissal. This suite composes them into the full user journey -
+//! open the menu with `ALT-Q`, select a row, and observe the effect - so the
 //! actions are proven to work together rather than only in isolation.
 //!
 //! Covers FR-021 (ALT-Q opens a menu with exactly `Next`/`Stop`/`Clear`),
@@ -20,7 +20,7 @@
 //!
 //! Rows are selected through the public [`App::queue_menu_select_next`],
 //! [`App::queue_menu_select_halt`], and [`App::queue_menu_select_clear`] entry
-//! points — the same methods the menu key-handling invokes — after the menu has
+//! points - the same methods the menu key-handling invokes - after the menu has
 //! been opened through the real `ALT-Q` keystroke path.
 
 use std::path::PathBuf;
@@ -115,7 +115,7 @@ fn menu_row(terminal: &Terminal<TestBackend>, app: &App, needle: &str) -> String
 }
 
 // ---------------------------------------------------------------------------
-// FR-021 / FR-022 / FR-031 — opening the menu through ALT-Q
+// FR-021 / FR-022 / FR-031 - opening the menu through ALT-Q
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -170,7 +170,7 @@ async fn test_alt_q_opens_without_disturbing_the_draft_or_running_turn() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-023 — the `Next` row is selectable only while the queue is non-empty
+// FR-023 - the `Next` row is selectable only while the queue is non-empty
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -197,7 +197,7 @@ async fn test_next_row_selectability_tracks_the_queue_end_to_end() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-024 / FR-029 — `Next` dispatches the oldest entry in FIFO order
+// FR-024 / FR-029 - `Next` dispatches the oldest entry in FIFO order
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -282,7 +282,7 @@ async fn test_alt_q_next_stops_running_turn_then_dispatches_at_the_boundary() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-025 / FR-029 — `Stop` halts without advancing the queue
+// FR-025 / FR-029 - `Stop` halts without advancing the queue
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -328,7 +328,7 @@ async fn test_alt_q_stop_halts_without_advancing_the_queue() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-026 / FR-027 — halt row label switches to `Resume` and resumes
+// FR-026 / FR-027 - halt row label switches to `Resume` and resumes
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -387,7 +387,7 @@ async fn test_alt_q_halt_row_reads_resume_and_resumes_after_a_stop() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-028 — `Clear` opens the confirmation dialog without emptying the queue
+// FR-028 - `Clear` opens the confirmation dialog without emptying the queue
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -424,7 +424,7 @@ async fn test_alt_q_clear_opens_the_confirmation_dialog_without_emptying() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-031 / FR-032 — Esc dismisses the menu without mutating state
+// FR-031 / FR-032 - Esc dismisses the menu without mutating state
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -466,7 +466,7 @@ async fn test_alt_q_esc_dismisses_without_mutating_input_or_queue() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-031 — no row action inserts characters into the editable buffer
+// FR-031 - no row action inserts characters into the editable buffer
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

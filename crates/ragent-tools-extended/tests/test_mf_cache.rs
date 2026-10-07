@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::cache` — `SQLite` WAL content cache
+//! Unit tests for `masterfetch::cache` - `SQLite` WAL content cache
 //! (T-035, FR-018, NFR-003).
 //!
 //! Covers:
@@ -158,7 +158,7 @@ fn test_round_trip_unicode_content() {
 }
 
 // ===========================================================================
-// Key isolation — same URL, different parameters must not collide
+// Key isolation - same URL, different parameters must not collide
 // ===========================================================================
 
 #[test]
@@ -264,7 +264,7 @@ fn test_key_with_none_css_selector_and_pages_matches_default_key() {
 }
 
 // ===========================================================================
-// Overwrite semantics — same key replaces existing entry
+// Overwrite semantics - same key replaces existing entry
 // ===========================================================================
 
 #[test]
@@ -301,8 +301,8 @@ fn test_overwrite_updates_size_bytes() {
 
 #[test]
 fn test_ttl_zero_immediately_expired() {
-    // ttl_seconds == 0 → expires_at == created_at. A subsequent get_cached
-    // sees expires_at <= now and lazily deletes the row → returns None.
+    // ttl_seconds == 0 -> expires_at == created_at. A subsequent get_cached
+    // sees expires_at <= now and lazily deletes the row -> returns None.
     let cache = ContentCache::open_in_memory().expect("open");
     let k = key(1);
 
@@ -377,7 +377,7 @@ fn test_bad_content_does_not_affect_existing_good_entry() {
     let k = key(1);
 
     insert(&cache, &k, "good-content", 3600);
-    // Attempt to overwrite with bad content — should be a no-op.
+    // Attempt to overwrite with bad content - should be a no-op.
     cache
         .set_cached(&k, "bad-content", false, 500, "text/html", 3600)
         .expect("set");
@@ -411,7 +411,7 @@ fn test_bad_content_total_bytes_unchanged() {
 
 #[test]
 fn test_bad_content_set_returns_ok() {
-    // set_cached with content_ok=false should return Ok(()) — it's a
+    // set_cached with content_ok=false should return Ok(()) - it's a
     // deliberate no-op, not an error.
     let cache = ContentCache::open_in_memory().expect("open");
     let k = key(1);
@@ -426,19 +426,19 @@ fn test_bad_content_set_returns_ok() {
 #[test]
 fn test_size_cap_evicts_oldest() {
     // Set max_bytes to 30 bytes. Insert 3 entries of 10 bytes each = 30,
-    // then insert a 4th → total would be 40, exceeding the cap. The oldest
+    // then insert a 4th -> total would be 40, exceeding the cap. The oldest
     // entry (page-1) should be evicted.
     let config = ContentCacheConfig { max_bytes: 30 };
     let cache = ContentCache::open_in_memory_with_config(config).expect("open");
 
     insert(&cache, &key(1), "aaaaaaaaaa", 3600); // 10 bytes
     insert(&cache, &key(2), "bbbbbbbbbb", 3600); // 10 bytes
-    insert(&cache, &key(3), "cccccccccc", 3600); // 10 bytes → total 30, at cap
+    insert(&cache, &key(3), "cccccccccc", 3600); // 10 bytes -> total 30, at cap
 
     assert_eq!(cache.entry_count().expect("count"), 3);
     assert_eq!(cache.total_bytes().expect("total"), 30);
 
-    // Insert a 4th → total 40, exceeds 30, oldest (page-1) evicted → 30.
+    // Insert a 4th -> total 40, exceeds 30, oldest (page-1) evicted -> 30.
     insert(&cache, &key(4), "dddddddddd", 3600);
 
     assert_eq!(cache.entry_count().expect("count"), 3);
@@ -451,7 +451,7 @@ fn test_size_cap_evicts_oldest() {
 #[test]
 fn test_size_cap_evicts_multiple_entries() {
     // max_bytes = 20. Insert 2× 10-byte entries (total 20, at cap), then
-    // insert a 20-byte entry → total 40, must evict 2 oldest to get to 20.
+    // insert a 20-byte entry -> total 40, must evict 2 oldest to get to 20.
     let config = ContentCacheConfig { max_bytes: 20 };
     let cache = ContentCache::open_in_memory_with_config(config).expect("open");
 
@@ -459,8 +459,8 @@ fn test_size_cap_evicts_multiple_entries() {
     insert(&cache, &key(2), "bbbbbbbbbb", 3600); // 10 bytes
     insert(&cache, &key(3), "cccccccccccccccccccc", 3600); // 20 bytes
 
-    // After inserting key(3), total was 40 → evict key(1) (40-10=30) → still
-    // over → evict key(2) (30-10=20) → at cap. Only key(3) remains.
+    // After inserting key(3), total was 40 -> evict key(1) (40-10=30) -> still
+    // over -> evict key(2) (30-10=20) -> at cap. Only key(3) remains.
     assert_eq!(cache.entry_count().expect("count"), 1);
     assert!(cache.get_cached(&key(1)).expect("get").is_none());
     assert!(cache.get_cached(&key(2)).expect("get").is_none());
@@ -473,7 +473,7 @@ fn test_size_cap_single_entry_exceeding_cap_kept() {
     // runs. Since it's the only entry, evict_to_cap removes it (it's the
     // oldest and total > max). So the cache ends up empty.
     // Actually: evict_to_cap evicts oldest entries until total <= max. With
-    // one entry larger than max, it evicts that entry → cache empty.
+    // one entry larger than max, it evicts that entry -> cache empty.
     let config = ContentCacheConfig { max_bytes: 5 };
     let cache = ContentCache::open_in_memory_with_config(config).expect("open");
 
@@ -490,7 +490,7 @@ fn test_size_cap_default_is_100mib() {
 
 #[test]
 fn test_size_cap_zero_max_bytes_evicts_everything() {
-    // max_bytes = 0 → every insert is immediately evicted.
+    // max_bytes = 0 -> every insert is immediately evicted.
     let config = ContentCacheConfig { max_bytes: 0 };
     let cache = ContentCache::open_in_memory_with_config(config).expect("open");
 
@@ -504,11 +504,11 @@ fn test_size_cap_total_bytes_reflects_eviction() {
     let cache = ContentCache::open_in_memory_with_config(config).expect("open");
 
     insert(&cache, &key(1), "aaaaaaaaaa", 3600); // 10 bytes
-    insert(&cache, &key(2), "bbbbbbbbbb", 3600); // 10 bytes → total 20
+    insert(&cache, &key(2), "bbbbbbbbbb", 3600); // 10 bytes -> total 20
 
     assert_eq!(cache.total_bytes().expect("total"), 20);
 
-    insert(&cache, &key(3), "cccccccccc", 3600); // 10 → total 30, evict key(1) → 20
+    insert(&cache, &key(3), "cccccccccc", 3600); // 10 -> total 30, evict key(1) -> 20
 
     assert_eq!(cache.total_bytes().expect("total"), 20);
 }
@@ -617,11 +617,11 @@ fn test_clear_expired_then_clear_all() {
     insert(&cache, &key(2), "fresh1", 3600);
     insert(&cache, &key(3), "fresh2", 3600);
 
-    // First clear expired → 1 removed.
+    // First clear expired -> 1 removed.
     assert_eq!(cache.clear_expired().expect("clear"), 1);
     assert_eq!(cache.entry_count().expect("count"), 2);
 
-    // Then clear all → 2 removed.
+    // Then clear all -> 2 removed.
     assert_eq!(cache.clear_all().expect("clear"), 2);
     assert_eq!(cache.entry_count().expect("count"), 0);
 }
@@ -651,7 +651,7 @@ fn test_wal_mode_file_based_cache() {
     let db_path = tmp.join("cache.db");
     let cache = ContentCache::open(&db_path).expect("open file cache");
 
-    // Query the journal_mode — should be "wal" for a file-based DB.
+    // Query the journal_mode - should be "wal" for a file-based DB.
     let mode = cache.journal_mode().expect("journal_mode");
     assert_eq!(mode.to_lowercase(), "wal");
 }
@@ -667,7 +667,7 @@ fn test_wal_mode_persists_across_reopen() {
         insert(&cache, &key(1), "persisted", 3600);
     }
 
-    // Reopen — WAL mode should persist and data should survive.
+    // Reopen - WAL mode should persist and data should survive.
     let cache = ContentCache::open(&db_path).expect("reopen");
     let mode = cache.journal_mode().expect("journal_mode");
     assert_eq!(mode.to_lowercase(), "wal");

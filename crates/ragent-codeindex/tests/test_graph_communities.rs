@@ -56,8 +56,8 @@ fn add_edge(store: &IndexStore, src: i64, tgt: i64, kind: EdgeKind) {
 }
 
 /// Build a store with two disconnected cliques:
-///   clique A: a1 — a2 — a3
-///   clique B: b1 — b2 — b3
+///   clique A: a1 - a2 - a3
+///   clique B: b1 - b2 - b3
 fn build_two_cliques() -> (IndexStore, i64, i64) {
     let store = IndexStore::open_in_memory().unwrap();
     let file_id = store.upsert_file(&make_entry("a.rs", "h1")).unwrap();
@@ -94,7 +94,7 @@ fn build_two_cliques() -> (IndexStore, i64, i64) {
     (store, a1, b1)
 }
 
-// ── detect_communities ──────────────────────────────────────────────────
+// -- detect_communities --------------------------------------------------
 
 #[test]
 fn test_detect_empty_graph_returns_empty() {
@@ -162,7 +162,7 @@ fn test_detect_clears_previous_assignments() {
     detect_communities(&store).unwrap();
     assert_eq!(store.community_count().unwrap(), 2);
 
-    // Run again — should not double up.
+    // Run again - should not double up.
     detect_communities(&store).unwrap();
     assert_eq!(store.community_count().unwrap(), 2);
     assert_eq!(store.query_all_communities().unwrap().len(), 6);
@@ -251,7 +251,7 @@ fn test_detect_communities_sorted_by_size_descending() {
     );
 }
 
-// ── list_communities ────────────────────────────────────────────────────
+// -- list_communities ----------------------------------------------------
 
 #[test]
 fn test_list_empty_when_no_detection() {
@@ -291,7 +291,7 @@ fn test_list_returns_labels() {
     assert!(communities[0].label.is_some());
 }
 
-// ── SymbolGraph::communities ─────────────────────────────────────────────
+// -- SymbolGraph::communities ---------------------------------------------
 
 #[test]
 fn test_symbol_graph_communities_runs_detection() {
@@ -309,7 +309,7 @@ fn test_symbol_graph_communities_empty_on_empty_graph() {
     assert!(communities.is_empty());
 }
 
-// ── Convergence and determinism ──────────────────────────────────────────
+// -- Convergence and determinism ------------------------------------------
 
 #[test]
 fn test_detect_is_deterministic() {

@@ -392,7 +392,7 @@ fn test_cap_head_transcript_does_not_panic_on_multibyte_boundary() {
     // Regression: the naive `len - keep_len` byte cut can land inside a
     // multi-byte UTF-8 character (the box-drawing glyph used by the TUI is
     // 3 bytes) and panic with "byte index is not a char boundary".
-    let unit = format!("{}\n", "\u{2500}".repeat(100)); // 100 x '─' + '\n'
+    let unit = format!("{}\n", "\u{2500}".repeat(100)); // 100 x '-' + '\n'
     let text = unit.repeat(MAX_COMPACTION_PROMPT_CHARS / unit.len() + 4);
     assert!(text.len() > MAX_COMPACTION_PROMPT_CHARS);
     let out = cap_head_transcript(&text, 100_000);
@@ -404,7 +404,7 @@ fn test_cap_head_transcript_does_not_panic_on_multibyte_boundary() {
 
 #[test]
 fn test_floor_char_boundary_snaps_back_to_char_start() {
-    // '─' is 3 bytes (E2 94 80). Indexes 1 and 2 inside it must snap to 0.
+    // '-' is 3 bytes (E2 94 80). Indexes 1 and 2 inside it must snap to 0.
     let s = "\u{2500}\u{2500}";
     assert_eq!(floor_char_boundary(s, 0), 0);
     assert_eq!(floor_char_boundary(s, 1), 0);
@@ -416,9 +416,9 @@ fn test_floor_char_boundary_snaps_back_to_char_start() {
     assert_eq!(floor_char_boundary(s, 100), 6);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // Performance-oriented additions (compaction speed-up pass)
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 
 #[test]
 fn test_resolve_compaction_model_returns_session_model_without_override() {

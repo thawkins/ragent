@@ -280,7 +280,7 @@ fn test_stack_unknown_leaves_base_layout_untouched() {
     let overlay = resolve_stack_overlay(Some("doesnotexist"), Language::Rust);
     assert!(matches!(overlay, StackOverlay::Unknown(_)));
     let plain = base(Language::Rust, AppType::Cmdline);
-    // No apply_stack_overlay call — the base plan is used verbatim.
+    // No apply_stack_overlay call - the base plan is used verbatim.
     assert!(!plain.files[0].content.contains("axum"));
     assert!(plain.files[1].content.contains("Hello, world!"));
 }

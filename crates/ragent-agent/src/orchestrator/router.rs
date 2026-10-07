@@ -1,3 +1,9 @@
+//! Request routing for the orchestrator.
+//!
+//! Defines the [`Router`] trait and the in-process mailbox-backed
+//! [`InProcessRouter`] implementation used to deliver orchestration requests
+//! to registered agents and await their replies.
+
 use anyhow::Result;
 use tokio::sync::oneshot;
 use tokio::time::{Duration, timeout};

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ragent_types::event::EventBus;
 
-// ── Broker start/stop tests ──────────────────────────────────────────────
+// -- Broker start/stop tests ----------------------------------------------
 
 #[test]
 fn test_broker_start_creates_helper_and_dir() {
@@ -81,7 +81,7 @@ fn test_broker_env_vars_paths_are_distinct() {
     broker.stop();
 }
 
-// ── Helper script body content tests ────────────────────────────────────
+// -- Helper script body content tests ------------------------------------
 
 #[test]
 fn test_helper_body_uses_env_var_dir() {
@@ -105,7 +105,7 @@ fn test_helper_body_writes_request_and_reads_response() {
     assert!(HELPER_BODY.contains("response_"), "reads response_<id>");
 }
 
-// ── watch_loop IPC tests ────────────────────────────────────────────────
+// -- watch_loop IPC tests ------------------------------------------------
 
 /// Drive the watch loop directly: drop a request file, confirm a
 /// [`Event::QuestionRequested`] is published, answer it, and confirm the
@@ -238,7 +238,7 @@ async fn test_watch_loop_cancel_writes_empty_response() {
     handle.abort();
 }
 
-// ── temp_base_dir + safe_session_id tests ────────────────────────────────
+// -- temp_base_dir + safe_session_id tests --------------------------------
 
 #[test]
 fn test_safe_session_id_sanitizes() {

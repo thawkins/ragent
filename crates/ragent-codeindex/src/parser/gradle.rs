@@ -57,13 +57,13 @@ impl LanguageParser for GradleParser {
     }
 }
 
-// ── Extraction context ──────────────────────────────────────────────────────
+// -- Extraction context ------------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Recursive walk ─────────────────────────────────────────────────────────
+// -- Recursive walk ---------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting Groovy/Gradle symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -94,7 +94,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     }
 }
 
-// ── Class declaration ───────────────────────────────────────────────────────
+// -- Class declaration -------------------------------------------------------
 
 /// Extract a Groovy class declaration.
 ///
@@ -134,7 +134,7 @@ fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     }
 }
 
-// ── Interface declaration ───────────────────────────────────────────────────
+// -- Interface declaration ---------------------------------------------------
 
 /// Extract a Groovy interface declaration.
 fn extract_interface(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -172,7 +172,7 @@ fn extract_interface(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
     }
 }
 
-// ── Enum declaration ────────────────────────────────────────────────────────
+// -- Enum declaration --------------------------------------------------------
 
 /// Extract a Groovy enum declaration.
 fn extract_enum(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -210,7 +210,7 @@ fn extract_enum(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Stri
     }
 }
 
-// ── Method declaration ─────────────────────────────────────────────────────
+// -- Method declaration -----------------------------------------------------
 
 /// Extract a Groovy method declaration.
 ///
@@ -251,7 +251,7 @@ fn extract_method(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[St
     });
 }
 
-// ── Constructor declaration ──────────────────────────────────────────────────
+// -- Constructor declaration --------------------------------------------------
 
 /// Extract a Groovy constructor declaration.
 fn extract_constructor(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -283,7 +283,7 @@ fn extract_constructor(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope:
     });
 }
 
-// ── Function definition (Groovy `def foo() { ... }`) ──────────────────────────
+// -- Function definition (Groovy `def foo() { ... }`) --------------------------
 
 /// Extract a standalone Groovy function definition (outside a class).
 ///
@@ -330,7 +330,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     }
 }
 
-// ── Import declaration ─────────────────────────────────────────────────────
+// -- Import declaration -----------------------------------------------------
 
 /// Extract a Groovy import declaration.
 fn extract_import(ctx: &mut Ctx, node: Node) {
@@ -363,7 +363,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Variable / field / constant declaration ─────────────────────────────────
+// -- Variable / field / constant declaration ---------------------------------
 
 /// Extract a Groovy variable, field, or constant declaration.
 fn extract_variable(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -409,7 +409,7 @@ fn extract_variable(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     }
 }
 
-// ── Juxtaposed function call (Gradle DSL style: `plugins { id("java") }`) ──
+// -- Juxtaposed function call (Gradle DSL style: `plugins { id("java") }`) --
 
 /// Extract a Groovy juxtaposed function call as a reference.
 ///
@@ -438,7 +438,7 @@ fn extract_juxt_call(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Method invocation ───────────────────────────────────────────────────────
+// -- Method invocation -------------------------------------------------------
 
 /// Extract a Groovy method invocation as a reference.
 fn extract_method_invocation(ctx: &mut Ctx, node: Node) {
@@ -457,7 +457,7 @@ fn extract_method_invocation(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Annotation ──────────────────────────────────────────────────────────────
+// -- Annotation --------------------------------------------------------------
 
 /// Extract a Groovy annotation as a reference.
 fn extract_annotation(ctx: &mut Ctx, node: Node) {
@@ -476,7 +476,7 @@ fn extract_annotation(ctx: &mut Ctx, node: Node) {
     });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Get the text of a named field child from a tree-sitter node.
 fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
@@ -533,4 +533,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

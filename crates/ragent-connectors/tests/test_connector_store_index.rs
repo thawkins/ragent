@@ -238,7 +238,7 @@ fn endpoint_display_and_try_from_match_parse() {
     assert_eq!(endpoint.as_str(), DEFAULT_CLAUDE_CATALOGUE_URL);
 }
 
-// ── NFR-001: the default-endpoint literal lives in exactly one source file ────
+// -- NFR-001: the default-endpoint literal lives in exactly one source file ----
 
 /// Recursively collect every `.rs` file under `root`.
 fn rust_sources_under(root: &Path, out: &mut Vec<PathBuf>) {

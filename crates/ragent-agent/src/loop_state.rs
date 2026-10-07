@@ -36,7 +36,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-// ── Constants ─────────────────────────────────────────────────────────
+use ragent_types::truncate_chars;
+
+// -- Constants ---------------------------------------------------------
 
 /// Maximum loop-state content length in characters (FR-004).
 pub const LOOP_STATE_MAX_CHARS: usize = 2000;
@@ -47,7 +49,7 @@ pub const INBOX_ENTRY_MAX_CHARS: usize = 500;
 /// Maximum number of inbox findings honored per run (FR-004).
 pub const INBOX_MAX_PER_RUN: usize = 16;
 
-// ── Types ─────────────────────────────────────────────────────────────
+// -- Types -------------------------------------------------------------
 
 /// The cross-run state for a stateful cron event.
 ///
@@ -147,7 +149,7 @@ pub struct ParsedTags {
     pub inbox_entries: Vec<String>,
 }
 
-// ── Tag Parsing ───────────────────────────────────────────────────────
+// -- Tag Parsing -------------------------------------------------------
 
 /// Open tag for loop-state.
 const LOOP_STATE_OPEN: &str = "<loop-state>";
@@ -216,7 +218,7 @@ fn extract_all_tags(text: &str, open: &str, close: &str) -> Vec<String> {
     results
 }
 
-// ── Inbox Writer ──────────────────────────────────────────────────────
+// -- Inbox Writer ------------------------------------------------------
 
 /// Append inbox entries to the global JSONL file.
 ///
@@ -277,7 +279,7 @@ pub fn read_inbox(data_dir: &Path) -> std::io::Result<Vec<InboxEntry>> {
     }
 }
 
-// ── Inbox Management ──────────────────────────────────────────────────
+// -- Inbox Management --------------------------------------------------
 
 /// Update the status of a single inbox entry by ID.
 ///
@@ -348,7 +350,7 @@ fn rewrite_inbox(data_dir: &Path, entries: &[InboxEntry]) -> std::io::Result<()>
     Ok(())
 }
 
-// ── Prompt Injection ──────────────────────────────────────────────────
+// -- Prompt Injection --------------------------------------------------
 
 /// Inject loop state into a prompt, returning the augmented prompt.
 ///
@@ -366,7 +368,7 @@ pub fn inject_state_into_prompt(prompt: &str, state: &LoopState) -> String {
     )
 }
 
-// ── Tag Removal ──────────────────────────────────────────────────────
+// -- Tag Removal ------------------------------------------------------
 
 /// Strip `<loop-state>` and `<inbox>` tag pairs from `output`, returning
 /// the clean text.
@@ -397,7 +399,7 @@ pub fn strip_tags(output: &str) -> String {
     result.trim().to_string()
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------
 
 /// Compute the file path for a cron event's loop state.
 fn loop_state_path(data_dir: &Path, event_id: &str) -> PathBuf {
@@ -412,18 +414,7 @@ fn inbox_path(data_dir: &Path) -> PathBuf {
     data_dir.join("log").join("inbox").join("inbox.jsonl")
 }
 
-/// Truncate a string to at most `max` characters, appending an ellipsis if
-/// truncation occurs.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
-        format!("{truncated}...")
-    }
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "../tests/inline/loop_state_tests.rs"]

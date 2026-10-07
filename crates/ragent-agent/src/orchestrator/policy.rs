@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-// ── ConflictPolicy ───────────────────────────────────────────────────────────
+// -- ConflictPolicy -----------------------------------------------------------
 
 /// Strategy applied by [`ConflictResolver`] when aggregating multiple agent
 /// responses into a single result.
@@ -53,7 +53,7 @@ pub enum ConflictPolicy {
     HumanReview,
 }
 
-// ── HumanFallback ────────────────────────────────────────────────────────────
+// -- HumanFallback ------------------------------------------------------------
 
 /// Called by [`ConflictResolver`] when [`ConflictPolicy::HumanReview`] is
 /// active or when no automatic resolution is possible.
@@ -85,7 +85,7 @@ impl HumanFallback for LoggingFallback {
     }
 }
 
-// ── ConflictResolver ─────────────────────────────────────────────────────────
+// -- ConflictResolver ---------------------------------------------------------
 
 /// Applies a [`ConflictPolicy`] to a set of agent responses.
 #[derive(Clone)]
@@ -180,5 +180,5 @@ impl ConflictResolver {
     }
 }
 
-// ── Coordinator integration ──────────────────────────────────────────────────
+// -- Coordinator integration --------------------------------------------------
 // See `Coordinator::with_policy` in the parent module.

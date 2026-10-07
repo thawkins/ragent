@@ -99,6 +99,17 @@ pub(crate) fn short_session_id(session_id: &str) -> String {
     tail8(session_id)
 }
 
+/// Truncate any identifier to a stable short prefix for compact display.
+///
+/// Returns the leading 8 characters of `id`, or the whole value unchanged
+/// when it is shorter. The cut is snapped to a char boundary via
+/// [`ragent_types::strutil::floor_char_boundary`] so a multi-byte UTF-8
+/// sequence straddling the cut point cannot panic.
+pub(crate) fn short_id(id: &str) -> String {
+    let end = ragent_types::strutil::floor_char_boundary(id, 8);
+    id[..end].to_string()
+}
+
 /// Truncate a [`RunId`] to a stable short prefix for compact display.
 ///
 /// Returns the last 8 characters of the run id, mirroring

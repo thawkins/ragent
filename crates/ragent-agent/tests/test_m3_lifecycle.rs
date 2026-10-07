@@ -1,17 +1,17 @@
 //! Lifecycle regression tests for `team_wait`, `team_idle`, and the unified
-//! shutdown path (COMMSPLAN Milestone 3 — tasks M3-T1..M3-T7).
+//! shutdown path (COMMSPLAN Milestone 3 - tasks M3-T1..M3-T7).
 //!
 //! These tests exercise the *disk + event-bus* behaviour of the team tools
 //! without spinning up real agent loops. They cover the four scenarios
 //! required by M3-T7:
 //!
-//! (a) A teammate fails while the lead is in `team_wait` — the
+//! (a) A teammate fails while the lead is in `team_wait` - the
 //!     `TeammateFailed` event must remove the agent from the waiting set
 //!     (M3-T2).
-//! (b) A teammate goes idle before `team_wait` starts — the pre-loop drain
+//! (b) A teammate goes idle before `team_wait` starts - the pre-loop drain
 //!     of the event-bus receiver must reconcile the idle event into the
 //!     waiting set so `team_wait` returns immediately (M3-T1).
-//! (c) The `EventBus` drops an event but the on-disk status is correct —
+//! (c) The `EventBus` drops an event but the on-disk status is correct -
 //!     the post-timeout disk re-check must recover the terminal state
 //!     (M3-T3).
 //! (d) `team_idle` publishes `Event::TeammateIdle` (M3-T4) and
@@ -30,7 +30,7 @@ use serde_json::json;
 mod team_support;
 use team_support::setup_workspace;
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 /// Create a temp working dir that contains a `.ragent/teams/` directory so
 /// `TeamStore::create(..., project_local = true)` succeeds. Returns the
@@ -73,7 +73,7 @@ fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberS
     store.add_member(member).expect("add_member");
 }
 
-// ── M3-T2: TeammateFailed removes the agent from the waiting set ──────────
+// -- M3-T2: TeammateFailed removes the agent from the waiting set ----------
 
 #[tokio::test]
 async fn test_team_wait_handles_teammate_failed_event() {
@@ -115,7 +115,7 @@ async fn test_team_wait_handles_teammate_failed_event() {
     );
 }
 
-// ── M3-T1: Teammate goes idle before team_wait starts ─────────────────────
+// -- M3-T1: Teammate goes idle before team_wait starts ---------------------
 
 #[tokio::test]
 async fn test_team_wait_pre_loop_drain_picks_up_idle_event() {
@@ -128,7 +128,7 @@ async fn test_team_wait_pre_loop_drain_picks_up_idle_event() {
     let bus = Arc::new(EventBus::new(128));
 
     // Subscribe and publish an idle event BEFORE the tool runs, then have the
-    // tool subscribe — the tool subscribes inside execute(), so we publish
+    // tool subscribe - the tool subscribes inside execute(), so we publish
     // after a short delay that is still before the tool's wait loop reads.
     // The pre-loop `try_recv` drain must capture it.
     let bus2 = bus.clone();
@@ -152,7 +152,7 @@ async fn test_team_wait_pre_loop_drain_picks_up_idle_event() {
     );
 }
 
-// ── M3-T3: disk re-check recovers terminal state after dropped event ──────
+// -- M3-T3: disk re-check recovers terminal state after dropped event ------
 
 #[tokio::test]
 async fn test_team_wait_disk_recheck_recovers_terminal_state() {
@@ -163,7 +163,7 @@ async fn test_team_wait_disk_recheck_recovers_terminal_state() {
     drop(store);
 
     // Use a tiny event bus (capacity 1) and no subscribers so the idle event
-    // is dropped. Then mark the member idle on disk — the post-timeout disk
+    // is dropped. Then mark the member idle on disk - the post-timeout disk
     // re-check must recover it.
     let bus = Arc::new(EventBus::new(1));
 
@@ -189,7 +189,7 @@ async fn test_team_wait_disk_recheck_recovers_terminal_state() {
 
     let ctx = make_ctx(&dir, "lead-sess", bus.clone());
     let tool = ragent_agent::tool::team_wait::TeamWaitTool;
-    // Short timeout — the disk re-check should still recover the state.
+    // Short timeout - the disk re-check should still recover the state.
     let input = json!({ "team_name": "disk-recheck-team", "timeout_secs": 1 });
     let out = tool.execute(input, &ctx).await.expect("team_wait execute");
     assert!(
@@ -199,7 +199,7 @@ async fn test_team_wait_disk_recheck_recovers_terminal_state() {
     );
 }
 
-// ── M3-T4: team_idle publishes Event::TeammateIdle ────────────────────────
+// -- M3-T4: team_idle publishes Event::TeammateIdle ------------------------
 
 #[tokio::test]
 async fn test_team_idle_publishes_teammate_idle_event() {
@@ -265,7 +265,7 @@ async fn test_team_idle_publishes_teammate_idle_event() {
     assert_eq!(m.status, MemberStatus::Idle);
 }
 
-// ── M3-T5/T6: shutdown tool routes through TeamManager (disk fallback) ────
+// -- M3-T5/T6: shutdown tool routes through TeamManager (disk fallback) ----
 
 #[tokio::test]
 async fn test_team_shutdown_teammate_graceful_marks_shutting_down() {
@@ -275,7 +275,7 @@ async fn test_team_shutdown_teammate_graceful_marks_shutting_down() {
     add_member(&mut store, "worker", "tm-001", MemberStatus::Working);
     drop(store);
 
-    // No team_manager in context — exercises the disk-only fallback path.
+    // No team_manager in context - exercises the disk-only fallback path.
     let bus = Arc::new(EventBus::new(16));
     let ctx = make_ctx(&dir, "lead-sess", bus);
     let tool = ragent_agent::tool::team_shutdown_teammate::TeamShutdownTeammateTool;
@@ -309,7 +309,7 @@ async fn test_team_shutdown_teammate_immediate_marks_stopped() {
     assert_eq!(m.status, MemberStatus::Stopped);
 }
 
-// ── M3-T6: TeamManager.shutdown_teammate graceful vs immediate ────────────
+// -- M3-T6: TeamManager.shutdown_teammate graceful vs immediate ------------
 
 #[tokio::test]
 async fn test_team_manager_shutdown_graceful_keeps_running_status() {

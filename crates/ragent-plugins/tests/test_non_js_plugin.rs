@@ -2,55 +2,20 @@
 //! FR-007, FR-008, FR-013, FR-025).
 //!
 //! The official Claude marketplace ships packages that carry no JavaScript entry
-//! point — a `skills/` folder of `SKILL.md` files and/or an `mcpServers`
+//! point - a `skills/` folder of `SKILL.md` files and/or an `mcpServers`
 //! section. These must install, list, load, and pass `/plugins test` without
 //! executing any entry point, and without being reported as a parse error.
 //!
 //! Every test is offline and rooted under `target/temp/` (no `/tmp`, per
 //! AGENTS.md).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
-use ragent_plugins::{
-    LifecycleState, PluginManager, StepOutcome, StoreDirs, add, scan_dirs, store_dirs_at,
-    test_plugin,
-};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII scratch tree under `target/temp/`.
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/non-js-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-
-    fn manager(&self) -> PluginManager {
-        PluginManager::new(self.dirs(), ragent_config::PluginsConfig::default())
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use ragent_plugins::{LifecycleState, StepOutcome, add, scan_dirs, test_plugin};
 
 /// A Claude-dialect manifest with no JavaScript entry point, mirroring the
 /// shape of the official `mongodb` marketplace plugin.
@@ -84,7 +49,7 @@ fn stage_skill_only(parent: &Path) -> PathBuf {
     plugin
 }
 
-// ── Install (FR-007, FR-010) ────────────────────────────────────────────────
+// -- Install (FR-007, FR-010) ------------------------------------------------
 
 #[test]
 fn add_installs_a_skill_only_claude_plugin() {
@@ -127,7 +92,7 @@ fn add_installs_a_skill_only_claude_plugin() {
     assert!(found[0].enabled);
 }
 
-// ── Load (FR-008) ───────────────────────────────────────────────────────────
+// -- Load (FR-008) -----------------------------------------------------------
 
 #[test]
 fn enable_loads_a_skill_only_plugin_inertly() {
@@ -148,7 +113,7 @@ fn enable_loads_a_skill_only_plugin_inertly() {
     assert!(loaded.calls.messages().is_empty());
 }
 
-// ── Harness (FR-013) ────────────────────────────────────────────────────────
+// -- Harness (FR-013) --------------------------------------------------------
 
 #[test]
 fn harness_passes_a_skill_only_plugin_without_executing_an_entry() {

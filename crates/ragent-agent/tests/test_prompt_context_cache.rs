@@ -1,6 +1,6 @@
 //! Integration tests for the prompt-context cache.
 //!
-//! Validates that `AgentPerf` T-006 / FR-012 — the agent loop never
+//! Validates that `AgentPerf` T-006 / FR-012 - the agent loop never
 //! re-reads AGENTS.md / README / git-context more than once per cache TTL.
 //!
 //! We construct a `PromptContextCache` directly (it's a private struct,

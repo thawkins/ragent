@@ -253,7 +253,7 @@ impl Constitution {
     }
 }
 
-// ── Amendment Process (FR-016) ───────────────────────────────────────────
+// -- Amendment Process (FR-016) -------------------------------------------
 
 /// Input for a constitutional amendment (FR-016).
 ///

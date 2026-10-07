@@ -10,14 +10,14 @@ use crate::vocab::normalize_gitlab_issue_state;
 use super::{Tool, ToolContext, ToolOutput};
 
 // ---------------------------------------------------------------------------
-// 1. GitlabListIssuesTool
+// 1. GitLabListIssuesTool
 // ---------------------------------------------------------------------------
 
 /// Tool that lists GitLab issues in a project.
-pub struct GitlabListIssuesTool;
+pub struct GitLabListIssuesTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabListIssuesTool {
+impl Tool for GitLabListIssuesTool {
     fn name(&self) -> &'static str {
         "gitlab_list_issues"
     }
@@ -108,14 +108,14 @@ impl Tool for GitlabListIssuesTool {
 }
 
 // ---------------------------------------------------------------------------
-// 2. GitlabGetIssueTool
+// 2. GitLabGetIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that retrieves a single GitLab issue by IID.
-pub struct GitlabGetIssueTool;
+pub struct GitLabGetIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabGetIssueTool {
+impl Tool for GitLabGetIssueTool {
     fn name(&self) -> &'static str {
         "gitlab_get_issue"
     }
@@ -219,14 +219,14 @@ impl Tool for GitlabGetIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 3. GitlabCreateIssueTool
+// 3. GitLabCreateIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that creates a new GitLab issue in a project.
-pub struct GitlabCreateIssueTool;
+pub struct GitLabCreateIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCreateIssueTool {
+impl Tool for GitLabCreateIssueTool {
     fn name(&self) -> &'static str {
         "gitlab_create_issue"
     }
@@ -322,14 +322,14 @@ impl Tool for GitlabCreateIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 4. GitlabCommentIssueTool
+// 4. GitLabCommentIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that posts a note (comment) on an existing GitLab issue.
-pub struct GitlabCommentIssueTool;
+pub struct GitLabCommentIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCommentIssueTool {
+impl Tool for GitLabCommentIssueTool {
     fn name(&self) -> &'static str {
         "gitlab_comment_issue"
     }
@@ -391,14 +391,14 @@ impl Tool for GitlabCommentIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 5. GitlabCloseIssueTool
+// 5. GitLabCloseIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that closes a GitLab issue.
-pub struct GitlabCloseIssueTool;
+pub struct GitLabCloseIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GitlabCloseIssueTool {
+impl Tool for GitLabCloseIssueTool {
     fn name(&self) -> &'static str {
         "gitlab_close_issue"
     }

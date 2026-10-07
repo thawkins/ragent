@@ -1,4 +1,4 @@
-//! Integration test M2.5: scan → parse → store end-to-end pipeline.
+//! Integration test M2.5: scan -> parse -> store end-to-end pipeline.
 //!
 //! Creates temp directories with Rust source files, scans them, parses
 //! with tree-sitter, stores symbols/imports in `SQLite`, and queries back.
@@ -102,7 +102,7 @@ pub mod inner {
     dir
 }
 
-/// Run the full pipeline: scan → parse → store for all files in a project.
+/// Run the full pipeline: scan -> parse -> store for all files in a project.
 /// Returns the store and a list of (path, `file_id`) pairs.
 fn index_project(dir: &TempDir) -> (IndexStore, Vec<(String, i64)>) {
     let config = ScanConfig::default();
@@ -676,7 +676,7 @@ fn helper() {
         store.upsert_refs(file_id, &parsed.references).unwrap();
     }
 
-    // "greet" is called inside run() and helper() — should have references
+    // "greet" is called inside run() and helper() - should have references
     let greet_refs = store.find_references("greet").unwrap();
     assert!(
         greet_refs.len() >= 2,
@@ -689,14 +689,14 @@ fn helper() {
             .collect::<Vec<_>>()
     );
 
-    // "helper" is called inside run() — should have at least 1 reference
+    // "helper" is called inside run() - should have at least 1 reference
     let helper_refs = store.find_references("helper").unwrap();
     assert!(
         !helper_refs.is_empty(),
         "expected references to 'helper' from run(), got 0"
     );
 
-    // "App" is used as a type — should have type references
+    // "App" is used as a type - should have type references
     let app_refs = store.find_references("App").unwrap();
     assert!(
         !app_refs.is_empty(),

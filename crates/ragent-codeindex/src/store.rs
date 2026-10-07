@@ -288,7 +288,7 @@ impl IndexStore {
         Ok(())
     }
 
-    // ── File CRUD ───────────────────────────────────────────────────────────
+    // -- File CRUD -----------------------------------------------------------
 
     /// PERF-074: the file upsert body (no result row), reused by the batch
     /// `apply_diff` path where per-row results are not needed.
@@ -577,7 +577,7 @@ impl IndexStore {
         Ok(out)
     }
 
-    // ── Stale detection ─────────────────────────────────────────────────────
+    // -- Stale detection -----------------------------------------------------
 
     /// Compare scanned files against the stored index and return the diff.
     ///
@@ -677,7 +677,7 @@ impl IndexStore {
         Ok(())
     }
 
-    // ── Symbol CRUD ─────────────────────────────────────────────────────────
+    // -- Symbol CRUD ---------------------------------------------------------
 
     /// Begin an explicit transaction.
     ///
@@ -993,7 +993,7 @@ impl IndexStore {
         Ok(count as u64)
     }
 
-    // ── Import CRUD ─────────────────────────────────────────────────────────
+    // -- Import CRUD ---------------------------------------------------------
 
     /// Insert imports for a file, replacing any existing imports for that file.
     pub fn upsert_imports(&self, file_id: i64, imports: &[ImportEntry]) -> Result<usize> {
@@ -1122,7 +1122,7 @@ impl IndexStore {
         Ok(out)
     }
 
-    // ── Symbol Ref CRUD ─────────────────────────────────────────────────────
+    // -- Symbol Ref CRUD -----------------------------------------------------
 
     /// Insert symbol references for a file, replacing existing ones.
     pub fn upsert_refs(&self, file_id: i64, refs: &[SymbolRef]) -> Result<usize> {
@@ -1290,7 +1290,7 @@ impl IndexStore {
         Ok(out)
     }
 
-    // ── File Dependencies ───────────────────────────────────────────────────
+    // -- File Dependencies ---------------------------------------------------
 
     /// Set file dependencies for a source file, replacing existing ones.
     pub fn set_file_deps(
@@ -1358,7 +1358,7 @@ impl IndexStore {
         Ok(version)
     }
 
-    // ── Graph Edges ─────────────────────────────────────────────────────────
+    // -- Graph Edges ---------------------------------------------------------
 
     /// Insert or replace a semantic edge between two symbols.
     ///
@@ -1614,7 +1614,7 @@ impl IndexStore {
         collect_bounded_rows(rows, "graph_edges")
     }
 
-    // ── Communities ──────────────────────────────────────────────────────────
+    // -- Communities ----------------------------------------------------------
 
     /// Insert or replace a community assignment for a symbol.
     pub fn upsert_community(&self, sym_id: i64, community: i64, label: Option<&str>) -> Result<()> {
@@ -1680,7 +1680,7 @@ impl IndexStore {
         Ok(out)
     }
 
-    // ── Aggregate stats ─────────────────────────────────────────────────────
+    // -- Aggregate stats -----------------------------------------------------
 
     /// Get the `file_id` for a given path.
     pub fn get_file_id(&self, path: &str) -> Result<Option<i64>> {
@@ -1719,7 +1719,7 @@ impl IndexStore {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 /// Raw row from `SQLite` before type conversion.
 struct RawFileRow {

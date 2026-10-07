@@ -1,6 +1,6 @@
 //! End-to-end integration tests for `ragent-research` (T-052).
 //!
-//! Exercises the full create → list → show → search → delete flow against a
+//! Exercises the full create -> list -> show -> search -> delete flow against a
 //! real on-disk `research/` directory, plus the FR-016 duplicate-create and
 //! FR-018 closest-match paths.
 
@@ -457,7 +457,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
             _topic: &str,
             _sources: &[ragent_research::SourceBody],
         ) -> anyhow::Result<AnalysisResult> {
-            // Simulate an LLM that returned empty content — exercises the
+            // Simulate an LLM that returned empty content - exercises the
             // mechanical fallback path while still proving the supporting
             // files contain real body content.
             Ok(AnalysisResult::default())
@@ -1003,7 +1003,7 @@ async fn competitive_mode_produces_comparison_table_and_entity_profiles() {
     }
 
     // Verify the detected comparison dimension is rendered as a criteria
-    // bullet (structural, independent of fallback-source preview text — the
+    // bullet (structural, independent of fallback-source preview text - the
     // entity-scoped findings no longer quote cross-entity "pricing" bodies).
     assert!(
         research_md.contains("- LLM inference"),

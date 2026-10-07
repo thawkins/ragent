@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::search::langsearch` — LangSearch API backend
+//! Unit tests for `masterfetch::search::langsearch` - LangSearch API backend
 //! (T-003, FR-001, FR-003, FR-005).
 //!
 //! The request-body builder and response parser are pure functions and are

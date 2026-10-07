@@ -2,49 +2,18 @@
 //! command family (spec `plugins` T-013; FR-009, FR-011, FR-012, FR-016,
 //! FR-022, FR-025).
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ragent_plugins::{
     ControlArgError, ControlCommand, LifecycleState, PluginCommandAdapter, PluginSession,
-    PluginSurface, PluginToolAdapter, StoreDirs, parse_control_command, render_list,
-    run_control_command,
+    PluginSurface, PluginToolAdapter, parse_control_command, render_list, run_control_command,
 };
 use ragent_tools_core::Tool;
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/control-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// Store dirs pinned to this tree's project store (no global leg).
-    fn dirs(&self) -> StoreDirs {
-        ragent_plugins::store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin declaring a tool and a command in its manifest
 /// (so `/plugins list` counts them even while the plugin is disabled).
@@ -105,7 +74,7 @@ const ENTRY: &str = r#"
 ragent.message.info("entry ran");
 "#;
 
-// ── parse_control_command ────────────────────────────────────────────────────
+// -- parse_control_command ----------------------------------------------------
 
 #[test]
 fn parse_list_detects_verbose() {
@@ -167,7 +136,7 @@ fn arg_error_reports_are_actionable() {
     assert!(report.contains("Usage: `/plugins disable <pluginid>`"));
 }
 
-// ── `/plugins list` (FR-009, FR-022, FR-025) ─────────────────────────────────
+// -- `/plugins list` (FR-009, FR-022, FR-025) ---------------------------------
 
 #[test]
 fn list_empty_store_reports_none_discovered() {
@@ -438,7 +407,7 @@ fn list_reports_parse_failure_row() {
     assert!(out.contains("manifest-parse"));
 }
 
-// ── `/plugins enable` / `/plugins disable` (FR-011, FR-012, FR-016) ──────────
+// -- `/plugins enable` / `/plugins disable` (FR-011, FR-012, FR-016) ----------
 
 #[test]
 fn run_enable_loads_registers_and_reports_state() {

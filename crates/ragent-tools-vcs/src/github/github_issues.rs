@@ -10,14 +10,14 @@ use crate::vocab::normalize_issue_state;
 use super::{Tool, ToolContext, ToolOutput};
 
 // ---------------------------------------------------------------------------
-// 1. GithubListIssuesTool
+// 1. GitHubListIssuesTool
 // ---------------------------------------------------------------------------
 
 /// Tool that lists GitHub issues in a repository.
-pub struct GithubListIssuesTool;
+pub struct GitHubListIssuesTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubListIssuesTool {
+impl Tool for GitHubListIssuesTool {
     fn name(&self) -> &'static str {
         "github_list_issues"
     }
@@ -109,14 +109,14 @@ impl Tool for GithubListIssuesTool {
 }
 
 // ---------------------------------------------------------------------------
-// 2. GithubGetIssueTool
+// 2. GitHubGetIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that retrieves a single GitHub issue by number.
-pub struct GithubGetIssueTool;
+pub struct GitHubGetIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubGetIssueTool {
+impl Tool for GitHubGetIssueTool {
     fn name(&self) -> &'static str {
         "github_get_issue"
     }
@@ -225,14 +225,14 @@ impl Tool for GithubGetIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 3. GithubCreateIssueTool
+// 3. GitHubCreateIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that creates a new GitHub issue in a repository.
-pub struct GithubCreateIssueTool;
+pub struct GitHubCreateIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubCreateIssueTool {
+impl Tool for GitHubCreateIssueTool {
     fn name(&self) -> &'static str {
         "github_create_issue"
     }
@@ -315,14 +315,14 @@ impl Tool for GithubCreateIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 4. GithubCommentIssueTool
+// 4. GitHubCommentIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that posts a comment on an existing GitHub issue.
-pub struct GithubCommentIssueTool;
+pub struct GitHubCommentIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubCommentIssueTool {
+impl Tool for GitHubCommentIssueTool {
     fn name(&self) -> &'static str {
         "github_comment_issue"
     }
@@ -387,14 +387,14 @@ impl Tool for GithubCommentIssueTool {
 }
 
 // ---------------------------------------------------------------------------
-// 5. GithubCloseIssueTool
+// 5. GitHubCloseIssueTool
 // ---------------------------------------------------------------------------
 
 /// Tool that closes a GitHub issue.
-pub struct GithubCloseIssueTool;
+pub struct GitHubCloseIssueTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubCloseIssueTool {
+impl Tool for GitHubCloseIssueTool {
     fn name(&self) -> &'static str {
         "github_close_issue"
     }

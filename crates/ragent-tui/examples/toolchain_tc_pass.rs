@@ -53,7 +53,7 @@ fn main() {
 async fn run() {
     let mut failures: Vec<String> = Vec::new();
 
-    // ── TC-001 / TC-002: bare + help pages ─────────────────────────────
+    // -- TC-001 / TC-002: bare + help pages -----------------------------
     let mut app = make_app();
     let bare = last_output_after(&mut app, "/toolchain").await;
     let help = last_output_after(&mut app, "/toolchain help").await;
@@ -73,7 +73,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-003: full report ────────────────────────────────────────────
+    // -- TC-003: full report --------------------------------------------
     let mut app = make_app();
     let text = last_output_after(&mut app, "/toolchain list").await;
     let rows = data_row_count(&text);
@@ -95,7 +95,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-004: spot-check against the live host ───────────────────────
+    // -- TC-004: spot-check against the live host -----------------------
     let cargo_v = std::process::Command::new("cargo")
         .arg("--version")
         .output()
@@ -132,7 +132,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-005 / TC-006: language filter + case-insensitivity ─────────
+    // -- TC-005 / TC-006: language filter + case-insensitivity ---------
     let mut app = make_app();
     let rust = last_output_after(&mut app, "/toolchain list rust").await;
     let rust_upper = last_output_after(&mut app, "/toolchain list RUST").await;
@@ -151,7 +151,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-007: unknown language id ────────────────────────────────────
+    // -- TC-007: unknown language id ------------------------------------
     let mut app = make_app();
     let unk = last_output_after(&mut app, "/toolchain list nosuchlang").await;
     let f = flat(&unk);
@@ -166,7 +166,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-008: unknown subcommand ─────────────────────────────────────
+    // -- TC-008: unknown subcommand -------------------------------------
     let mut app = make_app();
     let msg = last_output_after(&mut app, "/toolchain frobnicate").await;
     let f = flat(&msg);
@@ -183,7 +183,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-009 / TC-010: JSON output ───────────────────────────────────
+    // -- TC-009 / TC-010: JSON output -----------------------------------
     let mut app = make_app();
     let json_full = last_output_after(&mut app, "/toolchain list --json").await;
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_full);
@@ -252,7 +252,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-011: absent runtimes do not truncate ────────────────────────
+    // -- TC-011: absent runtimes do not truncate ------------------------
     // (same report object captured for TC-003; re-derive to be independent)
     let mut app = make_app();
     let text2 = last_output_after(&mut app, "/toolchain list").await;
@@ -270,7 +270,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-012: version-probe failure containment ──────────────────────
+    // -- TC-012: version-probe failure containment ----------------------
     let mut app = make_app();
     let rrow = last_output_after(&mut app, "/toolchain list r").await;
     let f3 = flat(&rrow);
@@ -285,7 +285,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-013: read-only guarantee ────────────────────────────────────
+    // -- TC-013: read-only guarantee ------------------------------------
     // Snapshot the spec dir and the crate source tree before/after every
     // /toolchain invocation (same observable as the T-016 automated test).
     fn snapshot_tree(root: &std::path::Path) -> Vec<(String, u64)> {
@@ -349,7 +349,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-014: autocomplete ───────────────────────────────────────────
+    // -- TC-014: autocomplete -------------------------------------------
     let mut app = make_app();
     app.input = "/tool".to_string();
     app.update_slash_menu();
@@ -378,7 +378,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── TC-015: /help index mentions toolchain ─────────────────────────
+    // -- TC-015: /help index mentions toolchain -------------------------
     let mut app = make_app();
     let helptext = last_output_after(&mut app, "/help").await;
     let ok = helptext.contains("/toolchain");
@@ -389,7 +389,7 @@ async fn run() {
         &mut failures,
     );
 
-    // ── Summary ────────────────────────────────────────────────────────
+    // -- Summary --------------------------------------------------------
     println!();
     if failures.is_empty() {
         println!("ALL MANUAL TESTPLAN CASES PASSED ({} cases)", 15);

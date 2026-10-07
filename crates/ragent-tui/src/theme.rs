@@ -333,7 +333,7 @@ pub mod accessibility {
     /// ```
     /// use ragent_tui::theme::accessibility::progress_bar;
     ///
-    /// let bar = progress_bar(0.5, 20); // "[██████████░░░░░░░░░░]"
+    /// let bar = progress_bar(0.5, 20); // "[##########..........]"
     /// ```
     pub fn progress_bar(progress: f32, width: usize) -> String {
         let filled = ((progress.clamp(0.0, 1.0) * width as f32) as usize).min(width);
@@ -360,7 +360,7 @@ pub mod accessibility {
     /// ```
     /// use ragent_tui::theme::accessibility::labeled_progress_bar;
     ///
-    /// let bar = labeled_progress_bar(0.5, 20, "Loading"); // "Loading [██████████░░░░░░░░░░] 50%"
+    /// let bar = labeled_progress_bar(0.5, 20, "Loading"); // "Loading [##########..........] 50%"
     /// ```
     pub fn labeled_progress_bar(progress: f32, width: usize, label: &str) -> String {
         let bar = progress_bar(progress, width);
@@ -369,7 +369,7 @@ pub mod accessibility {
     }
 }
 
-/// Standardized loading spinner using braille patterns (rotates: ◐◓◑◒)
+/// Standardized loading spinner using braille patterns (rotates: ****)
 pub const LOADING_FRAMES: &[&str] = &["◐", "◓", "◑", "◒"];
 
 /// Get the current loading frame based on elapsed time

@@ -1538,7 +1538,7 @@ impl ResearchSession {
         let name = ResearchName::try_new(name_str).map_err(ResearchError::InvalidName)?;
         let supervisor_cfg = config.supervisor_config();
 
-        // ── Plan ──────────────────────────────────────────────────────────
+        // -- Plan ----------------------------------------------------------
         router.run_step_if(RunStep::SupervisorPlan, router_observer, || {});
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::SupervisorPlan,
@@ -1594,7 +1594,7 @@ impl ResearchSession {
             state.add_sub_topic(sub_topic);
         }
 
-        // ── Delegate / Collect ─────────────────────────────────────────
+        // -- Delegate / Collect -----------------------------------------
         router.run_step_if(RunStep::SupervisorDelegate, router_observer, || {});
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::SupervisorDelegate,
@@ -1740,7 +1740,7 @@ impl ResearchSession {
             )
         });
 
-        // ── Synthesize ───────────────────────────────────────────────────
+        // -- Synthesize ---------------------------------------------------
         router.run_step_if(RunStep::SupervisorSynthesize, router_observer, || {});
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::SupervisorSynthesize,
@@ -1767,7 +1767,7 @@ impl ResearchSession {
             detail: None,
         }));
 
-        // ── Finalize ─────────────────────────────────────────────────────
+        // -- Finalize -----------------------------------------------------
         router.run_step_if(RunStep::SupervisorFinalize, router_observer, || {});
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::SupervisorFinalize,
@@ -1840,21 +1840,16 @@ impl ResearchSession {
                 crate::session::fallback::default_top_implications(&analysis.findings, topic);
         }
 
-        // ── Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) ──
+        // -- Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) --
         // Order the findings by reverse relevance and truncate to the effective
         // limit before the document is assembled, so the retained count and
         // `Finding N` numbering are contiguous and stable across modes.
         analysis.findings =
             crate::analysis::cap_findings_to_limit(analysis.findings, max_findings, &sources);
 
-        let concepts_section = if let Some(engine) = &self.concepts_engine {
-            self.extract_concepts_inner(name, &sources, engine, max_concepts)
-                .await
-                .ok()
-                .flatten()
-        } else {
-            None
-        };
+        let concepts_section = self
+            .extract_concepts_section(name, &sources, &observer, max_concepts)
+            .await;
 
         let mut item_with_sources = item.clone();
         item_with_sources.set_queries(queries.clone());
@@ -1873,7 +1868,7 @@ impl ResearchSession {
         item_with_sources.url_cloak = url_cloak;
         item_with_sources.invocation = invocation.or_else(|| item.invocation.clone());
 
-        // ── Self-Evaluation Scorecard (FR-008 / T-015) ───────────────────────
+        // -- Self-Evaluation Scorecard (FR-008 / T-015) -----------------------
         // Heuristically score the assembled report and either emit the scorecard
         // as a synthesis event and embed it in the document, or leave it `None`
         // when evaluation is disabled.
@@ -1932,7 +1927,7 @@ impl ResearchSession {
         };
         doc.item.set_title(&final_title);
 
-        // ── Per-provider search-request summary ────────────────────────────
+        // -- Per-provider search-request summary ----------------------------
         // Report how many search requests each provider received across the
         // whole run (default pipeline, tiered iterations, and every
         // supervisor/competitive researcher combined) and embed the table in
@@ -2094,7 +2089,7 @@ impl ResearchSession {
         let mut web_queries = Vec::new();
         let mut item_title = title.to_string();
 
-        // ── Resolve effective research brief (FR-004 / T-004) ─────────────
+        // -- Resolve effective research brief (FR-004 / T-004) -------------
         // Use an explicit brief when supplied; otherwise auto-generate one for
         // supervisor/competitive modes so downstream agents have a concrete
         // mission statement.
@@ -2119,7 +2114,7 @@ impl ResearchSession {
             }
         }
 
-        // ── --from-url pre-step ──────────────────────────────────────────
+        // -- --from-url pre-step ------------------------------------------
         self.fetch_from_url_seeds(
             config,
             &observer,
@@ -2130,7 +2125,7 @@ impl ResearchSession {
         )
         .await?;
 
-        // ── --from-file pre-step ─────────────────────────────────────────
+        // -- --from-file pre-step -----------------------------------------
         self.extract_from_file_seeds(
             config,
             &observer,
@@ -2141,7 +2136,7 @@ impl ResearchSession {
         )
         .await?;
 
-        // ── Create / load the on-disk item ──────────────────────────────
+        // -- Create / load the on-disk item ------------------------------
         let item_exists = ResearchIo::item_exists(self.manager.root(), &name).await;
         let mut item = if item_exists {
             self.manager.show(name_str).await?
@@ -2157,7 +2152,7 @@ impl ResearchSession {
         mark_in_progress(&mut item);
         self.manager.start_gathering(name_str).await?;
 
-        // ── Initialize tier router (T-005) ───────────────────────────────
+        // -- Initialize tier router (T-005) -------------------------------
         let run_tag = crate::tier_router::default_run_tag(name_str);
         // For supervisor/competitive modes, create a mode-aware router so the
         // run manifest records the graph steps instead of the tiered pipeline.
@@ -2184,7 +2179,7 @@ impl ResearchSession {
             topic = item.topic.clone();
         }
 
-        // ── Scope clarification (FR-005, FR-017) ─────────────────────────
+        // -- Scope clarification (FR-005, FR-017) -------------------------
         // Ask a single clarifying question before performing any web searches
         // when the topic is ambiguous and clarification is enabled. This check
         // deliberately runs after seed pre-steps so derived topics are also
@@ -2198,7 +2193,7 @@ impl ResearchSession {
             }
         }
 
-        // ── Supervisor / competitive multi-agent graph (FR-001, FR-009) ───
+        // -- Supervisor / competitive multi-agent graph (FR-001, FR-009) ---
         // For supervisor/competitive modes, delegate to the multi-agent graph
         // instead of the tiered pipeline. The graph reuses the same synthesis
         // and document-assembly helpers.
@@ -2222,7 +2217,7 @@ impl ResearchSession {
                 .await;
         }
 
-        // ── Decide single-pass vs. iterative engine ─────────────────────
+        // -- Decide single-pass vs. iterative engine ---------------------
         let engine_cfg = config.engine_config();
         let use_iterative =
             config.analysis.iterations.is_some() || config.analysis.depth == Some(Depth::Deep);
@@ -2271,7 +2266,7 @@ impl ResearchSession {
                 }
             }
         } else {
-            // ── Overlapped gather step (Milestone D-001) ─────────────────
+            // -- Overlapped gather step (Milestone D-001) -----------------
             //
             // Web gathering and local/spec gathering do not depend on each
             // other and can run concurrently up to the synthesis step. Both
@@ -2345,12 +2340,12 @@ impl ResearchSession {
             "research: gather phase complete"
         );
 
-        // ── Synthesize ─────────────────────────────────────────────────────
+        // -- Synthesize -----------------------------------------------------
         // Advance the tier router to mark WidthSweep/DepthInvestigation-style
         // steps as completed. Full tier: we keep adversarial steps as
         // skipped-stubs until T-006..T-015 implement them.
         router.run_step_if(RunStep::WidthSweep, &router_observer, || {});
-        // ── Contradiction Graph (T-007) ────────────────────────────────────
+        // -- Contradiction Graph (T-007) ------------------------------------
         // Run the deterministic contradiction-graph step for tiers that
         // include it, emit the result as a session event, and keep the graph
         // for the assembled document.
@@ -2367,7 +2362,7 @@ impl ResearchSession {
                 graph
             });
 
-        // ── Loci Analysis (T-008) ──────────────────────────────────────────
+        // -- Loci Analysis (T-008) ------------------------------------------
         let loci = router
             .run_step_if(RunStep::LociAnalysis, &router_observer, || {
                 let loci = analyze_loci(&sources);
@@ -2379,7 +2374,7 @@ impl ResearchSession {
             })
             .unwrap_or_else(crate::locus::LocusSet::empty);
 
-        // ── Depth Investigation (T-008) ────────────────────────────────────
+        // -- Depth Investigation (T-008) ------------------------------------
         let depth_investigation = router
             .run_step_if(RunStep::DepthInvestigation, &router_observer, || {
                 let investigations = investigate_depth(&loci);
@@ -2390,7 +2385,7 @@ impl ResearchSession {
             })
             .unwrap_or_default();
 
-        // ── Cross-Locus Reconcile (T-009) ─────────────────────────────────
+        // -- Cross-Locus Reconcile (T-009) ---------------------------------
         let cross_locus_reconcile = router
             .run_step_if(RunStep::CrossLocusReconcile, &router_observer, || {
                 let reconcile =
@@ -2402,7 +2397,7 @@ impl ResearchSession {
             })
             .unwrap_or_else(crate::reconcile::CrossLocusReconcile::empty);
 
-        // ── Source Tensions (T-009) ─────────────────────────────────────────
+        // -- Source Tensions (T-009) -----------------------------------------
         let source_tensions = router
             .run_step_if(RunStep::SourceTensions, &router_observer, || {
                 let tensions = build_source_tensions(&loci, contradiction_graph.as_ref(), &sources);
@@ -2413,7 +2408,7 @@ impl ResearchSession {
             })
             .unwrap_or_else(crate::reconcile::SourceTensions::empty);
 
-        // ── Evidence Digest (T-011) ────────────────────────────────────────
+        // -- Evidence Digest (T-011) ----------------------------------------
         let evidence_digest = router
             .run_step_if(RunStep::EvidenceDigest, &router_observer, || {
                 let digest = build_evidence_digest(
@@ -2520,7 +2515,7 @@ impl ResearchSession {
             };
             router.skip_step(step, detail, &router_observer);
         }
-        // ── Synthesize (T-012) ────────────────────────────────────────────
+        // -- Synthesize (T-012) --------------------------------------------
         // The synthesize step runs the LLM (or deterministic fallback) and,
         // immediately after, runs the deterministic 4-critic audit. Both are
         // reported through the tier router so the pipeline manifest is accurate.
@@ -2681,7 +2676,7 @@ impl ResearchSession {
             router.finish_step(RunStep::Synthesize, &router_observer);
         }
 
-        // ── Critics (T-012) ────────────────────────────────────────────────
+        // -- Critics (T-012) ------------------------------------------------
         // Emit one CriticResult event per critic report so the UI can see the
         // 4-critic audit subagents individually.
         router.run_step_if(RunStep::Critics, &router_observer, || {
@@ -2693,7 +2688,7 @@ impl ResearchSession {
             }
         });
 
-        // ── Surgical Patcher (T-013) ─────────────────────────────────────
+        // -- Surgical Patcher (T-013) -------------------------------------
         // Apply deterministic revisions to the draft based on the 4-critic
         // audit and corpus-critic gaps. The patched analysis replaces the
         // original synthesis output for downstream document assembly.
@@ -2709,7 +2704,7 @@ impl ResearchSession {
             analysis = patch_result.patched_analysis.clone();
         }
 
-        // ── Cite Check (T-014) ───────────────────────────────────────────
+        // -- Cite Check (T-014) -------------------------------------------
         // Verify that every `[#N]` citation in the patched draft is backed by a
         // source in the gathered corpus. If the failure gate closes, abort
         // before writing the report so unsupported citations are not shipped.
@@ -2740,7 +2735,7 @@ impl ResearchSession {
             router.finish_step(RunStep::CiteCheck, &router_observer);
         }
 
-        // ── Polish (T-015) ───────────────────────────────────────────────
+        // -- Polish (T-015) -----------------------------------------------
         // Apply deterministic final edits to the narrative before assembly:
         // strip control characters, normalize whitespace, and remove empty
         // paragraphs. This runs for every tier that includes the step.
@@ -2755,7 +2750,7 @@ impl ResearchSession {
             polish_result = pr;
         }
 
-        // ── Readability Audit (T-015) ──────────────────────────────────
+        // -- Readability Audit (T-015) ----------------------------------
         // Run a final deterministic readability audit on the polished draft
         // and surface the score in the assembled document.
         let mut readability_audit = ReadabilityAudit::empty();
@@ -2769,7 +2764,7 @@ impl ResearchSession {
             readability_audit = ra;
         }
 
-        // ── Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) ──
+        // -- Finding cap (spec researchmax; FR-003, FR-010, FR-020, FR-022) --
         // The patcher and polish steps above may reorder or rewrite findings,
         // so the cap runs last: order by reverse relevance against the same
         // sources the References Index uses, truncate to the effective limit,
@@ -2780,7 +2775,7 @@ impl ResearchSession {
             &synthesis_sources,
         );
 
-        // ── Concepts (spec researchcluster) ──────────────────────────────
+        // -- Concepts (spec researchcluster) ------------------------------
         // Extract the cross-source concept list from the same gathered corpus
         // the synthesis step consumed. The section renders directly above
         // `## Findings` in `RESEARCH.md`. When no concepts engine is wired
@@ -2794,7 +2789,7 @@ impl ResearchSession {
             )
             .await;
 
-        // ── Assemble ─────────────────────────────────────────────────────
+        // -- Assemble -----------------------------------------------------
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Assemble,
         });
@@ -2828,6 +2823,18 @@ impl ResearchSession {
             } else {
                 analysis.summary
             },
+            top_implications: if analysis.top_implications.is_empty() {
+                if llm_produced_summary {
+                    Vec::new()
+                } else {
+                    // Surface ranked implications from the mechanical
+                    // fallback so the section is never empty when no LLM
+                    // analysis was available.
+                    default_top_implications(&analysis.findings, &topic)
+                }
+            } else {
+                analysis.top_implications
+            },
             findings: if analysis.findings.is_empty() {
                 // FR-011 / T-010: the analysis engine guarantees non-empty
                 // findings via the mechanical fallback (see
@@ -2855,18 +2862,6 @@ impl ResearchSession {
                 }
             } else {
                 analysis.open_questions
-            },
-            top_implications: if analysis.top_implications.is_empty() {
-                if llm_produced_summary {
-                    Vec::new()
-                } else {
-                    // Surface ranked implications from the mechanical
-                    // fallback so the section is never empty when no LLM
-                    // analysis was available.
-                    default_top_implications(&analysis.top_implications, &topic)
-                }
-            } else {
-                analysis.top_implications
             },
             contradiction_graph,
             loci: if loci.is_empty() { None } else { Some(loci) },
@@ -2952,7 +2947,7 @@ impl ResearchSession {
                 item_title
             };
         doc.item.set_title(&final_title);
-        // ── Per-provider search-request summary ────────────────────────────
+        // -- Per-provider search-request summary ----------------------------
         // Report how many search requests each provider received across the
         // whole run (default pipeline, tiered iterations, and every
         // supervisor/competitive researcher combined) and embed the table in
@@ -2966,7 +2961,7 @@ impl ResearchSession {
             Some(provider_stats_md)
         };
         let assembled = self.manager.write_document(&doc).await?;
-        // ── Finalize ─────────────────────────────────────────────────────
+        // -- Finalize -----------------------------------------------------
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Finalize,
         });
@@ -3745,7 +3740,7 @@ pub struct RunOutcome {
     pub provider_tool_calls: Vec<(String, usize)>,
 }
 
-// ── Free helpers ─────────────────────────────────────────────────────────
+// -- Free helpers ---------------------------------------------------------
 
 /// Map web supporting-file numbers (`sources/web-NN.md`) to the combined
 /// 1-based References Index position of each web source in `sources`, so

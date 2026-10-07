@@ -85,7 +85,7 @@ fn default_max_rules() -> usize {
     32
 }
 
-// ── MCP notification injection mode (FR-003) ─────────────────────────────
+// -- MCP notification injection mode (FR-003) -----------------------------
 
 /// How an MCP server's push notifications should be injected into the parent
 /// session (FR-003).

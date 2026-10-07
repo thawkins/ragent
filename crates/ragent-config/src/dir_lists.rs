@@ -14,14 +14,13 @@
 //!
 //! The permission system checks these lists before prompting the user.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::{OnceLock, RwLock};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use globset::{GlobSet, GlobSetBuilder};
 
-// ── Built-in directory patterns ───────────────────────────────────────────────
+// -- Built-in directory patterns -----------------------------------------------
 
 /// Built-in allowlist: directory patterns that are automatically allowed without prompting.
 ///
@@ -71,7 +70,7 @@ pub fn get_builtin_lists() -> (Vec<String>, Vec<String>) {
     )
 }
 
-// ── Global state ─────────────────────────────────────────────────────────────
+// -- Global state -------------------------------------------------------------
 
 /// In-memory snapshot of the merged directory allowlist and denylist.
 #[derive(Debug, Clone, Default)]
@@ -107,19 +106,19 @@ impl CompiledDirLists {
 }
 
 static DIR_LISTS: OnceLock<RwLock<DirLists>> = OnceLock::new();
-static COMPILED_ALLOWLIST: OnceLock<RwLock<GlobSet>> = OnceLock::new();
-static COMPILED_DENYLIST: OnceLock<RwLock<GlobSet>> = OnceLock::new();
+static COMPILED_ALLOWLIST: OnceLock<RwLock<Arc<GlobSet>>> = OnceLock::new();
+static COMPILED_DENYLIST: OnceLock<RwLock<Arc<GlobSet>>> = OnceLock::new();
 
 fn global() -> &'static RwLock<DirLists> {
     DIR_LISTS.get_or_init(|| RwLock::new(DirLists::default()))
 }
 
-fn compiled_allowlist() -> &'static RwLock<GlobSet> {
-    COMPILED_ALLOWLIST.get_or_init(|| RwLock::new(GlobSet::empty()))
+fn compiled_allowlist() -> &'static RwLock<Arc<GlobSet>> {
+    COMPILED_ALLOWLIST.get_or_init(|| RwLock::new(Arc::new(GlobSet::empty())))
 }
 
-fn compiled_denylist() -> &'static RwLock<GlobSet> {
-    COMPILED_DENYLIST.get_or_init(|| RwLock::new(GlobSet::empty()))
+fn compiled_denylist() -> &'static RwLock<Arc<GlobSet>> {
+    COMPILED_DENYLIST.get_or_init(|| RwLock::new(Arc::new(GlobSet::empty())))
 }
 
 /// Recompile patterns and update the compiled allowlist cache.
@@ -127,7 +126,7 @@ fn recompile_allowlist() -> Result<()> {
     let g = global()
         .read()
         .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-    let compiled = compile_patterns(&g.allowlist);
+    let compiled = Arc::new(compile_patterns(&g.allowlist));
     let mut guard = compiled_allowlist()
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -140,7 +139,7 @@ fn recompile_denylist() -> Result<()> {
     let g = global()
         .read()
         .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-    let compiled = compile_patterns(&g.denylist);
+    let compiled = Arc::new(compile_patterns(&g.denylist));
     let mut guard = compiled_denylist()
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -154,12 +153,14 @@ fn compile_patterns(patterns: &[String]) -> GlobSet {
     for pattern in patterns {
         if let Ok(glob) = globset::Glob::new(pattern) {
             builder.add(glob);
+        } else {
+            tracing::warn!(pattern, "dir_lists: ignoring invalid glob pattern");
         }
     }
     builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
-// ── Initialisation ────────────────────────────────────────────────────────────
+// -- Initialisation ------------------------------------------------------------
 
 /// Merge a config's `dirs` lists with the built-in denylist.
 ///
@@ -219,8 +220,8 @@ pub fn load_from_config() {
     };
 
     // Compile patterns for efficient matching
-    let compiled_allow = compile_patterns(&lists.allowlist);
-    let compiled_deny = compile_patterns(&lists.denylist);
+    let compiled_allow = Arc::new(compile_patterns(&lists.allowlist));
+    let compiled_deny = Arc::new(compile_patterns(&lists.denylist));
 
     // Poison recovery: a stale snapshot is better than silently dropping the
     // user's allow/deny list update.
@@ -237,7 +238,7 @@ pub fn load_from_config() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = compiled_deny;
 }
-// ── Read accessors ────────────────────────────────────────────────────────────
+// -- Read accessors ------------------------------------------------------------
 
 /// Returns a snapshot of the current allowlist.
 ///
@@ -291,7 +292,7 @@ pub fn get_allowed_roots() -> Vec<String> {
 #[must_use]
 pub fn get_compiled_allowlist() -> Arc<GlobSet> {
     match compiled_allowlist().read() {
-        Ok(g) => Arc::new(g.clone()),
+        Ok(g) => Arc::clone(&g),
         Err(_) => {
             tracing::warn!("dir_lists: compiled allowlist lock poisoned; returning empty set");
             Arc::new(GlobSet::empty())
@@ -307,7 +308,7 @@ pub fn get_compiled_allowlist() -> Arc<GlobSet> {
 #[must_use]
 pub fn get_compiled_denylist() -> Arc<GlobSet> {
     match compiled_denylist().read() {
-        Ok(g) => Arc::new(g.clone()),
+        Ok(g) => Arc::clone(&g),
         Err(_) => {
             tracing::warn!("dir_lists: compiled denylist lock poisoned; returning empty set");
             Arc::new(GlobSet::empty())
@@ -329,26 +330,11 @@ pub fn invalidate_compiled_caches() {
     }
 }
 
-// ── Write accessors ───────────────────────────────────────────────────────────
+// -- Write accessors -----------------------------------------------------------
 
-/// Scope for config persistence: project-local or user-global.
-#[derive(Debug, Clone, Copy)]
-pub enum Scope {
-    /// Write to `./.ragent/ragent.json` (project-level config).
-    Project,
-    /// Write to `~/.config/ragent/ragent.json` (global config).
-    Global,
-}
-
-impl Scope {
-    fn config_path(self) -> Result<PathBuf> {
-        match self {
-            Self::Project => Ok(PathBuf::from(".ragent").join("ragent.json")),
-            Self::Global => crate::Config::global_config_path()
-                .context("Cannot determine global config directory"),
-        }
-    }
-}
+/// Scope for config persistence: project-local or user-global (shared with
+/// `bash_lists`, T-306).
+pub use crate::list_config::Scope;
 
 /// Add `pattern` to the allowlist. Persists to the chosen config file.
 pub fn add_allowlist(pattern: &str, scope: Scope) -> Result<()> {
@@ -361,19 +347,8 @@ pub fn add_allowlist(pattern: &str, scope: Scope) -> Result<()> {
         }
     }
     recompile_allowlist()?;
-    patch_config(scope, |root| {
-        // Ensure dirs object exists
-        if !root["dirs"].is_object() {
-            root["dirs"] = serde_json::json!({ "allowlist": [], "denylist": [] });
-        }
-        if !root["dirs"]["allowlist"].is_array() {
-            root["dirs"]["allowlist"] = serde_json::json!([]);
-        }
-        if !root["dirs"]["denylist"].is_array() {
-            root["dirs"]["denylist"] = serde_json::json!([]);
-        }
-
-        if let Some(arr) = root["dirs"]["allowlist"].as_array_mut() {
+    crate::list_config::patch_config(scope, "dirs", &["allowlist", "denylist"], |dirs| {
+        if let Some(arr) = dirs["allowlist"].as_array_mut() {
             let val = serde_json::Value::String(pattern.to_string());
             if !arr.contains(&val) {
                 arr.push(val);
@@ -393,8 +368,8 @@ pub fn remove_allowlist(pattern: &str, scope: Scope) -> Result<bool> {
         g.allowlist.len() < before
     };
     recompile_allowlist()?;
-    patch_config(scope, |root| {
-        if let Some(arr) = root["dirs"]["allowlist"].as_array_mut() {
+    crate::list_config::patch_config(scope, "dirs", &["allowlist", "denylist"], |dirs| {
+        if let Some(arr) = dirs["allowlist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(pattern));
         }
     })?;
@@ -412,8 +387,8 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
         }
     }
     recompile_denylist()?;
-    patch_config(scope, |root| {
-        if let Some(arr) = root["dirs"]["denylist"].as_array_mut() {
+    crate::list_config::patch_config(scope, "dirs", &["allowlist", "denylist"], |dirs| {
+        if let Some(arr) = dirs["denylist"].as_array_mut() {
             let val = serde_json::Value::String(pattern.to_string());
             if !arr.contains(&val) {
                 arr.push(val);
@@ -432,23 +407,19 @@ pub fn add_allowed_roots(path: &str, scope: Scope) -> Result<()> {
             g.allowed_roots.push(path.to_string());
         }
     }
-    patch_config(scope, |root| {
-        // Ensure dirs object exists
-        if !root["dirs"].is_object() {
-            root["dirs"] =
-                serde_json::json!({ "allowlist": [], "denylist": [], "allowed_roots": [] });
-        }
-        if !root["dirs"]["allowed_roots"].is_array() {
-            root["dirs"]["allowed_roots"] = serde_json::json!([]);
-        }
-
-        if let Some(arr) = root["dirs"]["allowed_roots"].as_array_mut() {
-            let val = serde_json::Value::String(path.to_string());
-            if !arr.contains(&val) {
-                arr.push(val);
+    crate::list_config::patch_config(
+        scope,
+        "dirs",
+        &["allowlist", "denylist", "allowed_roots"],
+        |dirs| {
+            if let Some(arr) = dirs["allowed_roots"].as_array_mut() {
+                let val = serde_json::Value::String(path.to_string());
+                if !arr.contains(&val) {
+                    arr.push(val);
+                }
             }
-        }
-    })
+        },
+    )
 }
 
 /// Remove `path` from the allowed_roots. Persists to the chosen config file.
@@ -461,11 +432,16 @@ pub fn remove_allowed_roots(path: &str, scope: Scope) -> Result<bool> {
         g.allowed_roots.retain(|e| e != path);
         g.allowed_roots.len() < before
     };
-    patch_config(scope, |root| {
-        if let Some(arr) = root["dirs"]["allowed_roots"].as_array_mut() {
-            arr.retain(|v| v.as_str() != Some(path));
-        }
-    })?;
+    crate::list_config::patch_config(
+        scope,
+        "dirs",
+        &["allowlist", "denylist", "allowed_roots"],
+        |dirs| {
+            if let Some(arr) = dirs["allowed_roots"].as_array_mut() {
+                arr.retain(|v| v.as_str() != Some(path));
+            }
+        },
+    )?;
     Ok(removed)
 }
 
@@ -480,59 +456,10 @@ pub fn remove_denylist(pattern: &str, scope: Scope) -> Result<bool> {
         g.denylist.len() < before
     };
     recompile_denylist()?;
-    patch_config(scope, |root| {
-        if let Some(arr) = root["dirs"]["denylist"].as_array_mut() {
+    crate::list_config::patch_config(scope, "dirs", &["allowlist", "denylist"], |dirs| {
+        if let Some(arr) = dirs["denylist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(pattern));
         }
     })?;
     Ok(removed)
-}
-
-// ── Config file I/O ───────────────────────────────────────────────────────────
-
-/// Read the target config as a JSON Value, apply `mutate` to the root object,
-/// then write the result back. Creates the file (and parent dirs) if absent.
-fn patch_config<F>(scope: Scope, mutate: F) -> Result<()>
-where
-    F: FnOnce(&mut serde_json::Value),
-{
-    let path = scope.config_path()?;
-
-    // Read existing content (empty object if file absent)
-    let mut root: serde_json::Value = if path.exists() {
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("Reading {}", path.display()))?;
-        serde_json::from_str(&text).with_context(|| format!("Parsing {}", path.display()))?
-    } else {
-        serde_json::json!({})
-    };
-
-    // Ensure the `dirs` key exists with allowlist/denylist arrays
-    if !root["dirs"].is_object() {
-        root["dirs"] = serde_json::json!({ "allowlist": [], "denylist": [], "allowed_roots": [] });
-    }
-    if !root["dirs"]["allowlist"].is_array() {
-        root["dirs"]["allowlist"] = serde_json::json!([]);
-    }
-    if !root["dirs"]["denylist"].is_array() {
-        root["dirs"]["denylist"] = serde_json::json!([]);
-    }
-    if !root["dirs"]["allowed_roots"].is_array() {
-        root["dirs"]["allowed_roots"] = serde_json::json!([]);
-    }
-
-    mutate(&mut root);
-
-    // Write back
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Creating directory {}", parent.display()))?;
-    }
-    let text = serde_json::to_string_pretty(&root).context("Serialising updated config")?;
-    std::fs::write(&path, text).with_context(|| format!("Writing {}", path.display()))?;
-
-    tracing::info!(path = %path.display(), "dir_lists: config updated");
-    Ok(())
 }

@@ -6,7 +6,7 @@
 //! `openai/plugins` and `anthropics/claude-plugins-official`) so the transform is
 //! proven against the actual schemas: `name`-as-id, optional `version`, and a
 //! `source` that is a repo-relative string or a `local`/`url`/`git-subdir`
-//! object. Everything is offline — the bytes are inline and no store is touched.
+//! object. Everything is offline - the bytes are inline and no store is touched.
 
 use ragent_plugins::{
     DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, FixtureStoreFetcher, StoreEndpoint,
@@ -100,7 +100,7 @@ fn provider_for_reports_each_stores_kind() {
     assert_eq!(provider_for(StoreKind::Claude).kind(), StoreKind::Claude);
 }
 
-// ── Codex transform ─────────────────────────────────────────────────────────
+// -- Codex transform ---------------------------------------------------------
 
 #[test]
 fn codex_provider_normalises_the_vendor_marketplace() {
@@ -152,7 +152,7 @@ fn codex_provider_normalises_the_vendor_marketplace() {
     );
 }
 
-// ── Claude transform ────────────────────────────────────────────────────────
+// -- Claude transform --------------------------------------------------------
 
 #[test]
 fn claude_provider_normalises_the_vendor_marketplace() {
@@ -197,7 +197,7 @@ fn claude_provider_normalises_the_vendor_marketplace() {
     assert_eq!(clangd.version, "1.0.0");
 }
 
-// ── Native documents stay strict ────────────────────────────────────────────
+// -- Native documents stay strict --------------------------------------------
 
 #[test]
 fn a_native_index_is_parsed_through_the_strict_path() {
@@ -217,7 +217,7 @@ fn a_native_index_is_parsed_through_the_strict_path() {
     assert_eq!(index.skipped, 1);
 }
 
-// ── Containment: malformed documents and unusable sources ───────────────────
+// -- Containment: malformed documents and unusable sources -------------------
 
 #[test]
 fn a_document_without_a_plugins_array_is_a_shape_error() {
@@ -260,7 +260,7 @@ fn entries_with_unusable_sources_are_skipped_not_fatal() {
     assert_eq!(index.skipped, 3);
 }
 
-// ── The fixture seam routes through the provider ────────────────────────────
+// -- The fixture seam routes through the provider ----------------------------
 
 #[test]
 fn the_fixture_seam_normalises_a_vendor_shaped_index() {
@@ -299,7 +299,7 @@ fn the_fixture_seam_keeps_serving_the_native_default_fixture() {
     }
 }
 
-// ── Repo-relative anchoring requires a GitHub origin ─────────────────────────
+// -- Repo-relative anchoring requires a GitHub origin -------------------------
 
 #[test]
 fn repo_relative_dirs_resolve_from_a_github_tree_origin() {

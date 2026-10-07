@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 /// to the *single* file (relative to the workspace root) that is allowed to
 /// define it with `pub struct <Name>` / `pub enum <Name>` / `pub type <Name>`.
 const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
-    // Message family (D2) — canonical in ragent-types/src/message/mod.rs
+    // Message family (D2) - canonical in ragent-types/src/message/mod.rs
     (
         "Message",
         "crates/ragent-types/src/message/mod.rs",
@@ -50,7 +50,7 @@ const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
         "enum",
     ),
     ("Role", "crates/ragent-types/src/message/mod.rs", "enum"),
-    // Permission family (D3) — Permission* (action/rule/checker/request) in
+    // Permission family (D3) - Permission* (action/rule/checker/request) in
     // ragent-config; PermissionDecision in ragent-types (used by events).
     (
         "Permission",
@@ -87,14 +87,14 @@ const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
         "crates/ragent-types/src/permission.rs",
         "enum",
     ),
-    // LLM primitive family (D8) — canonical in ragent-types/src/llm.rs
+    // LLM primitive family (D8) - canonical in ragent-types/src/llm.rs
     ("ToolDefinition", "crates/ragent-types/src/llm.rs", "struct"),
     ("ChatRequest", "crates/ragent-types/src/llm.rs", "struct"),
     ("ChatMessage", "crates/ragent-types/src/llm.rs", "struct"),
     ("ChatContent", "crates/ragent-types/src/llm.rs", "enum"),
     ("ContentPart", "crates/ragent-types/src/llm.rs", "enum"),
     ("StreamEvent", "crates/ragent-types/src/llm.rs", "enum"),
-    // Storage family (D1) — canonical in ragent-storage/src/storage.rs.
+    // Storage family (D1) - canonical in ragent-storage/src/storage.rs.
     // The agent crate's `storage/mod.rs` is now a re-export shim.
     // NOTE: `ragent-tools-extended::storage` defines its own `TaskRow` /
     // `MemoryRow` / `EmbeddingMatch` as part of the `StorageBackend` trait

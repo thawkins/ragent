@@ -31,8 +31,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 
 use super::thinking::{reasoning_effort_from_request, reasoning_levels_from_supported_efforts};
-use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::llm::{ChatRequest, LlmClient, StreamEvent, ToolDefinition};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -300,133 +299,21 @@ struct CopilotClient {
 
 impl CopilotClient {
     /// Builds the JSON request body in `OpenAI` chat completions format.
+    ///
+    /// Message packing and the base body come from the shared [`OpenAiCompat`]
+    /// builder (audit T-401) with the Copilot dialect: no `stream_options`, and
+    /// a single text part collapses to a bare string only when it is actually a
+    /// text part. Copilot adds a trailing `reasoning_effort`.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
-        let mut messages = Vec::new();
-
-        if let Some(system) = &request.system {
-            messages.push(json!({
-                "role": "system",
-                "content": &**system
-            }));
-        }
-
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => {
-                                Some(json!({                                "type": "text",
-                                    "text": text
-                                }))
-                            }
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1
-                        && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
-                    {
-                        // Single plain-text part - collapse to a bare string for compatibility.
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
-                    }
-                }
-            };
-
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": input.to_string()
-                                    }
-                                })),
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } = result
-                            {
-                                messages.push(json!({
-                                    "role": "tool",
-                                    "tool_call_id": tool_use_id,
-                                    "content": content
-                                }));
-                            }
-                        }
-                    } else {
-                        messages.push(json!({
-                            "role": msg.role,
-                            "content": content
-                        }));
-                    }
-                }
-                _ => {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true
-        });
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !tools.is_empty() {
-            // H2: reuse the cached serialised OpenAI-compatible tool list
-            // instead of building a fresh `Vec<Value>` on every call.
-            let cached = cached_tools(ToolFormat::OpenAi, tools);
-            body["tools"] = cached.openai_tools_array();
-        }
-
+        let mut compat = super::openai_compat::OpenAiCompat::base_body(
+            request,
+            super::openai_compat::OpenAiCompatSpec::copilot(),
+            tools,
+        );
         if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
-            body["reasoning_effort"] = json!(reasoning_effort);
+            compat.body_mut()["reasoning_effort"] = json!(reasoning_effort);
         }
-
-        body
+        compat.finish()
     }
 }
 
@@ -442,7 +329,7 @@ impl LlmClient for CopilotClient {
         request: ChatRequest,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/chat/completions", self.base_url);
-        tracing::info!(url = %url, model = %request.model, "copilot chat request");
+        tracing::debug!(url = %url, model = %request.model, "copilot chat request");
         let body = self.build_request_body(&request, &request.tools);
         let body_bytes = serde_json::to_vec(&body).context("serialise Copilot request body")?;
 
@@ -482,6 +369,8 @@ impl LlmClient for CopilotClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let error_body = ragent_types::sanitize::redact_secrets(&error_body);
             tracing::error!(provider = "copilot", url = %url, status = %status, body = %error_body, "chat error");
             // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
             // Extract a clean message from the JSON error response if possible.
@@ -761,8 +650,7 @@ pub fn resolve_copilot_github_token(
     db_lookup: Option<&dyn Fn() -> Option<String>>,
 ) -> Option<String> {
     // 1. GITHUB_COPILOT_TOKEN env var
-    if let Ok(token) = std::env::var("GITHUB_COPILOT_TOKEN")
-        && !token.is_empty()
+    if let Some(token) = ragent_config::credential_env::read_credential_env("GITHUB_COPILOT_TOKEN")
     {
         return Some(token);
     }
@@ -808,7 +696,7 @@ fn parse_api_error_message(body: &str) -> Option<String> {
     None
 }
 
-// ── Device Flow OAuth ────────────────────────────────────────────
+// -- Device Flow OAuth --------------------------------------------
 
 /// Response from `github.com/login/device/code`.
 #[derive(Debug, Clone, Deserialize)]
@@ -1540,15 +1428,18 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
         })
         .collect();
 
-    // Sort: larger context / newer models first
+    // Deduplicate by model ID first (the API sometimes returns duplicates).
+    // `dedup_by` only removes *consecutive* duplicates, so sort by id to make
+    // equal ids adjacent before removing them.
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    models.dedup_by(|a, b| a.id == b.id);
+
+    // Then sort for display: larger context / newer models first.
     models.sort_by(|a, b| {
         b.context_window
             .cmp(&a.context_window)
             .then_with(|| a.name.cmp(&b.name))
     });
-
-    // Deduplicate by model ID (API sometimes returns duplicates)
-    models.dedup_by(|a, b| a.id == b.id);
 
     Ok(models)
 }

@@ -6,7 +6,7 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
-// ── spec_branch_name ────────────────────────────────────────────────────
+// -- spec_branch_name ----------------------------------------------------
 
 #[test]
 fn test_spec_branch_name_basic() {
@@ -23,7 +23,7 @@ fn test_spec_branch_name_with_underscores() {
     assert_eq!(spec_branch_name("user_auth_fix"), "spec/user_auth_fix");
 }
 
-// ── create_spec_branch: not a repo ──────────────────────────────────────
+// -- create_spec_branch: not a repo --------------------------------------
 
 #[test]
 fn test_create_spec_branch_not_a_repo() {
@@ -33,7 +33,7 @@ fn test_create_spec_branch_not_a_repo() {
     assert_eq!(result, BranchResult::NotARepo);
 }
 
-// ── create_spec_branch: success ─────────────────────────────────────────
+// -- create_spec_branch: success -----------------------------------------
 
 #[test]
 fn test_create_spec_branch_success() {
@@ -53,7 +53,7 @@ fn test_create_spec_branch_success() {
     assert_eq!(current, Some("spec/my-feature".to_string()));
 }
 
-// ── create_spec_branch: already exists ──────────────────────────────────
+// -- create_spec_branch: already exists ----------------------------------
 
 #[test]
 fn test_create_spec_branch_already_exists() {
@@ -76,7 +76,7 @@ fn test_create_spec_branch_already_exists() {
     );
 }
 
-// ── SpecCommand helper functions ────────────────────────────────────────
+// -- SpecCommand helper functions ----------------------------------------
 
 #[test]
 fn test_build_branch_message_created() {
@@ -152,7 +152,7 @@ fn test_build_branch_log_failed() {
     assert!(log.contains("boom"));
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
+// -- Helpers -------------------------------------------------------------
 
 /// Initialise a minimal git repo in `dir` with one commit on `main`.
 fn init_git_repo(dir: &std::path::Path) {

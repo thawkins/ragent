@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::envelope` — page-type detection, source-type
+//! Unit tests for `masterfetch::envelope` - page-type detection, source-type
 //! classification, and freshness computation (T-033, FR-003, FR-029, FR-030,
 //! NFR-003).
 //!
@@ -13,11 +13,11 @@
 //!
 //! Covers [`compute_freshness`]:
 //! - modified preferred over published
-//! - future date → `content_age_days` = -1
+//! - future date -> `content_age_days` = -1
 //! - stale threshold (age > 365)
-//! - no dates → -1
-//! - empty date strings → -1
-//! - invalid dates → -1
+//! - no dates -> -1
+//! - empty date strings -> -1
+//! - invalid dates -> -1
 //! - various date formats (RFC 3339, offset, no timezone, date only, space
 //!   separator)
 //!
@@ -56,7 +56,7 @@ fn test_detect_article_fallback_paragraphs() {
 
 #[test]
 fn test_detect_article_short_text_not_article() {
-    // <article> tag but text is too short → not article.
+    // <article> tag but text is too short -> not article.
     let html = r"<html><body><article><p>Short.</p></article></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com/post", 10),
@@ -66,7 +66,7 @@ fn test_detect_article_short_text_not_article() {
 
 #[test]
 fn test_detect_article_two_paragraphs_not_enough() {
-    // Only 2 <p> tags → needs >= 3 for fallback article detection.
+    // Only 2 <p> tags -> needs >= 3 for fallback article detection.
     let html = r"<html><body><p>Para one with text.</p><p>Para two with text.</p></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com/post", 250),
@@ -180,7 +180,7 @@ fn test_detect_list_page_many_table_rows() {
 
 #[test]
 fn test_detect_list_page_few_links_not_list() {
-    // Fewer than 10 links → not a list page.
+    // Fewer than 10 links -> not a list page.
     let html =
         r#"<html><body><a href="/a">A</a><a href="/b">B</a><a href="/c">C</a></body></html>"#;
     assert_ne!(
@@ -289,7 +289,7 @@ fn test_detect_qa_structural_signal_accepted_answer() {
 
 // Note: schema.org/Question itemtype signal is not matched because the HTML
 // is lowercased before matching but the signal contains uppercase letters.
-// This is a known limitation — domain-based QA detection covers this case.
+// This is a known limitation - domain-based QA detection covers this case.
 
 #[test]
 fn test_detect_qa_quora_domain() {
@@ -643,10 +643,10 @@ fn test_auth_wall_detected_before_paywall() {
 fn test_detect_page_type_multibyte_at_5000_byte_boundary() {
     // Regression: `head_len` previously returned `s.len().min(5000)`, which can
     // land inside a multi-byte UTF-8 sequence and panic on slicing. Build HTML
-    // where byte 5000 falls in the middle of a 3-byte '…' (U+2026) character.
+    // where byte 5000 falls in the middle of a 3-byte '...' (U+2026) character.
     let prefix = "x".repeat(4999);
     let html = format!("<html><body>{prefix}…sign in</body></html>");
-    // Should not panic — classification result is not the point of this test.
+    // Should not panic - classification result is not the point of this test.
     let _ = detect_page_type(&html, "https://example.com", 50);
 }
 
@@ -1154,7 +1154,7 @@ fn test_freshness_recent_date_not_stale() {
 
 #[test]
 fn test_freshness_modified_preferred_over_published() {
-    // Modified is more recent → should use modified.
+    // Modified is more recent -> should use modified.
     let metadata = PageMetadata {
         published_time: Some("2010-01-01T00:00:00Z".to_string()),
         modified_time: Some("2024-01-01T00:00:00Z".to_string()),
@@ -1208,7 +1208,7 @@ fn test_freshness_published_ignored_when_modified_present() {
 }
 
 // ===========================================================================
-// compute_freshness: future date → -1
+// compute_freshness: future date -> -1
 // ===========================================================================
 
 #[test]
@@ -1238,7 +1238,7 @@ fn test_freshness_future_modified_date() {
 #[test]
 fn test_freshness_future_published_past_modified() {
     // Published is in the future, modified is in the past.
-    // Should prefer modified → age > 0, not -1.
+    // Should prefer modified -> age > 0, not -1.
     let future = Utc::now() + chrono::Duration::days(30);
     let past = Utc::now() - chrono::Duration::days(100);
     let metadata = PageMetadata {
@@ -1259,7 +1259,7 @@ fn test_freshness_future_published_past_modified() {
 
 #[test]
 fn test_freshness_stale_threshold() {
-    // Exactly at 365 days → not stale (stale is > 365).
+    // Exactly at 365 days -> not stale (stale is > 365).
     let date = Utc::now() - chrono::Duration::days(365);
     let metadata = PageMetadata {
         published_time: Some(date.to_rfc3339()),
@@ -1515,7 +1515,7 @@ fn test_build_envelope_article_next_action_when_content_not_ok() {
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/post", &metadata, false, 200);
     assert_eq!(envelope.page_type, PageType::Article);
-    // Article with content_ok=false → generic failure message.
+    // Article with content_ok=false -> generic failure message.
     assert!(!envelope.next_action.is_empty());
     assert!(
         envelope.next_action.contains("try a different URL")
@@ -1709,7 +1709,7 @@ fn test_parse_meta_refresh_seconds_boundary_three() {
 
 #[test]
 fn test_parse_meta_refresh_seconds_four_is_not_redirect() {
-    // 4 seconds → 4, which is > 3, so not a redirect.
+    // 4 seconds -> 4, which is > 3, so not a redirect.
     assert_eq!(parse_meta_refresh_seconds("4"), 4);
 }
 

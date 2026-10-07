@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn test_panic_log_path_format() {
-    let dir = PathBuf::from("/tmp/test-log");
+    let dir = PathBuf::from("target/temp/test-log");
     let path = panic_log_path(&dir);
     let name = path.file_name().unwrap().to_string_lossy();
     assert!(

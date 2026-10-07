@@ -42,6 +42,7 @@ fn tui_ctx() -> ToolContext {
 }
 
 #[tokio::test]
+#[ignore = "diagnostic: performs live web searches; run with --ignored"]
 async fn test_replicate_websearch_search_agentic_loop() {
     let ctx = tui_ctx();
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);

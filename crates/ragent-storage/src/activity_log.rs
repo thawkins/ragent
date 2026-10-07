@@ -1503,7 +1503,7 @@ impl ActivityLog {
         })
     }
 
-    // ── Rollback / Resume (FR-006, FR-007, FR-012, FR-013) ──────────
+    // -- Rollback / Resume (FR-006, FR-007, FR-012, FR-013) ----------
 
     /// Rolls back a run to the event at `target_seq` (inclusive), rebuilding
     /// the projection from the start of the run up to and including the target

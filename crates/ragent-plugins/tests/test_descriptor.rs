@@ -24,7 +24,7 @@ fn no_bodies(name: &str) -> Option<Vec<u8>> {
     None
 }
 
-// ── Pure recognition over directory listings ────────────────────────────────
+// -- Pure recognition over directory listings --------------------------------
 
 #[test]
 fn recognises_codex_manifest_file() {
@@ -204,7 +204,7 @@ fn ambiguous_marked_plugin_json_plus_claude_manifest_is_rejected() {
     assert!(matches!(result, Err(PluginError::AmbiguousManifest)));
 }
 
-// ── Filesystem wrapper over real fixture directories ────────────────────────
+// -- Filesystem wrapper over real fixture directories ------------------------
 
 static FIXTURE_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -312,7 +312,7 @@ fn detect_dialect_returns_none_for_non_plugin_directory() {
     assert_eq!(detect_dialect(&dir.0).expect("no ambiguity"), None);
 }
 
-// ── Descriptor model shape (FR-002, FR-025) ─────────────────────────────────
+// -- Descriptor model shape (FR-002, FR-025) ---------------------------------
 
 #[test]
 fn descriptor_records_unsupported_capabilities() {
@@ -348,7 +348,7 @@ fn dialect_display_names_are_stable() {
     assert_eq!(PluginDialect::Claude.to_string(), "claude");
 }
 
-// ── Error reporting keeps the underlying cause chain ────────────────────────
+// -- Error reporting keeps the underlying cause chain ------------------------
 
 #[test]
 fn ambiguous_manifest_error_names_the_cause() {

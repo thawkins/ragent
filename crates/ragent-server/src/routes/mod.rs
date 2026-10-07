@@ -257,7 +257,7 @@ async fn auth_middleware(
     }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────
+// -- Handlers ------------------------------------------------------
 
 async fn health() -> &'static str {
     "ok"
@@ -286,68 +286,89 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Placeholder written in place of every credential in a config payload.
-const REDACTED: &str = "<redacted>";
+pub const REDACTED: &str = "<redacted>";
+
+/// Maximum object/array nesting walked when redacting secrets.
+///
+/// Bounds the walk so a deeply nested (potentially attacker-controlled) value
+/// cannot make redaction expensive. The real config tree is far shallower.
+const MAX_REDACT_DEPTH: usize = 8;
+
+/// Returns `true` when a JSON object key names a credential.
+///
+/// SEC-ragent-server-001 (SECTASKS T-015). Matches by key-name *shape* rather
+/// than a hardcoded path list, so a newly-added `*_api_key` / `*_token` /
+/// `*_secret` config field is redacted automatically without editing the
+/// redactor. The suffix form deliberately ends in `_key` / `_token` / ... so
+/// non-secret keys such as `keywords` or `token_budget` are not caught.
+fn looks_like_secret_key(key: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "token",
+        "secret",
+        "password",
+        "api_key",
+        "apikey",
+        "webhook_url",
+        "client_id",
+        "client_secret",
+        "access_token",
+        "refresh_token",
+        "bot_token",
+        "private_key",
+        "credentials",
+    ];
+    if EXACT
+        .iter()
+        .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    {
+        return true;
+    }
+    const SUFFIXES: &[&str] = &["_key", "_token", "_secret", "_password"];
+    let bytes = key.as_bytes();
+    SUFFIXES.iter().any(|suffix| {
+        let suffix = suffix.as_bytes();
+        bytes.len() >= suffix.len()
+            && bytes[bytes.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    })
+}
+
+/// Recursively mask credential-named values in a JSON subtree.
+fn redact_secret_values(value: &mut serde_json::Value, depth: usize) {
+    if depth > MAX_REDACT_DEPTH {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                let present = entry
+                    .as_str()
+                    .is_some_and(|s| !s.trim().is_empty() && s != REDACTED);
+                if looks_like_secret_key(key) && present {
+                    *entry = serde_json::Value::String(REDACTED.to_string());
+                } else {
+                    redact_secret_values(entry, depth + 1);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                redact_secret_values(item, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
 
 /// Replace every credential value in a serialised [`Config`] with
 /// [`REDACTED`].
 ///
-/// SEC-ragent-server-001 (SECTASKS T-015). The set of paths mirrors the
-/// credential fields the config schema can hold: the search-engine API keys,
-/// the GitLab PAT, the Telegram bot token, the Discord webhook URL, and the
-/// Gmail OAuth client secret. Anything not on this list is returned as-is.
-fn redact_config_secrets(value: &mut serde_json::Value) {
-    /// Mask `object[key]` when it is a non-empty string.
-    fn mask(object: &mut serde_json::Value, key: &str) {
-        let Some(map) = object.as_object_mut() else {
-            return;
-        };
-        if let Some(entry) = map.get_mut(key) {
-            let is_present = entry
-                .as_str()
-                .is_some_and(|s| !s.trim().is_empty() && s != REDACTED);
-            if is_present {
-                *entry = serde_json::Value::String(REDACTED.to_string());
-            }
-        }
-    }
-
-    const TOP_LEVEL: &[&str] = &[
-        "tavily_api_key",
-        "langsearch_api_key",
-        "perplexity_api_key",
-        "exa_api_key",
-        "serper_api_key",
-    ];
-    for key in TOP_LEVEL {
-        mask(value, key);
-    }
-
-    // Nested credential holders, walked only to depth 2 so a deeply nested
-    // attacker-controlled key cannot make the walk expensive.
-    for section in ["gitlab", "gmail"] {
-        if let Some(node) = value.get_mut(section) {
-            for key in ["token", "client_secret", "client_id", "refresh_token"] {
-                mask(node, key);
-            }
-        }
-    }
-    if let Some(channels) = value.get_mut("channels") {
-        if let Some(telegram) = channels.get_mut("telegram") {
-            mask(telegram, "bot_token");
-        }
-        if let Some(discord) = channels.get_mut("discord") {
-            mask(discord, "webhook_url");
-        }
-    }
-    if let Some(provider) = value.get_mut("provider") {
-        if let Some(map) = provider.as_object_mut() {
-            for (_, entry) in map.iter_mut() {
-                for key in ["api_key", "token"] {
-                    mask(entry, key);
-                }
-            }
-        }
-    }
+/// SEC-ragent-server-001 (SECTASKS T-015). The config schema marks no field as
+/// secret, so serialising it directly would hand every stored API key / PAT /
+/// bot token / OAuth client secret to any authenticated caller. Every string
+/// value whose key names a credential (see [`looks_like_secret_key`]) is
+/// masked, regardless of where it sits in the tree.
+pub fn redact_config_secrets(value: &mut serde_json::Value) {
+    redact_secret_values(value, 0);
 }
 
 async fn get_providers(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
@@ -520,7 +541,14 @@ async fn send_message(
     tokio::spawn(async move {
         let cfg = config.read().await;
         let agent = agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
-            .unwrap_or_else(|_| Arc::new(AgentInfo::new("general", "General-purpose agent")));
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %redact_secrets(&e.to_string()),
+                    "Failed to resolve the configured agent; falling back to the general agent"
+                );
+                Arc::new(AgentInfo::new("general", "General-purpose agent"))
+            });
         drop(cfg);
         if let Err(e) = processor
             .process_message(
@@ -755,7 +783,7 @@ impl Drop for DropGuard {
     }
 }
 
-// ── Orchestration (Milestone 3) ───────────────────────────────────
+// -- Orchestration (Milestone 3) -----------------------------------
 
 /// Request body for `POST /orchestrator/start`.
 #[derive(Deserialize)]
@@ -840,7 +868,7 @@ async fn orch_job(
     }
 }
 
-// ── Task Endpoints ────────────────────────────────────────────────
+// -- Task Endpoints ------------------------------------------------
 
 #[derive(Deserialize)]
 struct SpawnTaskRequest {

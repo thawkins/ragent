@@ -19,7 +19,7 @@
 
 use ragent_telemetry::{OtelConfig, TelemetryState, TelemetrySubsystem};
 
-// ── Tests that work in all feature configurations ────────────────────────
+// -- Tests that work in all feature configurations ------------------------
 
 /// A disabled subsystem reports `TelemetryState::Disabled`.
 #[test]
@@ -140,11 +140,11 @@ fn test_telemetry_config_default_is_disabled() {
     assert!(!tc.is_enabled(), "default TelemetryConfig must be disabled");
 }
 
-// ── Tests that verify zero metric export with the telemetry feature ──────
+// -- Tests that verify zero metric export with the telemetry feature ------
 //
 // These tests use the OTEL SDK's `InMemoryMetricExporter` to prove that
 // recording metrics through the no-op meter provider produces zero
-// exported data — even after a `force_flush()`.
+// exported data - even after a `force_flush()`.
 
 #[cfg(feature = "telemetry")]
 mod disabled_zero_traffic {
@@ -157,7 +157,7 @@ mod disabled_zero_traffic {
 
     /// Build an `SdkMeterProvider` backed by an `InMemoryMetricExporter`
     /// with a very long export interval. This simulates the "collector
-    /// side" — if any metrics were exported, they would appear here.
+    /// side" - if any metrics were exported, they would appear here.
     fn build_collector() -> (
         SdkMeterProvider,
         InMemoryMetricExporter,
@@ -179,7 +179,7 @@ mod disabled_zero_traffic {
 
     /// When the subsystem is disabled, recording metrics through the
     /// no-op `InstrumentRegistry::noop()` produces zero exported metrics
-    /// — even after a `force_flush()` on a *separate* collector provider.
+    /// - even after a `force_flush()` on a *separate* collector provider.
     ///
     /// This proves that the no-op meter provider does not route data to
     /// any exporter (AC-2).
@@ -197,7 +197,7 @@ mod disabled_zero_traffic {
         noop_registry.tool_invocations.add(1, &[]);
         noop_registry.llm_duration.record(42.5, &[]);
 
-        // Flush the *collector* provider — no metrics should appear because
+        // Flush the *collector* provider - no metrics should appear because
         // the no-op registry's meter is not connected to this provider.
         rt.block_on(async {
             collector_provider
@@ -279,7 +279,7 @@ mod disabled_zero_traffic {
     fn test_shutdown_guard_disabled_no_traffic() {
         let sub = TelemetrySubsystem::disabled();
         let guard = ragent_telemetry::shutdown::ShutdownGuard::new(std::sync::Arc::new(sub));
-        // Drop the guard — it calls flush()+shutdown(), both no-ops.
+        // Drop the guard - it calls flush()+shutdown(), both no-ops.
         drop(guard);
         // No assertion needed: if the guard tried to contact a collector,
         // it would have panicked or hung. The fact that this test completes
@@ -308,7 +308,7 @@ mod disabled_zero_traffic {
         registry.cost_estimated.add(1.0, &[]);
         registry.errors_total.add(1, &[]);
 
-        // Flush the collector — nothing should appear.
+        // Flush the collector - nothing should appear.
         rt.block_on(async {
             collector_provider
                 .force_flush()

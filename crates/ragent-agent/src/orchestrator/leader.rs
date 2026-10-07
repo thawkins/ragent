@@ -16,7 +16,7 @@ use tokio::sync::{RwLock, broadcast};
 
 use super::{Coordinator, JobDescriptor};
 
-// ── Leader events ────────────────────────────────────────────────────────────
+// -- Leader events ------------------------------------------------------------
 
 /// Events emitted by [`LeaderElector`] when leadership changes.
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ pub enum LeaderEvent {
     },
 }
 
-// ── LeaderElector ────────────────────────────────────────────────────────────
+// -- LeaderElector ------------------------------------------------------------
 
 /// In-process leader elector using a simple vote-based approach.
 ///
@@ -131,7 +131,7 @@ impl LeaderElector {
     }
 }
 
-// ── CoordinatorCluster ───────────────────────────────────────────────────────
+// -- CoordinatorCluster -------------------------------------------------------
 
 /// A cluster of named [`Coordinator`]s with leader-based job routing.
 ///

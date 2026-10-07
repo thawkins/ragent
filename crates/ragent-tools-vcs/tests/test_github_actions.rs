@@ -22,7 +22,7 @@ fn test_extract_context_ranges_single_match_centred() {
     let ranges = extract_context_ranges(&lines);
     assert_eq!(ranges.len(), 1, "expected a single merged range");
     let (start, end) = ranges[0];
-    // ±10 context around line 15 → [5, 26)
+    // ±10 context around line 15 -> [5, 26)
     assert_eq!(start, 5);
     assert_eq!(end, 26);
 }

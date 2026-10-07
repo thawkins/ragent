@@ -41,49 +41,24 @@ pub const STATE_FILE: &str = "_state.json";
 /// through [`crate::manifest::read_manifest`].
 pub const MANIFEST_FILE: &str = "connector.json";
 
-/// One connector store directory set. `project` is the project-local store,
-/// `global` the user-global fallback (FR-001). Scanning reads both; project
+/// One connector store directory set (FR-001). Scanning reads both; project
 /// connectors take precedence on connector-id collision.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoreDirs {
-    /// Project-local store: `<workdir>/.ragent/connectors/`. `None` when no
-    /// working directory is in effect.
-    pub project: Option<PathBuf>,
-    /// User-global store: `~/.config/ragent/connectors/`. `None` when the
-    /// platform config directory cannot be determined.
-    pub global: Option<PathBuf>,
-}
-
-impl StoreDirs {
-    /// The destination store leg for a new install: the project store, or the
-    /// global fallback. `None` when neither leg resolves.
-    #[must_use]
-    pub fn destination(&self) -> Option<&Path> {
-        self.project.as_deref().or(self.global.as_deref())
-    }
-}
+///
+/// Shared with the plugin store (T-505): the resolution shape has one
+/// implementation in `ragent_surface::store`.
+pub type StoreDirs = ragent_surface::store::StoreDirs;
 
 /// Resolve the connector store directories for the given legs (FR-001).
 ///
-/// Pure over its inputs so tests avoid env mutation: pass the project working
-/// directory (or `connectors.store_dir` override) and the user-global root
-/// (resolved via [`ragent_config::user_dirs::global_state_dir`] by the caller)
-/// explicitly.
-///
-/// The returned order is ascending priority: global first, project last, so
-/// iteration with "last write wins" yields closest-wins on id collision.
-/// `global_root` is the `~/.config/ragent` root (not the `connectors/` child).
+/// Delegates to the shared store resolver (`ragent_surface::store`) with the
+/// `connectors` store leaf.
 #[must_use]
 pub fn store_dirs_at(
     workdir: &Path,
     store_dir_override: Option<&Path>,
     global_root: Option<&Path>,
 ) -> StoreDirs {
-    let global = global_root.map(|d| d.join("connectors"));
-    let project = store_dir_override
-        .map(Path::to_path_buf)
-        .or_else(|| Some(workdir.join(".ragent").join("connectors")));
-    StoreDirs { project, global }
+    ragent_surface::store::store_dirs_at(workdir, store_dir_override, global_root, "connectors")
 }
 
 /// Resolve the connector store directories from the live environment (FR-001).
@@ -94,11 +69,7 @@ pub fn store_dirs_at(
 /// [`ragent_config::user_dirs::global_state_dir`].
 #[must_use]
 pub fn store_dirs(workdir: &Path, store_dir_override: Option<&Path>) -> StoreDirs {
-    store_dirs_at(
-        workdir,
-        store_dir_override,
-        ragent_config::user_dirs::global_state_dir().as_deref(),
-    )
+    ragent_surface::store::store_dirs(workdir, store_dir_override, "connectors")
 }
 
 /// One store's on-disk state ledger (`_state.json`): enable/disable state and
@@ -276,7 +247,7 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
             if name == STATE_FILE || name.starts_with('.') {
                 continue;
             }
-            if !store_entry_is_dir(&store, &dir) {
+            if !ragent_surface::store::store_entry_is_dir(&store, &dir, "connector") {
                 continue;
             }
             if !dir.join(MANIFEST_FILE).is_file() {
@@ -346,37 +317,4 @@ pub fn descriptor_by_id(dirs: &StoreDirs, reference: &str) -> Option<ConnectorDe
         }
     }
     exact_id.or(ci_id).or(ci_name)
-}
-
-/// A store entry is a candidate connector directory when it is a real
-/// directory, or a symlink whose canonical target is a directory inside the
-/// store.
-fn store_entry_is_dir(store: &Path, dir: &Path) -> bool {
-    let Ok(file_type) = dir.symlink_metadata() else {
-        return false;
-    };
-    if file_type.is_dir() {
-        return true;
-    }
-    if !file_type.file_type().is_symlink() {
-        return false;
-    }
-    // Symlink: follow only when the resolved path stays inside the store.
-    let (Ok(target), Ok(store_root)) = (dir.canonicalize(), store.canonicalize()) else {
-        tracing::warn!(
-            link = %dir.display(),
-            "connector store symlink cannot be resolved; skipping"
-        );
-        return false;
-    };
-    if target.starts_with(&store_root) {
-        target.is_dir()
-    } else {
-        tracing::warn!(
-            link = %dir.display(),
-            target = %target.display(),
-            "connector store symlink escapes the store directory; skipping"
-        );
-        false
-    }
 }

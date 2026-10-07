@@ -152,7 +152,7 @@ impl Tool for WebSearchTool {
     }
 }
 
-// ── Shared types ──────────────────────────────────────────────────
+// -- Shared types --------------------------------------------------
 
 /// A single search result.
 ///

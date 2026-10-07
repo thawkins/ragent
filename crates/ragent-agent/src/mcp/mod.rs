@@ -14,6 +14,8 @@
 pub mod discovery;
 pub mod enable_state;
 pub mod http;
+/// Shared isolated probe helper for the `/connectors test` harness (T-309).
+pub mod probe;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,7 +36,7 @@ use ragent_config::{McpServerConfig, McpTransport};
 pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
 pub use enable_state::{McpEnableLedger, global_state_path, is_server_enabled};
 
-// ── MCP config validation ────────────────────────────────────────────────────
+// -- MCP config validation ----------------------------------------------------
 
 /// Shell metacharacters that must not appear in MCP stdio command strings.
 const SHELL_METACHARACTERS: &[char] = &['|', ';', '&', '$', '`', '(', ')', '{', '}', '<', '>'];
@@ -1711,7 +1713,7 @@ pub fn parse_port(value: &str) -> Option<u16> {
     value.trim().parse::<u16>().ok().filter(|port| *port != 0)
 }
 
-// ── Orphaned stdio child cleanup ────────────────────────────────────────────
+// -- Orphaned stdio child cleanup --------------------------------------------
 
 /// Whether `basename` names a launcher binary that mediates an MCP stdio
 /// server's real child process (`npx`, `npm exec`, ...).

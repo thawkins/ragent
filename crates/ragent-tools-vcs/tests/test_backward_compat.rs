@@ -8,7 +8,7 @@
 use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 
 // ---------------------------------------------------------------------------
-// FR-005: bare owner/repo → GitHub
+// FR-005: bare owner/repo -> GitHub
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -90,7 +90,7 @@ fn test_backward_compat_bare_three_segments_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-006: bare GitHub HTTPS URL → GitHub
+// FR-006: bare GitHub HTTPS URL -> GitHub
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -154,7 +154,7 @@ fn test_backward_compat_github_http_url() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-006: bare GitHub SSH URL → GitHub
+// FR-006: bare GitHub SSH URL -> GitHub
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -182,7 +182,7 @@ fn test_backward_compat_github_ssh_url_without_git_suffix() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-005/FR-006: routing correctness — bare identifiers never route to GitLab
+// FR-005/FR-006: routing correctness - bare identifiers never route to GitLab
 // ---------------------------------------------------------------------------
 
 #[test]

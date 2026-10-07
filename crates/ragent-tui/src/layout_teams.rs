@@ -105,7 +105,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     let dim = Style::default()
         .fg(colors::HINT)
         .add_modifier(Modifier::DIM);
-    // ── header ────────────────────────────────────────────────────────────
+    // -- header ------------------------------------------------------------
     lines.push(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(format!("{:<8} ", "id"), dim),
@@ -121,7 +121,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(format!(" {:>3} {:>3}", ">[stop]", "[x]"), dim),
     ]));
 
-    // ── lead row ─────────────────────────────────────────────────────────
+    // -- lead row ---------------------------------------------------------
     let lead_status_color = Color::Green;
     let lead_agent_id = app.agent_name.clone();
     let (lead_sent, lead_recv) = app
@@ -177,7 +177,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             }),
         ),
     ]));
-    // ── teammate rows ─────────────────────────────────────────────────────
+    // -- teammate rows -----------------------------------------------------
     for (i, member) in members.iter().enumerate() {
         let (status_str, status_color) = status_label(&member.status);
         let id_short = short_id(&member.agent_id);

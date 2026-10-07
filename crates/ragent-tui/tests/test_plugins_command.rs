@@ -322,7 +322,7 @@ async fn list_shows_mcp_server_and_tool_counts() {
 }
 
 /// FR-030: the table's `MCP Tools` cell is the LIVE tool count from the shared
-/// MCP client once the server has connected — `?` (unknown, not zero) is only
+/// MCP client once the server has connected - `?` (unknown, not zero) is only
 /// for a server whose tool list the surface cannot see.
 #[tokio::test(flavor = "multi_thread")]
 #[allow(clippy::await_holding_lock)]

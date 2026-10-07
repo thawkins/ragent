@@ -1,7 +1,7 @@
 //! Pin the GitLab legacy-migration path layout.
 //!
 //! FR/regression: `migrate_legacy_files` must scan the *legacy*
-//! `~/.ragent/` directory — not the canonical `~/.config/ragent/` — so an
+//! `~/.ragent/` directory - not the canonical `~/.config/ragent/` - so an
 //! existing install's credentials are picked up and imported. This test does
 //! not touch the filesystem or env vars; it asserts the path-shape contract
 //! of the helpers the migration uses.
@@ -20,7 +20,7 @@ fn legacy_home_dir_is_not_the_canonical_config_dir() {
     let canonical = ragent_config::user_dirs::global_state_dir();
 
     // The legacy scan root must be the home-dir `.ragent` folder, never the
-    // canonical config dir — otherwise migration becomes a silent self-scan.
+    // canonical config dir - otherwise migration becomes a silent self-scan.
     assert!(
         legacy.ends_with(".ragent"),
         "legacy home dir must end in .ragent, got {}",

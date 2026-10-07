@@ -4,7 +4,7 @@
 //!
 //! The move itself is enforced at compile time (the call is `send(event)`, not
 //! `send(event.clone())`); these tests pin the observable behaviour that the
-//! change must preserve — a large payload reaches every subscriber intact and
+//! change must preserve - a large payload reaches every subscriber intact and
 //! publishing with no subscribers is a silent no-op.
 
 use ragent_types::event::{Event, EventBus};

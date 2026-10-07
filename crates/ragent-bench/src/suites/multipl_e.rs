@@ -9,11 +9,11 @@ use crate::suites::{
     pass_at_k, skipped_metrics_for_suite,
 };
 
-pub(super) static ADAPTER: MultiPlEAdapter = MultiPlEAdapter;
+pub(super) static ADAPTER: MultipleAdapter = MultipleAdapter;
 
-pub(super) struct MultiPlEAdapter;
+pub(super) struct MultipleAdapter;
 
-impl BenchSuiteAdapter for MultiPlEAdapter {
+impl BenchSuiteAdapter for MultipleAdapter {
     fn suite_id(&self) -> &'static str {
         "multipl-e"
     }

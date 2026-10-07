@@ -182,7 +182,7 @@ fn test_spec_command_create_missing_feature() {
     assert!(cmd.is_usage_error(), "should be a usage error");
 }
 
-// ── Update subcommand tests ──────────────────────────────────────────────
+// -- Update subcommand tests ----------------------------------------------
 
 #[test]
 fn test_spec_command_update_parses() {
@@ -272,7 +272,7 @@ fn test_spec_update_prompt() {
     );
 }
 
-// ── Specify subcommand tests (T-001, FR-001) ───────────────────────────────
+// -- Specify subcommand tests (T-001, FR-001) -------------------------------
 
 #[test]
 fn test_spec_command_specify_parses() {
@@ -318,7 +318,7 @@ fn test_spec_help_contains_specify() {
     );
 }
 
-// ── Specify helper tests (T-002, FR-001) ──────────────────────────────────
+// -- Specify helper tests (T-002, FR-001) ----------------------------------
 
 #[test]
 fn test_specify_status_mentions_only_spec_md() {
@@ -381,7 +381,7 @@ fn test_specify_prompt_writes_only_spec_md() {
     );
 }
 
-// ── Plan subcommand tests (T-003, FR-004) ─────────────────────────────────
+// -- Plan subcommand tests (T-003, FR-004) ---------------------------------
 
 #[test]
 fn test_spec_command_plan_parses() {
@@ -430,7 +430,7 @@ fn test_spec_help_contains_plan() {
         "help should mention /spec plan: {help}"
     );
 }
-// ── Plan helper tests (T-004, FR-004) ──────────────────────────────────────
+// -- Plan helper tests (T-004, FR-004) --------------------------------------
 
 #[test]
 fn test_plan_status_mentions_plan_md() {
@@ -530,7 +530,7 @@ fn test_plan_prompt_without_existing_plan_no_preservation() {
     );
 }
 
-// ── Data-model instruction tests (T-021, FR-011) ───────────────────────────
+// -- Data-model instruction tests (T-021, FR-011) ---------------------------
 
 #[test]
 fn test_data_model_instruction_contains_spec_id() {
@@ -645,7 +645,7 @@ fn test_plan_message_without_data_model_no_mention() {
     );
 }
 
-// ── Contracts instruction tests (T-022, FR-012) ───────────────────────────
+// -- Contracts instruction tests (T-022, FR-012) ---------------------------
 
 #[test]
 fn test_contracts_instruction_contains_spec_id() {
@@ -776,7 +776,7 @@ fn test_plan_message_without_contracts_no_mention() {
     );
 }
 
-// ── Tasks subcommand tests (T-005, FR-005) ────────────────────────────────
+// -- Tasks subcommand tests (T-005, FR-005) --------------------------------
 
 #[test]
 fn test_spec_command_tasks_parses() {
@@ -805,7 +805,7 @@ fn test_spec_help_contains_tasks() {
         "help should mention /spec tasks: {help}"
     );
 }
-// ── Edge-case tests for SDD subcommands (T-041, NFR-004) ───────────────────
+// -- Edge-case tests for SDD subcommands (T-041, NFR-004) -------------------
 
 #[test]
 fn test_spec_command_specify_extra_whitespace() {
@@ -855,7 +855,7 @@ fn test_spec_help_lists_all_new_subcommands() {
     assert!(help.contains("/spec tasks"), "help should list tasks");
 }
 
-// ── Feedback command tests (FR-017, T-032) ──────────────────────────────────
+// -- Feedback command tests (FR-017, T-032) ----------------------------------
 
 #[test]
 fn test_spec_feedback_parse_valid() {
@@ -1044,7 +1044,7 @@ fn test_spec_feedback_help_lists_command() {
         "help should mention FEEDBACK.md: {help}"
     );
 }
-// ── --from-research parsing tests (FR-010, T-019) ───────────────────────────
+// -- --from-research parsing tests (FR-010, T-019) ---------------------------
 
 #[test]
 fn test_spec_command_create_with_from_research() {
@@ -1126,7 +1126,7 @@ fn test_spec_command_create_from_research_no_name() {
     );
 }
 
-// ── Research frontmatter instruction tests (FR-010, T-019) ──────────────────
+// -- Research frontmatter instruction tests (FR-010, T-019) ------------------
 
 #[test]
 fn test_build_research_frontmatter_instruction_with_name() {
@@ -1204,7 +1204,7 @@ fn test_spec_help_specify_mentions_from_research() {
     );
 }
 
-// ── Tasks handler tests (FR-005, T-006) ───────────────────────────────────
+// -- Tasks handler tests (FR-005, T-006) -----------------------------------
 
 #[test]
 fn test_tasks_status_mentions_tasks_md() {
@@ -1439,7 +1439,7 @@ fn test_build_tasks_md_without_title() {
         "TASKS.md should still contain tasks: {md}"
     );
 }
-// ── Feedback surfacing tests (FR-017, T-033) ───────────────────────────────
+// -- Feedback surfacing tests (FR-017, T-033) -------------------------------
 
 #[test]
 fn test_build_feedback_instruction_contains_content() {
@@ -1628,7 +1628,7 @@ fn test_plan_message_feedback_and_contracts_both_enabled() {
     assert!(msg.contains("contracts/"));
     assert!(msg.contains("FEEDBACK.md"));
 }
-// ── Related Research section instruction tests (FR-010, T-020) ─────────────
+// -- Related Research section instruction tests (FR-010, T-020) -------------
 
 #[test]
 fn test_build_research_section_instruction_with_name() {
@@ -1728,7 +1728,7 @@ fn test_build_specify_prompt_with_research_includes_both_frontmatter_and_section
         "specify prompt should include body section instruction: {prompt}"
     );
 }
-// ── Quickstart.md generation tests (FR-013, T-023) ───────────────────────
+// -- Quickstart.md generation tests (FR-013, T-023) -----------------------
 
 #[test]
 fn test_build_quickstart_md_with_requirements() {

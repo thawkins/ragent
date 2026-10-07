@@ -14,6 +14,8 @@ use ratatui::{
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_types::sanitize_terminal::sanitize_terminal;
 
+use crate::app::short_id;
+
 /// Sentinel prefix used to identify agent-notice chat bubbles. The event
 /// handler emits the bubble text as `Agent Notice\n<summary>` (ANTIPAT M1:
 /// the emoji prefix was replaced with the plain-text label).
@@ -274,9 +276,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     };
 
     let specific = match tool {
-        // ═══════════════════════════════════════════════════════════════════
-        // 📄 FILE OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  FILE OPERATIONS
+        // ===================================================================
         "read" => {
             // The read tool accepts `path` as the canonical parameter name, but some
             // providers/models emit `file_path` instead. Check both so the file name
@@ -286,28 +288,20 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             // the provider uses entirely unexpected field names. If the known key
             // resolves to an empty path (e.g. `{"path":""}`), we intentionally return
             // an empty summary to preserve existing test expectations.
-            let path = get_relative_path(&["path", "file_path"]);
-            if path.is_empty() { String::new() } else { path }
+            get_relative_path(&["path", "file_path"])
         }
         // intentionally gated on the structured extractor yielding an empty
         // string. This preserves existing behaviour for empty/missing known
         // parameters while still showing something useful when the provider
         // uses unexpected field names.
-        "write" | "create" => {
-            let path = get_relative_path(&["path"]);
-            if path.is_empty() { String::new() } else { path }
-        }
+        "write" | "create" => get_relative_path(&["path"]),
         "edit" | "patch" => {
             // The edit tool's canonical parameter is `file_path`, with `path` as a
             // deprecated legacy alias. Check both so the file name always shows
             // in the message window header regardless of which name the model used.
-            let path = get_relative_path(&["file_path", "path"]);
-            if path.is_empty() { String::new() } else { path }
+            get_relative_path(&["file_path", "path"])
         }
-        "rm" => {
-            let path = get_relative_path(&["path"]);
-            if path.is_empty() { String::new() } else { path }
-        }
+        "rm" => get_relative_path(&["path"]),
         "multiedit" | "multi_edit" => {
             let count = input
                 .get("edits")
@@ -316,10 +310,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or(0);
             pluralize(count, "edit", "edits")
         }
-        "append_to_file" | "append_file" => {
-            let path = get_relative_path(&["path"]);
-            if path.is_empty() { String::new() } else { path }
-        }
+        "append_to_file" | "append_file" => get_relative_path(&["path"]),
         "apply_patch" => {
             let target = get_str(&["path"]).unwrap_or_default();
             if target.is_empty() {
@@ -338,30 +329,23 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             )
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📁 DIRECTORY OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  DIRECTORY OPERATIONS
+        // ===================================================================
         "list" => {
             // list_directory uses "directory"; canonical list uses "path".
-            let path = get_relative_path(&["path", "directory"]);
-            if path.is_empty() { String::new() } else { path }
+            get_relative_path(&["path", "directory"])
         }
-        "make_directory" | "mkdir" => {
-            let path = get_relative_path(&["path", "directory"]);
-            if path.is_empty() { String::new() } else { path }
-        }
+        "make_directory" | "mkdir" => get_relative_path(&["path", "directory"]),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ℹ️ FILE INFO
-        // ═══════════════════════════════════════════════════════════════════
-        "file_info" => {
-            let path = get_relative_path(&["path"]);
-            if path.is_empty() { String::new() } else { path }
-        }
+        // ===================================================================
+        //  FILE INFO
+        // ===================================================================
+        "file_info" => get_relative_path(&["path"]),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔄 FILE MOVE/COPY
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  FILE MOVE/COPY
+        // ===================================================================
         "move_file" | "rename_file" => {
             let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
             let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
@@ -385,9 +369,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             )
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔍 SEARCH OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  SEARCH OPERATIONS
+        // ===================================================================
         "search" => {
             let query = get_str(&["query", "pattern"]).unwrap_or_default();
             let path = get_str(&["path"])
@@ -417,9 +401,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .unwrap_or("")
             .to_string(),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ⚡ EXECUTION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  EXECUTION
+        // ===================================================================
         "bash" => {
             // Aliases may send code/cmd instead of command. Replace newlines
             // with " ; " so multiline commands display on a single line.
@@ -435,9 +419,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             trunc120(&expr)
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌐 NETWORK
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  NETWORK
+        // ===================================================================
         "http_request" | "web_request" => {
             let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
             let url = get_str(&["url"]).unwrap_or_default();
@@ -477,9 +461,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .map(|q| format!("\"{}\"", trunc120(q)))
             .unwrap_or_else(|| "search".to_string()),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔎 EXTENDED SEARCH / INTELLIGENCE
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  EXTENDED SEARCH / INTELLIGENCE
+        // ===================================================================
         "conversation_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
             format!("session: \"{}\"", trunc120(&query))
@@ -489,9 +473,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("all sessions: \"{}\"", trunc120(&query))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔧 ENVIRONMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  ENVIRONMENT
+        // ===================================================================
         "get_env" => {
             let key = get_str(&["key", "name", "variable"]).unwrap_or_default();
             if key.is_empty() {
@@ -502,9 +486,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "bash_reset" => "reset shell".to_string(),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🗂️ BACKGROUND PROCESS MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  BACKGROUND PROCESS MANAGEMENT
+        // ===================================================================
         "bg" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
             match action.as_str() {
@@ -518,15 +502,15 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                     if task.is_empty() {
                         format!("{}", other)
                     } else {
-                        format!("{} {}", other, &task[..8.min(task.len())])
+                        format!("{} {}", other, short_id(&task))
                     }
                 }
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌐 BROWSER / EMAIL / CHANNELS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  BROWSER / EMAIL / CHANNELS
+        // ===================================================================
         "browser" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
             match action.as_str() {
@@ -608,25 +592,25 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ❓ USER INTERACTION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  USER INTERACTION
+        // ===================================================================
         "question" | "ask_user" => {
             let q = get_str(&["question", "query"]).unwrap_or_default();
             trunc120(&q)
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 💭 REASONING
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  REASONING
+        // ===================================================================
         "think" => {
             let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
             trunc120(&thought)
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📝 PLANNING
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  PLANNING
+        // ===================================================================
         "plan_enter" => {
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
             format!("→ {}", trunc120(task))
@@ -636,9 +620,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("← {}", trunc120(summary))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 TASK MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  TASK MANAGEMENT
+        // ===================================================================
         "task_create" => {
             let subject = get_str(&["subject"]).unwrap_or_default();
             format!("+{}", trunc120(&subject))
@@ -664,9 +648,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .unwrap_or("all");
             format!("filter: {}", status)
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 🤖 SUB-AGENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  SUB-AGENT
+        // ===================================================================
         "new_agent" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
@@ -674,7 +658,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "cancel_agent" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-            format!("cancel {}", &task_id[..8.min(task_id.len())])
+            format!("cancel {}", short_id(task_id))
         }
         "list_agents" => {
             let status = input
@@ -696,9 +680,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 👥 TEAM COORDINATION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  TEAM COORDINATION
+        // ===================================================================
         "team_create" => {
             let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             format!("create {}", name)
@@ -783,9 +767,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "team_shutdown_ack" => "ack shutdown".to_string(),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔎 LSP / CODE INTELLIGENCE
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  LSP / CODE INTELLIGENCE
+        // ===================================================================
         "lsp_definition" | "lsp_references" => {
             let path = get_relative_path(&["path"]);
             let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -815,9 +799,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📇 CODE INDEX
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CODE INDEX
+        // ===================================================================
         "codeindex_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
             let kind = get_str(&["kind"]);
@@ -887,9 +871,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "codeindex_communities" => "communities".to_string(),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 SPEC MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  SPEC MANAGEMENT
+        // ===================================================================
         "spec_list" => {
             let status = input.get("status").and_then(|v| v.as_str());
             match status {
@@ -916,18 +900,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("coverage {}", trunc120(&id))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (PDF)
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  DOCUMENT (PDF)
+        // ===================================================================
         "pdf_read" => get_relative_path(&["path"]),
         "pdf_write" => get_relative_path(&["path"]),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 GITHUB
-        // ═══════════════════════════════════════════════════════════════════
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌿 GIT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITHUB
+        // ===================================================================
+        // ===================================================================
+        //  GIT
+        // ===================================================================
         "git_add" => {
             let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             let update = input
@@ -1123,9 +1107,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🦊 GITLAB
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITLAB
+        // ===================================================================
         "gitlab_list_issues" => {
             let state = input
                 .get("state")
@@ -1224,9 +1208,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("cancel pipeline #{}", id)
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 GITHUB
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITHUB
+        // ===================================================================
         "github_list_issues" => {
             let state = input
                 .get("state")
@@ -1277,9 +1261,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(1);
             format!("actions ({})", limit)
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // ✨ UTILITY
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  UTILITY
+        // ===================================================================
         "format" => "format".to_string(),
         "metadata" => "metadata".to_string(),
         "truncate" => "truncate".to_string(),
@@ -1301,9 +1285,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ⏰ CRON SCHEDULER
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CRON SCHEDULER
+        // ===================================================================
         "cron_add" => {
             let id = get_str(&["id"]).unwrap_or_default();
             let schedule = get_str(&["schedule"]).unwrap_or_default();
@@ -1323,9 +1307,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("disable `{}`", trunc120(&id))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🧠 MODEL INFO
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  MODEL INFO
+        // ===================================================================
         "model_info" => {
             let format = get_str(&["format"]).unwrap_or_else(|| "text".to_string());
             format!("model info ({})", format)
@@ -1351,9 +1335,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🏁 AGENT COMPLETE
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  AGENT COMPLETE
+        // ===================================================================
         "agent_complete" => {
             let summary = get_str(&["summary"]).unwrap_or_default();
             // Only the first line goes in the compact header; embedding a
@@ -1364,9 +1348,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             trunc120(first_line)
         }
 
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
         // DEFAULT: Unknown tools
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
         _ => {
             if tool.starts_with("team_") {
                 summarize_tool_args(input, 40)
@@ -1470,9 +1454,9 @@ pub fn tool_result_summary(
     let trunc120 = |s: &str| truncate_str(s, 120);
 
     match tool {
-        // ═══════════════════════════════════════════════════════════════════
-        // 📄 FILE OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  FILE OPERATIONS
+        // ===================================================================
         "read" => {
             let summarised = out
                 .get("summarised")
@@ -1572,9 +1556,9 @@ pub fn tool_result_summary(
             Some(format!("{} found", pluralize(changes, "change", "changes")))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📁 DIRECTORY OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  DIRECTORY OPERATIONS
+        // ===================================================================
         "list" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let path = out
@@ -1590,9 +1574,9 @@ pub fn tool_result_summary(
             ))
         }
         "make_directory" | "mkdir" => Some("directory created".to_string()),
-        // ═══════════════════════════════════════════════════════════════════
-        // ℹ️ FILE INFO
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  FILE INFO
+        // ===================================================================
         "file_info" => {
             let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");
             let size = out.get("size").and_then(|v| v.as_u64());
@@ -1608,9 +1592,9 @@ pub fn tool_result_summary(
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔄 FILE MOVE/COPY
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  FILE MOVE/COPY
+        // ===================================================================
         "move_file" | "rename_file" => Some("moved".to_string()),
         "copy_file" => {
             let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -1620,9 +1604,9 @@ pub fn tool_result_summary(
                 Some("copied".to_string())
             }
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔍 SEARCH OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  SEARCH OPERATIONS
+        // ===================================================================
         "search" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let truncated = out
@@ -1661,9 +1645,9 @@ pub fn tool_result_summary(
             ))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ⚡ EXECUTION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  EXECUTION
+        // ===================================================================
         "bash" => {
             let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
             let timed_out = out
@@ -1688,9 +1672,9 @@ pub fn tool_result_summary(
             let result = out.get("result").and_then(|v| v.as_str());
             result.map(|r| format!("= {}", truncate_str(r, 100)))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌐 NETWORK
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  NETWORK
+        // ===================================================================
         "webfetch" => {
             let status = out.get("http_status").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(format!(
@@ -1722,9 +1706,9 @@ pub fn tool_result_summary(
                 pluralize(line_count, "line", "lines")
             ))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔧 ENVIRONMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  ENVIRONMENT
+        // ===================================================================
         "get_env" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             if count > 0 {
@@ -1734,9 +1718,9 @@ pub fn tool_result_summary(
             }
         }
         "bash_reset" => Some("shell reset".to_string()),
-        // ═══════════════════════════════════════════════════════════════════
-        // ❓ USER INTERACTION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  USER INTERACTION
+        // ===================================================================
         "question" | "ask_user" => {
             let response = out
                 .get("response")
@@ -1745,9 +1729,9 @@ pub fn tool_result_summary(
                 .unwrap_or("");
             Some(truncate_str(response, 100))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 💭 REASONING
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  REASONING
+        // ===================================================================
         "think" => {
             let thought = out
                 .get("thought")
@@ -1770,9 +1754,9 @@ pub fn tool_result_summary(
                 Some(summary.to_string())
             }
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📝 PLANNING
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  PLANNING
+        // ===================================================================
         "plan_enter" => {
             let task = out.get("task").and_then(|v| v.as_str()).unwrap_or("plan");
             Some(format!("delegated → {}", task))
@@ -1784,9 +1768,9 @@ pub fn tool_result_summary(
                 .unwrap_or(0);
             Some(format!("returned ({} chars)", len))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 TASK MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  TASK MANAGEMENT
+        // ===================================================================
         "task_create" => {
             let subject = out.get("subject").and_then(|v| v.as_str());
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1794,9 +1778,9 @@ pub fn tool_result_summary(
                 Some(s) => Some(format!(
                     "created \"{}\" [{}]",
                     truncate_str(s, 80),
-                    &id[..8.min(id.len())]
+                    short_id(id)
                 )),
-                None => Some(format!("created [{}]", &id[..8.min(id.len())])),
+                None => Some(format!("created [{}]", short_id(id))),
             }
         }
         "task_update" => {
@@ -1804,14 +1788,19 @@ pub fn tool_result_summary(
             let status = out.get("status").and_then(|v| v.as_str());
             let subject = out.get("subject").and_then(|v| v.as_str());
             let unblocked = out.get("unblocked").and_then(|v| v.as_array());
-            let short_id = &id[..8.min(id.len())];
+            let short_disp = short_id(id);
             let base = match (status, subject) {
                 (Some(s), Some(t)) => {
-                    format!("updated \"{}\" → {} [{}]", truncate_str(t, 80), s, short_id)
+                    format!(
+                        "updated \"{}\" → {} [{}]",
+                        truncate_str(t, 80),
+                        s,
+                        short_disp
+                    )
                 }
-                (Some(s), None) => format!("updated → {} [{}]", s, short_id),
-                (None, Some(t)) => format!("updated \"{}\" [{}]", truncate_str(t, 80), short_id),
-                (None, None) => format!("updated [{}]", short_id),
+                (Some(s), None) => format!("updated → {} [{}]", s, short_disp),
+                (None, Some(t)) => format!("updated \"{}\" [{}]", truncate_str(t, 80), short_disp),
+                (None, None) => format!("updated [{}]", short_disp),
             };
             if let Some(ub) = unblocked
                 && !ub.is_empty()
@@ -1829,16 +1818,16 @@ pub fn tool_result_summary(
             Some(format!(
                 "{} [{}] {}",
                 status,
-                &id[..8.min(id.len())],
+                short_id(id),
                 truncate_str(&subject, 80)
             ))
         }
         "task_list" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(pluralize(count, "task", "tasks"))
-        } // ═══════════════════════════════════════════════════════════════════
-        // 🤖 SUB-AGENT
-        // ═══════════════════════════════════════════════════════════════════
+        } // ===================================================================
+        //  SUB-AGENT
+        // ===================================================================
         "new_agent" => {
             let agent = out.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let background = out
@@ -1852,7 +1841,7 @@ pub fn tool_result_summary(
             let task_id = out
                 .get("task_id")
                 .and_then(|v| v.as_str())
-                .map(|id| format!(" ({})", &id[..8.min(id.len())]))
+                .map(|id| format!(" ({})", short_id(id)))
                 .unwrap_or_default();
             if background {
                 Some(format!("spawned {} agent{}", agent, task_id))
@@ -1890,9 +1879,9 @@ pub fn tool_result_summary(
                 Some(format!("timeout waiting for {} task(s)", count))
             }
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 👥 TEAM COORDINATION
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  TEAM COORDINATION
+        // ===================================================================
         "team_create" => {
             let name = out.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             Some(format!("created {}", name))
@@ -2017,9 +2006,9 @@ pub fn tool_result_summary(
         }
         "team_shutdown_teammate" => Some("shutdown requested".to_string()),
         "team_shutdown_ack" => Some("shutdown acknowledged".to_string()),
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔎 LSP / CODE INTELLIGENCE
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  LSP / CODE INTELLIGENCE
+        // ===================================================================
         "lsp_definition" | "lsp_references" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
@@ -2054,9 +2043,9 @@ pub fn tool_result_summary(
                 pluralize(count, "diagnostic", "diagnostics")
             ))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📇 CODE INDEX
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CODE INDEX
+        // ===================================================================
         "codeindex_search" => {
             let total = out
                 .get("total_results")
@@ -2111,9 +2100,9 @@ pub fn tool_result_summary(
                 pluralize(count, "dependency", "dependencies")
             ))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 SPEC MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  SPEC MANAGEMENT
+        // ===================================================================
         "spec_list" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!("{} listed", pluralize(count, "spec", "specs")))
@@ -2151,9 +2140,9 @@ pub fn tool_result_summary(
                 pct, req_count, task_count
             ))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (PDF)
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  DOCUMENT (PDF)
+        // ===================================================================
         "pdf_read" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
         "pdf_write" => {
             let path = input["path"]
@@ -2163,12 +2152,12 @@ pub fn tool_result_summary(
             // `pdf_write` reports a page count, not a line count.
             Some(format!("written to {}", path))
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 GITHUB
-        // ═══════════════════════════════════════════════════════════════════
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌿 GIT
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITHUB
+        // ===================================================================
+        // ===================================================================
+        //  GIT
+        // ===================================================================
         "git_add" => {
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             let update = out.get("update").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -2336,9 +2325,9 @@ pub fn tool_result_summary(
             })
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🦊 GITLAB
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITLAB
+        // ===================================================================
         "gitlab_list_issues" => {
             let state = out
                 .get("state")
@@ -2425,9 +2414,9 @@ pub fn tool_result_summary(
             Some(format!("cancel pipeline #{}", id))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📋 GITHUB
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GITHUB
+        // ===================================================================
         "github_list_issues" => {
             let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
             Some(format!("issues listed ({})", state))
@@ -2486,9 +2475,9 @@ pub fn tool_result_summary(
             }
             Some(s)
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // ✨ UTILITY
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  UTILITY
+        // ===================================================================
         "format" => Some("formatted".to_string()),
         "metadata" => Some("metadata extracted".to_string()),
         "truncate" => {
@@ -2536,9 +2525,9 @@ pub fn tool_result_summary(
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ⏰ CRON SCHEDULER
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CRON SCHEDULER
+        // ===================================================================
         "cron_add" => {
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             Some(format!("`{}` scheduled", trunc120(id)))
@@ -2572,9 +2561,9 @@ pub fn tool_result_summary(
             })
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🌐 MASTERFETCH
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  MASTERFETCH
+        // ===================================================================
         "mf_fetch" => {
             let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2601,9 +2590,9 @@ pub fn tool_result_summary(
         "mf_screenshot" => Some("screenshot captured".to_string()),
         "mf_version" => Some("version info".to_string()),
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🔧 APPLY PATCH / SKILLS / SEARCH
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  APPLY PATCH / SKILLS / SEARCH
+        // ===================================================================
         "apply_patch" => {
             let ops = out.get("operations").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let added = out.get("added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -2635,9 +2624,9 @@ pub fn tool_result_summary(
             Some(action.to_string())
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🗂️ BACKGROUND PROCESS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  BACKGROUND PROCESS
+        // ===================================================================
         "bg" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             let task_id = out.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -2648,9 +2637,9 @@ pub fn tool_result_summary(
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🖥️ BROWSER
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  BROWSER
+        // ===================================================================
         "browser" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             match action {
@@ -2698,9 +2687,9 @@ pub fn tool_result_summary(
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📧 GMAIL
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  GMAIL
+        // ===================================================================
         "gmail" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             match action {
@@ -2734,9 +2723,9 @@ pub fn tool_result_summary(
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📨 CHANNELS
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CHANNELS
+        // ===================================================================
         "send_channel_message" => {
             let delivered = out.get("delivered").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
@@ -2745,9 +2734,9 @@ pub fn tool_result_summary(
             ))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📂 OPEN
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  OPEN
+        // ===================================================================
         "open" => {
             let target = out.get("target").and_then(|v| v.as_str()).unwrap_or("?");
             let success = out
@@ -2761,9 +2750,9 @@ pub fn tool_result_summary(
             ))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 🧠 MODEL INFO
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  MODEL INFO
+        // ===================================================================
         "model_info" => {
             let provider = out
                 .get("provider_name")
@@ -2794,9 +2783,9 @@ pub fn tool_result_summary(
             ))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // 📇 CODE INDEX GRAPH
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
+        //  CODE INDEX GRAPH
+        // ===================================================================
         "codeindex_godnodes" => {
             let total = out
                 .get("total_results")
@@ -2827,9 +2816,9 @@ pub fn tool_result_summary(
             ))
         }
 
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
         // DEFAULT: Unknown tools
-        // ═══════════════════════════════════════════════════════════════════
+        // ===================================================================
         _ => {
             if tool.starts_with("team_") {
                 Some(
@@ -3098,8 +3087,8 @@ impl<'a> MessageWidget<'a> {
                                     let task_id = task
                                         .get("id")
                                         .and_then(|id| id.as_str())
-                                        .map(|id| &id[..8.min(id.len())])
-                                        .unwrap_or("unknown");
+                                        .map(short_id)
+                                        .unwrap_or_else(|| "unknown".to_string());
                                     let elapsed_ms = task
                                         .get("elapsed_ms")
                                         .and_then(|e| e.as_u64())

@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 use crate::github::RepoMetadata;
+use crate::vcs_error::{VcsStatus, classify_status};
 
 /// Lightweight authenticated GitLab API client.
 #[derive(Clone)]
@@ -146,18 +147,17 @@ impl GitLabClient {
     async fn handle_response(&self, resp: reqwest::Response, path: &str) -> Result<Value> {
         let status = resp.status();
 
-        if status.as_u16() == 429 {
-            bail!("GitLab rate limit exceeded. Path: {path}");
-        }
-
-        if status.as_u16() == 401 {
-            bail!(
+        // Shared shape rule (T-308); GitLab sends no `x-ratelimit-remaining`
+        // header, so a 403 is always a permission denial here.
+        match classify_status(status.as_u16(), None) {
+            VcsStatus::RateLimited => bail!("GitLab rate limit exceeded. Path: {path}"),
+            VcsStatus::Unauthorized => bail!(
                 "GitLab authentication failed. Run /gitlab setup to update your Personal Access Token."
-            );
-        }
-
-        if status.as_u16() == 403 {
-            bail!("GitLab permission denied for {path}. Check your token scopes.");
+            ),
+            VcsStatus::PermissionDenied => {
+                bail!("GitLab permission denied for {path}. Check your token scopes.");
+            }
+            VcsStatus::Other => {}
         }
 
         if !status.is_success() {

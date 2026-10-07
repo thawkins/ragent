@@ -22,5 +22,8 @@ pub mod orchestrator;
 // Re-export the most commonly used types at the module level for convenience.
 pub use orchestrator::{
     CrawlConfig, CrawlFetcher, CrawlOrchestrator, CrawlResult, FetchedPage, SitemapMode,
-    TruncatedBy, extract_domain, is_same_domain, normalize_and_dedup, score_url,
+    TruncatedBy, is_same_domain, normalize_and_dedup, score_url,
 };
+// Single shared domain extractor (T-302): re-exported here so existing
+// `crate::masterfetch::crawl::extract_domain` callers keep working.
+pub use crate::masterfetch::urlnorm::extract_domain;

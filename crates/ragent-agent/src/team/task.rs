@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use fs2::FileExt as _;
 use serde::{Deserialize, Serialize};
 
-// ── Task status ─────────────────────────────────────────────────────────────
+// -- Task status -------------------------------------------------------------
 
 /// Lifecycle state of a single task.
 ///
@@ -50,7 +50,7 @@ impl TaskStatus {
     }
 }
 
-// ── Task ─────────────────────────────────────────────────────────────────────
+// -- Task ---------------------------------------------------------------------
 
 /// A single unit of work in the shared task list.
 ///
@@ -150,7 +150,7 @@ impl Task {
     }
 }
 
-// ── Task list ─────────────────────────────────────────────────────────────────
+// -- Task list -----------------------------------------------------------------
 
 /// Root of `tasks.json`.
 ///
@@ -247,7 +247,7 @@ impl TaskList {
     }
 }
 
-// ── Task store ────────────────────────────────────────────────────────────────
+// -- Task store ----------------------------------------------------------------
 
 /// File-backed store for a team's task list.
 ///
@@ -753,7 +753,7 @@ impl TaskStore {
         Ok(removed)
     }
 
-    // ── PERF-016: async `spawn_blocking` wrappers ──────────────────────────────
+    // -- PERF-016: async `spawn_blocking` wrappers ------------------------------
     //
     // Each of these mirrors a synchronous `TaskStore` method but moves the
     // full read-modify-write cycle (file lock + `fs::read_to_string` +

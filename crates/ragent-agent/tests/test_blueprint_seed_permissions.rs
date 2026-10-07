@@ -148,7 +148,7 @@ async fn blueprint_bash_seed_is_refused_under_an_explicit_deny_rule() {
 }
 
 /// Sanity check: the same seed DOES run once the session explicitly allows the
-/// category — the gate withholds unapproved tools, it does not disable seeding.
+/// category - the gate withholds unapproved tools, it does not disable seeding.
 #[tokio::test]
 async fn blueprint_bash_seed_runs_when_the_category_is_allowed() {
     let fixture = Fixture::new();
@@ -212,7 +212,7 @@ fn fixture_team_root_is_inside_the_project() {
 #[tokio::test]
 async fn benign_blueprint_task_seed_still_creates_a_task() {
     let fixture = Fixture::new();
-    // The seeding tool is `team_task_create` — no `bash`, no file write.
+    // The seeding tool is `team_task_create` - no `bash`, no file write.
     let bp_dir = fixture
         .working_dir()
         .join(".ragent")
@@ -231,7 +231,7 @@ async fn benign_blueprint_task_seed_still_creates_a_task() {
     .expect("write task-seed.json");
 
     // `team_task_create` carries the `team:manage` category, so the session
-    // holds an explicit allow for it — exactly the "already pre-approved"
+    // holds an explicit allow for it - exactly the "already pre-approved"
     // state the gate is designed to honour.
     let ctx = ctx(
         &fixture,

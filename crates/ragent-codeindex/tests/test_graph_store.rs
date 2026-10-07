@@ -110,7 +110,7 @@ fn test_upsert_edge_replaces_on_conflict() {
     assert_eq!(store.edge_count().unwrap(), 1);
     assert_eq!(store.edge_count_by_confidence("INFERRED").unwrap(), 1);
 
-    // Upsert with EXTRACTED — should replace, not duplicate.
+    // Upsert with EXTRACTED - should replace, not duplicate.
     store
         .upsert_edge(foo_id, bar_id, "calls", "EXTRACTED", Some(file_id), Some(3))
         .unwrap();
@@ -378,7 +378,7 @@ fn test_existing_tables_unchanged() {
         .unwrap();
     assert!(!store.get_dependents("b.rs").unwrap().is_empty());
 }
-// ── edge_count_by_kind / graph_node_count (graph status helpers) ─────────────
+// -- edge_count_by_kind / graph_node_count (graph status helpers) -------------
 
 #[test]
 fn test_edge_count_by_kind() {
@@ -425,7 +425,7 @@ fn test_graph_node_count_distinct() {
         make_symbol("a", SymbolKind::Function, 0, file_id),
         make_symbol("b", SymbolKind::Function, 0, file_id),
         make_symbol("c", SymbolKind::Function, 0, file_id),
-        // "lonely" never appears in an edge — must NOT be counted as a node.
+        // "lonely" never appears in an edge - must NOT be counted as a node.
         make_symbol("lonely", SymbolKind::Function, 0, file_id),
     ];
     store.upsert_symbols(file_id, &symbols).unwrap();

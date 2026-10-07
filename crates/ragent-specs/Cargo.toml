@@ -13,7 +13,7 @@ repository = "https://github.com/thawkins/ragent"
 # drift from the `/new` surface.
 ragent-tools-extended = { path = "../ragent-tools-extended" }
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "1"
+thiserror = { workspace = true }
 regex = "1"
 tokio = { version = "1.42", features = ["fs", "io-util"] }
 tracing = "0.1"

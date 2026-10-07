@@ -161,7 +161,7 @@ fn test_effort_summary_calculation() {
     // Test via the runner's internal method indirectly
     let runner = SpecImplRunner {
         spec_name: "test".into(),
-        specs_root: PathBuf::from("/tmp"),
+        specs_root: PathBuf::from("target/temp"),
         tasks: vec![
             PlanTask {
                 id: "T-001".into(),
@@ -202,7 +202,7 @@ fn test_effort_summary_calculation() {
     assert_eq!(summary, "1xS, 1xM, 1xL");
 }
 
-// ── File Creation Order tests (FR-014, T-025) ────────────────────────
+// -- File Creation Order tests (FR-014, T-025) ------------------------
 
 /// Helper: build a runner with the given task titles in execution order.
 fn runner_with_titles(titles: &[&str]) -> SpecImplRunner {
@@ -223,7 +223,7 @@ fn runner_with_titles(titles: &[&str]) -> SpecImplRunner {
     let execution_order: Vec<usize> = (0..tasks.len()).collect();
     SpecImplRunner {
         spec_name: "test".into(),
-        specs_root: PathBuf::from("/tmp"),
+        specs_root: PathBuf::from("target/temp"),
         tasks,
         execution_order,
         options: ImplOptions::default(),

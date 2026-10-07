@@ -10,7 +10,7 @@ use ragent_connectors::{
     ConnectorId, ConnectorServer, build_categories,
 };
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// -- helpers ------------------------------------------------------------------
 
 /// A minimal stdio server so a descriptor passes the "at least one server" shape.
 fn server() -> ConnectorServer {
@@ -43,7 +43,7 @@ fn descriptor(id: &str, category: &str) -> ConnectorDescriptor {
     }
 }
 
-// ── CategoryFilter: sentinel, parsing, labels (FR-040) ───────────────────────
+// -- CategoryFilter: sentinel, parsing, labels (FR-040) -----------------------
 
 #[test]
 fn all_is_the_default_filter() {
@@ -81,7 +81,7 @@ fn display_matches_label() {
     );
 }
 
-// ── CategoryFilter::matches: exact, case-insensitive, blank under ALL (FR-039) ─
+// -- CategoryFilter::matches: exact, case-insensitive, blank under ALL (FR-039) -
 
 #[test]
 fn all_matches_every_descriptor_including_blank_category() {
@@ -110,7 +110,7 @@ fn blank_category_is_visible_only_under_all() {
     assert!(CategoryFilter::parse("ALL").matches(&blank));
 }
 
-// ── build_categories: distinct, sorted, case-insensitive, blank dropped (FR-040) ─
+// -- build_categories: distinct, sorted, case-insensitive, blank dropped (FR-040) -
 
 #[test]
 fn build_categories_dedups_case_insensitively_and_sorts() {
@@ -139,7 +139,7 @@ fn build_categories_is_empty_when_no_connector_declares_one() {
     assert!(build_categories(&installed, &catalogue).is_empty());
 }
 
-// ── CategoryFilterState: default ALL, selection, visible/count (FR-039, FR-040) ─
+// -- CategoryFilterState: default ALL, selection, visible/count (FR-039, FR-040) -
 
 #[test]
 fn a_fresh_state_is_on_all_with_no_categories() {
@@ -239,7 +239,7 @@ fn selecting_by_filter_value_matches_selecting_by_name() {
     assert_eq!(a.count_in(&all), 1);
 }
 
-// ── select_when_known (T-021; FR-039..FR-041) ────────────────────────────────
+// -- select_when_known (T-021; FR-039..FR-041) --------------------------------
 
 #[test]
 fn select_when_known_accepts_all_and_any_known_category() {
@@ -278,7 +278,7 @@ fn select_when_known_refuses_an_unknown_category_and_changes_no_state() {
     assert!(empty.is_all());
 }
 
-// ── CatalogueBrowser: the /connectors claude browse panel state ──────────────
+// -- CatalogueBrowser: the /connectors claude browse panel state --------------
 
 use std::collections::BTreeSet;
 

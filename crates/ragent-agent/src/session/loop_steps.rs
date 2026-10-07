@@ -1717,7 +1717,7 @@ impl SessionProcessor {
                     .and_then(|p| p.api.and_then(|a| a.base_url))
                     .filter(|s| !s.trim().is_empty())
             })
-            .or_else(|| std::env::var(env_var).ok().filter(|s| !s.trim().is_empty()))
+            .or_else(|| ragent_config::credential_env::read_credential_env(env_var))
     }
 }
 

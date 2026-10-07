@@ -56,13 +56,13 @@ impl LanguageParser for MavenParser {
     }
 }
 
-// ── Extraction context ──────────────────────────────────────────────────────
+// -- Extraction context ------------------------------------------------------
 
 /// Mutable context threaded through recursive extraction.
 /// Parser-local alias of the shared extraction context.
 type Ctx<'a> = super::ctx::Ctx<'a>;
 
-// ── Maven-specific tag classification ───────────────────────────────────────
+// -- Maven-specific tag classification ---------------------------------------
 
 /// Maven POM tags that represent important structural elements.
 const MAVEN_SYMBOL_TAGS: &[&str] = &[
@@ -111,7 +111,7 @@ const MAVEN_TAG_SNIPPET_LEN: usize = 60;
 /// [`MAVEN_TAG_SNIPPET_LEN`] so the appended `"..."` fits the same budget.
 const MAVEN_TAG_SNIPPET_CUT: usize = MAVEN_TAG_SNIPPET_LEN - 3;
 
-// ── Recursive walk ──────────────────────────────────────────────────────────
+// -- Recursive walk ----------------------------------------------------------
 
 /// Walk a tree-sitter node, extracting Maven POM symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -137,7 +137,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Element extraction ──────────────────────────────────────────────────────
+// -- Element extraction ------------------------------------------------------
 
 /// Extract an XML element as a Maven symbol if it's a relevant tag.
 fn extract_element(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
@@ -196,7 +196,7 @@ fn extract_element(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     }
 }
 
-// ── Dependency import extraction ────────────────────────────────────────────
+// -- Dependency import extraction --------------------------------------------
 
 /// Extract a Maven dependency as an import entry.
 fn extract_dependency_import(ctx: &mut Ctx, node: Node) {
@@ -255,7 +255,7 @@ fn extract_parent_import(ctx: &mut Ctx, node: Node) {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 
 /// Get the tag name from an element node by looking at its `STag` or `EmptyElemTag` child.
 fn get_tag_name(ctx: &Ctx, node: Node) -> String {
@@ -427,4 +427,4 @@ fn hash_node(ctx: &Ctx, node: Node) -> String {
     super::util::node_hash(ctx.source, node)
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------

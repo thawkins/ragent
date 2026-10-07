@@ -376,7 +376,7 @@ impl Default for LlmRecorder {
     }
 }
 
-// ── Tool recorder ────────────────────────────────────────────────────────
+// -- Tool recorder --------------------------------------------------------
 
 /// Recorder for tool execution metrics (T-013, FR-009, FR-015).
 ///
@@ -505,7 +505,7 @@ impl Default for ToolRecorder {
     }
 }
 
-// ── Session recorder ─────────────────────────────────────────────────────
+// -- Session recorder -----------------------------------------------------
 
 /// Recorder for session processor metrics (T-014, FR-011, FR-010).
 ///
@@ -677,7 +677,7 @@ impl Default for SessionRecorder {
     }
 }
 
-// ── Coordinator recorder ──────────────────────────────────────────────────
+// -- Coordinator recorder --------------------------------------------------
 
 /// Recorder for coordinator metrics (T-015, FR-012, FR-018).
 ///
@@ -834,7 +834,7 @@ impl Default for CoordinatorRecorder {
     }
 }
 
-// ── Permission recorder ──────────────────────────────────────────────────
+// -- Permission recorder --------------------------------------------------
 
 /// Recorder for permission system metrics (T-016, FR-016).
 ///
@@ -965,7 +965,7 @@ impl Default for PermissionRecorder {
     }
 }
 
-// ── Compression recorder ──────────────────────────────────────────────────
+// -- Compression recorder --------------------------------------------------
 
 /// Recorder for context compression pipeline metrics (T-017, FR-017).
 ///
@@ -1088,7 +1088,7 @@ impl Default for CompressionRecorder {
     }
 }
 
-// ── Snapshot recorder ─────────────────────────────────────────────────────
+// -- Snapshot recorder -----------------------------------------------------
 
 /// Recorder for snapshot undo/restore metrics (T-027, FR-029).
 ///
@@ -1153,7 +1153,7 @@ impl SnapshotRecorder {
     /// Record a snapshot restore: increment `ragent.snapshot.restores`
     /// (FR-029).
     ///
-    /// Call this every time [`restore_snapshot`](ragent_agent::snapshot::restore_snapshot)
+    /// Call this every time `ragent_storage::snapshot::restore_snapshot`
     /// (or the equivalent storage-layer restore) successfully writes a captured
     /// snapshot back to disk. The counter has no attributes, so it cannot leak
     /// file paths or contents (FR-034).
@@ -1201,7 +1201,7 @@ impl Default for SnapshotRecorder {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────
+// -- Tests -----------------------------------------------------------------
 
 #[cfg(all(test, feature = "telemetry"))]
 #[path = "../tests/inline/recorder_tests.rs"]

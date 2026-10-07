@@ -29,13 +29,13 @@ use crate::app::state::{
 
 // Helpers
 use crate::app::helpers::{
-    activity_log_db_path, open_verified_alog, parse_alog_run_id_yes, parse_swarm_args,
+    activity_log_db_path, open_verified_alog, parse_alog_run_id_yes, parse_swarm_args, short_id,
     short_run_id, short_session_id,
 };
 use crate::app::toolchain;
 use crate::widgets::message_widget::pluralize;
 
-// ── /spec govcreate orchestration (T-012) ────────────────────────────────────
+// -- /spec govcreate orchestration (T-012) ------------------------------------
 //
 // Production [`GovCreateStages`] implementation: the acquisition half calls
 // the shared archdoc acquisition helpers (`acquire_url` / `acquire_local`),
@@ -3154,7 +3154,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 }
             },
 
-            // ── /config ──────────────────────────────────────────────────────
+            // -- /config ------------------------------------------------------
             "config" => match args.trim() {
                 "help" | "" => {
                     self.append_assistant_text(
@@ -3224,7 +3224,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         ));
                     }
 
-                    // ── Resolved configuration values with provenance ───────────
+                    // -- Resolved configuration values with provenance -----------
                     // Reload the merged config and, for each top-level key, report
                     // the highest-precedence file that explicitly sets it. Source
                     // detection mirrors Config::load() precedence: defaults <
@@ -3463,7 +3463,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     self.append_assistant_text(&output);
                     self.status = "config: show".to_string();
                 }
-                // ── /config save ────────────────────────────────────────────
+                // -- /config save --------------------------------------------
                 // FR-003: snapshot the current global ragent.json into a
                 // timestamped backup inside `saves/`. The helper creates the
                 // `saves/` directory if needed and writes atomically.
@@ -3488,7 +3488,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         self.status = "config: save error".to_string();
                     }
                 },
-                // ── /config list ────────────────────────────────────────────
+                // -- /config list --------------------------------------------
                 // FR-004 / FR-006: scan the `saves/` directory for backups. If
                 // none exist, show a user-facing message instead of an empty
                 // picker. Otherwise open the interactive picker (key handling
@@ -3589,7 +3589,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 }
             },
 
-            // ── /init ────────────────────────────────────────────────────────
+            // -- /init --------------------------------------------------------
             "init" => match args.trim() {
                 // /init help - show usage without starting the analysis run.
                 "help" => {
@@ -3824,18 +3824,10 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     if let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) {
                         self.active_tasks.remove(idx);
                     }
-                    self.status = format!(
-                        "Cancelled task {} ({})",
-                        &task_id[..8.min(task_id.len())],
-                        agent
-                    );
+                    self.status = format!("Cancelled task {} ({})", short_id(&task_id), agent);
                     self.push_log_no_agent(
                         LogLevel::Info,
-                        format!(
-                            "Task cancelled: {}... ({})",
-                            &task_id[..8.min(task_id.len())],
-                            agent
-                        ),
+                        format!("Task cancelled: {}... ({})", short_id(&task_id), agent),
                     );
                 } else {
                     self.status = format!("No task found with ID starting with '{}'", args);
@@ -4696,7 +4688,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                 let mut report = String::from("From: /reload\n\n");
 
-                // ── reload agents ──────────────────────────────────────────────────
+                // -- reload agents --------------------------------------------------
                 if do_agents {
                     let cwd_path = crate::app::helpers::current_working_dir();
                     let builtin_agents = ragent_agent::agent::create_builtin_agents();
@@ -4752,7 +4744,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     );
                 }
 
-                // ── reload config ──────────────────────────────────────────────────
+                // -- reload config --------------------------------------------------
                 if do_config {
                     match ragent_agent::Config::load() {
                         Ok(cfg) => {
@@ -4786,7 +4778,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                 }
 
-                // ── reload mcp ─────────────────────────────────────────────────────
+                // -- reload mcp -----------------------------------------------------
                 if do_mcp {
                     match ragent_agent::Config::load() {
                         Ok(cfg) => {
@@ -4822,7 +4814,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     }
                 }
 
-                // ── reload skills ──────────────────────────────────────────────────
+                // -- reload skills --------------------------------------------------
                 if do_skills {
                     // Skills are loaded on-demand from disk each time they are needed;
                     // there is no persistent cache to clear.  Just confirm to the user.
@@ -6090,7 +6082,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                 }
             }
-            // ── /bash ────────────────────────────────────────────────────────
+            // -- /bash --------------------------------------------------------
             "bash" => {
                 let (sub, rest) = args
                     .split_once(char::is_whitespace)
@@ -6341,7 +6333,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     }
                 }
             }
-            // ── /dirs ────────────────────────────────────────────────────────
+            // -- /dirs --------------------------------------------------------
             "dirs" => {
                 let (sub, rest) = args
                     .split_once(char::is_whitespace)
@@ -6704,7 +6696,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
                 self.needs_redraw = true;
             }
-            // ── /undo ──────────────────────────────────────────────────────
+            // -- /undo ------------------------------------------------------
             // FR-014: Remove the last user/assistant turn pair from the conversation.
             // This allows users to correct mistakes or backtrack from unhelpful responses.
             "undo" => {
@@ -6768,7 +6760,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     }
                 }
             }
-            // ── /name ──────────────────────────────────────────────────────
+            // -- /name ------------------------------------------------------
             // FR-015: Set a human-readable display name on the active session.
             // The name is persisted in session metadata and appears in session lists.
             "name" => {
@@ -6831,13 +6823,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "alog" => self.handle_alog_command(args),
-            // ── /gcf ──────────────────────────────────────────────────────
+            // -- /gcf ------------------------------------------------------
             "gcf" => self.handle_gcf_command(args),
-            // ── /prompt ────────────────────────────────────────────────────
+            // -- /prompt ----------------------------------------------------
             "prompt" => self.handle_prompt_command(args),
             // /toolchain: language toolchain presence report (FR-002)
             "toolchain" => self.handle_toolchain_command(args),
-            // ── /swarm ──────────────────────────────────────────────────────
+            // -- /swarm ------------------------------------------------------
             "swarm" => {
                 let (sub, _rest) = args
                     .split_once(char::is_whitespace)
@@ -6957,7 +6949,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 self.handle_spawn_command(args);
             }
 
-            // ── /autopilot ──────────────────────────────────────────────────
+            // -- /autopilot --------------------------------------------------
             "autopilot" => {
                 let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
                 match sub.as_str() {
@@ -7062,7 +7054,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
             }
 
-            // ── /plan ────────────────────────────────────────────────────────
+            // -- /plan --------------------------------------------------------
             "plan" => {
                 if args.trim() == "help" {
                     self.append_assistant_text(
@@ -7085,12 +7077,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
                 }
-            } // ── /research ────────────────────────────────────────────────
+            } // -- /research ------------------------------------------------
             "research" => {
                 self.handle_research_command(args);
             }
 
-            // ── /plugins ────────────────────────────────────────────────
+            // -- /plugins ------------------------------------------------
             // A bare `/plugins`, `/plugins help`, and an unrecognised
             // subcommand all render the usage block (FR-006, FR-014). The
             // call drives an ephemeral plugin session synchronously; sandbox
@@ -7104,7 +7096,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 self.status = "plugins".to_string();
             }
 
-            // ── /connectors ──────────────────────────────────────────────
+            // -- /connectors ----------------------------------------------
             // Spec `connectors` FR-004, FR-006, FR-017: a bare `/connectors`,
             // `/connectors help`, and an unrecognised subcommand all render the
             // usage block. The shared dispatcher honours the master switch
@@ -7115,12 +7107,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 self.status = "connectors".to_string();
             }
 
-            // ── /new ────────────────────────────────────────────────────
+            // -- /new ----------------------------------------------------
             "new" => {
                 self.handle_new_command(args);
             }
 
-            // ── /spec ────────────────────────────────────────────────────────
+            // -- /spec --------------------------------------------------------
             "spec" => {
                 use ragent_specs::spec::SpecStatus;
                 use ragent_specs::{SddFlags, SpecCommand, SpecFilter, validate_with_flags};
@@ -8945,7 +8937,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                 }
             }
-            // ── /mode ────────────────────────────────────────────────────────
+            // -- /mode --------------------------------------------------------
             "mode" => {
                 let sub = args.trim().to_lowercase();
                 if sub == "help" {
@@ -9670,7 +9662,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 "[warn] Web API is already running at http://{addr}\n\nRun `/webapi disable` to stop it."
                             ));
                     } else {
-                        use rand::Rng;
+                        use rand::RngExt;
                         use rand::distr::Alphanumeric;
                         let token: String = rand::rng()
                             .sample_iter(&Alphanumeric)
@@ -11080,15 +11072,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                 }
             }
-            // ── /cron ────────────────────────────────────────────────────
+            // -- /cron ----------------------------------------------------
             "cron" => self.handle_cron_command(args),
-            // ── /triggers ────────────────────────────────────────────────
+            // -- /triggers ------------------------------------------------
             "triggers" => self.handle_triggers_command(args),
-            // ── /inbox ────────────────────────────────────
+            // -- /inbox ------------------------------------
             "inbox" => self.handle_inbox_command(args),
-            // ── /queue ───────────────────────────────────────────────────
+            // -- /queue ---------------------------------------------------
             "queue" => self.handle_queue_command(args).await,
-            // ── /loop ────────────────────────────────────────────────────
+            // -- /loop ----------------------------------------------------
             "loop" => handle_loop_command(self, args),
             _ => {
                 let working_dir = crate::app::helpers::current_working_dir();
@@ -11384,7 +11376,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         Some(out)
     }
 
-    // ── /cron slash-command handler (spec agentchron T-013) ────────────
+    // -- /cron slash-command handler (spec agentchron T-013) ------------
 
     /// Handle the `/cron` slash-command family (FR-007 surface, FR-008, FR-009).
     ///
@@ -11852,7 +11844,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.status = "cron: log".to_string();
     }
 
-    // ── /triggers slash-command handler (spec piegap T-004) ─────────────
+    // -- /triggers slash-command handler (spec piegap T-004) -------------
 
     /// Handle the `/triggers` slash-command family (FR-002, FR-003).
     ///
@@ -11923,11 +11915,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              |---|---|---|---|---|\n",
         );
         for rule in &rules {
-            let id_short = if rule.id.as_str().len() > 8 {
-                &rule.id.as_str()[..8]
-            } else {
-                rule.id.as_str()
-            };
+            let id_short = short_id(rule.id.as_str());
             let mode = if rule.fire_once { "once" } else { "repeat" };
             let status = match rule.status() {
                 ragent_types::trigger::TriggerRuleStatus::Active => "active",
@@ -12097,7 +12085,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.status = "triggers: help".to_string();
     }
 
-    // ── /bug-report slash-command handler (spec piegap T-011) ──────────────
+    // -- /bug-report slash-command handler (spec piegap T-011) --------------
 
     /// Handle `/bug-report` - generate a diagnostic dump with redaction (FR-007).
     ///
@@ -12303,7 +12291,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.status = "bug-report: generated".to_string();
     }
 
-    // ── /inbox slash-command handler (spec piegap T-006) ──────────────
+    // -- /inbox slash-command handler (spec piegap T-006) --------------
 
     /// Handle the `/inbox` slash-command family (FR-004).
     ///
@@ -12358,16 +12346,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              |---|---|---|---|---|\n",
         );
         for (i, entry) in entries.iter().enumerate() {
-            let id_short = if entry.id.len() > 8 {
-                &entry.id[..8]
-            } else {
-                &entry.id
-            };
-            let source_short = if entry.source_event_id.len() > 8 {
-                &entry.source_event_id[..8]
-            } else {
-                &entry.source_event_id
-            };
+            let id_short = short_id(&entry.id);
+            let source_short = short_id(&entry.source_event_id);
             let content_preview = truncate_field(&entry.content, 60);
             output.push_str(&format!(
                 "| {} | `{}` | `{}` | {} | {} |\n",
@@ -12758,24 +12738,27 @@ fn duration_secs_to_string(secs: i64) -> String {
 fn redact_secrets(input: &str) -> String {
     // API key patterns (Anthropic, OpenAI, etc.)
     // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static API_KEY_PATTERN: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").unwrap());
+    static API_KEY_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").expect("valid api-key regex")
+    });
 
     // Bearer token pattern
     // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static BEARER_PATTERN: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"(?i)(Bearer\s+[a-zA-Z0-9\-_\.]{20,})").unwrap());
+    static BEARER_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?i)(Bearer\s+[a-zA-Z0-9\-_\.]{20,})").expect("valid bearer regex")
+    });
 
     // AWS access key pattern
     // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static AWS_KEY_PATTERN: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap());
+    static AWS_KEY_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").expect("valid aws-key regex")
+    });
 
     // Generic key=value secrets
     // INVARIANT: static literal pattern, compilation cannot fail at runtime.
     static SECRET_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
         Regex::new(r"(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|auth)\s*[=:]\s*\S{8,})")
-            .unwrap()
+            .expect("valid secret regex")
     });
 
     let mut result = input.to_string();
@@ -12993,7 +12976,10 @@ autonomous execution and halt when the goal is satisfied.";
                 return;
             }
 
-            // Store the goal in session state (for now, just display confirmation)
+            // NOTE: goal persistence is not yet wired to session storage. Only
+            // the confirmation is shown; `/goal show`/`test` therefore always
+            // report "no goal set" until the storage round-trip lands (tracked
+            // by the piegap FR-011 goal-hook follow-up).
             let goal = GoalCondition::new(rest);
             let output = format!(
                 "## Goal Set\n\n**Goal:** {}\n\nThe agent will evaluate this goal after each turn\nand halt autonomous execution when it is satisfied.\n\nUse `/goal show` to check status or `/goal clear` to remove.",
@@ -13001,20 +12987,18 @@ autonomous execution and halt when the goal is satisfied.";
             );
             app.append_assistant_text(&output);
             app.status = format!("goal: set '{}'", rest);
-
-            // TODO: Persist goal to session storage
-            // For now, we just confirm the goal was set
         }
         "clear" => {
             app.append_assistant_text(
                 "## Goal Cleared\n\nThe autonomous stop goal has been removed.",
             );
             app.status = "goal: cleared".to_string();
-            // TODO: Clear goal from session storage
+            // NOTE: no session-storage entry exists yet to clear; nothing to do
+            // beyond the confirmation until goal persistence is implemented.
         }
         "show" => {
-            // TODO: Load goal from session storage
-            // For now, show placeholder
+            // NOTE: reads from session storage once goal persistence lands; the
+            // placeholder is the honest report while no goal can be stored.
             let output = r"## Current Goal
 
 No goal is currently set.
@@ -13024,8 +13008,8 @@ Use `/goal set <description>` to set a goal for autonomous execution.";
             app.status = "goal: none".to_string();
         }
         "test" => {
-            // TODO: Load goal and evaluate
-            // For now, show placeholder
+            // NOTE: requires a persisted goal plus a live GoalEvaluator; neither
+            // is available until goal persistence is implemented.
             let output = r"## Goal Test
 
 No goal is currently set to test.

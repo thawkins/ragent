@@ -104,7 +104,7 @@ fn drain_install(app: &mut App) {
     app.poll_plugin_store_install_result();
 }
 
-// ── ENTER installs and re-colours (FR-006, FR-011) ──────────────────────────
+// -- ENTER installs and re-colours (FR-006, FR-011) --------------------------
 
 #[tokio::test]
 async fn enter_installs_a_local_source_and_the_row_re_colours() {
@@ -168,7 +168,7 @@ async fn the_installed_plugin_lands_in_the_store_scan() {
     );
 }
 
-// ── Double-install guard (FR-014) ───────────────────────────────────────────
+// -- Double-install guard (FR-014) -------------------------------------------
 
 #[tokio::test]
 async fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
@@ -198,7 +198,7 @@ async fn a_second_enter_on_an_installed_result_is_refused_without_writing() {
     );
 }
 
-// ── Failure reporting (FR-024, FR-025) ──────────────────────────────────────
+// -- Failure reporting (FR-024, FR-025) --------------------------------------
 
 #[tokio::test]
 async fn a_non_https_source_is_refused_and_reported_without_panic() {
@@ -249,7 +249,7 @@ async fn a_missing_source_is_reported_as_a_failure() {
     assert!(last_message(&app).contains("[err]"));
 }
 
-// ── Report application semantics (FR-006, FR-011, FR-025) ───────────────────
+// -- Report application semantics (FR-006, FR-011, FR-025) -------------------
 
 #[test]
 fn a_success_result_re_colours_and_clears_the_installing_notice() {
@@ -343,7 +343,7 @@ fn a_foreign_store_result_never_fills_another_stores_panel() {
     );
 }
 
-// ── No install without ENTER (FR-022) ───────────────────────────────────────
+// -- No install without ENTER (FR-022) ---------------------------------------
 
 #[tokio::test]
 async fn typing_and_moving_never_spawn_an_install() {
@@ -392,7 +392,7 @@ async fn enter_with_no_result_highlighted_records_a_neutral_notice_and_installs_
     assert!(app.plugin_store_install_result.lock().unwrap().is_none());
 }
 
-// ── Poll plumbing (FR-025, FR-026) ──────────────────────────────────────────
+// -- Poll plumbing (FR-025, FR-026) ------------------------------------------
 
 #[test]
 fn polling_with_nothing_pending_is_a_noop() {

@@ -166,7 +166,7 @@ impl TriggerRuntime {
         let now = Instant::now();
         let mut inner = self.inner.lock();
 
-        // ── Step 1: Deduplication ────────────────────────────────────
+        // -- Step 1: Deduplication ------------------------------------
         // Check if we've seen this exact envelope content recently.
         let dedup = inner.dedup_cache.get(&envelope.dedup_hash).cloned();
         if let Some(entry) = &dedup {
@@ -181,7 +181,7 @@ impl TriggerRuntime {
             }
         }
 
-        // ── Step 2: Cycle suppression ────────────────────────────────
+        // -- Step 2: Cycle suppression --------------------------------
         // Check if this source is firing the same content repeatedly.
         let cycle = inner.cycles.get(&envelope.source_id).cloned();
         let suppressed = if let Some(c) = &cycle {
@@ -203,7 +203,7 @@ impl TriggerRuntime {
             return None;
         }
 
-        // ── Step 3: Update dedup cache ────────────────────────────────
+        // -- Step 3: Update dedup cache --------------------------------
         let count = dedup.as_ref().map(|e| e.count).unwrap_or(0);
         inner.dedup_cache.insert(
             envelope.dedup_hash,
@@ -213,7 +213,7 @@ impl TriggerRuntime {
             },
         );
 
-        // ── Step 4: Update cycle tracker ──────────────────────────────
+        // -- Step 4: Update cycle tracker ------------------------------
         let cycle_entry = inner.cycles.get(&envelope.source_id).cloned();
         let new_consecutive = if let Some(c) = &cycle_entry {
             if c.last_hash == envelope.dedup_hash {
@@ -234,7 +234,7 @@ impl TriggerRuntime {
             },
         );
 
-        // ── Step 5: Mark rule as fired if applicable ───────────────────
+        // -- Step 5: Mark rule as fired if applicable -------------------
         let rule_id = if envelope.source_kind == ragent_types::trigger::TriggerSourceKind::Dynamic {
             // For dynamic triggers, the source_id is the rule ID.
             if let Some(rule) = inner.rules.get_mut(&envelope.source_id) {
@@ -249,7 +249,7 @@ impl TriggerRuntime {
             None
         };
 
-        // ── Step 6: Return the fired result ───────────────────────────
+        // -- Step 6: Return the fired result ---------------------------
         debug!(
             envelope_id = %envelope.id,
             source_id = %envelope.source_id,

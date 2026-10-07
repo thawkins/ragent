@@ -294,7 +294,7 @@ fn write_cancel(response_path: &Path) {
     let _ = std::fs::write(response_path, b""); // INTENTIONAL: best-effort temp cleanup
 }
 
-// ── Temp directory helpers ──────────────────────────────────────────────────
+// -- Temp directory helpers --------------------------------------------------
 
 /// Resolve the base directory for askpass temp files for the given session.
 ///
@@ -326,7 +326,7 @@ const fn is_windows() -> bool {
     cfg!(target_os = "windows")
 }
 
-// ── Helper script body ──────────────────────────────────────────────────────
+// -- Helper script body ------------------------------------------------------
 
 /// The POSIX shell body of the askpass helper.
 ///
@@ -385,7 +385,7 @@ fi
 # sudo reads the password from the helper's stdout.
 printf '%s\n' "$PW"
 "#;
-// ── Tests ────────────────────────────────────────────────────────────────────
+// -- Tests --------------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "../tests/inline/askpass.rs"]

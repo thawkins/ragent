@@ -50,7 +50,7 @@ fn filtered_ids(browser: &PluginStoreBrowser) -> Vec<&str> {
         .collect()
 }
 
-// ── Filtering semantics (FR-008) ─────────────────────────────────────────────
+// -- Filtering semantics (FR-008) ---------------------------------------------
 
 #[test]
 fn a_query_matches_a_substring_anywhere_in_a_field() {
@@ -91,7 +91,7 @@ fn clearing_a_no_match_query_restores_the_full_set_at_the_top() {
     assert_eq!(browser.scroll, 0, "the viewport returns to the top");
 }
 
-// ── Cursor movement (FR-010) ─────────────────────────────────────────────────
+// -- Cursor movement (FR-010) -------------------------------------------------
 
 #[test]
 fn the_cursor_clamps_within_the_filtered_subset_not_the_full_list() {
@@ -147,7 +147,7 @@ fn moving_down_then_up_returns_to_the_original_row() {
     assert_eq!(browser.selected().expect("selected").id, "a");
 }
 
-// ── Query editing (FR-009) ───────────────────────────────────────────────────
+// -- Query editing (FR-009) ---------------------------------------------------
 
 #[test]
 fn set_query_replaces_rather_than_appends_to_the_query() {
@@ -239,7 +239,7 @@ fn edit_or_close_is_a_noop_without_a_panel() {
     assert!(app.plugin_store.is_none());
 }
 
-// ── State transitions (FR-008, FR-012) ───────────────────────────────────────
+// -- State transitions (FR-008, FR-012) ---------------------------------------
 
 #[test]
 fn a_refresh_replaces_the_entry_list_rather_than_appending() {
@@ -311,7 +311,7 @@ fn has_results_tracks_rows_across_every_status() {
     assert!(!browser.has_results());
 }
 
-// ── Dismissal leaves no side effects (FR-012) ────────────────────────────────
+// -- Dismissal leaves no side effects (FR-012) --------------------------------
 
 #[test]
 fn closing_a_loaded_panel_discards_the_browser_and_requests_a_repaint() {

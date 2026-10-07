@@ -6,112 +6,24 @@
 //! Mirrors `test_scoreboard_report.rs` with `OutputFormat::Imrad` and
 //! `## Abstract` as the first body section.
 
-use chrono::{TimeZone, Utc};
+#[path = "support/scoreboard_fixture.rs"]
+mod scoreboard_fixture;
+
 use ragent_research::OutputFormat;
-use ragent_research::cite_checker::CitationCheckResult;
-use ragent_research::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-use ragent_research::corpus_critic::CorpusCriticReport;
-use ragent_research::document::{ResearchDocument, assemble_document};
-use ragent_research::item::ResearchItem;
-use ragent_research::research_name::ResearchName;
-use ragent_research::source::Source;
+use ragent_research::contradiction::ContradictionGraph;
+use ragent_research::document::assemble_document;
 use ragent_research::synthesis::SynthesisAudit;
-use std::path::PathBuf;
 
-/// Build a minimal [`ResearchItem`] for tests.
-fn sample_item() -> ResearchItem {
-    let name = ResearchName::new("scoreboard-imrad").expect("valid name");
-    ResearchItem::new(name, "Scoreboard Test", "scoreboard verification")
-}
-
-/// Build an empty IMRaD-layout [`ResearchDocument`].
-fn empty_doc(item: ResearchItem) -> ResearchDocument {
-    ResearchDocument {
-        item,
-        summary: String::new(),
-        findings: Vec::new(),
-        top_implications: Vec::new(),
-        cross_references: Vec::new(),
-        open_questions: Vec::new(),
-        concepts: None,
-        contradiction_graph: None,
-        loci: None,
-        depth_investigation: None,
-        evidence_digest: None,
-        triple_draft: None,
-        cross_locus_reconcile: None,
-        source_tensions: None,
-        synthesis_audit: None,
-        template_body: None,
-        corpus_critic: None,
-        gap_fetch: None,
-        surgical_patch: None,
-        cite_check: None,
-        polish: None,
-        readability_audit: None,
-        decomposed_queries: Vec::new(),
-        output_format: OutputFormat::Imrad,
-        brief: None,
-        comparison_table: None,
-        evaluation_scorecard: None,
-        provider_stats: None,
-    }
-}
-
-/// Build a `Source::Web` with controlled relevance, body, and date fields.
-fn web_source(
-    domain: &str,
-    relevance: &str,
-    body: &str,
-    published_at: Option<chrono::DateTime<Utc>>,
-) -> Source {
-    Source::Web {
-        url: format!("https://{domain}/article"),
-        title: format!("Article on {domain}"),
-        captured_at: Utc::now(),
-        published_at,
-        body_path: PathBuf::from("sources/web-01.md"),
-        body: body.to_string(),
-        relevance: relevance.to_string(),
-        search_tool: "mf_search".into(),
-        search_engine: "openalex".into(),
-        content_type: None,
-        page_type: None,
-        media_type: "page".into(),
-        language: None,
-        oa_recovery: None,
-        author: None,
-    }
-}
-
-/// Corpus critic report pre-configured for the example in the spec (74, pass).
-fn sample_critic() -> CorpusCriticReport {
-    CorpusCriticReport {
-        score: 74,
-        coverage_score: 60,
-        evidence_score: 80,
-        balance_score: 70,
-        tension_score: 100,
-        issues: Vec::new(),
-        gaps: Vec::new(),
-        recommendations: Vec::new(),
-        contested_ratio: 0,
-        shallow_dimensions: Vec::new(),
-        isolated_sources: Vec::new(),
-        passed: true,
-    }
-}
-
-fn scoreboard_index(body: &str) -> usize {
-    body.find("## Corpus Quality Scoreboard")
-        .expect("scoreboard section must be present")
-}
+use scoreboard_fixture::{
+    empty_doc, local_source, sample_cite_check, sample_contradiction_graph, sample_critic,
+    sample_item, scoreboard_index, ts_2019, ts_2025, web_source,
+};
 
 #[test]
 fn test_imrad_scoreboard_placed_after_title_before_abstract() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let doc = empty_doc(item);
+    let doc = empty_doc(item, OutputFormat::Imrad);
     let assembled = assemble_document(&doc);
 
     let title_pos = assembled.body.find("# Title:").expect("title present");
@@ -130,7 +42,7 @@ fn test_imrad_scoreboard_placed_after_title_before_abstract() {
 fn test_imrad_scoreboard_score_line_grade_and_meter_from_critic() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let mut doc = empty_doc(item);
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
     doc.corpus_critic = Some(sample_critic());
     let assembled = assemble_document(&doc);
 
@@ -153,7 +65,7 @@ fn test_imrad_scoreboard_score_line_grade_and_meter_from_critic() {
 fn test_imrad_scoreboard_critic_subscore_line() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let mut doc = empty_doc(item);
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
     doc.corpus_critic = Some(sample_critic());
     let assembled = assemble_document(&doc);
 
@@ -170,7 +82,7 @@ fn test_imrad_scoreboard_critic_subscore_line() {
 fn test_imrad_scoreboard_synthesis_audit_fallback() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let mut doc = empty_doc(item);
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
     doc.synthesis_audit = Some(SynthesisAudit {
         overall_score: 82,
         recommendation: "proceed".into(),
@@ -191,7 +103,7 @@ fn test_imrad_scoreboard_synthesis_audit_fallback() {
 fn test_imrad_scoreboard_not_graded_when_no_scores() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let doc = empty_doc(item);
+    let doc = empty_doc(item, OutputFormat::Imrad);
     let assembled = assemble_document(&doc);
 
     let sb = &assembled.body
@@ -210,21 +122,11 @@ fn test_imrad_scoreboard_not_graded_when_no_scores() {
 fn test_imrad_scoreboard_source_facts_line() {
     let mut item = sample_item();
     item.sources = vec![
-        web_source(
-            "example.com",
-            "Very high",
-            "body",
-            Some(Utc.with_ymd_and_hms(2019, 5, 1, 0, 0, 0).unwrap()),
-        ),
-        web_source(
-            "other.org",
-            "Medium",
-            "body",
-            Some(Utc.with_ymd_and_hms(2025, 1, 15, 0, 0, 0).unwrap()),
-        ),
+        web_source("example.com", "Very high", "body", Some(ts_2019())),
+        web_source("other.org", "Medium", "body", Some(ts_2025())),
         web_source("undated.io", "High", "body", None),
     ];
-    let mut doc = empty_doc(item);
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
     doc.summary = "Claim [#1] and claim [#2] and claim [#3].".into();
     let assembled = assemble_document(&doc);
 
@@ -244,17 +146,9 @@ fn test_imrad_scoreboard_source_facts_line() {
 
 #[test]
 fn test_imrad_scoreboard_local_only_omits_domains_and_relevance() {
-    let name = ResearchName::new("scoreboard-imrad-local").expect("valid name");
-    let mut item = ResearchItem::new(name, "Scoreboard Test", "local only");
-    item.sources = vec![Source::Local {
-        path: "src/lib.rs".into(),
-        kind: ragent_research::source::LocalSourceKind::InProject,
-        captured_at: Utc::now(),
-        body_path: PathBuf::from("sources/local-01.md"),
-        relevance: "High".into(),
-        body: "fn main() {}".into(),
-    }];
-    let doc = empty_doc(item);
+    let mut item = sample_item();
+    item.sources = vec![local_source()];
+    let doc = empty_doc(item, OutputFormat::Imrad);
     let assembled = assemble_document(&doc);
 
     let sb = &assembled.body
@@ -277,29 +171,9 @@ fn test_imrad_scoreboard_local_only_omits_domains_and_relevance() {
 fn test_imrad_scoreboard_contradictions_and_citation_check_line() {
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "It is mortal.", None)];
-    let mut doc = empty_doc(item);
-    let claim_a = ContradictionClaim {
-        text: "Claim A".into(),
-        source_index: 1,
-        source_kind: "web".into(),
-        source_path: "https://example.com/article".into(),
-    };
-    let claim_b = ContradictionClaim {
-        text: "Claim B".into(),
-        source_index: 1,
-        source_kind: "web".into(),
-        source_path: "https://example.com/article".into(),
-    };
-    doc.contradiction_graph = Some(ContradictionGraph {
-        edges: vec![ContradictionEdge {
-            claim_a,
-            claim_b,
-            dimension: "mortality".into(),
-            note: "conflicting claims".into(),
-            strength: 78,
-        }],
-    });
-    doc.cite_check = Some(CitationCheckResult::empty());
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
+    doc.contradiction_graph = Some(sample_contradiction_graph());
+    doc.cite_check = Some(sample_cite_check());
     let assembled = assemble_document(&doc);
 
     let sb = &assembled.body
@@ -312,7 +186,7 @@ fn test_imrad_scoreboard_contradictions_and_citation_check_line() {
 
 #[test]
 fn test_imrad_scoreboard_omitted_for_empty_skeleton() {
-    let doc = empty_doc(sample_item());
+    let doc = empty_doc(sample_item(), OutputFormat::Imrad);
     let assembled = assemble_document(&doc);
     assert!(
         !assembled.body.contains("## Corpus Quality Scoreboard"),
@@ -329,7 +203,7 @@ fn test_imrad_data_quality_summary_untouched_by_scoreboard() {
     // has data.)
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
-    let mut doc = empty_doc(item);
+    let mut doc = empty_doc(item, OutputFormat::Imrad);
     doc.corpus_critic = Some(sample_critic());
     doc.contradiction_graph = Some(ContradictionGraph::empty());
     let assembled = assemble_document(&doc);

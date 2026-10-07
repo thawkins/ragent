@@ -109,7 +109,7 @@ fn serialised_config_includes_only_enabled_sdd_flags() {
 
 #[test]
 fn sdd_merge_or_semantics_preserves_base_enabled() {
-    // Base has a flag enabled, overlay doesn't mention it → stays enabled.
+    // Base has a flag enabled, overlay doesn't mention it -> stays enabled.
     let mut base = SddConfig::default();
     base.constitution = true;
 
@@ -121,7 +121,7 @@ fn sdd_merge_or_semantics_preserves_base_enabled() {
 
 #[test]
 fn sdd_merge_or_semantics_overlay_enables_flag() {
-    // Base is empty, overlay enables a flag → result enabled.
+    // Base is empty, overlay enables a flag -> result enabled.
     let mut base = SddConfig::default();
     let mut overlay = SddConfig::default();
     overlay.data_model = true;
@@ -188,7 +188,7 @@ fn all_thirteen_sdd_flags_exist() {
     cfg.feedback_loop = true; // FR-017
     assert!(!cfg.is_empty(), "all flags enabled should not be empty");
 }
-// ── Edge-case tests for SddConfig (T-041, NFR-004) ──────────────────────────
+// -- Edge-case tests for SddConfig (T-041, NFR-004) --------------------------
 
 #[test]
 fn sdd_is_empty_false_when_single_flag_enabled() {

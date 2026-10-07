@@ -365,7 +365,7 @@ fn test_agent_web_fetch_tool_content_not_ok_takes_priority_over_readability() {
     );
 }
 
-// ── Mandatory readability enforcement tests ────────────────────────────
+// -- Mandatory readability enforcement tests ----------------------------
 
 /// Build a minimal `AgentToolContext` for fetch-adapter tests.
 fn test_tool_context() -> AgentToolContext {
@@ -826,7 +826,7 @@ fn test_build_research_session_wires_available_tools() {
     );
 }
 
-// ── Engine-exclusion adapter tests (spec researchnoacc, T-007) ─────────
+// -- Engine-exclusion adapter tests (spec researchnoacc, T-007) ---------
 
 /// A fake search tool that records the JSON input it was invoked with and
 /// emits a `results` array shaped like `mf_search` metadata.

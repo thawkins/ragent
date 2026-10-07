@@ -2,8 +2,8 @@
 //! T-011 / FR-016): pressing `Esc` while a goal-driven loop is running
 //! raises the loop's interrupt flag
 //! ([`SessionProcessor::request_loop_interrupt`]) and the agent loop aborts
-//! at the next inter-stage safe point — no further LLM request, no further
-//! tool execution — terminating with termination status `interrupted`
+//! at the next inter-stage safe point - no further LLM request, no further
+//! tool execution - terminating with termination status `interrupted`
 //! ([`StopCondition::HumanIntervention`]). The session stays persisted and
 //! resumable: the partial assistant message is saved and the turn ends
 //! normally (`Ok`), never as a fatal error.
@@ -73,7 +73,7 @@ impl LlmClient for ScriptedClient {
             .expect("captured requests lock")
             .push(request);
         self.call_count.fetch_add(1, Ordering::SeqCst);
-        // The client is now "waiting on the model" — the interrupt race
+        // The client is now "waiting on the model" - the interrupt race
         // window opens here (the loop is inside the LLM stage).
         if let Some(tx) = &self.notify_chat {
             let _ = tx.send(());
@@ -298,7 +298,7 @@ fn drain_terminated(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> Vec<Eve
 /// Poll until the session's loop interrupt flag is armable (the loop is
 /// active), with a 5-second budget. The notify channel unblocks at LLM-call
 /// time, but under heavy scheduler load the scripted stream, tool phase and
-/// second LLM call can all complete before the test task resumes — by which
+/// second LLM call can all complete before the test task resumes - by which
 /// point the loop has finished and the interrupt flag is gone. Polling
 /// between attempts (asserting the loop is still active) makes the race
 /// window deterministic: either the flag is raised while the loop runs, or
@@ -342,7 +342,7 @@ fn think_call() -> ScriptedReply {
 }
 
 /// FR-016: `Esc` during a loop raises the interrupt flag, and the loop
-/// aborts at the next inter-stage safe point — after the first tool step,
+/// aborts at the next inter-stage safe point - after the first tool step,
 /// before the second LLM request. Termination status is `interrupted`, the
 /// turn ends normally (session persisted and resumable), and the loop is
 /// inactive afterwards.
@@ -387,7 +387,7 @@ async fn test_esc_between_iterations_stops_loop_with_interrupted() -> Result<()>
         .expect("channel open");
     // Under a loaded CI scheduler the scripted turn can outrun the test task:
     // once the notify fires, the whole first iteration can finish before this
-    // task is rescheduled, so the loop is already past iteration 1 — or done —
+    // task is rescheduled, so the loop is already past iteration 1 - or done -
     // by the time we poll. If the loop is inactive only because the turn
     // completed (goal achieved with no further scripted replies), that is a
     // schedule artifact, not a behavioural failure: the turn ended normally.
@@ -444,7 +444,7 @@ async fn test_esc_between_iterations_stops_loop_with_interrupted() -> Result<()>
         "the reason names the user interruption: {reason:?}"
     );
     assert!(!processor.loop_active(&session.id).await);
-    // FR-016: the session is persisted and resumable — it still exists.
+    // FR-016: the session is persisted and resumable - it still exists.
     assert!(
         processor
             .session_manager
@@ -456,7 +456,7 @@ async fn test_esc_between_iterations_stops_loop_with_interrupted() -> Result<()>
     Ok(())
 }
 
-/// FR-016: the interrupt races a live LLM response — the flag is raised the
+/// FR-016: the interrupt races a live LLM response - the flag is raised the
 /// moment the scripted client is called (the stream is still open), so the
 /// loop stops at the safe point between the LLM response and the tool phase:
 /// the scripted tool call never executes.
@@ -495,7 +495,7 @@ async fn test_esc_mid_llm_response_stops_before_tool_phase() -> Result<()> {
     // the turn can outrun the test task and finish before the interrupt can
     // arm (the script's last reply repeats, so a runaway turn keeps calling
     // the scripted client until `max_steps` stops it). That is a schedule
-    // artifact, not a behavioural failure — accept any completed turn and let
+    // artifact, not a behavioural failure - accept any completed turn and let
     // the normal-path assertions cover the intended scenario.
     if !raise_interrupt_until_armed(&processor, &session.id).await {
         let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), turn)
@@ -564,7 +564,7 @@ async fn test_esc_mid_llm_response_stops_before_tool_phase() -> Result<()> {
     Ok(())
 }
 
-/// FR-016: the interrupt takes precedence over the budget gate — an `Esc`
+/// FR-016: the interrupt takes precedence over the budget gate - an `Esc`
 /// interrupt raised before the run starts terminates as `interrupted`, not
 /// `budget_exhausted`, and no LLM request is sent at all.
 #[tokio::test]
@@ -611,7 +611,7 @@ async fn test_interrupt_wins_over_budget_gate() -> Result<()> {
 }
 
 /// Raising the interrupt outside an active loop is a no-op (`false`), and a
-/// plain chat turn is unaffected — no `LoopTerminated` publication.
+/// plain chat turn is unaffected - no `LoopTerminated` publication.
 #[tokio::test]
 async fn test_interrupt_without_loop_is_noop() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(64));
@@ -651,7 +651,7 @@ async fn test_interrupt_without_loop_is_noop() -> Result<()> {
 }
 
 /// FR-016: after the interrupt the turn ends with `MessageEnd { Cancelled }`
-/// and the partial assistant message is persisted — the transcript stays
+/// and the partial assistant message is persisted - the transcript stays
 /// well-formed (user message + assistant message) for the resume path.
 #[tokio::test]
 async fn test_interrupted_turn_is_persisted_for_resume() -> Result<()> {

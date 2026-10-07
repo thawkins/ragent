@@ -184,7 +184,7 @@ fn test_govcreate_usage_block_is_ascii_and_prefixed() {
 #[test]
 fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     // Regression test for the table-cell misalignment: the renderer used to
-    // drop the trailing backtick from the long `/spec govcreate …` code span,
+    // drop the trailing backtick from the long `/spec govcreate ...` code span,
     // which under-sized the command column and pushed `content-ref` /
     // `target-folder` into the Description column.  The fix in
     // `md_worker::preprocess_markdown_tables` appends a wrapping-safe space
@@ -203,7 +203,7 @@ fn test_spec_help_govcreate_row_keeps_positionals_in_command_column() {
     // Identify the govcreate row (the multi-line block that mentions
     // "govcreate"). The row runs from the line carrying the govcreate command
     // span to the closing border; continuation lines are cell data, so the
-    // only reliable terminator is the `+-…-+` border.
+    // only reliable terminator is the `+-...-+` border.
     let mut in_row = false;
     let mut row_text = String::new();
     for line in body.lines() {

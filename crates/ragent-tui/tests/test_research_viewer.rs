@@ -42,7 +42,7 @@ fn test_markdown_to_lines_mermaid_block_shows_label() {
 
 #[test]
 fn test_markdown_to_lines_image_renders_placeholder() {
-    let base = PathBuf::from("/tmp");
+    let base = PathBuf::from("target/temp");
     let md = "![diagram](assets/diagram.png)";
     let lines = markdown_to_lines_testable(md, &base, 80);
     let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
@@ -107,8 +107,8 @@ mod interaction_tests {
     fn make_research_view() -> ResearchViewState {
         ResearchViewState {
             name: "test".to_string(),
-            path: PathBuf::from("/tmp/research/test/RESEARCH.md"),
-            base_dir: PathBuf::from("/tmp/research/test"),
+            path: PathBuf::from("target/temp/research/test/RESEARCH.md"),
+            base_dir: PathBuf::from("target/temp/research/test"),
             markdown: "line\n".repeat(200),
             scroll_offset: 10,
             max_scroll: 100,

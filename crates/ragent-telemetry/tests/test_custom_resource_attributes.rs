@@ -5,7 +5,7 @@
 //!
 //! These tests exercise the **full end-to-end path** from
 //! `telemetry.otel.resource_attributes` in the config through
-//! `TelemetrySubsystem::new()` → `build_resource()` → exported `Resource`,
+//! `TelemetrySubsystem::new()` -> `build_resource()` -> exported `Resource`,
 //! verifying that:
 //!
 //! 1. Custom resource attributes appear in the exported resource.
@@ -23,7 +23,7 @@
 //!
 //! Unlike `test_resource_attributes.rs`, which builds the `Resource`
 //! directly, these tests go through `TelemetrySubsystem::new()` so the
-//! config → `build_resource` → export path is exercised in full.
+//! config -> `build_resource` -> export path is exercised in full.
 
 #![cfg(feature = "telemetry")]
 
@@ -36,7 +36,7 @@ use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsystem};
 
-// ── Helpers ──────────────────���────────────────────────────────────────────
+// -- Helpers ------------------���--------------------------------------------
 
 /// Build a `TelemetrySubsystem` from the given config, then build a
 /// *separate* in-memory collector provider that shares the same resource
@@ -47,7 +47,7 @@ use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsys
 /// `build_resource` behaviour by reconstructing the resource from the
 /// config. The export-level behaviour of `build_resource` is already
 /// covered by `test_resource_attributes.rs`, so here we focus on the
-/// config → subsystem wiring and the sensitive-data guard at the config
+/// config -> subsystem wiring and the sensitive-data guard at the config
 /// level.
 ///
 /// For the export-level sensitive-data guard, we use a direct
@@ -131,11 +131,11 @@ fn resource_attr(metrics: &[ResourceMetrics], key: &str) -> Option<String> {
     let owned_key: opentelemetry::Key = key.to_string().into();
     metrics
         .first()
-        .and_then(|rm| rm.resource.get(&owned_key))
+        .and_then(|rm| rm.resource().get(&owned_key))
         .map(|v| v.as_str().to_string())
 }
 
-// ── 1. Custom resource attributes appear in the export ───────────────────
+// -- 1. Custom resource attributes appear in the export -------------------
 
 /// Custom `resource_attributes` from config appear in the exported
 /// resource (FR-026).
@@ -194,7 +194,7 @@ fn test_custom_attributes_coexist_with_static() {
     );
 }
 
-// ── 2. Empty / absent resource_attributes ────────────────────────────────
+// -- 2. Empty / absent resource_attributes --------------------------------
 
 /// An absent `resource_attributes` map produces only the static attributes.
 #[test]
@@ -216,7 +216,7 @@ fn test_absent_resource_attributes_produces_only_static() {
     assert!(resource_attr(&metrics, "deployment.environment").is_none());
 }
 
-// ── 3. Sensitive-data guard at the export level ──────────────────────────
+// -- 3. Sensitive-data guard at the export level --------------------------
 
 /// An API key in `resource_attributes` is redacted in the export (FR-034).
 #[test]
@@ -367,7 +367,7 @@ fn test_mixed_safe_and_sensitive_resource_attributes() {
     );
 }
 
-// ── 4. Subsystem config accessor ─────────────────────────────────────────
+// -- 4. Subsystem config accessor -----------------------------------------
 
 /// The subsystem's config accessor preserves the `resource_attributes`
 /// map (FR-026).
@@ -398,7 +398,7 @@ fn test_subsystem_config_preserves_resource_attributes() {
     assert_eq!(stored.len(), 2);
 }
 
-/// The subsystem preserves a sensitive value in the config accessor — the
+/// The subsystem preserves a sensitive value in the config accessor - the
 /// sanitisation happens at build time, not in the config (FR-034).
 #[test]
 fn test_subsystem_config_preserves_sensitive_value_raw() {
@@ -418,7 +418,7 @@ fn test_subsystem_config_preserves_sensitive_value_raw() {
     );
 }
 
-// ── 5. Config serde for resource_attributes ──────────────────────────────
+// -- 5. Config serde for resource_attributes ------------------------------
 
 /// `telemetry.otel.resource_attributes` deserialises from JSON (FR-026).
 #[test]
@@ -475,7 +475,7 @@ fn test_resource_attributes_serde_roundtrip() {
     assert_eq!(parsed.resource_attributes, config.resource_attributes);
 }
 
-// ── 6. Config merge unions resource_attributes ──────────────────────────
+// -- 6. Config merge unions resource_attributes --------------------------
 
 /// `TelemetryConfig::merge` unions `resource_attributes` from base and
 /// overlay (FR-026).
@@ -561,7 +561,7 @@ fn test_config_merge_disabled_overlay_contributes_resource_attributes() {
     );
 }
 
-// ── 7. service_name is independent of resource_attributes ────────────────
+// -- 7. service_name is independent of resource_attributes ----------------
 
 /// `service.name` comes from `OtelConfig::service_name`, not from
 /// `resource_attributes`; both appear in the export (FR-004 + FR-026).
@@ -570,7 +570,7 @@ fn test_service_name_independent_of_resource_attributes() {
     let mut config = config_with_resource_attrs(HashMap::new());
     config.service_name = "custom-ragent".to_string();
     // Even if a user puts service.name in resource_attributes, the config
-    // field takes precedence for the static attribute — but both would
+    // field takes precedence for the static attribute - but both would
     // appear if the user explicitly adds it. The standard path is the
     // config field.
     config

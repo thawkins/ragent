@@ -165,7 +165,7 @@ impl Tool for PatchTool {
     }
 }
 
-// ── Unified diff parser ──────────────────────────────────────────
+// -- Unified diff parser ------------------------------------------
 
 /// A parsed file-level patch containing one or more hunks.
 #[derive(Debug)]
@@ -318,7 +318,7 @@ fn parse_range(s: &str) -> Result<(usize, usize)> {
     }
 }
 
-// ── Hunk application ─────────────────────────────────────────────
+// -- Hunk application ---------------------------------------------
 
 /// Apply a single hunk to a set of file lines.
 ///

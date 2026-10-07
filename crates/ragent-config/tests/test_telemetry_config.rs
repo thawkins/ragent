@@ -7,7 +7,7 @@
 
 use ragent_config::{Config, OtelConfig, OtelProtocol, TelemetryConfig};
 
-// ── Config-level deserialization ──────────────────────────────────────────
+// -- Config-level deserialization ------------------------------------------
 
 #[test]
 fn test_config_has_telemetry_field_defaulting_to_disabled() {
@@ -122,7 +122,7 @@ fn test_config_without_telemetry_block_uses_defaults() {
     assert_eq!(config.telemetry.otel.endpoint, "http://localhost:4318");
 }
 
-// ── Config merge ─────────────────────────────────────────────────────────
+// -- Config merge ---------------------------------------------------------
 
 #[test]
 fn test_config_merge_preserves_telemetry_enabled() {
@@ -153,7 +153,7 @@ fn test_config_merge_overlay_enables_telemetry() {
     assert_eq!(merged.telemetry.otel.endpoint, "https://overlay:4318");
 }
 
-// ── Legacy flag (T-019) ──────────────────────────────────────────────────
+// -- Legacy flag (T-019) --------------------------------------------------
 
 #[test]
 fn test_legacy_flag_enables_telemetry_when_otel_disabled() {
@@ -189,7 +189,7 @@ fn test_legacy_flag_false_does_not_enable() {
     assert!(!tc.is_enabled());
 }
 
-// ── OtelConfig standalone ─────────────────────────────────────────────────
+// -- OtelConfig standalone -------------------------------------------------
 
 #[test]
 fn test_otel_config_validate_accepts_valid_enabled() {

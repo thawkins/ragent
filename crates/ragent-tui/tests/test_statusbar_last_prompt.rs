@@ -42,7 +42,7 @@ fn render_app_to_string(app: &mut App) -> String {
 /// Find the character (column) index of `needle` in `row`.
 ///
 /// `str::find` returns a byte offset; the status bar contains multi-byte
-/// glyphs (`●`, `…`) so the byte offset is not the rendered column.
+/// glyphs (`●`, `...`) so the byte offset is not the rendered column.
 fn char_col_of(row: &str, needle: &str) -> usize {
     let byte_idx = row
         .find(needle)
@@ -50,9 +50,9 @@ fn char_col_of(row: &str, needle: &str) -> usize {
     row[..byte_idx].chars().count()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // prompt_display_text unit tests
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[test]
 fn test_prompt_display_text_empty_prompt() {
@@ -88,9 +88,9 @@ fn test_prompt_display_text_multibyte_chars_counted_as_chars() {
     assert_eq!(display.chars().count(), 32 + 4 + 2);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Slash-command submissions populate the tag
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_execute_slash_command_sets_last_prompt() {
@@ -143,9 +143,9 @@ async fn test_statusbar_slash_command_tag_truncated_like_prompts() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────��───────────
+// -----------------------------------------------------------------��-----------
 // Rendered status-bar integration tests
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[test]
 fn test_statusbar_renders_last_prompt_tag() {

@@ -157,6 +157,19 @@ fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
     }
 }
 
+/// The `/mcp` report shown when a server id is neither in `ragent.json` nor
+/// contributed by a plugin.
+///
+/// Shared by the pre-ledger guard and the (in practice unreachable) post-guard
+/// re-check in [`AppState::set_mcp_server_enabled`] so the wording lives in one
+/// place.
+fn unknown_mcp_server_msg(server_id: &str) -> String {
+    format!(
+        "From: /mcp\n\n[err] `{server_id}` is not a known MCP server \
+         (not in ragent.json and not contributed by a plugin)."
+    )
+}
+
 /// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a
 /// securely-created temp file.
 ///
@@ -579,7 +592,7 @@ pub enum ProviderSetupStep {
         /// Index of the highlighted provider in [`PROVIDER_LIST`].
         selected: usize,
     },
-    // ── GitLab setup steps ────────────────────────────────────────────
+    // -- GitLab setup steps --------------------------------------------
     /// Multi-field GitLab configuration: instance URL, PAT, username.
     ///
     /// Tab cycles between fields; Enter validates and saves.
@@ -604,7 +617,7 @@ pub enum ProviderSetupStep {
         /// Token being validated.
         token: String,
     },
-    // ── Router (Model Router) setup steps ─────────────────────────────
+    // -- Router (Model Router) setup steps -----------------------------
     /// Configure the router virtual provider cluster: provider multi-selection
     /// and tier-bucket assignment (FR-003).
     SetupRouter {
@@ -640,7 +653,7 @@ pub enum ProviderSetupStep {
         /// Which tier bucket the model will be assigned to.
         target_tier: ragent_llm::providers::router_config::Tier,
     },
-    // ── Telemetry setup step ─────────────────────────────────────────
+    // -- Telemetry setup step -----------------------------------------
     /// Multi-field telemetry (OpenTelemetry) configuration: endpoint, protocol,
     /// export interval, timeout, and internal Prometheus port.
     ///
@@ -2155,7 +2168,7 @@ pub struct App {
     pub agent_row_kill_areas: Vec<Rect>,
     /// Parallel task IDs for the agent kill click targets.
     pub agent_row_kill_task_ids: Vec<String>,
-    // ── Active-agents panel caches (FR-003, FR-008) ────────────────────────
+    // -- Active-agents panel caches (FR-003, FR-008) ------------------------
     /// Cached set of custom-agent names for the active-agents panel.
     /// Rebuilt only when `custom_agent_defs.len()` changes (FR-003).
     pub active_agents_custom_names: std::collections::HashSet<String>,
@@ -2420,7 +2433,7 @@ pub struct App {
     pub team_members: Vec<TeamMember>,
     /// Per-teammate message counters: `agent_id -> (sent, received)`.
     pub team_message_counts: HashMap<String, (u32, u32)>,
-    // ── Teams panel caches (FR-003, FR-009) ─────────────────────────────────
+    // -- Teams panel caches (FR-003, FR-009) ---------------------------------
     /// Cached per-agent task counts `(claimed, completed)` for the teams
     /// panel.  Updated by `TeamTaskClaimed` / `TeamTaskCompleted` events
     /// so the render path never reads the task store from disk (FR-009).
@@ -2562,20 +2575,20 @@ pub struct App {
     /// eliminates the per-cache-miss `std::thread::spawn` overhead that the
     /// previous implementation incurred on every streaming text delta.
     pub md_worker: crate::app::MdWorker,
-    // ── Status bar span cache (FR-003, FR-008) ──────────────────────────────
+    // -- Status bar span cache (FR-003, FR-008) ------------------------------
     /// Cached rendered status-bar spans and the signature they were built
     /// from.  When the signature matches on the next render, the cached
     /// spans are reused directly, avoiding per-frame `format!()` and
     /// `String::clone()` calls (FR-003).
     pub status_bar_cache: Option<crate::app::StatusBarCache>,
-    // ── Model picker row cache (FR-003) ─────────────────────────────────────
+    // -- Model picker row cache (FR-003) -------------------------------------
     /// Cached pre-built table rows for the `SelectModel` picker dialog.
     /// Rebuilt only when the model list changes (new discovery results),
     /// avoiding per-frame `format!()` calls for every model's context
     /// window, cost tier, thinking levels, and feature indicators.
     pub model_picker_rows_cache: Option<crate::app::ModelPickerRowsCache>,
 
-    // ── Message timeline line cache (FR-003, FR-006) ────────────────────────
+    // -- Message timeline line cache (FR-003, FR-006) ------------------------
     /// Per-message cache of rendered `Line<'static>` groups, so `render_messages`
     /// can avoid re-rendering the entire timeline every frame.  Each entry
     /// holds the lines for one message; the cache is rebuilt incrementally
@@ -2617,7 +2630,7 @@ pub struct App {
     /// `(input text, cursor, keyboard selection, inner width)`.
     pub input_render_cache: InputRenderCache,
 
-    // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
+    // -- Autopilot (M2 Task 2.1) ---------------------------------------------
     /// True when autopilot mode is active. Agent continues autonomously until
     /// agent_complete is called, limits are hit, or the user runs /autopilot off.
     pub autopilot_enabled: bool,
@@ -2639,13 +2652,13 @@ pub struct App {
     /// signalled completion during the current turn.
     pub last_task_completed_at: Option<std::time::Instant>,
 
-    // ── /spec impl sequential driver ────────────────────────────────────────
+    // -- /spec impl sequential driver ----------------------------------------
     /// Active `/spec impl` run, if any. Drives tasks one at a time: after each
     /// agent turn ends, the TUI checks the just-run task's status and, if
     /// completed, dispatches the next task's prompt.
     pub spec_impl_state: Option<SpecImplState>,
 
-    // ── Processing timing (for log breakdown) ───────────────────────────────
+    // -- Processing timing (for log breakdown) -------------------------------
     /// Wall-clock instant when the current prompt was sent (for total elapsed time).
     pub prompt_start_time: Option<std::time::Instant>,
     /// Cumulative time spent in tool calls during this processing cycle.
@@ -2653,11 +2666,11 @@ pub struct App {
     /// Cumulative time spent waiting for LLM responses during this processing cycle.
     pub llm_time_ms: u64,
 
-    // ── Plan approval (M2 Task 2.2) ────────────────────────────────────────    /// When Some, the plan approval overlay is shown. Holds the plan text and
+    // -- Plan approval (M2 Task 2.2) ----------------------------------------    /// When Some, the plan approval overlay is shown. Holds the plan text and
     /// the agent to restore on approval.
     pub plan_approval_pending: Option<PlanApprovalState>,
 
-    // ── Agent role mode (M2 Task 2.3) ───────────────────────────────────────
+    // -- Agent role mode (M2 Task 2.3) ---------------------------------------
     /// Currently active role mode. None = normal (general-purpose) mode.
     pub role_mode: Option<RoleMode>,
     /// Running HTTP API server handle. `None` when the server is disabled (default).
@@ -2667,7 +2680,7 @@ pub struct App {
     /// Bearer token for the HTTP API. Randomly generated on `/webapi enable`.
     pub webapi_token: Option<String>,
 
-    // ── Memory status (M7-T3) ─────────────────────────────────────────────────
+    // -- Memory status (M7-T3) -------------------------------------------------
     /// Cached count of structured memories (SQLite).
     pub memory_entry_count: u64,
     /// Atomic cache updated by the off-thread refresh query.
@@ -2691,7 +2704,7 @@ pub struct App {
     /// Paths of configuration files that were loaded at startup (displayed in message window).
     pub config_paths: Vec<std::path::PathBuf>,
 
-    // ── Router status (FR-044-FR-049) ────────────────────────────────────────
+    // -- Router status (FR-044-FR-049) ----------------------------------------
     /// Whether the router provider is the active provider and routing is enabled.
     pub router_enabled: bool,
     /// The last tier selected by the router for the most recent request.
@@ -2716,14 +2729,14 @@ pub struct App {
     /// halt and Esc keeps the agent running (nothing is stopped until Yes).
     pub pending_stop_confirm: bool,
 
-    // ── Research progress (`/research create`) ───────────────────────────────
+    // -- Research progress (`/research create`) -------------------------------
     /// Live progress trackers for all running/completed `/research create`
     /// runs. Each `/research create` invocation pushes a new tracker here so
     /// the results of older research runs remain visible in the message
     /// window instead of being overwritten by the latest run.
     pub research_progress: Vec<crate::research_progress::ResearchProgress>,
 
-    // ── Skill-registry cache (slash autocomplete hot path) ──────────────────
+    // -- Skill-registry cache (slash autocomplete hot path) ------------------
     /// Cached skill registry, lazily populated by [`App::skill_registry`].
     pub skill_registry_cache: Option<ragent_agent::skill::SkillRegistry>,
     /// `skill_dirs` from the last config load, paired with the cache above.
@@ -2731,7 +2744,7 @@ pub struct App {
     /// When the skill-registry cache was last refreshed from disk.
     pub skill_registry_last_refresh: std::time::Instant,
 
-    // ── Run-cost summary banner (FR-012) ────────────────────────────────────
+    // -- Run-cost summary banner (FR-012) ------------------------------------
     /// Transient one-line run-complete banner shown after an agent run ends.
     ///
     /// Populated from `Event::RunCostSummary` and dismissed on the next
@@ -2742,7 +2755,7 @@ pub struct App {
     /// When the run-cost banner was first shown, for auto-dismissal.
     pub run_cost_banner_at: Option<std::time::Instant>,
 
-    // ── Trigger runtime (FR-002, FR-003) ───────────────────────────────────
+    // -- Trigger runtime (FR-002, FR-003) -----------------------------------
     /// Shared trigger runtime for dynamic trigger rules and MCP notification
     /// push events. `None` until the trigger system is initialised (which
     /// happens lazily when the first session is created or when the user
@@ -3228,10 +3241,7 @@ impl App {
         // server must not silently erase a previously persisted disable entry
         // and then only afterwards report the id as invalid.
         if enabled && config.is_none() {
-            return format!(
-                "From: /mcp\n\n[err] `{server_id}` is not a known MCP server \
-                 (not in ragent.json and not contributed by a plugin)."
-            );
+            return unknown_mcp_server_msg(server_id);
         }
 
         // Persist to the global ledger first: a failure must leave the running
@@ -3265,7 +3275,11 @@ impl App {
 
         if enabled {
             let Some(config) = config else {
-                unreachable!("validated above: enable requires a known config");
+                // Unreachable in practice: the guard above rejects enabling an
+                // unknown server before the ledger is touched. Return an error
+                // string instead of panicking so a future invariant change
+                // degrades to a message rather than a crash on the event loop.
+                return unknown_mcp_server_msg(server_id);
             };
             let outcome = {
                 let mut guard = client.write().await;

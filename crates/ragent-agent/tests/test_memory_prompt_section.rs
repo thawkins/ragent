@@ -40,7 +40,7 @@ fn make_config(max_rows: usize, max_tokens: Option<usize>) -> Config {
 
 #[test]
 fn test_default_budget_includes_many_memories() {
-    let dir = PathBuf::from("/tmp/test-memory-budget");
+    let dir = PathBuf::from("target/temp/test-memory-budget");
     let storage = make_storage_with_memories(&dir, 150, 200);
     let config = make_config(200, Some(4_000));
 
@@ -66,7 +66,7 @@ fn test_default_budget_includes_many_memories() {
 
 #[test]
 fn test_small_budget_caps_injection() {
-    let dir = PathBuf::from("/tmp/test-memory-small-budget");
+    let dir = PathBuf::from("target/temp/test-memory-small-budget");
     let storage = make_storage_with_memories(&dir, 10, 200);
     let config = make_config(100, Some(50));
 
@@ -84,7 +84,7 @@ fn test_small_budget_caps_injection() {
 
 #[test]
 fn test_row_cap_limits_fetch_when_budget_disabled() {
-    let dir = PathBuf::from("/tmp/test-memory-row-cap");
+    let dir = PathBuf::from("target/temp/test-memory-row-cap");
     let storage = make_storage_with_memories(&dir, 20, 10);
     let config = make_config(3, None);
 
@@ -106,7 +106,7 @@ fn test_row_cap_limits_fetch_when_budget_disabled() {
 
 #[test]
 fn test_infinite_budget_includes_all_rows() {
-    let dir = PathBuf::from("/tmp/test-memory-infinite");
+    let dir = PathBuf::from("target/temp/test-memory-infinite");
     let storage = make_storage_with_memories(&dir, 7, 20);
     let config = make_config(100, None);
 

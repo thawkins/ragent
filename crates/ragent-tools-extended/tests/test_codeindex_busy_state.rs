@@ -39,7 +39,7 @@ fn read_workspace_file(rel: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
-// ── Helper: build a graph index ─────────────────────────────────────────
+// -- Helper: build a graph index -----------------------------------------
 
 fn build_graph_index() -> CodeIndex {
     let config = CodeIndexConfig::default();
@@ -118,7 +118,7 @@ fn make_ctx(idx: Arc<CodeIndex>) -> ragent_tools_extended::ToolContext {
     }
 }
 
-// ── All four graph tools use with_retry and busy_output ────────────────
+// -- All four graph tools use with_retry and busy_output ----------------
 
 #[test]
 fn test_all_graph_tools_use_with_retry() {
@@ -156,7 +156,7 @@ fn test_all_graph_tools_use_busy_output() {
     }
 }
 
-// ── All four graph tools return codeindex_busy when index is locked ─────
+// -- All four graph tools return codeindex_busy when index is locked -----
 
 #[tokio::test]
 async fn test_explain_returns_busy_when_locked() {
@@ -238,7 +238,7 @@ async fn test_godnodes_returns_busy_when_locked() {
     assert_eq!(metadata["error"], json!("codeindex_busy"));
 }
 
-// ── busy_output metadata includes fallback_tools ────────────────────────
+// -- busy_output metadata includes fallback_tools ------------------------
 
 #[test]
 fn test_busy_output_includes_fallback_tools() {
@@ -258,7 +258,7 @@ fn test_busy_output_includes_fallback_tools() {
     );
 }
 
-// ── with_retry is non-blocking ──────────────────────────────────────────
+// -- with_retry is non-blocking ------------------------------------------
 
 #[test]
 fn test_with_retry_uses_timeout() {
@@ -274,7 +274,7 @@ fn test_with_retry_uses_timeout() {
     );
 }
 
-// ── All graph tools have try_* methods on CodeIndex ─────────────────────
+// -- All graph tools have try_* methods on CodeIndex ---------------------
 
 #[test]
 fn test_codeindex_has_try_methods_for_all_graph_tools() {

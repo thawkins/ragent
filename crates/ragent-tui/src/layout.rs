@@ -10,7 +10,7 @@
 use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
 use std::path::Path;
 
-use crate::app::{image_dimensions_or_placeholder, sanitize_for_display};
+use crate::app::{image_dimensions_or_placeholder, sanitize_for_display, short_id};
 
 use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
@@ -2123,7 +2123,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             frame.render_widget(paragraph, area);
         }
 
-        // ── GitLab setup form ────────────────────────────────────────────
+        // -- GitLab setup form --------------------------------------------
         ProviderSetupStep::GitLabSetup {
             url_input,
             url_cursor,
@@ -2371,7 +2371,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 .margin(1)
                 .split(inner);
 
-            // ── Left pane: multi-select provider list ──
+            // -- Left pane: multi-select provider list --
             let left_block = Block::default()
                 .borders(Borders::ALL)
                 .title(if *left_pane_focused {
@@ -2428,7 +2428,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 .wrap(Wrap { trim: false });
             frame.render_widget(left_para, chunks[0]);
 
-            // ── Right pane: four tier buckets in a 2x2 grid ──
+            // -- Right pane: four tier buckets in a 2x2 grid --
             let right_block = Block::default()
                 .borders(Borders::ALL)
                 .title(if *left_pane_focused {
@@ -4282,7 +4282,7 @@ fn render_memory_view_overlay(frame: &mut Frame, app: &mut App) {
         .border_style(Style::default().fg(Color::Magenta));
     let inner = block.inner(area);
 
-    // ── Memory-view line cache (mirrors research view) ────────────────────
+    // -- Memory-view line cache (mirrors research view) --------------------
     let inner_width = inner.width.saturating_sub(2);
     let cache_width = inner_width;
     // PERF-048: the memory viewer stores its rendered rows once, in
@@ -4458,7 +4458,7 @@ fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
 
-    // ── Research-view line cache (mirrors render_messages) ──────────────────
+    // -- Research-view line cache (mirrors render_messages) ------------------
     //
     // `markdown_to_lines` already wraps its output to the supplied width, so
     // the lines it returns are one display row each.  We cache those wrapped
@@ -4937,7 +4937,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // invalidates the *new* group instead of the entire cache. Newly appended
     // groups have `version: 0` (stale) and are rendered below.
 
-    // ── Per-entry line cache (mirrors render_messages) ───────────────────
+    // -- Per-entry line cache (mirrors render_messages) -------------------
     //
     // The cache holds one `LogLineGroup` per log entry.  On every render:
     //   1. Reconcile cache length with `log_entries.len()`.
@@ -5664,7 +5664,7 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
 
-    // ── Output-view line cache (mirrors render_messages / render_log_panel) ─
+    // -- Output-view line cache (mirrors render_messages / render_log_panel) -
     //
     // The cache holds the un-wrapped lines for the current target, the
     // pre-wrapped styled rows at the cached width, and the plain-text content
@@ -6360,7 +6360,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let messages_to_show = &app.messages;
     let inner_width = area.width.saturating_sub(2);
 
-    // ── Per-message line cache (FR-003, FR-006) ──────────────────────────
+    // -- Per-message line cache (FR-003, FR-006) --------------------------
     //
     // The cache holds one `MessageLineGroup` per message.  Each group stores
     // the un-wrapped `Line<'static>` values (width-independent) and the
@@ -6511,8 +6511,8 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let session_display = app
         .session_id
         .as_deref()
-        .map(|s| &s[..8.min(s.len())])
-        .unwrap_or("none");
+        .map(short_id)
+        .unwrap_or_else(|| "none".to_string());
     let title = format!(
         " Messages │ agent: {} │ session: {} ",
         app.agent_name, session_display
@@ -6536,7 +6536,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     app.message_max_scroll = max_scroll;
     let scroll_from_top = max_scroll.saturating_sub(app.scroll_offset);
 
-    // ── Scroll-window slice (idle-CPU fix) ────────────────────────────────
+    // -- Scroll-window slice (idle-CPU fix) --------------------------------
     //
     // Handing ratatui a Paragraph containing the ENTIRE transcript with
     // `.scroll((offset, 0))` makes Paragraph::render re-run WordWrapper and
@@ -6713,7 +6713,7 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 
 /// All documented keybindings: (keys column, description column).
 const KEYBINDINGS: &[(&str, &str)] = &[
-    // ── Typing ──────────────────────────────────────────────────────────
+    // -- Typing ----------------------------------------------------------
     ("@", "Mention a file - opens file picker"),
     ("/", "Slash command - opens command menu"),
     ("?", "Show this keybindings help panel"),
@@ -6745,10 +6745,10 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     ("Alt+G", "Toggle GCF tool-result encoding"),
     ("Alt+X", "Stop the running agent (asks Are you sure?)"),
-    // ── Sending ─────────────────────────────────────────────────────────
+    // -- Sending ---------------------------------------------------------
     ("Enter", "Send message / confirm"),
     ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),
-    // ── Navigation ──────────────────────────────────────────────────────
+    // -- Navigation ------------------------------------------------------
     ("Shift+^ / PageUp", "Scroll messages up"),
     ("Shift+v / PageDown", "Scroll messages down"),
     ("^ / v", "Browse input history"),
@@ -6756,13 +6756,13 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+PageDown", "Scroll log panel down"),
     ("PageUp / PageDown", "Scroll opened output overlay"),
     ("Ctrl+PageUp/PageDown", "Output overlay: jump start/end"),
-    // ── Agent ────────────────────────────────────────────────────────────
+    // -- Agent ------------------------------------------------------------
     ("Tab", "Cycle to next agent"),
     ("Esc / Ctrl+X", "Cancel running agent (while processing)"),
-    // ── Teams ────────────────────────────────────────────────────────────
+    // -- Teams ------------------------------------------------------------
     ("Alt+v", "Focus next teammate"),
     ("Alt+^", "Focus previous teammate (or clear focus)"),
-    // ── Dialogs ──────────────────────────────────────────────────────────
+    // -- Dialogs ----------------------------------------------------------
     ("Esc", "Close any open dialog or menu"),
     ("y / a / n", "Allow / Always / Deny permission request"),
 ];

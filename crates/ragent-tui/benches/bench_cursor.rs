@@ -14,7 +14,7 @@ mod support;
 /// Generate a string of approximately `char_count` characters.
 /// Mix of ASCII and multibyte (emoji, CJK) to stress byte/char offset logic.
 fn generate_mixed_string(char_count: usize) -> String {
-    // Pattern: 7 ASCII chars + 1 emoji (🦀) + 1 CJK (中) + 1 accented (é) = 10 chars
+    // Pattern: 7 ASCII chars + 1 emoji () + 1 CJK (中) + 1 accented (é) = 10 chars
     let pattern = "abcdefg🦀中é";
     let pattern_chars: usize = pattern.chars().count(); // 10
     let repeats = char_count / pattern_chars;

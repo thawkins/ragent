@@ -3,6 +3,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+use crate::vcs_error::{VcsStatus, classify_status};
+
 /// GitHub OAuth App client ID for ragent.
 ///
 /// Override via the `RAGENT_GITHUB_CLIENT_ID` environment variable, or set in
@@ -148,16 +150,25 @@ impl GitHubClient {
         }
     }
 
+    /// Build a request with the standard GitHub API headers attached.
+    ///
+    /// Centralises the `Authorization`, `Accept`, and `User-Agent` headers that
+    /// every authenticated GitHub call shares, so each verb only supplies its
+    /// method, URL, and body.
+    fn request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
+        self.client
+            .request(method, url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "ragent/0.1")
+    }
+
     /// GET request to the GitHub API.
     pub async fn get(&self, path: &str) -> Result<Value> {
         let url = self.resolve_url(path);
 
         let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "ragent/0.1")
+            .request(reqwest::Method::GET, &url)
             .send()
             .await
             .with_context(|| format!("GitHub GET {path} failed"))?;
@@ -169,11 +180,7 @@ impl GitHubClient {
     pub async fn post(&self, path: &str, body: &Value) -> Result<Value> {
         let url = self.resolve_url(path);
         let resp = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "ragent/0.1")
+            .request(reqwest::Method::POST, &url)
             .json(body)
             .send()
             .await
@@ -186,11 +193,7 @@ impl GitHubClient {
     pub async fn put(&self, path: &str, body: &Value) -> Result<Value> {
         let url = self.resolve_url(path);
         let resp = self
-            .client
-            .put(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "ragent/0.1")
+            .request(reqwest::Method::PUT, &url)
             .json(body)
             .send()
             .await
@@ -203,11 +206,7 @@ impl GitHubClient {
     pub async fn patch(&self, path: &str, body: &Value) -> Result<Value> {
         let url = self.resolve_url(path);
         let resp = self
-            .client
-            .patch(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "ragent/0.1")
+            .request(reqwest::Method::PATCH, &url)
             .json(body)
             .send()
             .await
@@ -216,40 +215,47 @@ impl GitHubClient {
         self.handle_response(resp, path).await
     }
 
+    /// Map a non-success HTTP status onto the shared provider-specific error
+    /// shape via [`classify_status`].
+    ///
+    /// Classifies via the shared shape rule (T-308): a 429 is always a rate
+    /// limit; a 403 is a rate limit only when the quota is exhausted
+    /// (`x-ratelimit-remaining: 0`), otherwise an ordinary permission denial
+    /// matching the GitLab client (ANTIPAT.md I-5). `Other` statuses return
+    /// `Ok(())` so the caller can surface its own generic error.
+    fn check_status(
+        &self,
+        status: reqwest::StatusCode,
+        headers: &reqwest::header::HeaderMap,
+        path: &str,
+    ) -> Result<()> {
+        let rate_remaining = headers
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+
+        match classify_status(status.as_u16(), rate_remaining) {
+            VcsStatus::RateLimited => {
+                let reset_str = headers
+                    .get("x-ratelimit-reset")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("unknown");
+                bail!("GitHub rate limit exceeded. Resets at epoch {reset_str}. Path: {path}");
+            }
+            VcsStatus::PermissionDenied => {
+                bail!("GitHub permission denied for {path}. Check your token scopes.");
+            }
+            VcsStatus::Unauthorized => {
+                bail!("GitHub authentication failed. Run /github login to re-authenticate.");
+            }
+            VcsStatus::Other => {}
+        }
+        Ok(())
+    }
+
     async fn handle_response(&self, resp: reqwest::Response, path: &str) -> Result<Value> {
         let status = resp.status();
-
-        // A 429 is always a rate limit. A 403 is a rate limit only when the
-        // quota is exhausted (`x-ratelimit-remaining: 0`); otherwise it is an
-        // ordinary permission denial, matching the GitLab client (ANTIPAT.md
-        // I-5).
-        let rate_limited = if status.as_u16() == 429 {
-            true
-        } else if status.as_u16() == 403 {
-            resp.headers()
-                .get("x-ratelimit-remaining")
-                .and_then(|v| v.to_str().ok())
-                == Some("0")
-        } else {
-            false
-        };
-
-        if rate_limited {
-            let reset_str = resp
-                .headers()
-                .get("x-ratelimit-reset")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown");
-            bail!("GitHub rate limit exceeded. Resets at epoch {reset_str}. Path: {path}");
-        }
-
-        if status.as_u16() == 403 {
-            bail!("GitHub permission denied for {path}. Check your token scopes.");
-        }
-
-        if status.as_u16() == 401 {
-            bail!("GitHub authentication failed. Run /github login to re-authenticate.");
-        }
+        self.check_status(status, resp.headers(), path)?;
 
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -273,16 +279,16 @@ impl GitHubClient {
         // this check a compromised or hostile GitHub Enterprise instance could
         // direct the user's PAT to an attacker-controlled host.
         let same_origin = same_origin_as(&url, &self.base_url);
-        let mut request = self.client.get(&url);
-        if same_origin {
-            request = request.header("Authorization", format!("Bearer {}", self.token));
+        let request = if same_origin {
+            self.request(reqwest::Method::GET, &url)
         } else {
             tracing::warn!(
                 url = %url,
                 base = %self.base_url,
                 "GitHub: refusing to attach the token to a cross-origin URL"
             );
-        }
+            self.client.request(reqwest::Method::GET, &url)
+        };
         let resp = request
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "ragent/0.1")
@@ -291,9 +297,7 @@ impl GitHubClient {
             .with_context(|| format!("GitHub GET (bytes) {path} failed"))?;
 
         let status = resp.status();
-        if status.as_u16() == 401 {
-            bail!("GitHub authentication failed. Run /github login to re-authenticate.");
-        }
+        self.check_status(status, resp.headers(), path)?;
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             bail!("GitHub API error {status} for {path}: {body}");
@@ -660,11 +664,7 @@ impl GitHubClient {
         let url = self.resolve_url(&path);
 
         let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("User-Agent", "ragent/0.1")
+            .request(reqwest::Method::GET, &url)
             .send()
             .await
             .with_context(|| format!("GitHub GET {path} failed"))?;
@@ -674,9 +674,7 @@ impl GitHubClient {
             // No README present - proceed with empty README, per FR-007.
             return Ok(None);
         }
-        if status.as_u16() == 401 {
-            bail!("GitHub authentication failed. Run /github login to re-authenticate.");
-        }
+        self.check_status(status, resp.headers(), &path)?;
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             bail!("GitHub API error {status} for {path}: {body}");

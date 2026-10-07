@@ -166,7 +166,7 @@ pub fn find_flexible_replacement_range(
 ) -> Result<(usize, usize, String), FindError> {
     let decoded = decode_escapes(needle);
 
-    // ── Lane 1: exact substring ─────────────────────────────────────────
+    // -- Lane 1: exact substring -----------------------------------------
     let mut exact_iter = content.match_indices(decoded.as_str());
     let first_exact = exact_iter.next();
     let second_exact = exact_iter.next();
@@ -183,7 +183,7 @@ pub fn find_flexible_replacement_range(
         }
     }
 
-    // ── Lane 2: whitespace-flexible general scan ──────────────────────────
+    // -- Lane 2: whitespace-flexible general scan --------------------------
     let hay: Vec<char> = content.chars().collect();
     let pat: Vec<char> = decoded.chars().collect();
     let byte_offsets: Vec<usize> = content.char_indices().map(|(i, _)| i).collect();
@@ -390,7 +390,7 @@ pub fn format_match_failure(diag: &FindDiag, path: &std::path::Path) -> String {
     }
 }
 
-// ── Match cascade (editplan P2) ──────────────────────────────────────────────
+// -- Match cascade (editplan P2) ----------------------------------------------
 
 /// The matcher lane used by [`find_replacement_cascade`]. Logged as the
 /// `match_lane` field in the edit-log so the frequency of each fallback can
@@ -597,7 +597,7 @@ fn indent_reapply(
 /// *best* failure is reported: a multiple-match beat (lower lane wins over
 /// higher lanes) beats not-found.
 pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> CascadeMatch {
-    // ── Lane 1: exact ─────────────────────────────────────────────────────
+    // -- Lane 1: exact -----------------------------------------------------
     match find_exact_replacement_range(content, needle, new_str) {
         Ok((start, end, effective)) => {
             return CascadeMatch::Found {
@@ -621,7 +621,7 @@ pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> C
         }
     }
 
-    // ── Lane 2: flexible (whitespace-collapsed) ───────────────────────────
+    // -- Lane 2: flexible (whitespace-collapsed) ---------------------------
     // Run with an empty replacement so the returned byte range is the raw
     // matched span; substitute the caller's `new_str` on success. The CRLF
     // restoration must be applied here too - the call above routes through
@@ -646,7 +646,7 @@ pub fn find_replacement_cascade(content: &str, needle: &str, new_str: &str) -> C
         }
     }
 
-    // ── Lane 3: indent-normalised ─────────────────────────────────────────
+    // -- Lane 3: indent-normalised -----------------------------------------
     // Skip when the needle contains no newline: a single-line needle with
     // wrong indentation is still better served by the flexible lane above.
     if needle.contains('\n') {

@@ -3,7 +3,7 @@
 //! These tests pin the shape of the exponential-backoff-with-jitter curve
 //! used by [`ragent_agent::team::manager::teammate_retry_backoff`] so that
 //! future refactors don't silently regress to a linear schedule (which was
-//! the root cause of synchronised retry storms against cloud providers —
+//! the root cause of synchronised retry storms against cloud providers -
 //! see CHANGELOG "Swarm teammate retry backoff").
 
 use std::time::Duration;

@@ -1,4 +1,4 @@
-//! Tests for the `gmail` tool — JCODEPLAN M7 (T-060/T-062).
+//! Tests for the `gmail` tool - JCODEPLAN M7 (T-060/T-062).
 //!
 //! Covers:
 //! - Tool identity (name, permission category, description)

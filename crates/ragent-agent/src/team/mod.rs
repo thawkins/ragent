@@ -32,7 +32,7 @@ pub mod store;
 pub mod swarm;
 pub mod task;
 
-// ── Re-exports ─────────────────────────────────────────────────────────────────
+// -- Re-exports -----------------------------------------------------------------
 
 pub use classify::{
     DEFAULT_AGENT_TYPE, KNOWN_AGENT_TYPES, extract_explicit_agent_type, infer_agent_type,

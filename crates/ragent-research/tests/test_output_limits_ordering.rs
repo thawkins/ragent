@@ -100,7 +100,7 @@ fn findings_section(body: &str) -> &str {
     &rest[..end]
 }
 
-// ── Concept-path ordering: cited-count tie-break and unknown codes ─────────
+// -- Concept-path ordering: cited-count tie-break and unknown codes ---------
 
 /// A concept that cites two equal-rank sources outranks one that cites only a
 /// single source of the same rank (FR-004).
@@ -140,7 +140,7 @@ fn concepts_unknown_citation_uses_default_rank() {
     );
 }
 
-// ── Findings-path ordering: equal-rank stability ──────────────────────────
+// -- Findings-path ordering: equal-rank stability --------------------------
 
 /// Findings whose highest cited rank is identical keep their original model
 /// order when neither cites a further source (FR-003 tie-break).
@@ -152,7 +152,7 @@ fn cap_findings_keeps_original_order_for_equal_rank_ties() {
     assert_eq!(capped, findings);
 }
 
-// ── NFR-002: byte-stability when already within the limits ────────────────
+// -- NFR-002: byte-stability when already within the limits ----------------
 
 /// A report with no findings and no concepts must render identically before
 /// and after the caps are applied (NFR-002): the empty list stays empty and no

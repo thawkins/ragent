@@ -1,3 +1,9 @@
+//! Agent registry for the orchestrator.
+//!
+//! Tracks registered agents together with their capabilities, optional
+//! mailbox senders, and last-seen heartbeats, and exposes the lookups the
+//! router and coordinator use to select and reach agents.
+
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use std::collections::HashMap;

@@ -180,10 +180,7 @@ impl Provider for GeminiProvider {
 
     /// Discover available models from Gemini's `/v1beta/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("GOOGLE_API_KEY")
-            .or_else(|_| std::env::var("GEMINI_API_KEY"))
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("gemini")
             .context("Gemini model discovery requires GOOGLE_API_KEY or GEMINI_API_KEY")?;
         let models = list_gemini_models(&api_key, None)
             .await
@@ -566,6 +563,8 @@ impl LlmClient for GeminiClient {
             let status = response.status();
             // ANTIPAT 3.1/3.2: capped error-body read.
             let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
+            // SEC: redact the provider error body before logging or surfacing it.
+            let error_body = ragent_types::sanitize::redact_secrets(&error_body);
             tracing::warn!(
                 url = %url,
                 model = %request.model,

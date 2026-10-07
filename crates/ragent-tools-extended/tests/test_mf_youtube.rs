@@ -6,7 +6,7 @@
 //! video transcript from the watch page's embedded `ytInitialPlayerResponse`.
 //! These tests cover the parsing chain end to end: locating and parsing the
 //! player response, choosing a caption track, and turning caption XML into a
-//! transcript — plus the failure paths where no transcript can be recovered
+//! transcript - plus the failure paths where no transcript can be recovered
 //! (which the fetch layer turns into a `youtube_error_output` rather than a
 //! silent page-chrome body).
 
@@ -16,7 +16,7 @@ use ragent_tools_extended::masterfetch::youtube::{
 };
 
 /// A minimal but realistic `ytInitialPlayerResponse` object with nested
-/// braces and a JSON string containing a literal `}` — the case that breaks
+/// braces and a JSON string containing a literal `}` - the case that breaks
 /// naive regex/non-greedy extraction.
 const PLAYER_RESPONSE_HTML: &str = r#"
 <html><head><title>Some Video - YouTube</title></head>
@@ -123,7 +123,7 @@ fn caption_track_url_falls_back_to_first_english_track() {
 #[test]
 fn caption_track_url_accepts_legacy_flat_layout() {
     // Older/embedded player responses used a flat `captions.captionTracks`
-    // layout — keep accepting it so transcript extraction does not regress.
+    // layout - keep accepting it so transcript extraction does not regress.
     let value = serde_json::json!({
         "captions": {
             "captionTracks": [
@@ -160,7 +160,7 @@ fn caption_track_url_errors_when_tracks_empty() {
 #[test]
 fn parse_caption_xml_empty_body_yields_empty_transcript() {
     // A 0-byte caption response (bot-gating / consent interstitial) parses
-    // successfully — the empty-body guard lives in
+    // successfully - the empty-body guard lives in
     // `extract_transcript_from_watch_page` / `caption_xml_to_transcript`.
     assert!(
         parse_caption_xml("")

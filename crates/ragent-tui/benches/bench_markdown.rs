@@ -38,7 +38,7 @@ fn generate_markdown(target_bytes: usize) -> String {
     doc
 }
 
-/// Generate a table string (pipe-separated with │ borders) of `rows` lines.
+/// Generate a table string (pipe-separated with | borders) of `rows` lines.
 fn generate_table(rows: usize) -> String {
     let mut buf = String::with_capacity(rows * 60);
     buf.push_str("│ Name         │ Value │ Description        │\n");

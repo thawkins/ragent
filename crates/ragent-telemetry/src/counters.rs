@@ -59,7 +59,7 @@ impl AtomicF64 {
 /// the last observed value so the counters display can still surface a number.
 #[derive(Debug, Default)]
 pub struct CounterSnapshot {
-    // ── Usage metrics ────────────────────────────────────────────────────
+    // -- Usage metrics ----------------------------------------------------
     /// `ragent.llm.requests`
     pub llm_requests: AtomicU64,
     /// `ragent.sessions.active`
@@ -79,7 +79,7 @@ pub struct CounterSnapshot {
     /// `ragent.team.members`
     pub team_members: AtomicI64,
 
-    // ── Cost metrics ─────────────────────────────────────────────────────
+    // -- Cost metrics -----------------------------------------------------
     /// `ragent.tokens.input`
     pub tokens_input: AtomicU64,
     /// `ragent.tokens.output`
@@ -91,7 +91,7 @@ pub struct CounterSnapshot {
     /// `ragent.cost.estimated`
     pub cost_estimated: AtomicF64,
 
-    // ── Effectiveness metrics ────────────────────────────────────────────
+    // -- Effectiveness metrics --------------------------------------------
     /// `ragent.errors.total`
     pub errors_total: AtomicU64,
     /// `ragent.timeouts.total`
@@ -109,13 +109,13 @@ pub struct CounterSnapshot {
     /// `ragent.snapshot.restores`
     pub snapshot_restores: AtomicU64,
 
-    // ── Gauges ─────────────────────────────────────────────────────────────
+    // -- Gauges -------------------------------------------------------------
     /// `ragent.rate_limit.requests_pct`
     pub rate_limit_requests_pct: AtomicF64,
     /// `ragent.rate_limit.tokens_pct`
     pub rate_limit_tokens_pct: AtomicF64,
 
-    // ── Histogram last-recorded values ────────────────────────────────────
+    // -- Histogram last-recorded values ------------------------------------
     /// `ragent.llm.duration`
     pub llm_duration_last: AtomicF64,
     /// `ragent.llm.time_to_first_token`
@@ -310,7 +310,7 @@ pub fn current_values() -> CounterValues {
     }
 }
 
-// ── Typed update helpers used by recorders ────────────────────────────────
+// -- Typed update helpers used by recorders --------------------------------
 
 /// Increment `ragent.llm.requests`.
 pub fn increment_llm_requests(delta: u64) {

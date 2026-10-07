@@ -1,6 +1,10 @@
 //! Tests for manifest parsing, normalisation, and the host-API version check
 //! (spec `plugins` T-003; FR-002, FR-019, FR-025).
 
+mod support;
+
+use support::TempTree;
+
 use std::path::{Path, PathBuf};
 
 use ragent_plugins::{
@@ -18,7 +22,7 @@ fn codex_rel() -> &'static Path {
     Path::new("codex-plugin.json")
 }
 
-// ── Codex manifest parsing (FR-002) ─────────────────────────────────────────
+// -- Codex manifest parsing (FR-002) -----------------------------------------
 
 #[test]
 fn parses_minimal_codex_manifest() {
@@ -122,7 +126,7 @@ fn codex_fs_and_exec_permissions_are_recorded_unsupported() {
     assert!(parsed.descriptor.requested_permissions.is_empty());
 }
 
-// ── ANTIPAT M11: version required-ness is the same for both dialects ────────
+// -- ANTIPAT M11: version required-ness is the same for both dialects --------
 
 #[test]
 fn codex_manifest_without_version_defaults_to_the_shared_value() {
@@ -145,7 +149,7 @@ fn both_dialects_default_a_missing_version_identically() {
     assert_eq!(codex.descriptor.version, DEFAULT_PLUGIN_VERSION);
 }
 
-// ── ANTIPAT M12: one permission model for both dialects ─────────────────────
+// -- ANTIPAT M12: one permission model for both dialects ---------------------
 
 #[test]
 fn codex_and_claude_permissions_normalise_to_the_same_model() {
@@ -201,7 +205,7 @@ fn codex_network_grant_with_existing_prefix_is_not_double_prefixed() {
     );
 }
 
-// ── ANTIPAT M13: Codex reports an unbridgeable `skills` section ─────────────
+// -- ANTIPAT M13: Codex reports an unbridgeable `skills` section -------------
 
 #[test]
 fn codex_unbridgeable_skills_section_is_recorded_unsupported() {
@@ -286,7 +290,7 @@ fn codex_manifest_rejects_empty_entry() {
     );
 }
 
-// ── Claude manifest parsing (FR-002) ────────────────────────────────────────
+// -- Claude manifest parsing (FR-002) ----------------------------------------
 
 #[test]
 fn parses_minimal_claude_manifest() {
@@ -488,7 +492,7 @@ fn claude_manifest_rejects_invalid_json_with_position() {
     assert!(detail.contains("line") && detail.contains("column"));
 }
 
-// ── Dispatch and filesystem parsing ─────────────────────────────────────────
+// -- Dispatch and filesystem parsing -----------------------------------------
 
 #[test]
 fn parse_manifest_dispatches_on_dialect() {
@@ -552,7 +556,7 @@ fn parse_plugin_dir_returns_none_for_non_plugin_directory() {
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
 
-// ── Host-API version check (FR-019) ─────────────────────────────────────────
+// -- Host-API version check (FR-019) -----------------------------------------
 
 #[test]
 fn api_version_check_accepts_equal_and_lower() {
@@ -571,7 +575,7 @@ fn api_version_check_refuses_newer() {
     );
 }
 
-// ── Id derivation ───────────────────────────────────────────────────────────
+// -- Id derivation -----------------------------------------------------------
 
 #[test]
 fn derive_id_normalises_display_names() {
@@ -582,7 +586,7 @@ fn derive_id_normalises_display_names() {
     assert_eq!(derive_id(""), "unnamed-plugin");
 }
 
-// ── ParsedManifest round-trip ───────────────────────────────────────────────
+// -- ParsedManifest round-trip -----------------------------------------------
 
 #[test]
 fn parsed_manifest_tool_decls_serialise_for_downstream_tasks() {
@@ -600,32 +604,11 @@ fn parsed_manifest_tool_decls_serialise_for_downstream_tasks() {
     assert!(json.contains("\"parameters\":{\"type\":\"object\"}"));
 }
 
-// ── FR-031: prompt commands from the `commands/` directory ───────────────────
-
-/// A temp plugin tree under `target/temp/` (no `/tmp`).
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> Self {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/manifest-cmd-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).expect("temp dir creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+// -- FR-031: prompt commands from the `commands/` directory -------------------
 
 #[test]
 fn claude_commands_directory_yields_prompt_commands() {
-    let dir = TempDir::new("dir");
+    let dir = TempTree::new("dir");
     std::fs::create_dir_all(dir.0.join("commands")).expect("commands dir");
     std::fs::write(
         dir.0.join("commands/commit.md"),
@@ -668,7 +651,7 @@ fn claude_commands_directory_yields_prompt_commands() {
 
 #[test]
 fn claude_manifest_commands_array_with_file_is_a_prompt_command() {
-    let dir = TempDir::new("decl-file");
+    let dir = TempTree::new("decl-file");
     std::fs::create_dir_all(dir.0.join("commands")).expect("commands dir");
     std::fs::write(dir.0.join("commands/deploy.md"), "Deploy now.\n").expect("command file");
     std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
@@ -688,7 +671,7 @@ fn claude_manifest_commands_array_with_file_is_a_prompt_command() {
 
 #[test]
 fn manifest_commands_array_object_without_file_stays_inline() {
-    let dir = TempDir::new("inline");
+    let dir = TempTree::new("inline");
     std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
     std::fs::write(
         dir.0.join(".claude-plugin/plugin.json"),
@@ -704,11 +687,11 @@ fn manifest_commands_array_object_without_file_stays_inline() {
     assert!(parsed.commands[0].prompt().is_none(), "inline command");
 }
 
-// ── FR-032: agent profiles (`agents/` directory + `agents` section) ──────────
+// -- FR-032: agent profiles (`agents/` directory + `agents` section) ----------
 
 #[test]
 fn claude_agents_directory_yields_profiles() {
-    let dir = TempDir::new("agents-dir");
+    let dir = TempTree::new("agents-dir");
     std::fs::create_dir_all(dir.0.join("agents")).expect("agents dir");
     std::fs::write(
         dir.0.join("agents/reviewer.md"),
@@ -737,7 +720,7 @@ fn claude_agents_directory_yields_profiles() {
 
 #[test]
 fn manifest_agents_array_merges_with_directory_scan() {
-    let dir = TempDir::new("agents-merge");
+    let dir = TempTree::new("agents-merge");
     std::fs::create_dir_all(dir.0.join("agents")).expect("agents dir");
     std::fs::write(dir.0.join("agents/one.md"), "---\nname: one\n---\nBody.\n").expect("profile");
     std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
@@ -773,7 +756,7 @@ fn manifest_agents_wrong_shape_is_unsupported() {
     );
 }
 
-// ── FR-033: hooks (`hooks` section normalisation) ───────────────────────────
+// -- FR-033: hooks (`hooks` section normalisation) ---------------------------
 
 #[test]
 fn extract_hooks_reads_object_array_and_flat_shapes() {
@@ -1049,11 +1032,11 @@ fn claude_manifest_bridges_hooks_declaration() {
     );
 }
 
-// ── FR-029: implicit conventional `skills/` directory ────────────────────────
+// -- FR-029: implicit conventional `skills/` directory ------------------------
 
 #[test]
 fn claude_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
-    let dir = TempDir::new("skills-dir");
+    let dir = TempTree::new("skills-dir");
     std::fs::create_dir_all(dir.0.join("skills/build-mcp-app")).expect("skills dir");
     std::fs::write(
         dir.0.join("skills/build-mcp-app/SKILL.md"),
@@ -1086,7 +1069,7 @@ fn claude_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
 
 #[test]
 fn codex_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
-    let dir = TempDir::new("codex-skills-dir");
+    let dir = TempTree::new("codex-skills-dir");
     std::fs::create_dir_all(dir.0.join("skills/pack")).expect("skills dir");
     std::fs::write(
         dir.0.join("skills/pack/SKILL.md"),
@@ -1107,7 +1090,7 @@ fn codex_manifest_with_no_skills_section_but_skills_dir_contributes_skills() {
 
 #[test]
 fn manifest_skills_section_merges_with_conventional_skills_dir() {
-    let dir = TempDir::new("skills-merge");
+    let dir = TempTree::new("skills-merge");
     std::fs::create_dir_all(dir.0.join("skills/a")).expect("skills dir");
     std::fs::write(
         dir.0.join("skills/a/SKILL.md"),
@@ -1133,7 +1116,7 @@ fn manifest_skills_section_merges_with_conventional_skills_dir() {
 
 #[test]
 fn manifest_without_any_skills_contributes_none() {
-    let dir = TempDir::new("no-skills");
+    let dir = TempTree::new("no-skills");
     std::fs::create_dir_all(dir.0.join(".claude-plugin")).expect("manifest dir");
     std::fs::write(
         dir.0.join(".claude-plugin/plugin.json"),
@@ -1147,7 +1130,7 @@ fn manifest_without_any_skills_contributes_none() {
     assert!(parsed.skills.is_empty());
 }
 
-// ── SEC-ragent-plugins-002: a declared `id` becomes a store path ────────────
+// -- SEC-ragent-plugins-002: a declared `id` becomes a store path ------------
 
 /// A manifest-supplied `id` is joined onto the plugin store to form the install
 /// directory (and may be recursively deleted on `--force`), so a traversal or

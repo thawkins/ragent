@@ -4,12 +4,12 @@
 //! Covers FR-035 (selecting `No` or dismissing with Esc closes the dialog and
 //! leaves the queue unchanged), FR-036 (selecting `Yes` removes every entry and
 //! updates the queue counter to reflect the now-empty queue, then closes the
-//! dialog) and FR-037 (no entry is removed by merely selecting `Clear` — only
+//! dialog) and FR-037 (no entry is removed by merely selecting `Clear` - only
 //! an explicit `Yes` may drain the queue).
 //!
 //! Unlike the T-021 suite (which asserts the dialog's presentation and maps
 //! keys to [`InputAction`]s), this suite drives the *whole* journey through the
-//! real keystroke path — ALT-Q, `Clear` row, then `Yes`/`No`/`Esc` — and
+//! real keystroke path - ALT-Q, `Clear` row, then `Yes`/`No`/`Esc` - and
 //! asserts the resulting queue state.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -84,7 +84,7 @@ fn input_row_text(terminal: &Terminal<TestBackend>, app: &App) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// FR-036 — `Yes` drains the queue and refreshes the counter
+// FR-036 - `Yes` drains the queue and refreshes the counter
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -187,7 +187,7 @@ async fn test_yes_on_an_empty_queue_is_a_safe_noop() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-035 / FR-037 — `No` and `Esc` leave the queue unchanged
+// FR-035 / FR-037 - `No` and `Esc` leave the queue unchanged
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

@@ -413,9 +413,12 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
         return Some(Duration::from_secs(seconds).min(MAX_RETRY_AFTER));
     }
 
-    // Try parsing as HTTP date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT")
-    // For simplicity, we skip full date parsing and fall back to a default
-    // TODO: If needed, add chrono-based parsing here
+    // Try parsing as HTTP date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT").
+    // Full HTTP-date parsing is deliberately omitted: this is a non-hot retry
+    // path, and a missing/unparseable header already falls back to the caller's
+    // default exponential backoff (`DEFAULT_STREAM_TIMEOUT_SECS`-bounded), which
+    // is the correct conservative behaviour. Adding chrono-based parsing here
+    // would only shave one backoff step in a rare case.
     tracing::debug!(
         retry_after = %value_str,
         "Retry-After header is HTTP-date, using default backoff"

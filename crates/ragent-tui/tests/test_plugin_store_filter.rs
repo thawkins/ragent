@@ -60,7 +60,7 @@ fn sample() -> Vec<StoreEntry> {
     ]
 }
 
-// ── Search filtering (FR-008) ───────────────────────────────────────────────
+// -- Search filtering (FR-008) -----------------------------------------------
 
 #[test]
 fn an_empty_query_matches_every_entry() {
@@ -139,7 +139,7 @@ fn filtering_never_touches_the_store_and_needs_no_network() {
     assert_eq!(filtered_ids(&browser), ["codex-todo"]);
 }
 
-// ── Cursor clamp (FR-010) ───────────────────────────────────────────────────
+// -- Cursor clamp (FR-010) ---------------------------------------------------
 
 #[test]
 fn move_up_and_down_clamp_at_both_ends() {
@@ -168,7 +168,7 @@ fn move_leaves_the_cursor_at_zero_on_an_empty_set() {
     assert!(!browser.has_results());
 }
 
-// ── Scrolling (FR-010) ──────────────────────────────────────────────────────
+// -- Scrolling (FR-010) ------------------------------------------------------
 
 #[test]
 fn ensure_visible_keeps_the_cursor_in_a_scrolling_window() {

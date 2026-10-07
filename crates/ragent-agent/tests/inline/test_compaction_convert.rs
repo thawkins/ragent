@@ -1,6 +1,6 @@
 //! External tests for the compaction `convert` module (T-012).
 //!
-//! These exercise the bidirectional `ChatMessage` ↔ `Message` conversion used
+//! These exercise the bidirectional `ChatMessage` <-> `Message` conversion used
 //! by the compaction runner and the agent loop's pre-send / emergency-overflow
 //! paths. The module is compiled into the crate's module tree via the
 //! `#[path]` attribute in `convert.rs` so it can access the crate-private
@@ -69,7 +69,7 @@ fn test_text_messages_round_trip_preserves_text() {
     assert_eq!(messages[1].role, Role::Assistant);
     assert_eq!(first_text(&messages[1]), "hi there");
 
-    // Back to chat messages — text content survives the round trip.
+    // Back to chat messages - text content survives the round trip.
     let back = messages_to_chat_messages(&messages);
     assert_eq!(back.len(), 2);
     assert_eq!(back[0].role, "user");

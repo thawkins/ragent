@@ -33,6 +33,8 @@ pub mod team_broadcast;
 pub mod team_cleanup;
 pub mod team_create;
 pub mod team_idle;
+/// Shared path/slug helpers for the `team_memory_*` tools (T-304).
+pub mod team_memory_common;
 pub mod team_memory_read;
 pub mod team_memory_write;
 pub mod team_message;
@@ -1219,21 +1221,7 @@ pub fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<St
     } else {
         return set;
     }
-    for name in crate::session::permissions::SKILL_ALWAYS_ALLOWED_TOOLS {
-        set.insert(name.to_string());
-    }
-    for name in [
-        "codeindex_search",
-        "codeindex_symbols",
-        "codeindex_references",
-        "codeindex_dependencies",
-        "codeindex_status",
-        "codeindex_reindex",
-        "codeindex_explain",
-        "codeindex_path",
-        "codeindex_communities",
-        "codeindex_godnodes",
-    ] {
+    for name in always_allowed_tool_names() {
         set.insert(name.to_string());
     }
     set

@@ -75,7 +75,7 @@ fn first_glyph_fg(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> Color 
 }
 
 // ---------------------------------------------------------------------------
-// FR-021 — exactly four options, in fixed order
+// FR-021 - exactly four options, in fixed order
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -130,7 +130,7 @@ fn test_closed_menu_is_not_painted() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-023 — `Next` visible/selectable only with a non-empty queue
+// FR-023 - `Next` visible/selectable only with a non-empty queue
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -230,7 +230,7 @@ fn test_next_marker_returns_when_an_entry_is_queued_after_an_empty_render() {
 }
 
 // ---------------------------------------------------------------------------
-// NFR-007 — reuses the shared overlay/modal rendering path
+// NFR-007 - reuses the shared overlay/modal rendering path
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -293,7 +293,7 @@ fn test_menu_title_reports_the_pending_count() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-026 — halt label reflects the running-turn state
+// FR-026 - halt label reflects the running-turn state
 // ---------------------------------------------------------------------------
 
 #[test]

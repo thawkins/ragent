@@ -1,7 +1,7 @@
 //! Integration tests for the background task service (M3, T-021/T-023).
 //!
 //! These exercise [`ragent_agent::background::BackgroundTaskService`]:
-//! spawn → persist → wait → drain_completed, plus the wake/notify hook and
+//! spawn -> persist -> wait -> drain_completed, plus the wake/notify hook and
 //! the cleanup operation. Storage is an in-memory SQLite database.
 
 use std::sync::Arc;

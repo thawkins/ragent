@@ -43,10 +43,7 @@ impl Provider for GenericOpenAiProvider {
 
     /// Discover available models from the configured `/v1/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("GENERIC_OPENAI_API_KEY")
-            .or_else(|_| std::env::var("OPENAI_API_KEY"))
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("generic_openai")
             .context(
                 "Generic OpenAI model discovery requires GENERIC_OPENAI_API_KEY or OPENAI_API_KEY",
             )?;

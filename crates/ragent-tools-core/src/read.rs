@@ -444,7 +444,7 @@ fn cap_read_output(output: String, actual_start: usize, actual_end: usize) -> (S
     (truncated, true)
 }
 
-// ── Section detection ────────────────────────────────────────────────
+// -- Section detection ------------------------------------------------
 
 /// A detected structural section within a file.
 struct Section {

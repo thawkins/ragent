@@ -24,7 +24,7 @@ const MAX_CONNECTIONS: usize = 50;
 /// returns a [`PathResult`] with the sequence of hops.  Returns `None`
 /// if either symbol is not found or no path exists (FR-012).
 pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<PathResult>> {
-    // ── Resolve source and target symbol IDs ────────────────────────────
+    // -- Resolve source and target symbol IDs ----------------------------
     let source_id = match find_symbol_id(store, from)? {
         Some(id) => id,
         None => return Ok(None),
@@ -43,7 +43,7 @@ pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<
         }));
     }
 
-    // ── Build adjacency list ────────────────────────────────────────────
+    // -- Build adjacency list --------------------------------------------
     let edges = store.query_all_edges_typed()?;
     if edges.is_empty() {
         return Ok(None);
@@ -54,7 +54,7 @@ pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<
         adjacency.entry(edge.source_sym).or_default().push(edge);
     }
 
-    // ── BFS ─────────────────────────────────────────────────────────────
+    // -- BFS -------------------------------------------------------------
     let mut visited: HashMap<i64, Option<(&GraphEdge, i64)>> = HashMap::new();
     visited.insert(source_id, None);
 
@@ -79,7 +79,7 @@ pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<
         }
     }
 
-    // ── Reconstruct path ────────────────────────────────────────────────
+    // -- Reconstruct path ------------------------------------------------
     if !visited.contains_key(&target_id) {
         return Ok(None); // No path found.
     }
@@ -116,30 +116,30 @@ pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<
 /// (number of incident edges), and its incoming/outgoing edges (limited to
 /// the top 50 connections).  Returns `None` if the symbol is not found.
 pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> {
-    // ── Resolve the symbol ───────────────────────────────────────────────
+    // -- Resolve the symbol -----------------------------------------------
     let symbol = match find_symbol(store, name)? {
         Some(s) => s,
         None => return Ok(None),
     };
 
-    // ── Look up the source file path ────────────────────────────────────
+    // -- Look up the source file path ------------------------------------
     // FUNC-031: mark a missing file row instead of a blank `source_file`.
     let source_file = store
         .get_file_by_id(symbol.file_id)?
         .map(|f| f.path)
         .unwrap_or_else(|| format!("<missing-file:{}>", symbol.file_id));
 
-    // ── Look up community assignment ────────────────────────────────────
+    // -- Look up community assignment ------------------------------------
     let community = store
         .query_all_communities()?
         .into_iter()
         .find(|(sym_id, _, _)| *sym_id == symbol.id)
         .map(|(_, community_id, _)| community_id);
 
-    // ── Get all incident edges ──────────────────────────────────────────
+    // -- Get all incident edges ------------------------------------------
     let incident = store.query_edges_for_symbol_typed(symbol.id)?;
 
-    // ── Split into incoming and outgoing ────────────────────────────────
+    // -- Split into incoming and outgoing --------------------------------
     let mut incoming: Vec<Connection> = Vec::new();
     let mut outgoing: Vec<Connection> = Vec::new();
 
@@ -165,7 +165,7 @@ pub fn explain(store: &IndexStore, name: &str) -> Result<Option<ExplainResult>> 
 
     let degree = incoming.len() + outgoing.len();
 
-    // ── Limit to MAX_CONNECTIONS ────────────────────────────────────────
+    // -- Limit to MAX_CONNECTIONS ----------------------------------------
     // Sort by nothing in particular (edges are returned in DB order); just
     // truncate if the total exceeds the limit.  We split the limit
     // proportionally: half for incoming, half for outgoing, with the

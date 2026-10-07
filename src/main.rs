@@ -280,6 +280,15 @@ fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".").join("ragent"))
 }
 
+/// Return the process working directory, falling back to `.` when the OS
+/// cannot report it.
+///
+/// Centralises the previously divergent fallbacks (three different forms
+/// across six call sites) on one consistent behaviour.
+fn working_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 /// Print the ragent ASCII art startup banner to stdout.
 fn print_banner() {
     for line in ragent_tui::logo::LOGO {
@@ -291,6 +300,49 @@ fn print_banner() {
     );
 }
 
+/// Run the dry-run readiness check and exit the process.
+///
+/// This helper is intentionally terminal: it prints the report and calls
+/// `std::process::exit` with the readiness-derived exit code.
+async fn run_dry_run_and_exit(
+    config_path: Option<String>,
+    agent_name: &str,
+    model_override: Option<&str>,
+    json_output: bool,
+    config: Arc<tokio::sync::RwLock<Config>>,
+    provider_registry: Arc<ragent_agent::provider::ProviderRegistry>,
+    tool_registry: Arc<ragent_agent::tool::ToolRegistry>,
+) {
+    let config_path = config_path.map(PathBuf::from);
+    let working_dir = crate::working_dir();
+    let hidden_tools = config.read().await.effective_hidden_tools();
+    let inputs = ragent_agent::dry_run::DryRunInputs {
+        config_path,
+        agent_name: agent_name.to_string(),
+        model_override: model_override.map(std::string::ToString::to_string),
+        provider_registry,
+        tool_registry,
+        working_dir,
+        hidden_tools,
+    };
+
+    let (report, exit_code) = ragent_agent::dry_run::run_dry_run(inputs).await;
+
+    if json_output {
+        match report.to_json() {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("Failed to serialise readiness report: {e}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        print!("{}", report.to_human_string());
+    }
+
+    std::process::exit(i32::from(exit_code));
+}
+
 /// Parse CLI args, set up infrastructure, and dispatch to the selected command.
 ///
 /// # Errors
@@ -300,7 +352,7 @@ async fn async_main() -> Result<()> {
     // Install the panic hook first so panics during startup are also captured.
     panic_hook::install();
 
-    let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let working_dir = crate::working_dir();
 
     // Read the PREVIOUS marker FIRST. `write_record` truncates and replaces the
     // marker with this process's pid, so checking afterwards could never see the
@@ -391,49 +443,6 @@ async fn async_main() -> Result<()> {
     } else {
         None
     };
-
-    /// Run the dry-run readiness check and exit the process.
-    ///
-    /// This helper is intentionally terminal: it prints the report and calls
-    /// `std::process::exit` with the readiness-derived exit code.
-    async fn run_dry_run_and_exit(
-        config_path: Option<String>,
-        agent_name: &str,
-        model_override: Option<&str>,
-        json_output: bool,
-        config: Arc<tokio::sync::RwLock<Config>>,
-        provider_registry: Arc<ragent_agent::provider::ProviderRegistry>,
-        tool_registry: Arc<ragent_agent::tool::ToolRegistry>,
-    ) {
-        let config_path = config_path.map(PathBuf::from);
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let hidden_tools = config.read().await.effective_hidden_tools();
-        let inputs = ragent_agent::dry_run::DryRunInputs {
-            config_path,
-            agent_name: agent_name.to_string(),
-            model_override: model_override.map(std::string::ToString::to_string),
-            provider_registry,
-            tool_registry,
-            working_dir,
-            hidden_tools,
-        };
-
-        let (report, exit_code) = ragent_agent::dry_run::run_dry_run(inputs).await;
-
-        if json_output {
-            match report.to_json() {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("Failed to serialise readiness report: {e}");
-                    std::process::exit(2);
-                }
-            }
-        } else {
-            print!("{}", report.to_human_string());
-        }
-
-        std::process::exit(i32::from(exit_code));
-    }
 
     // Load config
     let t0 = Instant::now();
@@ -803,13 +812,7 @@ async fn async_main() -> Result<()> {
     // refusal, no connection); the connect loop applies the durable per-server
     // enable ledger to the bridged ids exactly as it does for configured servers.
     let (mcp_configs, connector_session) = {
-        let working_dir = std::env::current_dir().unwrap_or_else(|e| {
-            tracing::warn!(
-                error = %e,
-                "cannot determine working directory; plugin- and connector-contributed MCP servers will not be scanned"
-            );
-            std::path::PathBuf::new()
-        });
+        let working_dir = crate::working_dir();
         let guard = config.read().await;
         let mut merged = ragent_agent::plugin::plugin_mcp_servers(&working_dir, &guard.mcp);
         let connector_session = merge_connector_bridge(&working_dir, &guard, &mut merged);
@@ -901,7 +904,7 @@ async fn async_main() -> Result<()> {
 
     // Initialize spec manager for all modes (TUI, serve, run, etc.)
     let t0 = Instant::now();
-    let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
+    let specs_root = crate::working_dir().join("specs");
     let _ = session_processor // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
@@ -1226,6 +1229,14 @@ async fn async_main() -> Result<()> {
             provider: filter,
             ollama_url,
         }) => {
+            // Buffer the model listing in a `String` first: the stdout lock is
+            // not `Send`, so it must not be held across the `.await` calls
+            // below (a `future_not_send` error otherwise). The buffer is
+            // flushed to a single stdout lock once all awaits are done, so a
+            // piped consumer such as `ragent models | head` still sees a single
+            // writer.
+            use std::fmt::Write as _;
+            let mut out = String::new();
             if filter.as_deref() == Some("ollama_cloud") {
                 let api_key = storage
                     .get_provider_auth("ollama_cloud")
@@ -1233,14 +1244,10 @@ async fn async_main() -> Result<()> {
                     .flatten()
                     .filter(|k| !k.is_empty())
                     .or_else(|| {
-                        std::env::var("OLLAMA_CLOUD_API_KEY")
-                            .ok()
-                            .filter(|k| !k.is_empty())
+                        ragent_config::credential_env::read_credential_env("OLLAMA_CLOUD_API_KEY")
                     })
                     .or_else(|| {
-                        std::env::var("OLLAMA_API_KEY")
-                            .ok()
-                            .filter(|k| !k.is_empty())
+                        ragent_config::credential_env::read_credential_env("OLLAMA_API_KEY")
                     })
                     .unwrap_or_default();
 
@@ -1251,31 +1258,23 @@ async fn async_main() -> Result<()> {
                 .await
                 {
                     Ok(models) if models.is_empty() => {
-                        writeln!(std::io::stdout().lock(), "No models found on Ollama Cloud.")?;
+                        writeln!(out, "No models found on Ollama Cloud.")?;
                     }
                     Ok(models) => {
-                        writeln!(std::io::stdout().lock(), "ollama_cloud models:")?;
+                        writeln!(out, "ollama_cloud models:")?;
                         for m in &models {
-                            writeln!(
-                                std::io::stdout().lock(),
-                                "  ollama_cloud/{:<28} {}",
-                                m.id,
-                                m.name
-                            )?;
+                            writeln!(out, "  ollama_cloud/{:<28} {}", m.id, m.name)?;
                         }
                         if api_key.is_empty() {
                             writeln!(
-                                std::io::stdout().lock(),
+                                out,
                                 "\nNote: Chat requires an API key. Run `ragent auth \
                                  ollama_cloud <key>` or set OLLAMA_API_KEY."
                             )?;
                         }
                     }
                     Err(e) => {
-                        writeln!(
-                            std::io::stdout().lock(),
-                            "Could not connect to Ollama Cloud: {e}"
-                        )?;
+                        writeln!(out, "Could not connect to Ollama Cloud: {e}")?;
                     }
                 }
             } else if filter.as_deref() == Some("openrouter") {
@@ -1285,47 +1284,34 @@ async fn async_main() -> Result<()> {
                     .flatten()
                     .filter(|k| !k.is_empty())
                     .or_else(|| {
-                        std::env::var("OPENROUTER_API_KEY")
-                            .ok()
-                            .filter(|k| !k.is_empty())
+                        ragent_config::credential_env::read_credential_env("OPENROUTER_API_KEY")
                     })
                     .unwrap_or_default();
 
                 if let Some(provider) = provider_registry.get("openrouter") {
                     match provider.discover_models().await {
                         Ok(models) if models.is_empty() => {
-                            writeln!(std::io::stdout().lock(), "No models found on OpenRouter.")?;
+                            writeln!(out, "No models found on OpenRouter.")?;
                         }
                         Ok(models) => {
-                            writeln!(std::io::stdout().lock(), "openrouter models:")?;
+                            writeln!(out, "openrouter models:")?;
                             for ModelInfo { id, name, .. } in &models {
-                                writeln!(
-                                    std::io::stdout().lock(),
-                                    "  openrouter/{:<28} {}",
-                                    id,
-                                    name
-                                )?;
+                                writeln!(out, "  openrouter/{:<28} {}", id, name)?;
                             }
                             if api_key.is_empty() {
                                 writeln!(
-                                    std::io::stdout().lock(),
+                                    out,
                                     "\nNote: Chat requires an API key. Run `ragent auth \
                                      openrouter <key>` or set OPENROUTER_API_KEY."
                                 )?;
                             }
                         }
                         Err(e) => {
-                            writeln!(
-                                std::io::stdout().lock(),
-                                "Could not connect to OpenRouter: {e}"
-                            )?;
+                            writeln!(out, "Could not connect to OpenRouter: {e}")?;
                         }
                     }
                 } else {
-                    writeln!(
-                        std::io::stdout().lock(),
-                        "OpenRouter provider is not registered."
-                    )?;
+                    writeln!(out, "OpenRouter provider is not registered.")?;
                 }
             } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
                 match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref())
@@ -1333,22 +1319,19 @@ async fn async_main() -> Result<()> {
                 {
                     Ok(models) if models.is_empty() => {
                         writeln!(
-                            std::io::stdout().lock(),
+                            out,
                             "No models found on Ollama server. Pull models with: ollama pull <model>"
                         )?;
                     }
                     Ok(models) => {
-                        writeln!(std::io::stdout().lock(), "ollama models:")?;
+                        writeln!(out, "ollama models:")?;
                         for m in &models {
-                            writeln!(std::io::stdout().lock(), "  ollama/{:<28} {}", m.id, m.name)?;
+                            writeln!(out, "  ollama/{:<28} {}", m.id, m.name)?;
                         }
                     }
                     Err(e) => {
-                        writeln!(std::io::stdout().lock(), "Could not connect to Ollama: {e}")?;
-                        writeln!(
-                            std::io::stdout().lock(),
-                            "Is Ollama running? Start with: ollama serve"
-                        )?;
+                        writeln!(out, "Could not connect to Ollama: {e}")?;
+                        writeln!(out, "Is Ollama running? Start with: ollama serve")?;
                     }
                 }
                 if filter.as_deref() != Some("ollama") {
@@ -1358,7 +1341,7 @@ async fn async_main() -> Result<()> {
                             continue;
                         }
                         for m in &p.models {
-                            writeln!(std::io::stdout().lock(), "{}/{}", p.id, m.id)?;
+                            writeln!(out, "{}/{}", p.id, m.id)?;
                         }
                     }
                 }
@@ -1371,14 +1354,11 @@ async fn async_main() -> Result<()> {
                 };
 
                 if providers.is_empty() {
-                    writeln!(
-                        std::io::stdout().lock(),
-                        "No providers found matching filter"
-                    )?;
+                    writeln!(out, "No providers found matching filter")?;
                 } else {
                     for p in &providers {
                         for m in &p.models {
-                            writeln!(std::io::stdout().lock(), "{}/{}", p.id, m.id)?;
+                            writeln!(out, "{}/{}", p.id, m.id)?;
                         }
                     }
                 }
@@ -1386,7 +1366,9 @@ async fn async_main() -> Result<()> {
             // Flush stdout before the runtime is shut down so a closed pipe
             // (e.g. `ragent models | head`) cannot race the print and turn into
             // a `Broken pipe` panic (see the note on `main`'s bounded shutdown).
-            std::io::stdout().flush()?;
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(out.as_bytes())?;
+            stdout.flush()?;
         }
         Some(Commands::Config { command }) => match command {
             Some(ConfigCommands::Check { json }) => {
@@ -1408,8 +1390,7 @@ async fn async_main() -> Result<()> {
             }
         },
         Some(Commands::Memory { command }) => {
-            let project_dir =
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let project_dir = crate::working_dir();
             match command {
                 MemoryCommands::List => {
                     let mut stdout = std::io::stdout().lock();
@@ -1550,7 +1531,7 @@ fn merge_connector_bridge(
 /// the process alive burning CPU after the TUI had already exited. Arming a
 /// `shutdown_timeout` bounds that wait so the prompt returns promptly.
 fn main() -> Result<()> {
-    let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let working_dir = crate::working_dir();
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|e| anyhow::anyhow!("failed to create tokio runtime: {e}"))?;
     let result = runtime.block_on(async_main());

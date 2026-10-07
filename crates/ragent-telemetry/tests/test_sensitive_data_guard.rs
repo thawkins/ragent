@@ -5,16 +5,16 @@
 //!
 //! These tests verify three layers of the guard:
 //!
-//! 1. **Attribute helpers sanitize values** — the `attr_*` helpers in
+//! 1. **Attribute helpers sanitize values** - the `attr_*` helpers in
 //!    `InstrumentRegistry` replace sensitive values with `"redacted"`
 //!    before building `KeyValue` pairs.
-//! 2. **Recorders never leak sensitive data** — recording metrics through
+//! 2. **Recorders never leak sensitive data** - recording metrics through
 //!    `LlmRecorder`, `ToolRecorder`, `SessionRecorder`, and
 //!    `PermissionRecorder` with a sensitive model/provider/tool name
 //!    produces exported attributes whose value is `"redacted"`, not the
 //!    original secret.
-//! 3. **Resource attributes are sanitised** — custom
-//!    `telemetry.otel.resource_attributes` that contain an API key or
+//! 3. **Resource attributes are sanitised** - custom
+//!    `telemetry.otel.resource()_attributes` that contain an API key or
 //!    credential are redacted on the exported resource.
 
 #![cfg(feature = "telemetry")]
@@ -25,6 +25,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
 use ragent_telemetry::InstrumentRegistry;
 use ragent_telemetry::recorder::{
     CompressionRecorder, CoordinatorRecorder, LlmRecorder, PermissionRecorder, SessionRecorder,
@@ -33,7 +34,7 @@ use ragent_telemetry::recorder::{
 use ragent_telemetry::sensitive::{REDACTED, looks_sensitive, sanitize_attr_value};
 use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsystem};
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ---------------------------------------------------------------
 
 /// Build a `SdkMeterProvider` backed by an `InMemoryMetricExporter` with a
 /// long export interval so no background export fires during the test. The
@@ -73,56 +74,72 @@ fn flush_and_collect(
 /// exported metric data points. Used to assert that a specific value (e.g.
 /// an API key) never appears in any exported attribute.
 ///
-/// Walks every `ResourceMetrics` → `ScopeMetrics` → `Metric`, downcasts
+/// Walks every `ResourceMetrics` -> `ScopeMetrics` -> `Metric`, downcasts
 /// the `Aggregation` to its concrete sum/histogram/gauge form, and collects
 /// the `value` side of every `KeyValue` on every data point.
 fn all_attribute_values(metrics: &[ResourceMetrics]) -> Vec<String> {
-    use opentelemetry_sdk::metrics::data::{Gauge, Histogram, Sum};
-
     let mut values = Vec::new();
     for rm in metrics {
-        for sm in &rm.scope_metrics {
-            for metric in &sm.metrics {
+        for sm in rm.scope_metrics() {
+            for metric in sm.metrics() {
                 // The aggregation is a trait object; try downcasting to the
                 // three concrete forms ragent uses (Sum, Histogram, Gauge).
-                if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<u64>>() {
-                    for point in &sum.data_points {
-                        for kv in &point.attributes {
+                if let Some(sum) = match metric.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in sum.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
                 }
-                if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<i64>>() {
-                    for point in &sum.data_points {
-                        for kv in &point.attributes {
+                if let Some(sum) = match metric.data() {
+                    AggregatedMetrics::I64(MetricData::Sum(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in sum.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
                 }
-                if let Some(hist) = metric.data.as_any().downcast_ref::<Histogram<f64>>() {
-                    for point in &hist.data_points {
-                        for kv in &point.attributes {
+                if let Some(hist) = match metric.data() {
+                    AggregatedMetrics::F64(MetricData::Histogram(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in hist.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
                 }
-                if let Some(hist) = metric.data.as_any().downcast_ref::<Histogram<u64>>() {
-                    for point in &hist.data_points {
-                        for kv in &point.attributes {
+                if let Some(hist) = match metric.data() {
+                    AggregatedMetrics::U64(MetricData::Histogram(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in hist.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
                 }
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<f64>>() {
-                    for point in &gauge.data_points {
-                        for kv in &point.attributes {
+                if let Some(gauge) = match metric.data() {
+                    AggregatedMetrics::F64(MetricData::Gauge(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in gauge.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
                 }
-                if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<i64>>() {
-                    for point in &gauge.data_points {
-                        for kv in &point.attributes {
+                if let Some(gauge) = match metric.data() {
+                    AggregatedMetrics::I64(MetricData::Gauge(agg)) => Some(agg),
+                    _ => None,
+                } {
+                    for point in gauge.data_points() {
+                        for kv in point.attributes() {
                             values.push(kv.value.to_string());
                         }
                     }
@@ -133,7 +150,7 @@ fn all_attribute_values(metrics: &[ResourceMetrics]) -> Vec<String> {
     values
 }
 
-// ── 1. Attribute helpers ──────────────────────────────────────────────────
+// -- 1. Attribute helpers --------------------------------------------------
 
 /// `attr_model` redacts an API-key-like model name (FR-034).
 #[test]
@@ -209,7 +226,7 @@ fn test_ollama_model_with_colons_not_redacted() {
     assert_eq!(sanitize_attr_value("qwen3:1.7b"), "qwen3:1.7b");
 }
 
-// ── 2. Recorders never leak sensitive data into exports ──────────────────
+// -- 2. Recorders never leak sensitive data into exports ------------------
 
 /// Recording an LLM request with an API-key-shaped model name exports
 /// `"redacted"` as the `model` attribute, never the original key (FR-034).
@@ -357,7 +374,7 @@ fn test_safe_values_export_unchanged() {
     );
 }
 
-// ── 3. Resource attributes are sanitised ─────────────────────────────────
+// -- 3. Resource attributes are sanitised ---------------------------------
 
 /// A custom resource attribute containing an API key is redacted on the
 /// exported resource (FR-034).
@@ -416,7 +433,7 @@ fn test_custom_resource_attribute_with_file_content_is_redacted() {
     assert_eq!(sanitize_attr_value(content), REDACTED);
 }
 
-// ── 4. No-op recorders never leak (defence in depth) ──────────────────────
+// -- 4. No-op recorders never leak (defence in depth) ----------------------
 
 /// Disabled recorders never record anything, so there is no possibility
 /// of leaking sensitive data when telemetry is off (FR-022, FR-034).

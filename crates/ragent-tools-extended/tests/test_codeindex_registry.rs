@@ -8,7 +8,7 @@
 
 use ragent_tools_extended::create_extended_registry;
 
-// ── New graph tools are registered ───────────────────────────────────────
+// -- New graph tools are registered ---------------------------------------
 
 #[test]
 fn test_codeindex_explain_registered() {
@@ -46,7 +46,7 @@ fn test_codeindex_godnodes_registered() {
     );
 }
 
-// ── Existing codeindex tools remain registered (FR-006) ────────────────
+// -- Existing codeindex tools remain registered (FR-006) ----------------
 
 #[test]
 fn test_existing_codeindex_tools_remain_registered() {
@@ -66,7 +66,7 @@ fn test_existing_codeindex_tools_remain_registered() {
     }
 }
 
-// ── All codeindex tools have the correct permission category ────────────
+// -- All codeindex tools have the correct permission category ------------
 
 #[test]
 fn test_all_codeindex_tools_have_codeindex_read_permission() {
@@ -103,7 +103,7 @@ fn test_all_codeindex_tools_have_codeindex_read_permission() {
     );
 }
 
-// ── Total codeindex tool count ──────────────────────────────────────────
+// -- Total codeindex tool count ------------------------------------------
 
 #[test]
 fn test_total_codeindex_tool_count() {

@@ -38,7 +38,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
     }
 }
 
-// ── Tool identity ────────────────────────────────────────────────────────
+// -- Tool identity --------------------------------------------------------
 
 #[test]
 fn test_cron_add_identity() {
@@ -88,7 +88,7 @@ fn test_cron_add_schema_requires_all_fields() {
     }
 }
 
-// ── cron_add ─────────────────────────────────────────────────────────────
+// -- cron_add -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_cron_add_creates_event() {
@@ -172,7 +172,7 @@ async fn test_cron_add_missing_param() {
     assert!(result.is_err(), "missing prompt should fail");
 }
 
-// ── cron_list ─────────────────────────────────────────────────────────────
+// -- cron_list -------------------------------------------------------------
 
 #[tokio::test]
 async fn test_cron_list_empty() {
@@ -212,7 +212,7 @@ async fn test_cron_list_shows_events() {
     assert_eq!(out.metadata.unwrap()["count"].as_u64(), Some(2));
 }
 
-// ── cron_remove ──────────────────���────────────────────────────────────────
+// -- cron_remove ------------------���----------------------------------------
 
 #[tokio::test]
 async fn test_cron_remove_existing() {
@@ -249,7 +249,7 @@ async fn test_cron_remove_not_found() {
     assert!(out.content.contains("not found"));
 }
 
-// ── cron_enable / cron_disable ──────────────────────────────────���────────
+// -- cron_enable / cron_disable ----------------------------------���--------
 
 #[tokio::test]
 async fn test_cron_disable_then_enable() {
@@ -311,7 +311,7 @@ async fn test_cron_disable_not_found() {
     assert!(out.content.contains("not found"));
 }
 
-// ── registry registration ────────────────────────────────────────────────
+// -- registry registration ------------------------------------------------
 
 #[test]
 fn test_cron_tools_registered() {

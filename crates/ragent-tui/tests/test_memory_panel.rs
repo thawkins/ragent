@@ -110,9 +110,9 @@ fn make_app() -> App {
     )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Mouse-event constructors
-// ────────────────────���────────────────────────────────────────────────────────
+// --------------------���--------------------------------------------------------
 
 const fn mouse_down(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
@@ -168,9 +168,9 @@ const fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Render helper
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /// Render the app into a string buffer of the given terminal size.
 ///
@@ -243,9 +243,9 @@ fn seed_project_memory(storage: &Storage, dir: &std::path::Path, content: &str) 
     seed_project_memory_with_tags(storage, dir, content, &[]);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 // T-007: `pane_at` recognises `memory_area` (FR-013 hit-testing)
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[test]
 fn test_pane_at_returns_memory_when_click_inside_memory_area() {
@@ -264,7 +264,7 @@ fn test_pane_at_returns_memory_when_click_inside_memory_area() {
 #[test]
 fn test_pane_at_returns_none_for_memory_when_panel_hidden() {
     // When `show_memory` is false, clicks inside the cached `memory_area`
-    // rect must NOT be reported as the Memory pane — the panel is not
+    // rect must NOT be reported as the Memory pane - the panel is not
     // visible so hit-testing should fall through (FR-002 mutual exclusion
     // relies on `show_memory` gating `memory_area`).
     let mut app = make_app();
@@ -278,9 +278,9 @@ fn test_pane_at_returns_none_for_memory_when_panel_hidden() {
     assert_ne!(pane, Some(SelectionPane::Memory));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // T-007: mouse scroll inside `memory_area` adjusts `memory_scroll_offset`
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[test]
 fn test_mouse_scroll_up_on_memory_increments_memory_scroll_offset() {
@@ -308,9 +308,9 @@ fn test_mouse_scroll_down_on_memory_decrements_memory_scroll_offset() {
     assert_eq!(app.memory_scroll_offset, 6);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // T-007: scrollbar-gutter click on `memory_area` starts a Memory drag
-// ────────────────────────────────────────────────────���────────────────────────
+// ----------------------------------------------------���------------------------
 
 #[test]
 fn test_drag_starts_on_memory_scrollbar_column() {
@@ -344,7 +344,7 @@ fn test_drag_memory_scrollbar_moves_offset() {
     app.memory_area = Rect::new(80, 0, 30, 21);
     app.memory_max_scroll = 60;
 
-    // Click scrollbar (column 109), drag to top → offset = 0 (top of
+    // Click scrollbar (column 109), drag to top -> offset = 0 (top of
     // content).  Memory uses "lines from top" semantics, so dragging to
     // the top of the scrollbar track shows the first lines.
     app.handle_mouse_event(mouse_down(109, 10));
@@ -353,7 +353,7 @@ fn test_drag_memory_scrollbar_moves_offset() {
     app.handle_mouse_event(mouse_drag(109, 0));
     assert_eq!(app.memory_scroll_offset, 0);
 
-    // Drag to bottom → offset = max_scroll (bottom of content).
+    // Drag to bottom -> offset = max_scroll (bottom of content).
     app.handle_mouse_event(mouse_drag(109, 20));
     assert_eq!(app.memory_scroll_offset, 60);
 }
@@ -370,9 +370,9 @@ fn test_drag_does_not_start_on_memory_scrollbar_without_scrollable_content() {
     assert!(app.scrollbar_drag.is_none());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // T-007: left-click inside `memory_area` starts a Memory text selection
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[test]
 fn test_left_click_inside_memory_area_starts_memory_selection() {
@@ -425,9 +425,9 @@ fn test_mouse_up_preserves_memory_selection() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // T-007: right-click inside `memory_area` opens a Memory context menu
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 #[test]
 fn test_right_click_inside_memory_area_opens_context_menu() {
@@ -474,14 +474,14 @@ fn test_right_click_outside_memory_area_does_not_open_memory_menu() {
     app.show_memory = true;
     app.memory_area = Rect::new(80, 1, 30, 20);
 
-    // Click in the status bar (row 0) — outside every pane.
+    // Click in the status bar (row 0) - outside every pane.
     app.handle_mouse_event(right_click(10, 0));
     assert!(app.context_menu.is_none());
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 // T-012: Alt+M toggle flips `show_memory` (FR-003)
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[tokio::test]
 async fn test_alt_m_maps_to_toggle_memory_action() {
@@ -527,9 +527,9 @@ async fn test_toggle_memory_status_message_reflects_state() {
     assert_eq!(app.status, "memory panel hidden");
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 // T-012: Mutual exclusion with log / tasks / profile panels (FR-004)
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[tokio::test]
 async fn test_toggle_memory_mutually_excludes_log_panel() {
@@ -539,7 +539,7 @@ async fn test_toggle_memory_mutually_excludes_log_panel() {
     app.show_log = true;
     app.show_memory = false;
 
-    // Enable Memory panel — log must be dismissed.
+    // Enable Memory panel - log must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT))
         .await;
     assert!(app.show_memory, "Memory panel should be visible");
@@ -548,7 +548,7 @@ async fn test_toggle_memory_mutually_excludes_log_panel() {
         "log panel must be hidden when Memory is shown"
     );
 
-    // Re-enable log panel — Memory must be dismissed.
+    // Re-enable log panel - Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::ALT))
         .await;
     assert!(app.show_log, "log panel should be visible");
@@ -574,7 +574,7 @@ async fn test_toggle_memory_mutually_excludes_tasks_panel() {
         "Tasks panel must hide when Memory is shown"
     );
 
-    // Re-enable Tasks panel — Memory must be dismissed.
+    // Re-enable Tasks panel - Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT))
         .await;
     assert!(app.show_tasks_panel);
@@ -602,7 +602,7 @@ async fn test_toggle_memory_mutually_excludes_profile_panel() {
         "profile panel must hide when Memory is shown"
     );
 
-    // Re-enable profile panel — Memory must be dismissed.
+    // Re-enable profile panel - Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
         .await;
     assert!(app.show_profile);
@@ -670,9 +670,9 @@ async fn test_toggle_memory_clears_memory_context_menu_on_hide() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 // T-012: Alt+M does not insert `m` into the input buffer (FR-011)
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[tokio::test]
 async fn test_alt_m_does_not_insert_m_into_input() {
@@ -713,9 +713,9 @@ async fn test_alt_m_does_not_insert_m_when_panel_already_visible() {
     );
 }
 
-// ════════════════════��════════════════════════════════════════════════════════
+// ====================��========================================================
 // T-012: render_memory_panel with populated and missing files (FR-015)
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[test]
 fn test_render_memory_panel_sets_memory_area_rect() {
@@ -946,7 +946,7 @@ fn test_scrollbar_drag_clamps_offset_within_bounds() {
     app.memory_max_scroll = 100;
 
     // Click scrollbar (column 109) at the vertical middle (row 10 of a
-    // 21-row pane → track rows 0..20, middle ≈ row 10).
+    // 21-row pane -> track rows 0..20, middle ≈ row 10).
     app.handle_mouse_event(mouse_down(109, 10));
     app.handle_mouse_event(mouse_drag(109, 10));
 
@@ -956,14 +956,14 @@ fn test_scrollbar_drag_clamps_offset_within_bounds() {
         "offset {offset} must not exceed max_scroll {}",
         app.memory_max_scroll
     );
-    // fraction = 10/20 = 0.5 → offset = 0.5*100 = 50.
+    // fraction = 10/20 = 0.5 -> offset = 0.5*100 = 50.
     assert_eq!(offset, 50, "middle drag should yield offset 50");
 
-    // Drag above the pane → clamps to top (offset = 0).
+    // Drag above the pane -> clamps to top (offset = 0).
     app.handle_mouse_event(mouse_drag(109, 0));
     assert_eq!(app.memory_scroll_offset, 0);
 
-    // Drag below the pane → clamps to bottom (offset = max_scroll).
+    // Drag below the pane -> clamps to bottom (offset = max_scroll).
     app.handle_mouse_event(mouse_drag(109, 30));
     assert_eq!(app.memory_scroll_offset, 100);
 }
@@ -1213,9 +1213,9 @@ fn test_render_memory_panel_uses_real_cwd_path_not_tilde_display() {
     );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 // FR-016: interactive cursor, open, and delete in the Alt+M panel
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
 
 #[tokio::test]
 async fn test_memory_cursor_down_and_up_moves_selection() {

@@ -7,8 +7,12 @@
 //! can be told to fail a named server, so the per-server, containment, and
 //! collision behaviour is asserted without touching a real MCP process.
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -17,39 +21,8 @@ use ragent_connectors::{
     AlwaysEnabled, ConnectReport, ConnectorAuthShape, ConnectorDescriptor, ConnectorEnv,
     ConnectorId, ConnectorLifecycleState, ConnectorServer, ConnectorSession,
     InMemoryCredentialStore, LifecycleError, MANIFEST_FILE, MapEnv, MapServerLedger, McpConnect,
-    ServerState, StoreDirs, StoreLedger, store_dirs_at, store_secret,
+    ServerState, StoreDirs, StoreLedger, store_secret,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII scratch tree under `target/temp/`.
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/lifecycle-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/connectors")
-    }
-
-    fn dirs(&self) -> StoreDirs {
-        store_dirs_at(&self.0, Some(&self.store()), None)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A stdio server with the given id and command.
 fn stdio(id: &str, command: &str) -> ConnectorServer {
@@ -171,7 +144,7 @@ fn session(dirs: &StoreDirs, configured: Vec<String>) -> ConnectorSession {
     ConnectorSession::new(dirs.clone(), ConnectorsConfig::default(), configured)
 }
 
-// ── FR-018: a disabled connector is fully inert ────────────────────────────
+// -- FR-018: a disabled connector is fully inert ----------------------------
 
 #[tokio::test]
 async fn disabled_connector_starts_no_server_but_is_still_reported() {
@@ -206,7 +179,7 @@ async fn disabled_connector_starts_no_server_but_is_still_reported() {
     assert_eq!(statuses[0].state, ConnectorLifecycleState::Disabled);
 }
 
-// ── FR-008, FR-012, FR-020: enabled connector connects and surfaces tools ──
+// -- FR-008, FR-012, FR-020: enabled connector connects and surfaces tools --
 
 #[tokio::test]
 async fn enabled_connector_connects_and_surfaces_tools() {
@@ -316,7 +289,7 @@ async fn enable_is_idempotent_when_already_connected() {
     );
 }
 
-// ── FR-013: disable disconnects and deregisters exactly its tools ──────────
+// -- FR-013: disable disconnects and deregisters exactly its tools ----------
 
 #[tokio::test]
 async fn disable_disconnects_and_deregisters_exactly_its_servers() {
@@ -368,7 +341,7 @@ async fn disable_disconnects_and_deregisters_exactly_its_servers() {
     assert!(statuses[0].servers.is_empty());
 }
 
-// ── FR-026, FR-016: per-server independence and containment ────────────────
+// -- FR-026, FR-016: per-server independence and containment ----------------
 
 #[tokio::test]
 async fn one_failing_server_does_not_hide_the_other() {
@@ -458,7 +431,7 @@ async fn every_server_failing_records_connector_errored_with_cause() {
     );
 }
 
-// ── FR-018 (server ledger): a server switched off is not started ───────────
+// -- FR-018 (server ledger): a server switched off is not started -----------
 
 #[tokio::test]
 async fn server_disabled_in_the_durable_ledger_is_not_started() {
@@ -488,7 +461,7 @@ async fn server_disabled_in_the_durable_ledger_is_not_started() {
     assert_eq!(r.servers[0].state, ServerState::Disconnected);
 }
 
-// ── FR-019: connect/disconnect without a restart ───────────────────────────
+// -- FR-019: connect/disconnect without a restart ---------------------------
 
 #[tokio::test]
 async fn connect_refuses_when_the_connector_is_disabled() {
@@ -599,7 +572,7 @@ async fn disconnect_leaves_the_connector_enabled() {
     );
 }
 
-// ── FR-022, FR-032: auth gate ──────────────────────────────────────────────
+// -- FR-022, FR-032: auth gate ----------------------------------------------
 
 #[tokio::test]
 async fn connector_needing_auth_is_errored_and_not_connected() {
@@ -662,7 +635,7 @@ async fn connector_with_a_stored_secret_connects() {
     assert_eq!(report.reports[0].state, ConnectorLifecycleState::Connected);
 }
 
-// ── FR-033: server-id collision refusal ────────────────────────────────────
+// -- FR-033: server-id collision refusal ------------------------------------
 
 #[tokio::test]
 async fn bridged_id_colliding_with_a_configured_server_is_refused() {
@@ -735,7 +708,7 @@ async fn two_connectors_colliding_on_a_bridged_id_refuse_the_later() {
     assert_eq!(second.state, ConnectorLifecycleState::Errored);
 }
 
-// ── FR-021: disabled subsystem is inert ────────────────────────────────────
+// -- FR-021: disabled subsystem is inert ------------------------------------
 
 #[tokio::test]
 async fn disabled_subsystem_discovers_and_connects_nothing() {
@@ -769,7 +742,7 @@ async fn disabled_subsystem_discovers_and_connects_nothing() {
     assert!(session.statuses().is_empty());
 }
 
-// ── shutdown: session end disconnects everything ───────────────────────────
+// -- shutdown: session end disconnects everything ---------------------------
 
 #[tokio::test]
 async fn shutdown_disconnects_every_connected_server() {
@@ -817,7 +790,7 @@ async fn shutdown_disconnects_every_connected_server() {
     );
 }
 
-// ── unknown connector id is a contained refusal ────────────────────────────
+// -- unknown connector id is a contained refusal ----------------------------
 
 #[tokio::test]
 async fn unknown_connector_is_refused_by_every_transition() {
@@ -854,7 +827,7 @@ async fn unknown_connector_is_refused_by_every_transition() {
     ));
 }
 
-// ── report helpers ─────────────────────────────────────────────────────────
+// -- report helpers ---------------------------------------------------------
 
 #[test]
 fn connect_report_helpers_count_servers_and_tools() {
@@ -883,7 +856,7 @@ fn connect_report_helpers_count_servers_and_tools() {
     assert_eq!(report.tools(), 1);
 }
 
-// ── T-008 follow-up: client-derived statuses ───────────────────────────────
+// -- T-008 follow-up: client-derived statuses -------------------------------
 
 /// A connected bridged server reports `connected` with its live tool count,
 /// even though this session never drove the connection (the startup bridge

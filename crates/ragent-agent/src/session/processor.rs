@@ -3191,7 +3191,7 @@ impl SessionProcessor {
                                  continue",
                                 tc_clone.name
                             );
-                            tracing::info!(
+                            tracing::warn!(
                                 tool = %tc_clone.name,
                                 "interactive tool denied in subagent run"
                             );
@@ -3229,7 +3229,7 @@ impl SessionProcessor {
                                 parsed_input.unwrap_or(Value::Null)
                             }
                             crate::hooks::PreToolUseResult::Deny { reason } => {
-                                tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
+                                tracing::warn!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
                                 let err_msg = format!("Permission denied by hook: {}", reason);
                                 return denied_tool_call(
                                     &tc_clone,
@@ -3240,7 +3240,7 @@ impl SessionProcessor {
                                 );
                             }
                             crate::hooks::PreToolUseResult::Blocked { reason } => {
-                                tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook blocked tool execution");
+                                tracing::warn!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook blocked tool execution");
                                 let err_msg = format!("Blocked by hook: {}", reason);
                                 return denied_tool_call(
                                     &tc_clone,
@@ -4432,7 +4432,10 @@ impl SessionProcessor {
 
         // Ollama does not require an API key for local servers
         if provider_id == "ollama" {
-            return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
+            return Ok(
+                ragent_config::credential_env::read_credential_env("OLLAMA_API_KEY")
+                    .unwrap_or_default(),
+            );
         }
 
         // Copilot: prefer DB-stored device flow token (works for token
@@ -4444,10 +4447,7 @@ impl SessionProcessor {
             {
                 return Ok(key);
             }
-            let db_lookup = || -> Option<String> { None }; // already checked above
-            if let Some(token) =
-                crate::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
-            {
+            if let Some(token) = crate::provider::copilot::resolve_copilot_github_token(None) {
                 crate::sanitize::register_secret(&token);
                 return Ok(token);
             }
@@ -4472,8 +4472,8 @@ impl SessionProcessor {
                     }
                     // Fall back to api_key_env
                     if let Some(env_var) = parsed.get("api_key_env").and_then(|v| v.as_str()) {
-                        if let Ok(key) = std::env::var(env_var)
-                            && !key.is_empty()
+                        if let Some(key) =
+                            ragent_config::credential_env::read_credential_env(env_var)
                         {
                             return Ok(key);
                         }
@@ -4481,23 +4481,12 @@ impl SessionProcessor {
                 }
             }
         }
-        let env_vars = match provider_id {
-            "anthropic" => vec!["ANTHROPIC_API_KEY"],
-            "openai" => vec!["OPENAI_API_KEY"],
-            "gemini" => vec!["GEMINI_API_KEY"],
-            "huggingface" => vec!["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
-            "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
-            "ollama_cloud" => vec!["OLLAMA_CLOUD_API_KEY", "OLLAMA_API_KEY"],
-            "azure_foundry" => vec!["AZURE_AI_FOUNDRY_API_KEY"],
-            _ => vec![],
-        };
-
-        for var in &env_vars {
-            if let Ok(key) = std::env::var(var)
-                && !key.is_empty()
-            {
-                return Ok(key);
-            }
+        // Environment resolution goes through the single provider->env-key
+        // resolver (audit T-403) so the variable set, precedence, and
+        // blank/trim policy live in one place across the agent, router, and
+        // research paths.
+        if let Some(key) = crate::provider::env_key::provider_env_key(provider_id) {
+            return Ok(key);
         }
 
         // Check the database for a stored API key

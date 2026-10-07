@@ -1,51 +1,19 @@
 //! Tests for `PluginToolAdapter` and `PluginManager::execute_tool`
 //! (spec `plugins` T-010; FR-005, FR-015, FR-024, FR-026).
 
+mod support;
+
+use support::TempTree;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use ragent_plugins::{
     LifecycleState, PluginError, PluginManager, PluginToolAdapter, PluginToolDecl, StoreLedger,
-    dispatch_sandbox, plugin_tool_name, store_dirs_at,
+    dispatch_sandbox, plugin_tool_name,
 };
 use ragent_tools_core::Tool;
 use serde_json::{Value as JsonValue, json};
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/plugins-test/tool-adapter-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-
-    /// The project store (`<tree>/.ragent/plugins/`).
-    fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
-    }
-
-    /// A fresh manager bound to this tree's project store (no global leg).
-    fn manager(&self) -> PluginManager {
-        PluginManager::new(
-            store_dirs_at(&self.0, Some(&self.store()), None),
-            ragent_config::PluginsConfig::default(),
-        )
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// Write a Codex-dialect plugin into the tree's project store with explicit
 /// id so `manager.enable(id)` matches (derived ids come from `name`).
@@ -74,7 +42,7 @@ fn load_and_register(
     (names, registered)
 }
 
-// ── FR-005: adapter metadata surface ───────────────────────────────────────
+// -- FR-005: adapter metadata surface ---------------------------------------
 
 #[test]
 fn adapter_surfaces_declared_name_description_and_schema() {
@@ -127,7 +95,7 @@ fn plugin_tool_name_formats_registry_names() {
     );
 }
 
-// ── FR-024: collision rejection ────────────────────────────────────────────
+// -- FR-024: collision rejection --------------------------------------------
 
 #[test]
 fn registration_rejects_collision_with_builtin() {
@@ -272,7 +240,7 @@ fn registering_unloaded_or_errored_plugin_fails_without_panicking() {
     assert!(matches!(unknown, Err(PluginError::UnknownPlugin(_))));
 }
 
-// ── FR-005/FR-015/FR-026: execution and marshalling ───────────────────────
+// -- FR-005/FR-015/FR-026: execution and marshalling -----------------------
 
 #[test]
 fn handler_receives_json_args_and_bare_string_passes_through() {
@@ -437,7 +405,7 @@ fn infinite_loop_handler_times_out_without_hanging() {
     manager.enable("slow").expect("enable");
     // The dispatch wrapper rearms the interrupt per invocation, so an
     // infinite handler trips within this call's own budget window (default
-    // `max_execution_ms` in `PluginsConfig`) — the call must return rather
+    // `max_execution_ms` in `PluginsConfig`) - the call must return rather
     // than hang (FR-026). The wall-clock bound is generous for slow CI; the
     // contract is "finite".
     let started = std::time::Instant::now();
@@ -448,7 +416,7 @@ fn infinite_loop_handler_times_out_without_hanging() {
         "got {result:?}"
     );
     // One timeout failure counts toward the auto-unload threshold (default
-    // 3); the plugin is still loaded — only the third consecutive failure
+    // 3); the plugin is still loaded - only the third consecutive failure
     // unloads. Assert the failure was recorded against telemetry instead.
     let tracked = manager.get("slow").expect("tracked");
     let ledger = StoreLedger::load(&tracked.store);
@@ -549,7 +517,7 @@ fn reset_on_success_keeps_consecutive_counter_down() {
     assert!(!unloaded, "success reset keeps the threshold away");
 }
 
-// ── direct sandbox dispatch (used by the T-015 harness too) ───────────────
+// -- direct sandbox dispatch (used by the T-015 harness too) ---------------
 
 #[test]
 fn dispatch_sandbox_invokes_stashed_handlers_directly() {

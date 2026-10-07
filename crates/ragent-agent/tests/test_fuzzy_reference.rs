@@ -179,7 +179,7 @@ fn test_collect_project_files_cache_invalidates_on_mtime_change() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-// ── PERF-051: async walk wrapper ─────────────────────────────────────────
+// -- PERF-051: async walk wrapper -----------------------------------------
 
 #[tokio::test]
 async fn test_collect_project_files_async_matches_sync_walk() {

@@ -16,7 +16,7 @@ use regex::Regex;
 use std::fmt;
 use std::sync::LazyLock;
 
-// ── SDD capability flags (FR-019) ──────────────────────────────────────────
+// -- SDD capability flags (FR-019) ------------------------------------------
 
 /// Capability flags that gate SDD-specific validation checks and artifact
 /// generation (FR-019).
@@ -112,7 +112,7 @@ impl SddFlags {
     }
 }
 
-// ── EARS regex patterns ───────────────────────────────────────────────────
+// -- EARS regex patterns ---------------------------------------------------
 
 static RE_UBIQUITOUS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^the\s+.+\s+shall\s+.+$").expect("ubiquitous regex should compile")
@@ -495,7 +495,7 @@ impl Default for Report {
     }
 }
 
-// ── EARS template detection ─────────────────────────────────────────────────
+// -- EARS template detection -------------------------------------------------
 
 /// Detect the EARS template type from a requirement text string.
 ///
@@ -520,7 +520,7 @@ pub fn detect_ears_template(text: &str) -> Option<EarsTemplate> {
     None
 }
 
-// ── Requirement parser ────────────────────────────────────────────────────
+// -- Requirement parser ----------------------------------------------------
 
 /// A `[NEEDS CLARIFICATION: <question>]` marker found in a SPEC.md.
 ///
@@ -565,7 +565,7 @@ pub fn detect_clarification_markers(content: &str) -> Vec<ClarificationMarker> {
     markers
 }
 
-// ── Ambiguity detection (T-026, FR-015) ─────────────────────────────────────
+// -- Ambiguity detection (T-026, FR-015) -------------------------------------
 
 /// Regex matching common vague/ambiguous terms in requirement text.
 /// Matches whole words only (case-insensitive).
@@ -714,7 +714,7 @@ fn collect_defined_acronyms(content: &str) -> Vec<String> {
     defined
 }
 
-// ── Contradiction detection (T-027, FR-015) ────────────────────────────────
+// -- Contradiction detection (T-027, FR-015) --------------------------------
 
 /// Kind of contradiction detected between two requirements (FR-015, T-027).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1004,7 +1004,7 @@ fn objects_overlap(a: &str, b: &str) -> bool {
     words_a.iter().any(|w| words_b.contains(w))
 }
 
-// ── Gap detection (T-028, FR-015) ──────────────────────────────────────────
+// -- Gap detection (T-028, FR-015) ------------------------------------------
 
 /// Kind of acceptance-criteria gap detected in a requirement (FR-015, T-028).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1288,7 +1288,7 @@ pub fn extract_sections(content: &str) -> Vec<(usize, String, usize)> {
     sections
 }
 
-// ── Core validators ────────────────────────────────────────────────────────
+// -- Core validators --------------------------------------------------------
 
 /// Validate a spec and return a [`Report`].
 ///
@@ -1733,7 +1733,7 @@ pub fn validate_phase_minus_one_gates(spec: &Spec, report: &mut Report) {
     }
 }
 
-// ── Convenience API ────────────────────────────────────────────────────────
+// -- Convenience API --------------------------------------------------------
 
 // NOTE: Async filesystem validation is a Milestone-4 integration task.
 // The `validate` function above is sufficient for the validation engine.

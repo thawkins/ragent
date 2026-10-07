@@ -4,6 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::fmt::Write;
 
+use crate::task::TaskStatus;
+
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Lists all sub-agent tasks (running and completed) for the current session.
@@ -95,25 +97,15 @@ impl Tool for ListAgentsTool {
         let filtered: Vec<_> = if let Some(filter) = status_filter {
             tasks
                 .into_iter()
-                .filter(|t| {
-                    let status_str = match t.status {
-                        crate::task::TaskStatus::Running => "running",
-                        crate::task::TaskStatus::Completed => "completed",
-                        crate::task::TaskStatus::Failed => "failed",
-                        crate::task::TaskStatus::Cancelled => "cancelled",
-                        crate::task::TaskStatus::Suspended => "suspended",
-                        crate::task::TaskStatus::Terminating => "terminating",
-                    };
-                    status_str == filter
-                })
+                .filter(|t| t.status.as_str() == filter)
                 .collect()
         } else {
             tasks
         };
 
         if filtered.is_empty() {
-            let msg = if status_filter.is_some() {
-                format!("No tasks with status '{}' found.", status_filter.unwrap())
+            let msg = if let Some(filter) = status_filter {
+                format!("No tasks with status '{filter}' found.")
             } else {
                 "No sub-agent tasks found for this session.".to_string()
             };
@@ -125,7 +117,7 @@ impl Tool for ListAgentsTool {
 
         let running_count = filtered
             .iter()
-            .filter(|t| t.status == crate::task::TaskStatus::Running)
+            .filter(|t| t.status == TaskStatus::Running)
             .count();
 
         let mut output = String::new();
@@ -146,13 +138,7 @@ impl Tool for ListAgentsTool {
             };
 
             let status = format!("{} {}", status_emoji(&task.status), task.status);
-            let duration = if let Some(completed) = task.completed_at {
-                let dur = completed - task.created_at;
-                format!("{}s", dur.num_seconds())
-            } else {
-                let dur = chrono::Utc::now() - task.created_at;
-                format!("{}s (running)", dur.num_seconds())
-            };
+            let duration = format_duration(task, "(running)");
 
             let summary = task
                 .result
@@ -191,18 +177,22 @@ impl Tool for ListAgentsTool {
     }
 }
 
+/// Format a task's elapsed duration, appending `suffix` while it is still
+/// running (list and detail views use different suffixes).
+fn format_duration(task: &crate::task::TaskEntry, suffix: &str) -> String {
+    match task.completed_at {
+        Some(completed) => format!("{}s", (completed - task.created_at).num_seconds()),
+        None => format!(
+            "{}s {suffix}",
+            (chrono::Utc::now() - task.created_at).num_seconds()
+        ),
+    }
+}
+
 /// Format detailed information about a single task.
 fn format_task_detail(task: &crate::task::TaskEntry) -> String {
-    let mut status_words = task.status.to_string();
-    let first = status_words.remove(0).to_uppercase().to_string();
-    let status = format!("{} {first}{status_words}", status_emoji(&task.status));
-    let duration = if let Some(completed) = task.completed_at {
-        let dur = completed - task.created_at;
-        format!("{}s", dur.num_seconds())
-    } else {
-        let dur = chrono::Utc::now() - task.created_at;
-        format!("{}s (still running)", dur.num_seconds())
-    };
+    let status = format!("{} {}", status_emoji(&task.status), task.status);
+    let duration = format_duration(task, "(still running)");
 
     let mut detail = format!(
         "Task: {}\n\
@@ -221,9 +211,7 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
         &task.child_session_id[..8.min(task.child_session_id.len())],
     );
 
-    if let Some(prompt) = Some(&task.task_prompt) {
-        let _ = write!(detail, "\n\nTask Prompt:\n{prompt}");
-    }
+    let _ = write!(detail, "\n\nTask Prompt:\n{}", task.task_prompt);
 
     if let Some(ref result) = task.result {
         let _ = write!(detail, "\n\nResult:\n{result}");
@@ -251,13 +239,13 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
 }
 
 /// Returns the emoji marker used to visually represent a task status.
-fn status_emoji(status: &crate::task::TaskStatus) -> &'static str {
+fn status_emoji(status: &TaskStatus) -> &'static str {
     match status {
-        crate::task::TaskStatus::Running => "[..]",
-        crate::task::TaskStatus::Completed => "[ok]",
-        crate::task::TaskStatus::Failed => "[x]",
-        crate::task::TaskStatus::Cancelled => "[blocked]",
-        crate::task::TaskStatus::Suspended => "[||]",
-        crate::task::TaskStatus::Terminating => "[skull]",
+        TaskStatus::Running => "[..]",
+        TaskStatus::Completed => "[ok]",
+        TaskStatus::Failed => "[x]",
+        TaskStatus::Cancelled => "[blocked]",
+        TaskStatus::Suspended => "[||]",
+        TaskStatus::Terminating => "[skull]",
     }
 }

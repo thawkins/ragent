@@ -12,7 +12,7 @@ use ragent_agent::event::{Event, FinishReason};
 use ragent_agent::sanitize::redact_secrets_cow;
 use serde::Serialize;
 
-// ── Payload structs ──────────────────────────────────────────────────────
+// -- Payload structs ------------------------------------------------------
 
 #[derive(Serialize)]
 struct SessionOnly<'a> {
@@ -305,7 +305,7 @@ struct TeamNameP<'a> {
     team_name: &'a str,
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// -- Helpers --------------------------------------------------------------
 
 /// Serialize a payload directly to a JSON string, bypassing `serde_json::Value`.
 fn to_data<T: Serialize>(payload: &T) -> String {
@@ -398,7 +398,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::BackgroundTaskUpdated { .. } => "background_task_updated",
         Event::BackgroundTaskCompleted { .. } => "background_task_completed",
     }
-} // ── Public API ───────────────────────────────────────────────────────────
+} // -- Public API -----------------------------------------------------------
 /// Return the SSE event-type name and serialized JSON payload for an [`Event`].
 ///
 /// This is the testable core of [`event_to_sse`]. The returned tuple is

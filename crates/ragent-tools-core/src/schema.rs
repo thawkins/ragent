@@ -93,7 +93,3 @@ fn json_type_name(value: &Value) -> &'static str {
         Value::Object(_) => "object",
     }
 }
-
-#[cfg(test)]
-#[path = "../tests/inline/schema_tests.rs"]
-mod tests;

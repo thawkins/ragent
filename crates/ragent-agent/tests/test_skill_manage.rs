@@ -41,7 +41,7 @@ fn write_project_skill(dir: &std::path::Path, name: &str, body: &str) {
     .expect("write SKILL.md");
 }
 
-// ── Identity ────────────────────────────────────────────────────────
+// -- Identity --------------------------------------------------------
 
 #[test]
 fn test_skill_manage_identity() {
@@ -65,7 +65,7 @@ fn test_skill_manage_schema_actions() {
     }
 }
 
-// ── List ────────────────────────────────────────────────────────────
+// -- List ------------------------------------------------------------
 
 #[tokio::test]
 async fn test_skill_manage_list_includes_bundled_and_project() {
@@ -118,7 +118,7 @@ async fn test_skill_manage_list_scope_filter() {
     );
 }
 
-// ── Read (prompt fetch with arg substitution) ───────────────────────
+// -- Read (prompt fetch with arg substitution) -----------------------
 
 #[tokio::test]
 async fn test_skill_manage_read_returns_prompt_body() {
@@ -167,7 +167,7 @@ async fn test_skill_manage_read_unknown_skill_lists_available() {
     );
 }
 
-// ── Load (JCODEPLAN M8 acceptance) ──────────────────────────────────
+// -- Load (JCODEPLAN M8 acceptance) ----------------------------------
 
 #[tokio::test]
 async fn test_skill_manage_load_injects_skill_prompt() {
@@ -205,7 +205,7 @@ async fn test_skill_manage_load_injects_skill_prompt() {
     assert_eq!(meta["name"], "rust-error-handling");
 }
 
-// ── Reload ──────────────────────────────────────────────────────────
+// -- Reload ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_skill_manage_reload_reports_added_and_baseline() {
@@ -303,7 +303,7 @@ async fn test_skill_manage_reload_reflects_edited_body() {
     );
 }
 
-// ── Errors ──────────────────────────────────────────────────────────
+// -- Errors ----------------------------------------------------------
 
 #[tokio::test]
 async fn test_skill_manage_unknown_action_rejected() {

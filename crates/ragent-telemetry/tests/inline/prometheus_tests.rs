@@ -24,12 +24,29 @@ fn test_render_after_shutdown_returns_empty() {
 
 #[test]
 fn test_format_resource_metrics_with_resource() {
-    let rm = ResourceMetrics {
-        resource: Resource::builder_empty()
-            .with_attribute(opentelemetry::KeyValue::new("service.name", "test-ragent"))
-            .build(),
-        scope_metrics: vec![],
-    };
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+    // The OTEL SDK 0.33 makes `ResourceMetrics` fields private, so a snapshot
+    // carrying a resource is obtained by collecting from a reader registered
+    // on a provider configured with that resource (the `produce` path always
+    // stamps `rm.resource` with the provider's resource).
+    let shared = SharedManualReader::new();
+    let handle = shared.handle();
+    let provider = SdkMeterProvider::builder()
+        .with_resource(
+            Resource::builder_empty()
+                .with_attribute(opentelemetry::KeyValue::new("service.name", "test-ragent"))
+                .build(),
+        )
+        .with_reader(shared)
+        .build();
+
+    let mut rm = ResourceMetrics::default();
+    assert!(
+        handle.collect(&mut rm).is_ok(),
+        "collect should succeed for a registered reader"
+    );
+
     let text = format_resource_metrics(&rm);
     assert!(
         text.contains("target_info"),
@@ -39,16 +56,16 @@ fn test_format_resource_metrics_with_resource() {
         text.contains("service.name"),
         "should contain service.name label"
     );
+    // Keep the provider alive until after the snapshot is rendered.
+    let _ = &provider;
 }
 
 #[test]
 fn test_format_resource_metrics_empty() {
-    // Use an explicitly-empty Resource (not Resource::default(), which
-    // includes SDK defaults like telemetry.sdk.* and unknown_service).
-    let rm = ResourceMetrics {
-        resource: Resource::builder_empty().build(),
-        scope_metrics: vec![],
-    };
+    // `ResourceMetrics::default()` carries an explicitly-empty `Resource`
+    // (not `Resource::default()`, which includes SDK defaults like
+    // telemetry.sdk.* and unknown_service).
+    let rm = ResourceMetrics::default();
     let text = format_resource_metrics(&rm);
     // Empty resource -> no target_info line.
     assert!(!text.contains("target_info"));
@@ -81,27 +98,23 @@ fn test_shared_manual_reader_delegates() {
     counter.add(7, &[]);
 
     // Collect via the handle (the Arc<ManualReader> we kept).
-    let mut rm = ResourceMetrics {
-        resource: Resource::builder_empty().build(),
-        scope_metrics: vec![],
-    };
+    let mut rm = ResourceMetrics::default();
     assert!(
         handle.collect(&mut rm).is_ok(),
         "collect via the handle should succeed (delegation works)"
     );
     // The resource must be present (proving the reader is wired).
     assert!(
-        rm.resource
+        rm.resource()
             .get(&opentelemetry::Key::from("service.name"))
             .is_some(),
         "resource attributes must be collected via the handle"
     );
     // The counter must appear in the scope_metrics.
     let has_counter = rm
-        .scope_metrics
-        .iter()
-        .flat_map(|sm| sm.metrics.iter())
-        .any(|m| m.name == "ragent.llm.requests");
+        .scope_metrics()
+        .flat_map(|sm| sm.metrics())
+        .any(|m| m.name() == "ragent.llm.requests");
     assert!(
         has_counter,
         "the recorded counter must appear in the collected metrics"

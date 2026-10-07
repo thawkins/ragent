@@ -14,7 +14,7 @@ fn sample_item() -> ResearchItem {
     ResearchItem::new(name, "Invocation Test", "replay verification")
 }
 
-// ── ResearchRunRequest → SessionConfig plumbing ──────────────────────────
+// -- ResearchRunRequest -> SessionConfig plumbing --------------------------
 
 #[test]
 fn build_session_config_copies_invocation() {
@@ -36,7 +36,7 @@ fn build_session_config_defaults_invocation_to_none() {
     assert!(cfg.invocation.is_none());
 }
 
-// ── Frontmatter rendering and parsing ────────────────────────────────────
+// -- Frontmatter rendering and parsing ------------------------------------
 
 #[test]
 fn frontmatter_records_invocation_and_round_trips() {

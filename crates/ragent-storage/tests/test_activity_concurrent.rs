@@ -59,7 +59,7 @@ fn validate_consistent_log_passes() {
 
 #[test]
 fn validate_detects_sequence_gap() {
-    // seq 0, 1, 3 — missing 2.
+    // seq 0, 1, 3 - missing 2.
     let events = [
         ev(
             0,

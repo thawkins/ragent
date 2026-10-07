@@ -101,7 +101,7 @@ fn assistant_count(app: &App) -> usize {
 /// is absent entirely (FR-030 "no `plugins.stores` block is present").
 const NO_PLUGINS_BLOCK: &str = r#"{"defaultAgent": "general"}"#;
 
-// ── Launch with no `plugins.stores` block (FR-030, FR-036) ──────────────────
+// -- Launch with no `plugins.stores` block (FR-030, FR-036) ------------------
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -169,7 +169,7 @@ async fn launch_reports_no_configuration_error_for_either_store() {
     }
 }
 
-// ── Effective endpoint resolution (FR-027, FR-028, FR-029) ──────────────────
+// -- Effective endpoint resolution (FR-027, FR-028, FR-029) ------------------
 
 #[test]
 fn absent_stores_block_resolves_each_store_to_its_compiled_default() {
@@ -255,7 +255,7 @@ async fn a_configured_url_overrides_the_default_on_the_launch_path() {
     );
 }
 
-// ── Query and `--refresh` parsing on launch (FR-020, FR-021) ────────────────
+// -- Query and `--refresh` parsing on launch (FR-020, FR-021) ----------------
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -285,7 +285,7 @@ async fn a_multi_word_query_is_joined_and_refresh_defaults_off() {
     assert!(!browser.refresh);
 }
 
-// ── Disabled subsystem (SPEC configuration schema) ──────────────────────────
+// -- Disabled subsystem (SPEC configuration schema) --------------------------
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
@@ -311,7 +311,7 @@ async fn a_disabled_subsystem_reports_and_opens_no_panel() {
     );
 }
 
-// ── Non-store subcommands still report (regression) ─────────────────────────
+// -- Non-store subcommands still report (regression) -------------------------
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]

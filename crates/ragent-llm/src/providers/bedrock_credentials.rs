@@ -6,6 +6,14 @@
 //! 3. IAM instance metadata (EC2/ECS) - optional, best-effort
 //!
 //! Implements FR-001, FR-002, FR-003 of the BedrockAWS specification.
+//!
+//! Audit T-111: the credential env reads below intentionally use `std::env`
+//! directly. This is the AWS provider-chain module named in the audit's
+//! documented allow-list ("a documented allow-list may remain for AWS
+//! SDK-style reads"): `AWS_PROFILE` / `AWS_REGION` / `AWS_SHARED_CREDENTIALS_FILE`
+//! are chain *selectors*, not credentials, and the key/session pair follows the
+//! official AWS resolution order, including a blank-as-unset policy that is
+//! verified inline below.
 
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
@@ -150,20 +158,15 @@ pub fn resolve_region(options: &std::collections::HashMap<String, serde_json::Va
 
 /// Attempts to read credentials from environment variables.
 fn creds_from_env(region: &str) -> Option<AwsCredentials> {
-    let access_key = std::env::var("AWS_ACCESS_KEY_ID").ok()?;
-    let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY").ok()?;
+    // Canonical blank-as-unset, trimmed credential read (audit T-111).
+    let access_key = ragent_config::credential_env::read_credential_env("AWS_ACCESS_KEY_ID")?;
+    let secret_key = ragent_config::credential_env::read_credential_env("AWS_SECRET_ACCESS_KEY")?;
 
-    if access_key.trim().is_empty() || secret_key.trim().is_empty() {
-        return None;
-    }
-
-    let session_token = std::env::var("AWS_SESSION_TOKEN")
-        .ok()
-        .filter(|s| !s.trim().is_empty());
+    let session_token = ragent_config::credential_env::read_credential_env("AWS_SESSION_TOKEN");
 
     Some(AwsCredentials {
-        access_key: access_key.trim().to_string(),
-        secret_key: secret_key.trim().to_string(),
+        access_key,
+        secret_key,
         session_token,
         region: region.to_string(),
     })

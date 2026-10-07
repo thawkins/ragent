@@ -22,7 +22,15 @@ fn make_envelope(source: &str, summary: &str, action: &str) -> TriggerEnvelope {
 fn test_first_envelope_passes() {
     let rt = TriggerRuntime::default();
     let env = make_envelope("server-1", "build done", "report it");
-    assert!(rt.process(env).is_some());
+    let fired = rt.process(env).expect("first envelope must pass");
+    assert_eq!(fired.envelope.source_id, "server-1");
+    assert_eq!(fired.envelope.summary, "build done");
+    assert_eq!(fired.envelope.action_prompt, "report it");
+    assert_eq!(
+        fired.envelope.source_kind,
+        TriggerSourceKind::McpNotification
+    );
+    assert!(fired.rule_id.is_none(), "MCP envelopes carry no rule id");
 }
 
 #[test]
@@ -30,8 +38,10 @@ fn test_duplicate_within_window_suppressed() {
     let rt = TriggerRuntime::default();
     let env1 = make_envelope("server-1", "build done", "report it");
     let env2 = make_envelope("server-1", "build done", "report it");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_none()); // suppressed
+    let fired = rt.process(env1).expect("first envelope must pass");
+    assert_eq!(fired.envelope.source_id, "server-1");
+    assert_eq!(fired.envelope.summary, "build done");
+    assert!(rt.process(env2).is_none(), "duplicate must be suppressed");
 }
 
 #[test]
@@ -39,8 +49,11 @@ fn test_different_content_not_suppressed() {
     let rt = TriggerRuntime::default();
     let env1 = make_envelope("server-1", "build done", "report it");
     let env2 = make_envelope("server-1", "build failed", "report it");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_some()); // different content
+    let first = rt.process(env1).expect("first envelope must pass");
+    assert_eq!(first.envelope.summary, "build done");
+    let second = rt.process(env2).expect("different content must pass");
+    assert_eq!(second.envelope.summary, "build failed");
+    assert_eq!(second.envelope.source_id, "server-1");
 }
 
 #[test]
@@ -48,8 +61,10 @@ fn test_different_source_not_suppressed() {
     let rt = TriggerRuntime::default();
     let env1 = make_envelope("server-1", "build done", "report it");
     let env2 = make_envelope("server-2", "build done", "report it");
-    assert!(rt.process(env1).is_some());
-    assert!(rt.process(env2).is_some());
+    let first = rt.process(env1).expect("first envelope must pass");
+    assert_eq!(first.envelope.source_id, "server-1");
+    let second = rt.process(env2).expect("different source must pass");
+    assert_eq!(second.envelope.source_id, "server-2");
 }
 
 #[test]
@@ -61,12 +76,13 @@ fn test_cycle_suppression_after_max_cycles() {
     let rt = TriggerRuntime::new(config);
 
     // First 3 firings of the same source+content pass (cycle count 1,2,3)
-    for _ in 0..3 {
+    for cycle in 1..=3 {
         let env = make_envelope("server-1", "build done", "report it");
-        assert!(
-            rt.process(env).is_some(),
-            "Should pass within max_cycles boundary"
-        );
+        let fired = rt
+            .process(env)
+            .unwrap_or_else(|| panic!("cycle {cycle} should pass within max_cycles boundary"));
+        assert_eq!(fired.envelope.source_id, "server-1");
+        assert_eq!(fired.envelope.summary, "build done");
     }
 
     // 4th firing is suppressed (consecutive > max_cycles)
@@ -84,17 +100,25 @@ fn test_cycle_resets_on_different_content() {
 
     // Fire same content twice
     let env = make_envelope("server-1", "build done", "report it");
-    assert!(rt.process(env).is_some());
+    let first = rt.process(env).expect("first firing must pass");
+    assert_eq!(first.envelope.summary, "build done");
     let env = make_envelope("server-1", "build done", "report it");
-    assert!(rt.process(env).is_some());
+    let second = rt.process(env).expect("second firing must pass");
+    assert_eq!(second.envelope.summary, "build done");
 
     // Different content resets cycle
     let env = make_envelope("server-1", "build failed", "report it");
-    assert!(rt.process(env).is_some());
+    let reset = rt
+        .process(env)
+        .expect("different content must reset the cycle");
+    assert_eq!(reset.envelope.summary, "build failed");
 
     // Same content as before the reset - should pass (cycle reset)
     let env = make_envelope("server-1", "build done", "report it");
-    assert!(rt.process(env).is_some());
+    let after_reset = rt
+        .process(env)
+        .expect("cycle reset must let the same content pass again");
+    assert_eq!(after_reset.envelope.summary, "build done");
 }
 
 #[test]
@@ -134,11 +158,16 @@ fn test_dynamic_trigger_marks_rule_fired() {
         TriggerActionKind::SubAgent,
         false,
     );
-    let fired = rt.process(env).unwrap();
+    let fired = rt.process(env).expect("dynamic envelope must fire");
     assert_eq!(fired.rule_id.as_ref().unwrap().as_str(), "rule-test-1");
 
     let r = rt.get_rule("rule-test-1").unwrap();
-    assert!(r.fired_at.is_some());
+    // The runtime stamps `fired_at` with the firing envelope's timestamp.
+    assert_eq!(
+        r.fired_at,
+        Some(fired.envelope.timestamp),
+        "fired_at must record the firing timestamp"
+    );
     assert_eq!(r.status(), TriggerRuleStatus::Fired);
 }
 
@@ -182,5 +211,10 @@ fn test_shared_state_via_clone() {
     let id = rt.add_rule(TriggerRule::new("cond", "act"));
     // The clone shares the same state.
     assert_eq!(rt2.rule_count(), 1);
-    assert!(rt2.get_rule(id.as_str()).is_some());
+    let shared = rt2
+        .get_rule(id.as_str())
+        .expect("the clone must see the rule added via the original");
+    assert_eq!(shared.condition, "cond");
+    assert_eq!(shared.action, "act");
+    assert_eq!(shared.status(), TriggerRuleStatus::Active);
 }

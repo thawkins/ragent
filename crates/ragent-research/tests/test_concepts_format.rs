@@ -58,15 +58,15 @@ fn test_format_concepts_md_with_sources_appends_web_sources_block() {
     assert!(!out.contains("web-01"), "{out}");
     assert!(!out.contains("web-02"), "{out}");
     // Bullet style must match RESEARCH.md render_finding_sources:
-    // - [N] Title [Author] — URL (published YYYY-MM-DD), URL linkified.
+    // - [N] Title [Author] - URL (published YYYY-MM-DD), URL linkified.
     assert!(
         out.contains(
-            "- [1] Guide to AI Research Tools [Jane Doe] — [https://example.com/one](https://example.com/one) (published 2025-05-26)"
+            "- [1] Guide to AI Research Tools [Jane Doe] - [https://example.com/one](https://example.com/one) (published 2025-05-26)"
         ),
         "{out}"
     );
     assert!(
-        out.contains("- [2] Second Source — [https://example.com/two](https://example.com/two)"),
+        out.contains("- [2] Second Source - [https://example.com/two](https://example.com/two)"),
         "{out}"
     );
 }
@@ -192,7 +192,7 @@ async fn test_write_concepts_md_end_to_end_numbered_and_sourced() {
     assert!(content.contains("**WebSources:**"), "{content}");
     assert!(
         content.contains(
-            "- [1] First Source [Jane Doe] — [https://example.com/one](https://example.com/one) (published 2025-05-26)"
+            "- [1] First Source [Jane Doe] - [https://example.com/one](https://example.com/one) (published 2025-05-26)"
         ),
         "{content}"
     );

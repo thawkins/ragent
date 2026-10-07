@@ -4,7 +4,7 @@ use ragent_llm::providers::http_client::append_stream_chunk;
 
 #[test]
 fn multibyte_char_split_across_chunks_is_preserved() {
-    // 'é' is 0xC3 0xA9 — two bytes. Splitting between them must not corrupt.
+    // 'é' is 0xC3 0xA9 - two bytes. Splitting between them must not corrupt.
     let (mut out, mut pending) = (String::new(), Vec::new());
     append_stream_chunk(&mut out, &mut pending, b"caf");
     append_stream_chunk(&mut out, &mut pending, &[0xC3]);
@@ -18,7 +18,7 @@ fn multibyte_char_split_across_chunks_is_preserved() {
 
 #[test]
 fn multibyte_char_split_three_ways_across_chunks() {
-    // '─' is 0xE2 0x94 0x80 — three bytes.
+    // '-' is 0xE2 0x94 0x80 - three bytes.
     let (mut out, mut pending) = (String::new(), Vec::new());
     append_stream_chunk(&mut out, &mut pending, &[0xE2]);
     assert!(out.is_empty());

@@ -2,7 +2,7 @@
 //! encoding must not panic `pdf_extract`.
 //!
 //! `cff-parser` 0.1.0's `Encoding::get_table()` does `EncodingKind::Expert =>
-//! panic!()` — the vendored `pdf-extract` used to call it unconditionally when
+//! panic!()` - the vendored `pdf-extract` used to call it unconditionally when
 //! building the CFF unicode map. The panic was caught by
 //! `extract_pdf_text`'s `catch_unwind`, but the global panic hook still fired
 //! (writing a panic log and tearing down the TUI terminal), which is what the
@@ -45,7 +45,7 @@ fn build_expert_cff() -> Vec<u8> {
     // 25. All operands are < 247 so the CFF number encoding is value+139 in
     // a single byte.
     //
-    // Encoding is expressed with operand `1` — cff-parser treats operand 1
+    // Encoding is expressed with operand `1` - cff-parser treats operand 1
     // as the predefined *Expert* encoding (per the CFF spec, encoding
     // operands 0 and 1 are predefined IDs, not file offsets). That operand
     // makes `Encoding::get_table()` panic in cff-parser 0.1.0.
@@ -68,7 +68,7 @@ fn build_expert_cff() -> Vec<u8> {
 /// Build a one-page PDF embedding the crafted CFF font.
 ///
 /// The font is declared `Subtype /Type1` with a `FontDescriptor` whose
-/// `FontFile3` stream has `Subtype /Type1C` — the path in `pdf-extract`'s
+/// `FontFile3` stream has `Subtype /Type1C` - the path in `pdf-extract`'s
 /// `make_font` that historically reached `Encoding::get_table()`.
 #[cfg(test)]
 fn build_pdf_with_expert_cff() -> Vec<u8> {
@@ -164,6 +164,6 @@ fn test_expert_cff_through_extract_pdf_text() {
     let pdf = build_pdf_with_expert_cff();
     // The dedicated-OS-thread isolation path: must not abort the process,
     // and must not write a panic log via the global hook. Just assert it
-    // returns (Ok or Err — either is fine as long as we don't crash).
+    // returns (Ok or Err - either is fine as long as we don't crash).
     let _ = extract_pdf_text(&pdf);
 }

@@ -71,7 +71,7 @@ fn inline_manifest_strips_listing_fields_and_keeps_content() {
 
 #[test]
 fn inline_manifest_refuses_plain_listings_and_unknown_names() {
-    // A plain listing entry (no hosting-config section) never materialises —
+    // A plain listing entry (no hosting-config section) never materialises -
     // the real manifest lives in the clone.
     assert!(inline_manifest_for(DOC, "agent-sdk-dev").is_none());
     assert!(inline_manifest_for(DOC, "not-in-the-doc").is_none());

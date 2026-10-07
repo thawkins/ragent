@@ -4,7 +4,7 @@
 //! child session's SQLite row stays in step with the run. The TUI output-view
 //! overlay renders that row for a running sub-agent, and its generation key
 //! (message count + `edit_seq`, neither of which changes mid-run) relies on
-//! the row being updated as steps complete — a tool-only step must therefore
+//! the row being updated as steps complete - a tool-only step must therefore
 //! trigger an interim save.
 //!
 //! The mock provider scripts a `think` tool call (which needs no permission

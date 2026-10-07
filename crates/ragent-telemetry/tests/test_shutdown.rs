@@ -12,7 +12,7 @@ use std::sync::Arc;
 fn test_shutdown_guard_disabled_noop() {
     let sub = TelemetrySubsystem::disabled();
     let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
-    // Drop the guard — should not panic even with a disabled subsystem.
+    // Drop the guard - should not panic even with a disabled subsystem.
     drop(guard);
 }
 
@@ -85,7 +85,7 @@ fn test_shutdown_guard_enabled_no_panic_on_drop() {
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("enabled subsystem") });
     let guard = ShutdownGuard::new(std::sync::Arc::new(sub));
-    // Drop the guard — flush+shutdown may fail (no collector) but must
+    // Drop the guard - flush+shutdown may fail (no collector) but must
     // not panic (FR-031, FR-033).
     drop(guard);
 }
@@ -103,7 +103,7 @@ async fn test_flush_on_signal_arc_constructs() {
 
     let sub = Arc::new(TelemetrySubsystem::new(config).expect("enabled subsystem"));
 
-    // Spawn the signal handler — it should construct without error.
+    // Spawn the signal handler - it should construct without error.
     let handle = flush_on_signal_arc(sub).expect("signal handler should install");
     // Abort the task to clean up (we don't want it lingering).
     handle.abort();

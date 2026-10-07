@@ -60,7 +60,7 @@ async fn assert_edit(
     assert_eq!(result, expected, "file content after edit");
 }
 
-// ── Exact match (baseline) ───────────────────────────────────────────────────
+// -- Exact match (baseline) ---------------------------------------------------
 
 #[tokio::test]
 async fn test_edit_exact_match_baseline() {
@@ -76,7 +76,7 @@ async fn test_edit_exact_match_baseline() {
     .await;
 }
 
-// ── Exact-byte matching: cascade behaviour ────────────────────────────────────
+// -- Exact-byte matching: cascade behaviour ------------------------------------
 //
 // P2.4/P2.5: when exact matching fails, the fallback cascade retries with
 // whitespace-flexible and indent-normalised matching. Tests below verify both
@@ -215,7 +215,7 @@ async fn test_edit_not_found_includes_pass_hint() {
     );
 }
 
-// ── Multiple matches (FR-004, FR-005) ────────────────────────────────────────
+// -- Multiple matches (FR-004, FR-005) ----------------------------------------
 
 #[tokio::test]
 async fn test_edit_multiple_matches_errors() {
@@ -273,7 +273,7 @@ async fn test_edit_collapse_whitespace_multiple_matches_uses_decoded_needle() {
     );
 }
 
-// ── NotFound (FR-004) ────────────────────────────────────────────────────────
+// -- NotFound (FR-004) --------------------------------------------------------
 
 #[tokio::test]
 async fn test_edit_not_found_errors() {
@@ -295,7 +295,7 @@ async fn test_edit_not_found_errors() {
     );
 }
 
-// ── Create operation (FR-006): empty old_string ──────────────────────────────
+// -- Create operation (FR-006): empty old_string ------------------------------
 
 #[tokio::test]
 async fn test_edit_create_new_file() {
@@ -342,7 +342,7 @@ async fn test_edit_create_rejects_existing_file() {
     );
 }
 
-// ── Delete operation (FR-006): empty new_string ──────────────────────────────
+// -- Delete operation (FR-006): empty new_string ------------------------------
 
 #[tokio::test]
 async fn test_edit_delete_matched_text() {
@@ -358,7 +358,7 @@ async fn test_edit_delete_matched_text() {
     .await;
 }
 
-// ── No-change rejection (FR-007) ─────────────────────────────────────────────
+// -- No-change rejection (FR-007) ---------------------------------------------
 
 #[tokio::test]
 async fn test_edit_no_change_rejected() {
@@ -380,7 +380,7 @@ async fn test_edit_no_change_rejected() {
     );
 }
 
-// ── Stale-file detection (FR-003) ────────────────────────────────────────────
+// -- Stale-file detection (FR-003) --------------------------------------------
 
 #[tokio::test]
 async fn test_edit_stale_file_rejected() {
@@ -451,7 +451,7 @@ async fn test_edit_fresh_file_accepted() {
         .expect("fresh file edit should succeed");
 }
 
-// ── Snippet generation (FR-008) ──────────────────────────────────────────────
+// -- Snippet generation (FR-008) ----------------------------------------------
 
 #[tokio::test]
 async fn test_edit_returns_snippet_with_line_numbers() {
@@ -491,7 +491,7 @@ async fn test_edit_returns_snippet_with_line_numbers() {
     );
 }
 
-// ── Canonical vs legacy parameter names (FR-001, FR-012) ─────────────────────
+// -- Canonical vs legacy parameter names (FR-001, FR-012) ---------------------
 
 #[tokio::test]
 async fn test_edit_canonical_param_names() {
@@ -546,7 +546,7 @@ async fn test_edit_canonical_params_no_deprecation_warning() {
     );
 }
 
-// ── Read-then-edit integration (FR-003 end-to-end) ───────────────────────────
+// -- Read-then-edit integration (FR-003 end-to-end) ---------------------------
 
 #[tokio::test]
 async fn test_read_then_edit_no_stale_error() {
@@ -558,7 +558,7 @@ async fn test_read_then_edit_no_stale_error() {
     let read_input = json!({ "path": "a.rs" });
     let _ = ReadTool.execute(read_input, &c).await.unwrap();
 
-    // Immediately edit — file mtime == recorded read time, so no stale error.
+    // Immediately edit - file mtime == recorded read time, so no stale error.
     let input = json!({
         "file_path": "a.rs",
         "old_string": "fn foo() { 1 }",
@@ -571,7 +571,7 @@ async fn test_read_then_edit_no_stale_error() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn foo() { 2 }\n");
 }
 
-// ── Edit-log instrumentation (editlog spec) ─────────────────────────────────
+// -- Edit-log instrumentation (editlog spec) ---------------------------------
 
 use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 
@@ -767,7 +767,7 @@ async fn test_edit_log_disabled_does_not_write() {
     );
 }
 
-// ── collapse_whitespace: tool-level opt-in ─────────────────────────────────
+// -- collapse_whitespace: tool-level opt-in ---------------------------------
 
 #[tokio::test]
 async fn test_edit_collapse_whitespace_matches_runs() {
@@ -852,7 +852,7 @@ async fn test_edit_collapse_whitespace_preserves_uniqueness_check() {
     );
 }
 
-// ── P2.6 line-similarity hint + P2.7 multi-match disambiguation + match_lane ─
+// -- P2.6 line-similarity hint + P2.7 multi-match disambiguation + match_lane -
 
 #[tokio::test]
 async fn test_edit_not_found_line_similarity_hint_shows_closest_block() {

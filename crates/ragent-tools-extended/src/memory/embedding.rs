@@ -8,16 +8,16 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌──────────────────────────┐
-//! │   EmbeddingProvider      │  (trait)
-//! │   - embed(text)         │
-//! │   - embed_batch(texts)  │
-//! │   - dimensions()        │
-//! │   - name()              │
-//! └──────┬───────────────────┘
-//!        │
-//!   ┌────┴─────┐
-//!   │          │
+//! +--------------------------+
+//! |   EmbeddingProvider      |  (trait)
+//! |   - embed(text)         |
+//! |   - embed_batch(texts)  |
+//! |   - dimensions()        |
+//! |   - name()              |
+//! \------+-------------------+
+//!        |
+//!   +----+-----+
+//!   |          |
 //!   v          v
 //! NoOp     Local (ort)
 //! (empty)  (ONNX model)
@@ -88,7 +88,7 @@ pub trait EmbeddingProvider: Send + Sync {
     }
 }
 
-// ── NoOpEmbedding ─────────────────────────────────────────────────────────────
+// -- NoOpEmbedding -------------------------------------------------------------
 
 /// A no-op embedding provider that returns empty vectors.
 ///
@@ -126,7 +126,7 @@ impl EmbeddingProvider for NoOpEmbedding {
     }
 }
 
-// ── Utility functions ─────────────────────────────────────────────────────────
+// -- Utility functions ---------------------------------------------------------
 
 /// Compute the cosine similarity between two embedding vectors.
 ///
@@ -211,7 +211,7 @@ pub struct SimilarityResult {
     pub score: f32,
 }
 
-// ── Local ONNX Embedding Provider (feature-gated) ────────────────────────────
+// -- Local ONNX Embedding Provider (feature-gated) ----------------------------
 
 #[cfg(feature = "embeddings")]
 mod local;

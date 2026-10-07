@@ -9,7 +9,36 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-// ── Symbol Kind ─────────────────────────────────────────────────────────────
+/// Generate `Display` and `FromStr` for a string-backed enum from a single
+/// `variant => literal` table so the two directions can never drift apart.
+///
+/// The `FromStr` error is `anyhow::Error` with the message
+/// `unknown <TypeName>: <input>`.
+macro_rules! string_enum {
+    ($name:ident { $($variant:ident => $lit:literal),+ $(,)? }) => {
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let label = match self {
+                    $(Self::$variant => $lit,)+
+                };
+                write!(f, "{label}")
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = anyhow::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $($lit => Ok(Self::$variant),)+
+                    other => anyhow::bail!(concat!("unknown ", stringify!($name), ": {}"), other),
+                }
+            }
+        }
+    };
+}
+
+// -- Symbol Kind -------------------------------------------------------------
 
 /// The kind of a code symbol extracted by tree-sitter parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -53,62 +82,31 @@ pub enum SymbolKind {
     Unknown,
 }
 
-impl fmt::Display for SymbolKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
-            Self::Function => "function",
-            Self::Method => "method",
-            Self::Struct => "struct",
-            Self::Class => "class",
-            Self::Enum => "enum",
-            Self::EnumVariant => "enum_variant",
-            Self::Trait => "trait",
-            Self::Interface => "interface",
-            Self::Impl => "impl",
-            Self::Module => "module",
-            Self::Constant => "constant",
-            Self::Static => "static",
-            Self::TypeAlias => "type_alias",
-            Self::Field => "field",
-            Self::Import => "import",
-            Self::Macro => "macro",
-            Self::Test => "test",
-            Self::Unknown => "unknown",
-        };
-        write!(f, "{label}")
+// Parse a `SymbolKind` from its database string representation.
+string_enum! {
+    SymbolKind {
+        Function => "function",
+        Method => "method",
+        Struct => "struct",
+        Class => "class",
+        Enum => "enum",
+        EnumVariant => "enum_variant",
+        Trait => "trait",
+        Interface => "interface",
+        Impl => "impl",
+        Module => "module",
+        Constant => "constant",
+        Static => "static",
+        TypeAlias => "type_alias",
+        Field => "field",
+        Import => "import",
+        Macro => "macro",
+        Test => "test",
+        Unknown => "unknown",
     }
 }
 
-// ── Visibility ──────────────────────────────────────────────────────────────
-
-/// Parse a `SymbolKind` from its database string representation.
-impl FromStr for SymbolKind {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "function" => Ok(Self::Function),
-            "method" => Ok(Self::Method),
-            "struct" => Ok(Self::Struct),
-            "class" => Ok(Self::Class),
-            "enum" => Ok(Self::Enum),
-            "enum_variant" => Ok(Self::EnumVariant),
-            "trait" => Ok(Self::Trait),
-            "interface" => Ok(Self::Interface),
-            "impl" => Ok(Self::Impl),
-            "module" => Ok(Self::Module),
-            "constant" => Ok(Self::Constant),
-            "static" => Ok(Self::Static),
-            "type_alias" => Ok(Self::TypeAlias),
-            "field" => Ok(Self::Field),
-            "import" => Ok(Self::Import),
-            "macro" => Ok(Self::Macro),
-            "test" => Ok(Self::Test),
-            "unknown" => Ok(Self::Unknown),
-            other => anyhow::bail!("unknown SymbolKind: {other}"),
-        }
-    }
-}
+// -- Visibility --------------------------------------------------------------
 
 /// Visibility of a symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -124,33 +122,16 @@ pub enum Visibility {
     Private,
 }
 
-impl fmt::Display for Visibility {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
-            Self::Public => "pub",
-            Self::PubCrate => "pub(crate)",
-            Self::PubSuper => "pub(super)",
-            Self::Private => "private",
-        };
-        write!(f, "{label}")
+string_enum! {
+    Visibility {
+        Public => "pub",
+        PubCrate => "pub(crate)",
+        PubSuper => "pub(super)",
+        Private => "private",
     }
 }
 
-impl FromStr for Visibility {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pub" => Ok(Self::Public),
-            "pub(crate)" => Ok(Self::PubCrate),
-            "pub(super)" => Ok(Self::PubSuper),
-            "private" => Ok(Self::Private),
-            other => anyhow::bail!("unknown Visibility: {other}"),
-        }
-    }
-}
-
-// ── File Entry ──────────────────────────────────────────────────────────────
+// -- File Entry --------------------------------------------------------------
 
 /// A tracked file in the index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,7 +152,7 @@ pub struct FileEntry {
     pub line_count: u64,
 }
 
-// ── Symbol ──────────────────────────────────────────────────────────────────
+// -- Symbol ------------------------------------------------------------------
 
 /// A code symbol extracted from a source file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,7 +187,7 @@ pub struct Symbol {
     pub body_hash: Option<String>,
 }
 
-// ── Import Entry ────────────────────────────────────────────────────────────
+// -- Import Entry ------------------------------------------------------------
 
 /// An import/use statement in a source file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,7 +206,7 @@ pub struct ImportEntry {
     pub kind: String,
 }
 
-// ── Symbol Reference ────────────────────────────────────────────────────────
+// -- Symbol Reference --------------------------------------------------------
 
 /// A reference to a symbol found in source code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,7 +226,7 @@ pub struct SymbolRef {
     pub kind: String,
 }
 
-// ── Index Stats ─────────────────────────────────────────────────────────────
+// -- Index Stats -------------------------------------------------------------
 
 /// Summary statistics for the code index.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -313,7 +294,7 @@ impl fmt::Display for IndexStats {
     }
 }
 
-// ── Graph Status ─────────────────────────────────────────────────────────────
+// -- Graph Status -------------------------------------------------------------
 
 /// Summary statistics for the semantic edge graph.
 ///
@@ -364,7 +345,7 @@ impl fmt::Display for GraphStatus {
     }
 }
 
-// ── Symbol Filter ───────────────────────────────────────────────────────────
+// -- Symbol Filter -----------------------------------------------------------
 
 /// Filter criteria for querying symbols from the index.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -386,7 +367,7 @@ pub struct SymbolFilter {
     pub limit: Option<u32>,
 }
 
-// ── Scan Config ─────────────────────────────────────────────────────────────
+// -- Scan Config -------------------------------------------------------------
 
 /// Configuration for the file scanner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -409,7 +390,7 @@ impl Default for ScanConfig {
     }
 }
 
-// ── Scanned File ────────────────────────────────────────────────────────────
+// -- Scanned File ------------------------------------------------------------
 
 /// A file discovered and fingerprinted by the scanner.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,7 +409,7 @@ pub struct ScannedFile {
     pub line_count: u64,
 }
 
-// ── Stale Diff ──────────────────────────────────────────────────────────────
+// -- Stale Diff --------------------------------------------------------------
 
 /// The result of comparing scanned files against the index.
 #[derive(Debug, Clone, Default)]
@@ -455,7 +436,7 @@ impl StaleDiff {
     }
 }
 
-// ── Search Query ────────────────────────────────────────────────────────────
+// -- Search Query ------------------------------------------------------------
 
 /// Default maximum number of results a [`SearchQuery`] returns when the caller
 /// leaves `max_results` at zero (ANTIPAT M5.3 / audit 3.3).
@@ -489,7 +470,7 @@ impl SearchQuery {
     }
 }
 
-// ── Index Result ────────────────────────────────────────────────────────────
+// -- Index Result ------------------------------------------------------------
 
 /// Summary of an indexing operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -536,7 +517,7 @@ impl fmt::Display for IndexResult {
     }
 }
 
-// ── Dependency Direction ────────────────────────────────────────────────────
+// -- Dependency Direction ----------------------------------------------------
 
 /// Direction for file dependency queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,7 +528,7 @@ pub enum DepDirection {
     Dependents,
 }
 
-// ── Graph Edge Kind ──────────────────────────────────────────────────────────
+// -- Graph Edge Kind ----------------------------------------------------------
 
 /// The semantic kind of a typed edge between two symbols in the code graph.
 ///
@@ -572,37 +553,18 @@ pub enum EdgeKind {
     Implements,
 }
 
-impl fmt::Display for EdgeKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
-            Self::Calls => "calls",
-            Self::Imports => "imports",
-            Self::Inherits => "inherits",
-            Self::References => "references",
-            Self::MixesIn => "mixes_in",
-            Self::Implements => "implements",
-        };
-        write!(f, "{label}")
+string_enum! {
+    EdgeKind {
+        Calls => "calls",
+        Imports => "imports",
+        Inherits => "inherits",
+        References => "references",
+        MixesIn => "mixes_in",
+        Implements => "implements",
     }
 }
 
-impl FromStr for EdgeKind {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "calls" => Ok(Self::Calls),
-            "imports" => Ok(Self::Imports),
-            "inherits" => Ok(Self::Inherits),
-            "references" => Ok(Self::References),
-            "mixes_in" => Ok(Self::MixesIn),
-            "implements" => Ok(Self::Implements),
-            other => anyhow::bail!("unknown EdgeKind: {other}"),
-        }
-    }
-}
-
-// ── Confidence ───────────────────────────────────────────────────────────────
+// -- Confidence ---------------------------------------------------------------
 
 /// How an edge was derived: read directly from the source or inferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -613,29 +575,14 @@ pub enum Confidence {
     Inferred,
 }
 
-impl fmt::Display for Confidence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
-            Self::Extracted => "EXTRACTED",
-            Self::Inferred => "INFERRED",
-        };
-        write!(f, "{label}")
+string_enum! {
+    Confidence {
+        Extracted => "EXTRACTED",
+        Inferred => "INFERRED",
     }
 }
 
-impl FromStr for Confidence {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "EXTRACTED" => Ok(Self::Extracted),
-            "INFERRED" => Ok(Self::Inferred),
-            other => anyhow::bail!("unknown Confidence: {other}"),
-        }
-    }
-}
-
-// ── Graph Edge ───────────────────────────────────────────────────────────────
+// -- Graph Edge ---------------------------------------------------------------
 
 /// A typed semantic edge between two indexed symbols.
 ///
@@ -662,7 +609,7 @@ pub struct GraphEdge {
     pub line: Option<u32>,
 }
 
-// ── Code Index Config ───────────────────────────────────────────────────────
+// -- Code Index Config -------------------------------------------------------
 
 /// Configuration for the code index system.
 #[derive(Debug, Clone, Serialize, Deserialize)]

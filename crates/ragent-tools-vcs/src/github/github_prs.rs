@@ -26,13 +26,13 @@ pub fn parse_merge_method(value: Option<&str>) -> Result<&'static str> {
     }
 }
 
-// -- GithubListPrsTool ---------------------------------------------------------
+// -- GitHubListPrsTool ---------------------------------------------------------
 
 /// Tool that lists pull requests in a GitHub repository.
-pub struct GithubListPrsTool;
+pub struct GitHubListPrsTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubListPrsTool {
+impl Tool for GitHubListPrsTool {
     fn name(&self) -> &'static str {
         "github_list_prs"
     }
@@ -122,13 +122,13 @@ impl Tool for GithubListPrsTool {
     }
 }
 
-// -- GithubGetPrTool -----------------------------------------------------------
+// -- GitHubGetPrTool -----------------------------------------------------------
 
 /// Tool that retrieves a single GitHub pull request by number.
-pub struct GithubGetPrTool;
+pub struct GitHubGetPrTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubGetPrTool {
+impl Tool for GitHubGetPrTool {
     fn name(&self) -> &'static str {
         "github_get_pr"
     }
@@ -210,13 +210,13 @@ impl Tool for GithubGetPrTool {
     }
 }
 
-// -- GithubCreatePrTool --------------------------------------------------------
+// -- GitHubCreatePrTool --------------------------------------------------------
 
 /// Tool that creates a new GitHub pull request.
-pub struct GithubCreatePrTool;
+pub struct GitHubCreatePrTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubCreatePrTool {
+impl Tool for GitHubCreatePrTool {
     fn name(&self) -> &'static str {
         "github_create_pr"
     }
@@ -318,13 +318,13 @@ impl Tool for GithubCreatePrTool {
     }
 }
 
-// -- GithubMergePrTool ---------------------------------------------------------
+// -- GitHubMergePrTool ---------------------------------------------------------
 
 /// Tool that merges a GitHub pull request.
-pub struct GithubMergePrTool;
+pub struct GitHubMergePrTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubMergePrTool {
+impl Tool for GitHubMergePrTool {
     fn name(&self) -> &'static str {
         "github_merge_pr"
     }
@@ -392,13 +392,13 @@ impl Tool for GithubMergePrTool {
     }
 }
 
-// -- GithubReviewPrTool --------------------------------------------------------
+// -- GitHubReviewPrTool --------------------------------------------------------
 
 /// Tool that submits a review on a GitHub pull request.
-pub struct GithubReviewPrTool;
+pub struct GitHubReviewPrTool;
 
 #[async_trait::async_trait]
-impl Tool for GithubReviewPrTool {
+impl Tool for GitHubReviewPrTool {
     fn name(&self) -> &'static str {
         "github_review_pr"
     }

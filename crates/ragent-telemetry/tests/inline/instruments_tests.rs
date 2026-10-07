@@ -78,10 +78,9 @@ fn test_histogram_can_record() {
     rt.block_on(async { provider.force_flush().expect("flush") });
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_histogram = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.llm.duration")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.llm.duration")
     });
     assert!(
         has_histogram,
@@ -96,10 +95,9 @@ fn test_gauge_can_record() {
     rt.block_on(async { provider.force_flush().expect("flush") });
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_gauge = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.team.members")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.team.members")
     });
     assert!(has_gauge, "gauge record should produce ragent.team.members");
 }
@@ -112,10 +110,9 @@ fn test_up_down_counter_can_add() {
     rt.block_on(async { provider.force_flush().expect("flush") });
     let metrics = exporter.get_finished_metrics().unwrap_or_default();
     let has_up_down = metrics.iter().any(|rm| {
-        rm.scope_metrics
-            .iter()
-            .flat_map(|sm| sm.metrics.iter())
-            .any(|m| m.name == "ragent.sessions.active")
+        rm.scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .any(|m| m.name() == "ragent.sessions.active")
     });
     assert!(
         has_up_down,

@@ -1,7 +1,7 @@
 //! Integration tests for the structured-goal loop prompt (spec `agentloop`,
 //! task T-016 / FR-006): a goal-driven loop turn composes the structured
-//! goal — success state, verification command, scope boundaries, read-only
-//! constraints, tool set, and budget knobs — into the system prompt, while a
+//! goal - success state, verification command, scope boundaries, read-only
+//! constraints, tool set, and budget knobs - into the system prompt, while a
 //! plain chat turn renders none of it.
 
 use std::collections::HashMap;

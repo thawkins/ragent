@@ -42,7 +42,7 @@ fn user_message_count(app: &App) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// FR-016 — a running turn blocks the dispatch
+// FR-016 - a running turn blocks the dispatch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -73,7 +73,7 @@ async fn test_guard_defers_while_the_primary_agent_is_processing() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-016 — a compaction run blocks the dispatch
+// FR-016 - a compaction run blocks the dispatch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -137,7 +137,7 @@ async fn test_guard_defers_when_a_post_compact_send_is_pending() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-016 — every overlap signal blocks; only a fully idle boundary dispatches
+// FR-016 - every overlap signal blocks; only a fully idle boundary dispatches
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn test_guard_holds_until_every_overlap_signal_clears() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-016 — the guard also holds the `Next`-triggered dispatch
+// FR-016 - the guard also holds the `Next`-triggered dispatch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -230,7 +230,7 @@ async fn test_guard_defers_pending_next_during_compaction() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-016 — an idle boundary still dispatches (guard is not over-broad)
+// FR-016 - an idle boundary still dispatches (guard is not over-broad)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

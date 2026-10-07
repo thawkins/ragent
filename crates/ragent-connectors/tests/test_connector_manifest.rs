@@ -1,6 +1,10 @@
 //! Tests for connector manifest read/write and install staging (spec
 //! `connectors` T-004; FR-002, FR-011, FR-027).
 
+mod support;
+
+use support::TempTree;
+
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -8,29 +12,6 @@ use ragent_connectors::{
     ConnectorDescriptor, MANIFEST_FILE, MAX_SOURCE_BYTES, StageError, StoreDirs,
     install_descriptor, read_manifest, stage, write_manifest,
 };
-
-static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// RAII sandboxed temp tree rooted at `target/temp/` (AGENTS.md: no `/tmp`).
-struct TempTree(PathBuf);
-
-impl TempTree {
-    fn new(name: &str) -> Self {
-        let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../../target/temp/connectors-test/manifest-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("temp tree creatable");
-        Self(path)
-    }
-}
-
-impl Drop for TempTree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 fn dirs(tree: &TempTree) -> StoreDirs {
     StoreDirs {
@@ -92,7 +73,7 @@ fn make_tar_gz(path: &Path, files: &[(&str, &str)]) {
     builder.into_inner().unwrap().finish().unwrap();
 }
 
-// ── manifest read/write (FR-002) ────────────────────────────────────────────
+// -- manifest read/write (FR-002) --------------------------------------------
 
 #[test]
 fn manifest_round_trips_through_write_and_read() {
@@ -134,7 +115,7 @@ fn read_manifest_reports_parse_failure_for_malformed_json() {
     assert!(read_manifest(&dir).is_err());
 }
 
-// ── direct descriptor install (catalogue path, FR-011, FR-027) ───────────────
+// -- direct descriptor install (catalogue path, FR-011, FR-027) ---------------
 
 #[test]
 fn install_descriptor_writes_an_enabled_connector() {
@@ -177,7 +158,7 @@ fn install_descriptor_refuses_a_descriptor_with_no_server() {
     assert!(matches!(err, StageError::Descriptor(_)), "got {err:?}");
 }
 
-// ── stage: local directory (FR-011, FR-027) ─────────────────────────────────
+// -- stage: local directory (FR-011, FR-027) ---------------------------------
 
 #[test]
 fn stage_local_directory_installs_an_enabled_connector() {
@@ -251,7 +232,7 @@ fn stage_unrecognised_source_is_refused() {
     assert!(matches!(err, StageError::UnknownSource(_)), "got {err:?}");
 }
 
-// ── stage: local archives (FR-011) ──────────────────────────────────────────
+// -- stage: local archives (FR-011) ------------------------------------------
 
 #[test]
 fn stage_zip_archive_installs() {
@@ -296,7 +277,7 @@ fn stage_archive_escape_entry_is_refused_and_writes_nothing_outside() {
     assert!(!tree.0.join("escape.json").exists());
 }
 
-// ── stage: refusals (FR-027, FR-028) ────────────────────────────────────────
+// -- stage: refusals (FR-027, FR-028) ----------------------------------------
 
 #[test]
 fn stage_refuses_a_non_https_url_scheme() {
@@ -325,7 +306,7 @@ fn stage_archive_over_the_size_cap_is_refused() {
     assert!(matches!(err, StageError::TooLarge { .. }), "got {err:?}");
 }
 
-// ── store-leg selection ─────────────────────────────────────────────────────
+// -- store-leg selection -----------------------------------------------------
 
 #[test]
 fn stage_falls_back_to_the_global_leg_when_no_project_leg_resolves() {

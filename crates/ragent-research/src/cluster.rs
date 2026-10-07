@@ -255,7 +255,7 @@ fn render_web_source_bullet(meta: &WebSourceMeta) -> String {
     if !meta.author.is_empty() {
         out.push_str(&format!(" [{}]", meta.author));
     }
-    out.push_str(" \u{2014} ");
+    out.push_str(" - ");
     out.push_str(&meta.url);
     if !meta.published.is_empty() {
         out.push_str(&format!(" (published {})", meta.published));

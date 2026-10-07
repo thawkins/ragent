@@ -8,20 +8,18 @@
 //! later spec tasks.
 
 use anyhow::{Context, Result, bail};
-use futures::StreamExt;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::RwLock;
 
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client;
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::provider::thinking::{full_reasoning_levels, openrouter_reasoning_payload_from_request};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
-use ragent_types::event::FinishReason;
 
 const DEFAULT_OPENROUTER_HOST: &str = "https://openrouter.ai";
 
@@ -44,10 +42,11 @@ pub fn mask_key(key: &str) -> String {
     if key.is_empty() {
         return String::from("(none)");
     }
-    let chars: Vec<char> = key.chars().collect();
-    let start = chars.len().saturating_sub(4);
-    let tail: String = chars[start..].iter().collect();
-    format!("...{tail}")
+    // Find the byte offset of the 4th character from the end (or the start of
+    // the string when it has fewer than four characters), avoiding the
+    // intermediate `Vec<char>` allocation.
+    let start = key.char_indices().rev().nth(3).map_or(0, |(i, _)| i);
+    format!("...{}", &key[start..])
 }
 
 /// Provider implementation for OpenRouter.
@@ -123,7 +122,7 @@ impl OpenRouterProvider {
         if let Some(stored) = self.resolve_stored_key().await {
             return stored;
         }
-        std::env::var("OPENROUTER_API_KEY").unwrap_or_default()
+        ragent_config::credential_env::read_credential_env("OPENROUTER_API_KEY").unwrap_or_default()
     }
 
     /// Queries the OpenRouter `/api/v1/models` endpoint for live model discovery.
@@ -220,7 +219,8 @@ impl Provider for OpenRouterProvider {
             resolved = stored;
         }
         if resolved.is_empty() {
-            resolved = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+            resolved = ragent_config::credential_env::read_credential_env("OPENROUTER_API_KEY")
+                .unwrap_or_default();
         }
 
         // FR-009: reject unauthenticated chat attempts with an explicit,
@@ -442,428 +442,42 @@ impl OpenRouterClient {
 }
 
 impl OpenRouterClient {
-    /// Build the JSON request body for the OpenRouter `/api/v1/chat/completions`
-    /// endpoint.
+    /// Build the JSON request body for the OpenRouter chat-completions API.
     ///
-    /// OpenRouter accepts an OpenAI-compatible payload, so the body follows the
-    /// same shape as [`super::openai::OpenAiClient::build_request_body`]:
-    /// system-first messages, `stream: true`, optional `temperature`/`top_p`/
-    /// `max_tokens`, cached OpenAI-format tools, and `stream_options` with
-    /// `include_usage` so the final chunk carries token counts.
+    /// The message packing, base body, sampling fields, and cached tool list
+    /// come from the shared [`OpenAiCompat`] builder (audit T-401); OpenRouter
+    /// only adds its `reasoning` payload tail.
     ///
     /// # Errors
     ///
     /// This function is infallible.
     #[must_use]
     pub fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut messages = Vec::new();
-
-        if let Some(system) = &request.system {
-            messages.push(json!({
-                "role": "system",
-                "content": &**system
-            }));
-        }
-
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({
-                                "type": "text",
-                                "text": text
-                            })),
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1 {
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
-                    }
-                }
-            };
-
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": input.to_string()
-                                    }
-                                })),
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } = result
-                            {
-                                messages.push(json!({
-                                    "role": "tool",
-                                    "tool_call_id": tool_use_id,
-                                    "content": content
-                                }));
-                            }
-                        }
-                    } else {
-                        messages.push(json!({
-                            "role": msg.role,
-                            "content": content
-                        }));
-                    }
-                }
-                _ => {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true,
-            "stream_options": { "include_usage": true }
-        });
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if !request.tools.is_empty() {
-            // H2: reuse the cached serialised OpenAI-format tool list.
-            let cached = super::tool_cache::cached_tools(
-                super::tool_cache::ToolFormat::OpenAi,
-                &request.tools,
-            );
-            body["tools"] = cached.openai_tools_array();
-        }
+        let mut compat = super::openai_compat::OpenAiCompat::base_body(
+            request,
+            super::openai_compat::OpenAiCompatSpec::openai(),
+            &request.tools,
+        );
         if let Some(reasoning) = openrouter_reasoning_payload_from_request(request) {
-            body["reasoning"] = reasoning;
+            compat.body_mut()["reasoning"] = reasoning;
         }
-
-        body
+        compat.finish()
     }
 
     /// Parses an OpenAI-compatible SSE stream into [`StreamEvent`]s.
     ///
-    /// Handles `data: {...}` lines, `[DONE]`, `choices[0].delta` text,
-    /// `reasoning`/`reasoning_content` deltas (FR-020), incremental
-    /// `tool_calls`, final-chunk `usage`, and `finish_reason` mapping.
+    /// Delegates to the shared [`super::sse::parse_openai_sse_stream`] parser
+    /// (audit T-402). OpenRouter keeps its `reasoning` / `reasoning_content`
+    /// delta routing (FR-020) and its provider-specific empty-stream message
+    /// through [`super::sse::OpenAiSseSpec::openrouter`].
     fn parse_sse_stream(
         &self,
         response: reqwest::Response,
     ) -> Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>> {
-        let status = response.status();
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown")
-            .to_string();
-        let rate_limit_event = super::openai::parse_openai_rate_limit_headers(response.headers());
-        let stream = response.bytes_stream();
-        let base_url = self.base_url.clone();
-
-        let event_stream = async_stream::stream! {
-            // PERF-063: pre-size the SSE accumulation buffer so a long stream does
-            // not repeatedly realloc/copy as it grows.
-            let mut buffer = String::with_capacity(8 * 1024);
-            // FUNC-033: hold an incomplete trailing multibyte character from the
-            // previous chunk so a UTF-8 sequence split across TCP chunks is not
-            // corrupted.
-            let mut pending_utf8: Vec<u8> = Vec::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut in_reasoning_block = false;
-            let mut yielded_event = false;
-
-            if let Some(ev) = rate_limit_event {
-                yield ev;
-                yielded_event = true;
-            }
-
-            futures::pin_mut!(stream);
-
-            loop {
-                let chunk = match tokio::time::timeout(
-                    std::time::Duration::from_secs(
-                        super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS,
-                    ),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(r)) => match r {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::warn!(
-                                provider = "OpenRouter",
-                                status = %status,
-                                content_type = %content_type,
-                                yielded_events = yielded_event,
-                                error = %e,
-                                "SSE stream decode error"
-                            );
-                            let err_text = e.to_string();
-                            let is_decode_failure =
-                                err_text.to_lowercase().contains("error decoding response body");
-                            let message = if is_decode_failure && !yielded_event && status.is_success() {
-                                format!(
-                                    "OpenRouter returned an empty/malformed event stream \
-                                     (status {}, content-type {}).",
-                                    status, content_type
-                                )
-                            } else {
-                                err_text
-                            };
-                            yield StreamEvent::Error { message };
-                            break;
-                        }
-                    },
-                    Ok(None) => break,
-                    Err(_) => {
-                        yield StreamEvent::Error {
-                            message: format!(
-                                "OpenRouter: stream stalled - no data received for {}s",
-                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
-                            ),
-                        };
-                        break;
-                    }
-                };
-
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
-                // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
-                // peer dribbles bytes without ever emitting a newline instead
-                // of letting the accumulation buffer grow without bound.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "SSE accumulation buffer exceeded the cap; aborting the stream"
-                    );
-                    yield StreamEvent::Error {
-                        message: format!(
-                            "SSE buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
-                    };
-                    return;
-                }
-
-                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    let data = match line.strip_prefix("data: ") {
-                        Some(d) => d.trim(),
-                        None => continue,
-                    };
-
-                    if data == "[DONE]" {
-                        if in_reasoning_block {
-                            yield StreamEvent::ReasoningEnd;
-                        }
-                        yield StreamEvent::Finish { reason: FinishReason::Stop };
-                        return;
-                    }
-
-                    let parsed: Value = match serde_json::from_str(data) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            tracing::warn!(
-                                provider = "OpenRouter",
-                                line = %data,
-                                error = %e,
-                                "OpenRouter: failed to parse SSE line; skipping"
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Final-chunk usage (only present when stream_options.include_usage).
-                    if let Some(usage) = parsed.get("usage")
-                        && !usage.is_null()
-                    {
-                        let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
-                        let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
-                        if input_tokens > 0 || output_tokens > 0 {
-                            yield StreamEvent::Usage { input_tokens, output_tokens };
-                            yielded_event = true;
-                        }
-                    }
-
-                    let choices = match parsed["choices"].as_array() {
-                        Some(c) => c,
-                        None => continue,
-                    };
-
-                    for choice in choices {
-                        let delta = &choice["delta"];
-
-                        // OpenRouter exposes reasoning text under either
-                        // `delta.reasoning` or `delta.reasoning_content`
-                        // depending on the upstream model.
-                        let reasoning_text = delta
-                            .get("reasoning")
-                            .or_else(|| delta.get("reasoning_content"))
-                            .and_then(|v| v.as_str());
-
-                        if let Some(text) = reasoning_text {
-                            if !text.is_empty() {
-                                if !in_reasoning_block {
-                                    yield StreamEvent::ReasoningStart;
-                                    in_reasoning_block = true;
-                                }
-                                yield StreamEvent::ReasoningDelta {
-                                    text: text.to_string(),
-                                };
-                                yielded_event = true;
-                            }
-                        }
-
-                        // Normal text content. Close any open reasoning block
-                        // first so consumers see contiguous content phases.
-                        if let Some(content) = delta["content"].as_str() {
-                            if in_reasoning_block && !content.is_empty() {
-                                yield StreamEvent::ReasoningEnd;
-                                in_reasoning_block = false;
-                            }
-                            if !content.is_empty() {
-                                yield StreamEvent::TextDelta {
-                                    text: content.to_string(),
-                                };
-                                yielded_event = true;
-                            }
-                        }
-
-                        // Tool calls (incremental fragments indexed by `index`).
-                        if let Some(tool_calls) = delta["tool_calls"].as_array() {
-                            for tc in tool_calls {
-                                let index = tc["index"].as_u64().unwrap_or(0);
-                                if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
-                                }
-
-                                if let Some(function) = tc.get("function") {
-                                    if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
-                                        yielded_event = true;
-                                    }
-
-                                    // F4: accept both argument forms (string
-                                    // deltas and a whole JSON object).
-                                    let args_json = super::tool_cache::tool_arguments_json(function);
-                                    if let Some(args) =
-                                        args_json.filter(|args| !args.is_empty())
-                                    {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args,
-                                        };
-                                        yielded_event = true;
-                                    }
-                                }
-                            }
-                        }
-
-                          // Finish reason: flush open reasoning/tool-call state,
-                          // then emit the terminal event.
-                          if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                              if in_reasoning_block {
-                                  yield StreamEvent::ReasoningEnd;
-                              }
-
-                              let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                              ends.sort_unstable_by_key(|(idx, _)| *idx);
-                              for (_, id) in ends {
-                                  yield StreamEvent::ToolCallEnd { id };
-                              }
-
-                              let reason = match finish_reason {
-                                  "tool_calls" => FinishReason::ToolUse,
-                                  "length" => FinishReason::Length,
-                                  "content_filter" => FinishReason::ContentFilter,
-                                  _ => FinishReason::Stop,
-                              };
-                              yield StreamEvent::Finish { reason };
-                              yielded_event = true;
-                          }
-                    }
-                }
-            }
-
-            if in_reasoning_block {
-                yield StreamEvent::ReasoningEnd;
-            }
-
-            if !yielded_event {
-                tracing::warn!(
-                    provider = "OpenRouter",
-                    status = %status,
-                    content_type = %content_type,
-                    base_url = %base_url,
-                    "OpenRouter response stream ended without producing any events"
-                );
-                let message = format!(
-                    "OpenRouter response stream ended without producing any events \
-                     (status {}, content-type {}).",
-                    status, content_type
-                );
-                yield StreamEvent::Error { message };
-            }
-        };
-        Box::pin(event_stream)
+        super::sse::parse_openai_sse_stream(
+            response,
+            super::sse::OpenAiSseSpec::openrouter(self.base_url.clone()),
+        )
     }
 }
 
@@ -928,6 +542,8 @@ impl LlmClient for OpenRouterClient {
             } else {
                 error_body
             };
+            // SEC: redact the provider error body before logging or surfacing it.
+            let error_body = ragent_types::sanitize::redact_secrets(&error_body);
             tracing::warn!(
                 provider = "openrouter",
                 url = %url,

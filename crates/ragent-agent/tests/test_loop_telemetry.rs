@@ -411,7 +411,7 @@ async fn test_per_iteration_tool_call_counts_accumulate() -> Result<()> {
 }
 
 /// FR-025: an external termination (no run-start instant) records no loop
-/// telemetry — the record belongs to in-run termination paths, exactly once
+/// telemetry - the record belongs to in-run termination paths, exactly once
 /// per run.
 #[tokio::test]
 async fn test_external_termination_records_no_loop_telemetry() -> Result<()> {

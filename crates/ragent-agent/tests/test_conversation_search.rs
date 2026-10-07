@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
     ToolContext {
         session_id: session_id.to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         agent_manager: None,
@@ -36,7 +36,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
 #[tokio::test]
 async fn test_conversation_search_keyword_finds_match() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-1", "/tmp").unwrap();
+    storage.create_session("sess-1", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text(
             "sess-1",
@@ -70,7 +70,7 @@ async fn test_conversation_search_keyword_finds_match() {
 #[tokio::test]
 async fn test_conversation_search_keyword_no_match() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-1", "/tmp").unwrap();
+    storage.create_session("sess-1", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-1", "hello"))
         .unwrap();
@@ -89,7 +89,7 @@ async fn test_conversation_search_keyword_no_match() {
 #[tokio::test]
 async fn test_conversation_search_stats_mode() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-1", "/tmp").unwrap();
+    storage.create_session("sess-1", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-1", "hello"))
         .unwrap();
@@ -116,7 +116,7 @@ async fn test_conversation_search_stats_mode() {
 #[tokio::test]
 async fn test_conversation_search_turn_range() {
     let storage = Arc::new(Storage::open_in_memory().expect("storage"));
-    storage.create_session("sess-1", "/tmp").unwrap();
+    storage.create_session("sess-1", "target/temp").unwrap();
     storage
         .create_message(&Message::user_text("sess-1", "first"))
         .unwrap();

@@ -39,7 +39,7 @@ fn callee() {
 #[test]
 fn test_status_graph_zero_before_graph_build() {
     let dir = TempDir::new().unwrap();
-    // No source files written — reindex finds nothing, so the graph is empty.
+    // No source files written - reindex finds nothing, so the graph is empty.
     let idx = CodeIndex::open(&make_config(&dir)).unwrap();
     idx.full_reindex().unwrap();
 
@@ -92,7 +92,7 @@ fn test_status_fts_doc_count_present() {
         "FTS should be populated after a full reindex"
     );
 }
-// ── try_graph_status: non-blocking graph stats (FR-017) ─────────────────────
+// -- try_graph_status: non-blocking graph stats (FR-017) ---------------------
 
 #[test]
 fn test_try_graph_status_matches_blocking_variant() {

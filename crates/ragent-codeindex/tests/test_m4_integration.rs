@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// -- Helpers -----------------------------------------------------------------
 
 fn create_project() -> TempDir {
     let dir = TempDir::new().unwrap();
@@ -53,7 +53,7 @@ fn open_index(dir: &TempDir) -> CodeIndex {
     CodeIndex::open(&config).unwrap()
 }
 
-// ── Watcher Tests ──────────────────────────────────────────────────────────
+// -- Watcher Tests ----------------------------------------------------------
 
 #[test]
 fn test_watcher_create_event() {
@@ -135,7 +135,7 @@ fn test_watcher_ignores_git_dir() {
     }
 }
 
-// ── Worker Tests ───────────────────────────────────────────────────────────
+// -- Worker Tests -----------------------------------------------------------
 
 #[test]
 fn test_worker_indexes_changed_file() {
@@ -233,7 +233,7 @@ fn test_worker_dedup_events() {
 
     let mut handle = IndexWorker::start(Arc::clone(&index), rx, config);
 
-    // Send multiple events for the same file — should be deduped.
+    // Send multiple events for the same file - should be deduped.
     for _ in 0..5 {
         tx.send(WatchEvent::Changed(PathBuf::from("src/lib.rs")))
             .unwrap();
@@ -309,7 +309,7 @@ fn test_worker_manual_full_reindex() {
     handle.stop();
 }
 
-// ── Watch Session Tests ────────────────────────────────────────────────────
+// -- Watch Session Tests ----------------------------------------------------
 
 #[test]
 fn test_watch_session_start_stop() {
@@ -381,7 +381,7 @@ fn test_watch_session_picks_up_new_file() {
     session.stop();
 }
 
-// ── Tree Cache Tests ───────────────────────────────────────────────────────
+// -- Tree Cache Tests -------------------------------------------------------
 
 #[test]
 fn test_tree_cache_populated_on_index() {
@@ -415,7 +415,7 @@ fn test_remove_file_clears_cache() {
     );
 }
 
-// ── Event Batch Tests ──────────────────────────────────────────────────────
+// -- Event Batch Tests ------------------------------------------------------
 
 #[test]
 fn test_rename_event_via_worker() {

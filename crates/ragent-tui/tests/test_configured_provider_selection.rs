@@ -22,7 +22,7 @@ use ragent_agent::{
 use ragent_tui::App;
 use ragent_tui::app::ProviderSetupStep;
 
-// ── helpers ────────────────────────────────────────────────────────────────
+// -- helpers ----------------------------------------------------------------
 
 fn mem_storage() -> Arc<Storage> {
     Arc::new(Storage::open_in_memory().expect("in-memory storage"))
@@ -99,7 +99,7 @@ fn make_app() -> App {
     make_app_with_storage(mem_storage())
 }
 
-// ── FR-001: get_configured_providers (DB-key-based providers) ─────────────
+// -- FR-001: get_configured_providers (DB-key-based providers) -------------
 
 #[test]
 fn test_get_configured_providers_db_keys_enumerated() {
@@ -181,7 +181,7 @@ fn test_get_configured_providers_does_not_crash_empty() {
     assert!(result.is_empty() || !result.is_empty());
 }
 
-// ── FR-003: per-provider model persistence (via storage directly) ─────────
+// -- FR-003: per-provider model persistence (via storage directly) ---------
 
 #[test]
 fn test_model_persistence_write_and_read() {
@@ -226,7 +226,7 @@ fn test_model_persistence_multiple_providers_independent() {
     assert_eq!(oai_persisted, "gpt-4o");
 }
 
-// ── FR-003 / FR-004: model restore fallback (via storage) ─────────────────
+// -- FR-003 / FR-004: model restore fallback (via storage) -----------------
 
 #[test]
 fn test_model_restore_empty_persisted_value_returns_none() {
@@ -241,7 +241,7 @@ fn test_model_restore_empty_persisted_value_returns_none() {
     assert!(result.is_none(), "empty persisted model must not restore");
 }
 
-// ── FR-002: configured-provider picker dialog state ───────────────────────
+// -- FR-002: configured-provider picker dialog state -----------------------
 
 #[test]
 fn test_configured_picker_state_transition() {
@@ -294,7 +294,7 @@ fn test_configured_picker_esc_cancel() {
     assert!(app.provider_setup.is_none());
 }
 
-// ── FR-005: per-provider model cleared on reset ───────────────────────────
+// -- FR-005: per-provider model cleared on reset ---------------------------
 
 #[test]
 fn test_model_persistence_cleared_on_reset() {
@@ -325,7 +325,7 @@ fn test_model_persistence_cleared_on_reset() {
     );
 }
 
-// ── Sanity: model persistence key is independent of global selected_model ─
+// -- Sanity: model persistence key is independent of global selected_model -
 
 #[test]
 fn test_local_persistence_key_is_model_only_format() {
@@ -362,7 +362,7 @@ fn test_local_persistence_key_is_model_only_format() {
     );
 }
 
-// ── Smoke: models_for_provider returns non-empty for built-in providers ───
+// -- Smoke: models_for_provider returns non-empty for built-in providers ---
 
 #[test]
 fn test_models_for_provider_anthropic_is_empty_without_key_or_discovery() {

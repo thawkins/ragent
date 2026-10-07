@@ -149,9 +149,7 @@ impl Provider for ResponsesApiProvider {
 
     /// Discover available models from the OpenAI `/v1/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty())
+        let api_key = ragent_config::credential_env::provider_credential_env("openai")
             .context("OpenAI Responses API model discovery requires OPENAI_API_KEY")?;
 
         let client = create_http_client();
@@ -482,7 +480,9 @@ impl ResponsesApiClient {
                     let event: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::warn!(provider = "openai_responses", error = %e, data = %data, "failed to parse SSE event");
+                            // SEC: the raw SSE frame carries streamed model output;
+                            // redact before logging.
+                            tracing::warn!(provider = "openai_responses", error = %e, data = %ragent_types::sanitize::redact_secrets(data), "failed to parse SSE event");
                             continue;
                         }
                     };
@@ -565,7 +565,7 @@ impl ResponsesApiClient {
                                         .unwrap_or(0);
 
                                     if cache_write_tokens > 0 {
-                                        tracing::info!(
+                                        tracing::debug!(
                                             cache_write_tokens = cache_write_tokens,
                                             "OpenAI Responses API cache write tokens"
                                         );

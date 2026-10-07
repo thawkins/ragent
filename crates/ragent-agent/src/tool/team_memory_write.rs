@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use super::team_memory_common::{path_tag, slugify};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::memory::store::StructuredMemory;
 use crate::team::{MemoryScope, TeamStore, find_team_dir};
@@ -186,37 +187,6 @@ impl Tool for TeamMemoryWriteTool {
             })),
         })
     }
-}
-
-/// Normalise a user-supplied path into a tag-safe bucket identifier.
-fn path_tag(path: &str) -> String {
-    let slug: String = path
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let slug = slug.trim_matches('-');
-    let mut slug = slug.replace("--", "-");
-    while slug.contains("--") {
-        slug = slug.replace("--", "-");
-    }
-    let slug = if slug.is_empty() { "memory" } else { &slug };
-    format!("path-{slug}")
-}
-
-/// Slugify an arbitrary string for use in a tag.
-fn slugify(s: &str) -> String {
-    let slug: String = s
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let slug = slug.trim_matches('-');
-    let mut slug = slug.replace("--", "-");
-    while slug.contains("--") {
-        slug = slug.replace("--", "-");
-    }
-    slug
 }
 
 #[cfg(test)]

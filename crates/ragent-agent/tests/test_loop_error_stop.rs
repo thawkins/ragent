@@ -1,6 +1,6 @@
 //! Integration tests for loop stop condition 2 (spec `agentloop`, task
-//! T-007 / FR-011, FR-012): an unrecoverable stage failure — provider
-//! transport error, tool panic, permission hard-deny — terminates the loop
+//! T-007 / FR-011, FR-012): an unrecoverable stage failure - provider
+//! transport error, tool panic, permission hard-deny - terminates the loop
 //! immediately with termination status `error`, publishes the failure reason,
 //! and does not retry the failed stage; recoverable tool failures are
 //! appended as error observations and only terminate the loop once the
@@ -293,7 +293,7 @@ fn missing_file_read(name: &'static str) -> ScriptedReply {
 
 /// FR-011: a provider transport failure terminates the loop immediately with
 /// termination status `error`, publishes the failure reason, and does not
-/// retry — exactly one LLM request, then the loop is inactive.
+/// retry - exactly one LLM request, then the loop is inactive.
 #[tokio::test]
 async fn test_provider_transport_error_terminates_loop_with_status_error() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(64));
@@ -328,7 +328,7 @@ async fn test_provider_transport_error_terminates_loop_with_status_error() -> Re
         "the provider failure must surface as a turn error"
     );
 
-    // Exactly one failed attempt — the stage was not retried.
+    // Exactly one failed attempt - the stage was not retried.
     assert_eq!(
         captured.lock().expect("captured lock").len(),
         1,
@@ -365,7 +365,7 @@ async fn test_provider_transport_error_terminates_loop_with_status_error() -> Re
 }
 
 /// FR-011 outside a loop: the same provider failure behaves exactly as before
-/// — a turn error with no `LoopTerminated` publication.
+/// - a turn error with no `LoopTerminated` publication.
 #[tokio::test]
 async fn test_provider_error_without_loop_unchanged() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(64));
@@ -400,7 +400,7 @@ async fn test_provider_error_without_loop_unchanged() -> Result<()> {
 
 /// FR-012: consecutive recoverable tool failures are appended as error
 /// observations each round, and the loop terminates with status `error` once
-/// the consecutive count exceeds the retry allowance (3) — before a fifth
+/// the consecutive count exceeds the retry allowance (3) - before a fifth
 /// request.
 #[tokio::test]
 async fn test_recoverable_failures_terminate_at_retry_allowance() -> Result<()> {
@@ -506,7 +506,7 @@ async fn test_recoverable_failures_appended_as_observations() -> Result<()> {
         .expect("the allowance stop finalises the turn");
 
     // Round 2's request must contain round 1's error observation, and round
-    // 4's request must contain round 3's — the feedback loop is intact.
+    // 4's request must contain round 3's - the feedback loop is intact.
     let requests = captured.lock().expect("captured lock");
     assert_eq!(requests.len(), 4);
     for (failing_file, next_request_index) in [("absent-a.txt", 1), ("absent-c.txt", 3)] {
@@ -672,7 +672,7 @@ async fn test_persistent_provider_error_after_retry_budget_terminates_loop() -> 
 }
 
 /// FR-023: an observation append that cannot be persisted must never be
-/// silently discarded — storage-layer failures surface as errors. The loop's
+/// silently discarded - storage-layer failures surface as errors. The loop's
 /// failure guard consumes `classify_message`, so a storage-task panic
 /// diagnostic from a failing append/save escalates to termination status
 /// `error` instead of being dropped, and the finalise path propagates closure
@@ -688,7 +688,7 @@ fn test_storage_task_panic_classifies_unrecoverable_never_silent() {
     );
     // The processor's finalise path uses `?` on the closing save, so a plain
     // storage failure is returned from `process_message` (surface, not
-    // silence) — asserted here on the diagnostic that propagation carries.
+    // silence) - asserted here on the diagnostic that propagation carries.
     let storage_failure = anyhow::anyhow!("storage error: update_message failed");
     assert_eq!(
         storage_failure.to_string(),
@@ -697,7 +697,7 @@ fn test_storage_task_panic_classifies_unrecoverable_never_silent() {
     );
 }
 
-/// FR-011: a tool panic (join failure) is an unrecoverable failure — an
+/// FR-011: a tool panic (join failure) is an unrecoverable failure - an
 /// active loop terminates with status `error` naming the panic. (The panic
 /// path is exercised through the watchdog-style abort of the scripted task;
 /// here we verify the classification of the recorded panic message.)

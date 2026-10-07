@@ -10,6 +10,8 @@ pub mod bedrock;
 pub mod bedrock_credentials;
 pub mod bedrock_sigv4;
 pub mod copilot;
+/// Single provider -> API-key environment resolver (audit T-403).
+pub mod env_key;
 pub mod gemini;
 pub mod generic_openai;
 pub mod http_client;
@@ -18,7 +20,11 @@ pub mod media;
 pub mod mock_llm_client;
 pub mod ollama;
 pub mod ollama_cloud;
+/// Helpers shared by the `ollama` and `ollama_cloud` providers (T-307).
+pub mod ollama_shared;
 pub mod openai;
+/// Shared OpenAI-compatible request-body builder (audit T-401).
+pub mod openai_compat;
 pub mod openai_responses;
 pub mod openrouter;
 pub mod router;
@@ -27,6 +33,8 @@ pub mod router_classifier;
 pub mod router_client;
 pub mod router_config;
 pub mod router_modifiers;
+/// Shared OpenAI-compatible SSE stream parser (audit T-402).
+pub mod sse;
 /// Thinking-level helpers and provider-specific level mappings.
 pub mod thinking;
 /// Serialisation cache for tool definitions per wire format.

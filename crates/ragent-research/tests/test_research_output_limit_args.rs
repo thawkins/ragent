@@ -13,7 +13,7 @@
 use ragent_research::ResearchRunRequest;
 use ragent_research::cli::ResearchCliCommand;
 
-// ── Hand parser ───────────────────────────────────────────────────────────
+// -- Hand parser -----------------------------------------------------------
 
 #[test]
 fn parse_create_accepts_output_limit_flags() {
@@ -89,7 +89,7 @@ fn parse_create_rejects_non_numeric_output_limit() {
     }
 }
 
-// ── F-19 numeric-flag rejection (all numeric arms) ────────────────────────
+// -- F-19 numeric-flag rejection (all numeric arms) ------------------------
 
 #[test]
 fn parse_create_rejects_non_numeric_numeric_flags() {
@@ -157,7 +157,7 @@ fn parse_create_accepts_valid_numeric_flags() {
     }
 }
 
-// ── Help text (NFR-003) ───────────────────────────────────────────────────
+// -- Help text (NFR-003) ---------------------------------------------------
 
 #[test]
 fn help_message_lists_output_limit_flags_with_defaults() {
@@ -180,7 +180,7 @@ fn help_message_lists_output_limit_flags_with_defaults() {
     );
 }
 
-// ── Invocation round-trip (FR-012, FR-013) ────────────────────────────────
+// -- Invocation round-trip (FR-012, FR-013) --------------------------------
 
 #[test]
 fn from_invocation_round_trips_output_limits_cli_argv_form() {

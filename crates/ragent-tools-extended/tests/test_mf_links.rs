@@ -1,4 +1,4 @@
-//! Integration tests for `masterfetch::links` — outgoing-link classification
+//! Integration tests for `masterfetch::links` - outgoing-link classification
 //! (T-032, FR-007, NFR-003).
 //!
 //! Covers: citation classification, navigation classification, external
@@ -312,7 +312,7 @@ fn test_primary_source_from_first_external_citation() {
 <a href="https://random.com/post">Random</a>
 </article>"#;
     let links = classify(html, "https://example.com");
-    // No canonical, no known host → first external citation.
+    // No canonical, no known host -> first external citation.
     assert_eq!(
         links.primary_source.as_deref(),
         Some("https://random.com/post")

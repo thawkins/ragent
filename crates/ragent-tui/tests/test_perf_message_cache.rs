@@ -1,10 +1,10 @@
 //! PERF-041 / PERF-042 / PERF-043: message-window render-loop caches.
 //!
-//! * **PERF-043** — a clean frame performs no staleness scan (`edit_seq`
+//! * **PERF-043** - a clean frame performs no staleness scan (`edit_seq`
 //!   comparisons) over the transcript; only mutated groups are re-checked.
-//! * **PERF-042** — a streamed message is not re-parsed/re-wrapped on every
+//! * **PERF-042** - a streamed message is not re-parsed/re-wrapped on every
 //!   token; it is throttled to one refresh per window.
-//! * **PERF-041** — the flat plain-text copy buffer is only rebuilt when
+//! * **PERF-041** - the flat plain-text copy buffer is only rebuilt when
 //!   something actually changed, and copy paths can refresh it on demand.
 
 mod support;
@@ -44,7 +44,7 @@ fn primed_app(count: usize) -> ragent_tui::App {
     app
 }
 
-// ── PERF-043: watermark staleness scan ──────────────────────────────────
+// -- PERF-043: watermark staleness scan ----------------------------------
 
 #[tokio::test]
 async fn test_idle_frame_only_scans_dirty_groups() {
@@ -123,7 +123,7 @@ async fn test_tool_call_status_update_lowers_watermark_only() {
     );
 }
 
-// ── PERF-042: streaming throttle ──────────────────────────────────────────
+// -- PERF-042: streaming throttle ------------------------------------------
 
 #[tokio::test]
 async fn test_streaming_group_renders_immediately_when_never_populated() {
@@ -222,7 +222,7 @@ async fn test_streaming_re_render_is_throttled_to_one_per_window() {
     );
 }
 
-// ── PERF-041: lazy copy-buffer rebuild ──────────────────────────────────
+// -- PERF-041: lazy copy-buffer rebuild ----------------------------------
 
 #[test]
 fn test_idle_frame_does_not_rebuild_copy_buffer_when_nothing_changed() {

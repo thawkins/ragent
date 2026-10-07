@@ -13,7 +13,7 @@ fn test_sum_and_untracked_when_no_gap() {
     thread::sleep(Duration::from_millis(10));
     timings.record("Stage B", Duration::from_millis(10));
 
-    // No uninstrumented sleep between stages — untracked should be small.
+    // No uninstrumented sleep between stages - untracked should be small.
     let report = timings.format_report();
     assert!(report.contains("Sum"));
     assert!(report.contains("Untracked"));

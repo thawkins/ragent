@@ -132,7 +132,7 @@ async fn drive_probe(app: &mut App) {
     app.poll_plugin_store_probe_result();
 }
 
-// ── `--check` probes each store off-loop (FR-031 `--check`) ─────────────────
+// -- `--check` probes each store off-loop (FR-031 `--check`) -----------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stores_check_probes_both_defaults_and_reports_availability() {
@@ -215,7 +215,7 @@ async fn stores_check_uses_the_injected_seam_for_every_store() {
     );
 }
 
-// ── Plain `/plugins stores` is unchanged ────────────────────────────────────
+// -- Plain `/plugins stores` is unchanged ------------------------------------
 
 #[tokio::test]
 async fn plain_stores_touches_no_probe_slot_and_carries_no_availability() {
@@ -243,7 +243,7 @@ async fn plain_stores_touches_no_probe_slot_and_carries_no_availability() {
     );
 }
 
-// ── No reactor: the probe degrades to the plain config report ───────────────
+// -- No reactor: the probe degrades to the plain config report ---------------
 
 #[tokio::test]
 async fn stores_check_without_a_reactor_deposits_the_plain_config_report() {

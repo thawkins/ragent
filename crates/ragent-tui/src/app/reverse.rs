@@ -170,7 +170,7 @@ fn provider_label_and_id(provider: &VcsProvider) -> (String, String) {
 /// [`App::resolve_gitlab_token_for_reverse`] layers ragent.json and the
 /// encrypted database on top of this.
 fn resolve_gitlab_token() -> Option<String> {
-    std::env::var("GITLAB_TOKEN").ok().filter(|t| !t.is_empty())
+    ragent_config::credential_env::read_credential_env("GITLAB_TOKEN")
 }
 
 /// Resolve the GitLab instance base URL (FR-002).

@@ -1,4 +1,4 @@
-//! End-to-end test (T-054): run research → spec → verify linkage.
+//! End-to-end test (T-054): run research -> spec -> verify linkage.
 //!
 //! This is the highest-level integration test: it creates a real research
 //! item on disk, then builds a SPEC.md via `SpecTemplate::generate_with_research`

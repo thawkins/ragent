@@ -1,5 +1,5 @@
 #![allow(clippy::float_cmp)] // deterministic f64 scores compare exactly in these unit tests
-//! Integration tests for `masterfetch::focus` — BM25 query-focused content
+//! Integration tests for `masterfetch::focus` - BM25 query-focused content
 //! filtering (T-009 / T-034, FR-004, NFR-003).
 //!
 //! Covers: BM25 scoring, threshold filtering, heading preservation, fallback
@@ -40,7 +40,7 @@ fn test_single_block_is_noop() {
 #[test]
 fn test_no_query_terms_is_noop() {
     let text = "alpha beta\n\ngamma delta";
-    // "x" and "y" are single-char tokens → filtered out → no usable terms.
+    // "x" and "y" are single-char tokens -> filtered out -> no usable terms.
     assert_eq!(focus_content(text, "x y"), text);
 }
 
@@ -234,7 +234,7 @@ fn test_default_params_match_constants() {
     assert_eq!(params.fallback_top, 5);
 }
 // ---------------------------------------------------------------------------
-// Heading preservation — query matches block but not the preceding heading
+// Heading preservation - query matches block but not the preceding heading
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -287,7 +287,7 @@ fn test_whitespace_only_content_returns_empty() {
 
 #[test]
 fn test_no_matching_blocks_falls_back_to_top_n() {
-    // No block contains the query — implementation falls back to returning the
+    // No block contains the query - implementation falls back to returning the
     // top-N closest blocks (or all blocks). Either way it must be non-empty
     // and not panic.
     let content = "# H1\n\nBlock one text.\n\n# H2\n\nBlock two text.";
@@ -300,7 +300,7 @@ fn test_no_matching_blocks_falls_back_to_top_n() {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-term query — BM25 over a phrase
+// Multi-term query - BM25 over a phrase
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -321,7 +321,7 @@ fn test_query_case_insensitive_scoring() {
     // Tokenisation lowercases both query and content, so the *kept blocks*
     // are identical regardless of query case. (The focus header echoes the
     // original query string verbatim, so the full output strings differ in
-    // the header — we compare the post-header content instead.)
+    // the header - we compare the post-header content instead.)
     let content = "# H\n\nThe Rust programming language is fast.";
     let lower = focus_content(content, "rust");
     let upper = focus_content(content, "RUST");
@@ -347,7 +347,7 @@ fn test_query_case_insensitive_scoring() {
 }
 
 // ---------------------------------------------------------------------------
-// Threshold filtering — low-relevance blocks dropped
+// Threshold filtering - low-relevance blocks dropped
 // ---------------------------------------------------------------------------
 
 #[test]

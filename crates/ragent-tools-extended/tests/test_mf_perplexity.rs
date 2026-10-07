@@ -111,7 +111,7 @@ fn test_build_request_body_freshness_any_omitted() {
 }
 
 // ===========================================================================
-// Response parsing — search_results
+// Response parsing - search_results
 // ===========================================================================
 
 #[test]
@@ -193,7 +193,7 @@ fn test_parse_response_json_snippet_truncation() {
 }
 
 // ===========================================================================
-// Response parsing — citations fallback
+// Response parsing - citations fallback
 // ===========================================================================
 
 #[test]

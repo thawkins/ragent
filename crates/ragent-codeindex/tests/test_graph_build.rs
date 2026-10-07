@@ -1,7 +1,7 @@
 //! Tests for `CodeIndex::build_graph()` (spec graphCI, T-016).
 //!
 //! Covers FR-009 (graph build reports edge counts distinguishing EXTRACTED
-//! from INFERRED) and FR-021 (no existing sub-command is altered — this
+//! from INFERRED) and FR-021 (no existing sub-command is altered - this
 //! test verifies the new method is additive).
 
 use ragent_codeindex::CodeIndex;
@@ -75,7 +75,7 @@ fn test_build_graph_on_empty_index() {
     let config = make_config(&dir);
     let idx = CodeIndex::open(&config).unwrap();
 
-    // No files indexed — build should return zero edges.
+    // No files indexed - build should return zero edges.
     let result = idx.build_graph().unwrap();
     assert_eq!(result.edges_total, 0);
     assert_eq!(result.edges_extracted, 0);

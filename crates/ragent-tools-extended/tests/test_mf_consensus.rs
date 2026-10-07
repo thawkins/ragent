@@ -1,9 +1,9 @@
-//! Unit tests for `masterfetch::search::consensus` — cross-engine merge,
+//! Unit tests for `masterfetch::search::consensus` - cross-engine merge,
 //! dedup, ranking, related-query mining, and fetch hints (T-015 / T-036,
 //! FR-008, FR-009, NFR-003).
 //!
 //! All tests use the pure `merge_and_rank` / `mine_related_queries` functions
-//! with fixture `EngineReport`s — no network I/O.
+//! with fixture `EngineReport`s - no network I/O.
 
 use ragent_tools_extended::masterfetch::search::consensus::{
     merge_and_rank, merge_and_rank_with_cap, mine_related_queries,
@@ -53,7 +53,7 @@ fn test_merge_two_engines_no_overlap() {
 
 #[test]
 fn test_merge_dedup_by_normalised_url() {
-    // Same URL with trailing slash vs without — should dedup to 1.
+    // Same URL with trailing slash vs without - should dedup to 1.
     let reports = vec![
         EngineReport::ok(
             "ddg",
@@ -375,7 +375,7 @@ fn test_tier_med_for_mid_result() {
         .collect();
     let reports = vec![EngineReport::ok("ddg", results)];
     let output = merge_and_rank(&reports, "test");
-    // Rank 0 → score ~1.0 → high. Later ranks may be med or low.
+    // Rank 0 -> score ~1.0 -> high. Later ranks may be med or low.
     assert!(
         output.results.iter().any(|r| r.fetch_relevance == "high"
             || r.fetch_relevance == "med"
@@ -386,7 +386,7 @@ fn test_tier_med_for_mid_result() {
 
 #[test]
 fn test_tier_low_for_bottom_result() {
-    // Many results from one engine — the last ones should be "low".
+    // Many results from one engine - the last ones should be "low".
     let results: Vec<RawResult> = (0..30)
         .map(|i| RawResult::new(format!("R{i}"), format!("https://r{i}.com"), "", "ddg"))
         .collect();
@@ -482,7 +482,7 @@ fn test_hint_medium_relevance() {
     let output = merge_and_rank(&reports, "test");
     // With 6 results at rank 0-5: scores are 1.0, 0.87, 0.77, 0.69, 0.62, 0.57.
     // Ranks 3-5 should be in the med tier (0.3 <= score < 0.6).
-    // Rank 5 → 0.57 → med.
+    // Rank 5 -> 0.57 -> med.
     let med = output.results.iter().find(|r| r.fetch_relevance == "med");
     if let Some(med) = med {
         assert!(
@@ -750,7 +750,7 @@ fn test_mine_related_queries_excludes_stopwords() {
         ),
     ];
     let related = mine_related_queries(&results, "test");
-    // "the" and "best" are stopwords — should not appear.
+    // "the" and "best" are stopwords - should not appear.
     assert!(
         !related.contains(&"the".to_string()),
         "stopwords should be excluded: {related:?}"
@@ -962,7 +962,7 @@ fn test_engine_provided_score_beats_positional_score() {
     ];
     let output = merge_and_rank(&reports, "test");
 
-    // Scored (0.5) should rank above P2 (rank_score(5) ≈ 0.57 — but the
+    // Scored (0.5) should rank above P2 (rank_score(5) ≈ 0.57 - but the
     // scored result is at flat_index 0 in the merged list, so its
     // positional fallback would be 1.0; however since it has an
     // engine-provided score of 0.5, that should be used instead).

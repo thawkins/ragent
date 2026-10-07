@@ -78,7 +78,7 @@ fn fixture() -> (
     )
 }
 
-// ── FR-006 / FR-011: agent resolution ────────────────────────────────────
+// -- FR-006 / FR-011: agent resolution ------------------------------------
 
 #[test]
 fn test_resolve_agent_finds_builtin() {
@@ -173,7 +173,7 @@ fn test_resolve_agent_custom_shadows_nothing_but_resolves() {
     assert_eq!(mine.description, "custom agent description");
 }
 
-// ── FR-007: roster ───────────────────────────────────────────────────────
+// -- FR-007: roster -------------------------------------------------------
 
 #[test]
 fn test_roster_lists_nonhidden_builtins_and_customs() {
@@ -222,7 +222,7 @@ fn test_render_roster_includes_badges_and_description() {
     assert!(text.contains("general description"));
 }
 
-// ── FR-003: help page ────────────────────────────────────────────────────
+// -- FR-003: help page ----------------------------------------------------
 
 #[test]
 fn test_render_help_lists_every_subcommand() {
@@ -241,7 +241,7 @@ fn test_render_help_lists_every_subcommand() {
     }
 }
 
-// ── FR-010: usage correction ─────────────────────────────────────────────
+// -- FR-010: usage correction ---------------------------------------------
 
 #[test]
 fn test_render_usage_correction_lists_subcommands_and_agents() {
@@ -264,7 +264,7 @@ fn test_render_usage_correction_lists_subcommands_and_agents() {
     );
 }
 
-// ── FR-013: size cap (spot checks; full cases in test_prompt_size_cap.rs) ─
+// -- FR-013: size cap (spot checks; full cases in test_prompt_size_cap.rs) -
 
 #[test]
 fn test_apply_size_cap_under_cap_passthrough() {
@@ -284,8 +284,8 @@ fn test_apply_size_cap_marker_states_counts() {
     );
 }
 
-// ── FR-005-009 integration assertions live in sibling files; the header's
-// `(no tools)` marker is asserted here for the FR-009 surface directly. ────
+// -- FR-005-009 integration assertions live in sibling files; the header's
+// `(no tools)` marker is asserted here for the FR-009 surface directly. ----
 
 #[test]
 fn test_prompt_header_no_tools_marker_for_tool_free_agent() {

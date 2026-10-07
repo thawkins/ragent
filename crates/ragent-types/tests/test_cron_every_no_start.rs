@@ -4,8 +4,8 @@
 //! form (no explicit start timestamp), the system shall set the start time to
 //! the current time and compute `next_due` as now + duration.
 //!
-//! This test exercises the full flow from schedule expression → parsed
-//! schedule → `CronEvent` construction, verifying that:
+//! This test exercises the full flow from schedule expression -> parsed
+//! schedule -> `CronEvent` construction, verifying that:
 //!
 //! - `start_at` is `None` (no explicit start given).
 //! - `schedule.form` is `RepeatNow`.
@@ -66,7 +66,7 @@ fn test_every_no_start_has_no_start_at_and_repeat_now_form() {
     assert!(!parsed.schedule.is_one_shot());
 }
 
-/// Verify the full flow: parse `every <d>` → construct `CronEvent` → check
+/// Verify the full flow: parse `every <d>` -> construct `CronEvent` -> check
 /// that the event's `next_due` matches `now + d`.
 #[test]
 fn test_every_no_start_cron_event_next_due() {
@@ -111,31 +111,31 @@ fn test_every_no_start_large_duration() {
 fn test_every_no_start_unit_aliases() {
     let now = Utc::now();
 
-    // Alias: `mins` → minutes
+    // Alias: `mins` -> minutes
     {
         let parsed = parse_schedule("every 15mins", now).unwrap();
         assert_eq!(parsed.next_due, now + Duration::seconds(900));
     }
 
-    // Alias: `hrs` → hours
+    // Alias: `hrs` -> hours
     {
         let parsed = parse_schedule("every 3hrs", now).unwrap();
         assert_eq!(parsed.next_due, now + Duration::seconds(10_800));
     }
 
-    // Alias: `days` → days
+    // Alias: `days` -> days
     {
         let parsed = parse_schedule("every 5days", now).unwrap();
         assert_eq!(parsed.next_due, now + Duration::seconds(432_000));
     }
 
-    // Alias: `wks` → weeks
+    // Alias: `wks` -> weeks
     {
         let parsed = parse_schedule("every 2wks", now).unwrap();
         assert_eq!(parsed.next_due, now + Duration::seconds(1_209_600));
     }
 
-    // Alias: `months` → months (30 days)
+    // Alias: `months` -> months (30 days)
     {
         let parsed = parse_schedule("every 6months", now).unwrap();
         assert_eq!(parsed.next_due, now + Duration::seconds(15_552_000));

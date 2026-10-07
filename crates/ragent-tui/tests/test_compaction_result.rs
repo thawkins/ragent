@@ -20,7 +20,7 @@ fn compaction_message() -> Message {
 }
 
 // =========================================================================
-// poll_compaction_result — no result pending
+// poll_compaction_result - no result pending
 // =========================================================================
 
 #[test]
@@ -34,7 +34,7 @@ fn test_poll_compaction_result_noop_when_empty() {
 }
 
 // =========================================================================
-// poll_compaction_result — Ok result replaces history and clears state
+// poll_compaction_result - Ok result replaces history and clears state
 // =========================================================================
 
 #[test]
@@ -72,7 +72,7 @@ fn test_poll_compaction_result_ok_replaces_messages() {
 }
 
 // =========================================================================
-// poll_compaction_result — Err result clears state and blocks queued send
+// poll_compaction_result - Err result clears state and blocks queued send
 // =========================================================================
 
 #[tokio::test]
@@ -103,7 +103,7 @@ async fn test_poll_compaction_result_err_blocks_queued_send() {
 }
 
 // =========================================================================
-// poll_compaction_result — Ok result dispatches the queued send
+// poll_compaction_result - Ok result dispatches the queued send
 // =========================================================================
 
 #[tokio::test]
@@ -130,7 +130,7 @@ async fn test_poll_compaction_result_ok_dispatches_queued_send() {
 }
 
 // =========================================================================
-// poll_compaction_result — Mutex poisoned
+// poll_compaction_result - Mutex poisoned
 // =========================================================================
 
 #[test]
@@ -155,7 +155,7 @@ fn test_poll_compaction_result_recovers_from_poisoned_mutex() {
 }
 
 // =========================================================================
-// poll_context_snapshot_refresh — stale-snapshot drop after /compact
+// poll_context_snapshot_refresh - stale-snapshot drop after /compact
 // =========================================================================
 //
 // Regression: when `/compact` finished while a Context panel snapshot refresh

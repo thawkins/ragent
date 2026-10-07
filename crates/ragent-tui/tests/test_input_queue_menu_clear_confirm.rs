@@ -91,7 +91,7 @@ fn dialog_rows(terminal: &Terminal<TestBackend>, app: &App) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// FR-033 — the dialog presents the message and exactly Yes / No
+// FR-033 - the dialog presents the message and exactly Yes / No
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -187,7 +187,7 @@ fn test_closed_dialog_is_not_painted_and_area_is_cleared() {
 }
 
 // ---------------------------------------------------------------------------
-// NFR-010 — the dialog is a modal reusing the shared key dispatch
+// NFR-010 - the dialog is a modal reusing the shared key dispatch
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -222,7 +222,7 @@ async fn test_selection_change_sets_the_redraw_flag() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-034 — Enter with the default selection does not confirm `Yes`
+// FR-034 - Enter with the default selection does not confirm `Yes`
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -265,7 +265,7 @@ async fn test_esc_returns_cancel() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-035 / FR-037 — dismissing closes the dialog and leaves the queue
+// FR-035 / FR-037 - dismissing closes the dialog and leaves the queue
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

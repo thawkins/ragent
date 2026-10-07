@@ -455,7 +455,7 @@ fn web_relevance_returns_empty_as_some() {
     assert_eq!(s.relevance(), Some(""));
 }
 
-// ── Milestone E-003: relevance_rank tests ─────────────────────────────
+// -- Milestone E-003: relevance_rank tests -----------------------------
 
 #[test]
 fn relevance_rank_very_high_is_8() {

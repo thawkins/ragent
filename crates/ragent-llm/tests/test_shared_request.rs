@@ -16,7 +16,7 @@ fn shared_chat_request_is_cheaply_cloneable() {
         vec![],
     );
     let clone = body.clone();
-    // Cheap clone — same pointer, no deep copy.
+    // Cheap clone - same pointer, no deep copy.
     assert!(Arc::ptr_eq(&body.messages, &clone.messages));
     assert!(Arc::ptr_eq(&body.tools, &clone.tools));
 }

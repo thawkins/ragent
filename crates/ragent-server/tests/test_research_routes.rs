@@ -181,7 +181,7 @@ async fn create_test_item_with_invocation(name: &str, invocation: &str) {
         .unwrap();
 }
 
-// ── Auth tests ───────────────────────────────────────────────────────────
+// -- Auth tests -----------------------------------------------------------
 
 #[tokio::test]
 async fn test_research_list_requires_auth() {
@@ -205,7 +205,7 @@ async fn test_research_list_returns_empty_or_items() {
     assert!(body.contains("\"count\""));
 }
 
-// ── Show (GET /research/{name}) tests ───────────────────────────────────
+// -- Show (GET /research/{name}) tests -----------------------------------
 
 #[tokio::test]
 async fn test_research_show_not_found() {
@@ -273,7 +273,7 @@ async fn test_research_show_full_includes_extended_fields() {
     delete_test_item(&name).await;
 }
 
-// ── Delete tests ─────────────────────────────────────────────────────────
+// -- Delete tests ---------------------------------------------------------
 
 #[tokio::test]
 async fn test_research_delete_requires_confirmation() {
@@ -335,7 +335,7 @@ async fn test_research_delete_not_found() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-// ── POST /research tests ────────────────────────────────────────────────
+// -- POST /research tests ------------------------------------------------
 
 #[tokio::test]
 async fn test_research_post_invalid_name() {
@@ -375,7 +375,7 @@ async fn test_research_post_returns_202_with_location() {
     assert_eq!(parsed["name"], name);
     assert_eq!(parsed["status"], "accepted");
 
-    // Clean up — the background task may fail (no LLM), but the item
+    // Clean up - the background task may fail (no LLM), but the item
     // was created on disk. Wait a moment for the spawn to start, then
     // delete the item.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -403,7 +403,7 @@ async fn test_research_post_accepts_output_limit_fields() {
     assert_eq!(parsed["name"], name);
     assert_eq!(parsed["status"], "accepted");
 
-    // Clean up — the background run may fail (no LLM), but the item exists.
+    // Clean up - the background run may fail (no LLM), but the item exists.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     delete_test_item(&name).await;
 }
@@ -427,9 +427,9 @@ async fn test_research_post_duplicate_returns_conflict() {
     delete_test_item(&name).await;
 }
 
-// ── SSE events endpoint ─────────────────────────────────────────────────
+// -- SSE events endpoint -------------------------------------------------
 
-// ── Update (PUT /research/{name}) tests ─────────────────────────────────
+// -- Update (PUT /research/{name}) tests ---------------------------------
 
 #[tokio::test]
 async fn test_research_update_not_found() {
@@ -518,7 +518,7 @@ async fn test_research_update_accepts_recorded_invocation() {
             .starts_with("ragent research create")
     );
 
-    // Clean up — the background replay may fail (no LLM), but the item
+    // Clean up - the background replay may fail (no LLM), but the item
     // exists on disk and the run registry must drain.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     delete_test_item(&name).await;
@@ -581,7 +581,7 @@ async fn test_research_update_conflicts_with_in_flight_run() {
     delete_test_item(&name).await;
 }
 
-// ── SSE events endpoint (continued) ─────────────────────────────────────
+// -- SSE events endpoint (continued) -------------------------------------
 
 #[tokio::test]
 async fn test_research_events_no_active_run_returns_status() {

@@ -1,6 +1,6 @@
 //! Integration tests for the loop stop-flag guard (spec `agentloop`, task
-//! T-008 / FR-010, FR-017): once the loop's stop flag is set — by goal
-//! achievement or a budget breach — no further LLM request is sent, the
+//! T-008 / FR-010, FR-017): once the loop's stop flag is set - by goal
+//! achievement or a budget breach - no further LLM request is sent, the
 //! termination event is published exactly once, and the turn finalises
 //! cleanly.
 //!
@@ -353,7 +353,7 @@ async fn test_goal_achieved_stops_loop_after_single_request() -> Result<()> {
 }
 
 /// FR-013 / FR-017: with `max_steps: 2` and a mock that always returns tool
-/// calls, the third request must never be sent — the budget gate terminates
+/// calls, the third request must never be sent - the budget gate terminates
 /// with `budget_exhausted` BEFORE the next LLM request.
 #[tokio::test]
 async fn test_step_budget_stops_before_next_request() -> Result<()> {
@@ -471,7 +471,7 @@ async fn test_token_budget_stops_before_next_request() -> Result<()> {
     Ok(())
 }
 /// T-003 (FR-013): when the loop spec leaves `max_steps` unset, the `loop`
-/// config default applies — here `loop.max_steps: 2` from the injected
+/// config default applies - here `loop.max_steps: 2` from the injected
 /// config stops the loop before the third request even though the spec
 /// itself carries no budget.
 #[tokio::test]
@@ -535,7 +535,7 @@ async fn test_config_default_step_budget_stops_loop() -> Result<()> {
 }
 
 /// T-003 (FR-014): when the loop spec leaves `cost_limit` unset, the `loop`
-/// config cost budget applies — the token tally from the first exchange
+/// config cost budget applies - the token tally from the first exchange
 /// breaches it and the second request is never sent.
 #[tokio::test]
 async fn test_config_cost_limit_stops_loop() -> Result<()> {
@@ -598,7 +598,7 @@ async fn test_config_cost_limit_stops_loop() -> Result<()> {
 }
 
 /// T-003: an explicitly configured spec budget wins over the loop config
-/// default — the spec's `max_steps: 4` overrides the injected config value
+/// default - the spec's `max_steps: 4` overrides the injected config value
 /// of 2, so the loop runs four iterations before stopping.
 #[tokio::test]
 async fn test_explicit_spec_budget_wins_over_config_default() -> Result<()> {

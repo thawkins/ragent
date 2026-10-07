@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn base_ctx(active_model: Option<ModelRef>) -> ToolContext {
     ToolContext {
         session_id: "session-1".to_string(),
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: PathBuf::from("target/temp"),
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         agent_manager: None,
