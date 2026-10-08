@@ -2057,7 +2057,7 @@ impl App {
         }
     }
 
-    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 8] {
+    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 7] {
         [
             ("github", self.tool_visibility.github),
             ("gitlab", self.tool_visibility.gitlab),
@@ -2066,7 +2066,6 @@ impl App {
             ("plan", self.tool_visibility.plan),
             ("codeindex", self.tool_visibility.codeindex),
             ("masterfetch", self.tool_visibility.masterfetch),
-            ("browser", self.tool_visibility.browser),
         ]
     }
 
@@ -2102,10 +2101,6 @@ impl App {
             "masterfetch" => {
                 self.tool_visibility.masterfetch = enabled;
                 self.tool_visibility.specified.masterfetch = true;
-            }
-            "browser" => {
-                self.tool_visibility.browser = enabled;
-                self.tool_visibility.specified.browser = true;
             }
             _ => return false,
         }
@@ -2205,7 +2200,7 @@ impl App {
     ///   (name `plugin_<id>_<tool>`);
     /// - `visibility:<switch>` when the tool belongs to a tool-family
     ///   visibility switch (`github`, `gitlab`, `teams`, `agents`,
-    ///   `plan`, `codeindex`, `masterfetch`, `browser`);
+    ///   `plan`, `codeindex`, `masterfetch`);
     /// - `internal` otherwise (a core or built-in tool).
     fn tool_source(&self, registry: &ragent_agent::tool::ToolRegistry, name: &str) -> String {
         if let Some(tool) = registry.get(name) {

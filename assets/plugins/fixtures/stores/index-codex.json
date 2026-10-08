@@ -1,0 +1,59 @@
+{
+  "store": "codex",
+  "plugins": [
+    {
+      "id": "codex-weather",
+      "name": "Codex Weather",
+      "version": "1.2.0",
+      "description": "Weather lookups for the agent",
+      "category": "Web",
+      "source": "https://raw.githubusercontent.com/thawkins/ragent/main/assets/plugins/fixtures/codex-weather",
+      "dialect": "codex",
+      "tags": ["weather", "http"]
+    },
+    {
+      "id": "codex-time",
+      "name": "Codex Time",
+      "version": "0.9.1",
+      "description": "Time and timezone helpers",
+      "category": "Utility",
+      "source": "https://example.org/codex-time.zip",
+      "dialect": "codex"
+    },
+    {
+      "id": "codex-shell",
+      "name": "Codex Shell",
+      "version": "2.0.0",
+      "description": "Shell command wrappers",
+      "category": "utility",
+      "source": "https://example.org/codex-shell.zip",
+      "dialect": "codex"
+    },
+    {
+      "id": "codex-db",
+      "name": "Codex Database",
+      "version": "1.4.2",
+      "description": "Postgres and SQLite helpers",
+      "category": "Database",
+      "source": "https://example.org/codex-db.zip",
+      "dialect": "codex"
+    },
+    {
+      "id": "codex-lsp",
+      "name": "Codex LSP",
+      "version": "0.3.0",
+      "description": "Language server integration",
+      "category": "Language",
+      "source": "https://example.org/codex-lsp.zip",
+      "dialect": "codex"
+    },
+    {
+      "id": "codex-uncat",
+      "name": "Codex Uncategorised",
+      "version": "0.1.0",
+      "description": "No category field at all",
+      "source": "https://example.org/codex-uncat.zip",
+      "dialect": "codex"
+    }
+  ]
+}

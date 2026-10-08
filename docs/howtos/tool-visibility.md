@@ -17,7 +17,6 @@ The available switches are:
 | `plan` | `off` | Plan-mode tools |
 | `codeindex` | `on` | Code index tools |
 | `masterfetch` | `on` | MasterFetch web-access tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot`, `mf_cache_clear`, `mf_version`) |
-| `browser` | `on` | Browser automation tool (`browser` — Chrome DevTools Protocol) |
 
 When a switch is `off`, tools in that family are excluded from:
 
@@ -57,7 +56,6 @@ Examples:
 /tools plan off
 /tools codeindex off
 /tools masterfetch off
-/tools browser off
 ```
 
 Changes are written to `.ragent/ragent.json` when a project config directory is
@@ -76,8 +74,7 @@ You can also configure visibility directly in `ragent.json`:
     "agents": false,
     "plan": false,
     "codeindex": true,
-    "masterfetch": true,
-    "browser": true
+    "masterfetch": true
   }
 }
 ```

@@ -5573,9 +5573,10 @@ async fn test_slash_mcp_list_shows_transport_and_endpoint() {
             .and_then(|l| l.split('|').map(str::trim).nth(col).map(str::to_string))
             .unwrap_or_default()
     };
-    // Column 4 is the transport, column 5 the endpoint (stdio command or URL).
+    // Column 4 is the transport, column 5 the endpoint (stdio command plus
+    // args, or URL).
     assert_eq!(cell("| fetcher", 4), "stdio", "{joined}");
-    assert_eq!(cell("| fetcher", 5), "uvx", "{joined}");
+    assert_eq!(cell("| fetcher", 5), "uvx fetch-server", "{joined}");
     assert_eq!(cell("| remote", 4), "http", "{joined}");
     assert_eq!(cell("| remote", 5), "http://127.0.0.1:3000/mcp", "{joined}");
 }

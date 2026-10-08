@@ -23,6 +23,7 @@
 //! never stored on [`App`](crate::app::App) and never crosses an `.await`, so
 //! `App` stays `Send + Sync` for the async event loop.
 
+use ragent_connectors::CategoryFilter;
 use ragent_plugins::{
     PLUGIN_SUBCOMMANDS, StoreKind, render_help, run_plugin_subcommand, store_and_config,
     subcommand_of,
@@ -65,8 +66,8 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
         if !store_and_config(&app.cwd_path).1.is_enabled() {
             return Some(ragent_plugins::disabled_subsystem_report(sub));
         }
-        let (query, refresh) = parse_store_launch(rest);
-        app.open_plugin_store(kind, &query, refresh);
+        let (query, category, refresh) = parse_store_launch(rest);
+        app.open_plugin_store_category(kind, &query, refresh, category);
         return None;
     }
 
@@ -186,21 +187,33 @@ fn render_mcp_tool_report(app: &crate::app::App) -> String {
 }
 
 /// Parse the optional trailing arguments of a store-browser launch
-/// (`/plugins codex [query] [--refresh]`).
+/// (`/plugins codex [query] [--category <name>] [--refresh]`).
 ///
-/// Returns the pre-filled search query (FR-020) and whether a cache-bypassing
-/// re-fetch was requested (FR-021). `--refresh` is accepted anywhere and is
-/// removed from the query tokens, so a pre-filled query may contain spaces.
+/// Returns the pre-filled search query (FR-020), the category filter requested by
+/// `--category` (`ALL` when absent; `catnav` FR-022), and whether a cache-bypassing
+/// re-fetch was requested (FR-021). `--refresh` and `--category <name>` are
+/// accepted anywhere and are removed from the query tokens, so a pre-filled query
+/// may contain spaces. A missing `--category` value degrades to the unfiltered
+/// `ALL` selection so a malformed flag never filters everything out. The category
+/// value is validated against the categories the fetched index actually carries
+/// once the off-loop fetch lands (see [`crate::app::App::poll_plugin_store_result`]),
+/// so an unknown value renders the panel's inline refusal rather than an empty list.
 #[must_use]
-fn parse_store_launch(rest: &str) -> (String, bool) {
+fn parse_store_launch(rest: &str) -> (String, CategoryFilter, bool) {
     let mut refresh = false;
+    let mut category = CategoryFilter::all();
     let mut query_tokens: Vec<&str> = Vec::new();
-    for token in rest.split_whitespace() {
+    let mut tokens = rest.split_whitespace();
+    while let Some(token) = tokens.next() {
         if token == "--refresh" {
             refresh = true;
+        } else if token == "--category" {
+            if let Some(name) = tokens.next() {
+                category = CategoryFilter::parse(name);
+            }
         } else {
             query_tokens.push(token);
         }
     }
-    (query_tokens.join(" "), refresh)
+    (query_tokens.join(" "), category, refresh)
 }

@@ -17,12 +17,40 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use ragent_config::{PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
-use ragent_plugins::{DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, StoreEndpoint, StoreKind};
+use ragent_connectors::CategoryFilter;
+use ragent_plugins::{
+    DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, StoreEndpoint, StoreEntry, StoreIndex,
+    StoreKind,
+};
 use ragent_tui::App;
-use ragent_tui::app::PluginStoreStatus;
+use ragent_tui::app::{PluginStoreFetchResult, PluginStoreStatus};
 
 #[path = "support/mod.rs"]
 mod support;
+
+/// A store entry with `id` and an optional `category`.
+fn entry(id: &str, category: Option<&str>) -> StoreEntry {
+    StoreEntry {
+        id: id.to_string(),
+        name: id.to_string(),
+        version: "1.0.0".to_string(),
+        source: format!("https://example.org/{id}.zip"),
+        description: format!("{id} description"),
+        dialect: None,
+        tags: Vec::new(),
+        homepage: None,
+        category: category.map(str::to_string),
+    }
+}
+
+/// A store index carrying `entries` and no malformed-entry count.
+fn index(entries: Vec<StoreEntry>) -> StoreIndex {
+    StoreIndex {
+        store: Some("test".to_string()),
+        entries,
+        skipped: 0,
+    }
+}
 
 /// Serialise the cwd/env-mutating tests in this binary.
 fn launch_lock() -> &'static Mutex<()> {
@@ -283,6 +311,87 @@ async fn a_multi_word_query_is_joined_and_refresh_defaults_off() {
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(browser.query, "time helper");
     assert!(!browser.refresh);
+}
+
+// -- `--category` parsing on launch (catnav FR-022) --------------------------
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_category_flag_is_parsed_and_held_until_the_index_lands() {
+    let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
+    let mut app = app_with_session();
+
+    app.execute_slash_command("/plugins codex --category Web")
+        .await;
+
+    let browser = app.plugin_store.as_ref().expect("panel open");
+    assert!(
+        browser.query.is_empty(),
+        "`--category Web` is not part of the query"
+    );
+    assert_eq!(
+        browser.pending_category,
+        Some(CategoryFilter::Category("Web".to_string())),
+        "the launch holds the filter until the fetch lands"
+    );
+    assert_eq!(browser.active_category(), "ALL", "nothing is filtered yet");
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_known_category_flag_is_applied_when_the_index_arrives() {
+    let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
+    let mut app = app_with_session();
+
+    app.execute_slash_command("/plugins codex weather --category Web")
+        .await;
+    // Deposit a matching index exactly as the off-loop fetch would.
+    *app.plugin_store_result.lock().expect("slot") = Some(PluginStoreFetchResult {
+        kind: StoreKind::Codex,
+        outcome: Ok(index(vec![
+            entry("codex-weather", Some("Web")),
+            entry("codex-db", Some("Database")),
+        ])),
+    });
+    app.poll_plugin_store_result();
+
+    let browser = app.plugin_store.as_ref().expect("panel open");
+    assert_eq!(browser.query, "weather", "the query is still pre-filled");
+    assert_eq!(browser.active_category(), "Web", "the category is applied");
+    assert_eq!(
+        browser.category_cursor_row(),
+        2,
+        "the cursor sits on the pre-selected row (ALL, Database, Web)"
+    );
+    assert!(browser.pending_category.is_none(), "the filter is consumed");
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn an_unknown_category_flag_is_reported_and_leaves_the_full_set() {
+    let (_lock, _env, _temp) = enter_project(NO_PLUGINS_BLOCK);
+    let mut app = app_with_session();
+
+    app.execute_slash_command("/plugins codex --category Nope")
+        .await;
+    *app.plugin_store_result.lock().expect("slot") = Some(PluginStoreFetchResult {
+        kind: StoreKind::Codex,
+        outcome: Ok(index(vec![entry("codex-weather", Some("Web"))])),
+    });
+    app.poll_plugin_store_result();
+
+    let browser = app.plugin_store.as_ref().expect("panel open");
+    assert_eq!(
+        browser.active_category(),
+        "ALL",
+        "an unknown name falls back to ALL"
+    );
+    assert_eq!(browser.filtered.len(), 1, "the entry stays visible");
+    assert_eq!(
+        browser.last_install.as_deref(),
+        Some("unknown category `Nope`"),
+        "the refusal is reported in the footer"
+    );
 }
 
 // -- Disabled subsystem (SPEC configuration schema) --------------------------

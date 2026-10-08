@@ -1207,6 +1207,19 @@ impl App {
     /// field from `prefill` and recording a `--refresh` request (spec
     /// `pluginstores` FR-007, FR-012, FR-020, FR-021).
     ///
+    /// The unfiltered launch: equivalent to
+    /// [`Self::open_plugin_store_category`] with the `ALL` category, kept as the
+    /// common entry point so callers that name no category need not spell out the
+    /// filter.
+    pub fn open_plugin_store(&mut self, kind: StoreKind, prefill: &str, refresh: bool) {
+        self.open_plugin_store_category(kind, prefill, refresh, CategoryFilter::all());
+    }
+
+    /// Open the plugin-store browse panel for `kind`, pre-filling the search
+    /// field from `prefill`, recording a `--refresh` request, and holding an
+    /// optional `--category` filter until the index lands (spec `pluginstores`
+    /// FR-007, FR-012, FR-020, FR-021; `catnav` FR-022).
+    ///
     /// Both `/plugins codex` and `/plugins claude` drive the same browser,
     /// parameterised only by store (A2). The panel opens in the `Loading` state
     /// and its index fetch is started off-loop ([`Self::spawn_plugin_store_fetch`])
@@ -1215,12 +1228,25 @@ impl App {
     /// state (FR-022); while it is open the input field and the queue are locked
     /// (FR-015).
     ///
+    /// `category` is the filter parsed from a `--category <name>` launch
+    /// (`CategoryFilter::all()` when absent). It is applied once the fetch lands,
+    /// against the categories the fetched index actually declares
+    /// ([`App::poll_plugin_store_result`]), so an unknown name is reported inline
+    /// rather than leaving a silently empty panel (FR-022).
+    ///
     /// The installed-plugin-id set is derived once from the store scan on open
     /// (T-007, FR-005, A5) so the renderer can colour already-present rows.
-    pub fn open_plugin_store(&mut self, kind: StoreKind, prefill: &str, refresh: bool) {
+    pub fn open_plugin_store_category(
+        &mut self,
+        kind: StoreKind,
+        prefill: &str,
+        refresh: bool,
+        category: CategoryFilter,
+    ) {
         let installed = self.derive_installed_set();
         let mut browser = PluginStoreBrowser::new(kind, prefill, refresh);
         browser.set_installed(installed);
+        browser.set_pending_category(category);
         self.plugin_store = Some(browser);
         self.needs_redraw = true;
         self.spawn_plugin_store_fetch(kind);
@@ -1343,9 +1369,14 @@ impl App {
             Ok(index) => {
                 if let Some(browser) = self.plugin_store.as_mut() {
                     browser.set_index(index);
+                    // A `--category <name>` launch is validated against the
+                    // categories the fetched index actually declares, so an unknown
+                    // name is reported in the footer rather than leaving the panel
+                    // silently empty (spec `catnav` FR-022).
+                    browser.apply_pending_category();
                 }
             }
-            Err(err) => self.plugin_store_failed(result.kind, err.to_string()),
+            Err(err) => self.plugin_store_failed(result.kind, err.panel_detail(result.kind)),
         }
         self.needs_redraw = true;
     }
@@ -1645,6 +1676,72 @@ impl App {
     pub fn plugin_store_move_down(&mut self) {
         if let Some(browser) = self.plugin_store.as_mut() {
             browser.move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Whether the category navigator currently holds keyboard focus
+    /// (spec `catnav` FR-009).
+    ///
+    /// `false` when no panel is open or the result list holds focus.
+    #[must_use]
+    pub fn plugin_store_nav_focused(&self) -> bool {
+        self.plugin_store
+            .as_ref()
+            .is_some_and(|browser| browser.nav_focused)
+    }
+
+    /// Transfer keyboard focus between the category navigator and the result
+    /// list (spec `catnav` FR-009).
+    ///
+    /// A no-op when no panel is open. The focused pane's cursor is rendered
+    /// distinctly and subsequent `Up`/`Down` route to the focused pane (FR-009).
+    pub fn plugin_store_toggle_focus(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.nav_focused = !browser.nav_focused;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the category cursor up one navigator row while the navigator holds
+    /// focus, applying the newly highlighted category (spec `catnav` FR-008).
+    pub fn plugin_store_category_move_up(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.category_move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the category cursor down one navigator row while the navigator holds
+    /// focus, applying the newly highlighted category (spec `catnav` FR-007).
+    pub fn plugin_store_category_move_down(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.category_move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Apply the highlighted category and move keyboard focus to the result list
+    /// (spec `catnav` FR-010).
+    ///
+    /// Installing is deliberately not reachable here: `ENTER` over the navigator
+    /// only applies the category and transfers focus, so nothing is written to
+    /// the store (FR-024).
+    pub fn plugin_store_category_confirm(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.category_confirm();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the category filter to `ALL` and re-derive the visible results
+    /// (spec `catnav` FR-015).
+    ///
+    /// A no-op when no panel is open; issues no network request and installs
+    /// nothing (FR-014, FR-024).
+    pub fn plugin_store_clear_category(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.category_clear();
             self.needs_redraw = true;
         }
     }

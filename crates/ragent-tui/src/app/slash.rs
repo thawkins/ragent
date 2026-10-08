@@ -821,7 +821,6 @@ impl App {
                 "plan".to_string(),
                 "codeindex".to_string(),
                 "masterfetch".to_string(),
-                "browser".to_string(),
                 "help".to_string(),
             ],
             "mouse" => {
@@ -4890,7 +4889,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 let parts: Vec<&str> = args.split_whitespace().collect();
                 match parts.as_slice() {
                     [] | ["help"] | ["--help"] | ["-h"] | ["usage"] => {
-                        self.append_assistant_text("/tools\n\n## /tools - Tool family visibility\n\n| Subcommand | Description |\n|---|---|\n| `/tools` | Show this help |\n| `/tools list` | List the tool-family visibility table plus every visible and disabled tool |\n| `/tools <switch>` | Report whether one visibility switch is on or off |\n| `/tools <switch> on|off` | Turn a visibility switch on or off and save it |\n| `/tools help` | Show this help |\n\nValid switches: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.");
+                        self.append_assistant_text("/tools\n\n## /tools - Tool family visibility\n\n| Subcommand | Description |\n|---|---|\n| `/tools` | Show this help |\n| `/tools list` | List the tool-family visibility table plus every visible and disabled tool |\n| `/tools <switch>` | Report whether one visibility switch is on or off |\n| `/tools <switch> on|off` | Turn a visibility switch on or off and save it |\n| `/tools help` | Show this help |\n\nValid switches: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.");
                         self.status = "tools help".to_string();
                     }
                     ["list"] | ["show"] => {
@@ -4906,7 +4905,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             self.status = "tools".to_string();
                         } else {
                             self.append_assistant_text(
-                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
+                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.",
                                                       );
                             self.status = "tools error".to_string();
                         }
@@ -4926,7 +4925,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
 
                         if !self.set_tool_visibility_state(switch, enabled) {
                             self.append_assistant_text(
-                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
+                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.",
                                                       );
                             self.status = "tools error".to_string();
                             return;
@@ -5128,7 +5127,18 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                                 };
                                 let endpoint = match s.config.type_ {
                                     ragent_agent::McpTransport::Stdio => {
-                                        s.config.command.clone().unwrap_or_default()
+                                        // Show the full launch invocation (command plus
+                                        // its arguments) so a stdio server's endpoint is
+                                        // reproducible without opening `ragent.json`.
+                                        let mut invocation =
+                                            s.config.command.clone().unwrap_or_default();
+                                        for arg in &s.config.args {
+                                            if !arg.is_empty() {
+                                                invocation.push(' ');
+                                                invocation.push_str(arg);
+                                            }
+                                        }
+                                        invocation
                                     }
                                     ragent_agent::McpTransport::Sse
                                     | ragent_agent::McpTransport::Http => {

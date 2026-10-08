@@ -265,3 +265,77 @@ fn an_oversized_body_never_reaches_the_parser() {
     let err = ragent_plugins::read_capped(Cursor::new(body), 1024).expect_err("over cap");
     assert_eq!(err, StoreError::TooLarge { limit: 1024 });
 }
+
+// -- Clean "marketplace unavailable" panel detail (FR-013) -------------------
+
+#[test]
+fn a_transport_failure_reads_as_an_unavailable_marketplace() {
+    // A network failure means the store could not be reached, so the panel
+    // detail names the marketplace as unavailable with a plain cause instead
+    // of echoing the raw transport error (FR-013).
+    let err = StoreError::Network {
+        detail: "connection refused".to_string(),
+    };
+    assert!(err.is_unavailable());
+    let detail = err.panel_detail(StoreKind::Codex);
+    assert!(
+        detail.contains("Codex plugin marketplace is unavailable"),
+        "detail: {detail}"
+    );
+    assert!(detail.contains("could not connect"), "detail: {detail}");
+}
+
+#[test]
+fn a_timeout_reads_as_an_unavailable_marketplace() {
+    let err = StoreError::Timeout { ms: 10_000 };
+    assert!(err.is_unavailable());
+    let detail = err.panel_detail(StoreKind::Claude);
+    assert!(
+        detail.contains("Claude plugin marketplace is unavailable"),
+        "detail: {detail}"
+    );
+    assert!(detail.contains("10000 ms"), "detail: {detail}");
+}
+
+#[test]
+fn a_server_error_reads_as_an_unavailable_marketplace() {
+    let err = StoreError::Http { status: 503 };
+    assert!(err.is_unavailable());
+    let detail = err.panel_detail(StoreKind::Codex);
+    assert!(
+        detail.contains("Codex plugin marketplace is unavailable"),
+        "detail: {detail}"
+    );
+    assert!(detail.contains("503"), "detail: {detail}");
+}
+
+#[test]
+fn a_malformed_body_keeps_its_specific_message() {
+    // The store was reached but answered with something ragent cannot use, so
+    // the specific parse cause is kept rather than being flattened to
+    // "unavailable" (FR-013).
+    let err = StoreError::MalformedJson {
+        detail: "expected value at line 3 column 7".to_string(),
+    };
+    assert!(!err.is_unavailable());
+    let detail = err.panel_detail(StoreKind::Codex);
+    assert_eq!(detail, err.to_string());
+    assert!(detail.contains("line 3 column 7"), "detail: {detail}");
+}
+
+#[test]
+fn a_refused_endpoint_keeps_its_specific_message() {
+    let refused = StoreEndpoint::parse("http://example.org/i.json").expect_err("refused");
+    let err: StoreError = refused.into();
+    assert!(!err.is_unavailable());
+    assert_eq!(err.panel_detail(StoreKind::Claude), err.to_string());
+}
+
+#[test]
+fn the_unavailable_detail_is_ascii_only() {
+    let detail = StoreError::Network {
+        detail: "x".to_string(),
+    }
+    .panel_detail(StoreKind::Claude);
+    assert!(detail.is_ascii(), "detail must be ASCII: {detail:?}");
+}

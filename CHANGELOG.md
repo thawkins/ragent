@@ -1,5 +1,103 @@
 # Changelog
 
+## [Unreleased]
+
+### Commits (last 10)
+
+- **`054e5154`, `f87e2d95`, `87024938`, `d0eaa4e1`, `b2b46d5d`, `80fac9fb`,
+  `f6199c1c`, `0647d365`, `6cf0b60f`, `da83d927` - the v1.0.122..v1.0.129
+  release line.** Each is a `Version: X.Y.Z` release commit or a security
+  milestone (`da83d927` MS-03 network/secret hardening, `6cf0b60f` MS-04
+  defence in depth) already documented in its own `[1.0.12x]` section below.
+  The working-tree entry that follows records the unreleased `catnav` /
+  `browser`-removal / MCP-discovery / startup-diagnostics set collected on top
+  of `054e5154`.
+
+### Working tree (uncommitted)
+
+The following entries describe the uncommitted working-tree set on top of
+`054e5154` (v1.0.129).
+
+#### Added
+
+- **Plugin-store category navigator (spec `catnav`).** The `/plugins codex` and
+  `/plugins claude` browse panels gain a left-hand category navigator: `ALL` plus
+  the distinct non-empty categories the fetched store index declares (sorted
+  case-insensitively), followed by each distinct non-empty `tag` of an entry that
+  also declares a category. It is driven by keyboard (`Tab` focus, `Up`/`Down`
+  move-and-apply, `Enter` apply + focus results, `c` clear to `ALL`) and by mouse
+  (left-click a row to select, wheel to scroll the navigator without changing the
+  active category, left-click a result row to move the result cursor). A category
+  change re-derives the visible set from the full fetched index in memory (no
+  network request), composes with the free-text query, and resets the result
+  cursor; a category the index no longer declares falls back to `ALL`. A launch
+  accepts `--category <name>` on `/plugins codex` / `/plugins claude`, held until
+  the index lands and then validated (an unknown name is reported in the footer).
+  The `category` field is added to the store-index entry. New tests:
+  `test_plugin_store_category_filter.rs`, `test_plugin_store_category_nav.rs`,
+  `test_plugin_store_category_mouse.rs`, `test_plugin_store_category_launch.rs`,
+  and the fixture-driven acceptance walk
+  `test_plugin_store_category_acceptance.rs` (covers TESTPLAN TC-001..TC-013 and
+  acceptance criteria 1-10). New fixtures:
+  `assets/plugins/fixtures/stores/index-codex.json`, `index-claude.json`, and
+  `index-nocat.json`.
+- **ragent-native MCP server directory `~/.config/ragent/servers/`.** A new
+  `ragent_config::user_dirs::global_mcp_servers_dir()` resolves the ragent-native
+  location, and `/mcp discover` now scans it **first** (so its definitions win
+  de-duplication) before the third-party locations (`~/.claude/mcp-servers`,
+  `~/.cline/mcp-servers`, and the legacy `~/.mcp/servers`). The legacy location
+  is still scanned for backwards compatibility. Documented in the new
+  `docs/howtos/mcp.md`.
+
+#### Fixed
+
+- **Startup errors are no longer swallowed by the TUI stderr spool.** In TUI
+  mode stderr is redirected into the log spool, so an error that aborted startup
+  (a config parse failure, a storage open failure) printed its `Error:` line to
+  the redirected fd 2 and vanished. `stderr_spool::is_active()` now records
+  whether the redirect is in place, and the binary's top-level error handler
+  echoes a startup failure to stdout (the terminal) when the spool is active, so
+  the failure is never silent.
+- **Store-marketplace failures read as clean messages.** `StoreError` gains
+  `is_unavailable()` and `panel_detail(kind)`; a transport-level failure
+  (connection/DNS/TLS, timeout, non-2xx status, refused redirect) renders as
+  `<Store> plugin marketplace is unavailable (<plain cause>)` in the browse
+  panel instead of echoing the raw transport error, while a reached-but-unusable
+  response (malformed JSON/shape, oversized body, refused endpoint) keeps its
+  specific cause (spec `pluginstores` FR-013).
+
+#### Changed
+
+- **`CategoryFilter` gains a shared category predicate.** `matches_category()`
+  extracts the exact, case-insensitive category comparison from `matches()` so a
+  surface whose rows are not `ConnectorDescriptor`s (the plugin-store navigator)
+  can reuse the one definition of what a category is, and
+  `CategoryFilterState::from_categories()` / `sort_categories()` are exposed so
+  both surfaces derive the same sorted row set.
+
+#### Removed
+
+- **`browser` tool and its CDP automation stack** — the `browser` tool (Chrome
+  DevTools Protocol: `open`, `snapshot`, `click`, `type`, `fill_form`, `select`,
+  `wait`, `eval`, `scroll`, `upload`, `press`, `screenshot`, `status`, `setup`)
+  and the whole `ragent-tools-extended::browser` module (`actions.rs`, `cdp.rs`,
+  `launch.rs`, `mod.rs`) are deleted, and the tool is no longer registered in
+  `create_extended_registry()`. The `tokio-tungstenite` WebSocket dependency is
+  dropped from the workspace and the `ragent-tools-extended` manifest.
+- **`browser` configuration and visibility switch** — `BrowserConfig`
+  (`browser.cdp_endpoint`, `browser.default_headless`), the `Config.browser`
+  field, the `ToolVisibilityConfig.browser` / `ToolVisibilitySpecified.browser`
+  switches, and the `tool_family_names("browser")` entry are removed from
+  `ragent-config`; the `/tools` family list drops `browser` (the remaining
+  switches are `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`,
+  `masterfetch`). Configs that still carry a `browser` key are ignored (unknown
+  keys are tolerated).
+- **Browser tests and TUI renderers** — `tests/test_browser.rs`, the four inline
+  browser test modules, and the `browser` input/result summary arms in the TUI
+  message widget are deleted.
+
+Registered tool count falls 152 -> 151 across 22 categories.
+
 ## [1.0.129] - 2026-10-07
 
 *Code-audit remediation release. The `docs/plans/code-audit.md` plan is now

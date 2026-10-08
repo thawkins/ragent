@@ -23,6 +23,7 @@
 //! | [`global_blueprints_dir`]     | `~/.config/ragent/blueprints/`              | `~/.ragent/blueprints/`       |
 //! | [`global_templates_dir`]      | `~/.config/ragent/templates/`               | `~/.ragent/templates/`        |
 //! | [`global_agent_memory_dir`]   | `~/.config/ragent/agent-memory/`            | `~/.ragent/agent-memory/`     |
+//! | [`global_mcp_servers_dir`]    | `~/.config/ragent/servers/`                 | `~/.mcp/servers/`             |
 //! | [`global_models_dir`]         | `~/.config/ragent/models/`                  | `~/.local/share/ragent/models/` |
 //! | [`global_loop_state_dir`]     | `~/.config/ragent/loop-state/`              | `~/.local/share/ragent/loop-state/` |
 //! | [`global_inbox_dir`]          | `~/.config/ragent/log/inbox/`               | `~/.local/share/ragent/log/inbox/`  |
@@ -118,6 +119,17 @@ pub fn global_templates_dir() -> Option<PathBuf> {
 #[must_use]
 pub fn global_agent_memory_dir() -> Option<PathBuf> {
     global_state_dir().map(|d| d.join("agent-memory"))
+}
+
+/// Global MCP server-definition directory: `~/.config/ragent/servers/`.
+///
+/// `/mcp discover` scans this directory for `server.json` files or direct
+/// `*.json` MCP configs. It is the ragent-native replacement for the generic
+/// `~/.mcp/servers/` location, which is still scanned for backwards
+/// compatibility.
+#[must_use]
+pub fn global_mcp_servers_dir() -> Option<PathBuf> {
+    global_state_dir().map(|d| d.join("servers"))
 }
 
 /// Global embedding / LLM model directory: `~/.config/ragent/models/`.

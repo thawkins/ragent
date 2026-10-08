@@ -411,14 +411,22 @@ async fn try_npm_mcp_package(
 }
 
 /// Common locations of MCP registry directories.
+///
+/// The ragent-native location `~/.config/ragent/servers/` is checked first so
+/// its definitions win de-duplication; the remaining entries are third-party
+/// locations kept for backwards compatibility.
 fn mcp_registry_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    // ragent-native MCP server definitions
+    if let Some(ragent_dir) = ragent_config::user_dirs::global_mcp_servers_dir() {
+        dirs.push(ragent_dir);
+    }
     if let Some(home) = dirs::home_dir() {
         // Claude Desktop MCP servers
         dirs.push(home.join(".claude").join("mcp-servers"));
         // Cline MCP servers
         dirs.push(home.join(".cline").join("mcp-servers"));
-        // Generic MCP directory
+        // Generic MCP directory (legacy location for ragent)
         dirs.push(home.join(".mcp").join("servers"));
         // XDG config
         if let Some(config) = dirs::config_dir() {

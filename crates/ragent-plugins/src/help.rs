@@ -39,6 +39,8 @@ JavaScript runtime.
 | `/plugins disable <pluginid>` | required `pluginid` | Unload a plugin and deregister its tools and commands without deleting files. |
 | `/plugins test <pluginid>` | required `pluginid` | Load a plugin in an isolated harness, invoke each contributed tool once, and report per-step results. |
 | `/plugins stores` | optional `--check` | Report each store's effective endpoint and its source; add `--check` to also contact each store and report availability and plugin count. |
+| `/plugins codex [query] [--category <name>] [--refresh]` | optional | Open the interactive Codex plugin-marketplace browser, filtered by the optional `query`; `--category` pre-filters to that category and `--refresh` bypasses the store cache. |
+| `/plugins claude [query] [--category <name>] [--refresh]` | optional | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments. |
 | `/plugins help` | none | Show this usage block. |
 
 ### Sources accepted by `/plugins add`

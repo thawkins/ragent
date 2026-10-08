@@ -162,7 +162,7 @@ The `connectors` block in `ragent.json` controls the subsystem:
 The section merges overlay-wins (project config overrides user-global). With
 `connectors.enabled: false` the subsystem performs no discovery, no catalogue
 fetch, and no connection, and every subcommand other than `help` reports that it
-is disabled. See [`docs/howtos/config.md`](config.md) §7.39 for the full field
+is disabled. See [`docs/howtos/config.md`](config.md) §7.37 for the full field
 table.
 
 ## 9. Troubleshooting
@@ -182,7 +182,7 @@ table.
 
 - [`docs/howtos/slashcommands/connectors.md`](slashcommands/connectors.md) - the
   `/connectors` slash-command reference
-- [`docs/howtos/config.md`](config.md) §7.39 - the `connectors` config block
+- [`docs/howtos/config.md`](config.md) §7.37 - the `connectors` config block
 - [`docs/howtos/mcp.md`](mcp.md) - MCP server status, discovery, and enable/disable
 - [`docs/howtos/plugins.md`](plugins.md) - the sandboxed plugin system (a sibling
   catalogue)

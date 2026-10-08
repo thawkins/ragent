@@ -251,6 +251,7 @@ fn transform_vendor_entry(
         .filter(|h| !h.trim().is_empty())
         .map(str::to_string);
     let tags = collect_tags(map);
+    let category = collect_category(map);
     let dialect = map
         .get("dialect")
         .and_then(Value::as_str)
@@ -274,6 +275,7 @@ fn transform_vendor_entry(
         dialect,
         tags,
         homepage,
+        category,
     })
 }
 
@@ -300,6 +302,18 @@ fn collect_tags(map: &Map<String, Value>) -> Vec<String> {
         }
     }
     Vec::new()
+}
+
+/// Collect the optional `category` from a vendor entry as a non-blank trimmed
+/// string (FR-003). An absent, wrong-typed, empty, or whitespace-only value
+/// yields `None`, leaving the entry uncategorised; the entry itself is never
+/// rejected for its category (FR-026).
+fn collect_category(map: &Map<String, Value>) -> Option<String> {
+    map.get("category")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 /// Resolve a Codex marketplace `source` value.

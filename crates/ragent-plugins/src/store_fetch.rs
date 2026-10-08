@@ -350,3 +350,49 @@ pub enum StoreError {
         detail: String,
     },
 }
+
+impl StoreError {
+    /// Whether this failure means the marketplace could not be reached at all,
+    /// as opposed to being reached but returning content ragent cannot use
+    /// (FR-013).
+    ///
+    /// A transport-level failure (connection/DNS/TLS, timeout, a non-2xx status,
+    /// or a refused redirect) means the store is unavailable; a malformed or
+    /// oversized body, or a refused endpoint, means the store answered (or was
+    /// configured) with something specific that keeps its own message.
+    #[must_use]
+    pub fn is_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::Network { .. } | Self::Timeout { .. } | Self::Http { .. } | Self::Redirect { .. }
+        )
+    }
+
+    /// A clean, user-facing one-line detail for the browse panel (FR-013).
+    ///
+    /// When the marketplace could not be reached this summarises the failure as
+    /// `<Label> plugin marketplace is unavailable (<cause>)` so the panel names
+    /// the store and a plain cause rather than echoing a raw transport error. A
+    /// response that was reached but could not be used (malformed JSON or shape,
+    /// oversized body, refused endpoint) keeps its specific [`StoreError`]
+    /// message, which already names the cause. ASCII only; never panics.
+    #[must_use]
+    pub fn panel_detail(&self, kind: StoreKind) -> String {
+        if !self.is_unavailable() {
+            return self.to_string();
+        }
+        let cause = match self {
+            Self::Network { .. } => "could not connect to the store".to_string(),
+            Self::Timeout { ms } => format!("the store timed out after {ms} ms"),
+            Self::Http { status } => format!("the store returned HTTP {status}"),
+            Self::Redirect { status } => {
+                format!("the store redirected to a non-https location (HTTP {status})")
+            }
+            _ => self.to_string(),
+        };
+        format!(
+            "the {} plugin marketplace is unavailable ({cause})",
+            kind.label()
+        )
+    }
+}

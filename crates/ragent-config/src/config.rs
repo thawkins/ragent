@@ -212,9 +212,6 @@ pub struct Config {
     /// Prices are in USD per 1,000,000 tokens.
     #[serde(default)]
     pub prices: Vec<PriceEntry>,
-    /// Browser automation configuration (CDP endpoint, headless launch).
-    #[serde(default)]
-    pub browser: BrowserConfig,
     /// External messaging channel configuration (JCODEPLAN M7).
     ///
     /// Used by the `send_channel_message` tool to post notifications to
@@ -333,7 +330,6 @@ impl Default for Config {
             edit_log: false,
             activity_log: true,
             prices: Vec::new(),
-            browser: BrowserConfig::default(),
             channels: ChannelsConfig::default(),
             gmail: GmailConfig::default(),
             sdd: SddConfig::default(),
@@ -414,8 +410,6 @@ pub struct ToolVisibilitySpecified {
     pub codeindex: bool,
     /// `true` when `masterfetch` was explicitly set in the source JSON or via a setter.
     pub masterfetch: bool,
-    /// `true` when `browser` was explicitly set in the source JSON or via a setter.
-    pub browser: bool,
 }
 
 /// Tool-family visibility configuration.
@@ -452,11 +446,6 @@ pub struct ToolVisibilityConfig {
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::masterfetch`]).
     pub masterfetch: bool,
-    /// Browser automation tool (`browser`).
-    /// Default `true` - the browser tool is visible by default.
-    /// When serialised, this field is only written if the user explicitly set it
-    /// (tracked by [`ToolVisibilitySpecified::browser`]).
-    pub browser: bool,
     /// Tracks which switches were explicitly set, so merge/serialise can
     /// distinguish "user set this" from "this is just the default".
     pub specified: ToolVisibilitySpecified,
@@ -473,7 +462,6 @@ impl ToolVisibilityConfig {
             ("plan", self.plan),
             ("codeindex", self.codeindex),
             ("masterfetch", self.masterfetch),
-            ("browser", self.browser),
         ]
         .into_iter()
     }
@@ -510,7 +498,6 @@ impl ToolVisibilityConfig {
         merge_field!(plan);
         merge_field!(codeindex);
         merge_field!(masterfetch);
-        merge_field!(browser);
     }
 }
 
@@ -529,9 +516,6 @@ impl Serialize for ToolVisibilityConfig {
         if self.specified.masterfetch {
             count += 1;
         }
-        if self.specified.browser {
-            count += 1;
-        }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
         s.serialize_field("github", &self.github)?;
         s.serialize_field("gitlab", &self.gitlab)?;
@@ -543,9 +527,6 @@ impl Serialize for ToolVisibilityConfig {
         }
         if self.specified.masterfetch {
             s.serialize_field("masterfetch", &self.masterfetch)?;
-        }
-        if self.specified.browser {
-            s.serialize_field("browser", &self.browser)?;
         }
         s.end()
     }
@@ -785,7 +766,6 @@ impl Default for ToolVisibilityConfig {
             plan: false,
             codeindex: true,
             masterfetch: true,
-            browser: true,
             specified: ToolVisibilitySpecified::default(),
         }
     }
@@ -805,7 +785,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             plan: Option<bool>,
             codeindex: Option<bool>,
             masterfetch: Option<bool>,
-            browser: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
@@ -817,7 +796,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             plan: raw.plan.unwrap_or_else(default_false),
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             masterfetch: raw.masterfetch.unwrap_or_else(default_true),
-            browser: raw.browser.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 github: raw.github.is_some(),
                 gitlab: raw.gitlab.is_some(),
@@ -826,7 +804,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 plan: raw.plan.is_some(),
                 codeindex: raw.codeindex.is_some(),
                 masterfetch: raw.masterfetch.is_some(),
-                browser: raw.browser.is_some(),
             },
         })
     }
@@ -918,7 +895,6 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "mf_cache_clear",
             "mf_version",
         ]),
-        "browser" => Some(&["browser"]),
         _ => None,
     }
 }
@@ -3221,42 +3197,6 @@ pub struct GitLabIntegrationConfig {
     pub token: Option<String>,
     /// GitLab username / identity.
     pub username: Option<String>,
-}
-
-/// Browser automation configuration (JCODEPLAN M4).
-///
-/// Controls the CDP (Chrome DevTools Protocol) endpoint used by the `browser`
-/// tool. When `cdp_endpoint` is `None` or empty, the tool defaults to
-/// `http://127.0.0.1:9222`.
-///
-/// ```json
-/// {
-///   "browser": {
-///     "cdp_endpoint": "http://127.0.0.1:9222",
-///     "default_headless": true
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BrowserConfig {
-    /// CDP HTTP endpoint URL (e.g. `"http://127.0.0.1:9222"`).
-    ///
-    /// When `None` or empty, the `browser` tool defaults to
-    /// `http://127.0.0.1:9222`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cdp_endpoint: Option<String>,
-    /// Default headless mode for the `setup` action (default: `true`).
-    #[serde(default = "default_true", skip_serializing_if = "std::ops::Not::not")]
-    pub default_headless: bool,
-}
-
-impl Default for BrowserConfig {
-    fn default() -> Self {
-        Self {
-            cdp_endpoint: None,
-            default_headless: true,
-        }
-    }
 }
 
 /// External messaging channel configuration for the `send_channel_message` tool

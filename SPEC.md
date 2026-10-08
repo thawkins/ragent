@@ -98,15 +98,32 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.126). The core architecture, tool system,
+Ragent is in **beta** (v1.0.129). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.124 → v1.0.126):**
+**Current Release Highlights (v1.0.127 → v1.0.129):**
 
+- **Plugin-store category navigator (spec `catnav`) and `browser` removal
+  (v1.0.129 working tree)** — the `/plugins codex` and `/plugins claude` browse
+  panels gain a left-hand category navigator (§6.5): `ALL` plus the distinct
+  categories and tags the fetched index declares, driven by keyboard (`Tab`
+  focus, `Up`/`Down` move-and-apply, `Enter` apply, `c` clear) and mouse
+  (click/scroll); a `--category <name>` launch argument pre-selects a row; the
+  `StoreEntry` model gains an optional `category` field. The `browser` tool and
+  the whole `ragent-tools-extended::browser` CDP module are removed, along with
+  `BrowserConfig` and the `tool_visibility.browser` switch (the remaining `/tools`
+  switches are `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`,
+  `masterfetch`), so the registered tool count falls 152 -> 151 across 22
+  categories. `/mcp discover` scans the new ragent-native
+  `~/.config/ragent/servers/` directory first, and a startup failure is echoed to
+  stdout when the TUI stderr spool is active so it is never silent. Store
+  marketplace failures render as clean
+  `<Store> plugin marketplace is unavailable (<plain cause>)` rows
+  (spec `pluginstores` FR-013).
 - **Office / LibreOffice document tools removed (v1.0.126)** — the six
   `office_*` / `libre_*` document tools and their whole module set
   (`office_common`, `office_write`, `office_info`, `libreoffice_common`,
@@ -508,7 +525,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 152 registered tools across 23 categories |
+| **Tool-rich** | 151 registered tools across 22 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -896,7 +913,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | File operations | `read`, `write`/`create`/`update_file`, `edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 18 |
 | Shell / execution | `bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
 | Search | `grep`, `codeindex_*` | 6 |
-| Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `browser`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` | 10 |
+| Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` | 9 |
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
 | Code graph | `codeindex_explain`, `codeindex_path`, `codeindex_communities`, `codeindex_godnodes` | 4 |
@@ -960,12 +977,6 @@ has a JSON schema, a permission category, and an async `execute` method.
 |------|---------|
 | `initiative` | Create, checkpoint, list, and close durable project-scoped goals with milestones. |
 | `skill_manage` | List, read, load, and reload skill packs at runtime. |
-
-#### Browser Automation Tool (1)
-
-| Tool | Purpose |
-|------|---------|
-| `browser` | Browser automation via Chrome DevTools Protocol (CDP). Actions: `open`, `snapshot`, `click`, `type`, `fill_form`, `select`, `wait`, `eval`, `scroll`, `upload`, `press`, `screenshot`, `status`, `setup`. Requires a running Chrome/Chromium with `--remote-debugging-port=9222` (use `action=setup` to launch one). Configurable via the `browser` config block in `ragent.json`. |
 
 ### 3.3 Agent System
 
@@ -1622,8 +1633,7 @@ The format is compatible with OpenCode's `opencode.json`.
     "agents": true,
     "plan": true,
     "codeindex": true,
-    "masterfetch": true,
-    "browser": true
+    "masterfetch": true
   },
   "yolo": false,
   "stream": {
@@ -1817,7 +1827,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spawn <agent> <prompt...>` | Launch a detached fire-and-forget background sub-agent from the input line (spec `spawnagent`); not listed by `list_agents`, not awaitable via `wait_agents`, its result never injected back into the chat |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories and tags the fetched index declares) operated by keyboard and mouse, its own document shape normalised by that store's `StoreProvider`; `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
 | `/connectors list\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude [query] [--category <name>] [--refresh]` opens the interactive catalogue browser (the single catalogue surface); `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/toolchain list [lang] [--json]` | Language toolchain report |
@@ -1852,6 +1862,42 @@ graph LR
 ```
 
 **Figure 7:** TUI Component Architecture — UI layout and event wiring
+
+### 6.5 Plugin-Store Category Navigator
+
+The plugin-store browse panel opened by `/plugins codex` and `/plugins claude`
+(spec `catnav`) splits its inner area into a left-hand **category navigator** and
+the existing result column. The navigator lists the `ALL` sentinel first, then the
+distinct non-empty categories the fetched store index declares (sorted
+case-insensitively, folding case-only duplicates), followed by each distinct
+non-empty `tag` of an entry that also declares a category (FR-021); an index that
+declares no category renders `ALL` only and still browses normally (FR-018). The
+active category is shown in the panel title (`-- category <name>`) and painted in a
+distinct colour; the row under the category cursor carries a block cursor
+independent of the result-list cursor.
+
+The navigator is fully operable by keyboard: `Tab` transfers focus between the
+navigator and the result list, `Up`/`Down` move the focused pane's cursor (moving
+the category cursor applies the highlighted category on the same keypress and
+scrolls the navigator to keep the cursor visible), `Enter` over the navigator
+applies the category and hands focus back to the result list (never installing),
+and `c` clears the category to `ALL`. Mouse input is an additive convenience: a
+left-click on a category row selects and applies it and focuses the navigator, a
+wheel over the navigator scrolls its viewport without changing the active category,
+and a left-click on a result row moves the result cursor while keeping the active
+category. Every mouse path is a convenience over the keyboard path, so a terminal
+without mouse reporting still reaches every category (FR-023), and no navigator
+path ever installs, downloads, or executes plugin JavaScript (FR-024, FR-025).
+
+Selecting a category re-derives the visible result set from the full fetched index
+in memory, resets the result cursor to the first survivor, and issues no network
+request (FR-014, FR-028); the category predicate composes with the free-text query
+(a result is visible only when it matches both). A category no fetched entry
+declares is never presented as a row and a selection that vanishes after a re-fetch
+falls back to `ALL` (FR-027). A `--category <name>` launch argument holds the
+requested filter until the index lands, then validates it against the derived rows
+exactly like an in-panel selection, reporting an unknown name in the footer while
+leaving every row visible (FR-022).
 
 ### 6.4 Permission Dialog Countdown
 
@@ -4094,8 +4140,7 @@ still override per run with the corresponding flags.
       "agents": true,
       "plan": true,
       "codeindex": true,
-      "masterfetch": true,
-      "browser": true
+      "masterfetch": true
     },
     // Plugin subsystem (spec `plugins`). `enabled: false` makes the whole
     // subsystem inert (no discovery or loading). Budgets default to 5 s per
@@ -4322,7 +4367,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spawn <agent> <prompt...>` | Launch a detached fire-and-forget background sub-agent from the input line (spec `spawnagent`); not listed by `list_agents`, not awaitable via `wait_agents`, its result never injected back into the chat |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex` and `/plugins claude` browse each store's official marketplace (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories and tags the fetched index declares) operated by keyboard and mouse (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/todo` `/task` | Open the TASKS side panel |
 | `/osinfo show [--no-probe]\|help` | Read-only host OS/hardware report; routes through the `os_info` tool's collector/renderer (spec `osinfo`) |

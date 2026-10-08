@@ -61,6 +61,7 @@ fn entry(id: &str, source: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        category: None,
     }
 }
 

@@ -44,7 +44,6 @@ const TOOLS_SUBS: &[&str] = &[
     "plan",
     "codeindex",
     "masterfetch",
-    "browser",
     "help",
 ];
 const ON_OFF_HELP: &[&str] = &["on", "off", "help"];
@@ -580,7 +579,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help",
         subcommands: TOOLS_SUBS,
         flags: EMPTY,
     },

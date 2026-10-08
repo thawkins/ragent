@@ -4,7 +4,6 @@
 //! compatibility surface for the extracted runtime crates.
 
 pub mod archdoc;
-pub mod browser;
 pub mod channels;
 pub mod codeindex_communities;
 pub mod codeindex_dependencies;
@@ -492,7 +491,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_explain::CodeIndexExplainTool));
     // graphCI T-014: codeindex_communities tool (FR-013, FR-017).
     registry.register(Arc::new(codeindex_communities::CodeIndexCommunitiesTool));
-    registry.register(Arc::new(browser::BrowserTool));
     // JCODEPLAN M7 - external integrations.
     registry.register(Arc::new(gmail::GmailTool::new()));
     registry.register(Arc::new(channels::SendChannelMessageTool));

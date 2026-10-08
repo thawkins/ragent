@@ -181,7 +181,12 @@ queue unchanged.
 
 **FR-013** - When the store-index fetch fails (network error, non-2xx status, malformed
 JSON, or timeout), the system shall render an inline error row naming the cause in the
-panel body and shall leave the panel open and dismissible with `ESC`.
+panel body and shall leave the panel open and dismissible with `ESC`. When the store
+marketplace could not be reached at all (a connection/DNS/TLS failure, a timeout, a
+non-2xx status, or a refused redirect), the row shall read as a clean
+`<Store> plugin marketplace is unavailable (<plain cause>)` message instead of echoing
+the raw transport error; a response that was reached but could not be used (malformed
+JSON or shape, oversized body, refused endpoint) shall keep its specific cause.
 
 **FR-014** - When the user presses `ENTER` on a result already in the installed set, the
 system shall not re-run the install and shall report that the plugin is already
@@ -288,8 +293,9 @@ The existing `plugins` block gains a `stores` object:
 
 | Condition | Behaviour |
 | --------- | --------- |
-| Endpoint unreachable / DNS failure | Inline error row naming the cause; panel stays open (FR-013). |
-| Non-2xx HTTP status | Inline error row carrying the status code (FR-013). |
+| Endpoint unreachable / DNS failure | Inline error row reading `<Store> plugin marketplace is unavailable (could not connect to the store)`; panel stays open (FR-013). |
+| Non-2xx HTTP status | Inline error row reading `<Store> plugin marketplace is unavailable (the store returned HTTP <status>)` (FR-013). |
+| Store fetch timeout | Inline error row reading `<Store> plugin marketplace is unavailable (the store timed out after <ms> ms)` (FR-013). |
 | Index larger than `max_index_bytes` | Fetch aborted; inline error row (FR-025). |
 | Malformed JSON | Inline error row with the parse position (FR-013). |
 | Entry missing a required field | Entry skipped and counted; the remainder still renders. |

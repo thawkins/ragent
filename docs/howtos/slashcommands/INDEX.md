@@ -40,7 +40,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/template` | [template](template.md) | List and apply reusable prompt templates: /template [name] [args] |
 | `/goal` | [goal](goal.md) | Goal-based autonomous stop: /goal set\|clear\|show\|test |
 | `/gcf` | [gcf](gcf.md) | Toggle GCF encoding of tool results: /gcf on\|off\|show\|help |
-| `/tools` | [tools](tools.md) | Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools show|help |
+| `/tools` | [tools](tools.md) | Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools show|help |
 | `/skills` | [skills](skills.md) | List all registered skills and their descriptions (/skills help) |
 | `/mcp` | [mcp](mcp.md) | MCP servers: /mcp [status] \| /mcp discover \| /mcp connect <id> \| /mcp disconnect <id> \| /mcp help |
 | `/task` | [task](task.md) | Toggle the TASKS side panel, or list/help tasks: /task [list\|help] |
@@ -51,7 +51,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/dirs` | [dirs](dirs.md) | Manage directory/file permission lists: /dirs add\|remove allow\|deny <pattern> [--global] \| show \| help |
 | `/yolo` | [yolo](yolo.md) | Toggle YOLO mode  -  bypass all command validation and tool restrictions (/yolo help) |
 | `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|govcreate\|help |
-| `/plugins` | [plugins](plugins.md) | Plugin management: /plugins list [--verbose] \| add <source> [--force] \| remove <pluginid> \| enable <pluginid> \| disable <pluginid> \| test <pluginid> \| help |
+| `/plugins` | [plugins](plugins.md) | Plugin management: /plugins list [--verbose] \| add <source> [--force] \| remove <pluginid> \| enable <pluginid> \| disable <pluginid> \| test <pluginid> \| codex [query] [--category <name>] [--refresh] \| claude [query] [--category <name>] [--refresh] \| stores [--check] \| help |
 | `/connectors` | [connectors](connectors.md) | Connector management: /connectors list [--verbose] [--category <name>] \| claude [query] [--category <name>] [--refresh] \| add <id\|source> [--force] \| remove <id> \| enable <id> \| disable <id> \| connect <id> \| disconnect <id> \| auth <id> \| test <id> \| stores [--check] \| help |
 | `/research` | [research](research.md) | Research system: /research create [--mode tiered\|supervisor\|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> \| list \| open \| search \| show \| delete \| archive \| cluster |
 | `/spec reverse` | [reverse](specreverse.md) | Reverse-engineer a GitHub repo: /spec reverse <owner/repo \| URL> [--language <lang> --type <type> [--stack <name>]] [--create <name>] [--depth <N>] [--folder <path>] [--github \| --gitlab] |

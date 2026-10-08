@@ -48,8 +48,8 @@ Both are implemented in `crates/ragent-tools-extended/src/` (modules
 ## 2. Enabling the tools
 
 The PDF family is **registered and visible by default** -- there is no
-`office` visibility switch. The eight `/tools` switches (`github`, `gitlab`,
-`teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`) are unrelated
+`office` visibility switch. The seven `/tools` switches (`github`, `gitlab`,
+`teams`, `agents`, `plan`, `codeindex`, `masterfetch`) are unrelated
 to this family.
 
 Two consequences of the visibility model remain relevant if a caller hides the
@@ -71,7 +71,6 @@ For reference, the default visibility switches are:
 | `plan` | `false` (hidden) |
 | `codeindex` | `true` |
 | `masterfetch` | `true` |
-| `browser` | `true` |
 
 ---
 

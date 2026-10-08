@@ -304,7 +304,8 @@ fn store_entry_parses_required_and_optional_fields() {
         "description": "Weather lookups",
         "dialect": "codex",
         "tags": ["weather", "http"],
-        "homepage": "https://example.org/codex-weather"
+        "homepage": "https://example.org/codex-weather",
+        "category": "Productivity"
     });
     let entry = StoreEntry::from_value(&value).expect("valid entry");
     assert_eq!(entry.id, "codex-weather");
@@ -318,6 +319,7 @@ fn store_entry_parses_required_and_optional_fields() {
         entry.homepage.as_deref(),
         Some("https://example.org/codex-weather")
     );
+    assert_eq!(entry.category.as_deref(), Some("Productivity"));
 }
 
 #[test]
@@ -333,6 +335,7 @@ fn store_entry_tolerates_absent_optional_fields() {
     assert!(entry.dialect.is_none());
     assert!(entry.tags.is_empty());
     assert!(entry.homepage.is_none());
+    assert!(entry.category.is_none());
 }
 
 #[test]
@@ -346,6 +349,7 @@ fn store_entry_round_trips_through_serde() {
         dialect: Some("codex".to_string()),
         tags: vec!["t".to_string()],
         homepage: None,
+        category: Some("Productivity".to_string()),
     };
     let text = serde_json::to_string(&entry).expect("serialises");
     let back: StoreEntry = serde_json::from_str(&text).expect("deserialises");
@@ -396,6 +400,85 @@ fn store_entry_rejects_non_object_values() {
         assert_eq!(
             StoreEntry::from_value(&value),
             Err(StoreEntryError::NotAnObject)
+        );
+    }
+}
+
+// -- StoreEntry category parsing (FR-003, FR-026) -----------------------------
+
+#[test]
+fn store_entry_treats_absent_empty_and_blank_categories_as_uncategorised() {
+    // Absent field: the entry stays valid and uncategorised (FR-003).
+    let absent = json!({
+        "id": "a", "name": "b", "version": "1", "source": "https://x/a.zip",
+    });
+    assert!(
+        StoreEntry::from_value(&absent)
+            .expect("valid")
+            .category
+            .is_none()
+    );
+
+    // Empty and whitespace-only strings also collapse to uncategorised (FR-003).
+    for raw in ["", "   ", "\t\n "] {
+        let value = json!({
+            "id": "a", "name": "b", "version": "1", "source": "https://x/a.zip",
+            "category": raw,
+        });
+        let entry = StoreEntry::from_value(&value).expect("valid entry");
+        assert!(
+            entry.category.is_none(),
+            "expected uncategorised for {raw:?}"
+        );
+    }
+}
+
+#[test]
+fn store_entry_trims_surrounding_whitespace_from_a_category() {
+    let value = json!({
+        "id": "a", "name": "b", "version": "1", "source": "https://x/a.zip",
+        "category": "  Productivity  ",
+    });
+    let entry = StoreEntry::from_value(&value).expect("valid entry");
+    assert_eq!(entry.category.as_deref(), Some("Productivity"));
+}
+
+#[test]
+fn store_entry_accepts_oversized_and_odd_categories_without_panicking() {
+    // FR-026: an oversized or unusual category is carried verbatim (its interior
+    // bytes are never trimmed away), the entry itself stays intact, and nothing
+    // panics.
+    let oversized = "x".repeat(100_000);
+    for raw in [
+        oversized,
+        "\0ctrl-bytes".to_string(),
+        "line\nbreak".to_string(),
+    ] {
+        let value = json!({
+            "id": "a", "name": "b", "version": "1", "source": "https://x/a.zip",
+            "category": raw,
+        });
+        let entry = StoreEntry::from_value(&value).expect("odd category still parses");
+        assert_eq!(entry.category.as_deref(), Some(raw.as_str()));
+        assert_eq!(entry.id, "a", "the entry itself is intact");
+    }
+}
+
+#[test]
+fn store_entry_rejects_a_wrong_typed_category_through_the_skip_path() {
+    // FR-026: a non-string category is refused by the ordinary skip-and-count
+    // path (Invalid -> counted malformed) rather than panicking.
+    for raw in [json!(42), json!(["a"]), json!({"k": 1}), json!(true)] {
+        let value = json!({
+            "id": "a", "name": "b", "version": "1", "source": "https://x/a.zip",
+            "category": raw,
+        });
+        assert!(
+            matches!(
+                StoreEntry::from_value(&value),
+                Err(StoreEntryError::Invalid(_))
+            ),
+            "expected Invalid for {raw:?}"
         );
     }
 }

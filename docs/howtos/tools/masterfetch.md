@@ -130,8 +130,7 @@ Clear the masterfetch content cache.
 
 Capture a page as a screenshot image. The integrated Rust runtime has no
 headless browser engine, so this currently returns an error recommending
-`mf_fetch` for text-based extraction (or use the `browser` tool for CDP
-screenshots).
+`mf_fetch` for text-based extraction.
 
 **Arguments**
 

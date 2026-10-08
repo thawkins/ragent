@@ -119,7 +119,7 @@ catalogue fetch, or connection occurs. Connectors are discovered under
 `.ragent/connectors/` (project), falling back to `~/.config/ragent/connectors/`
 (user-global).
 
-See [`docs/howtos/config.md`](../config.md) §7.39 and
+See [`docs/howtos/config.md`](../config.md) §7.37 and
 [`specs/connectors/SPEC.md`](../../../specs/connectors/SPEC.md).
 
 ## Related

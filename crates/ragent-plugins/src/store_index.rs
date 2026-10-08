@@ -334,8 +334,8 @@ impl StoreCatalog {
 /// One plugin record from a store index (FR-003).
 ///
 /// `id`, `name`, `version`, and `source` are required; `description`,
-/// `dialect`, `tags`, and `homepage` are optional and default when absent, so an
-/// index may omit them (FR-003).
+/// `dialect`, `tags`, `homepage`, and `category` are optional and default when
+/// absent, so an index may omit them (FR-003).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoreEntry {
     /// Stable plugin identifier (used for the installed-set check).
@@ -359,6 +359,11 @@ pub struct StoreEntry {
     /// Store homepage URL, when the index supplies one.
     #[serde(default)]
     pub homepage: Option<String>,
+    /// Store taxonomy category, when the index supplies a non-blank one
+    /// (FR-003). An absent, empty, or whitespace-only value is normalised to
+    /// `None`, leaving the entry uncategorised.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 impl StoreEntry {
@@ -367,12 +372,13 @@ impl StoreEntry {
     /// Optional fields may be absent. A non-object value, a missing required
     /// field, a wrong-typed value, or an empty required string returns a
     /// [`StoreEntryError`]; the caller skips and counts the entry rather than
-    /// panicking.
+    /// panicking. A `category` that is absent, empty, or whitespace-only is
+    /// normalised to `None`, so the entry is uncategorised (FR-003, FR-026).
     pub fn from_value(value: &serde_json::Value) -> Result<Self, StoreEntryError> {
         if !value.is_object() {
             return Err(StoreEntryError::NotAnObject);
         }
-        let entry: Self = serde::Deserialize::deserialize(value)
+        let mut entry: Self = serde::Deserialize::deserialize(value)
             .map_err(|e| StoreEntryError::Invalid(e.to_string()))?;
         for (field, text) in [
             ("id", entry.id.as_str()),
@@ -384,8 +390,18 @@ impl StoreEntry {
                 return Err(StoreEntryError::EmptyField(field));
             }
         }
+        entry.category = normalise_category(entry.category);
         Ok(entry)
     }
+}
+
+/// Normalise a raw category into `Some(trimmed)` only when it carries non-blank
+/// text; absent, empty, and whitespace-only values collapse to `None`
+/// (FR-003, FR-026).
+fn normalise_category(category: Option<String>) -> Option<String> {
+    category
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
 }
 
 /// A store-index entry that could not be accepted (FR-025).

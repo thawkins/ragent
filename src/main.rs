@@ -1551,5 +1551,18 @@ fn main() -> Result<()> {
     {
         std::process::exit(exit.code);
     }
+    // In TUI mode stderr is redirected into the log spool, so an error that
+    // aborts startup (a config parse failure, a storage open failure) would
+    // otherwise vanish: Rust prints the `Error:` line from `main` returning
+    // `Err` to real stderr, which the spool swallows, and the process exits
+    // with no visible diagnostic. Echo it to stdout - the terminal the user is
+    // looking at - so the failure is never silent. The tracing fmt subscriber
+    // is the writer of stdout in non-TUI runs, but this is the documented
+    // CLI-presentation surface and no tracing writer is live on an error path.
+    if let Err(e) = &result
+        && stderr_spool::is_active()
+    {
+        println!("Error: {e}");
+    }
     result
 }

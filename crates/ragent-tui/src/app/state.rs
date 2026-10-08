@@ -22,7 +22,7 @@ use ragent_agent::storage::Storage;
 use ragent_agent::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
-use ragent_connectors::CatalogueBrowser;
+use ragent_connectors::{ALL_CATEGORY, CatalogueBrowser, CategoryFilter, CategoryFilterState};
 
 pub use ragent_connectors::CatalogueBrowseStatus as ConnectorBrowseStatus;
 use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
@@ -1001,7 +1001,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help",
+        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help",
     },
     SlashCommandDef {
         trigger: "router",
@@ -1540,7 +1540,11 @@ pub struct PluginStoreBrowser {
     pub installed: BTreeSet<String>,
     /// The current search query (FR-008, FR-009).
     pub query: String,
-    /// Every entry fetched from the store index, in document order (FR-003).
+    /// Every entry fetched from the store index, ordered by plugin name (FR-003).
+    ///
+    /// The list is sorted case-insensitively by `name` with the id as a stable
+    /// tie-break, so the result pane reads alphabetically regardless of the
+    /// document order the index arrives in.
     pub all: Vec<StoreEntry>,
     /// Indices into [`Self::all`] that match [`Self::query`], in order (FR-008).
     pub filtered: Vec<usize>,
@@ -1561,6 +1565,50 @@ pub struct PluginStoreBrowser {
     pub refresh: bool,
     /// The most recent install result shown in the panel footer (FR-006, FR-014).
     pub last_install: Option<String>,
+    /// The category filter and its derived distinct-category set (spec `catnav`
+    /// FR-001, FR-003, FR-018). Shared with the connector browser's
+    /// [`CategoryFilterState`] - the `ALL` sentinel, a sorted case-insensitive
+    /// distinct set, and an exact case-insensitive predicate - so the two
+    /// panels agree on what a category is (A2, A6).
+    pub categories: CategoryFilterState,
+    /// Block-cursor position within the navigator's rows (spec `catnav` FR-002).
+    /// Row `0` is the `ALL` sentinel; rows `1..=categories().len()` are the
+    /// derived categories in sorted order. Kept in sync with the active category
+    /// by [`Self::category_select_row`] and friends.
+    pub category_cursor: usize,
+    /// Index of the first navigator row shown in the navigator viewport, kept in
+    /// sync with [`Self::category_cursor`] by [`Self::ensure_category_visible`]
+    /// (spec `catnav` FR-007, FR-008, FR-012).
+    ///
+    /// The wheel over the navigator moves this directly (FR-012), so the viewport
+    /// can scroll away from the category cursor without changing the active
+    /// category; a keyboard move pulls it back so the cursor stays visible.
+    pub category_scroll: usize,
+    /// Height in rows of the navigator viewport, recorded by the renderer on every
+    /// frame (spec `catnav` FR-007, FR-008, FR-012).
+    ///
+    /// The key and mouse handlers read it back to keep the category cursor visible
+    /// after a move and to clamp the wheel scroll; a `0` (before the first render)
+    /// parks the scroll at the top.
+    pub category_viewport: usize,
+    /// Whether the category navigator holds keyboard focus (spec `catnav` FR-009).
+    ///
+    /// `false` - the result list focused - is the initial state; the focus key
+    /// (`Tab`) toggles it (FR-009). `Up`/`Down` route to whichever pane holds
+    /// focus and the focused pane's cursor is rendered distinctly (FR-009,
+    /// FR-017); the search query is edited by printable characters in either
+    /// state (FR-017).
+    pub nav_focused: bool,
+    /// A category filter requested by a `--category <name>` launch, held until
+    /// the fetched index (and therefore the real category set) is known (spec
+    /// `catnav` FR-022).
+    ///
+    /// A launch fixes the filter before any entry has been fetched, so the name
+    /// cannot be validated yet. Holding it here lets
+    /// [`Self::apply_pending_category`] validate it against the derived rows once,
+    /// exactly as an in-panel selection is validated, and report an unknown name in
+    /// the footer instead of leaving the panel silently empty.
+    pub pending_category: Option<CategoryFilter>,
 }
 
 impl PluginStoreBrowser {
@@ -1584,6 +1632,12 @@ impl PluginStoreBrowser {
             status: PluginStoreStatus::Loading,
             refresh,
             last_install: None,
+            categories: CategoryFilterState::new(),
+            category_cursor: 0,
+            category_scroll: 0,
+            category_viewport: 0,
+            nav_focused: false,
+            pending_category: None,
         };
         if !prefill.is_empty() {
             browser.set_query(prefill.to_string());
@@ -1620,14 +1674,25 @@ impl PluginStoreBrowser {
     /// the first survivor (FR-008).
     ///
     /// The match is a case-insensitive substring over the entry id, name,
-    /// description, and tags; an empty query matches every entry.
+    /// description, and tags; an empty query matches every entry. The category
+    /// predicate keeps an entry under the active category when its declared
+    /// `category` matches, or - for a tag-derived row (spec `catnav` FR-021) - when
+    /// any of its `tags` matches; `ALL` keeps every entry.
     fn apply_filter(&mut self) {
         let needle = self.query.to_lowercase();
+        let category = self.categories.filter().clone();
         self.filtered = self
             .all
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry_matches(entry, &needle))
+            .filter(|(_, entry)| {
+                category.matches_category(entry.category.as_deref())
+                    || entry
+                        .tags
+                        .iter()
+                        .any(|tag| category.matches_category(Some(tag)))
+            })
             .map(|(index, _)| index)
             .collect();
         self.cursor = 0;
@@ -1703,15 +1768,284 @@ impl PluginStoreBrowser {
     /// The status becomes [`PluginStoreStatus::Ready`] when at least one entry
     /// loaded and [`PluginStoreStatus::Empty`] otherwise (FR-017); the filter is
     /// re-applied so any prefilled query still constrains the result set.
+    ///
+    /// The entries are ordered by plugin id (case-insensitively, name as a stable
+    /// tie-break) so the result pane reads alphabetically whichever order the
+    /// index arrived in.
     pub fn set_index(&mut self, index: StoreIndex) {
         self.all = index.entries;
+        self.all
+            .sort_by_cached_key(|entry| (entry.id.to_lowercase(), entry.name.to_lowercase()));
         self.skipped = index.skipped;
         self.status = if self.all.is_empty() {
             PluginStoreStatus::Empty
         } else {
             PluginStoreStatus::Ready
         };
+        self.rebuild_categories();
         self.apply_filter();
+    }
+
+    /// Re-derive the distinct category set from [`Self::all`], keeping the active
+    /// category only while the new index still declares it (spec `catnav` FR-001,
+    /// FR-018, FR-021, FR-027).
+    ///
+    /// The set is the sorted, case-insensitive distinct non-blank categories
+    /// present in the loaded entries ([`CategoryFilterState::from_categories`]),
+    /// followed by each distinct non-empty `tag` of an entry that also declares a
+    /// category (FR-021, A7), with `ALL` implicit and always first. An index that
+    /// declares no category therefore still renders `ALL` only (FR-018). A category
+    /// no entry declares is dropped and the selection falls back to `ALL`, so the
+    /// navigator never shows a row that selects nothing, and the cursor is placed on
+    /// the surviving selection's row.
+    fn rebuild_categories(&mut self) {
+        let previous = self.categories.filter().label().to_string();
+        let mut categories = CategoryFilterState::from_categories(
+            self.all.iter().filter_map(|e| e.category.as_deref()),
+        );
+        // Tag-derived rows follow the declared categories (FR-021): only an entry
+        // that also declares a category contributes its tags, so an uncategorised
+        // index stays `ALL`-only (FR-018). `add_category` dedups case-insensitively
+        // against the declared set.
+        for tag in self
+            .all
+            .iter()
+            .filter(|e| e.category.is_some())
+            .flat_map(|e| e.tags.iter())
+        {
+            categories.add_category(tag);
+        }
+        self.categories = categories;
+        // The boolean is informational; the side effect (falling back to `ALL`
+        // when the category is no longer declared) is what matters here, and the
+        // cursor is re-derived from the resulting filter below (spec `catnav`
+        // FR-027).
+        // INTENTIONAL: the boolean is informational; the drop is deliberate.
+        let _ = self.categories.select_when_known(&previous);
+        self.category_cursor = self.category_row_of(self.categories.filter().label());
+        self.category_scroll = 0;
+    }
+
+    /// Record a category filter requested by a `--category <name>` launch, held
+    /// until the fetched index is known (spec `catnav` FR-022).
+    ///
+    /// The filter is *held*, not applied: applying an unvalidated name before the
+    /// fetch lands would hide every entry and could not distinguish an unknown
+    /// category from an empty one. [`CategoryFilter::All`] clears nothing and drops
+    /// any filter already held.
+    pub fn set_pending_category(&mut self, category: CategoryFilter) {
+        self.pending_category = match category {
+            CategoryFilter::All => None,
+            named => Some(named),
+        };
+    }
+
+    /// Apply a category filter recorded by [`Self::set_pending_category`] against
+    /// the categories now known, reporting an unknown name (spec `catnav` FR-022).
+    ///
+    /// Called once the fetched entries have landed ([`Self::set_index`]), so the
+    /// name is validated against the derived rows exactly like an in-panel
+    /// selection; an unknown name is reported in the footer (through
+    /// [`Self::last_install`]) instead of rendering an indistinguishable empty
+    /// list. A no-op when no launch filter is held.
+    pub fn apply_pending_category(&mut self) {
+        let Some(category) = self.pending_category.take() else {
+            return;
+        };
+        let row = self.category_row_of(category.label());
+        let known = row > 0 || category.is_all();
+        if known && self.category_select_row(row) {
+            return;
+        }
+        self.last_install = Some(format!("unknown category `{}`", category.label()));
+    }
+
+    /// The active category label (`ALL` when unfiltered) (spec `catnav` FR-002,
+    /// FR-005).
+    #[must_use]
+    pub fn active_category(&self) -> &str {
+        self.categories.filter().label()
+    }
+
+    /// The number of navigator rows: the `ALL` sentinel plus each derived category
+    /// (spec `catnav` FR-001).
+    #[must_use]
+    pub fn category_row_count(&self) -> usize {
+        1 + self.categories.categories().len()
+    }
+
+    /// The label of navigator row `row`: `ALL` for row `0`, else the sorted
+    /// category at that row; an out-of-range row reads as `ALL` so a renderer or a
+    /// mouse hit test can never index past the set (spec `catnav` FR-001, FR-027).
+    #[must_use]
+    pub fn category_row_label(&self, row: usize) -> &str {
+        match row
+            .checked_sub(1)
+            .and_then(|index| self.categories.categories().get(index))
+        {
+            Some(label) => label.as_str(),
+            None => ALL_CATEGORY,
+        }
+    }
+
+    /// The navigator row currently under the category cursor, clamped to the row
+    /// count (spec `catnav` FR-002).
+    #[must_use]
+    pub fn category_cursor_row(&self) -> usize {
+        self.category_cursor
+            .min(self.category_row_count().saturating_sub(1))
+    }
+
+    /// Move the category cursor up one row and apply the newly highlighted
+    /// category on the same keypress (spec `catnav` FR-008, A4). Returns whether the
+    /// cursor moved.
+    pub fn category_move_up(&mut self) -> bool {
+        if self.category_cursor == 0 {
+            return false;
+        }
+        self.category_cursor -= 1;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Move the category cursor down one row and apply the newly highlighted
+    /// category on the same keypress (spec `catnav` FR-007, A4). Returns whether the
+    /// cursor moved.
+    pub fn category_move_down(&mut self) -> bool {
+        if self.category_cursor + 1 >= self.category_row_count() {
+            return false;
+        }
+        self.category_cursor += 1;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Select navigator row `row` and apply it (spec `catnav` FR-007, FR-010,
+    /// FR-011). Returns `false` when `row` is out of range, leaving the selection
+    /// unchanged, so a stale mouse hit test cannot select a row that does not
+    /// exist (FR-027).
+    pub fn category_select_row(&mut self, row: usize) -> bool {
+        if row >= self.category_row_count() {
+            return false;
+        }
+        self.category_cursor = row;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Move the navigator viewport by `delta` rows without touching the category
+    /// cursor or the active category (spec `catnav` FR-012).
+    ///
+    /// The wheel over the navigator calls this. `delta` is positive to reveal
+    /// rows further down and negative to scroll back up. It is deliberately
+    /// independent of [`Self::category_cursor`], so the active category (and the
+    /// result list) stays exactly as it was; the scroll is clamped to
+    /// `0..=rows - 1`, so it never points past the last row.
+    pub fn category_scroll_by(&mut self, delta: i16) {
+        let rows = self.category_row_count();
+        if rows == 0 {
+            self.category_scroll = 0;
+            return;
+        }
+        let max = rows - 1;
+        let next = if delta.is_negative() {
+            self.category_scroll
+                .saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.category_scroll.saturating_add(delta as usize)
+        };
+        self.category_scroll = next.min(max);
+    }
+
+    /// Scroll the result viewport by moving the result cursor `delta` rows (spec
+    /// `catnav` FR-013, mirroring the result list's wheel behaviour).
+    ///
+    /// The result list is cursor-driven: the renderer draws the block cursor and
+    /// lets the list keep that row visible, so moving the cursor by a small step is
+    /// exactly how the wheel scrolls the result column. The cursor is clamped to the
+    /// filtered set, and the active category is left untouched.
+    pub fn scroll_results_by(&mut self, delta: i16) {
+        let rows = self.filtered.len();
+        if rows == 0 {
+            return;
+        }
+        self.cursor = if delta.is_negative() {
+            self.cursor.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.cursor.saturating_add(delta as usize).min(rows - 1)
+        };
+    }
+
+    /// Clear the category filter to `ALL` and re-derive the results (spec `catnav`
+    /// FR-015).
+    pub fn category_clear(&mut self) {
+        self.category_cursor = 0;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+    }
+
+    /// Apply the category under the cursor and hand focus back to the result list
+    /// (spec `catnav` FR-010).
+    ///
+    /// This is the navigator's `ENTER`: it re-applies the highlighted category
+    /// (idempotent when the cursor did not move) and clears [`Self::nav_focused`],
+    /// so the next `Up`/`Down` routes to the result list. It installs nothing, so
+    /// `ENTER` over the navigator can never write to the store (FR-024).
+    pub fn category_confirm(&mut self) {
+        self.apply_category_cursor();
+        self.nav_focused = false;
+    }
+
+    /// Apply the category at the current cursor row to the result set (spec
+    /// `catnav` FR-007, FR-008, FR-014).
+    ///
+    /// Selecting a category re-derives the visible results from [`Self::all`] in
+    /// memory and resets the result cursor; it issues no network request and
+    /// touches no store or plugin JavaScript (FR-014, FR-025, FR-028).
+    fn apply_category_cursor(&mut self) {
+        let row = self.category_cursor_row();
+        self.category_cursor = row;
+        let label = self.category_row_label(row).to_string();
+        self.categories.select_by_name(&label);
+        self.apply_filter();
+    }
+
+    /// Adjust [`Self::category_scroll`] so the category cursor stays inside a
+    /// navigator viewport of `viewport` rows (spec `catnav` FR-007, FR-008,
+    /// FR-012).
+    ///
+    /// The same pure integer bookkeeping as [`Self::ensure_visible`], over the
+    /// navigator rows rather than the result rows.
+    pub fn ensure_category_visible(&mut self, viewport: usize) {
+        let rows = self.category_row_count();
+        if viewport == 0 || rows == 0 {
+            self.category_scroll = 0;
+            return;
+        }
+        let cursor = self.category_cursor.min(rows - 1);
+        if cursor < self.category_scroll {
+            self.category_scroll = cursor;
+        } else if cursor >= self.category_scroll + viewport {
+            self.category_scroll = cursor + 1 - viewport;
+        }
+        self.category_scroll = self.category_scroll.min(rows.saturating_sub(viewport));
+    }
+
+    /// The navigator row carrying `label`: row `0` for the `ALL` sentinel, else the
+    /// sorted position plus one; an unknown label reads as `ALL` (spec `catnav`
+    /// FR-001, FR-027).
+    fn category_row_of(&self, label: &str) -> usize {
+        if label.eq_ignore_ascii_case(ALL_CATEGORY) {
+            return 0;
+        }
+        self.categories
+            .categories()
+            .iter()
+            .position(|category| category.eq_ignore_ascii_case(label))
+            .map_or(0, |index| index + 1)
     }
 
     /// Install a bare entry list with no malformed-entry count (T-008).
@@ -2041,6 +2375,19 @@ pub struct App {
     /// a centred, fully visible modal without any stored size to go stale
     /// (FR-018); tests read it back to locate the painted panel.
     pub plugin_store_area: Rect,
+    /// Cached area of the plugin-store panel's left category-navigator column
+    /// (set during render; spec `catnav` FR-001, FR-020).
+    ///
+    /// Recomputed from the panel body every frame so a terminal resize re-derives
+    /// it (FR-020); tests and mouse hit-testing read it back to locate the
+    /// navigator. [`Rect::default`] while no plugin-store panel is open.
+    pub plugin_store_nav_area: Rect,
+    /// Cached area of the plugin-store panel's result-list column (set during
+    /// render; spec `catnav` FR-020).
+    ///
+    /// Recomputed from the panel body every frame alongside the navigator;
+    /// [`Rect::default`] while no plugin-store panel is open.
+    pub plugin_store_result_area: Rect,
     /// Active connector-catalogue browser, present while the `/connectors claude`
     /// browse panel is open. `None` when no panel is showing.
     ///

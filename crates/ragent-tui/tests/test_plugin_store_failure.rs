@@ -36,6 +36,7 @@ fn entry(id: &str, description: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        category: None,
     }
 }
 
@@ -216,9 +217,12 @@ fn the_error_body_names_the_malformed_json_cause() {
 
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app);
+    // The result column shares the body with the category navigator (spec
+    // `catnav` T-004), so a long state line wraps onto the following row; the
+    // full cause is still painted and must be readable across the wrapped rows.
+    let body = rows.join("");
     assert!(
-        rows.iter()
-            .any(|r| r.contains("failed") && r.contains("line 3 column 7")),
+        body.contains("failed") && body.contains("line 3 column 7"),
         "the inline error names the parse position: {rows:?}"
     );
     assert!(app.plugin_store.is_some(), "the panel stays open (FR-013)");
@@ -244,6 +248,61 @@ fn a_malformed_index_error_polled_from_the_slot_is_contained() {
         other => panic!("expected a contained inline failure, got {other:?}"),
     }
     assert!(app.plugin_store.is_some(), "no panic closed the panel");
+}
+
+#[test]
+fn an_unreachable_marketplace_renders_a_clean_unavailable_line() {
+    let mut app = open_loading();
+    // A transport-level failure (no connection) must read as the marketplace
+    // being unavailable, naming the store, rather than echoing a raw error.
+    deliver(
+        &app,
+        StoreKind::Codex,
+        Err(StoreError::Network {
+            detail: "connection refused".to_string(),
+        }),
+    );
+
+    app.poll_plugin_store_result();
+
+    let terminal = render(&mut app, 100, 30);
+    let body = panel_rows(&terminal, &app).join("");
+    assert!(
+        body.contains("Codex plugin marketplace is unavailable"),
+        "the body names the unavailable marketplace: {body:?}"
+    );
+    assert!(
+        body.contains("could not connect"),
+        "the body carries a plain cause: {body:?}"
+    );
+    assert!(app.plugin_store.is_some(), "the panel stays open (FR-013)");
+}
+
+#[test]
+fn a_timed_out_marketplace_renders_a_clean_unavailable_line() {
+    // Open the Claude panel so the delivered Claude result is not discarded as
+    // stale (FR-007).
+    let mut app = support::make_app();
+    app.plugin_store = Some(PluginStoreBrowser::new(StoreKind::Claude, "", false));
+    deliver(
+        &app,
+        StoreKind::Claude,
+        Err(StoreError::Timeout { ms: 10_000 }),
+    );
+
+    app.poll_plugin_store_result();
+
+    let terminal = render(&mut app, 100, 30);
+    let body = panel_rows(&terminal, &app).join("");
+    assert!(
+        body.contains("Claude plugin marketplace is unavailable"),
+        "the body names the unavailable marketplace: {body:?}"
+    );
+    assert!(
+        body.contains("timed out"),
+        "the body carries a plain cause: {body:?}"
+    );
+    assert!(app.plugin_store.is_some(), "the panel stays open (FR-013)");
 }
 
 // -- No render path panics on hostile/edge store data (FR-025) ---------------
@@ -275,13 +334,15 @@ fn a_failed_state_renders_on_a_small_terminal_without_panicking() {
         .expect("panel open")
         .set_failed("network unreachable".to_string());
 
-    // A small-but-usable panel must still paint the failure line (truncated to
-    // the panel width) and keep the panel open, with no panic (FR-013, FR-018,
-    // FR-025).
+    // A small-but-usable panel must still paint the failure line (wrapped across
+    // the result column's rows, which now share the body with the category
+    // navigator, spec `catnav` T-004) and keep the panel open, with no panic
+    // (FR-013, FR-018, FR-025).
     let terminal = render(&mut app, 40, 14);
     let rows = panel_rows(&terminal, &app);
+    let body = rows.join("");
     assert!(
-        rows.iter().any(|r| r.contains("failed: network")),
+        body.contains("failed: network"),
         "the small panel still names the cause: {rows:?}"
     );
     assert!(app.plugin_store.is_some());

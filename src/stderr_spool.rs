@@ -14,8 +14,21 @@
 //! at startup, before the TUI threads are spawned.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ragent_types::stderr_spool::Spool;
+
+/// Whether [`install`] successfully redirected the process's stderr (fd 2) into
+/// a spool. Read by the binary's top-level error handler to decide whether a
+/// startup failure would otherwise be hidden behind the redirect and must be
+/// echoed to stdout instead.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Whether stderr is currently redirected into a spool (see [`install`]).
+#[must_use]
+pub fn is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
 
 /// Redirect fd 2 into a truncating spool file under `log_dir`.
 ///
@@ -95,5 +108,9 @@ pub fn install(log_dir: &Path) -> Option<Spool> {
         })
         .ok()?;
 
+    // Only now is the redirect fully in place: record it so the top-level error
+    // handler knows a startup `Error:` line would land in the spool instead of
+    // the terminal.
+    ACTIVE.store(true, Ordering::Relaxed);
     Some(spool)
 }

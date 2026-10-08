@@ -4,6 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (Unreleased)
+
+- **Plugin-store category navigator** — `/plugins codex` and `/plugins claude`
+  now open with a left-hand category navigator: `ALL` plus the distinct categories
+  and tags the fetched index declares. `Tab` moves focus between the navigator
+  and the result list, `Up`/`Down` move-and-apply, `Enter` applies and returns
+  focus to the results, `c` clears back to `ALL`, and the mouse can click a row or
+  scroll the list. `/plugins codex <query> --category <name> --refresh` pre-selects
+  a category.
+- **`browser` tool removed** — the `browser` CDP tool and its `browser` visibility
+  switch are gone. The `/tools` switches are now `github`, `gitlab`, `teams`,
+  `agents`, `plan`, `codeindex`, `masterfetch`; the registered tool count falls
+  152 -> 151 across 22 categories, and any `browser` config key is ignored.
+- **Startup diagnostics and MCP discovery** — a startup failure is echoed to
+  stdout when the TUI stderr spool is active (no more silent exit), `/mcp discover`
+  scans the ragent-native `~/.config/ragent/servers/` directory first, and a store
+  marketplace that cannot be reached reports a clean
+  `<Store> plugin marketplace is unavailable (...)` row.
+
 ## Highlights (v1.0.129)
 
 - **Code-audit remediation complete** — the `docs/plans/code-audit.md` plan is
@@ -265,7 +284,10 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   plugins contribute `plugin_<id>_<tool>` tools, slash commands (including the
   Claude `commands/*.md` prompt commands), skills, MCP servers, agents, and
   hooks. `/plugins codex` and `/plugins claude` browse each store's official
-  marketplace; `/plugins stores [--check]` reports each store's effective
+  marketplace and carry a left-hand category navigator (`ALL` plus the distinct
+  categories and tags the fetched index declares; `Tab` focus, `Up`/`Down` move,
+  `Enter` apply, `c` clear, or click/scroll with the mouse); `/plugins stores
+  [--check]` reports each store's effective
   endpoint. Reports
   render in the message window with the `From: /plugins <sub>` header; a bare
   `/plugins` or an unknown subcommand prints the usage block. The subcommands
@@ -803,13 +825,13 @@ switch persistently.
 ```text
 /tools
 /tools list
-/tools browser on
+/tools masterfetch on
 /tools teams on
 /tools github off
 ```
 
 Valid switches: `github`, `gitlab`, `teams`, `agents`, `plan`,
-`codeindex`, `masterfetch`, `browser`. Changes are saved to `ragent.json`.
+`codeindex`, `masterfetch`. Changes are saved to `ragent.json`.
 
 ---
 

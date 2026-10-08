@@ -747,7 +747,7 @@ The AI agent can use these tools during a session:
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 
-152 tools are registered in total across 23 categories — run `/tools` in the
+151 tools are registered in total across 22 categories — run `/tools` in the
 TUI to list them all.
 
 The **PDF family** (`pdf_read`, `pdf_write`) reads and writes PDF files
@@ -895,6 +895,8 @@ Manage plugins from the TUI or the CLI:
 | `/plugins disable <pluginid>` | Unload and deregister without deleting files |
 | `/plugins test <pluginid>` | Load in an isolated harness and invoke each tool once |
 | `/plugins stores [--check]` | Report each store's effective endpoint and its source; `--check` also contacts each store and reports availability and plugin count |
+| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex plugin-marketplace browser; `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses the store cache |
+| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments |
 | `/plugins help` | Show the usage block |
 
 The same operations are available from a shell as `ragent plugins <sub> …`.
@@ -1854,6 +1856,25 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Unreleased
+
+- **Plugin-store category navigator (spec `catnav`)** — `/plugins codex` and
+  `/plugins claude` gain a left-hand category navigator: `ALL` plus the distinct
+  categories and tags the fetched index declares, driven by keyboard (`Tab`
+  focus, `Up`/`Down` move-and-apply, `Enter` apply, `c` clear) and mouse
+  (click a row, wheel to scroll). A `--category <name>` launch argument
+  pre-selects a row; the `StoreEntry` model gains an optional `category` field.
+- **`browser` tool removed** — the `browser` CDP tool and the whole
+  `ragent-tools-extended::browser` module are deleted, along with `BrowserConfig`
+  and the `tool_visibility.browser` switch. The registered tool count falls
+  152 -> 151 across 22 categories, and the remaining `/tools` switches are
+  `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.
+- **MCP discovery and startup diagnostics** — `/mcp discover` now scans the
+  ragent-native `~/.config/ragent/servers/` directory first; a startup failure is
+  echoed to stdout when the TUI stderr spool is active so it is never silent; and
+  store-marketplace failures render as clean
+  `<Store> plugin marketplace is unavailable (<plain cause>)` rows.
 
 ## Version 1.0.129
 

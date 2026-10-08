@@ -29,6 +29,7 @@ fn entry(id: &str, description: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        category: None,
     }
 }
 
@@ -148,13 +149,41 @@ fn a_delivered_error_sets_the_inline_failure() {
     app.poll_plugin_store_result();
 
     match status(&app) {
-        PluginStoreStatus::Failed(detail) => assert!(
-            detail.contains("503"),
-            "the inline error names the cause: {detail}"
-        ),
+        PluginStoreStatus::Failed(detail) => {
+            assert!(
+                detail.contains("503"),
+                "the inline error names the cause: {detail}"
+            );
+            assert!(
+                detail.contains("Codex plugin marketplace is unavailable"),
+                "an unreachable store reads as a clean 'marketplace is unavailable' line: {detail}"
+            );
+        }
         other => panic!("expected a Failed status, got {other:?}"),
     }
     assert!(app.needs_redraw);
+}
+
+#[test]
+fn a_delivered_network_failure_reads_as_an_unavailable_marketplace() {
+    let mut app = open_loading();
+    deliver(
+        &app,
+        StoreKind::Codex,
+        Err(StoreError::Network {
+            detail: "dns error: failed to lookup address".to_string(),
+        }),
+    );
+
+    app.poll_plugin_store_result();
+
+    match status(&app) {
+        PluginStoreStatus::Failed(detail) => assert!(
+            detail.contains("Codex plugin marketplace is unavailable"),
+            "a connection failure is reported as an unavailable marketplace: {detail}"
+        ),
+        other => panic!("expected a Failed status, got {other:?}"),
+    }
 }
 
 // -- Stale results are discarded (FR-007) ------------------------------------

@@ -1,5 +1,5 @@
 # /tools
-> Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch|browser] [on|off] | /tools help
+> Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help
 
 ## Overview
 
@@ -9,9 +9,8 @@ switch name it reports that switch's state, and with a switch plus a state
 word it toggles the visibility of that tool family for the session and saves
 the choice to the active config source.
 
-Note the registry description lists seven switches but the implementation
-accepts eight: `github`, `gitlab`, `teams`, `agents`, `plan`,
-`codeindex`, `masterfetch`, and `browser`. Toggling a switch rewrites
+The implementation accepts seven switches: `github`, `gitlab`, `teams`,
+`agents`, `plan`, `codeindex` and `masterfetch`. Toggling a switch rewrites
 `tool_visibility` in the config source and invalidates the session
 processor's config cache so the change takes effect immediately.
 
@@ -36,8 +35,8 @@ processor's config cache so the change takes effect immediately.
 | `/tools <switch> off` | Disable the switch (`disable` also accepted) |
 | `/tools help` | Print usage help |
 
-Switches (all eight accepted): `github`, `gitlab`, `teams`,
-`agents`, `plan`, `codeindex`, `masterfetch`, `browser`.
+Switches (all seven accepted): `github`, `gitlab`, `teams`,
+`agents`, `plan`, `codeindex`, `masterfetch`.
 
 ## Examples
 
@@ -65,10 +64,10 @@ Re-enable codeindex tools:
 /tools codeindex on
 ```
 
-Disable the browser tool family:
+Disable the masterfetch tool family:
 
 ```
-/tools browser disable
+/tools masterfetch off
 ```
 
 Print the usage help:

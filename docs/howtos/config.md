@@ -44,21 +44,20 @@ the project root `README.md` and the **Tutorial** in
    - 7.21 [`yolo`](#721-yolo)
    - 7.22 [`edit_log`](#722-edit_log)
    - 7.23 [`prices`](#723-prices)
-   - 7.24 [`browser`](#724-browser)
-   - 7.25 [`channels`](#725-channels)
-   - 7.26 [`gmail`](#726-gmail)
-   - 7.27 [`telemetry`](#727-telemetry)
-   - 7.28 [`agent_perf`](#728-agent_perf)
-   - 7.29 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#729-search-api-keys)
-   - 7.30 [`sdd`](#730-sdd)
-   - 7.31 [`trigger`](#731-trigger)
-   - 7.32 [`piegap`](#732-piegap)
-   - 7.33 [`research`](#733-research)
-   - 7.34 [`loop`](#734-loop)
-   - 7.35 [`activity_log`](#735-activity_log)
-    - 7.36 [`plugins`](#736-plugins)
-    - 7.37 [`input_queue_capacity`](#737-input_queue_capacity)
-    - 7.38 [`connectors`](#738-connectors)
+   - 7.24 [`channels`](#724-channels)
+   - 7.25 [`gmail`](#725-gmail)
+   - 7.26 [`telemetry`](#726-telemetry)
+   - 7.27 [`agent_perf`](#727-agent_perf)
+   - 7.28 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#728-search-api-keys)
+   - 7.29 [`sdd`](#729-sdd)
+   - 7.30 [`trigger`](#730-trigger)
+   - 7.31 [`piegap`](#731-piegap)
+   - 7.32 [`research`](#732-research)
+   - 7.33 [`loop`](#733-loop)
+   - 7.34 [`activity_log`](#734-activity_log)
+    - 7.35 [`plugins`](#735-plugins)
+    - 7.36 [`input_queue_capacity`](#736-input_queue_capacity)
+    - 7.37 [`connectors`](#737-connectors)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -777,8 +776,7 @@ system-prompt listings. Hidden tools remain registered and executable.
     "agents": true,
     "plan": true,
     "codeindex": true,
-    "masterfetch": true,
-    "browser": true
+    "masterfetch": true
   }
 }
 ```
@@ -794,9 +792,8 @@ system-prompt listings. Hidden tools remain registered and executable.
 | `plan` | `false` | `plan_enter`, `plan_exit` |
 | `codeindex` | `true` | `codeindex_search`, `codeindex_status`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_reindex` |
 | `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` |
-| `browser` | `true` | `browser` |
 
-The `codeindex`, `masterfetch`, and `browser` switches are
+The `codeindex` and `masterfetch` switches are
 serialised **only** when explicitly set (tracked by `specified` flags). This
 lets the default config omit the key so code-level default changes propagate,
 while ensuring an explicit user toggle persists on save.
@@ -1138,29 +1135,7 @@ When merged, overlay entries replace base entries with the same model id
 
 ---
 
-### 7.24 `browser`
-
-Browser automation configuration (Chrome DevTools Protocol endpoint).
-
-```json
-{
-  "browser": {
-    "cdp_endpoint": "http://127.0.0.1:9222",
-    "default_headless": true
-  }
-}
-```
-
-#### `BrowserConfig` schema
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `cdp_endpoint` | `Option<String>` | `None` | CDP HTTP endpoint URL. When `None`/empty, defaults to `http://127.0.0.1:9222`. |
-| `default_headless` | `bool` | `true` | Default headless mode for the `setup` action. |
-
----
-
-### 7.25 `channels`
+### 7.24 `channels`
 
 External messaging channel configuration for the `send_channel_message` tool.
 
@@ -1194,7 +1169,7 @@ to live in the config file.
 
 ---
 
-### 7.26 `gmail`
+### 7.25 `gmail`
 
 Gmail tool configuration (OAuth2 client credentials).
 
@@ -1221,7 +1196,7 @@ never in this file.
 
 ---
 
-### 7.27 `telemetry`
+### 7.26 `telemetry`
 
 OpenTelemetry metrics export configuration.
 
@@ -1268,7 +1243,7 @@ via `apply_legacy_flag()`.
 
 ---
 
-### 7.28 `agent_perf`
+### 7.27 `agent_perf`
 
 Agent-loop performance configuration.
 
@@ -1301,7 +1276,7 @@ any are present.
 
 ---
 
-### 7.29 Search API keys
+### 7.28 Search API keys
 
 Several API keys for the `mf_search` / `websearch` tools can be stored in the
 config file. Environment variables always take precedence.
@@ -1320,7 +1295,7 @@ search engine alongside the keyless backends (OpenAlex, Wikipedia).
 
 ---
 
-### 7.30 `sdd`
+### 7.29 `sdd`
 
 Spec-Driven Development (SDD) capability toggles. All flags default to `false`
 (opt-in).
@@ -1366,7 +1341,7 @@ For the spec system, see [`docs/howtos/spec.md`](spec.md).
 
 ---
 
-### 7.31 `trigger`
+### 7.30 `trigger`
 
 Dynamic trigger rule system configuration.
 
@@ -1393,7 +1368,7 @@ section is omitted from serialised output when nothing is configured.
 
 ---
 
-### 7.32 `piegap`
+### 7.31 `piegap`
 
 Pie feature gap toggles. Each flag gates a standalone pie-derived feature. All
 default to `false` (opt-in).
@@ -1437,7 +1412,7 @@ enabled.
 
 ---
 
-### 7.33 `research`
+### 7.32 `research`
 
 Research subsystem configuration.
 
@@ -1497,7 +1472,7 @@ For the research system, see [`docs/howtos/research.md`](research.md).
 
 ---
 
-### 7.34 `loop`
+### 7.33 `loop`
 
 Goal-driven `/loop` run budgets and checkpoints (see
 [`docs/howtos/loopprogramming.md`](loopprogramming.md)). The whole section is
@@ -1531,7 +1506,7 @@ win.
 
 ---
 
-### 7.35 `activity_log`
+### 7.34 `activity_log`
 
 ```json
 {
@@ -1545,7 +1520,7 @@ win.
 
 Toggle at runtime with `/alog on|off`.
 
-### 7.36 `plugins`
+### 7.35 `plugins`
 
 Plugin subsystem configuration (spec `plugins`). Controls the master switch,
 the sandbox budgets, the store location, and per-plugin permission grants.
@@ -1579,7 +1554,7 @@ user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|
 in the TUI or `ragent plugins <sub>` from the CLI. See
 [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
 
-### 7.37 `input_queue_capacity`
+### 7.36 `input_queue_capacity`
 
 Maximum number of messages the TUI message input queue may hold (spec
 `inputqueue`). While the primary agent is executing, messages submitted with
@@ -1601,7 +1576,7 @@ absent user-global value. The per-run queue is in memory only and is never
 persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
 (see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
 
-### 7.38 `connectors`
+### 7.37 `connectors`
 
 Connector subsystem configuration (spec `connectors`). Controls the master
 switch, the connector store location, the catalogue endpoints and fetch budgets,
@@ -1754,8 +1729,7 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "agents": true,
       "plan": true,
       "codeindex": true,
-      "masterfetch": true,
-      "browser": true
+      "masterfetch": true
     },
 
     "code_index": {
@@ -1827,10 +1801,6 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     }
   ],
 
-  "browser": {
-    "cdp_endpoint": "http://127.0.0.1:9222",
-    "default_headless": true
-  },
 
   "channels": {
     "enabled": true,

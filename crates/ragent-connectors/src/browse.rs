@@ -107,12 +107,28 @@ impl CategoryFilter {
     /// category is visible only under `ALL`.
     #[must_use]
     pub fn matches(&self, descriptor: &ConnectorDescriptor) -> bool {
+        self.matches_category(Some(descriptor.category.as_str()))
+    }
+
+    /// Whether a raw category string is shown under this filter (FR-039).
+    ///
+    /// The comparison is exact and case-insensitive. `ALL` shows everything; a
+    /// blank or absent category is visible only under `ALL`. This is the one
+    /// shared predicate: [`CategoryFilter::matches`] delegates here, and a
+    /// caller whose rows are not [`ConnectorDescriptor`]s (the plugin-store
+    /// navigator) calls it directly so both surfaces agree on what a category
+    /// is.
+    #[must_use]
+    pub fn matches_category(&self, category: Option<&str>) -> bool {
         match self {
             Self::All => true,
-            Self::Category(name) => {
-                let category = descriptor.category.trim();
-                !category.is_empty() && category.eq_ignore_ascii_case(name)
-            }
+            Self::Category(name) => match category {
+                Some(category) => {
+                    let category = category.trim();
+                    !category.is_empty() && category.eq_ignore_ascii_case(name)
+                }
+                None => false,
+            },
         }
     }
 }
@@ -162,6 +178,22 @@ impl CategoryFilterState {
     #[must_use]
     pub const fn filter(&self) -> &CategoryFilter {
         &self.selected
+    }
+
+    /// Build the state from an iterator of raw category strings (FR-040).
+    ///
+    /// Blank categories are dropped (a row with no category belongs to `ALL`
+    /// only), duplicates are folded case-insensitively keeping the first
+    /// spelling seen, and the set is sorted case-insensitively so the menu order
+    /// does not depend on the input order. The selection starts on `ALL`.
+    #[must_use]
+    pub fn from_categories<'a>(categories: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut state = Self::new();
+        for category in categories {
+            state.add_category(category);
+        }
+        state.sort_categories();
+        state
     }
 
     /// The distinct category set, sorted, with `ALL` implied rather than listed
@@ -216,7 +248,7 @@ impl CategoryFilterState {
     /// Sort the distinct category set case-insensitively, matching
     /// [`build_categories`]. Call once after populating via
     /// [`CategoryFilterState::add_category`].
-    pub(crate) fn sort_categories(&mut self) {
+    pub fn sort_categories(&mut self) {
         self.available.sort_by_key(|known| known.to_lowercase());
     }
 

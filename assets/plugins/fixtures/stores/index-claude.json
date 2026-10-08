@@ -1,0 +1,32 @@
+{
+  "store": "claude",
+  "plugins": [
+    {
+      "id": "claude-todo",
+      "name": "Claude Todo",
+      "version": "0.3.0",
+      "description": "Todo list helpers",
+      "category": "Productivity",
+      "source": "https://raw.githubusercontent.com/thawkins/ragent/main/assets/plugins/fixtures/claude-todo",
+      "dialect": "claude",
+      "tags": ["todo"]
+    },
+    {
+      "id": "claude-db",
+      "name": "Claude Database",
+      "version": "0.4.0",
+      "description": "Database helpers",
+      "category": "Database",
+      "source": "https://example.org/claude-db.zip",
+      "dialect": "claude"
+    },
+    {
+      "id": "claude-uncat",
+      "name": "Claude Uncategorised",
+      "version": "0.1.0",
+      "description": "No category field at all",
+      "source": "https://example.org/claude-uncat.zip",
+      "dialect": "claude"
+    }
+  ]
+}

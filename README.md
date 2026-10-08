@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 152 registered tools across 23 categories:
+- **Comprehensive tool system** — 151 registered tools across 22 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -31,9 +31,6 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       error resolution
     - **Search** — grep
     - **Web** — webfetch, websearch, http_request
-      - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
-        click, type, fill_form, select, wait, eval, scroll, upload, press,
-        screenshot, status, setup)
       - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
         codeindex_dependencies, codeindex_status, codeindex_reindex, codeindex_explain,
         codeindex_path, codeindex_communities, codeindex_godnodes (read-only,
@@ -184,7 +181,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   a blocking Stop hook can feed findings back before the turn ends);
   `/plugins codex` and `/plugins claude`
   browse each store's official marketplace (`StoreProvider` normalises the Codex and
-  Claude document shapes), and `/plugins add` also accepts a
+  Claude document shapes); each panel carries a left-hand category navigator listing
+  `ALL` plus the distinct categories and tags the fetched index declares, operated by
+  keyboard (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear) and mouse (click
+  a row, wheel to scroll); a launch may pre-select a category with `--category
+  <name>`; `/plugins add` also accepts a
   `git+<https-url>#<ref>[:<subpath>]` git source; a freshly installed plugin is
   recorded enabled and loads at the next session start (no JavaScript runs during
   the install); managed through
@@ -523,13 +524,23 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.129** — The core architecture, tool system (152 tools across 23 categories), TUI,
+**v1.0.129** — The core architecture, tool system (151 tools across 22 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, plugin system, and multi-layered security are functional and under
 active development.
 
 Recent highlights:
 
+- **Unreleased — plugin-store category navigator and `browser` tool removal** —
+  `/plugins codex` and `/plugins claude` gain a left-hand category navigator
+  (`ALL` plus the distinct categories and tags the fetched index declares, driven
+  by keyboard and mouse, with a `--category <name>` launch argument). The
+  `browser` CDP tool and its `browser` visibility switch are removed, so the
+  registered tool count falls 152 -> 151 across 22 categories. `/mcp discover`
+  now scans the ragent-native `~/.config/ragent/servers/` directory first, a
+  startup failure is echoed to stdout when the TUI stderr spool is active, and an
+  unreachable store marketplace reports a clean
+  `<Store> plugin marketplace is unavailable (...)` row.
 - **v1.0.129 — code-audit remediation complete (M5-M9) and dependency
   upkeep** — the `docs/plans/code-audit.md` plan is executed through M9. A new
   `ragent-surface` crate (18th workspace crate) owns the shared

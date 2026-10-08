@@ -21,6 +21,8 @@ fn usage_block_documents_every_subcommand_and_source_form() {
         "`/plugins disable <pluginid>`",
         "`/plugins test <pluginid>`",
         "`/plugins stores`",
+        "`/plugins codex [query] [--category <name>] [--refresh]`",
+        "`/plugins claude [query] [--category <name>] [--refresh]`",
         "`/plugins help`",
     ] {
         assert!(help.contains(needle), "missing {needle} in:\n{help}");

@@ -61,6 +61,23 @@ const MODEL_PICKER_COLUMN_SPACING: usize = 1;
 /// it is truncated (spec `pluginstores` FR-004).
 const PLUGIN_STORE_DESC_MAX: u16 = 40;
 
+/// Narrowest terminal columns the plugin-store category navigator is drawn in
+/// (spec `catnav` FR-020).
+const PLUGIN_STORE_NAV_MIN: u16 = 12;
+
+/// Widest terminal columns the plugin-store category navigator is drawn in
+/// (spec `catnav` FR-020).
+const PLUGIN_STORE_NAV_MAX: u16 = 26;
+
+/// Terminal columns always reserved for the plugin-store result column, so the
+/// navigator can never squeeze the result list below a readable width
+/// (spec `catnav` FR-020).
+const PLUGIN_STORE_RESULT_MIN: u16 = 27;
+
+/// Blank separator columns between the plugin-store category navigator and the
+/// result column (spec `catnav` FR-001).
+const PLUGIN_STORE_NAV_GAP: u16 = 1;
+
 /// Maximum terminal columns reserved for a connector-catalogue row description
 /// before it is truncated (spec `connectors`).
 ///
@@ -271,6 +288,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         render_plugin_store_panel(frame, app);
     } else {
         app.plugin_store_area = Rect::default();
+        app.plugin_store_nav_area = Rect::default();
+        app.plugin_store_result_area = Rect::default();
     }
     // Connector-catalogue browse panel (`/connectors claude`) - drawn last so it
     // sits above every other overlay while it owns the keyboard.
@@ -763,12 +782,21 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
 /// The panel area is recomputed from `Frame::area` every frame, so a terminal
 /// resize re-derives a centred, fully visible modal (FR-018); it is stored back in
 /// [`App::plugin_store_area`] for tests and hit-testing.
+///
+/// The body is split into the left category navigator and the result column
+/// (spec `catnav` FR-001, FR-020): `ALL` first, then the distinct categories the
+/// index declares, with the active category in the active-category colour and a
+/// block cursor on the category row under the category cursor. The navigator stays
+/// visible and operable while the fetch is loading or the result set is empty
+/// (FR-016, FR-018, FR-019). Both column areas are recomputed from the current
+/// frame and stored back in [`App::plugin_store_nav_area`] and
+/// [`App::plugin_store_result_area`].
 fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
-    let Some(browser) = app.plugin_store.as_ref() else {
+    if app.plugin_store.is_none() {
         return;
-    };
+    }
 
     let screen = frame.area();
     // Size the panel to the screen with a margin, so it stays centred and fully
@@ -787,8 +815,14 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, area);
     app.plugin_store_area = area;
 
-    let title = plugin_store_title(browser);
-    let visible = browser.filtered.len();
+    // The title names the store, the search field, the counts, and the active
+    // category (FR-005); it needs only an immutable read of the browser.
+    let title = match app.plugin_store.as_ref() {
+        Some(browser) => plugin_store_title(browser),
+        // The early return above guarantees `Some`, but read defensively so no
+        // path can panic if that guard ever drifts.
+        None => String::new(),
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_set(PLUGIN_STORE_ASCII_BORDER)
@@ -808,21 +842,77 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
-    let list_area = chunks[0];
+    let body_area = chunks[0];
     let footer_area = chunks[1];
 
-    let cursor_style = Style::default()
-        .fg(Color::Black)
-        .bg(Color::Magenta)
-        .add_modifier(Modifier::BOLD);
+    // Split the body into the left category navigator and the result column. The
+    // navigator width is recomputed from the current frame every draw, so a
+    // terminal resize re-derives it and the column stays fully visible
+    // (spec `catnav` FR-020).
+    let nav_width = plugin_store_nav_width(body_area.width);
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(nav_width),
+            Constraint::Length(PLUGIN_STORE_NAV_GAP),
+            Constraint::Min(0),
+        ])
+        .split(body_area);
+    let nav_area = columns[0];
+    let result_area = columns[2];
+    app.plugin_store_nav_area = nav_area;
+    app.plugin_store_result_area = result_area;
+
     let normal_style = Style::default().fg(Color::White);
+    let active_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let installed_style = Style::default().fg(Color::Green);
     let dim_style = Style::default().fg(Color::DarkGray);
 
-    // The body: result rows, or one explicit state line (FR-013, FR-016, FR-017).
+    let Some(browser) = app.plugin_store.as_mut() else {
+        return;
+    };
+    // Focus distinction (FR-009): the pane that holds keyboard focus paints its
+    // cursor in its filled colour; the other pane's cursor is dimmed, so which
+    // pane owns `Up`/`Down` is visible at a glance. The navigator cursor keeps
+    // its own colour independent of the result cursor (FR-002).
+    let focused_result_cursor = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let focused_nav_cursor = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let unfocused_cursor = Style::default().fg(Color::White).bg(Color::DarkGray);
+    let nav_focused = browser.nav_focused;
+    let nav_cursor_style = if nav_focused {
+        focused_nav_cursor
+    } else {
+        unfocused_cursor
+    };
+    let cursor_style = if nav_focused {
+        unfocused_cursor
+    } else {
+        focused_result_cursor
+    };
+    // The category navigator: `ALL` first, then the derived categories (FR-001).
+    render_plugin_store_navigator(
+        frame,
+        browser,
+        nav_area,
+        nav_cursor_style,
+        active_style,
+        normal_style,
+    );
+
+    // The body: result rows, or one explicit state line (FR-013, FR-016, FR-017,
+    // FR-019). The navigator stays visible above either case.
     let body = plugin_store_body(browser);
     match body {
         PluginStoreBody::Rows => {
+            let visible = browser.filtered.len();
             let items: Vec<ListItem> = browser
                 .filtered
                 .iter()
@@ -859,14 +949,19 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
                 .highlight_symbol("");
             let mut state = ListState::default();
             state.select(Some(selected));
-            frame.render_stateful_widget(list, list_area, &mut state);
+            frame.render_stateful_widget(list, result_area, &mut state);
         }
         PluginStoreBody::Line(text, style) => {
+            // Wrap rather than clip: with the navigator sharing the body, the
+            // result column is narrower, and a long state line (a failed fetch
+            // naming its cause, FR-013) must stay fully readable instead of being
+            // silently truncated at the column edge.
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, style)))
                     .block(Block::default())
-                    .style(Style::default()),
-                list_area,
+                    .style(Style::default())
+                    .wrap(Wrap { trim: false }),
+                result_area,
             );
         }
     }
@@ -880,6 +975,76 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     );
 }
 
+/// The navigator column width for a body of `body_width` columns (spec `catnav`
+/// FR-020).
+///
+/// A third of the body, clamped to a readable range, and always narrow enough
+/// that the result column keeps at least [`PLUGIN_STORE_RESULT_MIN`] columns
+/// plus the separator. A narrow terminal therefore shrinks the navigator rather
+/// than clipping the result list.
+fn plugin_store_nav_width(body_width: u16) -> u16 {
+    let max_nav = body_width.saturating_sub(PLUGIN_STORE_NAV_GAP + PLUGIN_STORE_RESULT_MIN);
+    (body_width / 3)
+        .clamp(PLUGIN_STORE_NAV_MIN, PLUGIN_STORE_NAV_MAX)
+        .min(max_nav)
+}
+
+/// Render the plugin-store category navigator into `area` (spec `catnav` FR-001,
+/// FR-002, FR-016, FR-018).
+///
+/// The rows are the `ALL` sentinel first and then the derived, sorted distinct
+/// categories. The row under the category cursor carries a block cursor through
+/// [`ratatui::widgets::List::highlight_style`], independent of the result-list
+/// cursor; the active category is painted in the active-category colour. A
+/// still-loading or category-less index yields an `ALL`-only navigator. The
+/// navigator viewport height is recorded on the browser so the handlers clamp a
+/// wheel scroll; the scroll offset is otherwise left exactly as the wheel set it,
+/// so scrolling away from the cursor sticks. Only ASCII glyphs are drawn (FR-004).
+fn render_plugin_store_navigator(
+    frame: &mut Frame,
+    browser: &mut crate::app::PluginStoreBrowser,
+    area: Rect,
+    cursor_style: Style,
+    active_style: Style,
+    normal_style: Style,
+) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    // Record the navigator viewport height so the key and mouse handlers clamp the
+    // wheel scroll and keep the category cursor visible (FR-007, FR-008, FR-012).
+    // The per-frame visibility sync is *not* done here: a wheel scroll deliberately
+    // moves the viewport away from the cursor, and a render-time re-sync would undo
+    // it. The move and clear handlers keep the cursor visible instead.
+    browser.category_viewport = area.height as usize;
+
+    let rows = browser.category_row_count();
+    let active = browser.active_category().to_string();
+    let items: Vec<ListItem> = (0..rows)
+        .map(|row| {
+            let label = browser.category_row_label(row);
+            let style = if label.eq_ignore_ascii_case(&active) {
+                active_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(label.to_string(), style)))
+        })
+        .collect();
+
+    let selected = browser.category_cursor_row();
+    let list = List::new(items)
+        .highlight_style(cursor_style)
+        .highlight_symbol("");
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    *state.offset_mut() = browser.category_scroll.min(rows.saturating_sub(1));
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
 /// The body content of the plugin-store panel: either the result rows or a
 /// single explicit state line (FR-013, FR-016, FR-017).
 enum PluginStoreBody {
@@ -889,21 +1054,22 @@ enum PluginStoreBody {
     Line(String, Style),
 }
 
-/// The panel title line for `browser` (FR-004, FR-013, FR-016, FR-025).
+/// The panel title line for `browser` (FR-004, FR-005, FR-013, FR-016, FR-025).
 ///
-/// Names the store, the live search field, the visible/total counts, and - when
-/// the parser skipped any malformed entries - the skipped count, so a partial
-/// result set is visible at a glance rather than silently short (FR-025). ASCII
-/// only (acceptance criterion 10).
+/// Names the store, the live search field, the visible/total counts, the active
+/// category (spec `catnav` FR-005), and - when the parser skipped any malformed
+/// entries - the skipped count, so a partial result set is visible at a glance
+/// rather than silently short (FR-025). ASCII only (acceptance criterion 10).
 fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
     let total = browser.all.len();
     let visible = browser.filtered.len();
     let mut title = format!(
-        " {} Plugin Store -- search: {} -- {} of {}",
+        " {} Plugin Store -- search: {} -- {} of {} -- category {}",
         browser.kind.label(),
         browser.query,
         visible,
         total,
+        browser.active_category(),
     );
     if browser.skipped > 0 {
         title.push_str(&format!(" -- {} skipped", browser.skipped));
@@ -968,8 +1134,13 @@ fn plugin_store_empty_line(browser: &crate::app::PluginStoreBrowser) -> String {
 /// The footer line: the most recent install notice when one is present
 /// (FR-006, FR-014), otherwise the key-hint line (FR-004).
 ///
-/// A failed fetch already renders its cause in the body (FR-013), so the footer
-/// stays the ordinary hint line in every non-notice case.
+/// The hint line names the category-navigation keys (spec `catnav` FR-005):
+/// `Tab` transfers focus between the navigator and the result list, `Up`/`Down`
+/// move the focused pane's cursor, and `c` clears the active category. `ENTER`
+/// is context-sensitive - it applies the category over the navigator and installs
+/// the highlighted row over the result list - so the hint names both
+/// (`select/install`). A failed fetch already renders its cause in the body
+/// (FR-013), so the footer stays the ordinary hint line in every non-notice case.
 fn plugin_store_footer(
     browser: &crate::app::PluginStoreBrowser,
     dim_style: Style,
@@ -979,7 +1150,7 @@ fn plugin_store_footer(
         return Line::from(Span::styled(notice.to_string(), installed_style));
     }
     Line::from(Span::styled(
-        "Up/Down move  Enter install  Esc close".to_string(),
+        "Tab focus  Up/Down move  Enter select/install  c clear category  Esc close".to_string(),
         dim_style,
     ))
 }
@@ -7303,7 +7474,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(Span::styled(
-            "  or place configs in ~/.mcp/servers/ and retry.",
+            "  or place configs in ~/.config/ragent/servers/ and retry.",
             Style::default().fg(Color::DarkGray),
         )));
     } else {

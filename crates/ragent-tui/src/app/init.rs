@@ -261,6 +261,8 @@ impl App {
             plugin_store_probe_result: Arc::new(std::sync::Mutex::new(None)),
             plugin_store_fetcher: ragent_plugins::default_fetcher(),
             plugin_store_area: Rect::default(),
+            plugin_store_nav_area: Rect::default(),
+            plugin_store_result_area: Rect::default(),
             connector_store: None,
             connector_catalogue_result: Arc::new(std::sync::Mutex::new(None)),
             connector_catalogue_install_result: Arc::new(std::sync::Mutex::new(None)),

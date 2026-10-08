@@ -1,5 +1,5 @@
 # /plugins
-> Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | help
+> Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | codex [query] [--category <name>] [--refresh] | claude [query] [--category <name>] [--refresh] | stores [--check] | help
 
 ## Overview
 
@@ -26,6 +26,9 @@ handlers.
 /plugins enable <pluginid>     # enable, load, register tools/commands
 /plugins disable <pluginid>    # unload, deregister tools/commands
 /plugins test <pluginid>       # isolated harness: load + invoke each tool once
+/plugins codex [query] [--category <name>] [--refresh]    # browse the Codex marketplace
+/plugins claude [query] [--category <name>] [--refresh]   # browse the Claude marketplace
+/plugins stores [--check]      # report each store's endpoint and provenance
 /plugins help                  # usage block
 ```
 
@@ -40,6 +43,9 @@ handlers.
 | `/plugins enable <pluginid>` | Mark the plugin enabled, load it into the current session, and register its tools and commands. Reports the declared permissions and the load outcome. |
 | `/plugins disable <pluginid>` | Mark the plugin disabled, unload it, and deregister every tool and command it contributed, confirming how many of each were removed. Files are not deleted. |
 | `/plugins test <pluginid>` | Load the plugin in an isolated harness (never touching the live session), invoke each contributed tool once with schema-derived sample arguments, and report per-step `[ ok ]`/`[fail]` results with wall-clock time. |
+| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex marketplace browser over the store index: `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses on-disk store cache. The left-hand navigator lists `ALL` plus the distinct categories and tags the index declares (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear, or click/scroll with the mouse). |
+| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude marketplace browser, with the same `query`, `--category`, and `--refresh` arguments. |
+| `/plugins stores [--check]` | Report each store's effective endpoint and its source; `--check` also contacts each store and reports availability and plugin count. |
 | `/plugins help` | Print the usage block. A bare `/plugins` or an unknown subcommand does the same. |
 
 ### Sources accepted by `/plugins add`
@@ -115,7 +121,7 @@ other than `help` reports the subsystem is disabled and no plugin code executes.
 Plugins are discovered under `.ragent/plugins/` (project), falling back to
 `~/.config/ragent/plugins/` (user-global).
 
-See [`docs/howtos/config.md`](../config.md) §7.37 and
+See [`docs/howtos/config.md`](../config.md) §7.35 and
 [`specs/plugins/SPEC.md`](../../../specs/plugins/SPEC.md).
 
 ## Related

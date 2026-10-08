@@ -147,12 +147,101 @@ impl App {
         }
     }
 
+    /// Handle a mouse event while the plugin-store browse panel is open (spec
+    /// `catnav` FR-011, FR-012, FR-013, FR-023, FR-024, FR-028).
+    ///
+    /// The panel is drawn above every other surface and owns the keyboard, so it
+    /// also owns the mouse. A left-click in the navigator column hit-tests to a
+    /// category row, moves the category cursor to it, applies that category, and
+    /// focuses the navigator (FR-011). A wheel over the navigator scrolls its
+    /// viewport without changing the active category (FR-012). A left-click or wheel
+    /// over the result column moves the result cursor while leaving the active
+    /// category unchanged (FR-013). Every path is a convenience over the keyboard
+    /// path and installs, downloads, or executes nothing (FR-024); it is pure
+    /// in-memory bookkeeping, so it cannot block the event loop (FR-028).
+    ///
+    /// A click or wheel that lands on the modal but outside both columns is
+    /// swallowed, so it can never start a message text selection or open a context
+    /// menu on a surface hidden behind the panel.
+    fn handle_plugin_store_mouse(&mut self, event: MouseEvent) {
+        let nav_area = self.plugin_store_nav_area;
+        let result_area = self.plugin_store_result_area;
+        let pos = (event.column, event.row).into();
+        let in_nav = nav_area.contains(pos);
+        let in_results = result_area.contains(pos);
+
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) if in_nav => {
+                let row = event.row.saturating_sub(nav_area.y) as usize;
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    // Map the clicked viewport row to an absolute navigator row
+                    // through the current scroll offset; a row past the last category
+                    // is refused by `category_select_row`, so the selection cannot
+                    // change (FR-011, FR-027).
+                    let target = browser.category_scroll.saturating_add(row);
+                    browser.category_select_row(target);
+                    browser.nav_focused = true;
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_results => {
+                let row = event.row.saturating_sub(result_area.y) as usize;
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    // The result list scrolls as its cursor moves, so the row-to-index
+                    // mapping accounts for the current scroll offset; an out-of-range
+                    // row is ignored. The active category is left unchanged (FR-013).
+                    let target = browser.scroll.saturating_add(row);
+                    if target < browser.filtered.len() {
+                        browser.cursor = target;
+                    }
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_nav => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.category_scroll_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_nav => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.category_scroll_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_results => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.scroll_results_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_results => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.scroll_results_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            // Anything else over the modal is swallowed so nothing behind it reacts.
+            _ => {}
+        }
+    }
+
     /// Dispatch a mouse event to the appropriate UI region, updating the input
     /// buffer / cursor / scroll / context menu as needed. Asserts UI
     /// invariants and logs the transition for diagnostics.
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // While the plugin-store browse panel is open it owns the mouse as well as
+        // the keyboard: every mouse event is routed to the panel and swallowed, so a
+        // click in the navigator can never start a text selection behind the modal
+        // (spec `catnav` FR-011, FR-023).
+        if self.plugin_store.is_some() {
+            self.handle_plugin_store_mouse(event);
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("mouse-plugin-store", &before_input, before_cursor);
+            return;
+        }
         // Self-heal any selection/menu anchored on a panel that a recent
         // toggle (e.g. Alt+T) dismissed - the render pass zeroes those
         // areas, and a stale reference would trip assert_ui_invariants.

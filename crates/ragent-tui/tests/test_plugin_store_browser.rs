@@ -30,6 +30,7 @@ fn entry(id: &str, name: &str, description: &str, tags: &[&str]) -> StoreEntry {
         dialect: None,
         tags: tags.iter().map(|t| (*t).to_string()).collect(),
         homepage: None,
+        category: None,
     }
 }
 

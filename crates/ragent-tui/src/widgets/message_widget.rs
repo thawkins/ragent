@@ -509,27 +509,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ===================================================================
-        //  BROWSER / EMAIL / CHANNELS
+        //  EMAIL / CHANNELS
         // ===================================================================
-        "browser" => {
-            let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
-            match action.as_str() {
-                "open" => {
-                    let url = get_str(&["url"]).unwrap_or_default();
-                    format!("open {}", trunc120(&url))
-                }
-                "type" | "fill_form" => {
-                    let selector = get_str(&["selector"]).unwrap_or_default();
-                    format!("{} {}", action, trunc120(&selector))
-                }
-                "eval" => {
-                    let expr = get_str(&["expression"]).unwrap_or_default();
-                    format!("eval {}", trunc120(&expr))
-                }
-                "screenshot" => "screenshot".to_string(),
-                other => format!("{}", other),
-            }
-        }
         "gmail" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "search".to_string());
             match action.as_str() {
@@ -2634,56 +2615,6 @@ pub fn tool_result_summary(
                 Some(action.to_string())
             } else {
                 Some(format!("{} {}", action, task_id))
-            }
-        }
-
-        // ===================================================================
-        //  BROWSER
-        // ===================================================================
-        "browser" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
-            match action {
-                "open" => {
-                    let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-                    let loaded = out.get("loaded").and_then(|v| v.as_bool()).unwrap_or(false);
-                    Some(format!(
-                        "opened {} ({})",
-                        trunc120(url),
-                        if loaded { "loaded" } else { "not loaded" }
-                    ))
-                }
-                "snapshot" => {
-                    let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("snapshot: {}", trunc120(title)))
-                }
-                "screenshot" => {
-                    let len = out.get("data_length").and_then(|v| v.as_u64()).unwrap_or(0);
-                    Some(format!("screenshot ({} bytes)", len))
-                }
-                "status" => {
-                    let available = out
-                        .get("available")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let pages = out
-                        .get("page_targets")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    Some(format!(
-                        "status: {} ({} pages)",
-                        if available {
-                            "available"
-                        } else {
-                            "unavailable"
-                        },
-                        pages
-                    ))
-                }
-                "setup" => {
-                    let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("done");
-                    Some(format!("setup: {}", status))
-                }
-                other => Some(other.to_string()),
             }
         }
 

@@ -100,21 +100,6 @@ fn test_bg_input_summary_output_by_task() {
 }
 
 #[test]
-fn test_browser_input_summary_open() {
-    let input = json!({"action": "open", "url": "https://example.com"});
-    let summary = tool_input_summary("browser", &input, "/tmp");
-    assert!(!summary.contains("[browser]"), "got: {summary}");
-    assert!(summary.contains("example.com"));
-}
-
-#[test]
-fn test_browser_input_summary_default_action() {
-    let input = json!({"expression": "document.title"});
-    let summary = tool_input_summary("browser", &input, "/tmp");
-    assert!(!summary.contains("[browser]"));
-}
-
-#[test]
 fn test_gmail_input_summary_search() {
     let input = json!({"action": "search", "query": "from:ci is:unread"});
     let summary = tool_input_summary("gmail", &input, "/tmp");

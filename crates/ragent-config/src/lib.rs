@@ -29,8 +29,8 @@ pub mod yolo;
 // Re-export commonly used types
 pub use compaction::{CompactionConfig, CompactionModelRef, KeepConfig};
 pub use config::{
-    AgentConfig, AgentPerfConfig, AutoExtractConfig, BrowserConfig, Capabilities, ChannelsConfig,
-    Config, Cost, CrossProjectConfig, DEFAULT_ERROR_RETRY_ALLOWANCE, DEFAULT_INPUT_QUEUE_CAPACITY,
+    AgentConfig, AgentPerfConfig, AutoExtractConfig, Capabilities, ChannelsConfig, Config, Cost,
+    CrossProjectConfig, DEFAULT_ERROR_RETRY_ALLOWANCE, DEFAULT_INPUT_QUEUE_CAPACITY,
     DEFAULT_LOOP_MAX_STEPS, DiscordChannelConfig, GitLabIntegrationConfig, GmailConfig, LoopConfig,
     McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PieGapConfig, PriceEntry,
     ProviderConfig, ResearchConfig, ResearchEvaluateConfig, ResearchModelsConfig,

@@ -740,13 +740,50 @@ never leaves the plugin enabled. Use it as the first check after any edit.
 
 ## 9. Acquiring Plugins from the Claude and Codex Stores
 
-ragent has **no built-in remote marketplace browser** - installing is always
-`/plugins add <source>` from a directory, a local archive, or an `https://`
-URL. The upstream ecosystems distribute plugins as **git repositories**, so the
-practical workflow is: obtain the plugin or marketplace repository, then point
-`/plugins add` at it.
+ragent installs plugins from a directory, a local archive, or an `https://` URL
+with `/plugins add <source>`, and it also browses each store's official
+marketplace from the TUI. Two subcommands open an interactive browse panel over
+a store index:
 
-### 9.1 Claude Code / Claude Desktop plugins
+- `/plugins codex [query] [--category <name>] [--refresh]` - the Codex
+  marketplace.
+- `/plugins claude [query] [--category <name>] [--refresh]` - the Claude
+  marketplace.
+
+Each panel reads the store index (normalised by that store's `StoreProvider`),
+lists the plugins it declares, narrows by the typed `query`, and installs the
+selected plugin on `Enter`. `--refresh` bypasses the on-disk store cache and
+`--category <name>` pre-selects a category row once the index has landed.
+
+### 9.1 The category navigator
+
+Both panels carry a left-hand **category navigator**: `ALL` first, then the
+distinct non-empty categories the fetched index declares (sorted
+case-insensitively), followed by each distinct non-empty `tag` of an entry that
+also declares a category. It is driven by keyboard and mouse:
+
+| Input | Effect |
+| ----- | ------ |
+| `Tab` | Move focus between the navigator and the result list. |
+| `Up` / `Down` | Move the focused pane's cursor. Moving the category cursor applies the highlighted category on the same keypress. |
+| `Enter` | Over the navigator, apply the category and return focus to the results (never installs); over a result, install the plugin. |
+| `c` | Clear the category back to `ALL`. |
+| Click | A left-click on a category row selects and applies it; a left-click on a result row moves the result cursor. |
+| Wheel | Scrolling over the navigator moves its viewport without changing the active category. |
+
+Selecting a category re-derives the visible set from the full fetched index in
+memory (**no network request**) and composes with the free-text query, so a
+result is visible only when it matches both. A category the index no longer
+declares is never shown as a row, and a selection that vanishes after a refresh
+falls back to `ALL`. A store marketplace that cannot be reached renders a clean
+`<Store> plugin marketplace is unavailable (<plain cause>)` row rather than the
+raw transport error.
+
+Every mouse path is a convenience over the keyboard path, so a terminal without
+mouse reporting still reaches every category, and no navigator action ever
+installs, downloads, or runs plugin JavaScript.
+
+### 9.2 Claude Code / Claude Desktop plugins
 
 Claude Code plugins are bundled, shareable units that can bundle slash
 commands, agents, skills, hooks, and MCP servers. They are distributed as
@@ -791,7 +828,7 @@ Desktop-only `mounts`/`window` sections, those are reported under
 `Unsupported capabilities:` in `ragent`'s list output - the rest of the plugin
 still loads.
 
-### 9.2 OpenAI Codex plugins
+### 9.3 OpenAI Codex plugins
 
 Codex plugins are recognised by a `codex-plugin.json`, a
 `.codex-plugin/plugin.json` (the layout the official `openai/plugins` catalogue
@@ -820,7 +857,7 @@ ls vendor/codex-plugin/codex-plugin.json   # or .codex-plugin/plugin.json
 /plugins enable <pluginid>
 ```
 
-### 9.3 Installing from a hosted package (archive or URL)
+### 9.4 Installing from a hosted package (archive or URL)
 
 When the plugin is published as a `.zip` or `.tar.gz`, install it directly -
 locally or over `https`:
@@ -842,7 +879,7 @@ also works: it is downloaded, extracted, the single wrapper directory
 (`<repo>-<ref>/`) is descended automatically, and the manifest is validated
 before anything lands in the store.
 
-### 9.4 Adapting a plugin that is not yet ragent-compatible
+### 9.5 Adapting a plugin that is not yet ragent-compatible
 
 Because ragent recognises the **manifest dialects**, many upstream plugins load
 unchanged. When one does not, the usual fixes are small:
@@ -858,7 +895,7 @@ unchanged. When one does not, the usual fixes are small:
 4. **`api_version` newer than 1.** ragent's host API is version 1; reduce the
    declaration if the plugin only uses v1 features.
 
-### 9.5 A note on trust
+### 9.6 A note on trust
 
 Enabling a third-party plugin is a **trust decision**. Before enabling:
 
@@ -870,7 +907,7 @@ Enabling a third-party plugin is a **trust decision**. Before enabling:
 
 See [section 11](#11-security-model) for the full security posture.
 
-### 9.6 Capability coverage by store
+### 9.7 Capability coverage by store
 
 Codex and Claude plugins ship much the same broad set of contribution surfaces,
 but each store spells them differently and ragent bridges only some. The table

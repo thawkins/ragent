@@ -31,6 +31,7 @@ fn entry(id: &str, description: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        category: None,
     }
 }
 
@@ -164,7 +165,12 @@ fn the_footer_lists_the_available_keys() {
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app);
     let footer = rows.last().expect("footer row");
-    assert!(footer.contains("Enter install"), "footer: {footer:?}");
+    assert!(footer.contains("Tab focus"), "footer: {footer:?}");
+    assert!(
+        footer.contains("Enter select/install"),
+        "footer: {footer:?}"
+    );
+    assert!(footer.contains("c clear category"), "footer: {footer:?}");
     assert!(footer.contains("Esc close"), "footer: {footer:?}");
     assert!(footer.contains("Up/Down"), "footer: {footer:?}");
 }
@@ -198,11 +204,15 @@ fn the_highlighted_row_carries_a_full_row_block_cursor() {
     // The cursor starts on the first result row.
     let target = find_row(&terminal, &app, "codex-weather").expect("first row painted");
     let area = app.plugin_store_area;
+    // The result rows now sit in the right-hand column, to the right of the
+    // category navigator (spec `catnav` T-004).
+    let result = app.plugin_store_result_area;
     let buffer = terminal.backend().buffer();
     // The block cursor background spans the whole row, not just the text: it is
-    // present at the first painted column and at the far edge of the inner area.
+    // present at the first painted column of the result column and at the far
+    // edge of the inner area.
     assert_eq!(
-        buffer[(area.x + 1, target)].bg,
+        buffer[(result.x, target)].bg,
         Color::Magenta,
         "cursor spans the leading edge of the row"
     );
@@ -238,6 +248,54 @@ fn the_cursor_follows_the_block_cursor_position() {
         first_glyph_bg(&terminal, &app, first),
         Color::Magenta,
         "the first row is no longer highlighted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FR-009 - the focused pane's cursor is rendered distinctly
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_focused_navigator_cursor_differs_from_the_unfocused_result_cursor() {
+    // With the result list focused (the default), the navigator's `ALL` row cursor
+    // is dimmed rather than filled cyan (FR-009).
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 100, 30);
+    let nav = app.plugin_store_nav_area;
+    let buffer = terminal.backend().buffer();
+    let all_row = (0..nav.height)
+        .find(|&dy| {
+            let y = nav.y + dy;
+            (nav.x..nav.x + nav.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .contains("ALL")
+        })
+        .map(|dy| nav.y + dy)
+        .expect("the ALL row is painted in the navigator");
+    assert_ne!(
+        buffer[(nav.x, all_row)].bg,
+        Color::Cyan,
+        "the unfocused navigator cursor is not the filled focus colour"
+    );
+    drop(terminal);
+
+    // Focusing the navigator fills its cursor cyan and dims the result cursor
+    // instead (FR-009).
+    app.plugin_store.as_mut().expect("panel open").nav_focused = true;
+    let terminal = render(&mut app, 100, 30);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(nav.x, all_row)].bg,
+        Color::Cyan,
+        "the focused navigator cursor is filled cyan (FR-009)"
+    );
+    let result = app.plugin_store_result_area;
+    let first = find_row(&terminal, &app, "codex-weather").expect("row painted");
+    assert_ne!(
+        buffer[(result.x, first)].bg,
+        Color::Magenta,
+        "the unfocused result cursor is not the filled focus colour"
     );
 }
 

@@ -122,6 +122,8 @@ fn codex_provider_normalises_the_vendor_marketplace() {
     assert_eq!(linear.name, "linear");
     assert_eq!(linear.version, "0");
     assert_eq!(linear.dialect.as_deref(), Some("codex"));
+    // FR-003: a declared category is carried into the entry model.
+    assert_eq!(linear.category.as_deref(), Some("Productivity"));
     // A `local` path resolves against the marketplace repository root as an
     // installable git source (a bare `https` directory URL is not installable).
     assert_eq!(
@@ -134,6 +136,8 @@ fn codex_provider_normalises_the_vendor_marketplace() {
         .iter()
         .find(|e| e.id == "crowdstrike-falcon-foundry")
         .expect("crowdstrike entry present");
+    // FR-003: a vendor entry that omits `category` stays uncategorised.
+    assert!(crowdstrike.category.is_none());
     // A whole-repo `url` source becomes a git source at HEAD, sans `.git`.
     assert_eq!(
         crowdstrike.source,
@@ -176,6 +180,8 @@ fn claude_provider_normalises_the_vendor_marketplace() {
     );
     assert_eq!(sdk.description, "Development kit for the Claude Agent SDK");
     assert_eq!(sdk.dialect.as_deref(), Some("claude"));
+    // FR-003: the vendor `category` is carried through the transform.
+    assert_eq!(sdk.category.as_deref(), Some("development"));
 
     let security = index
         .entries
@@ -187,6 +193,7 @@ fn claude_provider_normalises_the_vendor_marketplace() {
         "git+https://github.com/42Crunch-AI/claude-plugins#v1.5.5:plugins/api-security-testing"
     );
     assert_eq!(security.homepage.as_deref(), Some("https://42crunch.com"));
+    assert_eq!(security.category.as_deref(), Some("security"));
 
     // A declared version is preserved verbatim.
     let clangd = index
@@ -258,6 +265,40 @@ fn entries_with_unusable_sources_are_skipped_not_fatal() {
     assert_eq!(index.entries.len(), 1, "only the resolvable entry survives");
     assert_eq!(index.entries[0].id, "good");
     assert_eq!(index.skipped, 3);
+}
+
+#[test]
+fn vendor_entries_with_odd_categories_never_panic() {
+    // FR-003, FR-026: an absent, empty, whitespace-only, wrong-typed, or oversized
+    // category never fails the entry. The vendor transform treats a blank or
+    // wrong-typed category as uncategorised, so the entry is still kept and the
+    // store index reports no skip for it.
+    let oversized = "x".repeat(100_000);
+    let doc = format!(
+        r#"{{"plugins":[
+        {{"name":"absent","source":"./plugins/absent"}},
+        {{"name":"empty","source":"./plugins/empty","category":""}},
+        {{"name":"blank","source":"./plugins/blank","category":"   "}},
+        {{"name":"typed","source":"./plugins/typed","category":42}},
+        {{"name":"huge","source":"./plugins/huge","category":"{oversized}"}}
+    ]}}"#
+    );
+    let index = provider_for(StoreKind::Claude)
+        .parse_index(doc.as_bytes(), &origin(DEFAULT_CLAUDE_STORE_URL))
+        .expect("the document still parses");
+    assert_eq!(index.entries.len(), 5, "every entry survives its category");
+    let by_id = |id: &str| {
+        index
+            .entries
+            .iter()
+            .find(|e| e.id == id)
+            .unwrap_or_else(|| panic!("{id} present"))
+    };
+    for id in ["absent", "empty", "blank", "typed"] {
+        assert!(by_id(id).category.is_none(), "{id} is uncategorised");
+    }
+    assert_eq!(by_id("huge").category.as_deref(), Some(oversized.as_str()));
+    assert_eq!(index.skipped, 0, "no entry is skipped over its category");
 }
 
 // -- The fixture seam routes through the provider ----------------------------
