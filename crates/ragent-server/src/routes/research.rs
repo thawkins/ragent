@@ -1042,5 +1042,5 @@ async fn research_events_stream(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/research_tests.rs"]
+#[path = "../../tests/inline/research_tests.rs"]
 mod tests;

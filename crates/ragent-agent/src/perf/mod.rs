@@ -183,5 +183,5 @@ pub fn env_var_name() -> &'static str {
     ENV_VAR
 }
 #[cfg(test)]
-#[path = "../tests/inline/perf_mod_tests.rs"]
+#[path = "../../tests/inline/perf_mod_tests.rs"]
 mod tests;

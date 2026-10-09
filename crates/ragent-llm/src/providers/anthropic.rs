@@ -654,5 +654,5 @@ pub(crate) fn parse_anthropic_rate_limit_headers(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/anthropic_tests.rs"]
+#[path = "../../tests/inline/anthropic_tests.rs"]
 mod tests;

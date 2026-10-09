@@ -573,5 +573,5 @@ async fn try_mcp_json_config(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/discovery_tests.rs"]
+#[path = "../../tests/inline/discovery_tests.rs"]
 mod tests;

@@ -649,7 +649,6 @@ executing), and `/queue help` shows the usage.
 | `docs/howtos/research.md` | Research system and report synthesis |
 | `docs/howtos/reverse.md` | Repository reverse-engineering |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
-| `docs/howtos/communications.md` | Gmail and messaging channel tools |
 
 ---
 

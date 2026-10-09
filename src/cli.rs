@@ -1577,7 +1577,7 @@ pub async fn handle_govcreate_command(
             Ok(())
         }
         SpecCommand::GovCreateUsage(reason) => {
-            eprintln!("ragent spec govcreate: [err] {reason}");
+            eprintln!("ragent spec govcreate: {reason}");
             eprintln!();
             eprint!(
                 "{}",

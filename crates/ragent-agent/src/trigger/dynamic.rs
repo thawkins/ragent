@@ -510,5 +510,5 @@ impl DynamicTriggerEngine {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/dynamic_tests.rs"]
+#[path = "../../tests/inline/dynamic_tests.rs"]
 mod tests;

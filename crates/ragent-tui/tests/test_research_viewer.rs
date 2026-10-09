@@ -93,7 +93,6 @@ fn test_markdown_to_lines_footer_note_present() {
     );
 }
 
-#[cfg(test)]
 mod interaction_tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,

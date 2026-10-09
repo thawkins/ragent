@@ -317,5 +317,5 @@ fn parse_aws_credentials_ini(contents: &str) -> HashMap<String, ProfileCredentia
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/bedrock_credentials_tests.rs"]
+#[path = "../../tests/inline/bedrock_credentials_tests.rs"]
 mod tests;

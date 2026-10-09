@@ -308,5 +308,5 @@ pub(crate) fn evaluate_suite_samples(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/mod_tests.rs"]
+#[path = "../../tests/inline/mod_tests.rs"]
 mod tests;

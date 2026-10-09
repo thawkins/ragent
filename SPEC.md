@@ -525,7 +525,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 151 registered tools across 22 categories |
+| **Tool-rich** | 149 registered tools across 21 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -921,7 +921,6 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` | 5 |
 | VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
 | PDF | `pdf_read/write` | 2 |
-| External messaging | `gmail`, `send_channel_message` | 2 |
 | MCP | `mcp_tool` | 1 |
 | Planning | `plan_enter`, `plan_exit` | 2 |
 | Background tasks | `bg` | 1 |
@@ -963,13 +962,6 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-
-#### External Messaging Tools (2)
-
-| Tool | Purpose |
-|------|---------|
-| `gmail` | Gmail search/read/draft/send via REST API with encrypted OAuth2 token storage. |
-| `send_channel_message` | Send notifications to Telegram/Discord channels. |
 
 #### Durable Initiatives & Skill Management Tools (2)
 
@@ -1360,7 +1352,6 @@ split**, or an **owner-only file mode**.
 | `bash_scratch_dir` private fallback | `ragent-tools-core::bash` | a failed private-dir creation falls back to a process-private 0700 directory, never to shared temp |
 | tree-walk budget | `ragent-tools-vcs::github` | the GitHub recursive tree walk carries a `MAX_TREE_REQUESTS`/`MAX_TREE_ENTRIES` budget, matching the GitLab equivalent |
 | `redacted_event_debug` / SSE device-code masking | `ragent-server::sse` | credential-bearing events expose presence-only fields on the SSE stream and a redacted rendering for log sites |
-| `target_is_allowed` | `ragent-tools-extended::channels` | config-supplied outbound base URLs (Telegram, Gmail) are SSRF-checked; an explicitly configured loopback target is permitted, everything else private is refused |
 | `CrawlFetcher` SSRF contract | `ragent-tools-extended::masterfetch::crawl` | the SSRF obligation is stated on the trait and validated at the `mf_crawl` tool boundary |
 
 ### 4.6e Shared Guards and Recurrence Prevention (SECTASKS MS-05)
@@ -1447,8 +1438,7 @@ containment gaps found by the 18-crate audit.
 | `GitHubClient::validate_repo_segment` | `ragent-tools-vcs::github` | an `owner`/`repo` that is not `[A-Za-z0-9._~-]+`, so it cannot escape the request path |
 | `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a hardcoded `api.github.com`, which previously ignored a configured GitHub Enterprise `base_url` and sent the Bearer token to the public origin |
 | `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
-| `refuse_non_public_target` on the Discord sink | `ragent-tools-extended::channels` | a config-supplied `channels.discord.webhook_url` pointing at a private, link-local, or metadata host (its Telegram sibling already had the check) |
-| `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from search/robots/gmail/channels/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
+| `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from search/robots/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
 | `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created (ANTIPAT H-1) |
 | `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure that previously returned an empty denylist, silently dropping the mandatory built-in system-directory protection (ANTIPAT H-3) |
 | plugin `content_digest` | `ragent-plugins::add` | an install with no integrity record: a SHA-256 over the staged tree is recorded in the store ledger, so a substituted archive or checkout is detectable |
@@ -1492,7 +1482,6 @@ containment gaps found by the 18-crate audit.
 `crates/ragent-config/tests/test_ms0_config_guards.rs`,
 `crates/ragent-plugins/tests/test_add.rs`,
 `crates/ragent-specs/tests/test_govcreate_authoring.rs`,
-`crates/ragent-tools-extended/tests/test_channels.rs`, and
 `crates/ragent-telemetry/tests/test_metric_toggles.rs` (all wired into the
 `ms0-regression` CI job).
 
@@ -3413,67 +3402,6 @@ TUI both use.
 
 ---
 
-## 19A. Gmail & Messaging Channels
-
-### 19A.1 Gmail Tool (`gmail`)
-
-The `gmail` tool provides Gmail integration via the Gmail REST API with OAuth2
-tokens stored encrypted in the ragent SQLite credential store (never in
-`ragent.json`).
-
-Actions: `search`, `read`, `draft`, `send`, `auth` (import an existing OAuth2
-token set), `status`, `logout`.
-
-Client credentials resolve with the following precedence:
-
-1. Values passed to the `auth` action.
-2. Tokens previously stored via `auth`.
-3. `gmail.client_id` / `gmail.client_secret` in `ragent.json` (supports
-   `env:` indirection).
-4. `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` environment variables.
-
-On HTTP 401 the tool attempts a refresh-token exchange and retries once.
-
-```jsonc
-{
-  "gmail": {
-    "client_id": "env:GMAIL_CLIENT_ID",
-    "client_secret": "env:GMAIL_CLIENT_SECRET"
-  }
-}
-```
-
-### 19A.2 Channel Messenger Tool (`send_channel_message`)
-
-The `send_channel_message` tool sends short messages to external notification
-channels. Supported channels:
-
-- **Telegram** — bot API `sendMessage`
-- **Discord** — incoming webhook
-
-Actions: `send` (targets `telegram`, `discord`, or `all`), `status`.
-
-```jsonc
-{
-  "channels": {
-    "enabled": true,
-    "telegram": {
-      "bot_token": "env:TELEGRAM_BOT_TOKEN",
-      "chat_id": "-1001234567890"
-    },
-    "discord": {
-      "webhook_url": "https://discord.com/api/webhooks/..."
-    }
-  }
-}
-```
-
-Both tools are registered under the `network:send` permission category and
-degrade gracefully (honest errors with a `next_action` hint) when not
-configured.
-
----
-
 ## 19B. Durable Initiatives & Skill Management
 
 ### 19B.1 Initiative Tool (`initiative`)
@@ -4114,7 +4042,7 @@ still override per run with the corresponding flags.
 - **Autopilot & router fixes** — Autopilot auto-continue suppressed after `agent_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
 - **Startup responsiveness** — MCP server connections, code-index open/watcher/reindex, and provider health checks moved to background tasks; `/startup` slash command shows per-stage timing; first printable keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
 - **Code-index performance** — SQLite `WAL` mode, `synchronous = NORMAL`, `temp_store = MEMORY`; direct `file_id` symbol queries; reindex chunk yield reduced to 1 ms; per-phase timing logs (beta.18)
-- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `skill_manage` runtime skill control; `gmail` and `send_channel_message` external integrations; six `mf_*` MasterFetch tools (beta.12–beta.17)
+- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `skill_manage` runtime skill control; six `mf_*` MasterFetch tools (beta.12–beta.17)
 - **Cost accounting** — `Event::RunCostSummary` published per turn; persisted to SQLite `run_cost_summaries`; TUI banner overlay; `--include-cost` session export flag; HTTP SSE `run_cost_summary` event (beta.12)
 - **Telemetry & operator tools** — OpenTelemetry metrics export, `/telemetry` slash family, ALT-O telemetry panel, `sudo` askpass broker, `askpass` environment wiring (beta.2–beta.5)
 - **Instruction-file includes** — `@<path>` directive with cycle detection, depth cap, escape sequences, and path containment checks (beta.17)

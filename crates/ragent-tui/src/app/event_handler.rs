@@ -135,7 +135,7 @@ impl App {
                     .process_message(&sid, &task_text, &agent, Arc::new(AtomicBool::new(false)))
                     .await
                 {
-                    tracing::debug!(error = %e, "Plan agent failed");
+                    tracing::warn!(error = %e, "Plan agent failed");
                 }
             });
         } else {

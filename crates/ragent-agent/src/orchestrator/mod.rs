@@ -28,5 +28,5 @@ pub use registry::{AgentEntry, AgentId, AgentRegistry, Responder};
 pub use router::{InProcessRouter, Router};
 
 #[cfg(test)]
-#[path = "../tests/inline/orchestrator_mod_tests.rs"]
+#[path = "../../tests/inline/orchestrator_mod_tests.rs"]
 mod tests;

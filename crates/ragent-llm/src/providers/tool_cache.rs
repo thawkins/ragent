@@ -369,5 +369,5 @@ pub(crate) fn tool_arguments_json(function: &serde_json::Value) -> Option<String
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/tool_cache_tests.rs"]
+#[path = "../../tests/inline/tool_cache_tests.rs"]
 mod tests;

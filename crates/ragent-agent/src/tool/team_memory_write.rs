@@ -190,5 +190,5 @@ impl Tool for TeamMemoryWriteTool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/team_memory_write_tests.rs"]
+#[path = "../../tests/inline/team_memory_write_tests.rs"]
 mod tests;

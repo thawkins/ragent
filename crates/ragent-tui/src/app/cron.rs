@@ -707,5 +707,5 @@ fn skip_disabled_event(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/cron_tests.rs"]
+#[path = "../../tests/inline/cron_tests.rs"]
 mod tests;

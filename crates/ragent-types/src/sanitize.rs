@@ -225,6 +225,34 @@ pub fn redact_secrets(msg: &str) -> String {
     redact_secrets_cow(msg).into_owned()
 }
 
+/// Mask a sensitive API key for display, keeping only the last four
+/// characters (or the whole value when it is shorter than four characters).
+///
+/// This is the single shared key-fingerprint helper: providers and search
+/// backends route their key logging through it so no site hand-rolls its own
+/// partial-key format. An empty key renders as `(none)` so a log line can
+/// distinguish "no key configured" from "key present".
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_types::sanitize::mask_key;
+///
+/// assert_eq!(mask_key("[REDACTED]"), "...abcd");
+/// assert_eq!(mask_key(""), "(none)");
+/// ```
+#[must_use]
+pub fn mask_key(key: &str) -> String {
+    if key.is_empty() {
+        return String::from("(none)");
+    }
+    // Find the byte offset of the 4th character from the end (or the start of
+    // the string when it has fewer than four characters), avoiding the
+    // intermediate `Vec<char>` allocation.
+    let start = key.char_indices().rev().nth(3).map_or(0, |(i, _)| i);
+    format!("...{}", &key[start..])
+}
+
 /// Cow-returning variant of [`redact_secrets`] (PERF-055).
 ///
 /// Returns [`Cow::Borrowed`] without allocating when the message contains no

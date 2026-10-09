@@ -6,6 +6,8 @@
 pub mod anthropic;
 pub mod azure_foundry;
 pub mod azure_resource;
+/// Scheme/host validation for environment-supplied provider base URLs.
+pub mod base_url;
 pub mod bedrock;
 pub mod bedrock_credentials;
 pub mod bedrock_sigv4;

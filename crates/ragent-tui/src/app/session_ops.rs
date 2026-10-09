@@ -871,7 +871,7 @@ impl App {
                     .process_message(&sid, &final_text, &agent, flag)
                     .await
                 {
-                    tracing::debug!(error = %e, "Failed to process message");
+                    tracing::error!(error = %e, "Failed to process message");
                 }
             } else {
                 let mut parts: Vec<ragent_agent::message::MessagePart> = image_paths
@@ -913,7 +913,7 @@ impl App {
                     .process_user_message(&sid, user_msg, &agent, flag)
                     .await
                 {
-                    tracing::debug!(error = %e, "Failed to process message with images");
+                    tracing::error!(error = %e, "Failed to process message with images");
                 }
             }
         });

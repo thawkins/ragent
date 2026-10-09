@@ -614,9 +614,6 @@ async fn websearch_search_query(query: &str) -> String {
     out
 }
 
-// Redaction patterns for bug reports
-use regex::Regex;
-
 /// Convert a `(name, kind, description, value)` metric tuple row into owned
 /// strings for the `TelemetryCountersContent` payload (shared by all four
 /// metric tables).
@@ -3348,13 +3345,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                     let is_secret_key = key.ends_with("_api_key")
                                         || key.ends_with("_key")
                                         || key == "openalex_email"
-                                        || key == "gitlab"
-                                        || key == "gmail"
-                                        || key == "channels";
+                                        || key == "gitlab";
                                     let rendered = if is_secret_key {
                                         "<redacted>".to_string()
                                     } else {
-                                        redact_secrets(&value.to_string())
+                                        ragent_types::sanitize::redact_secrets(&value.to_string())
                                     };
                                     let source = key_source.get(key).map(String::as_str).unwrap_or(
                                         if key == "config_paths" {
@@ -3835,9 +3830,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "bench" => match ragent_bench::parse_bench_command(args) {
                 Ok(ragent_bench::BenchCommand::Help) => {
-                    self.append_assistant_text(
-                        "From: /bench\nUsage: `/bench list` | `/bench init <suite-or-all-or-full> [--full] [--language LANG] [--force-download] [--verify-only]` | `/bench show` | `/bench run <suite-or-profile-or-all> [--limit N|--cap N] [--samples K] [--subset NAME] [--release VERSION] [--scenario NAME] [--language LANG] [--temperature F] [--top-p F] [--max-tokens N] [--deterministic] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--resume] [--no-exec] [--yes]` | `/bench status` | `/bench open last` | `/bench cancel`"
-                    );
+                    self.append_assistant_text(&self.render_bench_help());
                     self.status = "bench help".to_string();
                 }
                 Ok(ragent_bench::BenchCommand::List) => {
@@ -11300,7 +11293,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 .process_message(&sid, &rendered, &agent, flag)
                 .await
             {
-                tracing::debug!(error = %e, "Failed to process plugin command prompt");
+                tracing::warn!(error = %e, "Failed to process plugin command prompt");
             }
         });
         true
@@ -12211,7 +12204,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     LogLevel::Error => "ERROR",
                     LogLevel::Tool => "TOOL",
                 };
-                let msg = redact_secrets(&entry.message);
+                let msg = ragent_types::sanitize::redact_secrets(&entry.message);
                 lines.push_str(&format!("[{}] {}: {}\n", ts, level, msg));
             }
             lines
@@ -12228,7 +12221,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     ragent_types::Role::Assistant => "[agent] Assistant",
                     ragent_types::Role::Compaction => "[spin] Compaction",
                 };
-                let content = redact_secrets(&msg.text_content());
+                let content = ragent_types::sanitize::redact_secrets(&msg.text_content());
                 // Truncate long messages for the report (char-boundary-safe).
                 let content = truncate_field(&content, 501);
                 lines.push_str(&format!("**{}**: {}\n\n", role, content));
@@ -12736,64 +12729,6 @@ fn duration_secs_to_string(secs: i64) -> String {
         }
     }
     format!("{secs}s")
-}
-
-/// Redact well-known secret patterns from a string.
-///
-/// Patterns redacted:
-/// - API keys (sk-..., key_..., api_key=...)
-/// - Bearer tokens
-/// - AWS access keys
-/// - Generic secrets/tokens/passwords in key=value format
-fn redact_secrets(input: &str) -> String {
-    // API key patterns (Anthropic, OpenAI, etc.)
-    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static API_KEY_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").expect("valid api-key regex")
-    });
-
-    // Bearer token pattern
-    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static BEARER_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"(?i)(Bearer\s+[a-zA-Z0-9\-_\.]{20,})").expect("valid bearer regex")
-    });
-
-    // AWS access key pattern
-    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static AWS_KEY_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").expect("valid aws-key regex")
-    });
-
-    // Generic key=value secrets
-    // INVARIANT: static literal pattern, compilation cannot fail at runtime.
-    static SECRET_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|auth)\s*[=:]\s*\S{8,})")
-            .expect("valid secret regex")
-    });
-
-    let mut result = input.to_string();
-
-    // Redact API keys
-    result = API_KEY_PATTERN
-        .replace_all(&result, "[REDACTED_API_KEY]")
-        .to_string();
-
-    // Redact Bearer tokens
-    result = BEARER_PATTERN
-        .replace_all(&result, "Bearer [REDACTED_TOKEN]")
-        .to_string();
-
-    // Redact AWS keys
-    result = AWS_KEY_PATTERN
-        .replace_all(&result, "[REDACTED_AWS_KEY]")
-        .to_string();
-
-    // Redact generic secrets
-    result = SECRET_PATTERN
-        .replace_all(&result, "[REDACTED_SECRET]")
-        .to_string();
-
-    result
 }
 
 /// Handle the `/blueprints` slash command for listing installed team blueprints.

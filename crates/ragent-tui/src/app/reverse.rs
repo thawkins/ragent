@@ -799,5 +799,5 @@ pub(crate) fn reverse_help_message() -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "../tests/inline/reverse_tests.rs"]
+#[path = "../../tests/inline/reverse_tests.rs"]
 mod tests;

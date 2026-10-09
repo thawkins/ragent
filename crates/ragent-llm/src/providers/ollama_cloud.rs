@@ -519,13 +519,12 @@ impl LlmClient for OllamaCloudClient {
         // logging is actually enabled, so a disabled log costs nothing.
         let body_bytes =
             serde_json::to_vec(&body).context("serialise Ollama Cloud request body")?;
+        // SEC: never log the request body itself - it carries the full chat
+        // messages / prompt. Log only structural metadata (size + model) so a
+        // debug log cannot leak user content.
+        let body_len = body_bytes.len();
         if tracing::enabled!(tracing::Level::DEBUG) {
-            let preview_len = body_bytes.len().min(800);
-            let body_preview = String::from_utf8_lossy(&body_bytes[..preview_len]);
-            // SEC: the request body carries the full chat messages / prompt, so
-            // route the preview through the shared redactor before logging.
-            let body_preview = ragent_types::sanitize::redact_secrets(&body_preview);
-            tracing::debug!(body = %body_preview, "Ollama Cloud request body (truncated)");
+            tracing::debug!(body_bytes = body_len, "Ollama Cloud request body built");
         }
 
         let response = tokio::time::timeout(
@@ -928,5 +927,5 @@ pub async fn list_ollama_cloud_models(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/ollama_cloud_tests.rs"]
+#[path = "../../tests/inline/ollama_cloud_tests.rs"]
 mod tests;

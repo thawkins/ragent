@@ -515,5 +515,5 @@ fn parse_tool_list(value: Value) -> Vec<McpToolDef> {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/http_tests.rs"]
+#[path = "../../tests/inline/http_tests.rs"]
 mod tests;

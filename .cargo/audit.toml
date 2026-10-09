@@ -1,14 +1,11 @@
 # cargo-audit configuration for ragent.
-# These advisories are suppressed because fixing them requires major upstream
-# crate upgrades that are currently blocked by compatibility.
+# Kept in sync with deny.toml: only advisories that still apply to the current
+# dependency tree are listed here, so a re-introduced vulnerable crate is never
+# silently masked.
 [advisories]
 ignore = [
-    "RUSTSEC-2026-0187", # lopdf stack overflow; blocked by pdf-extract/printpdf versions
     "RUSTSEC-2026-0194", # quick-xml duplicate attr check; blocked by ooxmlsdk/calamine
     "RUSTSEC-2026-0195", # quick-xml namespace allocation; blocked by ooxmlsdk/calamine
-    "RUSTSEC-2024-0384", # instant unmaintained; transitive via notify 7 (no upgrade path)
     "RUSTSEC-2024-0436", # paste unmaintained; transitive via tokenizers 0.21 (embeddings feature)
-    "RUSTSEC-2025-0134", # rustls-pemfile unmaintained; transitive via tonic 0.12 (opentelemetry-otlp 0.29)
-    "RUSTSEC-2026-0192", # ttf-parser unmaintained; transitive via printpdf
     "RUSTSEC-2026-0253", # lru pop() panic safety; remaining copy pinned by tantivy; pop never called
 ]

@@ -84,10 +84,4 @@ fn at_defaults_predicate_has_both_names() {
 
     let cfg = ragent_config::ResearchConfig::default();
     assert_eq!(cfg.is_empty(), cfg.is_default());
-
-    let cfg = ragent_config::ChannelsConfig::default();
-    assert_eq!(cfg.is_empty(), cfg.is_default());
-
-    let cfg = ragent_config::GmailConfig::default();
-    assert_eq!(cfg.is_empty(), cfg.is_default());
 }

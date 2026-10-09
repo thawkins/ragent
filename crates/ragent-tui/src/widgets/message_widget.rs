@@ -508,41 +508,6 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
-        // ===================================================================
-        //  EMAIL / CHANNELS
-        // ===================================================================
-        "gmail" => {
-            let action = get_str(&["action"]).unwrap_or_else(|| "search".to_string());
-            match action.as_str() {
-                "search" => {
-                    let q = get_str(&["query"]).unwrap_or_default();
-                    format!("search \"{}\"", trunc120(&q))
-                }
-                "read" => {
-                    let id = get_str(&["id"]).unwrap_or_default();
-                    format!("read {}", trunc120(&id))
-                }
-                "send" | "draft" => {
-                    let to = get_str(&["to"]).unwrap_or_default();
-                    let subject = get_str(&["subject"]).unwrap_or_default();
-                    if subject.is_empty() {
-                        format!("{} to {}", action, to)
-                    } else {
-                        format!("{} to {}: {}", action, to, trunc120(&subject))
-                    }
-                }
-                other => format!("{}", other),
-            }
-        }
-        "send_channel_message" => {
-            let action = get_str(&["action"]).unwrap_or_else(|| "send".to_string());
-            let channel = get_str(&["channel"]).unwrap_or_else(|| "all".to_string());
-            if action == "send" {
-                format!("send [{}]", channel)
-            } else {
-                format!("{} [{}]", action, channel)
-            }
-        }
         "open" => {
             let target = get_str(&["target"]).unwrap_or_default();
             let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
@@ -2616,53 +2581,6 @@ pub fn tool_result_summary(
             } else {
                 Some(format!("{} {}", action, task_id))
             }
-        }
-
-        // ===================================================================
-        //  GMAIL
-        // ===================================================================
-        "gmail" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
-            match action {
-                "search" => {
-                    let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    Some(format!("{} found", pluralize(count, "message", "messages")))
-                }
-                "send" => {
-                    let id = out.get("message_id").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("sent ({})", trunc120(id)))
-                }
-                "draft" => {
-                    let id = out.get("draft_id").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(format!("drafted ({})", trunc120(id)))
-                }
-                "status" => {
-                    let auth = out
-                        .get("authenticated")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    Some(format!(
-                        "status: {}",
-                        if auth {
-                            "authenticated"
-                        } else {
-                            "not authenticated"
-                        }
-                    ))
-                }
-                other => Some(other.to_string()),
-            }
-        }
-
-        // ===================================================================
-        //  CHANNELS
-        // ===================================================================
-        "send_channel_message" => {
-            let delivered = out.get("delivered").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!(
-                "{} delivered",
-                pluralize(delivered, "message", "messages")
-            ))
         }
 
         // ===================================================================

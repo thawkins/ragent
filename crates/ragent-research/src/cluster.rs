@@ -448,14 +448,10 @@ fn find_source_files(sources_dir: &Path) -> Result<Vec<std::path::PathBuf>, Rese
 }
 
 fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> String {
-    let bytes = s.as_bytes();
-    if bytes.len() <= max_bytes {
+    if s.len() <= max_bytes {
         return s.to_string();
     }
-    let mut cut = max_bytes;
-    while cut > 0 && !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
+    let cut = ragent_types::strutil::floor_char_boundary(s, max_bytes);
     let mut out = String::with_capacity(cut + 64);
     out.push_str(&s[..cut]);
     out.push_str("\n\n... _(truncated - source exceeded per-file context budget)_\n");

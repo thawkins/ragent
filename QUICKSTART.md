@@ -747,7 +747,7 @@ The AI agent can use these tools during a session:
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 
-151 tools are registered in total across 22 categories — run `/tools` in the
+149 tools are registered in total across 21 categories — run `/tools` in the
 TUI to list them all.
 
 The **PDF family** (`pdf_read`, `pdf_write`) reads and writes PDF files

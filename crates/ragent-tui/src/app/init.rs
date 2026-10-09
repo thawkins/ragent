@@ -83,7 +83,7 @@ impl App {
         let configured_provider = Self::detect_provider(&storage);
         // Best-effort startup cleanup; failure leaves stale rows only.
         if let Err(e) = storage.delete_discovered_models("huggingface") {
-            tracing::debug!(error = %e, "stale huggingface model cleanup failed");
+            tracing::warn!(error = %e, "stale huggingface model cleanup failed");
         }
         sub.record("App: provider detect", t0.elapsed());
 

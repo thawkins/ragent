@@ -2222,7 +2222,7 @@ impl ResearchSession {
         let use_iterative =
             config.analysis.iterations.is_some() || config.analysis.depth == Some(Depth::Deep);
         // PDF files supplied via --from-file automatically enable PDF web sources
-        // for the gather phase (FR-XXX).
+        // for the gather phase.
         let from_file_pdf = config
             .input
             .from_files

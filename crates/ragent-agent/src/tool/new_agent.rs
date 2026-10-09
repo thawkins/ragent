@@ -232,5 +232,5 @@ impl Tool for NewAgentTool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/new_agent_tests.rs"]
+#[path = "../../tests/inline/new_agent_tests.rs"]
 mod tests;

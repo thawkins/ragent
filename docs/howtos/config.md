@@ -44,20 +44,18 @@ the project root `README.md` and the **Tutorial** in
    - 7.21 [`yolo`](#721-yolo)
    - 7.22 [`edit_log`](#722-edit_log)
    - 7.23 [`prices`](#723-prices)
-   - 7.24 [`channels`](#724-channels)
-   - 7.25 [`gmail`](#725-gmail)
-   - 7.26 [`telemetry`](#726-telemetry)
-   - 7.27 [`agent_perf`](#727-agent_perf)
-   - 7.28 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#728-search-api-keys)
-   - 7.29 [`sdd`](#729-sdd)
-   - 7.30 [`trigger`](#730-trigger)
-   - 7.31 [`piegap`](#731-piegap)
-   - 7.32 [`research`](#732-research)
-   - 7.33 [`loop`](#733-loop)
-   - 7.34 [`activity_log`](#734-activity_log)
-    - 7.35 [`plugins`](#735-plugins)
-    - 7.36 [`input_queue_capacity`](#736-input_queue_capacity)
-    - 7.37 [`connectors`](#737-connectors)
+   - 7.24 [`telemetry`](#724-telemetry)
+   - 7.25 [`agent_perf`](#725-agent_perf)
+   - 7.26 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#726-search-api-keys)
+   - 7.27 [`sdd`](#727-sdd)
+   - 7.28 [`trigger`](#728-trigger)
+   - 7.29 [`piegap`](#729-piegap)
+   - 7.30 [`research`](#730-research)
+   - 7.31 [`loop`](#731-loop)
+   - 7.32 [`activity_log`](#732-activity_log)
+    - 7.33 [`plugins`](#733-plugins)
+    - 7.34 [`input_queue_capacity`](#734-input_queue_capacity)
+    - 7.35 [`connectors`](#735-connectors)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -75,7 +73,7 @@ All ragent runtime behaviour is driven by a single layered JSON configuration:
 - **Tool visibility** (which tool families are advertised to the LLM)
 - **Memory, compaction, and retrieval** settings
 - **Telemetry / OpenTelemetry export**
-- **External integrations** (GitLab, Telegram/Discord channels, Gmail)
+- **External integrations** (GitLab)
 - **Feature flags** (experimental, SDD, pie-gap, triggers, research)
 
 The config is loaded once at startup by `ragent-config::Config::load`, merged
@@ -172,7 +170,7 @@ different merge strategies:
 
 | Section | Strategy |
 | ------- | -------- |
-| `username`, API keys, `gitlab`, `channels`, `gmail` | Overlay overrides base when `Some`. |
+| `username`, API keys, `gitlab` | Overlay overrides base when `Some`. |
 | `defaultAgent` | Overlay overrides when explicitly set or different from default. |
 | `provider` | Deep merge per provider key: provider-level `api`, `env`, `thinking`, and `options` are replaced when the overlay specifies them, while `models` entries are merged per-model-id so a partial overlay (e.g. `provider.openrouter.models."anthropic/claude-sonnet-4".thinking`) does not discard lower-layer fields such as `name` or `capabilities`. Model-level `thinking` overrides provider-level `thinking`. |
 | `agent`, `command`, `mcp` | Per-key overlay replaces base entry. |
@@ -1135,68 +1133,7 @@ When merged, overlay entries replace base entries with the same model id
 
 ---
 
-### 7.24 `channels`
-
-External messaging channel configuration for the `send_channel_message` tool.
-
-```json
-{
-  "channels": {
-    "enabled": true,
-    "telegram": { "bot_token": "env:TELEGRAM_BOT_TOKEN", "chat_id": "-100123" },
-    "discord": { "webhook_url": "https://discord.com/api/webhooks/..." }
-  }
-}
-```
-
-#### `ChannelsConfig` schema
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `enabled` | `bool` | `false` | Master switch for the channel messaging tool. |
-| `telegram` | `Option<TelegramChannelConfig>` | `None` | Telegram bot channel. |
-| `discord` | `Option<DiscordChannelConfig>` | `None` | Discord webhook channel. |
-
-**`TelegramChannelConfig`**: `bot_token: Option<String>`, `chat_id:
-Option<String>`, `base_url: Option<String>` (defaults to
-`https://api.telegram.org`).
-
-**`DiscordChannelConfig`**: `webhook_url: Option<String>`.
-
-All token/secret fields support the `env:VAR_NAME` indirection — the value is
-read from the named environment variable at use time, so secrets do not need
-to live in the config file.
-
----
-
-### 7.25 `gmail`
-
-Gmail tool configuration (OAuth2 client credentials).
-
-```json
-{
-  "gmail": {
-    "client_id": "...apps.googleusercontent.com",
-    "client_secret": "env:GMAIL_CLIENT_SECRET"
-  }
-}
-```
-
-#### `GmailConfig` schema
-
-| Field | Type | Default | Description |
-| ----- | ---- | ------- | ----------- |
-| `client_id` | `Option<String>` | `None` | OAuth2 client ID. Supports `env:VAR_NAME`. Falls back to `GMAIL_CLIENT_ID`. |
-| `client_secret` | `Option<String>` | `None` | OAuth2 client secret. Supports `env:VAR_NAME`. Falls back to `GMAIL_CLIENT_SECRET`. |
-| `base_url` | `Option<String>` | `None` | Optional HTTP endpoint override (defaults to `https://gmail.googleapis.com`). |
-
-The OAuth2 access/refresh tokens are managed by the `gmail` tool itself
-(`auth`/`status`/`logout` actions) and stored encrypted in `ragent-storage` —
-never in this file.
-
----
-
-### 7.26 `telemetry`
+### 7.24 `telemetry`
 
 OpenTelemetry metrics export configuration.
 
@@ -1243,7 +1180,7 @@ via `apply_legacy_flag()`.
 
 ---
 
-### 7.27 `agent_perf`
+### 7.25 `agent_perf`
 
 Agent-loop performance configuration.
 
@@ -1276,7 +1213,7 @@ any are present.
 
 ---
 
-### 7.28 Search API keys
+### 7.26 Search API keys
 
 Several API keys for the `mf_search` / `websearch` tools can be stored in the
 config file. Environment variables always take precedence.
@@ -1295,7 +1232,7 @@ search engine alongside the keyless backends (OpenAlex, Wikipedia).
 
 ---
 
-### 7.29 `sdd`
+### 7.27 `sdd`
 
 Spec-Driven Development (SDD) capability toggles. All flags default to `false`
 (opt-in).
@@ -1341,7 +1278,7 @@ For the spec system, see [`docs/howtos/spec.md`](spec.md).
 
 ---
 
-### 7.30 `trigger`
+### 7.28 `trigger`
 
 Dynamic trigger rule system configuration.
 
@@ -1368,7 +1305,7 @@ section is omitted from serialised output when nothing is configured.
 
 ---
 
-### 7.31 `piegap`
+### 7.29 `piegap`
 
 Pie feature gap toggles. Each flag gates a standalone pie-derived feature. All
 default to `false` (opt-in).
@@ -1412,7 +1349,7 @@ enabled.
 
 ---
 
-### 7.32 `research`
+### 7.30 `research`
 
 Research subsystem configuration.
 
@@ -1472,7 +1409,7 @@ For the research system, see [`docs/howtos/research.md`](research.md).
 
 ---
 
-### 7.33 `loop`
+### 7.31 `loop`
 
 Goal-driven `/loop` run budgets and checkpoints (see
 [`docs/howtos/loopprogramming.md`](loopprogramming.md)). The whole section is
@@ -1506,7 +1443,7 @@ win.
 
 ---
 
-### 7.34 `activity_log`
+### 7.32 `activity_log`
 
 ```json
 {
@@ -1520,7 +1457,7 @@ win.
 
 Toggle at runtime with `/alog on|off`.
 
-### 7.35 `plugins`
+### 7.33 `plugins`
 
 Plugin subsystem configuration (spec `plugins`). Controls the master switch,
 the sandbox budgets, the store location, and per-plugin permission grants.
@@ -1554,7 +1491,7 @@ user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|
 in the TUI or `ragent plugins <sub>` from the CLI. See
 [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
 
-### 7.36 `input_queue_capacity`
+### 7.34 `input_queue_capacity`
 
 Maximum number of messages the TUI message input queue may hold (spec
 `inputqueue`). While the primary agent is executing, messages submitted with
@@ -1576,7 +1513,7 @@ absent user-global value. The per-run queue is in memory only and is never
 persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
 (see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
 
-### 7.37 `connectors`
+### 7.35 `connectors`
 
 Connector subsystem configuration (spec `connectors`). Controls the master
 switch, the connector store location, the catalogue endpoints and fetch budgets,
@@ -1800,21 +1737,6 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "output_per_1m": 10.00
     }
   ],
-
-
-  "channels": {
-    "enabled": true,
-    "telegram": {
-      "bot_token": "env:TELEGRAM_BOT_TOKEN",
-      "chat_id": "-100123"
-    }
-  },
-
-  "gmail": {
-    "client_id": "env:GMAIL_CLIENT_ID",
-    "client_secret": "env:GMAIL_CLIENT_SECRET"
-  },
-
   "telemetry": {
     "otel": {
       "enabled": false,
@@ -2015,20 +1937,6 @@ back to FTS5-only mode.
 }
 ```
 
-### Telegram notifications
-
-```json
-{
-  "channels": {
-    "enabled": true,
-    "telegram": {
-      "bot_token": "env:TELEGRAM_BOT_TOKEN",
-      "chat_id": "env:TELEGRAM_CHAT_ID"
-    }
-  }
-}
-```
-
 ### Model Router with fallback chains
 
 ```json
@@ -2104,7 +2012,6 @@ This is merged last, with the highest precedence.
 | [`docs/howtos/codeindex.md`](codeindex.md) | Code index (tree-sitter, search, graph) |
 | [`docs/howtos/spec.md`](spec.md) | Spec lifecycle management |
 | [`docs/howtos/research.md`](research.md) | Research system |
-| [`docs/howtos/communications.md`](communications.md) | Gmail and messaging channels |
 | [`docs/howtos/reverse.md`](reverse.md) | GitHub repo reverse-engineering |
 | [`README.md`](../../README.md) | Project overview and quick start |
 | [`SPEC.md`](../../SPEC.md) | Full configuration schema reference |

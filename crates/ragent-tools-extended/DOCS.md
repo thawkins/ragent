@@ -16,7 +16,7 @@ engine.
 
 - tokio, async-trait, futures, serde, serde_json, anyhow, thiserror, tracing, chrono, uuid, dirs
 - reqwest (with cookies/gzip/deflate), tokio-tungstenite, regex, percent-encoding, url, rusqlite
-- html2text, readability-rs, base64, lingua
+- html2text, readability-rs, lingua
 - quick-xml, printpdf, pdf-extract, lopdf
 - ort, tokenizers, ndarray (optional, `embeddings` feature)
 
@@ -41,7 +41,6 @@ Dev-dependencies: tempfile, axum.
 ### Modules
 
 - **browser** — `BrowserTool` (`browser`) — Chrome DevTools Protocol automation. Submodules: `actions`, `cdp` (`CdpConnection`, `TargetInfo`, `VersionInfo`, `CdpError`), `launch` (`find_browser_binary`).
-- **channels** — `SendChannelMessageTool` (`send_channel_message`), `resolve_secret`.
 - **codeindex_search** — `CodeIndexSearchTool` (`codeindex_search`).
 - **codeindex_status** — `CodeIndexStatusTool` (`codeindex_status`).
 - **codeindex_symbols** — `CodeIndexSymbolsTool` (`codeindex_symbols`).
@@ -53,7 +52,6 @@ Dev-dependencies: tempfile, axum.
 - **codeindex_explain** — `CodeIndexExplainTool` (`codeindex_explain`).
 - **codeindex_communities** — `CodeIndexCommunitiesTool` (`codeindex_communities`).
 - **document_extract** — `DocumentFormat` (enum), `detect_document_format`, `ExtractedDocument`, `extract_file_as_markdown`.
-- **gmail** — `GmailTool` (`gmail`), `GmailTokens`, `TokenStore` (trait), `SqliteTokenStore`, `GmailResolvedConfig`.
 - **http_request** — `HttpRequestTool` (`http_request`).
 - **masterfetch** — MasterFetch web content engine. Types: `PageType`, `SourceType`, `PageMetadata`, `EnvelopeSignals`, `FetchResult`, `SearchResult`, `CrawlPage`. Tools: `MfFetchTool`, `MfCrawlTool`, `MfSearchTool`, `MfScreenshotTool`, `MfCacheClearTool`, `MfVersionTool`. Submodules: `cache`, `envelope`, `extractor`, `focus`, `http`, `language`, `links`, `metadata`, `pdf`, `robots`, `search`, `security`, `urlnorm`, `youtube`, `crawl` (`CrawlOrchestrator`, `CrawlConfig`, `CrawlResult`).
 - **pdf_common** — `MAX_OUTPUT_BYTES`, `truncate_output`, and the `resolve_path` re-export shared by the PDF tools.

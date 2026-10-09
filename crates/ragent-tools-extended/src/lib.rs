@@ -4,7 +4,6 @@
 //! compatibility surface for the extracted runtime crates.
 
 pub mod archdoc;
-pub mod channels;
 pub mod codeindex_communities;
 pub mod codeindex_dependencies;
 pub mod codeindex_explain;
@@ -17,7 +16,6 @@ pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
 pub mod document_extract;
-pub mod gmail;
 pub mod http_request;
 pub mod masterfetch;
 pub mod pdf_common;
@@ -491,9 +489,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_explain::CodeIndexExplainTool));
     // graphCI T-014: codeindex_communities tool (FR-013, FR-017).
     registry.register(Arc::new(codeindex_communities::CodeIndexCommunitiesTool));
-    // JCODEPLAN M7 - external integrations.
-    registry.register(Arc::new(gmail::GmailTool::new()));
-    registry.register(Arc::new(channels::SendChannelMessageTool));
 
     // MasterFetch tools (FR-020)
     registry.register(Arc::new(masterfetch::tools::fetch::MfFetchTool));

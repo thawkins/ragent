@@ -304,5 +304,5 @@ impl Default for TriggerRuntime {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/runtime_tests.rs"]
+#[path = "../../tests/inline/runtime_tests.rs"]
 mod tests;

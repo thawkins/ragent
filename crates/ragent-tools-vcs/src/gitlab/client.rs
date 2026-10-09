@@ -736,5 +736,5 @@ fn retry_after_secs(resp: &reqwest::Response) -> u64 {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/client_tests.rs"]
+#[path = "../../tests/inline/client_tests.rs"]
 mod tests;

@@ -135,7 +135,7 @@ From: /config help
   `piegap`, and `experimental` are labelled `global + project (union)` when a
   value is set in both layers.
 - **Secret redaction** - keys matching `*_api_key` / `*_key`, plus the
-  `openalex_email`, `gitlab`, `gmail`, and `channels` sections, are redacted
+  `openalex_email`, and `gitlab` sections, are redacted
   before display.
 - **Storage** - the resolved SQLite database path.
 - **Code Index** - the index directory `.ragent/codeindex`.

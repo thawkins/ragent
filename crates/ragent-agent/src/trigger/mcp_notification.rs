@@ -489,5 +489,5 @@ fn extract_text(value: &Value) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/mcp_notification_tests.rs"]
+#[path = "../../tests/inline/mcp_notification_tests.rs"]
 mod tests;

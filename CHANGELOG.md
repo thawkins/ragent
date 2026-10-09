@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.130] - 2026-10-08
+
+### Fixed
+
+- **`/events` SSE connection-cap now builds on stable Rust.** The connection
+  budget reservation in `crates/ragent-server/src/routes/mod.rs` used
+  `AtomicUsize::try_update`, which is an unstable library feature
+  (`atomic_try_update`, issue rust-lang/rust#135894) and fails to compile with
+  `error[E0658]: use of unstable library feature 'atomic_try_update'` on a
+  stable toolchain. Its deprecated predecessor `fetch_update` compiles but
+  emits a `deprecated` warning, so neither is portable. The reservation is now
+  a `compare_exchange_weak` loop, which is stable across supported toolchains
+  and preserves the exact semantics (reserve a slot while the count is below
+  [`MAX_SSE_CONNECTIONS`], otherwise reject with `503`).
+
 ## [Unreleased]
 
 ### Commits (last 10)
@@ -97,6 +112,26 @@ The following entries describe the uncommitted working-tree set on top of
   message widget are deleted.
 
 Registered tool count falls 152 -> 151 across 22 categories.
+
+- **`gmail` and `send_channel_message` tools and their dependency code** — the
+  `gmail` tool (`GmailTool`, Gmail REST v1 with encrypted OAuth2 token storage,
+  `SqliteTokenStore`, `GmailTokens`) and the `send_channel_message` tool
+  (`SendChannelMessageTool`, Telegram/Discord sinks) are deleted along with the
+  whole `ragent-tools-extended::gmail` and `::channels` modules and their tests
+  (`tests/test_gmail.rs`, `tests/test_channels.rs`). Both are removed from
+  `create_extended_registry()`. The `base64` dependency is dropped from the
+  `ragent-tools-extended` manifest (its only user was `gmail.rs`).
+- **`gmail`/`channels` configuration in `ragent-config`** — `GmailConfig`,
+  `ChannelsConfig`, `TelegramChannelConfig`, and `DiscordChannelConfig`, the
+  `Config.gmail` / `Config.channels` fields, their merge arms, and
+  `user_dirs::global_gmail_db_path` are removed. Configs that still carry a
+  `gmail` or `channels` key are ignored (unknown keys are tolerated).
+- **Gmail/Telegram/Discord credential seeding** — the
+  `GMAIL_ACCESS_TOKEN`/`GMAIL_REFRESH_TOKEN`/`GMAIL_CLIENT_SECRET` and
+  `TELEGRAM_BOT_TOKEN`/`DISCORD_WEBHOOK_URL` entries are dropped from the startup
+  secret-registry seed in `src/main.rs`.
+
+Registered tool count falls 151 -> 149 across 21 categories.
 
 ## [1.0.129] - 2026-10-07
 

@@ -255,5 +255,5 @@ fn extract_query_string(url: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/bedrock_sigv4_tests.rs"]
+#[path = "../../tests/inline/bedrock_sigv4_tests.rs"]
 mod tests;

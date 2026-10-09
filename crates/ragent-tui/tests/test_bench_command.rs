@@ -122,6 +122,58 @@ async fn test_bench_list_shows_suites_and_profiles() {
 }
 
 #[tokio::test]
+async fn test_bench_help_shows_command_table_and_supported_languages() {
+    let mut app = configured_app();
+
+    app.execute_slash_command("/bench help").await;
+
+    let text = app
+        .messages
+        .last()
+        .expect("bench help message")
+        .text_content();
+    // Each command gets its own table row.
+    assert!(text.contains("Benchmark Commands"));
+    let command_rows = text
+        .lines()
+        .filter(|line| line.starts_with("| `/bench"))
+        .count();
+    assert!(
+        command_rows >= 8,
+        "expected one table row per command, got {command_rows}: {text}"
+    );
+    for command in [
+        "/bench list",
+        "/bench show",
+        "/bench status",
+        "/bench init",
+        "/bench run",
+        "/bench open last",
+        "/bench cancel",
+        "/bench help",
+    ] {
+        assert!(
+            text.contains(command),
+            "help missing command row: {command}"
+        );
+    }
+    // Full benchmark list with supported languages.
+    assert!(text.contains("## Benchmarks"));
+    assert!(text.contains("supported languages"));
+    assert!(text.contains("humaneval"));
+    assert!(text.contains("mbpp"));
+    assert!(text.contains("bigcodebench"));
+    // Multilingual suites render their full language list.
+    assert!(text.contains("cpp"));
+    assert!(text.contains("haskell"));
+    assert!(text.contains("typescript"));
+    assert!(text.contains("diff"));
+    // Virtual targets and profiles are listed too.
+    assert!(text.contains("Virtual Targets"));
+    assert!(text.contains("quick"));
+}
+
+#[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_bench_init_humaneval_creates_data_root() {
     let (_guard, _temp, _cwd) = enter_isolated_project_dir();

@@ -429,5 +429,5 @@ fn load_template_from_file(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/template_mod_tests.rs"]
+#[path = "../../tests/inline/template_mod_tests.rs"]
 mod tests;

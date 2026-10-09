@@ -675,5 +675,5 @@ fn format_model_name(name: &str, details: &OllamaModelDetails) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/ollama_tests.rs"]
+#[path = "../../tests/inline/ollama_tests.rs"]
 mod tests;

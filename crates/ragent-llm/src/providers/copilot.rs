@@ -41,6 +41,12 @@ use ragent_types::event::FinishReason;
 /// token exchange).
 const DEFAULT_COPILOT_API_BASE: &str = "https://api.githubcopilot.com";
 
+/// Maximum number of bytes of a redacted provider error body written to the log.
+///
+/// The body is already secret-redacted, but the redactor only masks recognised
+/// credential shapes; this bound keeps an oversized error payload out of the log.
+const MAX_ERR_LOG_BYTES: usize = 2048;
+
 /// GitHub Models inference endpoint (used as fallback when the Copilot
 /// internal token exchange is unavailable, e.g. for `gh` CLI OAuth tokens).
 const GITHUB_MODELS_API_BASE: &str = "https://models.inference.ai.azure.com";
@@ -371,7 +377,11 @@ impl LlmClient for CopilotClient {
             let error_body = read_body_capped(response, MAX_ERROR_BODY_BYTES).await;
             // SEC: redact the provider error body before logging or surfacing it.
             let error_body = ragent_types::sanitize::redact_secrets(&error_body);
-            tracing::error!(provider = "copilot", url = %url, status = %status, body = %error_body, "chat error");
+            // SEC: cap the logged body. The redactor only masks recognised
+            // credential shapes, so bound the size too before logging.
+            let error_preview =
+                ragent_types::strutil::truncate_bytes_no_ellipsis(&error_body, MAX_ERR_LOG_BYTES);
+            tracing::error!(provider = "copilot", url = %url, status = %status, body = %error_preview, "chat error");
             // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
             // Extract a clean message from the JSON error response if possible.
             let detail = parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
@@ -575,8 +585,8 @@ impl LlmClient for CopilotClient {
 /// ```no_run
 /// use ragent_llm::provider::copilot::find_copilot_token;
 ///
-/// if let Some(token) = find_copilot_token() {
-///     println!("Found Copilot token: {}", &token[..8]);
+/// if let Some(_token) = find_copilot_token() {
+///     println!("Found Copilot token: <redacted>");
 /// }
 /// ```
 #[must_use]
@@ -772,7 +782,7 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
 /// # async fn example() -> anyhow::Result<()> {
 /// let device_code = "abc123";
 /// match poll_copilot_device_flow(device_code).await? {
-///     Some(token) => println!("Authorised! Token: {}", &token[..8]),
+///     Some(_token) => println!("Authorised! Token: <redacted>"),
 ///     None => println!("Still waiting for user authorisation..."),
 /// }
 /// # Ok(())
@@ -932,7 +942,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 ///
 /// # async fn example() -> anyhow::Result<()> {
 /// let auth = resolve_copilot_auth("ghu_xxxxxxxxxxxx", None).await?;
-/// println!("Using API at {} with token {}", auth.base_url, &auth.token[..8]);
+/// println!("Using API at {} with token <redacted>", auth.base_url);
 /// # Ok(())
 /// # }
 /// ```
@@ -1445,5 +1455,5 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/copilot_tests.rs"]
+#[path = "../../tests/inline/copilot_tests.rs"]
 mod tests;

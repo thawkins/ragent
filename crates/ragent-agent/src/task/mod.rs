@@ -1295,5 +1295,5 @@ fn is_cancel_error(err: &anyhow::Error) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/task_mod_tests.rs"]
+#[path = "../../tests/inline/task_mod_tests.rs"]
 mod tests;

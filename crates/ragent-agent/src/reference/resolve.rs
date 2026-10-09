@@ -387,5 +387,5 @@ fn list_recursive(
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/resolve_tests.rs"]
+#[path = "../../tests/inline/resolve_tests.rs"]
 mod tests;

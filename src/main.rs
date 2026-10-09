@@ -552,8 +552,8 @@ async fn async_main() -> Result<()> {
 
     // Also seed from well-known environment variables.
     //
-    // SEC-ragent-types-004 (SECTASKS T-046): the GitLab / GitHub / Tavily /
-    // Gmail credentials the tools accept from the environment were never
+    // SEC-ragent-types-004 (SECTASKS T-046): the GitLab / GitHub / Tavily
+    // credentials the tools accept from the environment were never
     // registered, so a token echoed by a failing command could reach the log or
     // the SSE stream in cleartext - the pattern layer does not know
     // `glpat-...` shapes in every position.
@@ -570,11 +570,6 @@ async fn async_main() -> Result<()> {
         "PERPLEXITY_API_KEY",
         "EXA_API_KEY",
         "SERPER_API_KEY",
-        "GMAIL_ACCESS_TOKEN",
-        "GMAIL_REFRESH_TOKEN",
-        "GMAIL_CLIENT_SECRET",
-        "TELEGRAM_BOT_TOKEN",
-        "DISCORD_WEBHOOK_URL",
     ] {
         if let Ok(val) = std::env::var(var) {
             ragent_agent::sanitize::register_secret(&val);
@@ -1184,7 +1179,7 @@ async fn async_main() -> Result<()> {
                         )?;
                     }
                     Err(e) => {
-                        eprintln!("Failed to export session: {}", e);
+                        eprintln!("ragent session export: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -1215,7 +1210,7 @@ async fn async_main() -> Result<()> {
                         )?;
                     }
                     Err(e) => {
-                        eprintln!("Failed to import session archive: {}", e);
+                        eprintln!("ragent session import: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -1439,7 +1434,7 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
                     },
                 ) else {
                     eprintln!(
-                        "ragent spec govcreate: [err] no model configured \
+                        "ragent spec govcreate: no model configured \
                          - pass --model provider/model or set one via /model in the TUI"
                     );
                     std::process::exit(2);
@@ -1562,7 +1557,7 @@ fn main() -> Result<()> {
     if let Err(e) = &result
         && stderr_spool::is_active()
     {
-        println!("Error: {e}");
+        println!("ragent: {e}");
     }
     result
 }

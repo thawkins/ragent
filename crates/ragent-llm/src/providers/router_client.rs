@@ -584,15 +584,26 @@ impl RouterClient {
 }
 
 /// Resolve a custom base URL from environment variables for a downstream provider.
+///
+/// The value comes from the ambient environment, so it is validated by
+/// [`super::base_url::validate_base_url`] before use: a non-`http(s)` scheme or
+/// a hostless value is rejected (logged and treated as unset) rather than
+/// dialled, so a poisoned environment cannot redirect the request.
 fn resolve_env_base_url(provider_id: &str) -> Option<String> {
-    match provider_id {
-        "generic_openai" => std::env::var("GENERIC_OPENAI_API_BASE")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_BASE")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
+    let raw = match provider_id {
+        "generic_openai" => std::env::var("GENERIC_OPENAI_API_BASE").ok(),
+        "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_BASE").ok(),
         _ => None,
+    }?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    match super::base_url::validate_base_url(provider_id, &raw) {
+        Ok(valid) => Some(valid),
+        Err(e) => {
+            tracing::warn!(provider = %provider_id, error = %e, "ignoring invalid base URL from environment");
+            None
+        }
     }
 }
 

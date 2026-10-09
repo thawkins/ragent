@@ -39,14 +39,7 @@ const DEFAULT_OPENROUTER_HOST: &str = "https://openrouter.ai";
 /// ```
 #[must_use]
 pub fn mask_key(key: &str) -> String {
-    if key.is_empty() {
-        return String::from("(none)");
-    }
-    // Find the byte offset of the 4th character from the end (or the start of
-    // the string when it has fewer than four characters), avoiding the
-    // intermediate `Vec<char>` allocation.
-    let start = key.char_indices().rev().nth(3).map_or(0, |(i, _)| i);
-    format!("...{}", &key[start..])
+    ragent_types::sanitize::mask_key(key)
 }
 
 /// Provider implementation for OpenRouter.

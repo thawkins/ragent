@@ -109,7 +109,7 @@ pub fn gh_cli_token() -> Option<String> {
     if token.is_empty() {
         return None;
     }
-    tracing::debug!("using `gh auth token` as the GitHub credential");
+    tracing::debug!("resolved GitHub credential via the `gh` CLI token helper");
     *GH_CLI_TOKEN_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(token.clone());

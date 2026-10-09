@@ -374,11 +374,16 @@ where
             Err(e) if is_retryable_error(&e) && attempt < max_retries => {
                 last_error = Some(anyhow::anyhow!("Request failed: {}", e));
                 let delay = backoff_delay(attempt);
+                // SEC: log a classified summary rather than the raw reqwest error
+                // Display, which can embed the request URL and (for body errors)
+                // the response payload.
                 tracing::debug!(
                     attempt = attempt + 1,
                     max_retries = max_retries,
                     delay_ms = delay.as_millis() as u64,
-                    error = %e,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    status = e.status().map(|s| s.as_u16()),
                     "Retrying HTTP request after transient failure"
                 );
                 tokio::time::sleep(delay).await;

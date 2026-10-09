@@ -1957,5 +1957,5 @@ impl McpClientBackend for McpClient {
 }
 
 #[cfg(all(test, unix))]
-#[path = "../tests/inline/mod_orphan_sweep_tests.rs"]
+#[path = "../../tests/inline/mod_orphan_sweep_tests.rs"]
 mod orphan_sweep_tests;

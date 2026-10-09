@@ -340,5 +340,5 @@ pub fn format_forked_result(result: &ForkedSkillResult) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/invoke_tests.rs"]
+#[path = "../../tests/inline/invoke_tests.rs"]
 mod tests;

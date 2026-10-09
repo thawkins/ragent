@@ -1,237 +1,187 @@
 # Code Audit Report
 
-**Project**: Rust 2024 Cargo workspace (17 crates + root `ragent` binary)
-**Scope**: Full project (excludes `target/`, `vendor/`, `.git/`, `node_modules/`, `dist/`, `build/`, `log/`)
-**Findings**: 77 total (16 high, 36 medium, 25 low)
+**Project**: Rust 2024 Cargo workspace — `ragent`, an AI coding agent CLI/TUI (18 crates + root binary; tokio, ratatui, axum, SQLite, tracing, clippy pedantic/nursery)
+**Scope**: Full project source (`crates/*/src`, `src/`, `Cargo.toml`, `deny.toml`, test suites) — `deep` was not a path, so no sub-directory scoping applied
+**Findings**: 73 total (8 high, 19 medium, 46 low)
 
 ---
 
 ## High Priority
 
-### Standards
-- Inconsistent acronym casing for the same product within one crate: `GitHubClient`/`GitLabClient` vs `Github*`/`Gitlab*` tool types — `crates/ragent-tools-vcs/src/github/client.rs:86`, `crates/ragent-tools-vcs/src/gitlab/client.rs:14` (and `github_issues.rs:232`, `gitlab_issues.rs:398`)
-
 ### Duplication
-- Two near-identical full `snapshot` modules (~326 vs ~342 lines); the agent copy is unreferenced and stale (live code uses `ragent_storage::snapshot`) — `crates/ragent-agent/src/snapshot/mod.rs:1` (and `crates/ragent-storage/src/snapshot.rs:1`)
-- `build_request_body` for OpenAI-compatible providers is the same ~130-line body copied across six files — `crates/ragent-llm/src/providers/openai.rs:204`, `openrouter.rs:458`, `generic_openai.rs`, `copilot.rs:303`, `ollama.rs:264`, `ollama_cloud.rs:341`
-- OpenAI SSE stream parser duplicated — `crates/ragent-llm/src/providers/openai.rs:387` (and `crates/ragent-llm/src/providers/openrouter.rs:590`)
-- Provider→env-var API key resolution table duplicated in four places with near-identical match arms — `crates/ragent-agent/src/session/processor.rs:4426`, `crates/ragent-agent/src/one_shot.rs:26`, `crates/ragent-agent/src/research_adapter.rs:214`, `crates/ragent-llm/src/providers/router_client.rs:551`/`:578`
-
-### Security
-- `.gitignore` does not ignore certificate/credential files: `*.pem`, `*.p12`, `*.pfx`, `service-account.json`, `credentials.json` — `.gitignore:50`
-- `.gitignore` ignores `*.db` but not the SQLite sidecars `*.db-wal`/`*.db-shm`, which can hold plaintext credential-store and session-history pages — `.gitignore:48`
-
-### Logging
-- Debug log emits up to 800 bytes of the raw request body (full chat messages / user prompt content) unredacted — `crates/ragent-llm/src/providers/ollama_cloud.rs:564`
+- Six per-engine `truncate_query`/`truncate_snippet` wrappers are pure one-line delegations to `engine::{truncate_query_to, truncate_snippet, truncate_snippet_bytes}` — collapse the indirection — `crates/ragent-tools-extended/src/masterfetch/search/exa.rs:281` (and `tavily.rs:245`, `perplexity.rs:264`, `openalex.rs:452`, `wikipedia.rs:575`, `serper.rs:310`) all forwarding to `engine.rs:874`
+- UTF-8/char-boundary truncation reimplemented ~15x with identical `char_indices`/`chars().take()` logic — extract one shared `truncate_to_char_boundary` into `ragent-types`/`ragent-surface` — `crates/ragent-agent/src/session/history.rs:250` (and `crates/ragent-agent/src/task/mod.rs:1256`, `crates/ragent-research/src/cluster.rs:450`, `crates/ragent-research/src/session/topic.rs:432`, `crates/ragent-tui/src/app/helpers.rs:308`, `crates/ragent-tui/src/widgets/message_widget.rs:105`)
+- `truncate_preview(s, max)` duplicated verbatim as a private helper in two crates — hoist to `ragent-surface::harness` — `crates/ragent-agent/src/session/processor.rs:4515` (and `crates/ragent-tools-core/src/edit_log.rs:477`)
+- `truncate_content` exists twice with near-identical signatures/bodies — `crates/ragent-agent/src/reference/resolve.rs:250` (and `crates/ragent-tools-core/src/truncate.rs:49`; tools-core already takes `impl AsRef<str>`, so agent should reuse it)
+- Provider request-body construction is copy-pasted across essentially every LLM provider — `build_request_body` appears 12x and `default_models` 16x; no shared builder in `ragent-llm` — `crates/ragent-llm/src/providers/` (openai.rs, anthropic.rs, gemini.rs, ollama.rs, openrouter.rs, bedrock.rs, azure_foundry.rs, copilot.rs, huggingface.rs, generic_openai.rs, openai_responses.rs, ollama_cloud.rs)
+- Redaction/sensitive-value masking logic recurs in ~38 source files (20+ providers plus config, storage, telemetry, server, tools, tui) — should be a single primitive — `crates/ragent-llm/src/providers/` (all), `crates/ragent-config/src/config.rs`, `crates/ragent-storage/src/storage.rs`, `crates/ragent-telemetry/src/sensitive.rs`, `crates/ragent-server/src/sse.rs`
 
 ### Testing
-- No test coverage anywhere for the Azure AI Foundry provider client (273 lines of request-building/auth/model-discovery) — `crates/ragent-llm/src/providers/azure_foundry.rs:1`
-- Core agent-loop step logic untested (1739 lines) — `crates/ragent-agent/src/session/loop_steps.rs:132`
-- Orchestrator `Coordinator` public API (job spawning, first-success policy, metrics) has zero tests — `crates/ragent-agent/src/orchestrator/coordinator.rs:211`
-- `CalculatorTool` (417 lines, expression parser) has no test — `crates/ragent-tools-core/src/calculator.rs:1`
-- Small registered tools with no coverage: `get_env.rs:1`, `agent_complete.rs:1`, `bash_reset.rs:1`, `xlsx.rs:1` — `crates/ragent-tools-core/src/`
-- Duplicated schema test suite (byte-identical bodies compiled and run twice) — `crates/ragent-tools-core/tests/inline/schema_tests.rs:9` (and `crates/ragent-tools-core/tests/test_schema_validation.rs:1`)
-- Tests that assert nothing (empty/placeholder bodies) — `crates/ragent-agent/tests/test_precompiled_regexes.rs:15`, `:40`
-- Source-scraping fragility: reads `src/app/slash.rs` and asserts on exact match-arm/help-text substrings — `crates/ragent-tui/tests/test_codeindex_backward_compat.rs:40`
-- Non-`#[ignore]`d live-network test calls the real Ollama Cloud API in CI — `crates/ragent-llm/tests/test_ollama_cloud_real.rs:10`
+- 128 inline `#[cfg(test)]` modules remain in library `src/`, violating the AGENTS-RUST rule that all tests live in each crate's `tests/` — concentrated in `crates/ragent-research/src/` (~40), `crates/ragent-llm/src/providers/` (18), `crates/ragent-agent/src/` (26) — representative site `crates/ragent-agent/src/task/mod.rs:1297`
+- Nested `#[cfg(test)]` attributes sit inside function bodies (not a trailing `mod tests`), an unusual inline-test shape the removal tooling may miss — `crates/ragent-agent/src/research_adapter.rs:325` (and `:533`, `:709`)
+
+---
 
 ## Medium Priority
 
-### Standards
-- Bare `.unwrap()` on externally-derived HTML-parser input, no `// no-panic-ok`, unguarded against malformed markup — `crates/ragent-tools-extended/src/masterfetch/extractor.rs:905`
-- `.unwrap()` on a user-facing path guarded only by `is_some()` — `crates/ragent-agent/src/tool/list_agents.rs:116`
-- `.unwrap()` on `Vec::last()` of model-produced text in research synthesis — `crates/ragent-research/src/chapter.rs:123`
-- Non-ASCII emoji in source comments violates the no-Unicode/no-emoji rule (~216 lines) — `crates/ragent-tui/src/widgets/message_widget.rs:278`
-- Acronym capitalization inside a type name — `crates/ragent-bench/src/suites/multipl_e.rs:14`
-- Missing `//!` module doc comment, inconsistent with the rest of the workspace — `crates/ragent-agent/src/orchestrator/registry.rs:1`, `orchestrator/router.rs:1`, `orchestrator/coordinator.rs:1`, `crates/ragent-agent/src/file_ops/api.rs:1`, `file_ops/wrapper.rs:1`, `crates/ragent-types/src/sanitize.rs:1`
-- Inconsistent module-file layout: mostly `mod.rs` (45 sites) but `memory/embedding.rs`+`memory/embedding/` and `app.rs`+`app/` mix named-file style — `crates/ragent-agent/src/memory/embedding.rs:1`, `crates/ragent-tui/src/app.rs:1`
-
 ### Duplication
-- `McpProbe` impl (`probe_connect` + `probe_call` bodies byte-identical) copied across CLI and TUI surfaces — `src/connectors.rs:318` (and `crates/ragent-tui/src/app/connector.rs:460`)
-- `/plugins` and `/connectors` crates carry parallel copies of the same code with no shared crate — `crates/ragent-plugins/src/harness.rs:292` (and `crates/ragent-connectors/src/harness.rs:430`), plus `help.rs:59`/`:98`
-- Store-path and ledger logic duplicated — `crates/ragent-plugins/src/store.rs:55` (and `crates/ragent-connectors/src/store.rs:77`)
-- `estimate_context_window` identical (same heuristic and 7.0 fallback) — `crates/ragent-llm/src/providers/ollama.rs:163` (and `crates/ragent-llm/src/providers/ollama_cloud.rs:226`)
-- `path_tag` identical within one crate — `crates/ragent-agent/src/tool/team_memory_read.rs:161` (and `team_memory_write.rs:192`)
-- JSONL log helper pair `pick_log_file`/`append_json_line` duplicated verbatim — `crates/ragent-tools-core/src/edit_log.rs:151` (and `crates/ragent-tools-core/src/cron_log.rs:89`)
-- `truncate_chars` duplicated — `crates/ragent-agent/src/loop_state.rs:417` (and `crates/ragent-types/src/trigger.rs:231`)
-- `handle_response` error-classification block duplicated with the same 429/403/401 shape — `crates/ragent-tools-vcs/src/github/client.rs:219` (and `crates/ragent-tools-vcs/src/gitlab/client.rs:146`)
-- `Scope` enum + `config_path` + lock-poisoning accessors duplicated — `crates/ragent-config/src/bash_lists.rs:68` (and `crates/ragent-config/src/dir_lists.rs:248`)
+- API-key masking exists as a one-off `mask_key` in openrouter only while other providers hand-roll redaction — no shared key-mask helper in `ragent-llm` — `crates/ragent-llm/src/providers/openrouter.rs:41`
+- Output truncation `truncate_output(String)` duplicated — `crates/ragent-tools-core/src/bash.rs:1226` (and `crates/ragent-tools-extended/src/pdf_common.rs:32`)
+- `truncate` generic helper duplicated across unrelated crates — `crates/ragent-agent/src/compaction/serializer.rs:167` (and `crates/ragent-surface/src/harness.rs:60`, `crates/ragent-research/src/cli.rs:862`, `crates/ragent-plugins/src/control.rs:591`)
+- Retry/backoff loops appear across ~40 files with no shared backoff utility — extract into `ragent-types` or a small `ragent-llm::retry` — `crates/ragent-llm/src/providers/http_client.rs` (and `crates/ragent-agent/src/mcp/http.rs`, `crates/ragent-telemetry/src/recorder.rs`)
+- `truncate_str(&str, max) -> String` duplicated with same name/behaviour in two crates — `crates/ragent-agent/src/task/mod.rs:1256` (and `crates/ragent-tui/src/widgets/message_widget.rs:105`)
 
 ### Logging
-- Error log includes the raw provider API error body without redaction; a provider echoing credentials would leak it — `crates/ragent-llm/src/providers/copilot.rs:485` (and unredacted `bail!` at `openai.rs:374`, `anthropic.rs:408`, `gemini.rs:576`, `huggingface.rs:561`, `ollama.rs:481`, `ollama_cloud.rs:599`, `azure_foundry.rs:148`, `azure_resource.rs:402`, `openrouter.rs:939`, `bedrock.rs:1210`)
-- Warn logs the raw SSE frame/line content, which carries streamed model output — `crates/ragent-llm/src/providers/ollama.rs:585`, `crates/ragent-llm/src/providers/openai_responses.rs:485`
-- Error log emits the full JSON tool-argument dump (`args_debug`); tool args are attacker-supplied and may carry secrets — `crates/ragent-agent/src/tool/team_create.rs:302`
-- Per-request `tracing::info!` on the hot chat path should be `debug!` — `crates/ragent-llm/src/providers/copilot.rs:445`
-- Tool denials/blocks logged at `info!`; refusal events belong at `warn!` — `crates/ragent-agent/src/session/processor.rs:3232`, `:3243`, `:3194`
+- TUI logs a message-processing failure at `debug!` while the identical failure is `error!` in the server — raise to `error!` — `crates/ragent-tui/src/app/session_ops.rs:874` (and `:916`; compare `crates/ragent-server/src/routes/mod.rs:562`)
+- Full Ollama Cloud request body (chat prompt + tool defs, up to 800 bytes) written to the debug log — redacted for secrets but still logs user content — gate behind a stricter flag or log metadata only — `crates/ragent-llm/src/providers/ollama_cloud.rs:528`
+- Provider error-response body logged verbatim (redacted for secrets only) — confirm `redact_secrets` covers all credential shapes, else log status only — `crates/ragent-llm/src/providers/copilot.rs:374`
 
 ### Security
-- Ad-hoc `std::env::var` reads of credential-bearing vars scattered outside the validated config layer — `crates/ragent-agent/src/one_shot.rs:31`, `crates/ragent-agent/src/session/processor.rs:4435`, `crates/ragent-agent/src/session/loop_steps.rs:1720`, `crates/ragent-llm/src/providers/bedrock_credentials.rs:153`, `crates/ragent-tools-vcs/src/gitlab/auth.rs:110`, `crates/ragent-tui/src/app/reverse.rs:173`, `crates/ragent-tui/src/app/models.rs:683`
-- `get_env` tool reads arbitrary process environment directly; redaction is name-substring only, so a secret in a differently-named var is returned verbatim to the model — `crates/ragent-tools-core/src/get_env.rs:16`, `:84`
-- `resolve_secret` returns env-sourced channel/Gmail credentials as plain `String`, passed straight into config with no shape/type validation — `crates/ragent-tools-extended/src/channels.rs:111`, `crates/ragent-tools-extended/src/gmail.rs:288`
+- Legacy v1 credential obfuscation key is a hardcoded, publicly-known constant (`b"ragent-obfuscation-key-v1"`); any v1 blob is trivially reversible and the literal ships in every binary — `crates/ragent-storage/src/storage.rs:113`
+- Legacy v2 credential key is derived by `blake3::derive_key` over non-secret material (`$USER:$HOME`) with a documented prior hardcoded-literal fallback; key material is guessable if those values are known — `crates/ragent-storage/src/storage.rs:259`
+- `deny.toml` suppresses quick-xml DoS advisories RUSTSEC-2026-0194/0195 on a "trusted XML input" assumption — an unmitigated DoS if ragent ever parses user- or web-supplied XML/OOXML — `deny.toml:26`
+- `deny.toml` suppresses the `unsound` use-after-free advisory RUSTSEC-2026-0253; the suppression depends entirely on "ragent never calls `LruCache::pop()`" and has no CI guard enforcing it — `deny.toml:35`
 
 ### Testing
-- Diagnostic/generator scripts living as tests with no assertions (runs by default and touches live search) — `crates/ragent-agent/tests/test_mf_orchestrator_diag.rs:1`, `crates/ragent-agent/tests/dump_registries.rs:37`
-- Duplicated sandbox helper with no shared module: `struct TempTree` defined independently in 17 `crates/ragent-plugins/tests/*.rs` and 10 `crates/ragent-connectors/tests/*.rs` files — `crates/ragent-plugins/tests/test_add.rs:13`
-- Near-identical config test triples replicate the same merge/overlay/serialize assertion bodies — `crates/ragent-config/tests/test_serper_api_key.rs:14`, `test_perplexity_api_key.rs:14`, `test_langsearch_api_key.rs:14`
-- Weak assertions dominate: only `.is_some()`/`.is_none()` on outcomes rather than the returned value — `crates/ragent-agent/src/tests/inline/runtime_tests.rs:22`, `crates/ragent-agent/tests/test_trigger_runtime.rs`, `crates/ragent-tools-extended/tests/test_archdoc_extract.rs`
-- AGENTS.md violation: tests use `/tmp` instead of `target/temp` (24 sites) — `crates/ragent-tools-core/tests/test_think.rs:21`, `crates/ragent-agent/tests/test_conversation_search.rs:14`
+- `ragent-surface` (priority focus area) has a single test file for 4 source modules; thin coverage of surface helpers/attribution/tokeniser/store-dir resolution — `crates/ragent-surface/tests/test_surface_helpers.rs:1`
+- `ragent-bench` is thinly covered: 22 `src` files vs 5 test files, with three inline modules still in `src/` — `crates/ragent-bench/src/data.rs:853` (and `:1412`, `:1529`; `crates/ragent-bench/src/model.rs:585`)
+- Inline test module embedded in a 7,778-line `layout.rs`, the largest inline block remaining; hard to maintain and should be relocated — `crates/ragent-tui/src/layout.rs:7778`
+- Inline test module in a 3,186-line `web_gatherer.rs` (research crate, largest concentration of inline tests) — `crates/ragent-research/src/web_gatherer.rs:3186`
+- Both `crates/ragent-telemetry/tests/inline/` and `crates/ragent-tools-vcs/tests/inline/` directories exist alongside relocated top-level test files; dual layout risks duplication and is inconsistent with other crates' flat `tests/` layout — `crates/ragent-telemetry/tests/inline/` (and `crates/ragent-tools-vcs/tests/inline/`)
+- `ragent-llm` provider clients (priority focus) keep inline modules across 18 provider files (anthropic, openai, gemini, bedrock, copilot, ollama, huggingface, xai, thinking, router_*) rather than the crate's `tests/` dir — `crates/ragent-llm/src/providers/anthropic.rs:656`
 
 ### Dependencies
-- duplicate-major in lockfile: thiserror 1.x and 2.x co-resident while workspace pins "2" — `thiserror@1.0.69`, `thiserror@2.0.21`
-- duplicate-major in lockfile: rand three major lines co-resident — `rand@0.8.8`, `rand@0.9.5`, `rand@0.10.3`
-- duplicate-major in lockfile: reqwest two lines co-resident — `reqwest@0.12.28`, `reqwest@0.13.5`
-- `rand@0.8.8` declared in `crates/ragent-storage` (2 majors behind) — `rand@0.8.8 -> 0.10.3`
-- `opentelemetry@0.29.1` declared in `crates/ragent-telemetry` (4 breaking 0.x releases behind) — `opentelemetry@0.29.1 -> 0.33.0`
-- yanked crate pinned in committed lockfile — `yoke-derive@0.8.3 (yanked, via icu -> reqwest 0.12)`
-- duplicate-major: lopdf 0.39 direct + 0.44 transitive (+ vendored 0.38) — `lopdf@0.39.0`, `lopdf@0.44.0`
+- Over-broad/stale advisory suppressions in `.cargo/audit.toml` — 8 entries but at least 5 no longer apply (RUSTSEC-2026-0187 lopdf now 0.44.0; RUSTSEC-2024-0384 `instant` absent; RUSTSEC-2025-0134 `rustls-pemfile` absent; RUSTSEC-2026-0192 `ttf-parser` absent); `deny.toml` already documents these as un-ignored, so the two files disagree — `.cargo/audit.toml:5`
+
+---
 
 ## Low Priority
 
 ### Standards
-- Inline fully-qualified paths instead of `use` imports, deviating from the dominant style — `crates/ragent-agent/src/tool/list_agents.rs:100`, `:128`
-- `Regex::new(...).unwrap()` instead of the project-wide `.expect("valid ... regex")` convention — `crates/ragent-tui/src/app/slash.rs:12763`
-- Test file names deviate from the `test_<component>_<scenario>` convention — `crates/ragent-agent/tests/dump_registries.rs`, `session_processor.rs`, `crates/ragent-research/tests/source_vault.rs`, `crates/ragent-types/tests/structure_types.rs`
-- `#[cfg(test)] impl` block living in a production source file — `crates/ragent-research/src/tier_router.rs:43`
+- Inconsistent error output channel: session export/import failures write to stderr via `eprintln!`, while the top-level error path writes to stdout via `println!("Error: {e}")` — `src/main.rs:1182` (and `:1213` vs `:1560`)
+- Inconsistent CLI diagnostic prefixes across command families (`ragent-research:`, `ragent new:`, `ragent spec govcreate: [err]`) for the same class of user error — `src/cli.rs:746` (and `:1142`, `:1580`)
+- Mixed `println!`/`eprintln!` for user-facing status vs error within a single handler; research subcommands print success to stdout but emit failures both with and without the `ragent-research:` prefix — `src/cli.rs:548` (vs `:740`)
+- `src/cli.rs` (~1600 lines) and `src/main.rs` (~1560 lines) are oversized modules combining CLI parsing/dispatch with research, spec, scaffold, and session import/export orchestration; consider splitting by command family — `src/cli.rs:1` (and `src/main.rs:1`)
 
 ### Duplication
-- `format_size(bytes)` byte-count formatter identical — `crates/ragent-agent/src/reference/resolve.rs:388` (and `crates/ragent-tools-core/src/list.rs:183`)
-- `extract_domain(url)` host-lowercasing duplicated (one `Option`, one `Result`) — `crates/ragent-tools-extended/src/masterfetch/crawl/orchestrator.rs:495` (and `crates/ragent-tools-extended/src/masterfetch/robots.rs:733`)
+- `truncate_cell` duplicated — `crates/ragent-research/src/comparison.rs:199` (and `crates/ragent-tools-extended/src/pdf_write.rs:595`)
+- Title/snippet word-boundary truncation duplicated — `crates/ragent-research/src/web_gatherer/title.rs:114` (and `crates/ragent-research/src/item.rs:628`)
+- `as_any_static` boilerplate repeated 6x across crates (trait-object downcast shim) — candidate for a macro in `ragent-types` — `crates/*/src` (6 sites)
+- `truncate_summary`/`truncate_snippet`/`truncate_body` family re-declared per module despite shared engine helpers — `crates/ragent-tools-extended/src/masterfetch/crawl/classify.rs:477` (and `masterfetch/extractor.rs:1010`, `masterfetch/http.rs:187`, `research/analysis/parser.rs:602`, `research/document.rs:2326`)
 
 ### Logging
-- `unreachable!()` panic on a data-driven dispatch path — `crates/ragent-tui/src/app/state.rs:3268`
-- Leftover milestone/dev tags baked into log message text ("M7-T3:", "M6-T2:") — `crates/ragent-agent/src/task/mod.rs:1106`, `crates/ragent-agent/src/team/manager.rs:668`
-- Unresolved TODO left in a hot HTTP retry path — `crates/ragent-llm/src/providers/http_client.rs:418`
-- Placeholder TODO comments for unimplemented goal persistence/loading — `crates/ragent-tui/src/app/slash.rs:13005`, `:13013`, `:13016`, `:13027`
-- `info!` emitted per response when cache-write tokens are non-zero; routine bookkeeping belongs at `debug!` — `crates/ragent-llm/src/providers/openai_responses.rs:568`
+- HTTP retry paths log the raw `reqwest` error (`error = %e`), which can embed the response body and request URL — sanitize/truncate before logging — `crates/ragent-llm/src/providers/http_client.rs:377` (and `:332`, `:381`)
+- Rustdoc examples demonstrate logging a partial token (`&token[..8]`), teaching a credential-leak pattern — change examples to log `"<redacted>"` — `crates/ragent-llm/src/providers/copilot.rs:579` (and `:775`, `:935`)
+- Near-verbatim credential-source message ("using `gh auth token` as the GitHub credential") — reword to avoid implying a token value is present — `crates/ragent-config/src/github.rs:112`
+- Plugin-command prompt processing failure logged at `debug!`, out of step with error-class failures logged at `error!`/`warn!` elsewhere — `crates/ragent-tui/src/app/slash.rs:11299`
+- Stale HuggingFace model cleanup failure logged at `debug!` though it affects user-visible model-list state — consider `warn!` — `crates/ragent-tui/src/app/init.rs:86`
+- Plan-agent failure logged at `debug!` only — `crates/ragent-tui/src/app/event_handler.rs:138`
+- Demo fn mixes `tracing::info!` with `println!` in the same body (allowed CLI surface, but inconsistent) — use one channel — `src/cli.rs:51` (vs `:85`)
+- `println!("{:#?}", *config)` dumps the fully resolved config struct to stdout — relies on the custom `Debug` redaction impl; verify no secret field is added without a matching redaction — `src/main.rs:1383`
+- Commented-out debug `println!` left in tree — remove — `examples/parallel_edit.rs:36` (outside stated source scope; flagged only)
+- Stale `FR-XXX` placeholder marker left in a comment — replace with the real FR id or delete — `crates/ragent-research/src/session.rs:2225`
 
 ### Security
-- Server `/config` redaction relies on a hardcoded key allow-list; a newly added secret-bearing field leaks silently to authenticated callers — `crates/ragent-server/src/routes/mod.rs:314`
-- `.gitignore` negates `!.env.example` but no `.env.example` exists in the tree — `.gitignore:22`
-- Derived per-process credential key path (`USER`+`HOME`) is non-secret; verify the `0600` file write precedes first decrypt use — `crates/ragent-storage/src/storage.rs:162`
-- AWS long-term example key literal `AKIAIOSFODNN7EXAMPLE` in docs/comments/fixtures (documented placeholder) — `crates/ragent-llm/src/providers/bedrock.rs:27`
-- Placeholder token literals in docs/howtos and specs (clearly marked, benign) — `docs/howtos/reverse.md:457`
-
-### Dependencies
-- `notify@7.0.0` declared in `crates/ragent-codeindex` (1 major behind) — `notify@7.0.0 -> 8.2.0`
-- `thiserror@1.0.69` declared in 5 crates vs workspace "2" — `thiserror@1.0.69 -> 2.0.21`
-- `rquickjs@0.10.0` declared in `crates/ragent-plugins` (4 breaking 0.x behind) — `rquickjs@0.10.0 -> 0.14.0`
-- `which@7.0.3` declared in `crates/ragent-tools-core` — `which@7.0.3 -> 8.0.6`
-- `chacha20poly1305@0.10.1` declared in `crates/ragent-storage` — `chacha20poly1305@0.10.1 -> 0.11.0`
-- `tree-sitter@0.26.13` declared in `crates/ragent-codeindex` — `tree-sitter@0.26.13 -> 0.27.0`
-- `reqwest@0.12.28` declared directly in `crates/ragent-llm` (bypasses workspace pin) — `reqwest@0.12.28 -> 0.13.5`
-- `tokio@1.53.1` patch behind — `tokio@1.53.1 -> 1.53.2`
-- `criterion@0.5.1` (dev, capped LOW) — `criterion@0.5.1 -> 0.8.2`
+- Credential-store write path is documented as potentially landing on a 0644 world-readable file, letting another local user read encrypted credentials/ciphertext for offline attack — `crates/ragent-storage/src/storage.rs:277`
+- Bedrock provider opens a credentials file at an arbitrary path taken verbatim from `AWS_SHARED_CREDENTIALS_FILE` env var, with no containment check — `crates/ragent-llm/src/providers/bedrock_credentials.rs:234`
+- `get_env` tool returns arbitrary process environment variables to the model; safety rests solely on ad-hoc name-substring and value-shape redaction, not an allowlist — `crates/ragent-tools-core/src/get_env.rs:131`
+- `ragent_info` reports process environment values by probing a fixed key list (may surface tokens/keys not caught by the redactor) — `crates/ragent-agent/src/tool/ragent_info.rs:311`
+- `os_info` and telemetry read `HOSTNAME` and other env vars directly into reported/exported attributes without going through the redaction registry — `crates/ragent-agent/src/tool/os_info.rs:1932`
+- masterfetch search reads API keys by iterating caller/config-supplied env-var names via `std::env::var`, widening the secret-exfiltration surface from model-driven config — `crates/ragent-tools-extended/src/masterfetch/tools/search_tool.rs:179`
+- Provider base URLs and keys are read from ambient env across many providers (router_client/generic_openai/azure_foundry/ollama) with no scheme/host validation, enabling endpoint redirection via a poisoned environment — `crates/ragent-llm/src/providers/router_client.rs:589`
+- Connector auth resolves and stores secrets from ambient environment variables by arbitrary name, with the trust boundary resting on the connector descriptor rather than an allowlist — `crates/ragent-connectors/src/auth.rs:365`
+- Bedrock credential resolution reads `AWS_PROFILE`/`AWS_REGION`/`AWS_BEDROCK_REGION` from env and silently follows profiles/files they point at, expanding the credential-loading attack surface — `crates/ragent-llm/src/providers/bedrock_credentials.rs:90`
+- `.gitignore` ignores `.env*` but re-includes `.env.example`; no committed example file was found in scope, so the allow-rule currently protects nothing and risks a future example file carrying placeholder-but-real keys — `.gitignore:22`
+- Inline bedrock tests embed realistic AWS secret keys (`wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`) as string literals in source; these are the public AWS doc sample (not live) but normalise real-key-shaped fixtures in-repo — `crates/ragent-llm/src/tests/inline/bedrock_credentials_tests.rs:12`
 
 ### Testing
-- Research scoreboard tests duplicate `ResearchDocument` fixture setup/assertions across three files with no shared helper — `crates/ragent-research/tests/test_scoreboard_report.rs:108`, `test_scoreboard_imrad.rs:111`, `test_scoreboard_reductions.rs:144`
+- `#[cfg(test)]` appears as a literal inside a test-fixture code string rather than as an attribute; confuses inline-test scanners — `crates/ragent-bench/tests/test_bench_core.rs:516`
+- Stray `#[cfg(test)]` markers inside already-external test files suggest leftover migration noise to clean up — `crates/ragent-tools-extended/tests/test_pdf_expert_cff.rs:30` (and `:73`; `crates/ragent-tui/tests/test_research_viewer.rs:96`; `crates/ragent-codeindex/tests/test_rust_parser.rs:366`)
+- `crates/ragent-agent/src/tests/inline/*` holds five relocated module tests under `src/` rather than `tests/`, contradicting the "tests belong in `tests/`" convention — `crates/ragent-agent/src/tests/inline/template_mod_tests.rs:1`
+- Duplicate `#[cfg(test)]` markers at adjacent lines in the same file (likely a doubled attribute) — `crates/ragent-llm/src/providers/router_classifier.rs:979` (and `:983`; `crates/ragent-specs/src/impl_runner.rs:854`, `:858`)
+
+### Dependencies
+- `uuid` 1.26.1 -> 1.27.0 (minor) across all members — workspace pin in `Cargo.toml` — bump via `cargo update -p uuid`
+- `pulldown-cmark` 0.12.2 -> 0.13.4 (1 major behind, ragent-tui) — `crates/ragent-tui/Cargo.toml` — review 0.13 breaking changes then bump
+- `syn` 2.0.119 -> 3.0.6 (1 major behind) — `crates/ragent-config/Cargo.toml` (and `crates/ragent-types/Cargo.toml`) — bump when proc-macro deps permit
+- `serial_test`/`serial_test_derive` 3.5.0 -> 4.0.1 (dev/build-only) — `crates/ragent-config/Cargo.toml` (and `crates/ragent-types/Cargo.toml`) — bump dev-dependency
+- `tree-sitter` 0.27.0 -> 0.27.1 and `tree-sitter-language` 0.1.8 -> 0.1.9 (patch) — `crates/ragent-codeindex/Cargo.toml` — routine patch bump
+- `unicode-width` 0.2.0 -> 0.2.2 (patch, ragent-tui) — `crates/ragent-tui/Cargo.toml` — routine patch bump
+- Duplicate major versions in tree (multiple-versions = "warn") — `base64` 0.22.1/0.23.1, `html5ever` 0.26/0.38, `rand` 0.8/0.9/0.10, `getrandom` 0.2/0.3/0.4, `syn` 1/2/3, `hashbrown` 0.14/0.16/0.17 — transitive; consolidate via `[patch]`/`cargo update` only where a shared upstream version exists
+- `libc` 0.2.189 -> 0.2.190 (patch) — root `Cargo.toml` — routine patch bump; the single approved `unsafe` site (`kill_process_group`) depends on it, re-verify after bump
+- No CI freshness gate beyond `cargo deny`/`cargo audit` — advisory DB age and stale suppressions drift silently — add a scheduled `cargo audit`/`cargo outdated` job that fails on new advisories
 
 ---
 
-## Tooling Verification (Agent 6, real output)
-
-- `cargo audit` — 0 vulnerabilities; 1 allowed warning (yanked `yoke-derive`).
-- `cargo deny check advisories` — `advisories ok`; no unsuppressed advisories.
-- `cargo deny check bans licenses sources` — `bans ok, licenses ok, sources ok` (61 duplicate-version warnings).
-- `Cargo.lock` committed and consistent with manifests (`cargo metadata --locked` passes).
-- CI guard scripts pass: `check-inline-tests`, `check-poison-locks`, `check-security-unwraps`, `check-silent-errors`, `check-dead-code-reasons`.
+## Notes / Positive Results
+- No raw `println!`/`eprintln!`/`print!`/`eprint!`/`dbg!` calls exist in any library crate's `src/`; every `crates/*/src` hit is a doc-comment example, a generated-code string literal, or a comment. Real macro call sites live only in the allowed CLI presentation surface (`src/main.rs`, `src/cli.rs`, `src/connectors.rs`, `src/plugins.rs`) and the documented pre-tracing `src/panic_hook.rs` exception.
+- No wildcard imports in production code (all `use ...::*` occurrences are `use super::*` inside test modules).
+- `cargo audit`: 0 vulnerabilities; `Cargo.lock` present and tracked; `deny.toml` correctly sets `[advisories] unsound = "all"` and `[sources]` denies unknown registries/git.
+- Caveat: the standards agent was interrupted before completing the `unwrap`/`expect`/`panic`/`unwrap_or_default`/`let _ =` sweep and the anyhow-vs-thiserror comparison; those categories are unverified rather than cleared.
 
 ---
 
 # Implementation Plan
 
 ## Quick Wins (< 30 min each)
-
 | # | Finding | File(s) | Fix |
 |---|---------|---------|-----|
-| 1 | `.gitignore` missing cert/credential files | `.gitignore:50` | Add `*.pem`, `*.p12`, `*.pfx`, `service-account.json`, `credentials.json` |
-| 2 | `.gitignore` missing SQLite sidecars | `.gitignore:48` | Add `*.db-wal`, `*.db-shm` |
-| 3 | Dead `!.env.example` rule, no template | `.gitignore:22` | Add a committed `.env.example` template (or remove the negate rule) |
-| 4 | `unreachable!()` panic on dispatch path | `crates/ragent-tui/src/app/state.rs:3268` | Restructure match to cover all arms without panic |
-| 5 | `Regex::new(...).unwrap()` vs `.expect(...)` | `crates/ragent-tui/src/app/slash.rs:12763` | Convert to `.expect("valid ... regex")` |
-| 6 | Inline fully-qualified paths | `crates/ragent-agent/src/tool/list_agents.rs:100` | Hoist `crate::task::TaskStatus` into a `use` |
-| 7 | Leftover milestone tags in log text | `crates/ragent-agent/src/task/mod.rs:1106`, `crates/ragent-agent/src/team/manager.rs:668` | Strip "M7-T3:"/"M6-T2:" prefixes |
-| 8 | Unresolved TODO in HTTP retry path | `crates/ragent-llm/src/providers/http_client.rs:418` | Resolve or file a tracked issue |
-| 9 | Placeholder TODO comments in `/goal` | `crates/ragent-tui/src/app/slash.rs:13005` | Resolve, file, or annotate with a reason |
-| 10 | `info!` for tool denials | `crates/ragent-agent/src/session/processor.rs:3232` | Raise to `warn!` |
-| 11 | Hot-path `info!` per chat request | `crates/ragent-llm/src/providers/copilot.rs:445` | Lower to `debug!` |
-| 12 | `info!` for cache-write bookkeeping | `crates/ragent-llm/src/providers/openai_responses.rs:568` | Lower to `debug!` |
-| 13 | Tests use `/tmp` | `crates/ragent-tools-core/tests/test_think.rs:21` (+23 sites) | Switch to `target/temp` |
-| 14 | Empty/placeholder tests | `crates/ragent-agent/tests/test_precompiled_regexes.rs:15` | Add real assertions or delete |
-| 15 | Duplicated schema test suite | `crates/ragent-tools-core/tests/test_schema_validation.rs:1` | Delete one copy, keep shared module |
-| 16 | Test file naming | `crates/ragent-agent/tests/dump_registries.rs` (+3) | Rename to `test_<component>_<scenario>` |
-| 17 | Raw SSE frame in warn log | `crates/ragent-llm/src/providers/ollama.rs:585` | Truncate/redact before logging |
-| 18 | Full request body in debug log | `crates/ragent-llm/src/providers/ollama_cloud.rs:564` | Redact via `redact_secrets` |
-| 19 | Tool-args JSON dump in error log | `crates/ragent-agent/src/tool/team_create.rs:302` | Log arg keys only, not values |
-| 20 | Patch-level dep bumps | `crates/ragent-llm/Cargo.toml` | `tokio 1.53.1 -> 1.53.2` |
-| 21 | Duplicate direct `reqwest` bypassing workspace pin | `crates/ragent-llm/Cargo.toml` | Use `workspace = true` |
+| 1 | Remove commented-out debug `println!` | `examples/parallel_edit.rs:36` | Delete the stale line |
+| 2 | Stale `FR-XXX` placeholder | `crates/ragent-research/src/session.rs:2225` | Replace with real FR id or delete |
+| 3 | Rustdoc examples logging partial token | `crates/ragent-llm/src/providers/copilot.rs:579,775,935` | Log `"<redacted>"` in examples |
+| 4 | Reclassify `debug!` error-class logs | `crates/ragent-tui/src/app/session_ops.rs:874,916`; `slash.rs:11299`; `init.rs:86`; `event_handler.rs:138` | Raise to `warn!`/`error!` |
+| 5 | Sanitize raw reqwest error in retry logs | `crates/ragent-llm/src/providers/http_client.rs:332,377,381` | Log status/cause only |
+| 6 | Unify CLI error channel/prefixes | `src/main.rs:1182,1213,1560`; `src/cli.rs:548,740,746,1142,1580` | Route all errors to stderr with one prefix scheme |
+| 7 | Prune stale audit suppressions | `.cargo/audit.toml:5` | Remove 5 obsolete advisory IDs to match `deny.toml` |
+| 8 | Patch dependency bumps | `Cargo.toml` (libc, uuid); `crates/ragent-codeindex/Cargo.toml` (tree-sitter); `crates/ragent-tui/Cargo.toml` (unicode-width) | `cargo update -p <crate>` |
+| 9 | Clean stray/duplicate `#[cfg(test)]` markers | `tests/test_pdf_expert_cff.rs:30,73`; `test_research_viewer.rs:96`; `test_rust_parser.rs:366`; `router_classifier.rs:979,983`; `impl_runner.rs:854,858`; `test_bench_core.rs:516` | Remove markers/literals |
+| 10 | Reword credential-source messages | `crates/ragent-config/src/github.rs:112` | Remove token-implying phrasing |
+| 11 | `mask_key` one-off vs hand-rolled redaction | `crates/ragent-llm/src/providers/openrouter.rs:41` | Promote to shared helper (feeds #13) |
 
 ## Medium Effort (30 min - 2 hours each)
-
 | # | Finding | File(s) | Fix |
 |---|---------|---------|-----|
-| 1 | Acronym casing GitHub/GitLab vs Github/Gitlab | `crates/ragent-tools-vcs/src/github/client.rs:86` | Standardise on one form across both crates |
-| 2 | `.unwrap()` on HTML parser input | `crates/ragent-tools-extended/src/masterfetch/extractor.rs:905` | Guard or use `?`; add `// no-panic-ok` only if proven safe |
-| 3 | `.unwrap()` on user-facing paths | `crates/ragent-agent/src/tool/list_agents.rs:116`, `crates/ragent-research/src/chapter.rs:123` | Replace with `if let`/`ok_or` propagation |
-| 4 | Emoji in source comments | `crates/ragent-tui/src/widgets/message_widget.rs:278` (+215) | Strip emoji to ASCII per AGENTS.md |
-| 5 | Missing module doc comments | `crates/ragent-agent/src/orchestrator/registry.rs:1` (+5) | Add `//!` headers |
-| 6 | `MultiPlEAdapter` naming | `crates/ragent-bench/src/suites/multipl_e.rs:14` | Rename to `MultiPleAdapter` |
-| 7 | Duplicated `McpProbe` impl | `src/connectors.rs:318` | Extract shared probe helper |
-| 8 | Duplicated `format_size` | `crates/ragent-agent/src/reference/resolve.rs:388` | Move to shared `ragent-types` helper |
-| 9 | Duplicated `extract_domain` | `crates/ragent-tools-extended/src/masterfetch/crawl/orchestrator.rs:495` | Unify into one helper |
-| 10 | Duplicated `estimate_context_window` | `crates/ragent-llm/src/providers/ollama.rs:163` | Share one implementation |
-| 11 | Duplicated `path_tag` | `crates/ragent-agent/src/tool/team_memory_read.rs:161` | Extract to shared helper |
-| 12 | Duplicated JSONL log helpers | `crates/ragent-tools-core/src/edit_log.rs:151` | Extract shared JSONL module |
-| 13 | Duplicated `truncate_chars` | `crates/ragent-agent/src/loop_state.rs:417` | Move to `ragent-types` |
-| 14 | Duplicated `handle_response` classification | `crates/ragent-tools-vcs/src/github/client.rs:219` | Extract shared VCS error classifier |
-| 15 | Duplicated `Scope`/`config_path`/lock accessors | `crates/ragent-config/src/bash_lists.rs:68` | Extract shared list-config helper |
-| 16 | Duplicated store-path logic (plugins/connectors) | `crates/ragent-plugins/src/store.rs:55` | Extract shared store helper crate or module |
-| 17 | Parallel plugins/connectors harness+help code | `crates/ragent-plugins/src/harness.rs:292` | Extract shared harness/help module |
-| 18 | Stale agent snapshot duplicate | `crates/ragent-agent/src/snapshot/mod.rs:1` | Delete; keep `ragent-storage::snapshot` |
-| 19 | Duplicated provider env-key resolution (4 sites) | `crates/ragent-agent/src/session/processor.rs:4426` | Single resolver in `ragent-llm` |
-| 20 | Duplicated OpenAI request-body builder (6 files) | `crates/ragent-llm/src/providers/openai.rs:204` | Extract shared `openai_compat` builder |
-| 21 | Duplicated OpenAI SSE parser | `crates/ragent-llm/src/providers/openai.rs:387` | Extract shared SSE parser |
-| 22 | Unredacted provider error bodies (11 providers) | `crates/ragent-llm/src/providers/copilot.rs:485` | Route error bodies through `redact_secrets` |
-| 23 | Ad-hoc credential env reads | `crates/ragent-agent/src/one_shot.rs:31` (+7) | Route through validated config layer |
-| 24 | `get_env` tool redaction by name-substring only | `crates/ragent-tools-core/src/get_env.rs:16` | Deny-list by value-shape / require opt-in |
-| 25 | `resolve_secret` unvalidated plain `String` | `crates/ragent-tools-extended/src/channels.rs:111` | Add shape/type validation |
-| 26 | Server `/config` hardcoded redaction allow-list | `crates/ragent-server/src/routes/mod.rs:314` | Redact by config-schema secret flag, not a literal list |
-| 27 | Duplicated `TempTree` sandbox helper (27 files) | `crates/ragent-plugins/tests/test_add.rs:13` | Shared `tests/support` module per crate |
-| 28 | Diagnostic scripts as tests | `crates/ragent-agent/tests/test_mf_orchestrator_diag.rs:1` | Convert to `#[ignore]` or a script |
-| 29 | Live-network test not gated | `crates/ragent-llm/tests/test_ollama_cloud_real.rs:10` | Add `#[ignore]` gate |
-| 30 | Missing tests: CalculatorTool, Azure Foundry, small tools | `crates/ragent-tools-core/src/calculator.rs:1` (+6) | Add `tests/` coverage |
-| 31 | Duplicated config test triples | `crates/ragent-config/tests/test_serper_api_key.rs:14` | Table-driven test |
-| 32 | Weak `.is_some()`-only assertions | `crates/ragent-agent/src/tests/inline/runtime_tests.rs:22` | Assert on returned values |
-| 33 | Deduplicate major dependency lines | `Cargo.toml` / crate manifests | Align `thiserror`, `rand`, `reqwest` to one major line |
-| 34 | `rand@0.8.8` in ragent-storage (2 majors behind) | `crates/ragent-storage/Cargo.toml` | Upgrade to `0.10` |
-| 35 | `opentelemetry@0.29.1` (4 behind) | `crates/ragent-telemetry/Cargo.toml` | Plan 0.33 migration |
-| 36 | Yanked `yoke-derive@0.8.3` | `Cargo.lock` | `cargo update -p yoke-derive` to a non-yanked release |
+| 1 | Shared truncation/char-boundary primitive | `ragent-types`/`ragent-surface`; ~15 call sites incl. `session/history.rs:250`, `task/mod.rs:1256`, `cluster.rs:450`, `helpers.rs:308`, `message_widget.rs:105` | Add `truncate_to_char_boundary`, replace all copies |
+| 2 | Consolidate `truncate_preview`/`truncate_content`/`truncate_output`/`truncate`/`truncate_str`/`truncate_cell` | `ragent-surface::harness`; sites in agent/tools-core/tools-extended/research/plugins | Extract single helper set; delete duplicates |
+| 3 | Shared provider request-body builder | `crates/ragent-llm/src/providers/*` (12 `build_request_body`, 16 `default_models`) | Add builder module; migrate all providers |
+| 4 | Collapse per-engine truncate wrappers | `crates/ragent-tools-extended/src/masterfetch/search/*.rs` | Call `engine::*` directly |
+| 5 | Shared redaction primitive | `ragent-llm`/`ragent-config`/`ragent-storage`/`ragent-telemetry` (~38 files) | Extract one masking primitive, route all sites |
+| 6 | Shared retry/backoff utility | `ragent-llm::retry`/`ragent-types`; `http_client.rs`, `mcp/http.rs`, `recorder.rs` | Extract backoff helper |
+| 7 | Gate user-content debug log | `crates/ragent-llm/src/providers/ollama_cloud.rs:528` | Log metadata only / stricter flag |
+| 8 | Verify provider error-body redaction | `crates/ragent-llm/src/providers/copilot.rs:374` | Status-only logging or tighten redactor |
+| 9 | Re-key legacy credential store (v1/v2) | `crates/ragent-storage/src/storage.rs:113,259,277` | Migrate off hardcoded/guessable keys; enforce 0600 |
+| 10 | Guard/env-allowlist hardening | `get_env.rs:131`, `ragent_info.rs:311`, `os_info.rs:1932`, `search_tool.rs:179`, `auth.rs:365`, `router_client.rs:589`, `bedrock_credentials.rs:90,234` | Allowlist env names; validate base URL scheme/host; contain credential paths |
+| 11 | Move inline tests out of `src/` (batch 1: providers + bench) | `crates/ragent-llm/src/providers/*`, `crates/ragent-bench/src/data.rs,model.rs` | Relocate to crate `tests/` per AGENTS-RUST |
+| 12 | Normalise `tests/inline/` layout | `crates/ragent-telemetry/tests/inline/`, `crates/ragent-tools-vcs/tests/inline/`, `crates/ragent-agent/src/tests/inline/` | Flatten to `tests/` |
+| 13 | Add coverage for thin crates | `crates/ragent-surface/tests/`, `crates/ragent-bench/tests/` | New tests for surface helpers + bench core |
+| 14 | `.gitignore` `.env.example` re-include | `.gitignore:22` | Add tracked placeholder example file or drop the allow-rule |
+| 15 | Major dep bumps | `crates/ragent-tui/Cargo.toml` (pulldown-cmark), `ragent-config`/`ragent-types` (syn, serial_test) | Review breaking changes, bump |
 
 ## Complex (> 2 hours)
-
 | # | Finding | File(s) | Fix |
 |---|---------|---------|-----|
-| 1 | Agent-loop step logic untested (1739 lines) | `crates/ragent-agent/src/session/loop_steps.rs:132` | Build a fake-provider harness; integration-test the loop |
-| 2 | Orchestrator `Coordinator` API untested | `crates/ragent-agent/src/orchestrator/coordinator.rs:211` | Test harness for spawn/first-success/metrics |
-| 3 | Source-scraping fragility (74 test files) | `crates/ragent-tui/tests/test_codeindex_backward_compat.rs:40` | Replace substring scraping with behavioural assertions |
-| 4 | `lopdf` 0.39 direct + 0.44 transitive (+vendored 0.38) | `Cargo.toml`, `vendor/` | Coordinate ooxmlsdk/quick-xml upgrade; unblocks RUSTSEC suppressions |
-| 5 | Module-file layout inconsistency | `crates/ragent-agent/src/memory/embedding.rs` | Decide `mod.rs` vs named-file policy and apply consistently |
+| 1 | 128 inline `#[cfg(test)]` modules in `src/` | `crates/ragent-research/src/` (~40), `ragent-llm/src/providers/` (18), `ragent-agent/src/` (26) | Migrate all to `tests/`; add `check-inline-tests` guard to CI |
+| 2 | Nested `#[cfg(test)]` inside fn bodies | `crates/ragent-agent/src/research_adapter.rs:325,533,709` | Restructure and relocate |
+| 3 | Oversized inline blocks | `crates/ragent-tui/src/layout.rs:7778`, `crates/ragent-research/src/web_gatherer.rs:3186` | Split + relocate test modules |
+| 4 | quick-xml RUSTSEC-2026-0194/0195 | `deny.toml:26`; `Cargo.lock` quick-xml 0.39.4 | Upgrade once `ooxmlsdk` compatible, or add XML input-size guards |
+| 5 | lru RUSTSEC-2026-0253 unsound suppression | `deny.toml:35`; tantivy 0.26 path | Move tantivy off lru 0.16 or add CI guard asserting no `LruCache::pop()` |
+| 6 | Oversized `cli.rs`/`main.rs` split | `src/cli.rs:1`, `src/main.rs:1` | Extract command families into modules |
+| 7 | Duplicate major versions in tree | `base64`, `html5ever`, `rand`, `getrandom`, `syn`, `hashbrown` | Coordinated `[patch]`/upstream consolidation |
+| 8 | Missing CI freshness gate | `.github/` workflows | Scheduled `cargo audit`+`cargo outdated` failing on new advisories |
 
 ## Suggested Fix Order
-
-1. **Security quick wins**: `.gitignore` cert/sidecar/env-template entries and secret redaction in logs — highest blast radius, lowest risk.
-2. **Shared utilities & dedup of small helpers**: `format_size`, `extract_domain`, `truncate_chars`, `path_tag`, JSONL helpers, `Scope` config — unblocks the larger dedup work and reduces test-helper duplication.
-3. **Provider consolidation**: shared OpenAI request-body builder, SSE parser, env-key resolver, and error-body redaction — large surface, must land together with provider tests.
-4. **Dead-code & stale-duplicate removal**: agent `snapshot` module, duplicated schema test suite, empty tests.
-5. **Test infrastructure**: shared `TempTree` support module, `/tmp` -> `target/temp`, weak-assertion tightening.
-6. **New test coverage**: calculator, Azure Foundry, small tools, then the complex loop/orchestrator harnesses.
-7. **Dependency upgrades**: dedup majors, `rand`, `yoke-derive`, then the `opentelemetry`/`lopdf` migrations.
-8. **Cosmetic**: emoji removal, module doc comments, naming, TODO/tag cleanup.
+1. **Quick Wins #1–#11**: mechanical deletions, log-level fixes, doc wording, and patch bumps — low risk, immediate hygiene.
+2. **Utilities/shared code first (#1–#6 Medium)**: shared truncation, redaction, retry, and provider-builder helpers — these are the prerequisites that make the duplication and later refactors land cleanly.
+3. **Security hardening (#7–#10 Medium)**: credential re-keying, env allowlisting, URL validation, log gating — isolated, high-value, verify-only risk.
+4. **Tests (#11–#14 Medium, then Complex #1–#3)**: relocate inline tests and add missing coverage after the source settles (moving tests after extraction avoids churn).
+5. **Dependency work (#15 Medium, Complex #4–#7)**: major bumps and advisory resolution last, when the tree is stable.
+6. **Cosmetic (#8 Complex, #6 Complex)**: module splits once logic has been consolidated.
 
 ## Verification
-- [ ] `cargo build` and `cargo clippy --workspace` report 0 errors / 0 warnings
-- [ ] `cargo fmt --check` passes on every edited `.rs` file
-- [ ] `cargo test --workspace` passes; new tests cover previously-untested files
-- [ ] `cargo deny check advisories bans licenses sources` remains `ok`
-- [ ] `cargo audit` reports 0 vulnerabilities and no yanked crates
-- [ ] CI guard scripts (`check-inline-tests`, `check-poison-locks`, `check-security-unwraps`, `check-silent-errors`, `check-dead-code-reasons`) still pass
-- [ ] No new `println!`/`eprintln!`/`dbg!` outside the documented CLI/panic surface
+- [ ] `cargo build` and `cargo clippy --workspace --all-targets` report 0 errors/warnings
+- [ ] `cargo fmt --check` passes on all edited `.rs` files
+- [ ] `cargo test --workspace` passes; new tests cover previously-untested `ragent-surface` and `ragent-bench`
+- [ ] `scripts/check-inline-tests.sh` reports 0 inline `#[cfg(test)]` modules under `crates/*/src`
+- [ ] `cargo audit` and `cargo deny check` pass with `.cargo/audit.toml` and `deny.toml` suppressions reconciled
+- [ ] Redaction test (`test_config_redaction.rs`) still passes after unifying the masking primitive
+- [ ] Credential store can read legacy v1/v2 blobs and re-encrypt under the new key

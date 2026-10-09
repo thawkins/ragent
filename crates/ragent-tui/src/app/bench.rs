@@ -206,6 +206,91 @@ impl App {
         }
     }
 
+    /// Render the `/bench help` reference: each command in its own table row,
+    /// followed by the full list of registered benchmarks and their supported
+    /// languages (FR-013 parity with the other slash-command help surfaces).
+    pub(crate) fn render_bench_help(&self) -> String {
+        let mut output = String::from("From: /bench help\n## Benchmark Commands\n\n");
+        output.push_str("| command | description |\n| --- | --- |\n");
+        let commands: &[(&str, &str)] = &[
+            (
+                "`/bench list`",
+                "List all registered benchmark suites, virtual targets, and profiles.",
+            ),
+            (
+                "`/bench show`",
+                "Show benchmark defaults: selected model, target expansions, and last workbooks.",
+            ),
+            (
+                "`/bench status`",
+                "Show the active benchmark run, or the most recent completed run.",
+            ),
+            (
+                "`/bench init <suite-or-all-or-full> [--full] [--language LANG] \
+                 [--force-download] [--verify-only]`",
+                "Initialize benchmark data: sample fixtures by default, or full upstream \
+                 datasets with `--full`; `--verify-only` checks existing data without writing.",
+            ),
+            (
+                "`/bench run <suite-or-profile-or-all> [--limit N|--cap N] [--samples K] \
+                 [--subset NAME] [--release VERSION] [--scenario NAME] [--language LANG] \
+                 [--temperature F] [--top-p F] [--max-tokens N] [--deterministic] \
+                 [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--resume] [--no-exec] [--yes]`",
+                "Run one suite, a named profile, or every registered suite. `--yes` confirms \
+                 expensive targets; `--resume` continues a prior partial run.",
+            ),
+            (
+                "`/bench open last`",
+                "Open the most recent benchmark workbook(s) and their summary.",
+            ),
+            (
+                "`/bench cancel`",
+                "Request cancellation of the active benchmark run.",
+            ),
+            ("`/bench help`", "Show this help reference."),
+        ];
+        for (command, description) in commands {
+            output.push_str(&format!("| {command} | {description} |\n"));
+        }
+
+        output.push_str("\n## Benchmarks\n\n");
+        output.push_str("| suite | description | default language | supported languages |\n");
+        output.push_str("| --- | --- | --- | --- |\n");
+        for suite in ragent_bench::all_suites() {
+            let languages = suite.languages.join(", ");
+            output.push_str(&format!(
+                "| `{}` ({}) | {} | `{}` | {} |\n",
+                suite.id, suite.display_name, suite.description, suite.default_language, languages
+            ));
+        }
+
+        output.push_str("\n## Virtual Targets\n\n");
+        output.push_str("| target | expands to |\n| --- | --- |\n");
+        output.push_str(&format!(
+            "| `all` | all {} registered suites |\n",
+            ragent_bench::all_suites().len()
+        ));
+        output.push_str("| `full` | full upstream dataset ingestion for every suite |\n");
+
+        output.push_str("\n## Profiles\n\n");
+        output.push_str("| profile | suites |\n| --- | --- |\n");
+        for profile in ragent_bench::all_profiles() {
+            let suites = if profile.suites.is_empty() {
+                "(none yet)".to_string()
+            } else {
+                profile
+                    .suites
+                    .iter()
+                    .map(|suite| format!("`{suite}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            output.push_str(&format!("| `{}` | {} |\n", profile.id, suites));
+        }
+
+        output
+    }
+
     pub(crate) fn render_bench_list(&self) -> String {
         let mut output = String::from("From: /bench list\n## Benchmark Suites\n\n");
         output.push_str(

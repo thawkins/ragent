@@ -418,6 +418,9 @@ pub async fn run_tui(
                 let banner = crate::logo::LOGO.join("\n");
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
+                app.append_assistant_text("\n  Created by Tim Hawkins <tim.thawkins@gmail.com>");
+                app.append_assistant_text("\n  https://github.com/thawkins/ragent");
+                app.append_assistant_text("\n");
                 // app.force_new_message = true;
                 app.append_assistant_text(&format!(
                     "\n[ok] Session created: `{}`",

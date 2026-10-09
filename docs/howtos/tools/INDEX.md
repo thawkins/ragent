@@ -4,7 +4,7 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (151 registered
+> **Scope:** Tool names, parameter schemas, and usage patterns (149 registered
 > tools plus the dynamic `mcp_tool`). For TUI workflow see
 > `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
@@ -36,7 +36,6 @@ worked examples.
 | 20 | [skills.md](skills.md) | 1 | always on |
 | 21 | [interactive.md](interactive.md) | 4 | always on |
 | 22 | [utility.md](utility.md) | 5 | always on |
-| 23 | [communications.md](communications.md) | 2 | always on |
 
 Switches default `off` for `github`, `gitlab`, `teams`, `agents`, `plan`;
 the rest default `on`. See `docs/howtos/tool-visibility.md`.
@@ -50,7 +49,6 @@ All documents are also available as PDFs under `pdf/`.
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/teams.md` | Multi-agent team coordination |
-| `docs/howtos/communications.md` | Gmail and messaging channel tools |
 | `docs/howtos/spec.md` | Spec management and SDD workflow |
 | `docs/howtos/reverse.md` | Repository reverse-engineering |
 | `docs/howtos/research.md` | Research system and report synthesis |

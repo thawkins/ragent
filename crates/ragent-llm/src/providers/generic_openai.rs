@@ -11,6 +11,25 @@ use crate::llm::LlmClient;
 use crate::provider::openai::{OPENAI_API_BASE, OpenAiClient, discover_openai_models};
 use crate::{ModelInfo, Provider};
 
+/// Read an environment-supplied base URL and validate its scheme and host.
+///
+/// Returns the normalised URL (trailing `/` stripped) or `None` when the
+/// variable is unset, empty, or not an `http(s)` URL with a host, so a poisoned
+/// environment cannot redirect requests to another scheme or hostless target.
+fn resolve_validated_env_base(env_key: &str) -> Option<String> {
+    let raw = std::env::var(env_key).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    match super::base_url::validate_base_url("generic_openai", &raw) {
+        Ok(valid) => Some(valid),
+        Err(e) => {
+            tracing::warn!(env = %env_key, error = %e, "ignoring invalid base URL from environment");
+            None
+        }
+    }
+}
+
 /// Provider implementation for arbitrary OpenAI-compatible endpoints.
 pub struct GenericOpenAiProvider;
 
@@ -47,9 +66,7 @@ impl Provider for GenericOpenAiProvider {
             .context(
                 "Generic OpenAI model discovery requires GENERIC_OPENAI_API_KEY or OPENAI_API_KEY",
             )?;
-        let base_url = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
-            .ok()
-            .filter(|s| !s.trim().is_empty())
+        let base_url = resolve_validated_env_base(Self::DEFAULT_ENV_ENDPOINT_KEY)
             .unwrap_or_else(|| OPENAI_API_BASE.to_string());
         let models = discover_openai_models(&api_key, &base_url, "generic_openai")
             .await
@@ -66,9 +83,7 @@ impl Provider for GenericOpenAiProvider {
         // ANTIPAT 3.6: register the credential with the shared redaction
         // registry so any text passed through `redact_secrets` masks it.
         ragent_types::sanitize::register_secret(api_key);
-        let env_endpoint = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+        let env_endpoint = resolve_validated_env_base(Self::DEFAULT_ENV_ENDPOINT_KEY);
         let configured_endpoint = options
             .get(Self::ENDPOINT_OPTION_KEY)
             .and_then(Value::as_str)

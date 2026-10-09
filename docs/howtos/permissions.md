@@ -199,7 +199,6 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 | `bash`, `bash:execute` | `Permission::Bash`   | `bash`, `bash_reset`, `bg`              |
 | `web`                | `Permission::Web`      | `webfetch`, `websearch`, `mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot` |
 | `network:fetch`      | `Permission::Web`     | `http_request` |
-| `network:send`       | `Permission::Web`      | `gmail`, `send_channel_message`         |
 | `plan`, `plan_enter` | `Permission::PlanEnter`| `plan_enter`                            |
 | `task`               | `Permission::Task`     | `task_create`, `task_update`, `task_get`, `task_list` |
 | `git:read`           | `Permission::Custom`   | `git_status`, `git_log`, `git_diff`, `git_show`, `git_branch` |

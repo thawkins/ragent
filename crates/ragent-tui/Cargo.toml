@@ -39,7 +39,7 @@ rand = { workspace = true }
 arboard = { workspace = true }
 image = { workspace = true }
 html2text = { workspace = true }
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 
 ragent-specs = { path = "../ragent-specs" }
 ragent-research = { path = "../ragent-research" }
@@ -49,7 +49,6 @@ ragent-connectors = { path = "../ragent-connectors" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }
-regex = { workspace = true }
 uuid = { workspace = true }
 # Width/grapheme handling for the message/log line caches (must match
 # ratatui's WordWrapper so pre-wrapped cache rows are stable).

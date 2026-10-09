@@ -100,31 +100,6 @@ fn test_bg_input_summary_output_by_task() {
 }
 
 #[test]
-fn test_gmail_input_summary_search() {
-    let input = json!({"action": "search", "query": "from:ci is:unread"});
-    let summary = tool_input_summary("gmail", &input, "/tmp");
-    assert!(!summary.contains("[gmail]"), "got: {summary}");
-    assert!(summary.contains("ci"));
-}
-
-#[test]
-fn test_gmail_input_summary_send() {
-    let input = json!({"action": "send", "to": "a@b.c", "subject": "hello"});
-    let summary = tool_input_summary("gmail", &input, "/tmp");
-    assert!(!summary.contains("[gmail]"));
-    assert!(summary.contains("send"));
-    assert!(summary.contains("a@b.c"));
-}
-
-#[test]
-fn test_send_channel_message_input_summary() {
-    let input = json!({"action": "send", "channel": "telegram", "message": "hi"});
-    let summary = tool_input_summary("send_channel_message", &input, "/tmp");
-    assert!(!summary.contains("[msg]"), "got: {summary}");
-    assert!(summary.contains("telegram"));
-}
-
-#[test]
 fn test_open_input_summary() {
     let input = json!({"action": "url", "target": "https://github.com/"});
     let summary = tool_input_summary("open", &input, "/tmp");

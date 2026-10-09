@@ -701,9 +701,25 @@ async fn events_stream(
 ) -> Response {
     // F-M9: reserve a slot in the connection budget before subscribing, so a
     // flood of clients cannot each hold a broadcast receiver unboundedly.
-    let reserved = SSE_CONNECTIONS.try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-        (n < MAX_SSE_CONNECTIONS).then_some(n + 1)
-    });
+    // A `compare_exchange_weak` loop reserves the slot. This is used instead of
+    // `AtomicUsize::fetch_update` / `try_update` because the former is
+    // deprecated (renamed to the latter) while the latter is still unstable, so
+    // neither is portable across supported stable toolchains.
+    let mut current = SSE_CONNECTIONS.load(Ordering::Acquire);
+    let reserved = loop {
+        if current >= MAX_SSE_CONNECTIONS {
+            break Err(current);
+        }
+        match SSE_CONNECTIONS.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break Ok(current),
+            Err(actual) => current = actual,
+        }
+    };
     if reserved.is_err() {
         tracing::warn!(
             limit = MAX_SSE_CONNECTIONS,

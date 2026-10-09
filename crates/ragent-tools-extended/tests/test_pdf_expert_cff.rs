@@ -27,7 +27,6 @@ use lopdf::dictionary;
 /// - Global Subr INDEX: empty
 /// - Encoding subtable (format 1 = Expert)
 /// - CharStrings INDEX: one zero-length charstring
-#[cfg(test)]
 fn build_expert_cff() -> Vec<u8> {
     let mut d = Vec::new();
     // Header (4 bytes).
@@ -70,7 +69,6 @@ fn build_expert_cff() -> Vec<u8> {
 /// The font is declared `Subtype /Type1` with a `FontDescriptor` whose
 /// `FontFile3` stream has `Subtype /Type1C` - the path in `pdf-extract`'s
 /// `make_font` that historically reached `Encoding::get_table()`.
-#[cfg(test)]
 fn build_pdf_with_expert_cff() -> Vec<u8> {
     use lopdf::{Document, Object, Stream};
 

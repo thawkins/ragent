@@ -294,5 +294,5 @@ pub fn verification_failure_observation(cmd: &str, outcome: &VerificationOutcome
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/verification_tests.rs"]
+#[path = "../../tests/inline/verification_tests.rs"]
 mod tests;

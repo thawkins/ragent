@@ -378,5 +378,5 @@ pub fn capture_is_rollbackable(capture: &LoopCapture) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/loop_capture_tests.rs"]
+#[path = "../../tests/inline/loop_capture_tests.rs"]
 mod tests;

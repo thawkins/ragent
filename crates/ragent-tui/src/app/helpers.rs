@@ -306,14 +306,7 @@ pub(crate) fn summarise_error(raw: &str) -> String {
 /// Callers pass byte budgets (e.g. status-bar width limits). For a
 /// character-count budget use [`truncate_chars`] instead.
 pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &s[..end])
+    ragent_types::strutil::truncate_bytes(s, max)
 }
 
 /// Truncate `s` to at most `max_chars` **characters**, appending a single

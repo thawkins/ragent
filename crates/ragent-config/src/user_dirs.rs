@@ -29,7 +29,6 @@
 //! | [`global_inbox_dir`]          | `~/.config/ragent/log/inbox/`               | `~/.local/share/ragent/log/inbox/`  |
 //! | [`global_history_path`]       | `~/.config/ragent/input_history.txt`        | `~/.local/share/ragent/input_history.txt` |
 //! | [`global_db_path`]            | `~/.config/ragent/ragent.db`                | `~/.local/share/ragent/ragent.db`   |
-//! | [`global_gmail_db_path`]      | `~/.config/ragent/gmail.db`                 | `~/.local/share/ragent/gmail.db`    |
 //! | [`global_github_token_path`]  | `~/.config/ragent/github_token`             | `~/.ragent/github_token`            |
 //! | [`global_gitlab_token_path`]  | `~/.config/ragent/gitlab_token`             | `~/.ragent/gitlab_token`            |
 //! | [`global_gitlab_config_path`] | `~/.config/ragent/gitlab_config.json`       | `~/.ragent/gitlab_config.json`      |
@@ -160,12 +159,6 @@ pub fn global_history_path() -> Option<PathBuf> {
 #[must_use]
 pub fn global_db_path() -> Option<PathBuf> {
     global_state_dir().map(|d| d.join("ragent.db"))
-}
-
-/// Global Gmail OAuth token database: `~/.config/ragent/gmail.db`.
-#[must_use]
-pub fn global_gmail_db_path() -> Option<PathBuf> {
-    global_state_dir().map(|d| d.join("gmail.db"))
 }
 
 /// Global GitHub personal access token file: `~/.config/ragent/github_token`.

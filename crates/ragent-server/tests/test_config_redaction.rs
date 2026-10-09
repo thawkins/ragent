@@ -10,27 +10,19 @@ fn test_redacts_known_and_newly_named_secret_fields() {
     let mut value = json!({
         "tavily_api_key": "tvly-1234567890",
         "gitlab": { "token": "glpat-abcdef", "instance_url": "https://gitlab.com" },
-        "channels": {
-            "telegram": { "bot_token": "123:abc" },
-            "discord": { "webhook_url": "https://discord.com/api/webhooks/x/y" }
-        },
         "provider": {
             "anthropic": { "api_key": "sk-ant-xyz" },
             // A hypothetical future secret field: redacted by shape alone.
             "future": { "some_new_secret": "leak-me" }
-        },
-        "gmail": { "client_secret": "GOCSPX-secret", "client_id": "abc.apps.googleusercontent.com" }
+        }
     });
 
     redact_config_secrets(&mut value);
 
     assert_eq!(value["tavily_api_key"], REDACTED);
     assert_eq!(value["gitlab"]["token"], REDACTED);
-    assert_eq!(value["channels"]["telegram"]["bot_token"], REDACTED);
-    assert_eq!(value["channels"]["discord"]["webhook_url"], REDACTED);
     assert_eq!(value["provider"]["anthropic"]["api_key"], REDACTED);
     assert_eq!(value["provider"]["future"]["some_new_secret"], REDACTED);
-    assert_eq!(value["gmail"]["client_secret"], REDACTED);
 }
 
 #[test]

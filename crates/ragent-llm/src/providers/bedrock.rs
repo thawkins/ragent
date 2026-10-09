@@ -1347,5 +1347,5 @@ pub async fn discover_bedrock_models(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "../tests/inline/bedrock_tests.rs"]
+#[path = "../../tests/inline/bedrock_tests.rs"]
 mod tests;

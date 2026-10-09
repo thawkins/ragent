@@ -1001,5 +1001,5 @@ pub(crate) async fn finish_json_search(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "../tests/inline/engine_tests.rs"]
+#[path = "../../../tests/inline/engine_tests.rs"]
 mod tests;

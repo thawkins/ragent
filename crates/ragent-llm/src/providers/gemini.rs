@@ -827,5 +827,5 @@ impl LlmClient for GeminiClient {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/gemini_tests.rs"]
+#[path = "../../tests/inline/gemini_tests.rs"]
 mod tests;

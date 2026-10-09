@@ -651,5 +651,5 @@ pub struct ResponsesApiUsage {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/openai_responses_tests.rs"]
+#[path = "../../tests/inline/openai_responses_tests.rs"]
 mod tests;

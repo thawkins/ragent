@@ -349,5 +349,5 @@ pub fn build_evaluation_context(messages: &[Message], max_bytes: usize) -> Strin
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/goal_mod_tests.rs"]
+#[path = "../../tests/inline/goal_mod_tests.rs"]
 mod tests;

@@ -42,13 +42,10 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **AutoExtractConfig** (struct) — Automatic memory extraction configuration.
 - **BrowserConfig** (struct) — Browser automation (CDP) configuration.
 - **Capabilities** (struct) — LLM provider capability flags (vision, tools, etc.).
-- **ChannelsConfig** (struct) — External messaging channel configuration (Telegram/Discord).
 - **Config** (struct) — Top-level ragent configuration; loaded with layered precedence.
 - **Cost** (struct) — Per-token cost model for an LLM model.
 - **CrossProjectConfig** (struct) — Cross-project memory search configuration.
-- **DiscordChannelConfig** (struct) — Discord webhook channel configuration.
 - **GitLabIntegrationConfig** (struct) — GitLab integration configuration.
-- **GmailConfig** (struct) — Gmail OAuth2 client credentials configuration.
 - **McpServerConfig** (struct) — MCP server definition (command, args, env, transport).
 - **McpTransport** (enum) — MCP transport type (stdio).
 - **MemoryConfig** (struct) — Memory system configuration (blocks, structured store, retrieval).
@@ -59,7 +56,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **ResearchConfig** (struct) — Research subsystem configuration (OA recovery, Unpaywall).
 - **SddConfig** (struct) — Spec-Driven Development capability toggles.
 - **StreamConfig** (struct) — LLM streaming configuration (timeouts, retries).
-- **TelegramChannelConfig** (struct) — Telegram bot channel configuration.
 - **ToolVisibilityConfig** (struct) — Tool-family visibility switches (hide tool families from LLM).
 - **tool_family_names** (fn) — Maps a switch name to its tool family list.
 - **Permission** (enum) — Permission types (Read, Edit, Bash, Web, Custom, etc.).
@@ -87,7 +83,7 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 ### Module: config
 
 - **Config** (struct) — Top-level config; methods: `load`, `save`, `save_to_source`, `global_config_dir`, `global_config_path`, `backup_global_config`, `restore_global_config`, `effective_hidden_tools`, `merge`, `thinking_config_for_model`.
-- Supporting structs: `ToolVisibilityConfig`, `ToolVisibilitySpecified`, `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `SemanticConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `BrowserConfig`, `ChannelsConfig`, `TelegramChannelConfig`, `DiscordChannelConfig`, `GmailConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
+- Supporting structs: `ToolVisibilityConfig`, `ToolVisibilitySpecified`, `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `SemanticConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `BrowserConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
 - **tool_family_names** (fn) — Maps visibility switch name to tool family list.
 
 ### Module: dir_lists

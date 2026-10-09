@@ -228,7 +228,7 @@ pub fn openrouter_reasoning_payload_from_request(request: &ChatRequest) -> Optio
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/thinking_openrouter_reasoning_tests.rs"]
+#[path = "../../tests/inline/thinking_openrouter_reasoning_tests.rs"]
 mod openrouter_reasoning_tests;
 
 /// Maps the `Low`/`Medium`/`High` levels to their shared effort string.
@@ -414,5 +414,5 @@ pub fn should_warn_unsupported_thinking(request: &ChatRequest) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/thinking_tests.rs"]
+#[path = "../../tests/inline/thinking_tests.rs"]
 mod tests;

@@ -1050,5 +1050,5 @@ pub fn render_json_report(rows: &[ReportRow]) -> String {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/toolchain_tests.rs"]
+#[path = "../../tests/inline/toolchain_tests.rs"]
 mod tests;

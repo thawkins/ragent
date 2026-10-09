@@ -159,5 +159,5 @@ impl Tool for TeamMemoryReadTool {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/team_memory_read_tests.rs"]
+#[path = "../../tests/inline/team_memory_read_tests.rs"]
 mod tests;

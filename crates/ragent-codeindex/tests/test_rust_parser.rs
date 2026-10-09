@@ -363,7 +363,6 @@ pub const MAX_ITEMS: usize = 100;
 
 pub type Config = ConfigManager;
 
-#[cfg(test)]
 mod tests {
     use super::*;
 

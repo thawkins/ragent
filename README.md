@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 151 registered tools across 22 categories:
+- **Comprehensive tool system** — 149 registered tools across 21 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -63,7 +63,6 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
       OpenAlex (scholarly works), and Wikipedia (encyclopedia summaries) keyless
       backends in parallel, plus optional LangSearch / Tavily / Perplexity /
       Exa API-backed engines when configured
-    - **Gmail & messaging** — gmail, send_channel_message for external notifications
   - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
     slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
     highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,

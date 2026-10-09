@@ -212,19 +212,6 @@ pub struct Config {
     /// Prices are in USD per 1,000,000 tokens.
     #[serde(default)]
     pub prices: Vec<PriceEntry>,
-    /// External messaging channel configuration (JCODEPLAN M7).
-    ///
-    /// Used by the `send_channel_message` tool to post notifications to
-    /// Telegram chats and Discord webhooks.
-    #[serde(default, skip_serializing_if = "ChannelsConfig::is_empty")]
-    pub channels: ChannelsConfig,
-    /// Gmail tool configuration (JCODEPLAN M7).
-    ///
-    /// Optional OAuth2 client credentials for the `gmail` tool. The OAuth
-    /// access/refresh tokens themselves are stored encrypted in `ragent-storage`
-    /// (never in this file).
-    #[serde(default, skip_serializing_if = "GmailConfig::is_empty")]
-    pub gmail: GmailConfig,
     /// Spec-Driven Development (SDD) capability toggles (FR-019).
     ///
     /// All flags default to `false` (opt-in). New SDD artifacts and gates are
@@ -330,8 +317,6 @@ impl Default for Config {
             edit_log: false,
             activity_log: true,
             prices: Vec::new(),
-            channels: ChannelsConfig::default(),
-            gmail: GmailConfig::default(),
             sdd: SddConfig::default(),
             trigger: crate::trigger::TriggerConfig::default(),
             piegap: PieGapConfig::default(),
@@ -348,8 +333,7 @@ impl Default for Config {
 ///
 /// `Config` carries plaintext secrets (`tavily_api_key`,
 /// `langsearch_api_key`, `perplexity_api_key`, `exa_api_key`,
-/// `serper_api_key`, `gitlab.token`, `channels.telegram.bot_token`,
-/// `channels.discord.webhook_url`, `gmail.client_secret`). A derived `Debug` printed them verbatim on any
+/// `serper_api_key`, `gitlab.token`). A derived `Debug` printed them verbatim on any
 /// `{:?}`/`{cfg:?}`/`tracing::debug!(?cfg)`; this impl mirrors the MS-05
 /// decision to drop derived `Debug` from `ragent_types::Event`.
 ///
@@ -1913,7 +1897,7 @@ impl Config {
     ///
     /// Legacy locations that this supersedes:
     /// - `~/.ragent/`            (legacy home-dir root; agents, skills, teams, tokens, memory, templates)
-    /// - `~/.local/share/ragent/` (XDG data root; loop-state, inbox, gmail, embeddings, history, DBs)
+    /// - `~/.local/share/ragent/` (XDG data root; loop-state, inbox, embeddings, history, DBs)
     ///
     /// Returns `None` when the platform config directory cannot be determined
     /// (e.g. `XDG_CONFIG_HOME` unset on a headless Linux box).
@@ -2514,28 +2498,6 @@ impl Config {
         // tavily_api_key: overlay overrides base
         if overlay.tavily_api_key.is_some() {
             base.tavily_api_key = overlay.tavily_api_key;
-        }
-
-        // channels: overlay fields override base (M7)
-        if overlay.channels.enabled {
-            base.channels.enabled = true;
-        }
-        if overlay.channels.telegram.is_some() {
-            base.channels.telegram = overlay.channels.telegram;
-        }
-        if overlay.channels.discord.is_some() {
-            base.channels.discord = overlay.channels.discord;
-        }
-
-        // gmail: overlay fields override base (M7)
-        if overlay.gmail.client_id.is_some() {
-            base.gmail.client_id = overlay.gmail.client_id;
-        }
-        if overlay.gmail.client_secret.is_some() {
-            base.gmail.client_secret = overlay.gmail.client_secret;
-        }
-        if overlay.gmail.base_url.is_some() {
-            base.gmail.base_url = overlay.gmail.base_url;
         }
 
         // langsearch_api_key: overlay overrides base
@@ -3197,126 +3159,6 @@ pub struct GitLabIntegrationConfig {
     pub token: Option<String>,
     /// GitLab username / identity.
     pub username: Option<String>,
-}
-
-/// External messaging channel configuration for the `send_channel_message` tool
-/// (JCODEPLAN M7, T-061).
-///
-/// Configured under the `channels` key in `ragent.json`:
-///
-/// ```json
-/// {
-///   "channels": {
-///     "enabled": true,
-///     "telegram": { "bot_token": "123:abc", "chat_id": "-100123" },
-///     "discord": { "webhook_url": "https://discord.com/api/webhooks/..." }
-///   }
-/// }
-/// ```
-///
-/// Token values support a `env:VAR_NAME` prefix - the value is then read from
-/// the named environment variable at use time, so secrets do not need to live
-/// in the config file (e.g. `"bot_token": "env:TELEGRAM_BOT_TOKEN"`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ChannelsConfig {
-    /// Master switch for the channel messaging tool (default: `false`).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub enabled: bool,
-    /// Telegram bot channel configuration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telegram: Option<TelegramChannelConfig>,
-    /// Discord webhook channel configuration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discord: Option<DiscordChannelConfig>,
-}
-
-impl ChannelsConfig {
-    /// Returns `true` when no channels settings are present.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        !self.enabled && self.telegram.is_none() && self.discord.is_none()
-    }
-
-    /// Canonical name for "at defaults"; equivalent to [`ChannelsConfig::is_empty`]
-    /// (ANTIPAT L-4 standardises the predicate on `is_default`).
-    #[must_use]
-    pub fn is_default(&self) -> bool {
-        self.is_empty()
-    }
-}
-
-/// Telegram channel settings for `send_channel_message`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TelegramChannelConfig {
-    /// Bot token from BotFather. Supports the `env:VAR_NAME` indirection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bot_token: Option<String>,
-    /// Chat identifier (`chat_id`) that messages are sent to. Supports the
-    /// `env:VAR_NAME` indirection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_id: Option<String>,
-    /// Optional HTTP(S) endpoint override (used by tests; defaults to
-    /// `https://api.telegram.org`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-}
-
-/// Discord channel settings for `send_channel_message`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DiscordChannelConfig {
-    /// Full webhook URL (`https://discord.com/api/webhooks/<id>/<token>`).
-    /// Supports the `env:VAR_NAME` indirection.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub webhook_url: Option<String>,
-}
-
-/// Gmail tool configuration (JCODEPLAN M7, T-060).
-///
-/// Configured under the `gmail` key in `ragent.json`:
-///
-/// ```json
-/// {
-///   "gmail": {
-///     "client_id": "...apps.googleusercontent.com",
-///     "client_secret": "env:GMAIL_CLIENT_SECRET"
-///   }
-/// }
-/// ```
-///
-/// The OAuth2 access/refresh tokens used to call the Gmail API are managed by
-/// the `gmail` tool itself (`auth`/`status`/`logout` actions) and are stored
-/// encrypted in `ragent-storage` - never in this file.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GmailConfig {
-    /// OAuth2 client ID used for refresh-token exchange. Supports the
-    /// `env:VAR_NAME` indirection, and falls back to the
-    /// `GMAIL_CLIENT_ID` environment variable when unset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    /// OAuth2 client secret used for refresh-token exchange. Supports the
-    /// `env:VAR_NAME` indirection, and falls back to the
-    /// `GMAIL_CLIENT_SECRET` environment variable when unset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-    /// Optional HTTP(S) endpoint override (used by tests; defaults to
-    /// `https://gmail.googleapis.com`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-}
-
-impl GmailConfig {
-    /// Returns `true` when no gmail settings are present.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.client_id.is_none() && self.client_secret.is_none() && self.base_url.is_none()
-    }
-
-    /// Canonical name for "at defaults"; equivalent to [`GmailConfig::is_empty`]
-    /// (ANTIPAT L-4).
-    #[must_use]
-    pub fn is_default(&self) -> bool {
-        self.is_empty()
-    }
 }
 
 /// Spec-Driven Development (SDD) capability toggles (FR-019).

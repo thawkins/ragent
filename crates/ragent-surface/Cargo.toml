@@ -11,5 +11,8 @@ ragent-config = { path = "../ragent-config" }
 serde_json = "1"
 tracing = { workspace = true }
 
+[dev-dependencies]
+tempfile = "3.14"
+
 [lints]
 workspace = true

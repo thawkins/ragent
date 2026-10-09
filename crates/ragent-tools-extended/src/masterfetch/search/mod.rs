@@ -545,5 +545,5 @@ pub fn build_cache_key(query: &str, opts: &SearchOptions) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "../tests/inline/mod_tests.rs"]
+#[path = "../../../tests/inline/mod_tests.rs"]
 mod tests;

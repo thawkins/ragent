@@ -178,19 +178,6 @@ Files:
 - `crates/ragent-tools-extended/src/browser/launch.rs`
 - `crates/ragent-tools-extended/src/browser/mod.rs`
 
-## ragent-tools-extended :: Gmail & messaging
-
-**Tools:** gmail, send_channel_message
-
-**Files:** 2
-
-**External crates (8):** anyhow, async-trait, base64, reqwest, serde, serde_json, tracing, url
-**Workspace crates (2):** ragent_config, ragent_storage
-
-Files:
-- `crates/ragent-tools-extended/src/channels.rs`
-- `crates/ragent-tools-extended/src/gmail.rs`
-
 ## ragent-tools-extended :: MasterFetch
 
 **Tools:** mf_fetch, mf_crawl, mf_search, mf_screenshot, mf_cache_clear, mf_version

@@ -33,7 +33,6 @@ async fn main() -> anyhow::Result<()> {
 
     // To actually write changes, call with dry_run=false
     // let res2 = apply_batch_edits(pairs, 4, false).await?;
-    // println!("Applied: {}", res2.applied.len());
 
     Ok(())
 }

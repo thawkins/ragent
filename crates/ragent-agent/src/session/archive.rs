@@ -813,5 +813,5 @@ fn create_tarball(source_dir: &Path, output_path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "../tests/inline/archive_tests.rs"]
+#[path = "../../tests/inline/archive_tests.rs"]
 mod tests;
