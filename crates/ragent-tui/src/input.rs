@@ -366,6 +366,21 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // While the `/backend` switcher panel (spec `openhands` FR-008) is open it
+    // owns the keyboard: `Up`/`Down` move the block cursor, `Enter` switches the
+    // active backend to the highlighted row, and `Esc` dismisses the panel. Every
+    // other key is swallowed and the input field stays locked.
+    if app.backend_panel.is_some() {
+        match key.code {
+            KeyCode::Up => app.backend_panel_move_up(),
+            KeyCode::Down => app.backend_panel_move_down(),
+            KeyCode::Enter => app.backend_panel_activate_selected(),
+            KeyCode::Esc => app.close_backend_panel(),
+            _ => {}
+        }
+        return None;
+    }
+
     // While the queue-entry panel (ALT-Q `Show` row) is open it swallows every
     // keystroke so none of them can mutate the editable input buffer: `Up`/`Down`
     // move the highlight, `Enter` moves the highlighted entry one step toward the

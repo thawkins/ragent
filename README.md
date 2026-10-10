@@ -20,7 +20,26 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — 149 registered tools across 21 categories:
+- **Pluggable execution backends** — select *where* a session's tools run without
+  changing the agent loop: `local` (host, the default), `docker`/`podman` (a
+  per-session container whose workspace is a named volume, never a host bind mount),
+  and `remote` (drive a second ragent server over REST+SSE and mirror its events
+  locally). A durable backend registry reports each backend's health, the TUI
+  `/backend` switcher shows and changes the active backend, sandbox credentials are
+  resolved from the encrypted store at spawn time and injected as container
+  environment variables, and a provisioning failure fails the turn rather than
+  falling back to the host. The 7-layer bash validation, path containment, and
+  permission system are unchanged and apply before any backend dispatch
+- **LLM security analyzer** — an opt-in permission mode (`/security on`, or the
+  `security_analyzer` config block) where each proposed tool action is judged by an
+  LLM that returns an `allow`/`ask`/`deny` verdict with a rationale, published before
+  the action is permitted or refused; it is a tightening-only layer over the static
+  rules (a `deny` is hard, an `allow` never overrides an explicit policy `deny`, and
+  any analyzer failure degrades to the normal interactive prompt)
+- **Comprehensive tool system** — 148 registered tools across 21 categories
+  (the engine-gated `mf_screenshot` tool is registered only when a drivable
+  headless browser is present — spec `openhands` FR-029 — so the default build
+  advertises 148):
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -84,6 +103,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   server types, stdio client, and tool bridging; TUI commands (`/mcp` /
   `/mcp status`, `/mcp discover`, `/mcp connect <id>`, `/mcp disconnect <id>`) with
   durable global enable/disable state (`mcp_state.json`) and live connect/disconnect
+- **ACP integration** — Agent Client Protocol support in both directions: an ACP
+  **client** that drives Claude Code, Codex, or Gemini CLI as an external
+  subprocess over JSON-RPC on stdio, and a **feature-gated, off-by-default ACP
+  server** (`cargo build --features acp-server`; `ragent acp-server`) that an
+  ACP-capable editor (Zed, VS Code, JetBrains) attaches to, streaming the driven
+  session's updates back as `session/update` notifications
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back
 - **Event bus** — internal tokio pub/sub for real-time UI updates across all components
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
@@ -154,7 +179,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   not flag them, a per-engine progress table that breaks exclusions
   and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
-  prompts, and file context into agent sessions
+  prompts, and file context into agent sessions; also discovers the AgentSkills
+  convention (`.agents/skills/` project and `~/.agents/skills/` user, a directory per
+  pack with a `SKILL.md` declaring `name` and `description`), listable via `/skills`
+  (or `/skill`) and loadable via `/skill <name> [args]` or the bare `/<name>` trigger,
+  with an existing higher-scope pack winning a name clash
 - **Plugin system** — load Codex-dialect (`codex-plugin.json` or the nested
   `.codex-plugin/plugin.json` the `openai/plugins` store ships) and Claude
   Code/Desktop-dialect (`.claude-plugin/plugin.json`) plugins — including
@@ -208,6 +237,39 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   reports each catalogue endpoint and its provenance. Connectors install
   enabled; `enable` connects their servers now in a running session.
   `connectors.enabled: false` makes the subsystem inert
+- **Automation service** — named, schedulable or webhook-triggered agent runs
+  with durable run history and execution-backend confinement (spec `openhands`
+  FR-013, FR-014, FR-018, FR-033). A public webhook ingress (`POST /auto/<id>`)
+  enqueues a run with the request body as context; a background scheduler fires
+  schedule-triggered automations (same grammar as `/cron`); every terminal run
+  is recorded with its automation id, trigger, times, outcome, backend, and
+  output reference, and can notify Slack/GitHub/Linear/Notion/a generic webhook.
+  A run executes only in its configured backend. Managed through
+  `/automation [list]`, `/automation runs <id>`, `/automation run <id>`,
+  `/automation help` in the TUI, `ragent automation list|runs <id>|run <id>` on
+  the CLI, and `GET /automation`, `GET /automation/runs/{id}`,
+  `POST /automation/{id}/run` over HTTP. `automation.enabled: false` (or an
+  absent block) makes the subsystem inert
+- **OpenAPI 3.1 contract and typed client** — the REST API is described by an
+  OpenAPI 3.1 document served at `GET /openapi.json`, rendered from a single
+  route table in the server crate so it cannot drift from the served routes; a
+  companion test asserts the table and the router agree in both directions. The
+  same table generates a dependency-free typed TypeScript client
+  (`docs/openapi/ragent-client.d.ts`), emitted from the CLI with
+  `ragent openapi --client`. The document carries no runtime data or secrets,
+  so `/openapi.json` is public while every described operation declares the
+  native bearer security scheme. MCP servers configured with the `http`
+  transport (`"type": "http"`, `"url": …`) connect over Streamable-HTTP
+  alongside the existing `stdio` transport
+- **OpenAI-compatible surface** — an inbound `POST /v1/chat/completions` and
+  `GET /v1/models` adapter over the same `SessionProcessor` agent loop, behind
+  the native bearer token (FR-003, FR-024). `stream:false` returns an OpenAI
+  `chat.completion` JSON object; `stream:true` streams `chat.completion.chunk`
+  `text/event-stream` events terminated by `data: [DONE]` (FR-011, FR-012).
+  Enable it with `openai.enabled` plus an `openai.token`; enabling it without a
+  token makes `ragent serve` refuse to start the surface rather than serve it
+  unauthenticated (FR-032). Permission checks are preserved on both paths
+  (FR-038).
 - **Input queue** — the TUI input field stays editable while the primary agent
   executes: each `Enter` appends the message to a bounded FIFO queue (default 32
   entries, configurable via `input_queue_capacity`), a two-digit counter appears
@@ -222,6 +284,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
 - **Config error reporting** — actionable JSON parse diagnostics showing file path,
   line, column, problematic source line, and caret marker
+- **UI internationalisation** — opt-in locale message catalog (English fallback
+  for any missing key) for the status-bar labels, the `/help` header, and panel
+  footers, configured via the `i18n` config section or the `/i18n
+  on|off|status|list|<locale>` command; a non-English ambient `LANG` with an
+  installed catalog enables it automatically
 
 ## Installation
 
@@ -295,6 +362,9 @@ Commands:
   new      Scaffold a new project in the current directory
   plugins  Manage plugins (the `/plugins` slash-command parity surface)
   connectors  Manage connectors (the `/connectors` slash-command parity surface)
+  automation  Manage automations (the `/automation` slash-command parity surface)
+  openapi  Emit the OpenAPI 3.1 document (or `--client` for the generated typed client)
+  acp-server  Serve the ACP endpoint on stdio for IDE clients (features acp-server)
 
 Options:
       --model <MODEL>          Override model (provider/model format)
@@ -351,7 +421,38 @@ with OpenCode's `opencode.json`.
     "teams": true,
     "agents": true,
     "plan": true,
-    "codeindex": true
+    "codeindex": true,
+    "masterfetch": true
+  },
+  // Execution backend (spec `openhands` FR-001, FR-026). Omitted = `local`
+  // (host execution, FR-019). `backends` declares the registry entries the
+  // `/backend` switcher and the container backend read; `credentials` names
+  // encrypted-store credentials injected as container env vars at spawn time
+  // (the value is never in this file; FR-010).
+  "execution_backend": "podman",
+  "backends": [
+    { "id": "sandbox", "name": "Podman sandbox", "kind": "podman",
+      "image": "ghcr.io/yourorg/ragent-sandbox:latest", "workspace": "/projects",
+      "credentials": ["EXAMPLE_API_KEY"] }
+  ],
+  // LLM security analyzer (spec `openhands` FR-006, FR-017). Opt-in; a
+  // tightening-only layer over the static permission rules.
+  "security_analyzer": {
+    "enabled": true,
+    "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" }
+  },
+  // OpenAI-compatible inbound surface (spec `openhands` FR-012, FR-024,
+  // FR-032). When `enabled` is true a `token` (or the ambient `RAGENT_TOKEN`)
+  // is required or `ragent serve` refuses to start the surface.
+  "openai": {
+    "enabled": true,
+    "token": "sk-ragent-local"
+  },
+  // UI internationalisation (spec `openhands` FR-027). Opt-in; a non-English
+  // ambient `LANG` with an installed catalog enables it automatically.
+  "i18n": {
+    "enabled": true,
+    "locale": "fr"
   },
   // Plugin subsystem (defaults shown). `enabled: false` makes the whole
   // subsystem inert (no discovery or loading).
@@ -372,11 +473,36 @@ with OpenCode's `opencode.json`.
       "cache_ttl_secs": 3600
     },
     "credentials": {}
+  },
+  // Automation service (spec `openhands` FR-013, FR-014, FR-018, FR-033).
+  // An absent block leaves the subsystem inert; `enabled: true` starts the
+  // scheduler and the webhook ingress.
+  "automation": {
+    "enabled": true,
+    "run_history_cap": 500,
+    "scheduler_tick_secs": 30,
+    "automations": [
+      {
+        "id": "on-issue",
+        "agent": "general",
+        "prompt": "Triage issue {{payload}}",
+        "trigger": { "kind": "webhook" },
+        "backend": "local",
+        "dispatch": [
+          { "kind": "slack", "url": "https://hooks.slack.com/...", "token_env": "SLACK_BOT_TOKEN" }
+        ]
+      },
+      {
+        "id": "nightly",
+        "trigger": { "kind": "schedule", "schedule": "every 2m" }
+      }
+    ]
   }
 }
 ```
 
-See the full configuration schema in [SPEC.md](SPEC.md).
+See the full configuration schema in [SPEC.md](SPEC.md) and the automation
+manual in [docs/howtos/slashcommands/automation.md](docs/howtos/slashcommands/automation.md).
 
 ## Custom Agents
 
@@ -523,14 +649,42 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.129** — The core architecture, tool system (151 tools across 22 categories), TUI,
-HTTP server, memory system, teams/swarm coordination, spec management, skills system,
-research system, plugin system, and multi-layered security are functional and under
-active development.
+**Unreleased** — The core architecture, tool system (148 tools across 21 categories in
+the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
+management, skills system, research system, plugin system, pluggable execution backends,
+ACP integration, the automation service, and multi-layered security are functional and
+under active development.
 
 Recent highlights:
 
-- **Unreleased — plugin-store category navigator and `browser` tool removal** —
+- **v1.0.131 — OpenHands-parity release** — the pluggable execution backends
+  (`local`/`docker`/`podman`/`remote`, the `/backend` switcher, a health-visible
+  registry, and sandbox secret injection resolved from the encrypted store at spawn
+  time), the ACP client plus the feature-gated `ragent acp-server`, the
+  OpenAI-compatible inbound surface, the generated OpenAPI 3.1 contract and HTTP MCP
+  transport, the automation service, AgentSkills discovery, and the opt-in LLM
+  security analyzer now ship as a tagged release. The 7-layer bash validation, path
+  containment, and permission system are unchanged and gate every new surface.
+  Registry fixes collected on top of `2ed21e3d`: the fast-path schema tests assert the
+  crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table),
+  `PluginStoreBrowser::set_index` keeps document order, the `mask_key` doctest expects
+  `[REDACTED]`, `machine_output` routes tracing to stderr for the report subcommands so
+  machine-readable stdout stays clean, and the unused `ragent-storage` dependency is
+  dropped from `ragent-tools-extended`.
+- **v1.0.130 — OpenHands parity delta (spec `openhands`)** — ragent closes the six
+  structural gaps to OpenHands: pluggable execution backends (`local`/`docker`/`podman`/
+  `remote`, the `/backend` switcher, a health-visible registry, and sandbox secret
+  injection), an ACP client + feature-gated `ragent acp-server`, an OpenAI-compatible
+  inbound surface (`/v1/chat/completions`, `/v1/models`), a generated OpenAPI 3.1
+  contract and HTTP MCP transport, the automation service (webhook + scheduler + run
+  history + backend confinement), AgentSkills discovery, an LLM security analyzer, and
+  an engine-gated screenshot capability (so the always-erroring `mf_screenshot` stub is
+  no longer advertised — the default build ships 148 tools). The 7-layer bash
+  validation, path containment, and permission system are unchanged and gate every new
+  surface. The manual test plan `specs/openhands/TESTPLAN.md` walks acceptance
+  criteria 1-14 and the CI gates (`cargo fmt`, `cargo clippy --workspace`,
+  `cargo check --workspace`) pass.
+- **v1.0.130 — plugin-store category navigator and `browser` tool removal** —
   `/plugins codex` and `/plugins claude` gain a left-hand category navigator
   (`ALL` plus the distinct categories and tags the fetched index declares, driven
   by keyboard and mouse, with a `--category <name>` launch argument). The
@@ -539,7 +693,10 @@ Recent highlights:
   now scans the ragent-native `~/.config/ragent/servers/` directory first, a
   startup failure is echoed to stdout when the TUI stderr spool is active, and an
   unreachable store marketplace reports a clean
-  `<Store> plugin marketplace is unavailable (...)` row.
+  `<Store> plugin marketplace is unavailable (...)` row. This release also fixes a
+  stable-toolchain build failure in the `/events` SSE connection cap
+  (`AtomicUsize::try_update`, an unstable feature, replaced with a portable
+  `compare_exchange_weak` loop).
 - **v1.0.129 — code-audit remediation complete (M5-M9) and dependency
   upkeep** — the `docs/plans/code-audit.md` plan is executed through M9. A new
   `ragent-surface` crate (18th workspace crate) owns the shared

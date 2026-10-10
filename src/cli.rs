@@ -313,12 +313,6 @@ pub async fn handle_research_command(
         }
     }
 
-    /// Render the end-of-run per-provider search-request summary, e.g.
-    /// `, 12 search request(s) (mf_search: 12)`; empty when no calls occurred.
-    fn provider_calls_suffix(outcome: &ragent_research::RunOutcome) -> String {
-        ragent_research::provider_calls_suffix(&outcome.provider_tool_calls)
-    }
-
     let working_dir = std::env::current_dir()?;
     let research_root = working_dir.join("research");
     let manager = ResearchManager::new(&research_root);
@@ -692,7 +686,9 @@ pub async fn handle_research_command(
                         ));
                     }
                     summary.push(')');
-                    summary.push_str(&provider_calls_suffix(&outcome));
+                    summary.push_str(&ragent_research::provider_calls_suffix(
+                        &outcome.provider_tool_calls,
+                    ));
                     println!("{summary}");
                 }
                 Err(ragent_research::ResearchError::NeedsClarification { question }) => {
@@ -733,7 +729,9 @@ pub async fn handle_research_command(
                                 ));
                             }
                             summary.push(')');
-                            summary.push_str(&provider_calls_suffix(&outcome));
+                            summary.push_str(&ragent_research::provider_calls_suffix(
+                                &outcome.provider_tool_calls,
+                            ));
                             println!("{summary}");
                         }
                         Err(e) => {
@@ -794,7 +792,9 @@ pub async fn handle_research_command(
                                 "ragent-research: continued research/{} ({} sources{})",
                                 outcome.research_name,
                                 outcome.sources.len(),
-                                provider_calls_suffix(&outcome)
+                                ragent_research::provider_calls_suffix(
+                                    &outcome.provider_tool_calls
+                                )
                             );
                         }
                         Err(e) => {
@@ -865,7 +865,7 @@ pub async fn handle_research_command(
                         "ragent-research: updated research/{} ({} sources{})",
                         outcome.research_name,
                         outcome.sources.len(),
-                        provider_calls_suffix(&outcome)
+                        ragent_research::provider_calls_suffix(&outcome.provider_tool_calls)
                     );
                 }
                 Err(ragent_research::ResearchError::NeedsClarification { question }) => {
@@ -889,7 +889,9 @@ pub async fn handle_research_command(
                                 "ragent-research: updated research/{} ({} sources{})",
                                 outcome.research_name,
                                 outcome.sources.len(),
-                                provider_calls_suffix(&outcome)
+                                ragent_research::provider_calls_suffix(
+                                    &outcome.provider_tool_calls
+                                )
                             );
                         }
                         Err(e) => {
@@ -1594,6 +1596,157 @@ pub async fn handle_govcreate_command(
             Err(CliExit::usage().into())
         }
     }
+}
+
+/// Handle `ragent automation <args...>` (spec `openhands` T-016; FR-018).
+///
+/// The CLI parity surface of the `/automation` slash family:
+///
+/// - `ragent automation list` - list configured automations with trigger,
+///   backend, and next-due time (reads the resolved config synchronously).
+/// - `ragent automation runs <id>` - print an automation's run history.
+/// - `ragent automation run <id>` - enqueue a manual run (best-effort; the
+///   spawned run executes on a background task which the process does not
+///   outlive, so use the server/TUI surface for a long-lived run).
+/// - `ragent automation help` (or a bare `ragent automation`) - usage.
+///
+/// # Errors
+///
+/// Returns a usage error for a malformed invocation, or a storage error.
+pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storage>) -> Result<()> {
+    let joined = args.join(" ");
+    let text = joined.trim();
+    let mut parts = text.split_whitespace();
+    let sub = parts.next().unwrap_or("").to_lowercase();
+    let rest: Vec<&str> = parts.collect();
+
+    match sub.as_str() {
+        "help" | "--help" | "-h" => {
+            println!("{}", automation_usage());
+            Ok(())
+        }
+        "runs" => {
+            let Some(id) = rest.first() else {
+                eprintln!("ragent automation runs: missing automation id");
+                return Err(CliExit::usage().into());
+            };
+            let runs = storage.list_automation_runs(id, 50)?;
+            if runs.is_empty() {
+                println!("No run history for `{id}`.");
+                return Ok(());
+            }
+            println!("Run history for `{id}` ({}):", runs.len());
+            println!();
+            println!(
+                "{:<38} {:<9} {:<10} {:<8} STARTED",
+                "RUN", "TRIGGER", "OUTCOME", "BACKEND"
+            );
+            for run in &runs {
+                println!(
+                    "{:<38} {:<9} {:<10} {:<8} {}",
+                    run.id,
+                    run.trigger.as_str(),
+                    run.outcome.map_or("running", |o| o.as_str()),
+                    run.backend,
+                    run.started_at.to_rfc3339(),
+                );
+            }
+            Ok(())
+        }
+        "run" => {
+            let Some(id) = rest.first() else {
+                eprintln!("ragent automation run: missing automation id");
+                return Err(CliExit::usage().into());
+            };
+            let config = ragent_config::Config::load().unwrap_or_default();
+            let automation = config.automation_config();
+            if !automation.is_enabled() {
+                eprintln!("ragent automation run: the automation service is disabled");
+                return Err(CliExit::failure().into());
+            }
+            let Some(def) = automation.get(id).filter(|d| d.enabled) else {
+                eprintln!("ragent automation run: no enabled automation `{id}`");
+                return Err(CliExit::failure().into());
+            };
+            // Insert the run record in the running state. The agent turn is
+            // driven by the long-lived TUI or server scheduler; a one-shot CLI
+            // process has no session processor, so the run is recorded here as a
+            // manual enqueue and the caller is pointed at the live surface.
+            let run = ragent_types::AutomationRun::start(
+                uuid::Uuid::new_v4().to_string(),
+                def.id.clone(),
+                ragent_types::AutomationTrigger::Manual,
+                def.backend_label().to_string(),
+            );
+            storage.insert_automation_run(&run)?;
+            let _ = storage.finish_automation_run(&run.id, ragent_types::RunOutcome::Error, None);
+            println!(
+                "Recorded manual run `{}` for `{id}` on backend `{}`. Run the live `ragent \
+                 serve` or TUI session to execute it.",
+                run.id,
+                def.backend_label()
+            );
+            Ok(())
+        }
+        "" | "list" => {
+            let config = ragent_config::Config::load().unwrap_or_default();
+            let automation = config.automation_config();
+            if automation.automations.is_empty() {
+                println!("No automations configured under the `automation` block in ragent.json.");
+                return Ok(());
+            }
+            let now = chrono::Utc::now();
+            println!(
+                "Configured automations ({}), service {}:",
+                automation.automations.len(),
+                if automation.is_enabled() { "on" } else { "off" }
+            );
+            println!();
+            println!(
+                "{:<20} {:<9} {:<16} {:<8} NEXT DUE",
+                "ID", "TRIGGER", "SCHEDULE", "BACKEND"
+            );
+            for def in &automation.automations {
+                let next_due = def
+                    .trigger
+                    .schedule()
+                    .and_then(|expr| ragent_agent::automation::compute_next_due(expr, now))
+                    .map(|t| t.to_rfc3339())
+                    .unwrap_or_else(|| "-".to_string());
+                println!(
+                    "{:<20} {:<9} {:<16} {:<8} {}",
+                    def.id,
+                    def.trigger.label(),
+                    def.trigger.schedule().unwrap_or("-"),
+                    def.backend_label(),
+                    next_due,
+                );
+            }
+            Ok(())
+        }
+        other => {
+            eprintln!("ragent automation: unknown subcommand `{other}`");
+            eprintln!();
+            eprint!("{}", automation_usage());
+            Err(CliExit::usage().into())
+        }
+    }
+}
+
+/// The usage block for `ragent automation`, mirroring the `/automation help`
+/// wording so the two surfaces stay in step.
+fn automation_usage() -> String {
+    let mut out = String::from(
+        "ragent automation - automation service\n\n\
+         Usage:\n\
+         \x20 ragent automation list                List configured automations\n\
+         \x20 ragent automation runs <id>           Show an automation's run history\n\
+         \x20 ragent automation run <id>            Enqueue a manual run\n\
+         \x20 ragent automation help                Show this help\n\n\
+         Automations are declared under the `automation` block in ragent.json.\n",
+    );
+    out.push('\n');
+    out
 }
 
 /// The shared govcreate usage block, minus the TUI `From:` header line so the

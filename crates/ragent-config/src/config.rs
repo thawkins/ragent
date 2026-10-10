@@ -7,6 +7,9 @@
 
 use crate::compaction::CompactionConfig;
 use crate::gcf::GcfConfig;
+use crate::i18n::I18nConfig;
+use crate::openai::OpenAiConfig;
+use crate::security_analyzer::SecurityAnalyzerConfig;
 use anyhow::bail;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -257,6 +260,16 @@ pub struct Config {
     /// overrides user-global). `None` means the compiled defaults apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connectors: Option<crate::connectors::ConnectorsConfig>,
+    /// Automation service configuration (spec `openhands` T-016; FR-013,
+    /// FR-014, FR-033).
+    ///
+    /// Loaded and merged with the same precedence as other optional config
+    /// sections: the overlay section wins when present (project config
+    /// overrides user-global). `None` means the compiled defaults apply; the
+    /// scheduler, webhook ingress, and run history are all driven from this
+    /// block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation: Option<crate::automation::AutomationConfig>,
     /// Maximum number of messages the TUI message input queue may hold
     /// (spec `inputqueue` FR-015).
     ///
@@ -266,6 +279,57 @@ pub struct Config {
     /// persisted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_queue_capacity: Option<usize>,
+    /// Execution backend a tool invocation is dispatched to (spec `openhands`
+    /// FR-001, FR-019).
+    ///
+    /// Accepts a label (`local`, `docker`, `podman`, `remote`) or an object
+    /// carrying `id` plus optional connection fields; use
+    /// [`ExecutionBackendKind`] / [`BackendConfig`] to read it.
+    /// [`Config::effective_execution_backend`] resolves the active kind and
+    /// falls back to `local` when nothing is configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_backend: Option<ExecutionBackend>,
+    /// Configured execution backends (the backend registry, FR-004).
+    ///
+    /// Entries are selectable by `execution_backend` and read by the container
+    /// backend (T-002, for image and workspace) and the registry (T-004, for
+    /// health and the TUI switcher).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backends: Vec<BackendConfig>,
+    /// ACP (Agent Client Protocol) client configuration (spec `openhands`
+    /// FR-015, FR-022, FR-036).
+    ///
+    /// `None` means the ACP subsystem is inert: no external agent is spawned and
+    /// no ACP agent appears in the picker. When present, each registered agent is
+    /// driveable over JSON-RPC on stdio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<AcpConfig>,
+    /// UI internationalisation configuration (spec `openhands` FR-027).
+    ///
+    /// Opt-in and omitted from the default config: when `None` the subsystem is
+    /// inert and user-facing strings render in English. When present,
+    /// [`crate::i18n::resolve`] resolves the effective locale and catalogue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i18n: Option<I18nConfig>,
+    /// OpenAI-compatible inbound surface configuration (spec `openhands`
+    /// FR-012, FR-024, FR-032).
+    ///
+    /// Opt-in and omitted from the default config: the `/v1` endpoints are
+    /// always mounted behind the native bearer-token check, and this section
+    /// additionally carries the surface's bearer token and arms the FR-032
+    /// refuse-to-start gate when the surface is enabled without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai: Option<OpenAiConfig>,
+    /// LLM security-analyzer configuration (spec `openhands` FR-006, FR-016,
+    /// FR-017).
+    ///
+    /// Opt-in and omitted from the default config: when `None` the analyzer is
+    /// inert and the static permission rules decide alone. When present and
+    /// enabled, each proposed tool action is evaluated by an LLM that returns an
+    /// allow/ask/deny verdict with a rationale before the action is permitted or
+    /// refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_analyzer: Option<SecurityAnalyzerConfig>,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -323,7 +387,14 @@ impl Default for Config {
             research: ResearchConfig::default(),
             plugins: None,
             connectors: None,
+            automation: None,
             input_queue_capacity: None,
+            execution_backend: None,
+            backends: Vec::new(),
+            acp: None,
+            i18n: None,
+            openai: None,
+            security_analyzer: None,
             config_paths: Vec::new(),
         }
     }
@@ -1427,6 +1498,322 @@ impl std::fmt::Display for McpTransport {
     }
 }
 
+/// Default per-turn wall-clock budget for an ACP agent, in seconds.
+///
+/// Bounds a single relayed turn so a subprocess that goes silent without
+/// exiting cannot block the session indefinitely (FR-036).
+#[must_use]
+pub const fn default_acp_turn_timeout_secs() -> u64 {
+    300
+}
+
+/// Configuration for the ACP (Agent Client Protocol) client (spec `openhands`
+/// FR-015, FR-022, FR-036).
+///
+/// ragent drives each registered ACP agent - Claude Code, Codex, Gemini CLI, or
+/// a custom ACP server - as a subprocess that speaks JSON-RPC over its standard
+/// input and output (FR-015). While an ACP agent is the active agent kind, its
+/// streamed updates render in the TUI and turns are not routed to a local
+/// ragent LLM provider (FR-022). An optional `default_agent` names the entry used
+/// when none is selected explicitly.
+///
+/// ```jsonc
+/// {
+///   "acp": {
+///     "default_agent": "claude",
+///     "agents": {
+///       "claude": { "id": "claude", "command": "claude-code-acp", "args": [] }
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AcpConfig {
+    /// Id of the ACP agent used when no agent has been selected explicitly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_agent: Option<String>,
+    /// Registered ACP agents keyed by a stable id.
+    #[serde(default)]
+    pub agents: HashMap<String, AcpAgentConfig>,
+    /// Whether the ACP **server** endpoint is enabled (spec `openhands`
+    /// FR-022, FR-028).
+    ///
+    /// The endpoint serves ACP-capable editors (Zed, VS Code, JetBrains) over
+    /// JSON-RPC on ragent's own stdio. It is **off by default**: an editor can
+    /// only attach once the user opts in, because the server drives a full
+    /// local ragent turn and must never be an implicit attack surface on a
+    /// plain terminal launch. Enable it with `acp.server_enabled: true`.
+    #[serde(default)]
+    pub server_enabled: bool,
+    /// The agent the ACP server drives (spec `openhands` FR-022, FR-028).
+    ///
+    /// Defaults to [`AcpConfig::default_agent`] and, when that is unset too,
+    /// to [`Config::default_agent`](crate::Config::default_agent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_agent: Option<String>,
+}
+
+impl AcpConfig {
+    /// Whether the ACP subsystem has any registered agents.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.agents.is_empty()
+    }
+}
+
+/// A single external ACP agent that ragent can drive over stdio (FR-015).
+///
+/// The `command` is spawned as a subprocess; the turn is relayed over JSON-RPC
+/// on that child's stdin/stdout. `enabled: false` retires an entry without
+/// deleting it, mirroring the MCP server and plugin conventions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpAgentConfig {
+    /// Stable identifier used to select this agent.
+    pub id: String,
+    /// Human-readable display name. Defaults to [`AcpAgentConfig::id`] when
+    /// omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Whether this agent is offered by the `/agent` picker and the ACP surface.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Executable path or name of the ACP agent to spawn.
+    pub command: String,
+    /// Command-line arguments passed to the ACP agent process.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variables injected into the ACP agent process.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Working directory for the subprocess. Defaults to the session working
+    /// directory when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Per-turn wall-clock budget in seconds, bounding a silent subprocess
+    /// (FR-036). Defaults to [`default_acp_turn_timeout_secs`].
+    #[serde(default = "default_acp_turn_timeout_secs")]
+    pub turn_timeout_secs: u64,
+    /// Optional system/instruction context sent to the agent when a session is
+    /// created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+}
+
+impl Default for AcpAgentConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: None,
+            enabled: true,
+            command: String::new(),
+            args: Vec::new(),
+            env: HashMap::new(),
+            cwd: None,
+            turn_timeout_secs: default_acp_turn_timeout_secs(),
+            system_prompt: None,
+        }
+    }
+}
+
+impl AcpAgentConfig {
+    /// The name to display for this agent: the explicit `name`, or the id when
+    /// none was given.
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.id)
+    }
+}
+
+/// Kind of execution backend a tool invocation is dispatched to (spec
+/// `openhands` FR-001, FR-004).
+///
+/// T-001 defines the whole set so the config key, the backend registry
+/// (T-004), and the TUI switcher (T-005) share one vocabulary from the start.
+/// Only [`ExecutionBackendKind::Local`] has an executable adapter in T-001;
+/// `Docker`/`Podman`/`Remote` parse successfully and resolve to a clear
+/// "not yet implemented" error until T-002/T-003 land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionBackendKind {
+    /// Execute tools directly on the host (the default, FR-019).
+    #[default]
+    Local,
+    /// Execute tools inside a Docker container (T-002).
+    Docker,
+    /// Execute tools inside a Podman container (T-002).
+    Podman,
+    /// Drive a remote ragent server over its REST+SSE API (T-003).
+    Remote,
+}
+
+impl ExecutionBackendKind {
+    /// The config/log label for this kind (`local`, `docker`, `podman`,
+    /// `remote`), matching serde's lowercase names so config, logs, and the
+    /// TUI cannot drift.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Docker => "docker",
+            Self::Podman => "podman",
+            Self::Remote => "remote",
+        }
+    }
+
+    /// Parse a backend-kind label (case-insensitive, trimmed).
+    ///
+    /// Unknown labels resolve to `None` so the caller decides the fallback
+    /// policy explicitly; [`Config::effective_execution_backend`] then keeps
+    /// the safe default rather than mis-resolving a typo onto a more capable
+    /// backend.
+    #[must_use]
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Self::Local),
+            "docker" => Some(Self::Docker),
+            "podman" => Some(Self::Podman),
+            "remote" => Some(Self::Remote),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind executes on the host. Keeps the "no fallback to host
+    /// execution" rule (FR-031) explicit at call sites.
+    #[must_use]
+    pub const fn is_local(self) -> bool {
+        matches!(self, Self::Local)
+    }
+}
+
+impl std::fmt::Display for ExecutionBackendKind {
+    /// Render the config/wire label (`local`, `docker`, `podman`, `remote`).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A configured execution backend entry in the backend registry (FR-004).
+///
+/// T-001 persists the descriptor - id, display name, kind, and the
+/// kind-specific connection fields - so the registry (T-004), the TUI switcher
+/// (T-005), and the container/remote adapters (T-002/T-003) all read one shape.
+/// `kind` is a plain string so an unknown value from a newer config is
+/// preserved rather than failing the whole config parse; resolution goes
+/// through [`ExecutionBackendKind::from_label`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BackendConfig {
+    /// Stable identifier used to select this backend.
+    pub id: String,
+    /// Human-readable display name. Defaults to [`BackendConfig::id`] when
+    /// omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Kind label (`local`, `docker`, `podman`, `remote`).
+    #[serde(default)]
+    pub kind: String,
+    /// Container image reference (`docker`/`podman` kinds; T-002).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Host path mounted as the container workspace (`docker`/`podman` kinds;
+    /// T-002).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Base URL of the remote server (`remote` kind; T-003).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// API key for the remote server (`remote` kind; T-003). Masked in
+    /// diagnostics by the redacting [`Config`] `Debug` impl.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Names of encrypted-store credentials to inject at spawn time
+    /// (`docker`/`podman`/`remote` kinds; spec `openhands` T-006, FR-010).
+    ///
+    /// A name is not a secret: the value is resolved from the encrypted
+    /// credential store when the sandbox is provisioned and injected as a
+    /// container environment variable, never written into the descriptor
+    /// (FR-010, FR-035).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credentials: Vec<String>,
+}
+
+impl BackendConfig {
+    /// The name to display for this backend: the explicit `name`, or the id
+    /// when none was given.
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.id)
+    }
+
+    /// The parsed backend kind, or `None` when `kind` is missing/unknown.
+    #[must_use]
+    pub fn kind_parsed(&self) -> Option<ExecutionBackendKind> {
+        ExecutionBackendKind::from_label(&self.kind)
+    }
+}
+
+/// The value of the `execution_backend` config key.
+///
+/// Two spellings are accepted so the terse form stays convenient while the
+/// registry form (FR-004) can carry the connection descriptor:
+///
+/// ```jsonc
+/// { "execution_backend": "podman" }
+/// // or
+/// { "execution_backend": { "id": "box", "kind": "docker", "image": "...", "workspace": "." } }
+/// ```
+///
+/// An object entry with an `id` but no `kind` is treated as a selection of a
+/// backend already declared in `backends`; the kind is then resolved from that
+/// entry (T-004) or left unparsed for the caller to report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExecutionBackend {
+    /// A bare backend-kind label (`local`, `docker`, `podman`, `remote`).
+    Kind(String),
+    /// An inline backend descriptor.
+    Config(BackendConfig),
+}
+
+impl ExecutionBackend {
+    /// The parsed backend kind, or `None` when the value is a label/kind that
+    /// is absent, unknown, or (for a descriptor) not yet resolvable.
+    #[must_use]
+    pub fn kind(&self) -> Option<ExecutionBackendKind> {
+        match self {
+            Self::Kind(label) => ExecutionBackendKind::from_label(label),
+            Self::Config(cfg) => cfg.kind_parsed(),
+        }
+    }
+
+    /// The backend id when the value is an inline descriptor, or `None` for a
+    /// bare label.
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Kind(_) => None,
+            Self::Config(cfg) => Some(cfg.id.as_str()),
+        }
+    }
+
+    /// The configured kind label as written, whether bare or from a
+    /// descriptor. Used for diagnostics without forcing a parse.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Kind(label) => label,
+            Self::Config(cfg) => cfg.kind.as_str(),
+        }
+    }
+}
+
+impl From<ExecutionBackendKind> for ExecutionBackend {
+    /// Wrap a kind so writers (config save, `/backend`) emit the canonical
+    /// lowercase label.
+    fn from(kind: ExecutionBackendKind) -> Self {
+        Self::Kind(kind.as_str().to_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Flags for experimental features that are not yet stable.
 pub struct ExperimentalFlags {
@@ -2285,6 +2672,188 @@ impl Config {
             .clamp(MIN_INPUT_QUEUE_CAPACITY, MAX_INPUT_QUEUE_CAPACITY)
     }
 
+    /// The execution backend a tool invocation runs in (spec `openhands`
+    /// FR-001, FR-019).
+    ///
+    /// Resolves the configured [`Config::execution_backend`] value and falls
+    /// back to [`ExecutionBackendKind::Local`] when the key is absent or names
+    /// an unknown kind, so an unconfigured or mistyped session always executes
+    /// on the host under the existing security layers rather than failing to
+    /// resolve a backend.
+    #[must_use]
+    pub fn effective_execution_backend(&self) -> ExecutionBackendKind {
+        self.execution_backend
+            .as_ref()
+            .and_then(ExecutionBackend::kind)
+            .unwrap_or(ExecutionBackendKind::Local)
+    }
+
+    /// Whether [`Config::execution_backend`] was set to a value that does not
+    /// resolve to a known kind.
+    ///
+    /// `true` signals a configuration mistake (a typo or a descriptor whose
+    /// `kind` is missing) that the caller should surface; the effective
+    /// backend still resolves safely to `local` (FR-019).
+    #[must_use]
+    pub fn has_unknown_execution_backend(&self) -> bool {
+        self.execution_backend
+            .as_ref()
+            .is_some_and(|value| value.kind().is_none())
+    }
+
+    /// The configured backend entry, if any (spec `openhands` T-002; FR-001,
+    /// FR-004, FR-009).
+    ///
+    /// Handles both config spellings: an inline descriptor
+    /// ([`ExecutionBackend::Config`]) is returned as-is, while a bare
+    /// `execution_backend: "podman"` label - or an object that names a registered
+    /// entry by `id` with no `kind` - resolves against [`Config::backends`]. The
+    /// container backend reads this for the image and workspace it needs to
+    /// provision a sandbox (T-002); the backend registry (T-004) reads the same
+    /// entries for health and selection.
+    ///
+    /// Returns `None` when nothing is configured (or a label names an unknown kind
+    /// or an unregistered id), so the caller falls back to the
+    /// [`local`](ExecutionBackendKind::Local) default (FR-019).
+    #[must_use]
+    pub fn effective_backend_config(&self) -> Option<&BackendConfig> {
+        match self.execution_backend.as_ref()? {
+            ExecutionBackend::Config(descriptor) => Some(descriptor),
+            ExecutionBackend::Kind(label) => {
+                let kind = ExecutionBackendKind::from_label(label)?;
+                self.backends
+                    .iter()
+                    .find(|entry| entry.kind_parsed() == Some(kind))
+            }
+        }
+    }
+
+    /// Whether ACP agents are configured and enabled (spec `openhands` FR-015).
+    #[must_use]
+    pub fn acp_enabled(&self) -> bool {
+        self.acp
+            .as_ref()
+            .is_some_and(|acp| acp.agents.values().any(|agent| agent.enabled))
+    }
+
+    /// Iterate the enabled ACP agents, in id order (spec `openhands` FR-015,
+    /// FR-022).
+    ///
+    /// Each item is the registered id paired with its descriptor. Disabled
+    /// entries are skipped so a retired agent is not offered by the picker or
+    /// the ACP surface.
+    pub fn enabled_acp_agents(&self) -> Vec<(&str, &AcpAgentConfig)> {
+        let Some(acp) = self.acp.as_ref() else {
+            return Vec::new();
+        };
+        let mut agents: Vec<(&str, &AcpAgentConfig)> = acp
+            .agents
+            .iter()
+            .filter(|(_, agent)| agent.enabled)
+            .map(|(id, agent)| (id.as_str(), agent))
+            .collect();
+        agents.sort_by_key(|(id, _)| *id);
+        agents
+    }
+
+    /// Resolve the ACP agent to drive for a turn: the explicitly selected
+    /// `selected` id when it names an enabled agent, otherwise the configured
+    /// `default_agent`, otherwise the first enabled agent (spec `openhands`
+    /// FR-015, FR-022).
+    #[must_use]
+    pub fn resolve_acp_agent(&self, selected: Option<&str>) -> Option<&AcpAgentConfig> {
+        let enabled = self.enabled_acp_agents();
+        if let Some(id) = selected
+            && let Some((_, agent)) = enabled.iter().find(|(aid, _)| *aid == id)
+        {
+            return Some(*agent);
+        }
+        if let Some(default) = self
+            .acp
+            .as_ref()
+            .and_then(|acp| acp.default_agent.as_deref())
+            && let Some((_, agent)) = enabled.iter().find(|(aid, _)| *aid == default)
+        {
+            return Some(*agent);
+        }
+        enabled.first().map(|(_, agent)| *agent)
+    }
+
+    /// Whether the ACP server endpoint is enabled (spec `openhands` FR-022,
+    /// FR-028).
+    ///
+    /// The endpoint is **off by default**: it only runs when
+    /// `acp.server_enabled: true` is set explicitly, so a plain terminal launch
+    /// never exposes an editor-facing JSON-RPC surface.
+    #[must_use]
+    pub fn acp_server_enabled(&self) -> bool {
+        self.acp.as_ref().is_some_and(|acp| acp.server_enabled)
+    }
+
+    /// Resolve the agent name the ACP server drives (spec `openhands` FR-022,
+    /// FR-028).
+    ///
+    /// Precedence: `acp.server_agent`, then `acp.default_agent`, then the
+    /// top-level [`default_agent`](Config::default_agent).
+    #[must_use]
+    pub fn acp_server_agent(&self) -> &str {
+        self.acp
+            .as_ref()
+            .and_then(|acp| acp.server_agent.as_deref().or(acp.default_agent.as_deref()))
+            .unwrap_or(&self.default_agent)
+    }
+
+    /// The resolved automation service configuration (spec `openhands` T-016;
+    /// FR-013, FR-014).
+    ///
+    /// Returns the configured `automation` block, or the compiled defaults when
+    /// the block is absent. The defaults have no automations, so an unconfigured
+    /// project runs no scheduled or webhook automations.
+    #[must_use]
+    pub fn automation_config(&self) -> crate::automation::AutomationConfig {
+        self.automation.clone().unwrap_or_default()
+    }
+
+    /// Whether the automation service is enabled (spec `openhands` FR-013,
+    /// FR-014, FR-033).
+    ///
+    /// `true` only when an explicit `automation` block sets `enabled: true`.
+    /// An absent block leaves the service switched off, so a project that never
+    /// opted in runs no scheduler and accepts no webhooks.
+    #[must_use]
+    pub fn automation_enabled(&self) -> bool {
+        self.automation
+            .as_ref()
+            .is_some_and(crate::automation::AutomationConfig::is_enabled)
+    }
+
+    /// Whether the OpenAI-compatible surface is an explicitly enabled capability
+    /// (spec `openhands` FR-012, FR-024, FR-032).
+    ///
+    /// `true` only when `openai.enabled` is set. The endpoints are always mounted
+    /// behind the native bearer-token check; this flag additionally arms the
+    /// FR-032 startup gate.
+    #[must_use]
+    pub fn openai_surface_enabled(&self) -> bool {
+        self.openai.as_ref().is_some_and(|openai| openai.enabled)
+    }
+
+    /// Resolve the bearer token the OpenAI-compatible surface requires (spec
+    /// `openhands` FR-024, FR-032).
+    ///
+    /// Returns the configured `openai.token`, or `None` when it is absent or
+    /// blank. A `None` result is the refuse-to-start condition: when the surface
+    /// is enabled without a token the server starts no surface rather than
+    /// serving it unauthenticated (FR-032).
+    #[must_use]
+    pub fn openai_surface_token(&self) -> Option<String> {
+        self.openai
+            .as_ref()
+            .and_then(|openai| openai.token.as_deref())
+            .filter(|token| !token.trim().is_empty())
+            .map(str::to_string)
+    }
+
     /// Deep merge two untrusted configs, with overlay taking precedence for set
     /// fields.
     ///
@@ -2396,6 +2965,14 @@ impl Config {
         if !overlay.hooks.is_empty() {
             overlay.hooks.clear();
             rejected.push("hooks");
+        }
+        // The OpenAI-compatible surface token is the server's bearer credential
+        // (FR-024). A project-local file must not be able to set or replace it
+        // (that would let repository content choose the credential guarding the
+        // whole API), so the whole section is dropped from the untrusted overlay.
+        if overlay.openai.is_some() {
+            overlay.openai = None;
+            rejected.push("openai");
         }
 
         if !rejected.is_empty() {
@@ -2625,11 +3202,94 @@ impl Config {
             base.connectors = overlay.connectors;
         }
 
+        // Automation service config (spec `openhands` T-016; FR-013, FR-014,
+        // FR-033): the overlay section wins wholesale when present, so
+        // project-level `automation` settings are not discarded by an absent
+        // user-global block. Dispatch targets name credentials, they do not
+        // carry them (FR-035), so no field-wise merge or redaction is needed.
+        if overlay.automation.is_some() {
+            base.automation = overlay.automation;
+        }
+
         // Input-queue capacity: overlay wins when explicitly set (spec
         // `inputqueue` FR-015), so a project-level override is not discarded by
         // an absent user-global value.
         if overlay.input_queue_capacity.is_some() {
             base.input_queue_capacity = overlay.input_queue_capacity;
+        }
+
+        // Execution backend (spec `openhands` FR-001, FR-019): overlay wins
+        // whenever it explicitly sets the key, so a project-level override is
+        // not discarded by an absent user-global value. An overlay value that
+        // names an unknown kind still wins rather than silently falling through
+        // to the base, so a typo cannot quietly downgrade a session to a
+        // different backend - `effective_execution_backend` then keeps the safe
+        // `local` default and the caller can report the unknown value.
+        if overlay.execution_backend.is_some() {
+            base.execution_backend = overlay.execution_backend;
+        }
+        // Backend registry (FR-004): overlay entries replace base entries with
+        // the same id, otherwise append. Unknown/duplicate-free entries are
+        // preserved so a later config file can add or override one backend.
+        for entry in overlay.backends {
+            if let Some(existing) = base.backends.iter_mut().find(|b| b.id == entry.id) {
+                *existing = entry;
+            } else {
+                base.backends.push(entry);
+            }
+        }
+
+        // ACP client config (spec `openhands` FR-015): the registry is merged by
+        // agent id so a project-level `acp` block extends the user-global agents
+        // instead of discarding them, and an overlay entry with the same id
+        // replaces the base one. `default_agent` and the whole section win
+        // wholesale when the overlay declares them.
+        if let Some(overlay_acp) = overlay.acp {
+            match base.acp.as_mut() {
+                Some(base_acp) => {
+                    if overlay_acp.default_agent.is_some() {
+                        base_acp.default_agent = overlay_acp.default_agent;
+                    }
+                    if overlay_acp.server_agent.is_some() {
+                        base_acp.server_agent = overlay_acp.server_agent;
+                    }
+                    // The ACP server endpoint is opt-in; an overlay that sets
+                    // the flag enables it and one that omits it leaves the base
+                    // decision untouched (FR-028).
+                    if overlay_acp.server_enabled {
+                        base_acp.server_enabled = true;
+                    }
+                    for (id, entry) in overlay_acp.agents {
+                        base_acp.agents.insert(id, entry);
+                    }
+                }
+                None => base.acp = Some(overlay_acp),
+            }
+        }
+
+        // UI i18n (spec `openhands` FR-027): the overlay section wins wholesale
+        // when present, so a project-level `i18n` setting is not discarded by an
+        // absent user-global block.
+        if overlay.i18n.is_some() {
+            base.i18n = overlay.i18n;
+        }
+
+        // OpenAI-compatible surface (spec `openhands` FR-012, FR-024, FR-032): an
+        // overlay that enables the surface enables it, and an overlay token
+        // overrides the base token. An overlay that omits the section leaves the
+        // base decision untouched.
+        if let Some(overlay_openai) = overlay.openai {
+            match base.openai.as_mut() {
+                Some(base_openai) => {
+                    if overlay_openai.enabled {
+                        base_openai.enabled = true;
+                    }
+                    if overlay_openai.token.is_some() {
+                        base_openai.token = overlay_openai.token;
+                    }
+                }
+                None => base.openai = Some(overlay_openai),
+            }
         }
 
         // dirs: union of allowlist, denylist, and allowed_roots from both configs

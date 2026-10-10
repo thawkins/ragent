@@ -17,14 +17,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::utils::shorten_middle;
-
-/// Label rendered before the working-directory path on the top status-bar
-/// line (e.g. `Project: ~/Projects/ragent`).
-const PROJECT_LABEL: &str = "Project: ";
-
-/// Label rendered before the git branch name on the top status-bar line
-/// (e.g. `Branch: main`).
-const BRANCH_LABEL: &str = "Branch: ";
+use ragent_config::i18n::{MessageKey, t};
 
 /// Configuration for status bar rendering.
 #[derive(Debug, Clone, Default)]
@@ -339,15 +332,17 @@ fn build_line1(
             if cwd_span == left_width {
                 spans.extend(left);
             } else {
-                // Shorten the working directory (including the `Project: `
-                // label) so the branch + tag group and the status fit.
+                // Shorten the working directory (including the localised
+                // `Project: ` label) so the branch + tag group and the status
+                // fit.
+                let label = t(MessageKey::StatusProject);
                 let text_budget = (cwd_span - 2) as usize;
-                let label_budget = text_budget.saturating_sub(PROJECT_LABEL.len());
+                let label_budget = text_budget.saturating_sub(label.len());
                 let cwd_text = shorten_path(&app.cwd, label_budget);
                 spans.push(Span::styled(
                     format!(
                         " {:<width$} ",
-                        format!("{PROJECT_LABEL}{cwd_text}"),
+                        format!("{label}{cwd_text}"),
                         width = text_budget
                     ),
                     Style::default().fg(colors::TEXT),
@@ -491,7 +486,7 @@ fn build_line1_left(
     spans.push(Span::styled(
         format!(
             " {:<width$} ",
-            format!("{PROJECT_LABEL}{path}"),
+            format!("{}{path}", t(MessageKey::StatusProject)),
             width = pad_width
         ),
         Style::default().fg(colors::TEXT),
@@ -514,7 +509,7 @@ fn build_line1_center(
         let (status_icon, status_color) = get_git_status_indicator();
 
         spans.push(Span::styled(
-            format!("{BRANCH_LABEL}{} ", branch),
+            format!("{}{} ", t(MessageKey::StatusBranch), branch),
             Style::default().fg(colors::TEXT),
         ));
         spans.push(Span::styled(
@@ -545,7 +540,10 @@ pub fn build_line1_right(
                 .add_modifier(Modifier::BOLD),
         ));
     } else {
-        spans.push(Span::styled("Ready ", Style::default().fg(colors::HEALTHY)));
+        spans.push(Span::styled(
+            t(MessageKey::StatusReady).into_owned(),
+            Style::default().fg(colors::HEALTHY),
+        ));
     }
 
     // Live web-phase deadline countdown (FR-010, FR-011, FR-013). If a
@@ -588,6 +586,21 @@ fn build_line2_left(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
+    // Active execution backend (spec `openhands` FR-008): always visible, even in
+    // Minimal mode, so the user can always see where tools will run. A non-local
+    // backend is highlighted because it changes where a tool actually executes.
+    if !app.active_backend.is_empty() {
+        let color = if app.active_backend == "local" {
+            colors::LABEL
+        } else {
+            colors::WARNING
+        };
+        spans.push(Span::styled(
+            format!("B:{} ", app.active_backend),
+            Style::default().fg(color),
+        ));
+    }
+
     // Compression / Compaction activity indicator - always visible, even in Minimal mode.
     if app.compact_in_progress || app.compress_in_progress {
         let label = if app.compact_in_progress && app.compress_in_progress {
@@ -626,7 +639,7 @@ fn build_line2_left(
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
-            format!("Model: "),
+            t(MessageKey::StatusModel).into_owned(),
             Style::default()
                 .fg(colors::WARNING)
                 .add_modifier(Modifier::BOLD),
@@ -642,11 +655,12 @@ fn build_line2_left(
     // Thinking level indicator
     if let Some(level) = app.selected_thinking_level {
         let short = App::thinking_level_short(level);
-        let (level_color, level_icon) = (colors::LABEL, " Thinking:");
+        let level_color = colors::LABEL;
+        let level_icon = t(MessageKey::StatusThinking);
         let level_str = if mode == ResponsiveMode::Full || mode == ResponsiveMode::Compact {
-            format!("{} {} ", level_icon, short)
+            format!("{level_icon} {short} ")
         } else {
-            format!("{} ", level_icon)
+            format!("{level_icon} ")
         };
         spans.push(Span::styled(level_str, Style::default().fg(level_color)));
     }

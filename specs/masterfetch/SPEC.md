@@ -320,15 +320,17 @@ to fetch the relevant subset.
 
 ### FR-015 — `mf_screenshot` graceful degradation (state-driven)
 
-When the `mf_screenshot` tool is invoked, the system **shall** return an
-error message explaining that screenshot capture requires a headless browser
-engine that is not available in the integrated Rust runtime. The error
-**shall** be user-readable and **shall** suggest using `mf_fetch` instead for
-text-based content extraction. The tool **shall** remain registered and
-visible so agents know it exists but understand its limitation.
+When a headless browser engine ragent can drive is **not** present, the
+`mf_screenshot` capability **shall** be absent from the advertised tool set, so
+it is never offered when it cannot work. When it **is** present (a build with the
+opt-in `headless-browser` feature and an engine binary on `PATH`) and the tool is
+invoked, the system **shall** capture the page, degrading honestly with a
+user-readable error recommending `mf_fetch` if capture cannot complete.
 
-> *State-driven requirement — the tool is always in the "browser-unavailable"
-> state in the integrated Rust runtime; it must degrade honestly.*
+> *State-driven requirement — the capability only advertises itself in a state
+> in which it can act. The engine gate is the spec `openhands` FR-029 /
+> T-017 amendment: the always-erroring stub was removed so the tool is not
+> advertised without an engine.*
 
 ### FR-016 — `mf_cache_clear` cache management (event-driven)
 

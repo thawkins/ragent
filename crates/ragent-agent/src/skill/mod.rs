@@ -22,10 +22,15 @@
 //! | Scope              | Path                                   | Applies To                    |
 //! |--------------------|----------------------------------------|-------------------------------|
 //! | Enterprise         | Managed settings                       | All users in organization     |
-//! | OpenSkills Global  | `~/.agent/skills/`, `~/.claude/skills/`| OpenSkills ecosystem (global) |
+//! | OpenSkills Global  | `~/.agents/skills/`, `~/.agent/skills/`, `~/.claude/skills/` | OpenSkills / AgentSkills ecosystem (global) |
 //! | Personal           | `~/.ragent/skills/<name>/SKILL.md`     | All projects for this user    |
-//! | OpenSkills Project | `.agent/skills/`, `.claude/skills/`    | OpenSkills ecosystem (project)|
+//! | OpenSkills Project | `.agents/skills/`, `.agent/skills/`, `.claude/skills/` | OpenSkills / AgentSkills ecosystem (project) |
 //! | Project            | `.ragent/skills/<name>/SKILL.md`        | This project only             |
+//!
+//! The `.agents/skills/` roots are the AgentSkills convention (FR-005); each
+//! pack is a directory holding a `SKILL.md` with YAML frontmatter declaring at
+//! least `name` and `description`. The convention is additive: on a name clash
+//! the existing (higher-scope) pack wins.
 //!
 //! Higher-priority scopes override lower ones when names conflict.
 //! Ragent-native paths always take precedence over OpenSkills paths at
@@ -69,11 +74,13 @@ pub enum SkillScope {
     Bundled = 0,
     /// Enterprise-managed settings.
     Enterprise = 1,
-    /// `OpenSkills` global directories (`~/.agent/skills/`, `~/.claude/skills/`).
+    /// `OpenSkills` global directories (`~/.agents/skills/`,
+    /// `~/.agent/skills/`, `~/.claude/skills/`).
     OpenSkillsGlobal = 2,
     /// User-level skill from `~/.ragent/skills/`.
     Personal = 3,
-    /// `OpenSkills` project directories (`.agent/skills/`, `.claude/skills/`).
+    /// `OpenSkills` project directories (`.agents/skills/`, `.agent/skills/`,
+    /// `.claude/skills/`).
     OpenSkillsProject = 4,
     /// Project-level skill from `.ragent/skills/`.
     Project = 5,

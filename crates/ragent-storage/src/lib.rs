@@ -16,9 +16,9 @@ pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
     BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, EmbeddingMatch,
     InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
-    MessageEmbeddingMatch, MessageSearchResult, RunCostSummaryRow, SessionRow, SessionSearchParams,
-    Storage, TaskDerived, TaskRow, TaskUpdateParams, TaskView, compute_task_dag, decrypt_key,
-    deobfuscate_key, detect_cycle, encrypt_key, obfuscate_key,
+    MessageEmbeddingMatch, MessageSearchResult, RunCostSummaryRow, SCHEMA_VERSION, SessionRow,
+    SessionSearchParams, Storage, TaskDerived, TaskRow, TaskUpdateParams, TaskView,
+    compute_task_dag, decrypt_key, deobfuscate_key, detect_cycle, encrypt_key, obfuscate_key,
 };
 
 // Backward-compatible aliases for code that has not yet migrated (e.g.
@@ -30,6 +30,11 @@ pub use storage::TaskRow as TodoRow;
 
 // `Storage::get_todos` is kept as an inherent method alias in
 // `storage.rs`; see there for the deprecated shim.
+
+// Automation run-history types (spec `openhands` T-016; FR-018). Re-exported
+// so callers of the run-history storage methods need not depend on
+// `ragent-types` directly.
+pub use ragent_types::{AutomationRun, AutomationTrigger, RunOutcome};
 
 // Re-export sanitize module from ragent_types
 pub use ragent_types::sanitize;

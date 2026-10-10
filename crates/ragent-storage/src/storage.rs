@@ -43,7 +43,10 @@ use ragent_types::message::{Message, MessagePart, Role};
 /// entire 34-statement `CREATE ... IF NOT EXISTS` batch and the 7
 /// `pragma_table_info` column probes are skipped, reducing `Storage::open`
 /// from ~41 SQL round-trips to a single `CREATE TABLE` + `SELECT`.
-const SCHEMA_VERSION: u32 = 1;
+///
+/// Public so tests can assert the persisted `schema_version` setting against
+/// the compiler-enforced value instead of a hard-coded literal.
+pub const SCHEMA_VERSION: u32 = 2;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -1088,6 +1091,24 @@ impl Storage {
 
             CREATE INDEX IF NOT EXISTS idx_cron_events_next_due
             ON cron_events(enabled, next_due);
+
+            -- Automation run history (spec `openhands` T-016; FR-018): one row
+            -- per automation run, recording the automation id, trigger kind,
+            -- start/end times, terminal outcome, the execution backend the run
+            -- was confined to (FR-033), and a reference to the run output.
+            CREATE TABLE IF NOT EXISTS automation_runs (
+            id TEXT PRIMARY KEY,
+            automation_id TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            outcome TEXT,
+            backend TEXT NOT NULL,
+            output_ref TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_automation_runs_automation
+            ON automation_runs(automation_id, started_at DESC);
 
             ",
         )?;
@@ -2758,6 +2779,123 @@ impl Storage {
             params![enabled_i, id],
         )?;
         Ok(changed > 0)
+    }
+
+    // -- Automation Run History (spec `openhands` T-016; FR-018) ------
+
+    /// Insert a new automation run-history record (FR-018).
+    ///
+    /// A run is inserted in the running state (`ended_at`/`outcome` absent) and
+    /// later finalised with [`Self::finish_automation_run`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `SQLite` insert fails (e.g. a duplicate run id).
+    pub fn insert_automation_run(&self, run: &ragent_types::AutomationRun) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "INSERT INTO automation_runs \
+             (id, automation_id, trigger, started_at, ended_at, outcome, backend, output_ref) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                run.id,
+                run.automation_id,
+                run.trigger.as_str(),
+                run.started_at.to_rfc3339(),
+                run.ended_at.map(|t| t.to_rfc3339()),
+                run.outcome.map(ragent_types::RunOutcome::as_str),
+                run.backend,
+                run.output_ref,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Finalise an automation run: set its end time, outcome, and output
+    /// reference (FR-018).
+    ///
+    /// Returns `true` if a row was updated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `SQLite` update fails.
+    pub fn finish_automation_run(
+        &self,
+        id: &str,
+        outcome: ragent_types::RunOutcome,
+        output_ref: Option<&str>,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let changed = conn.execute(
+            "UPDATE automation_runs SET ended_at = ?1, outcome = ?2, output_ref = ?3 \
+             WHERE id = ?4",
+            params![now, outcome.as_str(), output_ref, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// List the run-history records for one automation, newest first (FR-018).
+    ///
+    /// `limit` caps the number of rows returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_automation_runs(
+        &self,
+        automation_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ragent_types::AutomationRun>> {
+        let conn = lock_conn_read!(self)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, automation_id, trigger, started_at, ended_at, outcome, backend, \
+             output_ref FROM automation_runs WHERE automation_id = ?1 \
+             ORDER BY started_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(
+                params![automation_id, limit as i64],
+                automation_run_from_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Fetch a single automation run by id (FR-018).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_automation_run(&self, id: &str) -> Result<Option<ragent_types::AutomationRun>> {
+        let conn = lock_conn_read!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT id, automation_id, trigger, started_at, ended_at, outcome, backend, \
+                 output_ref FROM automation_runs WHERE id = ?1",
+                params![id],
+                automation_run_from_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Prune an automation's run history to the newest `keep` records (FR-018).
+    ///
+    /// Returns the number of rows deleted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the prune fails.
+    pub fn prune_automation_runs(&self, automation_id: &str, keep: usize) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let deleted = conn.execute(
+            "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN \
+             (SELECT id FROM automation_runs WHERE automation_id = ?1 \
+              ORDER BY started_at DESC LIMIT ?2)",
+            params![automation_id, keep as i64],
+        )?;
+        Ok(deleted)
     }
 
     // -- Structured Memory CRUD --------------------------------------
@@ -5312,6 +5450,46 @@ pub struct CronEventRow {
     pub last_fired: Option<String>,
     /// Whether this event runs in stateful loop mode (FR-004).
     pub stateful: bool,
+}
+
+/// Row-mapping helper for `automation_runs` queries (spec `openhands` T-016;
+/// FR-018). Timestamp columns are RFC 3339 strings; an unparseable value maps
+/// to a `FromSqlConversionFailure`.
+fn automation_run_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ragent_types::AutomationRun> {
+    let started_raw: String = row.get("started_at")?;
+    let started_at = chrono::DateTime::parse_from_rfc3339(&started_raw)
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })?
+        .with_timezone(&Utc);
+    let ended_at: Option<String> = row.get("ended_at")?;
+    let ended_at = ended_at
+        .map(|raw| {
+            chrono::DateTime::parse_from_rfc3339(&raw)
+                .map(|t| t.with_timezone(&Utc))
+                .map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+        })
+        .transpose()?;
+    let outcome: Option<String> = row.get("outcome")?;
+    let trigger: String = row.get("trigger")?;
+    Ok(ragent_types::AutomationRun {
+        id: row.get("id")?,
+        automation_id: row.get("automation_id")?,
+        trigger: ragent_types::AutomationTrigger::from_label(&trigger),
+        started_at,
+        ended_at,
+        outcome: outcome.as_deref().map(ragent_types::RunOutcome::from_label),
+        backend: row.get("backend")?,
+        output_ref: row.get("output_ref")?,
+    })
 }
 
 /// Row-mapping helper for `cron_events` queries.

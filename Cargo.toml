@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.130"
+version = "1.0.131"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -313,6 +313,10 @@ default = []
 # binary by default via `ragent-telemetry`'s own default feature. Kept as an
 # alias for compatibility with any scripts still passing --features telemetry.
 telemetry = ["ragent-tui/telemetry"]
+# ACP server endpoint on stdio for ACP-capable editors (spec `openhands`
+# FR-022, FR-028). Off by default; also gated at runtime by the
+# `acp.server_enabled` config key. Enable with `--features acp-server`.
+acp-server = ["ragent-agent/acp-server"]
 
 [profile.release]
 lto = true

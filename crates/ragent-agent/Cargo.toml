@@ -64,6 +64,10 @@ ragent-telemetry = { path = "../ragent-telemetry" }
 
 [features]
 default = []
+# ACP server endpoint on stdio for ACP-capable editors (spec `openhands`
+# FR-022, FR-028). Off by default; the endpoint is additionally gated at
+# runtime by the `acp.server_enabled` config key.
+acp-server = []
 
 [package.metadata.cargo-machete]
 # readability-rs is used via its lib name `readability` (research_adapter.rs);

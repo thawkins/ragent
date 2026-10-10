@@ -267,6 +267,12 @@ impl App {
             connector_catalogue_result: Arc::new(std::sync::Mutex::new(None)),
             connector_catalogue_install_result: Arc::new(std::sync::Mutex::new(None)),
             connector_store_area: Rect::default(),
+            backend_panel: None,
+            backend_panel_area: Rect::default(),
+            active_backend: app_config
+                .effective_execution_backend()
+                .as_str()
+                .to_string(),
             show_log,
             show_profile: false,
             show_tasks_panel: false,
@@ -389,6 +395,7 @@ impl App {
             history_file_path: None,
             history_picker: None,
             config_save_picker: None,
+            security_verdicts: 0,
             selected_agent_session_id: None,
             selected_agent_index: None,
             custom_agent_defs: custom_defs,

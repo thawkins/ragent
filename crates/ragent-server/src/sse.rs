@@ -394,11 +394,15 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::RouterClassification { .. } => "router_classification",
         Event::HookWarning { .. } => "hook_warning",
         Event::ToolResultFlagged { .. } => "tool_result_flagged",
+        Event::SecurityVerdict { .. } => "security_verdict",
         Event::BackgroundTaskSpawned { .. } => "background_task_spawned",
         Event::BackgroundTaskUpdated { .. } => "background_task_updated",
         Event::BackgroundTaskCompleted { .. } => "background_task_completed",
     }
-} // -- Public API -----------------------------------------------------------
+}
+
+// -- Public API -----------------------------------------------------------
+
 /// Return the SSE event-type name and serialized JSON payload for an [`Event`].
 ///
 /// This is the testable core of [`event_to_sse`]. The returned tuple is
@@ -1177,6 +1181,17 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "device_code_present": device_code.as_ref().is_some_and(|c| !c.is_empty()),
             "interval": interval,
             "error": error,
+        })),
+        Event::SecurityVerdict {
+            session_id,
+            tool,
+            verdict,
+            rationale,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "tool": tool,
+            "verdict": verdict,
+            "rationale": rationale,
         })),
     };
     (name, data)

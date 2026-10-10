@@ -11,6 +11,9 @@ mod helpers;
 pub(crate) use helpers::short_id;
 pub use helpers::{hard_break_lines, image_dimensions_or_placeholder, sanitize_for_display};
 
+mod backend_panel;
+pub use self::backend_panel::{BackendPanelRow, BackendPanelState};
+
 mod bench;
 mod compress;
 pub mod cron;

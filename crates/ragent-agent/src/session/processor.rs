@@ -136,8 +136,9 @@ fn writes_in_spec_dir(
         let Ok(args): Result<serde_json::Value, _> = serde_json::from_str(&tc.args_json) else {
             tracing::warn!(
                 tool = %tc.name,
-                "unparseable args in spec-dir write check"
+                "unparseable args in spec-dir write check; treating as no-match"
             );
+            // Fail-safe: do not auto-complete on a write whose args cannot be read.
             return false;
         };
         let mut args_paths = ["path", "file_path"]
@@ -181,12 +182,12 @@ fn unknown_tool_error(registry: &crate::tool::ToolRegistry, name: &str) -> anyho
     let mut best: Option<(u8, usize, String)> = None;
     for candidate in registry.list() {
         let cand_lower = candidate.to_lowercase();
-        let rank = if cand_lower == lowered {
-            0
+        let (rank, distance) = if cand_lower == lowered {
+            (0, 0)
         } else if cand_lower.starts_with(&lowered) || lowered.starts_with(&cand_lower) {
-            1
+            (1, edit_distance(&cand_lower, &lowered))
         } else if cand_lower.contains(&lowered) || lowered.contains(&cand_lower) {
-            2
+            (2, edit_distance(&cand_lower, &lowered))
         } else {
             // Bail before building the distance matrix when the length
             // difference alone already exceeds the budget.
@@ -198,9 +199,8 @@ fn unknown_tool_error(registry: &crate::tool::ToolRegistry, name: &str) -> anyho
             if distance > max_distance {
                 continue;
             }
-            3
+            (3, distance)
         };
-        let distance = edit_distance(&cand_lower, &lowered);
         let better = match &best {
             None => true,
             Some((best_rank, best_distance, _)) => {
@@ -255,6 +255,46 @@ fn schema_violation(
     }
 }
 
+/// Dispatch a tool invocation through the active execution backend
+/// (spec `openhands` FR-001, FR-019, FR-020, FR-026, FR-031).
+///
+/// The backend is resolved from the session config on each dispatch: an absent
+/// or unknown `execution_backend` key resolves to `local`, the host adapter that
+/// runs the tool exactly as before. A configured `docker`/`podman` entry resolves
+/// to a real [`ContainerBackend`](crate::backend::ContainerBackend) that runs the
+/// invocation inside a sandbox (FR-020); any other non-local kind without an
+/// adapter fails the call instead of running it on the host (FR-031). The 7-layer
+/// bash validation and permission checks have already run in the caller
+/// ([`dispatch_tool_with_permissions`]) and are unaffected by this choice
+/// (FR-002, FR-037).
+///
+/// The session's encrypted credential store is passed through so a container or
+/// remote sandbox resolves its credentials at spawn time (FR-010); the values are
+/// never read from the config.
+async fn dispatch_tool_leaf(
+    tool: &std::sync::Arc<dyn crate::tool::Tool>,
+    tool_input: Value,
+    tool_ctx: &ToolContext,
+) -> anyhow::Result<crate::tool::ToolOutput> {
+    let backend = tool_ctx.config.as_ref().map_or_else(
+        || crate::backend::resolve_backend(ragent_config::ExecutionBackendKind::Local),
+        |config| {
+            crate::backend::resolve_backend_with_secrets(
+                config,
+                &tool_ctx.working_dir,
+                tool_ctx.storage.clone(),
+            )
+        },
+    );
+    backend
+        .execute_tool(crate::backend::BackendToolCall {
+            tool: tool.as_ref(),
+            input: tool_input,
+            ctx: tool_ctx,
+        })
+        .await
+}
+
 /// B3: dispatches a validated tool call through the permission layer.
 ///
 /// Extracted from the inline task body so the schema-validation gate and the
@@ -276,10 +316,15 @@ async fn dispatch_tool_with_permissions(
     // explicitly approved this call. Checked against the policy verdict below
     // so a hook can satisfy an `Ask` but never override an explicit `Deny`.
     hook_approved: bool,
+    // T-015 (FR-006, FR-017): `true` when the LLM security analyzer returned an
+    // `allow` verdict for this call. Applied after the hook approval so it can
+    // satisfy a bare `Ask` but never override an explicit policy `Deny` or a
+    // forced destructive-action checkpoint.
+    security_approved: bool,
 ) -> anyhow::Result<crate::tool::ToolOutput> {
     let perm_category = tool.permission_category();
     if perm_category.is_empty() || perm_category == "none" {
-        return tool.execute(tool_input, tool_ctx).await;
+        return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
     }
     let resource = extract_resource_from_input(&tool_input, &tc.name);
     if tc.name == "bash" {
@@ -290,7 +335,7 @@ async fn dispatch_tool_with_permissions(
             is_safe_command(&cmd_name)
         });
         if all_safe {
-            return tool.execute(tool_input, tool_ctx).await;
+            return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
         }
         let mut all_approved = true;
         for sub_cmd in &sub_commands {
@@ -306,6 +351,7 @@ async fn dispatch_tool_with_permissions(
                 Some(&tool_ctx.canonical_cache),
                 checkpoint_forced,
                 checkpoint_timeout_secs,
+                security_approved,
             )
             .await;
             match permission_action {
@@ -321,7 +367,7 @@ async fn dispatch_tool_with_permissions(
             }
         }
         if all_approved {
-            return tool.execute(tool_input, tool_ctx).await;
+            return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
         }
         // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy
         // the sub-command prompts - but only when no explicit rule denies any
@@ -334,7 +380,7 @@ async fn dispatch_tool_with_permissions(
                 tool = %tc.name,
                 "PreToolUse hook approval satisfied the bash permission prompt"
             );
-            return tool.execute(tool_input, tool_ctx).await;
+            return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
         }
         return Err(anyhow::anyhow!(
             "Permission denied for one or more sub-commands"
@@ -351,6 +397,7 @@ async fn dispatch_tool_with_permissions(
         Some(&tool_ctx.canonical_cache),
         checkpoint_forced,
         checkpoint_timeout_secs,
+        security_approved,
     )
     .await;
     // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy the
@@ -368,10 +415,12 @@ async fn dispatch_tool_with_permissions(
             tool = %tc.name,
             "PreToolUse hook approval satisfied the permission prompt"
         );
-        return tool.execute(tool_input, tool_ctx).await;
+        return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
     }
     match permission_action {
-        Ok(crate::permission::PermissionAction::Allow) => tool.execute(tool_input, tool_ctx).await,
+        Ok(crate::permission::PermissionAction::Allow) => {
+            dispatch_tool_leaf(tool, tool_input, tool_ctx).await
+        }
         Ok(crate::permission::PermissionAction::Deny) => {
             // T-010 (FR-015): when the denial comes from a forced
             // destructive-action checkpoint (timeout or refusal), surface
@@ -576,10 +625,12 @@ pub struct SessionProcessor {
     >,
     /// C-001: cached skill registry keyed by the mtimes of the scanned
     /// skill directories plus the `extra_dirs` list. `SkillRegistry::load`
-    /// does synchronous `std::fs` walks + `serde_norway` parses across up to
-    /// 7 directories on every turn; caching it here (invalidated when any
-    /// contributing directory's mtime changes) eliminates that per-turn
-    /// disk I/O.
+    /// scans the ordered roots from `skill::loader::discovery_roots` - including
+    /// the AgentSkills `.agents/skills/` project and `~/.agents/skills/` user
+    /// directories (FR-005) - and does synchronous `std::fs` walks +
+    /// `serde_norway` parses across up to 8 directories on every turn; caching it
+    /// here (invalidated when any contributing directory's mtime changes)
+    /// eliminates that per-turn disk I/O.
     pub skill_registry_cache: parking_lot::Mutex<Option<CachedSkillRegistry>>,
     /// Active goal-driven loop runs (spec `agentloop`), keyed by session id.
     ///
@@ -1623,33 +1674,9 @@ impl SessionProcessor {
         // so the cache key and the load call can never disagree.
         let effective_extra_dirs = crate::skill::effective_skill_dirs(working_dir, extra_dirs);
         let extra_dirs: &[String] = &effective_extra_dirs;
-        // Collect the candidate skill directories exactly as `discover_skills`
-        // does so the cache is invalidated precisely when the scan inputs change.
-        let mut dirs: Vec<PathBuf> = Vec::new();
-        if let Some(home) = dirs::home_dir() {
-            for dir_name in [".agent", ".claude"] {
-                dirs.push(home.join(dir_name).join("skills"));
-            }
-        }
-        if let Some(global_skills) = ragent_config::user_dirs::global_skills_dir() {
-            dirs.push(global_skills);
-        }
-        for dir in extra_dirs {
-            dirs.push(PathBuf::from(dir));
-        }
-        for dir_name in [".agent", ".claude"] {
-            dirs.push(working_dir.join(dir_name).join("skills"));
-        }
-        dirs.push(working_dir.join(".ragent").join("skills"));
-        // Monorepo: first-level subdirectories of `working_dir`.
-        if let Ok(entries) = std::fs::read_dir(working_dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.is_dir() {
-                    dirs.push(path.join(".ragent").join("skills"));
-                }
-            }
-        }
+        // Collect the candidate skill directories from the same helper the
+        // loader scans with, so the cache is invalidated precisely when the scan
+        // inputs change (including the AgentSkills `.agents/skills/` roots).
 
         // Fast path: cached registry still valid (checked before collecting
         // fresh mtimes so a cache hit does no directory stat sweep).
@@ -1671,15 +1698,16 @@ impl SessionProcessor {
 
         // Record mtimes of the directories that actually exist. Needed only
         // to populate a new cache entry, so it runs after the fast path.
-        let dir_mtimes: Vec<(PathBuf, std::time::SystemTime)> = dirs
-            .into_iter()
-            .filter_map(|d| {
-                std::fs::metadata(&d)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .map(|mt| (d, mt))
-            })
-            .collect();
+        let dir_mtimes: Vec<(PathBuf, std::time::SystemTime)> =
+            crate::skill::loader::discovery_roots(working_dir, extra_dirs)
+                .into_iter()
+                .filter_map(|root| {
+                    std::fs::metadata(&root.dir)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .map(|mt| (root.dir, mt))
+                })
+                .collect();
 
         // Cache miss or invalid: reload from disk.
         let registry = crate::skill::SkillRegistry::load(working_dir, extra_dirs);
@@ -1805,6 +1833,27 @@ impl SessionProcessor {
                 .map(Some)
         })
         .await;
+
+        // ACP agents (spec `openhands` FR-022): when the active agent is bound to
+        // an external ACP agent, relay the turn to it over JSON-RPC on stdio
+        // instead of routing it to a local ragent LLM provider. A relay failure
+        // fails the turn and never falls back to a local provider (FR-036).
+        if let Some(acp_agent) = self.acp_agent_for_active(agent) {
+            return self
+                .process_acp_turn(session_id, acp_agent, &user_msg, cancel_flag)
+                .await;
+        }
+
+        // Remote backend (spec `openhands` FR-021): when the active execution
+        // backend is `remote`, drive the turn against that server's REST+SSE API
+        // and mirror its event stream into the local bus. The turn's tools run on
+        // the remote host; a relay failure surfaces in the TUI and never re-runs
+        // the turn locally (FR-031, FR-034).
+        if let Some(descriptor) = self.remote_backend_for_active(session_id) {
+            return self
+                .process_remote_turn(session_id, &descriptor, &user_msg, cancel_flag)
+                .await;
+        }
 
         // 2. Prepare LLM client, config, working dir, team context
         // T-007 (FR-011): a stage failure before the loop body (missing
@@ -3062,6 +3111,11 @@ impl SessionProcessor {
                     let team_context_cache = self.team_context_cache.clone();
                     let tool_repeat_guard = self.tool_repeat_guard.clone();
                     let telemetry_clone = Arc::clone(&self.telemetry);
+                    // T-015 (FR-006): resolve the analyzer client once per tool
+                    // call, outside the spawned task (the resolve performs async
+                    // config + provider I/O). `None` when the analyzer is
+                    // disabled, so the task skips it entirely.
+                    let security_analyzer = self.security_analyzer_client(&turn.model_ref).await;
                     // T-009 (FR-008/FR-009/FR-021/FR-022): the loop
                     // restriction guard runs inside the task, before hooks
                     // and the permission checker, so a restricted loop
@@ -3219,6 +3273,10 @@ impl SessionProcessor {
                         // `dispatch_tool_with_permissions`, where it can satisfy
                         // an `Ask` but never an explicit `Deny`.
                         let mut hook_approved = false;
+                        // T-015 (FR-006, FR-017): set when the security analyzer
+                        // returned an `allow` for this call; threaded into
+                        // `dispatch_tool_with_permissions` to satisfy a bare `Ask`.
+                        let mut security_approved = false;
                         let tool_input: Value = match pre_hook_result {
                             crate::hooks::PreToolUseResult::Allow {
                                 hook_approved: approved,
@@ -3316,6 +3374,70 @@ impl SessionProcessor {
                         let start = Instant::now();
                         let tool_input_for_post_hook = serde_json::to_string(&tool_input)
                             .unwrap_or_else(|_| tc_clone.args_json.clone());
+                        // T-015 (FR-006, FR-017): when the security analyzer is
+                        // enabled, evaluate this action *after* the PreToolUse
+                        // hooks and *before* execution, publish the verdict +
+                        // rationale so it is visible whatever the outcome, and
+                        // apply it as a tightening-only layer. A `deny` is a hard
+                        // denial; an `allow` can satisfy a bare `Ask` but never
+                        // an explicit policy `Deny` or a forced checkpoint; a
+                        // fail-safe `ask` leaves the normal interactive flow.
+                        if let Some((analyzer_client, analyzer_model, analyzer_timeout)) =
+                            security_analyzer.as_ref()
+                        {
+                            let verdict = crate::security::analyze_tool_action(
+                                analyzer_client,
+                                analyzer_model,
+                                &tc_clone.name,
+                                &serde_json::to_string(&tool_input)
+                                    .unwrap_or_else(|_| tc_clone.args_json.clone()),
+                                *analyzer_timeout,
+                            )
+                            .await;
+                            // FR-017: publish the verdict *before* the action
+                            // is permitted or refused. Published directly on the
+                            // cloned bus (the spawned task cannot borrow `self`).
+                            event_bus.publish(Event::SecurityVerdict {
+                                session_id: session_id_str.clone(),
+                                tool: tc_clone.name.clone(),
+                                verdict: verdict.label().to_string(),
+                                rationale: verdict.rationale.clone(),
+                            });
+                            match verdict.decision {
+                                crate::permission::PermissionAction::Deny => {
+                                    // FR-006: the analyzer's denial is reported
+                                    // to the model so it can correct course - the
+                                    // rationale is the observation text.
+                                    return denied_tool_call(
+                                        &tc_clone,
+                                        &event_bus,
+                                        &session_id_str,
+                                        tool_input,
+                                        format!(
+                                            "Action denied by security analyzer: {}",
+                                            verdict.rationale
+                                        ),
+                                    );
+                                }
+                                crate::permission::PermissionAction::Allow => {
+                                    security_approved = true;
+                                }
+                                crate::permission::PermissionAction::Ask => {
+                                    // FR-006, FR-017: the analyzer escalated to a
+                                    // prompt. Surface its rationale in the chat so
+                                    // the user sees why the call was flagged, then
+                                    // let the standard interactive flow decide.
+                                    event_bus.publish(Event::AgentNotice {
+                                        session_id: session_id_str.clone(),
+                                        message: format!(
+                                            "security analyzer: {} - {}",
+                                            verdict.label(),
+                                            verdict.rationale
+                                        ),
+                                    });
+                                }
+                            }
+                        }
                         let result = registry
                             .get(&tc_clone.name)
                             .ok_or_else(|| unknown_tool_error(&registry, &tc_clone.name));
@@ -3345,6 +3467,7 @@ impl SessionProcessor {
                                         checkpoint_forced,
                                         checkpoint_timeout_secs,
                                         hook_approved,
+                                        security_approved,
                                     )
                                     .await
                                 }
@@ -4421,6 +4544,87 @@ impl SessionProcessor {
         });
 
         Ok(())
+    }
+
+    /// Resolve the security-analyzer LLM client for a turn (FR-006).
+    ///
+    /// Returns `None` when the analyzer is disabled (or the section is absent),
+    /// so the caller skips the analyzer entirely. When enabled, resolves the
+    /// effective `(provider, model)` - the `security_analyzer.model` override
+    /// wins over the session's primary model - and returns the warm client plus
+    /// the model id and the configured timeout.
+    ///
+    /// A failure to resolve the provider, API key, or client is logged and
+    /// degrades to `None`; the caller then falls back to the normal permission
+    /// flow (the analyzer is tightening-only and never blocks on its own
+    /// availability).
+    async fn security_analyzer_client(
+        &self,
+        session_model_ref: &crate::agent::ModelRef,
+    ) -> Option<(Arc<dyn crate::llm::LlmClient>, String, u64)> {
+        let cfg = self.load_config_cached();
+        let section = cfg.security_analyzer.as_ref()?;
+        if !section.enabled {
+            return None;
+        }
+
+        let (provider_id, model_id) = match section.model.as_ref() {
+            Some(over) => (over.provider_id.clone(), over.model_id.clone()),
+            None => (
+                session_model_ref.provider_id.clone(),
+                session_model_ref.model_id.clone(),
+            ),
+        };
+        let timeout_secs = section.timeout_secs;
+
+        let provider = match self.provider_registry.get(&provider_id) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(provider = %provider_id, "security analyzer provider not registered; analyzer disabled for this turn");
+                return None;
+            }
+        };
+        // FR-017: an enabled analyzer must publish a verdict for every proposed
+        // tool action. A key-resolution failure therefore must not silently skip
+        // the analyzer - proceed with an empty key so the call fails over to a
+        // fail-safe `ask` verdict (published like any other) instead of leaving
+        // the action with no verdict at all. Providers that need no key (local
+        // endpoints) already resolve to an empty key above.
+        let api_key = match self.resolve_api_key(&provider_id).await {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::warn!(provider = %provider_id, error = %e, "security analyzer API key resolution failed; proceeding without a key (the call will fail safe)");
+                String::new()
+            }
+        };
+
+        let cache_key = format!("{provider_id}/{model_id}");
+        if let Some(cached) = self.llm_client_cache.read().get(&cache_key).map(Arc::clone) {
+            return Some((cached, model_id, timeout_secs));
+        }
+        let mut options: HashMap<String, serde_json::Value> = HashMap::new();
+        options.insert(
+            "model_id".to_string(),
+            serde_json::Value::String(model_id.clone()),
+        );
+        match provider.create_client(&api_key, None, &options).await {
+            Ok(c) => {
+                let arc: Arc<dyn crate::llm::LlmClient> = Arc::from(c);
+                let mut cache = self.llm_client_cache.write();
+                const MAX_LLM_CLIENTS: usize = 8;
+                if cache.len() >= MAX_LLM_CLIENTS
+                    && let Some(key) = cache.keys().next().cloned()
+                {
+                    cache.remove(&key);
+                }
+                cache.insert(cache_key, arc.clone());
+                Some((arc, model_id, timeout_secs))
+            }
+            Err(e) => {
+                tracing::warn!(provider = %provider_id, model = %model_id, error = %e, "security analyzer client creation failed; analyzer disabled for this turn");
+                None
+            }
+        }
     }
 
     pub(crate) async fn resolve_api_key(&self, provider_id: &str) -> Result<String> {

@@ -11,6 +11,8 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/agents` | [agents](agents.md) | List all agents  -  built-in and custom |
 | `/browse_refresh` | [browse_refresh](browse_refresh.md) | Refresh the @ file-picker project index |
 | `/bench` | [bench](bench.md) | Benchmark runner: /bench list\|init <suite-or-all-or-full>\|show\|run <target>\|status\|open last\|cancel |
+| `/backend` | [backend](backend.md) | Execution backend: /backend [<kind>] - open the switcher, or switch to a kind |
+| `/automation` | [automation](automation.md) | Automation service: /automation [list] - runs <id>, run <id>, help |
 | `/clear` | [clear](clear.md) | Clear message history for the current session |
 | `/clip` | [clip](clip.md) | Copy the rendered message-window contents to the system clipboard |
 | `/cancel` | [cancel](cancel.md) | Cancel a background task (/cancel <task_id_prefix> \| /cancel help) |
@@ -42,6 +44,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/gcf` | [gcf](gcf.md) | Toggle GCF encoding of tool results: /gcf on\|off\|show\|help |
 | `/tools` | [tools](tools.md) | Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools show|help |
 | `/skills` | [skills](skills.md) | List all registered skills and their descriptions (/skills help) |
+| `/skill` | [skill](skill.md) | Load or inspect skill packs: /skill \| /skill list \| /skill <name> [args] \| /skill help |
 | `/mcp` | [mcp](mcp.md) | MCP servers: /mcp [status] \| /mcp discover \| /mcp connect <id> \| /mcp disconnect <id> \| /mcp help |
 | `/task` | [task](task.md) | Toggle the TASKS side panel, or list/help tasks: /task [list\|help] |
 | `/team` | [team](team.md) | Team management (/team help\|status\|show [name]\|create/open/delete <name>\|close\|message <id> <text>\|tasks\|clear\|cleanup) |
@@ -50,6 +53,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/bash` | [bash](bash.md) | Manage bash command lists: /bash add\|remove allow\|deny <entry> [--global] \| show \| help |
 | `/dirs` | [dirs](dirs.md) | Manage directory/file permission lists: /dirs add\|remove allow\|deny <pattern> [--global] \| show \| help |
 | `/yolo` | [yolo](yolo.md) | Toggle YOLO mode  -  bypass all command validation and tool restrictions (/yolo help) |
+| `/security` | [../llmsecurity](../llmsecurity.md) | LLM security analyzer: /security on\|off\|status\|revert\|help (tightening-only permission layer) |
 | `/spec` | [spec](spec.md) | Specification management: /spec create\|add\|delete\|list\|search\|validate\|status\|task\|govcreate\|help |
 | `/plugins` | [plugins](plugins.md) | Plugin management: /plugins list [--verbose] \| add <source> [--force] \| remove <pluginid> \| enable <pluginid> \| disable <pluginid> \| test <pluginid> \| codex [query] [--category <name>] [--refresh] \| claude [query] [--category <name>] [--refresh] \| stores [--check] \| help |
 | `/connectors` | [connectors](connectors.md) | Connector management: /connectors list [--verbose] [--category <name>] \| claude [query] [--category <name>] [--refresh] \| add <id\|source> [--force] \| remove <id> \| enable <id> \| disable <id> \| connect <id> \| disconnect <id> \| auth <id> \| test <id> \| stores [--check] \| help |

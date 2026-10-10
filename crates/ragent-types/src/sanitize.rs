@@ -238,7 +238,8 @@ pub fn redact_secrets(msg: &str) -> String {
 /// ```rust
 /// use ragent_types::sanitize::mask_key;
 ///
-/// assert_eq!(mask_key("[REDACTED]"), "...abcd");
+/// assert_eq!(mask_key("sk-1234567890abcd"), "...abcd");
+/// assert_eq!(mask_key("abc"), "...abc");
 /// assert_eq!(mask_key(""), "(none)");
 /// ```
 #[must_use]

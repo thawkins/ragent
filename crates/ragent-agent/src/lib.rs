@@ -4,6 +4,9 @@
 //! compatibility re-exports for the shared config, storage, LLM, and runtime
 //! primitives that the moved modules still reference through `crate::*`.
 
+/// Agent Client Protocol (ACP) client: drive an external coding agent as a
+/// subprocess over JSON-RPC on stdio (spec `openhands` FR-015, FR-022, FR-036).
+pub mod acp;
 pub mod agent;
 pub mod compaction;
 pub mod cost;
@@ -12,6 +15,8 @@ pub mod event;
 
 pub use ragent_types::event::{Event, EventBus, FinishReason};
 pub use ragent_types::startup::StartupTimings;
+pub mod automation;
+pub mod backend;
 pub mod file_ops;
 pub mod goal;
 pub mod hooks;
@@ -38,6 +43,9 @@ pub use ragent_types::resource;
 pub mod loop_state;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
+/// LLM security analyzer: allow/ask/deny verdict with a rationale (spec
+/// `openhands` FR-006, FR-016, FR-017).
+pub mod security;
 pub mod session;
 pub mod skill;
 pub mod storage;

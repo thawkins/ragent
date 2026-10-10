@@ -5218,7 +5218,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ragent"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5249,7 +5249,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5308,7 +5308,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5333,7 +5333,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5456,7 +5456,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5486,17 +5486,22 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
+ "async-stream",
+ "async-trait",
  "axum",
  "blake3",
+ "chrono",
  "criterion",
  "futures",
  "http-body-util",
  "parking_lot",
  "ragent-agent",
+ "ragent-config",
  "ragent-research",
+ "ragent-types",
  "serde",
  "serde_json",
  "tokio",
@@ -5618,7 +5623,6 @@ dependencies = [
  "quick-xml",
  "ragent-codeindex",
  "ragent-config",
- "ragent-storage",
  "ragent-tools-core",
  "ragent-types",
  "readability-rs",
@@ -5659,7 +5663,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.130"
+version = "1.0.131"
 dependencies = [
  "anyhow",
  "arboard",

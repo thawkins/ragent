@@ -3,7 +3,10 @@
 //! Defines the Axum router, shared [`AppState`], and all REST/SSE endpoint
 //! handlers for session management, messaging, permissions, and configuration.
 
+pub mod automation;
 pub mod memory;
+pub mod openai;
+pub mod openapi;
 pub mod research;
 
 use std::collections::HashMap;
@@ -173,6 +176,14 @@ pub fn router(state: AppState) -> Router {
         .nest("/memory", memory::memory_routes())
         // Research API (research system)
         .nest("/research", research::research_routes())
+        // Automation run-history + manual-run surface (spec `openhands` T-016;
+        // FR-018). Merged into the auth-protected router; the public webhook
+        // ingress is registered separately on the outer router below.
+        .merge(automation::automation_admin_routes())
+        // OpenAI-compatible inbound surface (spec `openhands` FR-003, FR-011,
+        // FR-038). Merged into the auth-protected router so `/v1/models` and
+        // `/v1/chat/completions` inherit the native bearer-token check.
+        .merge(openai::openai_routes())
         // Orchestration endpoints (Milestone 3 - Task 3.1)
         .route("/orchestrator/start", post(orch_start))
         .route("/orchestrator/jobs/{id}", get(orch_job))
@@ -199,6 +210,16 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        // Automation webhook ingress (spec `openhands` T-016; FR-013). Public
+        // like `/health`: an external system (a GitHub webhook, a CI job) has no
+        // bearer token. The enqueued run still runs through the ordinary
+        // permission-checked agent loop, confined to the automation's backend.
+        .merge(automation::automation_routes())
+        // OpenAPI 3.1 document (spec `openhands` FR-007). Public: it describes
+        // the API shape and carries no runtime data or credentials, so a client
+        // can fetch it before authenticating. The document itself is derived
+        // from the single route table in `openapi::ROUTES`.
+        .merge(openapi::openapi_routes())
         .merge(protected)
         .fallback_service(static_files)
         // F-M10: bound the request body and give every handler a deadline.

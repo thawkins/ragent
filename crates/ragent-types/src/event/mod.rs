@@ -37,6 +37,39 @@ pub enum FinishReason {
     Truncation,
 }
 
+impl FinishReason {
+    /// The stable lowercase label persisted and rendered (`stop`, `tool_use`,
+    /// `length`, `content_filter`, `cancelled`, `truncation`).
+    ///
+    /// The single source of truth for the label mapping, so the session's
+    /// `finish_reason_label` and the remote relay's inverse mapping cannot drift.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stop => "stop",
+            Self::ToolUse => "tool_use",
+            Self::Length => "length",
+            Self::ContentFilter => "content_filter",
+            Self::Cancelled => "cancelled",
+            Self::Truncation => "truncation",
+        }
+    }
+
+    /// Parse a stored label back into a reason, defaulting to [`Self::Stop`] for an
+    /// unrecognised value.
+    #[must_use]
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "tool_use" => Self::ToolUse,
+            "length" => Self::Length,
+            "content_filter" => Self::ContentFilter,
+            "cancelled" => Self::Cancelled,
+            "truncation" => Self::Truncation,
+            _ => Self::Stop,
+        }
+    }
+}
+
 /// P-15: one tool call's lifecycle summary inside a [`Event::ToolCallBatch`].
 ///
 /// Bundles the `ToolCallStart` + `ToolCallEnd` + `ToolResult` data for a
@@ -962,6 +995,23 @@ pub enum Event {
         /// Trimmed stderr from the hook (capped at 500 characters).
         reason: String,
     },
+    /// The LLM security analyzer returned a verdict for a proposed tool action
+    /// (spec `openhands` FR-006, FR-017).
+    ///
+    /// Published *before* the action is permitted or refused so the verdict and
+    /// its rationale are visible to the user whether the outcome is an automatic
+    /// allow, an automatic deny, or an interactive prompt the analyzer escalated
+    /// to.
+    SecurityVerdict {
+        /// Session in which the action was proposed.
+        session_id: String,
+        /// Name of the tool being evaluated.
+        tool: String,
+        /// The analyzer's verdict: `"allow"`, `"ask"`, or `"deny"`.
+        verdict: String,
+        /// Human-readable justification for the verdict.
+        rationale: String,
+    },
     /// A memory candidate was extracted automatically (requires confirmation).
     MemoryCandidateExtracted {
         /// Session that triggered the extraction.
@@ -1173,6 +1223,7 @@ impl Event {
             Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
             Self::HookWarning { .. } => "HookWarning",
             Self::ToolResultFlagged { .. } => "ToolResultFlagged",
+            Self::SecurityVerdict { .. } => "SecurityVerdict",
             Self::CompressionStarted { .. } => "CompressionStarted",
             Self::CompressionFinished { .. } => "CompressionFinished",
             Self::ProviderLoadingStarted { .. } => "ProviderLoadingStarted",
@@ -1261,6 +1312,7 @@ impl Event {
             | Self::MemoryCandidateExtracted { session_id, .. }
             | Self::HookWarning { session_id, .. }
             | Self::ToolResultFlagged { session_id, .. }
+            | Self::SecurityVerdict { session_id, .. }
             | Self::ModelDownloadStarted { session_id, .. }
             | Self::ModelDownloadProgress { session_id, .. }
             | Self::ModelDownloadFinished { session_id, .. } => Some(session_id.as_str()),

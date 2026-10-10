@@ -494,7 +494,13 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(masterfetch::tools::fetch::MfFetchTool));
     registry.register(Arc::new(masterfetch::tools::crawl_tool::MfCrawlTool));
     registry.register(Arc::new(masterfetch::tools::search_tool::MfSearchTool));
-    registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
+    // Spec `openhands` FR-029 (T-017): the screenshot capability is registered
+    // only when a headless browser engine ragent can drive is present, so the
+    // tool is never advertised when it cannot work. ragent compiles no driver,
+    // so `headless_engine_present()` is `false` in the default build.
+    if masterfetch::tools::screenshot::headless_engine_present() {
+        registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
+    }
     registry.register(Arc::new(masterfetch::tools::cache_clear::MfCacheClearTool));
     registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
 

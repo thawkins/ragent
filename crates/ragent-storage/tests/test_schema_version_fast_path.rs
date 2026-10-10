@@ -12,7 +12,7 @@
 //!   `list_sessions` skip their `pragma_table_info` probe.
 //! - All tables/indexes are present after a fast-path open (schema is intact).
 
-use ragent_storage::Storage;
+use ragent_storage::{SCHEMA_VERSION, Storage};
 
 /// Returns a fresh temp file path for a file-backed database.
 fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -36,8 +36,9 @@ fn fresh_db_writes_schema_version() {
         .expect("get setting")
         .expect("schema_version should be set after migration");
     assert_eq!(
-        version, "1",
-        "schema_version should be '1' after fresh migration"
+        version,
+        SCHEMA_VERSION.to_string(),
+        "schema_version should match SCHEMA_VERSION after fresh migration"
     );
 
     drop(storage);
@@ -61,7 +62,7 @@ fn second_open_uses_fast_path_and_schema_is_intact() {
             .get_setting("schema_version")
             .expect("get setting")
             .expect("version set");
-        assert_eq!(v, "1");
+        assert_eq!(v, SCHEMA_VERSION.to_string());
     }
 
     // Second open - fast path.  All CRUD must still work.
@@ -104,7 +105,7 @@ fn second_open_uses_fast_path_and_schema_is_intact() {
             .get_setting("schema_version")
             .expect("get setting")
             .expect("version set");
-        assert_eq!(v, "1");
+        assert_eq!(v, SCHEMA_VERSION.to_string());
     }
 
     let _ = std::fs::remove_file(&path);
@@ -166,5 +167,5 @@ fn in_memory_always_full_migration() {
         .get_setting("schema_version")
         .expect("get setting")
         .expect("version set");
-    assert_eq!(v, "1");
+    assert_eq!(v, SCHEMA_VERSION.to_string());
 }

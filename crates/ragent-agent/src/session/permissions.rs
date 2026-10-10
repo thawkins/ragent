@@ -517,6 +517,12 @@ pub async fn check_permission_with_prompt(
     canonical_cache: Option<&ragent_tools_core::CanonicalPathCache>,
     checkpoint_forced: bool,
     checkpoint_timeout_secs: u64,
+    // Spec `openhands` T-015 (FR-006, FR-017): `true` when the LLM security
+    // analyzer returned an `allow` verdict for this call. Applied only at the
+    // bare-`Ask` prompt below, so it can satisfy a rule-less request but never
+    // override an explicit policy `Deny`, the directory denylist, or a forced
+    // destructive-action checkpoint (all decided earlier in this function).
+    security_approved: bool,
 ) -> Result<PermissionAction> {
     // Short-circuit if --yes / --no-prompt flag is set. A forced
     // destructive-action checkpoint (FR-015) suppresses this: auto-approval
@@ -595,6 +601,18 @@ pub async fn check_permission_with_prompt(
             Ok(action)
         }
         PermissionAction::Ask => {
+            // FR-006, FR-017: a rule-less (`Ask`) request is exactly what the
+            // analyzer's `allow` is allowed to satisfy. No explicit rule denied
+            // it and no destructive-action checkpoint is forcing it, so honor
+            // the analyzer's approval instead of prompting. `deny`/`ask`
+            // verdicts never reach this branch with `security_approved == true`.
+            if security_approved && !checkpoint_forced {
+                tracing::info!(
+                    tool = %tool_name,
+                    "security analyzer approval satisfied the permission prompt"
+                );
+                return Ok(PermissionAction::Allow);
+            }
             // No explicit rule matched.  Try the file:read auto-grant
             // before falling through to an interactive prompt.  This is
             // the only path that may perform a blocking `canonicalize()`.

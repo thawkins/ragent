@@ -4,9 +4,10 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (149 registered
-> tools plus the dynamic `mcp_tool`). For TUI workflow see
-> `docs/howtos/tutorial.md`. For hiding/exposing tool families see
+> **Scope:** Tool names, parameter schemas, and usage patterns (148 registered
+> tools in the default build — 149 when a drivable headless browser engine is
+> present, so `mf_screenshot` registers — plus the dynamic `mcp_tool`). For TUI
+> workflow see `docs/howtos/tutorial.md`. For hiding/exposing tool families see
 > `docs/howtos/tool-visibility.md`. For team coordination see
 > `docs/howtos/teams.md`.
 

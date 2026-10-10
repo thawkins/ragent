@@ -345,7 +345,14 @@ impl SessionProcessor {
 
         // PERF-009 / P-2: `load_config_cached` already returns an `Arc<Config>`,
         // so we reuse it directly instead of re-wrapping.
-        let session_config: Arc<ragent_config::Config> = cfg;
+        //
+        // FR-033: an automation run installs a per-session execution-backend
+        // override before its first turn. When one is present it is applied here
+        // so the whole turn (and every tool dispatch in it) is confined to the
+        // automation's configured backend. A run with no override keeps the
+        // shared `Arc` unchanged so the common path stays allocation-free.
+        let session_config: Arc<ragent_config::Config> =
+            crate::automation::apply_session_backend_override(&cfg, session_id);
         // FR-033: configured hooks run first, then hooks contributed by enabled
         // plugins, so a user's own hooks always precede a plugin's at the same
         // trigger.

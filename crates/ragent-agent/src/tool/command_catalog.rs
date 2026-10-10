@@ -49,6 +49,10 @@ const TOOLS_SUBS: &[&str] = &[
 const ON_OFF_HELP: &[&str] = &["on", "off", "help"];
 const WEBSEARCH_SUBS: &[&str] = &["show", "test", "search", "help"];
 const HELP_ONLY: &[&str] = &["help"];
+const BACKEND_SUBS: &[&str] = &["show", "local", "docker", "podman", "remote", "help"];
+const AUTOMATION_SUBS: &[&str] = &["list", "runs", "run", "help"];
+const I18N_SUBS: &[&str] = &["on", "off", "status", "list", "help"];
+const SECURITY_SUBS: &[&str] = &["on", "off", "status", "revert", "help"];
 const TOOLCHAIN_SUBS: &[&str] = &["list", "help"];
 const PROMPT_SUBS: &[&str] = &["help", "primary", "subagent", "list"];
 const STATUS_SUBS: &[&str] = &["clear"];
@@ -185,6 +189,18 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         trigger: "bench",
         description: "Benchmark runner: /bench list|init <suite-or-all-or-full>|show|run <target>|status|open last|cancel",
         subcommands: EMPTY,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "backend",
+        description: "Execution backend: /backend [<kind>] | open the switcher, or switch to a kind",
+        subcommands: BACKEND_SUBS,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "automation",
+        description: "Automation service: /automation [list] | runs <id> | run <id> | help",
+        subcommands: AUTOMATION_SUBS,
         flags: EMPTY,
     },
     CommandCatalogEntry {
@@ -494,6 +510,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         flags: EMPTY,
     },
     CommandCatalogEntry {
+        trigger: "skill",
+        description: "Load or inspect skill packs (/skill [name] | /skill list | /skill help)",
+        subcommands: EMPTY,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
         trigger: "spawn",
         description: "Spawn a detached background sub-agent that nothing waits on: /spawn <agent> <prompt...> | /spawn help",
         subcommands: EMPTY,
@@ -617,6 +639,18 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         trigger: "yolo",
         description: "Toggle YOLO mode - bypass all command validation and tool restrictions (/yolo help)",
         subcommands: EMPTY,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "security",
+        description: "LLM security analyzer: /security on|off|status|revert | /security help",
+        subcommands: SECURITY_SUBS,
+        flags: EMPTY,
+    },
+    CommandCatalogEntry {
+        trigger: "i18n",
+        description: "UI language: /i18n on|off|status|list|<locale> | /i18n help",
+        subcommands: I18N_SUBS,
         flags: EMPTY,
     },
 ];

@@ -85,11 +85,15 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
 
     let workdir = std::env::current_dir()?;
 
+    // Read the store dirs and the resolved connector config once and reuse them
+    // for the `stores --check`, `test`, and management paths instead of re-reading
+    // the store/config on every branch.
+    let (dirs, config) = store_and_config(&workdir);
+
     // `stores --check` contacts each catalogue over a blocking HTTP client,
     // which panics if it builds and drops its runtime on an async worker thread
     // (FR-036), so it runs on the off-loop blocking path.
     if sub == "stores" && rest.contains("--check") {
-        let config = store_and_config(&workdir).1;
         let report = run_connector_subcommand_stores_check(&config).await;
         println!("{}", cli_body(&report));
         return Ok(());
@@ -109,7 +113,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
         let mut probe = CliMcpProbe;
         if let Some(report) = run_connector_subcommand_async(
             &workdir,
-            &store_and_config(&workdir).1,
+            &config,
             &NullCredentialStore,
             &ProcessEnv,
             &mut probe,
@@ -124,7 +128,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
     }
 
     // The management subcommands drive the ephemeral session environment.
-    let mut env = CliConnectorEnv::build(&workdir);
+    let mut env = CliConnectorEnv::new(dirs, config);
     let report = run_connector_subcommand_env(&mut env, sub, rest)
         .await
         .unwrap_or_else(|| render_help(sub));
@@ -168,14 +172,7 @@ fn catalogue_browser_pointer() -> String {
 /// body is otherwise printed verbatim so both surfaces stay in step.
 #[must_use]
 fn cli_body(report: &str) -> String {
-    let rewritten = report
-        .strip_prefix("From: /connectors")
-        .map(|tail| format!("ragent connectors{tail}"))
-        .unwrap_or_else(|| report.to_string());
-    let rewritten = rewritten
-        .replace("## /connectors", "## ragent connectors")
-        .replace("`/connectors ", "`ragent connectors ");
-    format!("{rewritten}\n")
+    crate::cli_surface::rewrite_report_body(report, "connectors")
 }
 
 /// The CLI connector session environment.
@@ -192,9 +189,8 @@ struct CliConnectorEnv {
 }
 
 impl CliConnectorEnv {
-    /// Build the environment for one `ragent connectors` invocation.
-    fn build(workdir: &std::path::Path) -> Self {
-        let (dirs, config) = store_and_config(workdir);
+    /// Build the environment from an already-resolved store dirs and config.
+    fn new(dirs: StoreDirs, config: ConnectorsConfig) -> Self {
         let session = ConnectorSession::new(dirs.clone(), config.clone(), Vec::new());
         Self {
             session,

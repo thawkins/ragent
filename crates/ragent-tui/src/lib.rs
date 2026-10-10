@@ -659,8 +659,24 @@ pub async fn run_tui(
     let cron_scheduler = app::cron::start_cron_scheduler(
         Arc::clone(&storage),
         Arc::clone(&session_processor),
-        cron_working_dir,
+        cron_working_dir.clone(),
     );
+
+    // -- Automation scheduler startup (spec `openhands` T-016; FR-014) --
+    // When the project config enables the automation service, tick its
+    // scheduled automations for the lifetime of the TUI. An unconfigured
+    // project starts no scheduler, so no runs fire.
+    let automation_config = session_processor.load_config_cached().automation_config();
+    let _automation_scheduler = if automation_config.is_enabled() {
+        let service = Arc::new(ragent_agent::automation::AutomationService::new(
+            Arc::clone(&session_processor),
+            automation_config,
+            cron_working_dir,
+        ));
+        Some(service.spawn_scheduler())
+    } else {
+        None
+    };
 
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {

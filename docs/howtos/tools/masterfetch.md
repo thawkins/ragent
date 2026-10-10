@@ -11,7 +11,7 @@ same-domain crawling with a content cache. Outputs carry envelope signals
 | `mf_search` | Keyless multi-engine web search. |
 | `mf_crawl` | Best-first same-domain crawl. |
 | `mf_cache_clear` | Clear the content cache. |
-| `mf_screenshot` | Capture a page as a screenshot. |
+| `mf_screenshot` | Capture a page as a screenshot. **Registered only when a drivable headless browser engine is present** (spec `openhands` FR-029); absent from the default build. |
 | `mf_version` | Return integration version info. |
 
 **Use cases:** extracting article content, searching multiple engines in
@@ -128,9 +128,13 @@ Clear the masterfetch content cache.
 
 ## mf_screenshot
 
-Capture a page as a screenshot image. The integrated Rust runtime has no
-headless browser engine, so this currently returns an error recommending
-`mf_fetch` for text-based extraction.
+Capture a page as a screenshot image. This tool is registered **only when a
+drivable headless browser engine is present** (spec `openhands` FR-029): the
+default build compiles no driver, so the tool is absent from the advertised tool
+set and the capability is never offered when it cannot work. When a bundled
+driver is enabled (the opt-in `headless-browser` Cargo feature) and an engine
+binary resolves on `PATH`, the tool registers and returns a screenshot (or an
+honest error recommending `mf_fetch` for text-based extraction).
 
 **Arguments**
 

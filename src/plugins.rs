@@ -64,7 +64,10 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     }
 
     let sub = subcommand_of(text);
-    let rest = text[sub.len()..].trim_start();
+    // Strip the typed prefix rather than slicing by `sub.len()`: the two agree
+    // today, but a byte slice indexed by `sub` would panic if they ever diverged.
+    // Mirrors the connectors CLI dispatch.
+    let rest = text.strip_prefix(sub).map(str::trim_start).unwrap_or("");
 
     let known = PLUGIN_SUBCOMMANDS.contains(&sub);
     // `help` and any unrecognised subcommand both render the usage block.
@@ -87,11 +90,10 @@ pub fn run_cli(args: &[String]) -> Result<()> {
         let workdir = workdir.clone();
         let sub_owned = sub.to_string();
         let rest_owned = rest.to_string();
-        let sub_for_fallback = sub_owned.clone();
         std::thread::spawn(move || run_plugin_subcommand_offline(&workdir, &sub_owned, &rest_owned))
             .join()
             .map_err(|_| anyhow::anyhow!("plugin store probe thread panicked"))?
-            .unwrap_or_else(|| render_help(&sub_for_fallback))
+            .unwrap_or_else(|| render_help(sub))
     } else {
         run_plugin_subcommand_offline(&workdir, sub, rest).unwrap_or_else(|| render_help(sub))
     };
@@ -135,12 +137,5 @@ fn run_plugin_subcommand_offline(
 /// otherwise printed verbatim so both surfaces stay in step.
 #[must_use]
 fn cli_body(report: &str) -> String {
-    let rewritten = report
-        .strip_prefix("From: /plugins")
-        .map(|tail| format!("ragent plugins{tail}"))
-        .unwrap_or_else(|| report.to_string());
-    let rewritten = rewritten
-        .replace("## /plugins", "## ragent plugins")
-        .replace("`/plugins ", "`ragent plugins ");
-    format!("{rewritten}\n")
+    crate::cli_surface::rewrite_report_body(report, "plugins")
 }

@@ -9,11 +9,18 @@
 //!
 //! This test verifies every tool individually and also checks the full set
 //! registered in `create_extended_registry()`.
+//!
+//! Spec `openhands` FR-029 (T-017): `mf_screenshot` is registered **only** when
+//! a headless browser engine ragent can drive is present, so the registry check
+//! below treats it as conditional. Its per-struct category (`web`) is still
+//! asserted directly.
 
 use ragent_tools_extended::masterfetch::tools::cache_clear::MfCacheClearTool;
 use ragent_tools_extended::masterfetch::tools::crawl_tool::MfCrawlTool;
 use ragent_tools_extended::masterfetch::tools::fetch::MfFetchTool;
-use ragent_tools_extended::masterfetch::tools::screenshot::MfScreenshotTool;
+use ragent_tools_extended::masterfetch::tools::screenshot::{
+    MfScreenshotTool, headless_engine_present,
+};
 use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
 use ragent_tools_extended::masterfetch::tools::version::MfVersionTool;
 use ragent_tools_extended::{Tool, create_extended_registry};
@@ -78,9 +85,6 @@ fn test_mf_version_permission_category_is_system() {
 // ---------------------------------------------------------------------------
 // Struct-level: all six tools have the expected category
 // ---------------------------------------------------------------------------
-
-/// Names of the four network tools that must return `"web"`.
-const WEB_TOOLS: &[&str] = &["mf_fetch", "mf_crawl", "mf_search", "mf_screenshot"];
 
 /// Names of the two non-network tools that must return `"system"`.
 const SYSTEM_TOOLS: &[&str] = &["mf_cache_clear", "mf_version"];
@@ -181,21 +185,31 @@ fn test_exact_count_of_web_and_system_mf_tools() {
 }
 
 // ---------------------------------------------------------------------------
-// Registry registration: all six tools are registered in create_extended_registry
+// Registry registration: the always-on tools are registered in
+// create_extended_registry; `mf_screenshot` is engine-gated (FR-029).
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_all_six_mf_tools_registered_with_correct_categories() {
     let registry = create_extended_registry();
 
-    // Verify all six tools are present and have correct categories.
-    for name in WEB_TOOLS {
+    // Five tools are always registered (the four network tools minus the
+    // engine-gated screenshot tool, plus the two system tools).
+    for name in [
+        "mf_fetch",
+        "mf_crawl",
+        "mf_search",
+        "mf_cache_clear",
+        "mf_version",
+    ] {
         let tool = registry.get(name);
         assert!(
             tool.is_some(),
             "tool '{name}' should be registered in create_extended_registry()"
         );
-        if let Some(ref t) = tool {
+    }
+    for name in ["mf_fetch", "mf_crawl", "mf_search"] {
+        if let Some(t) = registry.get(name) {
             assert_eq!(
                 t.permission_category(),
                 "web",
@@ -204,12 +218,7 @@ fn test_all_six_mf_tools_registered_with_correct_categories() {
         }
     }
     for name in SYSTEM_TOOLS {
-        let tool = registry.get(name);
-        assert!(
-            tool.is_some(),
-            "tool '{name}' should be registered in create_extended_registry()"
-        );
-        if let Some(ref t) = tool {
+        if let Some(t) = registry.get(name) {
             assert_eq!(
                 t.permission_category(),
                 "system",
@@ -217,4 +226,12 @@ fn test_all_six_mf_tools_registered_with_correct_categories() {
             );
         }
     }
+
+    // `mf_screenshot` is present only when a drivable engine is present
+    // (FR-029): never advertised when it cannot work.
+    assert_eq!(
+        registry.get("mf_screenshot").is_some(),
+        headless_engine_present(),
+        "mf_screenshot registration must track headless_engine_present() (FR-029)"
+    );
 }

@@ -4,7 +4,24 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (Unreleased)
+## Highlights (v1.0.131)
+
+- **OpenHands-parity release** — pluggable execution backends (`/backend`,
+  `execution_backend`/`backends`), the LLM security analyzer (`/security`), the
+  OpenAI-compatible surface (`/v1/chat/completions`, `/v1/models`), the generated
+  OpenAPI 3.1 contract and `/openapi.json` HTTP MCP transport, the ACP client plus
+  the feature-gated `ragent acp-server`, the automation service (`/automation`,
+  `POST /auto/{id}`), AgentSkills discovery, and the i18n catalog now ship as a
+  tagged release. The 7-layer bash validation, path containment, and permission
+  system are unchanged and gate every new surface.
+- **Quality-gate fixes** — the fast-path schema tests assert the crate's exported
+  `SCHEMA_VERSION` (now 2, the `automation_runs` table), the plugin-store browse
+  panel keeps document order, the `mask_key` doctest expects `[REDACTED]`, the
+  report subcommands keep their machine-readable stdout clean by routing tracing to
+  stderr, and the unused `ragent-storage` dependency is dropped from
+  `ragent-tools-extended`.
+
+## Highlights (v1.0.130)
 
 - **Plugin-store category navigator** — `/plugins codex` and `/plugins claude`
   now open with a left-hand category navigator: `ALL` plus the distinct categories

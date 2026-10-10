@@ -631,3 +631,86 @@ fn test_discover_skills_all_openskills_project_variants() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// -- FR-005: AgentSkills discovery roots --------------------------------------
+
+#[test]
+fn test_discovery_roots_include_agents_skills_project_and_global() {
+    let tmp = std::env::temp_dir().join("ragent_test_discovery_roots_agents");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    // The project AgentSkills root (`.agents/skills/`) is scanned at
+    // `OpenSkillsProject` scope (FR-005).
+    let project_agents = tmp.join(".agents").join("skills");
+    let root = discovery_roots(&tmp, &[])
+        .into_iter()
+        .find(|root| root.dir == project_agents && root.scope == SkillScope::OpenSkillsProject);
+    assert!(
+        root.is_some(),
+        "project .agents/skills/ must be a discovery root: {:?}",
+        discovery_roots(&tmp, &[])
+            .iter()
+            .map(|r| (r.dir.display().to_string(), r.scope))
+            .collect::<Vec<_>>()
+    );
+
+    // The user AgentSkills root (`~/.agents/skills/`) is scanned at
+    // `OpenSkillsGlobal` scope (FR-005).
+    if let Some(home) = dirs::home_dir() {
+        let global_agents = home.join(".agents").join("skills");
+        let root = discovery_roots(&tmp, &[])
+            .into_iter()
+            .find(|root| root.dir == global_agents && root.scope == SkillScope::OpenSkillsGlobal);
+        assert!(
+            root.is_some(),
+            "user ~/.agents/skills/ must be a discovery root"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_discovery_roots_agents_project_precedes_ragent_project() {
+    // `.agents/skills/` sits before `.ragent/skills/` so a `.ragent` pack wins a
+    // name clash (higher scope), while `.agents` still overrides the user scope.
+    let tmp = std::env::temp_dir().join("ragent_test_discovery_roots_order");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    let roots = discovery_roots(&tmp, &[]);
+    let agents_project = roots
+        .iter()
+        .position(|r| r.dir == tmp.join(".agents").join("skills"))
+        .expect("project .agents/skills/ present");
+    let ragent_project = roots
+        .iter()
+        .position(|r| r.dir == tmp.join(".ragent").join("skills"))
+        .expect("project .ragent/skills/ present");
+    assert!(
+        agents_project < ragent_project,
+        ".agents/skills/ must be scanned before .ragent/skills/"
+    );
+    assert_eq!(roots[agents_project].scope, SkillScope::OpenSkillsProject);
+    assert_eq!(roots[ragent_project].scope, SkillScope::Project);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_discovery_roots_includes_extra_dirs_as_personal() {
+    let tmp = std::env::temp_dir().join("ragent_test_discovery_roots_extra");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    let extra = vec!["/some/extra/skills".to_string()];
+    let roots = discovery_roots(&tmp, &extra);
+    let root = roots
+        .iter()
+        .find(|r| r.dir == Path::new("/some/extra/skills"))
+        .expect("extra dir present");
+    assert_eq!(root.scope, SkillScope::Personal);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

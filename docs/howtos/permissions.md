@@ -197,7 +197,7 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 | `read`, `file:read`  | `Permission::Read`     | `read`, `glob`, `grep`, `list`, `file_info`, `diff_files` |
 | `edit`, `file:write` | `Permission::Edit`     | `write`, `create`, `edit`, `multi_edit`, `append_to_file`, `rm`, `move_file`, `copy_file`, `make_directory`, `patch`, `apply_patch` |
 | `bash`, `bash:execute` | `Permission::Bash`   | `bash`, `bash_reset`, `bg`              |
-| `web`                | `Permission::Web`      | `webfetch`, `websearch`, `mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot` |
+| `web`                | `Permission::Web`      | `webfetch`, `websearch`, `mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot` (registered only when a drivable headless browser is present; spec `openhands` FR-029) |
 | `network:fetch`      | `Permission::Web`     | `http_request` |
 | `plan`, `plan_enter` | `Permission::PlanEnter`| `plan_enter`                            |
 | `task`               | `Permission::Task`     | `task_create`, `task_update`, `task_get`, `task_list` |
@@ -1464,6 +1464,7 @@ override any `allow` rules.
 | `docs/howtos/tool-visibility.md`  | Hiding and exposing tool families              |
 | `docs/howtos/custom-agents.md`    | Custom agent definitions with permission rules |
 | `docs/howtos/hooks.md`            | PreToolUse/PostToolUse lifecycle hooks          |
+| `docs/howtos/llmsecurity.md`      | LLM security analyzer (tightening-only layer)  |
 | `docs/howtos/codeindex.md`        | Code index tools (hardwired auto-approve)      |
 | `docs/howtos/teams.md`            | Team coordination tools                        |
 | `SPEC.md` (project root)          | Architecture spec, Section 4: Security & Permissions |

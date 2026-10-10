@@ -38,7 +38,9 @@ etc.).
 
 ### Modules
 
+- **acp** — Agent Client Protocol (spec `openhands`): the ACP **client** (`AcpClient`, JSON-RPC on a subprocess's stdio; `relay_turn`) that drives external agents, and the feature-gated ACP **server** (`server::serve_stdio`, behind the `acp-server` feature) that serves ACP-capable editors over ragent's own stdio (FR-015, FR-022, FR-028, FR-036).
 - **agent** — Agent definitions, built-in roster, system-prompt building, OASF custom agent loading.
+- **backend** — Execution backends (spec `openhands`): the `ExecutionBackend` trait, the `local` host adapter, the `docker`/`podman` `ContainerBackend` (sandbox provisioning, workspace volume mount, container tool dispatch), container-runtime detection with `podman` as the default, and the `remote` `RemoteBackend` (drive a second ragent server over REST+SSE and mirror its event stream locally).
 - **background** — Background shell task service (`bg` tool), wake/notify hooks.
 - **bang_command** — `!`-prefixed shell command helpers shared by CLI + TUI.
 - **compaction** — Context-window summarisation (estimator, prompt, runner, serializer, convert).

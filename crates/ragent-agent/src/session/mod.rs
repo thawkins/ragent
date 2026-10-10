@@ -4,6 +4,8 @@
 //! scoped to a working directory. [`SessionManager`] provides CRUD operations
 //! backed by persistent [`Storage`] and emits lifecycle events via [`EventBus`].
 
+/// ACP agent turn dispatch (spec `openhands` FR-015, FR-022, FR-036).
+pub mod acp_dispatch;
 pub mod archive;
 pub mod cache;
 pub mod compaction_ops;
@@ -15,6 +17,10 @@ pub mod permissions;
 pub mod processor;
 pub mod profiler;
 pub mod prompt_builders;
+/// Remote-backend turn dispatch: relay a turn to a second ragent server over
+/// REST+SSE and mirror its event stream locally (spec `openhands` FR-021,
+/// FR-031, FR-034).
+pub mod remote_dispatch;
 pub mod stream_buffer;
 pub(crate) mod text_toolcalls;
 pub mod verification;
@@ -26,14 +32,7 @@ use crate::event::FinishReason;
 /// enum because they cross a serde boundary; this helper maps to a fixed
 /// string instead.
 pub fn finish_reason_label(reason: &FinishReason) -> &'static str {
-    match reason {
-        FinishReason::Stop => "stop",
-        FinishReason::ToolUse => "tool_use",
-        FinishReason::Length => "length",
-        FinishReason::ContentFilter => "content_filter",
-        FinishReason::Cancelled => "cancelled",
-        FinishReason::Truncation => "truncation",
-    }
+    reason.as_str()
 }
 
 use chrono::{DateTime, Utc};

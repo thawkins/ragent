@@ -300,16 +300,116 @@ fn yaml_to_json(yaml: &serde_norway::Value) -> anyhow::Result<serde_json::Value>
     Ok(json_val)
 }
 
-/// Discover skills from standard locations and optional extra directories.
+/// The canonical AgentSkills directory names scanned under the home directory
+/// and the project directory: `~/.agents/skills/`, `~/.agent/skills/`,
+/// `~/.claude/skills/`, and their project-local equivalents.
 ///
-/// Scans in order (lowest -> highest priority):
+/// `.agents` is the AgentSkills convention (FR-005); `.agent` and `.claude`
+/// are the pre-existing `OpenSkills` variants.
+const AGENTSKILLS_DIRS: [&str; 3] = [".agents", ".agent", ".claude"];
+
+/// A skill discovery directory paired with the [`SkillScope`] its skills load
+/// into.
 ///
-/// 1. `OpenSkills` global: `~/.agent/skills/*/SKILL.md`, `~/.agents/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
-/// 2. Personal: `~/.ragent/skills/*/SKILL.md`
-/// 3. Extra directories from config `skill_dirs` (treated as Personal scope)
-/// 4. `OpenSkills` project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.agents/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
-/// 5. Project: `{working_dir}/.ragent/skills/*/SKILL.md`
-/// 6. Monorepo: nested `.ragent/skills/` in subdirectories of `working_dir`
+/// The order of the vector returned by [`discovery_roots`] is the scan order
+/// *and* the precedence order: skills are loaded lowest-first and
+/// [`crate::skill::SkillRegistry::register`] keeps the highest-scope entry on a
+/// name clash.
+pub(crate) struct DiscoveryRoot {
+    /// The directory to scan for `<name>/SKILL.md` packs.
+    pub(crate) dir: std::path::PathBuf,
+    /// The scope skills found in `dir` are registered under.
+    pub(crate) scope: SkillScope,
+}
+
+/// Enumerate the ordered skill discovery roots for `working_dir` plus
+/// `extra_dirs`.
+///
+/// This is the single source of truth for where [`discover_skills`] scans and
+/// where the caller-side registry caches (for example
+/// `SessionProcessor::skill_registry`) watch for changes, so cache
+/// invalidation and the scan can never drift apart. In particular the
+/// AgentSkills convention (FR-005) - the project `.agents/skills/` and the user
+/// `~/.agents/skills/` directories - is listed here once.
+///
+/// Order (lowest -> highest priority):
+///
+/// 1. `OpenSkills` global: `~/.agents/skills/`, `~/.agent/skills/`,
+///    `~/.claude/skills/`
+/// 2. Personal: `~/.config/ragent/skills/`
+/// 3. Extra directories from config `skill_dirs` (Personal scope)
+/// 4. `OpenSkills` project: `{working_dir}/.agents/skills/`,
+///    `{working_dir}/.agent/skills/`, `{working_dir}/.claude/skills/`
+/// 5. Project: `{working_dir}/.ragent/skills/`
+/// 6. Monorepo: nested `.ragent/skills/` in first-level subdirectories
+pub(crate) fn discovery_roots(working_dir: &Path, extra_dirs: &[String]) -> Vec<DiscoveryRoot> {
+    let mut roots = Vec::new();
+
+    // OpenSkills global (includes the AgentSkills convention ~/.agents/skills/).
+    if let Some(home) = dirs::home_dir() {
+        for dir_name in AGENTSKILLS_DIRS {
+            roots.push(DiscoveryRoot {
+                dir: home.join(dir_name).join("skills"),
+                scope: SkillScope::OpenSkillsGlobal,
+            });
+        }
+    }
+
+    // Personal skills: ~/.config/ragent/skills/*/SKILL.md
+    if let Some(personal_dir) = global_skills_dir() {
+        roots.push(DiscoveryRoot {
+            dir: personal_dir,
+            scope: SkillScope::Personal,
+        });
+    }
+
+    // Extra directories from config (treated as Personal scope so project
+    // skills can still override them).
+    for dir in extra_dirs {
+        roots.push(DiscoveryRoot {
+            dir: std::path::PathBuf::from(dir),
+            scope: SkillScope::Personal,
+        });
+    }
+
+    // OpenSkills project (includes the AgentSkills convention .agents/skills/).
+    for dir_name in AGENTSKILLS_DIRS {
+        roots.push(DiscoveryRoot {
+            dir: working_dir.join(dir_name).join("skills"),
+            scope: SkillScope::OpenSkillsProject,
+        });
+    }
+
+    // Project skills: {working_dir}/.ragent/skills/*/SKILL.md
+    roots.push(DiscoveryRoot {
+        dir: working_dir.join(".ragent").join("skills"),
+        scope: SkillScope::Project,
+    });
+
+    // Monorepo support: first-level subdirectories of `working_dir`.
+    if let Ok(entries) = std::fs::read_dir(working_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                roots.push(DiscoveryRoot {
+                    dir: path.join(".ragent").join("skills"),
+                    scope: SkillScope::Project,
+                });
+            }
+        }
+    }
+
+    roots
+}
+
+/// Discover AgentSkills and ragent YAML skill packs from standard locations and
+/// optional extra directories.
+///
+/// Scans the roots from [`discovery_roots`] in order (lowest -> highest
+/// priority), covering the AgentSkills convention (project `.agents/skills/`
+/// and user `~/.agents/skills/`) alongside ragent's own packs. Each pack is a
+/// directory containing a `SKILL.md` whose YAML frontmatter declares at least
+/// `name` and `description`.
 ///
 /// Higher-scope skills override lower-scope skills when names conflict.
 /// Ragent-native paths always take precedence over `OpenSkills` paths at the
@@ -325,58 +425,17 @@ fn yaml_to_json(yaml: &serde_norway::Value) -> anyhow::Result<serde_json::Value>
 pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillInfo> {
     let mut skills = Vec::new();
 
-    // OpenSkills global: ~/.agent/skills/, ~/.agents/skills/, and ~/.claude/skills/
-    if let Some(home) = dirs::home_dir() {
-        for dir_name in &[".agent", ".agents", ".claude"] {
-            let openskills_dir = home.join(dir_name).join("skills");
-            if openskills_dir.is_dir() {
-                load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsGlobal, &mut skills);
-            }
+    for root in discovery_roots(working_dir, extra_dirs) {
+        if root.dir.is_dir() {
+            load_skills_from_dir(&root.dir, root.scope, &mut skills);
         }
     }
 
-    // Personal skills: ~/.config/ragent/skills/*/SKILL.md
-    if let Some(personal_dir) = global_skills_dir()
-        && personal_dir.is_dir()
-    {
-        load_skills_from_dir(&personal_dir, SkillScope::Personal, &mut skills);
-    }
-
-    // Extra directories from config (treated as Personal scope so project
-    // skills can still override them)
+    // Warn about configured `skill_dirs` entries that do not exist. The
+    // standard roots are commonly absent and are not warned about.
     for dir in extra_dirs {
-        let path = Path::new(dir);
-        if path.is_dir() {
-            load_skills_from_dir(path, SkillScope::Personal, &mut skills);
-        } else {
+        if !Path::new(dir).is_dir() {
             tracing::warn!("Configured skill_dirs entry does not exist: {dir}");
-        }
-    }
-
-    // OpenSkills project: .agent/skills/, .agents/skills/, and .claude/skills/
-    for dir_name in &[".agent", ".agents", ".claude"] {
-        let openskills_dir = working_dir.join(dir_name).join("skills");
-        if openskills_dir.is_dir() {
-            load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsProject, &mut skills);
-        }
-    }
-
-    // Project skills: {working_dir}/.ragent/skills/*/SKILL.md
-    let project_dir = working_dir.join(".ragent").join("skills");
-    if project_dir.is_dir() {
-        load_skills_from_dir(&project_dir, SkillScope::Project, &mut skills);
-    }
-
-    // Monorepo support: scan first-level subdirectories for nested .ragent/skills/
-    if let Ok(entries) = std::fs::read_dir(working_dir) {
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_dir() {
-                let nested_skills = path.join(".ragent").join("skills");
-                if nested_skills.is_dir() {
-                    load_skills_from_dir(&nested_skills, SkillScope::Project, &mut skills);
-                }
-            }
         }
     }
 

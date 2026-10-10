@@ -24,6 +24,8 @@ use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
 use ragent_connectors::{ALL_CATEGORY, CatalogueBrowser, CategoryFilter, CategoryFilterState};
 
+use super::BackendPanelState;
+
 pub use ragent_connectors::CatalogueBrowseStatus as ConnectorBrowseStatus;
 use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
 use serde::Serialize;
@@ -756,6 +758,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Benchmark runner: /bench list|init <suite-or-all-or-full>|show|run <target>|status|open last|cancel",
     },
     SlashCommandDef {
+        trigger: "backend",
+        description: "Execution backend: /backend [<kind>] | open the switcher, or switch to a kind",
+    },
+    SlashCommandDef {
+        trigger: "automation",
+        description: "Automation service: /automation [list] | runs <id> | run <id> | help",
+    },
+    SlashCommandDef {
         trigger: "clear",
         description: "Clear message history for the current session",
     },
@@ -878,6 +888,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "skills",
         description: "List all registered skills and their descriptions (/skills help)",
+    },
+    SlashCommandDef {
+        trigger: "skill",
+        description: "Load or inspect skill packs (/skill [name] | /skill list | /skill help)",
     },
     SlashCommandDef {
         trigger: "mcp",
@@ -1054,6 +1068,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "osinfo",
         description: "Report host OS and hardware info: /osinfo show [--no-probe]|help",
+    },
+    SlashCommandDef {
+        trigger: "i18n",
+        description: "UI language: /i18n on|off|status|list|<locale> | /i18n help",
+    },
+    SlashCommandDef {
+        trigger: "security",
+        description: "LLM security analyzer: /security on|off|status|revert | /security help",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.
@@ -1540,11 +1562,11 @@ pub struct PluginStoreBrowser {
     pub installed: BTreeSet<String>,
     /// The current search query (FR-008, FR-009).
     pub query: String,
-    /// Every entry fetched from the store index, ordered by plugin name (FR-003).
+    /// Every entry fetched from the store index, in document order (FR-003).
     ///
-    /// The list is sorted case-insensitively by `name` with the id as a stable
-    /// tie-break, so the result pane reads alphabetically regardless of the
-    /// document order the index arrives in.
+    /// The list keeps the order the index arrived in; filtering narrows it without
+    /// reordering. The navigator's derived category set is sorted separately
+    /// (spec `catnav` FR-001).
     pub all: Vec<StoreEntry>,
     /// Indices into [`Self::all`] that match [`Self::query`], in order (FR-008).
     pub filtered: Vec<usize>,
@@ -1769,13 +1791,11 @@ impl PluginStoreBrowser {
     /// loaded and [`PluginStoreStatus::Empty`] otherwise (FR-017); the filter is
     /// re-applied so any prefilled query still constrains the result set.
     ///
-    /// The entries are ordered by plugin id (case-insensitively, name as a stable
-    /// tie-break) so the result pane reads alphabetically whichever order the
-    /// index arrived in.
+    /// The entries keep the order the index arrived in (document order), which the
+    /// result pane renders as-is; only the navigator's category set is sorted
+    /// (spec `catnav` FR-001).
     pub fn set_index(&mut self, index: StoreIndex) {
         self.all = index.entries;
-        self.all
-            .sort_by_cached_key(|entry| (entry.id.to_lowercase(), entry.name.to_lowercase()));
         self.skipped = index.skipped;
         self.status = if self.all.is_empty() {
             PluginStoreStatus::Empty
@@ -2414,6 +2434,18 @@ pub struct App {
     /// Cached area of the connector-catalogue browse panel (set during render).
     /// Kept in [`Rect::default`] while no panel is open.
     pub connector_store_area: Rect,
+    /// The `/backend` switcher panel state, present while it is open
+    /// (spec `openhands` FR-008). `None` when no panel is showing; while it is
+    /// `Some` the panel swallows every keystroke and locks the input field.
+    pub backend_panel: Option<BackendPanelState>,
+    /// Cached area of the `/backend` panel (set during render). Kept in
+    /// [`Rect::default`] while the panel is closed.
+    pub backend_panel_area: Rect,
+    /// The active execution backend kind for this session (spec `openhands`
+    /// FR-008, FR-019). Seeded from the loaded config at startup and updated by
+    /// a `/backend` switch. The actual dispatch still resolves the backend from
+    /// the per-turn config, so this is the surfaced label the TUI shows.
+    pub active_backend: String,
     /// Cursor position (character index) within the input line.
     pub input_cursor: usize,
     /// Keyboard selection anchor (character index). When `Some(n)`, the region
@@ -2762,6 +2794,9 @@ pub struct App {
     pub history_picker: Option<HistoryPickerState>,
     /// Active config-save picker dialog (`/config list`), if any.
     pub config_save_picker: Option<ConfigSavePickerState>,
+    /// Number of LLM security-analyzer verdicts published this session
+    /// (spec `openhands` T-015; FR-006, FR-017). Displayed by `/security status`.
+    pub security_verdicts: u64,
     /// Session ID of the currently selected agent in the agents panel.
     /// When set, messages and logs are filtered to show only from this session.
     /// When `None`, shows primary session messages/logs.

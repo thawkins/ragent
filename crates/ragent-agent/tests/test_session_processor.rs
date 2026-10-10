@@ -37,6 +37,7 @@ async fn test_hardwired_team_tool_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -60,6 +61,7 @@ async fn test_hardwired_task_suffix_tool_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -83,6 +85,7 @@ async fn test_hardwired_ask_user_tool_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -106,6 +109,7 @@ async fn test_hardwired_wait_agents_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -132,6 +136,7 @@ async fn test_hardwired_agent_complete_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -158,6 +163,7 @@ async fn test_hardwired_list_agents_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -183,6 +189,7 @@ async fn test_hardwired_task_create_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -208,6 +215,7 @@ async fn test_hardwired_task_update_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -233,6 +241,7 @@ async fn test_hardwired_task_get_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -258,6 +267,7 @@ async fn test_hardwired_task_list_is_auto_approved() {
         None,
         false,
         120,
+        false,
     )
     .await
     .expect("permission check should succeed");

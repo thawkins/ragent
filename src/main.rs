@@ -28,11 +28,16 @@ use ragent_agent::{
 use ragent_connectors::{ConnectorSession, store_dirs};
 
 mod cli;
+mod cli_surface;
 mod connectors;
 mod crash_dump;
 mod panic_hook;
 mod plugins;
 mod stderr_spool;
+
+/// ACP server endpoint on stdio for IDE clients (spec `openhands` T-008;
+/// FR-022, FR-028).
+mod acp_server;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -164,6 +169,27 @@ enum Commands {
         #[arg(value_name = "ARGS", trailing_var_arg = true, num_args = 0..)]
         args: Vec<String>,
     },
+    /// Emit the OpenAPI 3.1 document (or `--client` for the generated typed client)
+    #[command(name = "openapi")]
+    Openapi {
+        /// Emit the generated typed TypeScript client instead of the document
+        #[arg(long)]
+        client: bool,
+    },
+    /// Manage automations (the `/automation` slash-command parity surface)
+    #[command(name = "automation")]
+    Automation {
+        /// Subcommand and arguments: `list|runs <id>|run <id>|help`
+        #[arg(value_name = "ARGS", trailing_var_arg = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+    /// Serve the ACP endpoint on stdio for IDE clients (Zed, VS Code, JetBrains)
+    ///
+    /// Feature-gated and disabled by default: requires a build with the
+    /// `acp-server` feature and `acp.server_enabled: true` in the configuration
+    /// (spec `openhands` FR-022, FR-028).
+    #[command(name = "acp-server")]
+    AcpServer,
     /// Scaffold a new project in the current directory (the `/new` command)
     New {
         #[command(flatten)]
@@ -416,6 +442,26 @@ async fn async_main() -> Result<()> {
                 command: SessionCommands::Resume { .. }
             })
         );
+    // Commands whose stdout is a machine-readable document or report (`openapi`
+    // emits the OpenAPI JSON or the generated TypeScript client; the parity
+    // subcommands `plugins`, `connectors`, `automation`, `session`, `config`,
+    // `new`, `spec`, and `research` print a report the CLI tests parse) must not
+    // have tracing log lines interleave with that output. Route tracing to
+    // stderr for those commands so the stdout stream stays pure.
+    let machine_output = matches!(
+        cli.command,
+        Some(
+            Commands::Openapi { .. }
+                | Commands::Plugins { .. }
+                | Commands::Connectors { .. }
+                | Commands::Automation { .. }
+                | Commands::New { .. }
+                | Commands::Spec { .. }
+                | Commands::Session { .. }
+                | Commands::Config { .. }
+                | Commands::Research { .. }
+        )
+    );
     let tui_log_rx = if tui_will_run {
         use tracing_subscriber::prelude::*;
         let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
@@ -424,6 +470,13 @@ async fn async_main() -> Result<()> {
             .with(ragent_tui::tracing_layer::TuiTracingLayer::new(tx))
             .init();
         Some(rx)
+    } else if machine_output {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .with_writer(std::io::stderr)
+            .init();
+        None
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -1089,7 +1142,57 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Serve { addr }) => {
             tracing::info!(address = %addr, "Starting HTTP server");
-            let auth_token = uuid::Uuid::new_v4().to_string();
+            // FR-012, FR-024, FR-032: when the OpenAI-compatible surface is
+            // explicitly enabled, its bearer token must be configured. The token
+            // is the server's one bearer token (FR-024) - ragent does not run a
+            // second credential - resolved from `openai.token` then the ambient
+            // `RAGENT_TOKEN`, instead of the ephemeral generated one. When the
+            // surface is enabled without one, refuse to start rather than serve
+            // it unauthenticated (FR-032).
+            let (openai_enabled, openai_token) = {
+                let guard = config.read().await;
+                let enabled = guard.openai_surface_enabled();
+                let token = guard.openai_surface_token().or_else(|| {
+                    std::env::var("RAGENT_TOKEN")
+                        .ok()
+                        .filter(|token| !token.trim().is_empty())
+                });
+                (enabled, token)
+            };
+            let auth_token = if openai_enabled {
+                match openai_token {
+                    Some(token) => token,
+                    None => anyhow::bail!(
+                        "the OpenAI-compatible surface is enabled (openai.enabled: true) \
+                         but no bearer token is configured; set `openai.token` or \
+                         RAGENT_TOKEN, or disable the surface"
+                    ),
+                }
+            } else if let Some(token) = openai_token {
+                token
+            } else {
+                uuid::Uuid::new_v4().to_string()
+            };
+            // Automation scheduler (spec `openhands` T-016; FR-014): when the
+            // project config enables the subsystem, tick the scheduled
+            // automations for the lifetime of the served process. An
+            // unconfigured project starts no scheduler, so no runs fire. It
+            // shares the session processor, so it is set up before the state
+            // takes ownership of it.
+            let automation_config = {
+                let guard = config.read().await;
+                guard.automation_config()
+            };
+            let _automation_scheduler = if automation_config.is_enabled() {
+                let service = Arc::new(ragent_agent::automation::AutomationService::new(
+                    Arc::clone(&session_processor),
+                    automation_config,
+                    crate::working_dir(),
+                ));
+                Some(service.spawn_scheduler())
+            } else {
+                None
+            };
             let orchestrator_registry = ragent_agent::orchestrator::AgentRegistry::new();
             let coordinator = ragent_agent::orchestrator::Coordinator::new(orchestrator_registry);
             let state = ragent_server::routes::AppState {
@@ -1457,6 +1560,38 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             // the CLI connection seam and never touches a live TUI client, so it
             // is safe to await on the main task.
             connectors::run_cli(&args).await?;
+        }
+        Some(Commands::Automation { args }) => {
+            // Automation service CLI parity surface (spec `openhands` T-016;
+            // FR-018). Lists automations and their run history, or enqueues a
+            // manual run; the run-history reads are synchronous storage calls.
+            cli::handle_automation_command(&args, Arc::clone(&storage))?;
+        }
+        Some(Commands::Openapi { client }) => {
+            // FR-007 parity surface: emit the OpenAPI 3.1 document, or the
+            // generated typed client, from the same route table the server
+            // serves. Synchronous stdout writes only.
+            let mut stdout = std::io::stdout().lock();
+            if client {
+                stdout.write_all(ragent_server::routes::openapi::typescript_client().as_bytes())?;
+            } else {
+                let doc =
+                    serde_json::to_string_pretty(&ragent_server::routes::openapi::document())?;
+                stdout.write_all(doc.as_bytes())?;
+                stdout.write_all(b"\n")?;
+            }
+        }
+        Some(Commands::AcpServer) => {
+            // Spec `openhands` T-008 (FR-022, FR-028): serve the ACP endpoint on
+            // stdio for an IDE client. Off by default - `acp_server::run` refuses
+            // unless the feature is compiled in *and* `acp.server_enabled` is set.
+            acp_server::run(
+                config.read().await.clone().into(),
+                Arc::clone(&session_processor),
+                Arc::clone(&event_bus),
+                working_dir.clone(),
+            )
+            .await?;
         }
     }
     Ok(())

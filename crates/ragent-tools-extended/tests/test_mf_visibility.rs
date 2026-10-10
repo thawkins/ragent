@@ -410,24 +410,38 @@ fn test_serialise_omits_masterfetch_when_not_specified() {
 }
 
 // ---------------------------------------------------------------------------
-// All six tools registered in the extended registry
+// Masterfetch tools registered in the extended registry. The five always-on
+// tools are unconditional; `mf_screenshot` is engine-gated (spec `openhands`
+// FR-029, T-017), so it is expected only while an engine is present.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_all_six_mf_tools_registered_in_registry() {
     use ragent_tools_extended::create_extended_registry;
+    use ragent_tools_extended::masterfetch::tools::screenshot::headless_engine_present;
 
     let registry = create_extended_registry();
     let definitions = registry.definitions();
     let registered_names: std::collections::HashSet<String> =
         definitions.iter().map(|d| d.name.clone()).collect();
 
-    for &name in MF_TOOL_NAMES {
+    for name in [
+        "mf_fetch",
+        "mf_crawl",
+        "mf_search",
+        "mf_cache_clear",
+        "mf_version",
+    ] {
         assert!(
             registered_names.contains(name),
             "tool '{name}' should be registered in create_extended_registry()"
         );
     }
+    assert_eq!(
+        registered_names.contains("mf_screenshot"),
+        headless_engine_present(),
+        "mf_screenshot is registered only when a drivable engine is present (FR-029)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +451,7 @@ fn test_all_six_mf_tools_registered_in_registry() {
 #[test]
 fn test_hidden_mf_tools_are_subset_of_registered_tools() {
     use ragent_tools_extended::create_extended_registry;
+    use ragent_tools_extended::masterfetch::tools::screenshot::headless_engine_present;
 
     let registry = create_extended_registry();
     let registered_names: std::collections::HashSet<String> = registry
@@ -449,15 +464,26 @@ fn test_hidden_mf_tools_are_subset_of_registered_tools() {
     config.tool_visibility.masterfetch = false;
     let hidden = config.effective_hidden_tools();
 
-    // Every hidden mf_* tool should be a registered tool.
+    // Every mf_* tool the config hides is also a registered tool: the five
+    // always-on tools unconditionally, `mf_screenshot` only while its engine is
+    // present (FR-029). A hidden-but-unregistered name would be harmless, but
+    // pinning the relationship keeps the family list honest.
     for &name in MF_TOOL_NAMES {
         assert!(
             hidden.iter().any(|h| h == name),
             "tool '{name}' should be hidden"
         );
-        assert!(
-            registered_names.contains(name),
-            "tool '{name}' should be registered"
-        );
+        if name == "mf_screenshot" {
+            assert_eq!(
+                registered_names.contains(name),
+                headless_engine_present(),
+                "mf_screenshot registration must track headless_engine_present() (FR-029)"
+            );
+        } else {
+            assert!(
+                registered_names.contains(name),
+                "tool '{name}' should be registered"
+            );
+        }
     }
 }

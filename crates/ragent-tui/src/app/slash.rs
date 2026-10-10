@@ -809,6 +809,39 @@ impl App {
                     "help".to_string(),
                 ]
             }
+            "i18n" => {
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "status".to_string(),
+                    "list".to_string(),
+                    "help".to_string(),
+                ]
+            }
+            "security" | "security-analyzer" => {
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "status".to_string(),
+                    "revert".to_string(),
+                    "help".to_string(),
+                ]
+            }
+            "skill" => vec!["list".to_string(), "help".to_string()],
+            "backend" => vec![
+                "show".to_string(),
+                "local".to_string(),
+                "docker".to_string(),
+                "podman".to_string(),
+                "remote".to_string(),
+                "help".to_string(),
+            ],
+            "automation" => vec![
+                "list".to_string(),
+                "runs".to_string(),
+                "run".to_string(),
+                "help".to_string(),
+            ],
             "tools" => vec![
                 "list".to_string(),
                 "github".to_string(),
@@ -1574,6 +1607,242 @@ Usage: `/telemetry help|on|off|setup|counters`",
         }
     }
 
+    /// Dispatch the `/backend` slash command (spec `openhands` T-005; FR-008).
+    ///
+    /// `/backend` with no argument (or `show`/`list`) opens the interactive
+    /// switcher panel showing the active backend and the health of every
+    /// registered backend. `/backend <kind|id>` switches the active backend
+    /// directly; `/backend help` renders the usage table. The command is
+    /// read-only for `show`/`help`; a switch persists `execution_backend` to the
+    /// loaded config file.
+    fn handle_backend_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "show" | "list" => self.open_backend_panel(),
+            "help" | "--help" | "-h" => {
+                self.append_assistant_text(
+                    "From: /backend help\n\n\
+                     ## /backend - execution backend surface\n\n\
+                     The active execution backend selects *where* a session's tool \
+                     invocations run (spec `openhands` FR-001). `local` runs tools on \
+                     the host as before; `docker`/`podman` run them inside a sandbox \
+                     container; `remote` drives a second ragent server over its REST+SSE \
+                     API.\n\n\
+                     | Subcommand | Description |\n\
+                     |---|---|\n\
+                     | `/backend` | Open the switcher panel (active backend + health of every registered backend) |\n\
+                     | `/backend show` | Alias of `/backend` |\n\
+                     | `/backend <kind>` | Switch to a backend kind: `local`, `docker`, `podman`, `remote` |\n\
+                     | `/backend <id>` | Switch to a backend by its registered id |\n\
+                     | `/backend help` | Show this help |\n\n\
+                     Panel keys: `Up`/`Down` move the cursor, `Enter` switches to the \
+                     highlighted backend, `Esc` closes. A backend whose health is not \
+                     `ok` cannot be selected. The switch persists to `ragent.json` and \
+                     applies to the next turn.",
+                );
+                self.status = "backend: help".to_string();
+            }
+            _ => {
+                self.switch_backend_by_selector(&sub);
+            }
+        }
+    }
+
+    /// Dispatch the `/automation` slash command (spec `openhands` T-016;
+    /// FR-013, FR-018).
+    ///
+    /// `/automation` (or `list`) shows the configured automations with their
+    /// trigger, backend, and next-due time. `/automation runs <id>` shows an
+    /// automation's run history, `/automation run <id>` enqueues a manual run,
+    /// and `/automation help` renders the usage table. Listing is read-only;
+    /// `run` writes a run-history record and spawns an agent run confined to the
+    /// automation's configured backend (FR-033).
+    ///
+    /// The service handle is built on demand, only for the subcommands that need
+    /// it (`runs`/`run`/`list`), so the purely informational `help` path allocates
+    /// nothing.
+    fn automation_service(
+        &self,
+        config: &ragent_config::AutomationConfig,
+    ) -> std::sync::Arc<ragent_agent::automation::AutomationService> {
+        std::sync::Arc::new(ragent_agent::automation::AutomationService::new(
+            std::sync::Arc::clone(&self.session_processor),
+            config.clone(),
+            self.cwd_path.clone(),
+        ))
+    }
+
+    async fn handle_automation_command(&mut self, args: &str) {
+        use ragent_agent::automation::compute_next_due;
+
+        let mut parts = args.split_whitespace();
+        let sub = parts.next().unwrap_or("").to_lowercase();
+        let rest: Vec<&str> = parts.collect();
+
+        let config = self.session_processor.load_config_cached();
+        let automation_config = config.automation_config();
+
+        match sub.as_str() {
+            "help" | "--help" | "-h" => {
+                self.append_assistant_text(
+                    "From: /automation help\n\n\
+                     ## /automation - automation service\n\n\
+                     An automation is a named, schedulable or webhook-triggered \
+                     agent run (spec `openhands` FR-013, FR-014). The webhook \
+                     ingress accepts `POST /auto/<id>`; the scheduler fires \
+                     schedule-triggered automations. Every run is confined to the \
+                     automation's configured execution backend (FR-033) and \
+                     recorded in durable run history (FR-018).\n\n\
+                     | Subcommand | Description |\n\
+                     |---|---|\n\
+                     | `/automation` | List configured automations with trigger, backend, next-due |\n\
+                     | `/automation list` | Alias of `/automation` |\n\
+                     | `/automation runs <id>` | Show an automation's run history |\n\
+                     | `/automation run <id>` | Enqueue a manual run now |\n\
+                     | `/automation help` | Show this help |\n\n\
+                     Automations are declared under the `automation` block in \
+                     `ragent.json`. The CLI parity surface is `ragent automation`.",
+                );
+                self.status = "automation: help".to_string();
+            }
+            "runs" => {
+                let Some(id) = rest.first() else {
+                    self.append_assistant_text(
+                        "From: /automation runs\n\nUsage: `/automation runs <id>`",
+                    );
+                    self.status = "automation: usage".to_string();
+                    return;
+                };
+                let service = self.automation_service(&automation_config);
+                match service.list_runs(id, 50).await {
+                    Ok(runs) if runs.is_empty() => {
+                        self.append_assistant_text(&format!(
+                            "From: /automation runs\n\nNo run history for `{id}`."
+                        ));
+                        self.status = "automation: 0 runs".to_string();
+                    }
+                    Ok(runs) => {
+                        let mut text = format!(
+                            "From: /automation runs\n\nRun history for `{id}` ({}):\n\n",
+                            runs.len()
+                        );
+                        text.push_str("| Run | Trigger | Outcome | Backend | Started |\n");
+                        text.push_str("|---|---|---|---|---|\n");
+                        for run in &runs {
+                            text.push_str(&format!(
+                                "| `{}` | {} | {} | {} | {} |\n",
+                                run.id,
+                                run.trigger,
+                                run.outcome.map_or("running", |o| o.as_str()),
+                                run.backend,
+                                run.started_at.to_rfc3339(),
+                            ));
+                        }
+                        self.append_assistant_text(&text);
+                        self.status = format!("automation: {} run(s)", runs.len());
+                    }
+                    Err(e) => {
+                        self.append_assistant_text(&format!(
+                            "From: /automation runs\n\n[warn] Failed to read run history: {e}"
+                        ));
+                        self.status = "automation: error".to_string();
+                    }
+                }
+            }
+            "run" => {
+                let Some(id) = rest.first() else {
+                    self.append_assistant_text(
+                        "From: /automation run\n\nUsage: `/automation run <id>`",
+                    );
+                    self.status = "automation: usage".to_string();
+                    return;
+                };
+                let service = self.automation_service(&automation_config);
+                if !service.is_enabled() {
+                    self.append_assistant_text(&format!(
+                        "From: /automation run\n\n[warn] The automation service is disabled \
+                         (`automation.enabled: false`)."
+                    ));
+                    self.status = "automation: disabled".to_string();
+                    return;
+                }
+                if service.definition(id).is_none() {
+                    self.append_assistant_text(&format!(
+                        "From: /automation run\n\n[warn] No enabled automation `{id}`."
+                    ));
+                    self.status = "automation: unknown".to_string();
+                    return;
+                }
+                match service.run_now(id).await {
+                    Ok(run) => {
+                        self.append_assistant_text(&format!(
+                            "From: /automation run\n\n[ok] Enqueued run `{}` for `{id}` on backend \
+                             `{}`. It applies to the configured execution backend (FR-033).",
+                            run.id, run.backend
+                        ));
+                        self.status = format!("automation: run {id}");
+                    }
+                    Err(e) => {
+                        self.append_assistant_text(&format!(
+                            "From: /automation run\n\n[warn] Failed to enqueue run: {e}"
+                        ));
+                        self.status = "automation: error".to_string();
+                    }
+                }
+            }
+            "" | "list" | "show" => {
+                let service = self.automation_service(&automation_config);
+                let defs = service.definitions();
+                if defs.is_empty() {
+                    self.append_assistant_text(
+                        "From: /automation\n\nNo automations configured. Declare them under the \
+                         `automation` block in `ragent.json`.",
+                    );
+                    self.status = "automation: 0".to_string();
+                    return;
+                }
+                let now = chrono::Utc::now();
+                let mut text = format!(
+                    "From: /automation\n\nConfigured automations ({}), service {}:\n\n",
+                    defs.len(),
+                    if service.is_enabled() { "on" } else { "off" }
+                );
+                text.push_str("| Id | Trigger | Schedule | Backend | Next due | Running |\n");
+                text.push_str("|---|---|---|---|---|---|\n");
+                for def in defs {
+                    let next_due = def
+                        .trigger
+                        .schedule()
+                        .and_then(|expr| compute_next_due(expr, now))
+                        .map(|t| t.to_rfc3339())
+                        .unwrap_or_else(|| "-".to_string());
+                    text.push_str(&format!(
+                        "| `{}` | {} | {} | {} | {} | {} |\n",
+                        def.id,
+                        def.trigger.label(),
+                        def.trigger.schedule().unwrap_or("-"),
+                        def.backend_label(),
+                        next_due,
+                        if service.is_running(&def.id) {
+                            "yes"
+                        } else {
+                            "no"
+                        },
+                    ));
+                }
+                self.append_assistant_text(&text);
+                self.status = format!("automation: {}", defs.len());
+            }
+            other => {
+                self.append_assistant_text(&format!(
+                    "From: /automation\n\n[warn] Unknown subcommand `{other}`. Use `/automation \
+                     help`."
+                ));
+                self.status = "automation: unknown".to_string();
+            }
+        }
+    }
+
     /// Dispatch the `/osinfo` slash command family (spec `osinfo` FR-014).
     ///
     /// `execute_slash_command_inner` routes `/osinfo <args>` here. The first
@@ -1841,6 +2110,254 @@ Usage: `/telemetry help|on|off|setup|counters`",
                      Usage: `/gcf on|off|show|help`",
                 );
                 self.status = "gcf: usage".to_string();
+            }
+        }
+    }
+
+    /// Handle the `/security` command: the LLM security analyzer
+    /// (spec `openhands` T-015; FR-006, FR-016, FR-017).
+    ///
+    /// Subcommands:
+    /// - `on` / `off` - enable/disable the analyzer and persist
+    ///   `security_analyzer.enabled`.
+    /// - `status` / bare - report the effective state, model, timeout, and how
+    ///   many verdicts have been published this session.
+    /// - `revert` - disable the analyzer (the escape hatch for a false denial).
+    /// - `help` - usage table.
+    fn handle_security_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("");
+        match sub.to_lowercase().as_str() {
+            "" | "status" => {
+                let persisted = ragent_config::Config::load()
+                    .ok()
+                    .and_then(|c| c.security_analyzer)
+                    .map(|s| {
+                        let model = s
+                            .model
+                            .as_ref()
+                            .map(|m| format!("{}/{}", m.provider_id, m.model_id))
+                            .unwrap_or_else(|| "<session model>".to_string());
+                        format!(
+                            "{} (model: {model}, timeout: {}s)",
+                            s.enabled, s.timeout_secs
+                        )
+                    })
+                    .unwrap_or_else(|| "absent (default-off)".to_string());
+                self.append_assistant_text(&format!(
+                    "From: /security status\n\n\
+                     LLM security analyzer: **{}**\n\
+                     Persisted config: {persisted}\n\
+                     Verdicts this session: {}\n\n\
+                     The analyzer returns allow/ask/deny with a rationale before an \
+                     action is permitted or refused (FR-006, FR-017). A `deny` is a \
+                     hard denial; an `allow` may satisfy a bare prompt but never an \
+                     explicit policy `Deny`. An analyzer failure escalates to the \
+                     normal prompt. `PreToolUse` hook exit codes are unaffected \
+                     (exit 2 blocks and returns stderr; exit 1 warns).",
+                    if self.security_verdicts > 0 {
+                        "active"
+                    } else {
+                        "idle"
+                    },
+                    self.security_verdicts
+                ));
+                self.status = "security: status".to_string();
+            }
+            "on" => self.apply_security(Some(true)),
+            "off" | "revert" => self.apply_security(Some(false)),
+            "help" | "--help" | "-h" => {
+                self.append_assistant_text(
+                    "From: /security help\n\n\
+                     ## /security - LLM security analyzer\n\n\
+                     Evaluates each proposed tool action with a model that returns\n\
+                     an `allow` / `ask` / `deny` verdict plus a rationale, published\n\
+                     before the action is permitted or refused (FR-006, FR-017).\n\n\
+                     | Subcommand | Description |\n\
+                     |---|---|\n\
+                     | `/security on` | Enable the analyzer, persist `security_analyzer.enabled: true` |\n\
+                     | `/security off` | Disable the analyzer, persist `security_analyzer.enabled: false` |\n\
+                     | `/security status` | Show effective state, model, and session verdict count |\n\
+                     | `/security revert` | Alias for `off` - the escape hatch for a false denial |\n\
+                     | `/security help` | Show this help |\n\n\
+                     Configure the model with `security_analyzer.model` \
+                     (`{ \"provider_id\": .., \"model_id\": .. }`).\n\
+                     The analyzer is tightening-only: it can deny a call or satisfy\n\
+                     a bare prompt, but never overrides an explicit policy `Deny` or\n\
+                     a destructive-action checkpoint. Any analyzer failure escalates\n\
+                     to the normal permission prompt.",
+                );
+                self.status = "security: help".to_string();
+            }
+            other => {
+                self.append_assistant_text(&format!(
+                    "From: /security\n\nUnknown subcommand `{other}`. \
+                     Usage: `/security on|off|status|revert|help`"
+                ));
+                self.status = "security: usage".to_string();
+            }
+        }
+    }
+
+    /// Apply and persist a `security_analyzer` change, then report the outcome
+    /// (FR-006).
+    fn apply_security(&mut self, enabled: Option<bool>) {
+        let current = ragent_config::Config::load()
+            .ok()
+            .and_then(|c| c.security_analyzer);
+        let target_enabled = enabled.unwrap_or_else(|| current.as_ref().is_some_and(|s| s.enabled));
+        match ragent_config::security_analyzer::persist(target_enabled) {
+            Ok(()) => {
+                self.session_processor.invalidate_config_cache();
+                self.append_assistant_text(&format!(
+                    "From: /security\n\n\u{2705} LLM security analyzer {}.\n\
+                     Verdicts and rationales are published before each action is \
+                     permitted or refused (FR-006, FR-017).",
+                    if target_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ));
+                self.status = format!("security: {}", if target_enabled { "on" } else { "off" });
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /security\n\n\u{26a0} Failed to persist security analyzer state: {e}"
+                ));
+                self.status = "security: error".to_string();
+            }
+        }
+    }
+
+    /// Handle the `/i18n` command: locale message catalog with English fallback
+    /// (spec `openhands` T-014; FR-027).
+    ///
+    /// Subcommands:
+    /// - `on` / `off` - enable/disable translated user-facing strings and
+    ///   persist `i18n.enabled`.
+    /// - `<locale>` - enable i18n with the given locale (e.g. `/i18n fr`).
+    /// - `status` / bare - report the effective state, locale, and catalog.
+    /// - `list` - enumerate the installed locale catalogs.
+    /// - `help` - usage table.
+    fn handle_i18n_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("");
+        let cwd = crate::app::helpers::current_working_dir();
+        match sub.to_lowercase().as_str() {
+            "" | "status" => {
+                let effective = ragent_config::i18n::is_enabled();
+                let locale = ragent_config::i18n::active_locale();
+                let loaded = ragent_config::i18n::catalog_loaded();
+                let persisted = ragent_config::Config::load()
+                    .ok()
+                    .and_then(|c| c.i18n)
+                    .map(|s| format!("{} ({})", s.enabled, s.locale))
+                    .unwrap_or_else(|| "absent (default-off)".to_string());
+                let catalog = ragent_config::i18n::catalog_exists(&locale, &cwd);
+                self.append_assistant_text(&format!(
+                    "From: /i18n status\n\n\
+                     UI internationalisation: **{}**\n\
+                     Effective locale: `{locale}`\n\
+                     Catalog loaded: {loaded}\n\
+                     Catalog available: {catalog}\n\
+                     Persisted config: {persisted}\n\n\
+                     Missing keys fall back to the compiled English text (FR-027).",
+                    if effective { "on" } else { "off" }
+                ));
+                self.status = "i18n: status".to_string();
+            }
+            "on" => self.apply_i18n(Some(true), None),
+            "off" => self.apply_i18n(Some(false), None),
+            "list" => {
+                let mut lines = String::from("From: /i18n list\n\nInstalled locale catalogs:\n\n");
+                let dirs = ragent_config::i18n::locale_dirs(&cwd);
+                let mut found = 0usize;
+                for dir in &dirs {
+                    let Ok(entries) = std::fs::read_dir(dir) else {
+                        continue;
+                    };
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            let name = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("<unknown>");
+                            lines.push_str(&format!("  {name}  ({})\n", path.display()));
+                            found += 1;
+                        }
+                    }
+                }
+                if found == 0 {
+                    lines.push_str("  (none installed; English is always available)\n");
+                }
+                self.append_assistant_text(&lines);
+                self.status = format!("i18n: {found} catalog(s)");
+            }
+            "help" | "--help" | "-h" => {
+                self.append_assistant_text(
+                    "From: /i18n help\n\n\
+                     ## /i18n - UI language\n\n\
+                     Renders user-facing strings (the status bar, the `/help`\n\
+                     header, and the catalogue footer) from a locale message\n\
+                     catalog, falling back to English for any missing key.\n\n\
+                     | Subcommand | Description |\n\
+                     |---|---|\n\
+                     | `/i18n on` | Enable translated strings, persist `i18n.enabled: true` |\n\
+                     | `/i18n off` | Disable translation, persist `i18n.enabled: false` |\n\
+                     | `/i18n <locale>` | Enable i18n with the given locale (e.g. `/i18n fr`) |\n\
+                     | `/i18n status` | Show effective state, locale, and catalog availability |\n\
+                     | `/i18n list` | Enumerate installed locale catalogs |\n\
+                     | `/i18n help` | Show this help (bare `/i18n` does the same) |\n\n\
+                     Catalogs live at `<project>/.ragent/locales/<locale>.json`\n\
+                     (project) and `~/.config/ragent/locales/<locale>.json` (user).\n\
+                     With no `i18n` section, a non-English ambient `LANG` with an\n\
+                     installed catalog enables translation automatically.",
+                );
+                self.status = "i18n: help".to_string();
+            }
+            other => {
+                // Any other token is treated as a locale tag (`/i18n fr`,
+                // `/i18n de_DE.UTF-8`).
+                let locale = other.to_string();
+                self.apply_i18n(Some(true), Some(&locale));
+            }
+        }
+    }
+
+    /// Apply and persist an `i18n` change, then report the outcome (FR-027).
+    fn apply_i18n(&mut self, enabled: Option<bool>, locale: Option<&str>) {
+        let cwd = crate::app::helpers::current_working_dir();
+        let current = ragent_config::Config::load().ok().and_then(|c| c.i18n);
+        let target_enabled = enabled.unwrap_or_else(|| current.as_ref().is_some_and(|s| s.enabled));
+        let target_locale = locale
+            .map(str::to_string)
+            .or_else(|| current.as_ref().map(|s| s.locale.clone()))
+            .unwrap_or_else(|| "en".to_string());
+        // Apply in-process immediately so the status bar reflects the change on
+        // this frame even if persistence is only partially successful.
+        ragent_config::i18n::apply(target_enabled, &target_locale, &cwd);
+        match ragent_config::i18n::persist(enabled, locale) {
+            Ok(()) => {
+                self.session_processor.invalidate_config_cache();
+                self.append_assistant_text(&format!(
+                    "From: /i18n\n\n\u{2705} UI internationalisation {} (locale `{target_locale}`).\n\
+                     Catalog loaded: {}",
+                    if target_enabled { "enabled" } else { "disabled" },
+                    ragent_config::i18n::catalog_loaded()
+                ));
+                self.status = format!("i18n: {}", if target_enabled { "on" } else { "off" });
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /i18n\n\n\u{26a0} UI internationalisation {} for this session, \
+                     but saving the config failed: {e} (unsaved).",
+                    if target_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ));
+                self.status = "i18n: unsaved".to_string();
             }
         }
     }
@@ -2981,6 +3498,8 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "goal" => handle_goal_command(self, args),
             "telemetry" => self.handle_telemetry_command(args),
             "osinfo" => self.handle_osinfo_command(args),
+            "backend" => self.handle_backend_command(args),
+            "automation" => self.handle_automation_command(args).await,
             "about" => {
                 let about = format!(
                     "  ragent - AI Coding Agent\n\
@@ -4046,7 +4565,11 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "editlog" => self.handle_editlog_command(args),
             "help" => {
-                let mut help_lines = String::from("From: /help\nAvailable commands:\n\n```\n");
+                let mut help_lines = String::new();
+                help_lines.push_str(&ragent_config::i18n::t(
+                    ragent_config::i18n::MessageKey::HelpHeader,
+                ));
+                help_lines.push_str("\n\n```\n");
                 for cmd_def in SLASH_COMMANDS {
                     help_lines.push_str(&format!(
                         "  /{:<18} {}\n",
@@ -4969,70 +5492,14 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
             "skills" => {
                 if is_help_args(args) {
                     self.append_assistant_text(
-                        "From: /skills help\n\n## /skills \u{2014} Registered skill packs\n\n| Subcommand | Description |\n|---|---|\n| `/skills` | List every registered skill with scope, access, and description |\n| `/skills help` | Show this help |\n\nSkills are discovered from `~/.ragent/skills/<name>/SKILL.md` (personal) and `.ragent/skills/<name>/SKILL.md` (project). Reload with `/reload skills`.",
+                        "From: /skills help\n\n## /skills \u{2014} Registered skill packs\n\n| Subcommand | Description |\n|---|---|\n| `/skills` | List every registered skill with scope, access, and description |\n| `/skills help` | Show this help |\n\nSkills are discovered from `~/.ragent/skills/<name>/SKILL.md` (personal), `.ragent/skills/<name>/SKILL.md` (project), and the AgentSkills convention `~/.agents/skills/<name>/SKILL.md` (user) and `.agents/skills/<name>/SKILL.md` (project). Reload with `/reload skills`.",
                     );
                     self.status = "skills: help".to_string();
                     return;
                 }
-                let working_dir = crate::app::helpers::current_working_dir();
-                let skill_dirs = ragent_agent::Config::load()
-                    .map(|c| c.skill_dirs)
-                    .unwrap_or_default();
-                let registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-                let skills = registry.list_all();
-
-                let mut output = String::from("From: /skills\nRegistered Skills:\n\n");
-
-                if skills.is_empty() {
-                    output.push_str("  (no skills found)\n\n");
-                    output.push_str("  Skills are loaded from:\n");
-                    output.push_str("    Personal:  ~/.ragent/skills/<name>/SKILL.md\n");
-                    output.push_str("    Project:   .ragent/skills/<name>/SKILL.md\n");
-                } else {
-                    // Render each skill as its own compact block instead of one wide
-                    // dense table row, so long descriptions wrap cleanly under the
-                    // command name instead of stretching an ever-wider column.
-                    output.push_str("```\n");
-                    for skill in &skills {
-                        let hint = skill
-                            .argument_hint
-                            .as_deref()
-                            .map(|h| format!(" {h}"))
-                            .unwrap_or_default();
-                        let access = match (skill.user_invocable, !skill.disable_model_invocation) {
-                            (true, true) => "both",
-                            (true, false) => "user-only",
-                            (false, true) => "agent-only",
-                            (false, false) => "disabled",
-                        };
-                        let desc = skill.description.as_deref().unwrap_or("(no description)");
-                        output.push_str(&format!("/{}{}\n", skill.name, hint));
-                        output.push_str(&format!("  scope: {}  access: {}\n", skill.scope, access));
-                        // Wrap the description at ~76 cols with a hanging indent so
-                        // multi-line descriptions stay visually attached to the skill.
-                        let mut line = String::from("  ");
-                        for word in desc.split_whitespace() {
-                            if line.len() + word.len() + 1 > 78 {
-                                output.push_str(&line);
-                                output.push('\n');
-                                line = String::from("  ");
-                            }
-                            if line.len() > 2 {
-                                line.push(' ');
-                            }
-                            line.push_str(word);
-                        }
-                        output.push_str(&line);
-                        output.push_str("\n\n");
-                    }
-                    output.push_str(&format!("{} skill(s) registered\n", skills.len()));
-                    output.push_str("```\n");
-                }
-
-                self.append_assistant_text(&output);
-
-                self.status = "skills".to_string();
+                self.render_skill_list("skills");
             }
+            "skill" => handle_skill_command(self, args),
             "blueprints" => {
                 handle_blueprints_command(self, args);
             }
@@ -6828,6 +7295,12 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             "alog" => self.handle_alog_command(args),
             // -- /gcf ------------------------------------------------------
             "gcf" => self.handle_gcf_command(args),
+            // -- /i18n ------------------------------------------------------
+            "i18n" => self.handle_i18n_command(args),
+            // -- /security --------------------------------------------------
+            // `security-analyzer` is accepted as an alias (spec `openhands`
+            // TC-012 spells the command both ways).
+            "security" | "security-analyzer" => self.handle_security_command(args),
             // -- /prompt ----------------------------------------------------
             "prompt" => self.handle_prompt_command(args),
             // /toolchain: language toolchain presence report (FR-002)
@@ -11086,140 +11559,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // -- /loop ----------------------------------------------------
             "loop" => handle_loop_command(self, args),
             _ => {
-                let working_dir = crate::app::helpers::current_working_dir();
-                let skill_dirs = ragent_agent::Config::load()
-                    .map(|c| c.skill_dirs)
-                    .unwrap_or_default();
-                let registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-                if let Some(skill) = registry.get(cmd) {
-                    if !skill.user_invocable {
-                        self.status = format!("Skill '{}' is not user-invocable", cmd);
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("Skill /{} is not user-invocable", cmd),
-                        );
-                        return;
-                    }
-                    // Check provider/model are configured
-                    if self.configured_provider.is_none() {
-                        self.status =
-                            "[warn] No provider configured - use /provider to set up".to_string();
-                        return;
-                    }
-                    if self.selected_model.is_none() {
-                        self.status = "[warn] No model selected - use /model to choose".to_string();
-                        return;
-                    }
-                    // Ensure a session exists
-                    if self.session_id.is_none() {
-                        let dir = crate::app::helpers::current_working_dir();
-                        match self.session_processor.session_manager.create_session(dir) {
-                            Ok(session) => {
-                                self.session_id = Some(session.id.clone());
-                                // A fresh session starts with an empty queue (NFR-005).
-                                self.clear_input_queue();
-                                // Map the primary session's short_sid to the current agent name
-                                let short_sid = short_session_id(&session.id);
-                                self.sid_to_display_name
-                                    .insert(short_sid, self.agent_name.clone());
-                            }
-                            Err(e) => {
-                                self.status = format!("error: {}", e);
-                                return;
-                            }
-                        }
-                    }
-
-                    let sid = self.session_id.clone().unwrap_or_default();
-                    let skill = skill.clone();
-                    let args_owned = args.to_string();
-                    let processor = self.session_processor.clone();
-                    let agent = ragent_agent::skill::invoke::resolve_inline_skill_agent(
-                        &Arc::new(self.agent_info.clone()),
-                        self.selected_model.as_deref(),
-                        skill.model.as_deref(),
-                        &skill.allowed_tools,
-                    );
-
-                    self.status = format!("invoking skill /{}...", cmd);
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("Invoking skill /{} with args: {}", cmd, args),
-                    );
-
-                    // Show the skill invocation as a user message in the chat
-                    let display_text = if args.is_empty() {
-                        format!("/{}", cmd)
-                    } else {
-                        format!("/{} {}", cmd, args)
-                    };
-                    let user_msg = Message::user_text(&sid, &display_text);
-                    self.messages.push(user_msg);
-                    self.add_to_history(display_text);
-
-                    let flag = Arc::new(AtomicBool::new(false));
-                    self.cancel_flag = Some(flag.clone());
-                    let working_dir = crate::app::helpers::current_working_dir();
-
-                    tokio::spawn(async move {
-                        match ragent_agent::skill::invoke::invoke_skill(
-                            &skill,
-                            &args_owned,
-                            &sid,
-                            &working_dir,
-                        )
-                        .await
-                        {
-                            Ok(invocation) => {
-                                if invocation.forked {
-                                    // Execute in an isolated sub-session
-                                    match ragent_agent::skill::invoke::invoke_forked_skill(
-                                        &invocation,
-                                        &processor,
-                                        &sid,
-                                        &working_dir,
-                                        flag,
-                                        agent.model.clone(),
-                                    )
-                                    .await
-                                    {
-                                        Ok(result) => {
-                                            tracing::info!(
-                                                skill = %result.skill_name,
-                                                forked_session = %result.forked_session_id,
-                                                "Forked skill completed"
-                                            );
-                                            // The forked result is already displayed via events;
-                                            // no additional process_message call needed.
-                                        }
-                                        Err(e) => {
-                                            tracing::debug!(
-                                                error = %e,
-                                                "Failed to execute forked skill"
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    let message = ragent_agent::skill::invoke::format_skill_message(
-                                        &invocation,
-                                    );
-                                    if let Err(e) = processor
-                                        .process_message(&sid, &message, &agent, flag)
-                                        .await
-                                    {
-                                        tracing::debug!(
-                                            error = %e,
-                                            "Failed to process skill message"
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::debug!(error = %e, "Failed to invoke skill");
-                            }
-                        }
-                    });
-                } else {
+                if !self.invoke_skill_command(cmd, args) {
                     // Unknown command: the status line alone is easily missed
                     // (it auto-expires back to "ready"), which made a typo'd
                     // slash command look like a silently swallowed prompt.
@@ -11297,6 +11637,221 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
         });
         true
+    }
+
+    /// Load and invoke a skill pack by name, exactly as the bare `/<name>`
+    /// skill trigger does.
+    ///
+    /// Shared by the `/<name>` fall-through and the `/skill <name> [args...]`
+    /// form so both surfaces resolve through the same [`SkillRegistry`] and
+    /// therefore see AgentSkills packs discovered under `.agents/skills/`
+    /// (FR-005). Returns `true` when `name` matched a registered pack (and the
+    /// invocation was started), `false` otherwise so the caller can report an
+    /// unknown command.
+    ///
+    /// [`SkillRegistry`]: ragent_agent::skill::SkillRegistry
+    fn invoke_skill_command(&mut self, name: &str, args: &str) -> bool {
+        let working_dir = crate::app::helpers::current_working_dir();
+        let skill_dirs = ragent_agent::Config::load()
+            .map(|c| c.skill_dirs)
+            .unwrap_or_default();
+        let registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+        let Some(skill) = registry.get(name) else {
+            return false;
+        };
+        if !skill.user_invocable {
+            self.status = format!("Skill '{name}' is not user-invocable");
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!("Skill /{name} is not user-invocable"),
+            );
+            return true;
+        }
+        // Check provider/model are configured
+        if self.configured_provider.is_none() {
+            self.status = "[warn] No provider configured - use /provider to set up".to_string();
+            return true;
+        }
+        if self.selected_model.is_none() {
+            self.status = "[warn] No model selected - use /model to choose".to_string();
+            return true;
+        }
+        // Ensure a session exists
+        if self.session_id.is_none() {
+            let dir = crate::app::helpers::current_working_dir();
+            match self.session_processor.session_manager.create_session(dir) {
+                Ok(session) => {
+                    self.session_id = Some(session.id.clone());
+                    // A fresh session starts with an empty queue (NFR-005).
+                    self.clear_input_queue();
+                    // Map the primary session's short_sid to the current agent name
+                    let short_sid = short_session_id(&session.id);
+                    self.sid_to_display_name
+                        .insert(short_sid, self.agent_name.clone());
+                }
+                Err(e) => {
+                    self.status = format!("error: {}", e);
+                    return true;
+                }
+            }
+        }
+
+        let sid = self.session_id.clone().unwrap_or_default();
+        let skill = skill.clone();
+        let args_owned = args.to_string();
+        let processor = self.session_processor.clone();
+        let agent = ragent_agent::skill::invoke::resolve_inline_skill_agent(
+            &Arc::new(self.agent_info.clone()),
+            self.selected_model.as_deref(),
+            skill.model.as_deref(),
+            &skill.allowed_tools,
+        );
+
+        self.status = format!("invoking skill /{name}...");
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!("Invoking skill /{name} with args: {args}"),
+        );
+
+        // Show the skill invocation as a user message in the chat
+        let display_text = if args.is_empty() {
+            format!("/{name}")
+        } else {
+            format!("/{name} {args}")
+        };
+        let user_msg = Message::user_text(&sid, &display_text);
+        self.messages.push(user_msg);
+        self.add_to_history(display_text);
+
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        let working_dir = crate::app::helpers::current_working_dir();
+
+        tokio::spawn(async move {
+            match ragent_agent::skill::invoke::invoke_skill(&skill, &args_owned, &sid, &working_dir)
+                .await
+            {
+                Ok(invocation) => {
+                    if invocation.forked {
+                        // Execute in an isolated sub-session
+                        match ragent_agent::skill::invoke::invoke_forked_skill(
+                            &invocation,
+                            &processor,
+                            &sid,
+                            &working_dir,
+                            flag,
+                            agent.model.clone(),
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                tracing::info!(
+                                    skill = %result.skill_name,
+                                    forked_session = %result.forked_session_id,
+                                    "Forked skill completed"
+                                );
+                                // The forked result is already displayed via events;
+                                // no additional process_message call needed.
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    error = %e,
+                                    "Failed to execute forked skill"
+                                );
+                            }
+                        }
+                    } else {
+                        let message =
+                            ragent_agent::skill::invoke::format_skill_message(&invocation);
+                        if let Err(e) = processor
+                            .process_message(&sid, &message, &agent, flag)
+                            .await
+                        {
+                            tracing::debug!(
+                                error = %e,
+                                "Failed to process skill message"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "Failed to invoke skill");
+                }
+            }
+        });
+        true
+    }
+
+    /// Render the registered skill packs into the chat transcript under a
+    /// `From: /<from_cmd>` header.
+    ///
+    /// Shared by the `/skills`, `/skill list`, and `/skill` (no-arg) forms so
+    /// the list, its scope/access annotations, and the discovery-path hint are
+    /// identical on every surface. Reads the same [`SkillRegistry`] the
+    /// invocation path uses, so an AgentSkills pack discovered under
+    /// `.agents/skills/` appears here (FR-005).
+    ///
+    /// [`SkillRegistry`]: ragent_agent::skill::SkillRegistry
+    fn render_skill_list(&mut self, from_cmd: &str) {
+        let working_dir = crate::app::helpers::current_working_dir();
+        let skill_dirs = ragent_agent::Config::load()
+            .map(|c| c.skill_dirs)
+            .unwrap_or_default();
+        let registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+        let skills = registry.list_all();
+
+        let mut output = format!("From: /{from_cmd}\nRegistered Skills:\n\n");
+
+        if skills.is_empty() {
+            output.push_str("  (no skills found)\n\n");
+            output.push_str("  Skills are loaded from:\n");
+            output.push_str("    Personal:    ~/.ragent/skills/<name>/SKILL.md\n");
+            output.push_str("    Project:     .ragent/skills/<name>/SKILL.md\n");
+            output.push_str("    AgentSkills: ~/.agents/skills/<name>/SKILL.md (user)\n");
+            output.push_str("                 .agents/skills/<name>/SKILL.md (project)\n");
+        } else {
+            // Render each skill as its own compact block instead of one wide
+            // dense table row, so long descriptions wrap cleanly under the
+            // command name instead of stretching an ever-wider column.
+            output.push_str("```\n");
+            for skill in &skills {
+                let hint = skill
+                    .argument_hint
+                    .as_deref()
+                    .map(|h| format!(" {h}"))
+                    .unwrap_or_default();
+                let access = match (skill.user_invocable, !skill.disable_model_invocation) {
+                    (true, true) => "both",
+                    (true, false) => "user-only",
+                    (false, true) => "agent-only",
+                    (false, false) => "disabled",
+                };
+                let desc = skill.description.as_deref().unwrap_or("(no description)");
+                output.push_str(&format!("/{}{}\n", skill.name, hint));
+                output.push_str(&format!("  scope: {}  access: {}\n", skill.scope, access));
+                // Wrap the description at ~76 cols with a hanging indent so
+                // multi-line descriptions stay visually attached to the skill.
+                let mut line = String::from("  ");
+                for word in desc.split_whitespace() {
+                    if line.len() + word.len() + 1 > 78 {
+                        output.push_str(&line);
+                        output.push('\n');
+                        line = String::from("  ");
+                    }
+                    if line.len() > 2 {
+                        line.push(' ');
+                    }
+                    line.push_str(word);
+                }
+                output.push_str(&line);
+                output.push_str("\n\n");
+            }
+            output.push_str(&format!("{} skill(s) registered\n", skills.len()));
+            output.push_str("```\n");
+        }
+
+        self.append_assistant_text(&output);
+        self.status = from_cmd.to_string();
     }
 
     /// Render a list of session tasks into the chat transcript.
@@ -13086,4 +13641,46 @@ Re-opening the setup dialog with your agent (`{agent}`) pre-selected."
     let mut spec = LoopSpec::new(agent, goal);
     crate::app::loop_dialog::apply_loop_overrides(&mut spec, &overrides);
     app.start_goal_loop(spec);
+}
+
+/// Handle the `/skill` slash command: list, load, and invoke skill packs.
+///
+/// Usage:
+/// - `/skill help` - show usage help.
+/// - `/skill` or `/skill list` - list every registered skill pack.
+/// - `/skill <name> [args...]` - load the named pack and invoke it exactly as
+///   the bare `/<name>` skill trigger does. The lookup goes through
+///   [`ragent_agent::skill::SkillRegistry`], so an AgentSkills pack discovered
+///   under `.agents/skills/` is loadable and invocable by its frontmatter name
+///   (FR-005). A name clash resolves to the existing higher-scope pack (A7).
+///
+/// Invoking a non-user-invocable pack reports the refusal; invoking a pack with
+/// no provider/model configured points the user at the setup commands.
+fn handle_skill_command(app: &mut App, args: &str) {
+    let args = args.trim();
+
+    if is_help_args(args) {
+        app.append_assistant_text(
+            "From: /skill help\n\n## /skill \u{2014} Skill packs\n\n| Subcommand | Description |\n|---|---|\n| `/skill` | List every registered skill with scope, access, and description |\n| `/skill list` | Alias of `/skill` |\n| `/skill <name> [args...]` | Load and invoke the named pack (same as `/<name>`) |\n| `/skill help` | Show this help |\n\nSkills are discovered from `~/.ragent/skills/<name>/SKILL.md` (personal), `.ragent/skills/<name>/SKILL.md` (project), and the AgentSkills convention `~/.agents/skills/<name>/SKILL.md` (user) and `.agents/skills/<name>/SKILL.md` (project). Reload with `/reload skills`.",
+        );
+        app.status = "skill: help".to_string();
+        return;
+    }
+
+    if args.is_empty() || args.eq_ignore_ascii_case("list") {
+        app.render_skill_list("skill");
+        return;
+    }
+
+    let (name, skill_args) = args
+        .split_once(char::is_whitespace)
+        .map_or((args, ""), |(c, a)| (c, a.trim()));
+    if !app.invoke_skill_command(name, skill_args) {
+        app.status = format!("skill: '{name}' not found");
+        app.append_assistant_text(&format!(
+            "From: /skill\n\n\u{26a0} No skill named `{name}` is registered. \
+             Run `/skill` to list the available packs.",
+        ));
+        app.push_log_no_agent(LogLevel::Warn, format!("skill not found: {name}"));
+    }
 }

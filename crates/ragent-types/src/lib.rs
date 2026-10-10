@@ -13,6 +13,7 @@
 //! - Cron scheduling types
 
 pub mod activity;
+pub mod automation;
 pub mod cron;
 pub mod embedding;
 pub mod error;
@@ -43,6 +44,7 @@ pub use activity::{
     ProjectedToolResult, Projection, ResumeResult, RollbackResult, RunStatus, TerminationReason,
     validate_event_log_consistency,
 };
+pub use automation::{AutomationRun, AutomationTrigger, RunOutcome};
 pub use cron::{
     CronEvent, CronForm, CronSchedule, DurationParseError, ParsedSchedule, ScheduleParseError,
     parse_duration, parse_schedule,

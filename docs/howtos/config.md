@@ -56,6 +56,10 @@ the project root `README.md` and the **Tutorial** in
     - 7.33 [`plugins`](#733-plugins)
     - 7.34 [`input_queue_capacity`](#734-input_queue_capacity)
     - 7.35 [`connectors`](#735-connectors)
+    - 7.36 [`execution_backend` and `backends`](#736-execution_backend-and-backends)
+    - 7.37 [`acp`](#737-acp)
+    - 7.38 [`i18n`](#738-i18n)
+    - 7.39 [`security_analyzer`](#739-security_analyzer)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -789,7 +793,7 @@ system-prompt listings. Hidden tools remain registered and executable.
 | `agents` | `false` | `cancel_agent`, `list_agents`, `new_agent`, `agent_complete`, `wait_agents` |
 | `plan` | `false` | `plan_enter`, `plan_exit` |
 | `codeindex` | `true` | `codeindex_search`, `codeindex_status`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_reindex` |
-| `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` |
+| `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (plus `mf_screenshot` only when a drivable headless browser engine is present; spec `openhands` FR-029) |
 
 The `codeindex` and `masterfetch` switches are
 serialised **only** when explicitly set (tracked by `specified` flags). This
@@ -1555,6 +1559,266 @@ in the TUI or `ragent connectors <sub>` from the CLI.
 
 ---
 
+### 7.36 `execution_backend` and `backends`
+
+Select **where** a session's tool invocations run (spec `openhands` FR-001,
+FR-026). When unset, ragent executes tools on the host exactly as before
+(`local`, FR-019). A `docker` or `podman` selection runs the shell, file, and
+search tools inside a container instead. A `remote` selection relays the whole
+turn to a second ragent server over its REST+SSE API and mirrors that server's
+event stream into the local TUI (FR-021).
+
+```jsonc
+{
+  // Terse form: select a kind by label.
+  "execution_backend": "podman",
+  // Registry form: declare backends and select one by id (or by kind label).
+  "backends": [
+    { "id": "box", "name": "Podman sandbox", "kind": "podman",
+      "image": "ghcr.io/yourorg/ragent-sandbox:latest", "workspace": "/projects" },
+    { "id": "build-farm", "name": "Remote build host", "kind": "remote",
+      "url": "http://10.0.0.5:9100", "api_key": "..." }
+  ]
+}
+```
+
+The `execution_backend` key accepts either a bare label (`local`, `docker`,
+`podman`, `remote`) or an inline descriptor object (`{ "id", "kind", "image",
+"workspace" }`). An object that names a registered `id` (with no `kind`)
+resolves its kind from the matching `backends` entry. An absent or unknown value
+resolves safely to `local`.
+
+#### `BackendConfig` schema
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `id` | `String` | `""` | Stable identifier used to select this backend. |
+| `name` | `Option<String>` | `None` | Human-readable display name; defaults to `id`. |
+| `kind` | `String` | `""` | Backend kind: `local`, `docker`, `podman`, or `remote`. |
+| `image` | `Option<String>` | `None` | Container image reference (`docker`/`podman`). |
+| `workspace` | `Option<String>` | `None` | Container-side workspace mount point. An absolute path overrides the default `/projects`; a relative value such as `"."` keeps the default. |
+| `url` | `Option<String>` | `None` | Base URL of a remote server (`remote` kind; T-003). |
+| `api_key` | `Option<String>` | `None` | API key for a remote server (`remote` kind; T-003). Redacted in diagnostics. |
+| `credentials` | `Vec<String>` | `[]` | Names of encrypted-store credentials to inject at spawn time (T-006, FR-010). A name is not a secret: the value is resolved from the encrypted credential store when the sandbox is provisioned and injected as a container environment variable. |
+
+**Container isolation.** The workspace is a container-named volume, never a
+host bind mount, so a sandboxed tool cannot read or write the host working
+directory (FR-020, FR-035). A provisioning failure (a missing runtime, or a
+missing or unpullable `image`) fails the turn with a provisioning error and
+never runs the tool on the host (FR-031). `podman` is the default container
+runtime when no runtime is specified (FR-026), and a container backend is only
+offered when a runtime is present on `PATH`.
+
+**Secret injection (FR-010).** A `docker`/`podman`/`remote` descriptor that
+lists `credentials` has each named value resolved from the encrypted credential
+store (the same store `/auth` writes to) **at spawn time** and injected as a
+container environment variable (`-e NAME=VALUE`); a remote descriptor's first
+named credential is used as its bearer key. A name the store does not hold is a
+provisioning failure - the sandbox is never started without a required
+credential. The value is never written into `ragent.json`, the container image,
+or the workspace (FR-035). A literal `api_key` on a remote descriptor still
+works and takes precedence, so existing configs are unchanged.
+
+**Workspace persistence (FR-023).** The workspace is a named volume derived from
+the project identity, so it survives replacement of the container. Changing the
+`credentials` list re-provisions the container (a fresh environment) while
+re-mounting the same volume, so the conversation's files are preserved.
+
+**Remote backend.** A `remote` descriptor needs a `url` (the base URL of a
+second ragent server, for example `ragent serve --port 9100`) and an `api_key`
+(the server's bearer token). While the remote backend is active, the session
+processor does **not** run tools locally: it opens (or reuses) a session on the
+remote server, posts the prompt to `POST /sessions/{id}/messages`, and mirrors
+the server's `text/event-stream` events into the local event bus so the turn
+renders exactly like a local one (FR-021). If the remote server cannot be
+reached before the turn, or drops the stream part-way through it, the turn fails
+with a connection error shown in the TUI and none of that turn's tools are
+re-executed locally (FR-031, FR-034). A remote backend with no `url` fails at
+provisioning rather than falling back to host execution.
+
+**Backend registry (FR-004, FR-030).** Every configured backend is exposed as a
+durable registry entry carrying a stable `id`, a display name, a kind, a
+secret-free connection descriptor, and a health state. The config file is the
+durable record; `crates/ragent-agent/src/backend/registry.rs` rebuilds the read
+model from it. The built-in `local` entry is always present and healthy
+(FR-019); a `docker`/`podman` entry is `ok` when its runtime is on `PATH`, else
+`unavailable`; a `remote` entry is `ok` when a `url` and a key are configured
+(FR-030), and a live `/health` probe refines that state (the probe targets the
+server's **public** `/health` endpoint, so no key is sent). The TUI backend
+surface (T-005, FR-008) renders this registry: the active backend, each
+registered backend's health, and a switcher.
+
+### 7.37 `acp`
+
+Agent Client Protocol configuration (spec `openhands` FR-015, FR-022, FR-028,
+FR-036). Two roles:
+
+**ACP client** (`agents`, `default_agent`). When `agents` is present, ragent can
+drive an external coding agent (Claude Code, Codex, Gemini CLI, or a custom ACP
+server) as a subprocess over JSON-RPC on stdio. Absent by default, which leaves
+the client subsystem inert.
+
+**ACP server** (`server_enabled`, `server_agent`). When `server_enabled` is
+`true`, ragent **serves** ACP-capable editors (Zed, VS Code, JetBrains) over
+JSON-RPC on its own stdio. Disabled by default. Serving additionally requires a
+binary built with the `acp-server` Cargo feature, and the endpoint is reachable
+only through the `ragent acp-server` subcommand (not via the TUI or `run`):
+
+```json
+{
+  "acp": {
+    "server_enabled": true,
+    "server_agent": "coder",
+    "agents": {
+      "claude": { "id": "claude", "command": "claude-code-acp", "args": [] }
+    }
+  }
+}
+```
+
+- `server_enabled` (bool, default `false`) - master switch for the server
+  endpoint. When `false` (or the feature is not compiled in), `ragent acp-server`
+  exits with a usage error (exit code 2) and serves nothing.
+- `server_agent` (string, optional) - the local ragent agent the server drives.
+  Resolves `server_agent` -> `default_agent` -> the top-level `defaultAgent`.
+
+Build and run:
+
+```bash
+cargo build --features acp-server
+ragent acp-server            # editor attaches over stdin/stdout
+```
+
+Point an editor at the binary with `ragent acp-server` as the agent command.
+
+See [`docs/howtos/acp.md`](acp.md) for the full guide: the client turn lifecycle,
+how an agent binds to an ACP entry, worked examples for Claude Code, Codex, and
+Gemini CLI, the server endpoint, and troubleshooting.
+
+### 7.38 `i18n`
+
+UI internationalisation (spec `openhands` FR-027). Opt-in and absent by default;
+when present, user-facing strings render from the configured locale's message
+catalog and fall back to English for any missing key.
+
+```json
+{ "i18n": { "enabled": true, "locale": "fr" } }
+```
+
+### 7.39 `security_analyzer`
+
+LLM-based security-analyzer permission mode (spec `openhands` FR-006, FR-016,
+FR-017). Opt-in and absent by default; when present and enabled, each proposed
+tool action is evaluated by an LLM that returns an allow/ask/deny verdict with a
+rationale before the action is permitted or refused. See
+[`docs/howtos/llmsecurity.md`](llmsecurity.md) for the full guide.
+
+---
+
+### 7.40 `openai`
+
+OpenAI-compatible inbound HTTP surface configuration (spec `openhands` FR-012,
+FR-024, FR-032). Opt-in and absent by default; the `/v1/models` and
+`/v1/chat/completions` endpoints are always mounted behind the native
+bearer-token check, and this section carries the surfaced token and arms the
+refuse-to-start gate.
+
+```jsonc
+{
+  "openai": {
+    "enabled": true,
+    "token": "sk-ragent-local"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `false` | Whether the OpenAI-compatible surface is an explicitly enabled capability. Enabling it arms the FR-032 token gate. |
+| `token` | `Option<String>` | `None` | Bearer token required for every request to the surface (FR-024). Redacted in diagnostics. Falls back to the ambient `RAGENT_TOKEN`. |
+
+**Refuse to start without a token (FR-032).** The surface is never served
+unauthenticated: when `enabled: true` but no `token` (or `RAGENT_TOKEN`) is
+available, `ragent serve` exits with an error and starts no server. A configured
+token is the server's single bearer token (FR-024) - ragent does not run a second
+credential for `/v1`. Only the top-level (trusted) config may set the token; a
+project-local `.ragent/ragent.json` overlay has its `openai` section dropped by
+`merge_project`, so repository content cannot choose the credential that guards
+the whole API.
+
+**Streaming (FR-012).** `POST /v1/chat/completions` with `stream:true` streams
+`text/event-stream` chunks in the OpenAI `chat.completion.chunk` shape and
+terminates with `data: [DONE]`; `stream:false` returns one `chat.completion`
+JSON object (FR-011). Both paths preserve the permission checks (FR-038).
+
+---
+
+### 7.41 `automation`
+
+Automation service configuration (spec `openhands` FR-013, FR-014, FR-018,
+FR-033). Absent by default; the service is inert unless a present block sets
+`enabled: true`.
+
+```jsonc
+{
+  "automation": {
+    "enabled": true,
+    "run_history_cap": 500,
+    "scheduler_tick_secs": 30,
+    "output_dir": null,
+    "automations": [
+      {
+        "id": "on-issue",
+        "name": "Issue triage",
+        "agent": "general",
+        "prompt": "Triage issue {{payload}}",
+        "trigger": { "kind": "webhook" },
+        "backend": "local",
+        "dispatch": [
+          { "kind": "slack", "url": "https://hooks.slack.com/...", "token_env": "SLACK_BOT_TOKEN" }
+        ],
+        "enabled": true
+      },
+      {
+        "id": "nightly",
+        "trigger": { "kind": "schedule", "schedule": "every 2m" },
+        "backend": "local"
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `true` (only when the block is present) | Master switch. An **absent** block leaves the service inert; `Config::automation_enabled` reads presence. |
+| `run_history_cap` | `usize` | `500` | Run-history records retained per automation; older records are pruned. |
+| `scheduler_tick_secs` | `u64` | `30` | Scheduler tick interval in seconds. |
+| `output_dir` | `Option<PathBuf>` | `None` | Override for the run-output directory (default `<working_dir>/log/automation/`). |
+| `automations` | `Vec<AutomationDefinition>` | `[]` | The registered automations. |
+
+Each automation definition:
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `id` | `String` | required | Unique id; also the webhook URL segment (`POST /auto/<id>`). |
+| `name` | `Option<String>` | `None` | Display name (falls back to the id). |
+| `agent` | `Option<String>` | `None` | Agent to run (falls back to `defaultAgent`). |
+| `prompt` | `String` | `""` | Prompt template; `{{payload}}` is replaced with the trigger payload. |
+| `trigger` | `AutomationTriggerKind` | required | `{ "kind": "webhook" }` or `{ "kind": "schedule", "schedule": "every 2m" }`. |
+| `backend` | `Option<String>` | `None` (`local`) | Execution backend the run is confined to (FR-033). |
+| `dispatch` | `Vec<DispatchTarget>` | `[]` | Third-party notifications on run completion. |
+| `enabled` | `bool` | `true` | Whether the automation is active. |
+
+Each dispatch target: `kind` (`slack`/`github`/`linear`/`notion`/`webhook`),
+optional `url`, optional `token_env` (the environment variable holding the
+bearer token - the value is never stored, FR-035), and optional `target` (a
+channel, repository, or database id). A target with no `url` is inert.
+
+See `docs/howtos/slashcommands/automation.md` for the surfaces.
+
+---
+
 ## 8. Full Example File
 
 The following is a comprehensive example showing every section. You do not
@@ -1820,7 +2084,16 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "credentials": {}
   },
 
-  "input_queue_capacity": 32
+  "input_queue_capacity": 32,
+
+  "acp": {
+    "default_agent": "claude",
+    "server_enabled": false,
+    "server_agent": null,
+    "agents": {
+      "claude": { "id": "claude", "command": "claude-code-acp", "args": [] }
+    }
+  }
 }
 ```
   
@@ -1974,8 +2247,27 @@ back to FTS5-only mode.
 }
 ```
 
-### Override pricing for a custom model
+### Run a session inside a container sandbox
 
+```jsonc
+{
+  // Run shell/file/search tools inside a Podman sandbox. The workspace is a
+  // container-named volume (never a host bind mount), so the host working
+  // directory is untouched by sandboxed tools.
+  "execution_backend": "podman",
+  "backends": [
+    { "id": "sandbox", "kind": "podman",
+      "image": "ghcr.io/yourorg/ragent-sandbox:latest" }
+  ]
+}
+```
+
+With no runtime specified the backend defaults to `podman` (FR-026); substitute
+`"docker"` when only Docker is present. If the runtime is missing or the image
+cannot be pulled, the turn fails with the provisioning error and the tool is not
+run on the host (FR-031).
+
+### Override pricing for a custom model
 ```json
 {
   "prices": [
@@ -2009,6 +2301,9 @@ This is merged last, with the highest precedence.
 | [`docs/howtos/custom-agents.md`](custom-agents.md) | Custom agent definitions (OASF / Markdown) |
 | [`docs/howtos/teams.md`](teams.md) | Teams and swarm coordination |
 | [`docs/howtos/hooks.md`](hooks.md) | Lifecycle hooks |
+| [`docs/howtos/llmsecurity.md`](llmsecurity.md) | LLM security analyzer (tightening-only layer) |
+| [`docs/howtos/sandbox-backends.md`](sandbox-backends.md) | Switchable execution backends and container sandboxing |
+| [`docs/howtos/acp.md`](acp.md) | Agent Client Protocol (ACP) client and server |
 | [`docs/howtos/codeindex.md`](codeindex.md) | Code index (tree-sitter, search, graph) |
 | [`docs/howtos/spec.md`](spec.md) | Spec lifecycle management |
 | [`docs/howtos/research.md`](research.md) | Research system |

@@ -987,6 +987,10 @@ impl App {
             // field, so the message input field and the input queue stay locked
             // while it is open (spec `pluginstores` FR-015).
             || self.plugin_store.is_some()
+            // The `/backend` switcher panel (spec `openhands` FR-008) is a modal
+            // overlay: every key routes to it, so no character may reach the
+            // input buffer while it is open.
+            || self.backend_panel.is_some()
     }
 
     /// Return the number of Unicode code points currently in the input buffer.

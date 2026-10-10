@@ -16,7 +16,7 @@ The available switches are:
 | `agents` | `off` | Autonomous agent task tools |
 | `plan` | `off` | Plan-mode tools |
 | `codeindex` | `on` | Code index tools |
-| `masterfetch` | `on` | MasterFetch web-access tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot`, `mf_cache_clear`, `mf_version`) |
+| `masterfetch` | `on` | MasterFetch web-access tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_cache_clear`, `mf_version`; `mf_screenshot` joins the family only when a drivable headless browser engine is present — spec `openhands` FR-029) |
 
 When a switch is `off`, tools in that family are excluded from:
 

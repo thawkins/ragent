@@ -298,6 +298,148 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.connector_store_area = Rect::default();
     }
+    // `/backend` switcher panel (spec `openhands` FR-008) - drawn last so it sits
+    // above every other overlay while it owns the keyboard.
+    if app.backend_panel.is_some() {
+        render_backend_panel(frame, app);
+    } else {
+        app.backend_panel_area = Rect::default();
+    }
+}
+
+/// Render the `/backend` execution-backend switcher panel (spec `openhands`
+/// T-005; FR-008).
+///
+/// A bordered, titled modal listing every registered backend with its id, kind,
+/// health, and secret-free connection summary. The active backend carries an
+/// `[active]` marker and the highlighted row carries the block cursor; an
+/// `unavailable` row is dimmed because it cannot be selected. Only ASCII glyphs
+/// are used in the body. The panel area is recomputed from `Frame::area` every
+/// frame and stored back in [`App::backend_panel_area`] for tests.
+fn render_backend_panel(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let Some(panel) = app.backend_panel.as_ref() else {
+        return;
+    };
+    let active_kind = app.active_backend.clone();
+
+    let rows = &panel.rows;
+    let id_w = rows
+        .iter()
+        .map(|r| r.id.len())
+        .max()
+        .unwrap_or(4)
+        .clamp(4, 16);
+    let kind_w = rows
+        .iter()
+        .map(|r| r.kind.len())
+        .max()
+        .unwrap_or(4)
+        .clamp(4, 8);
+    let health_w = rows
+        .iter()
+        .map(|r| r.health.len())
+        .max()
+        .unwrap_or(7)
+        .clamp(7, 12);
+    let widest = rows
+        .iter()
+        .map(|row| {
+            id_w + kind_w
+                + health_w
+                + row.connection.len()
+                + row.detail.as_deref().map_or(0, str::len)
+                + 24
+        })
+        .max()
+        .unwrap_or(0);
+    let screen = frame.area();
+    let title = format!(" Execution backend - active: {active_kind} ");
+    let width = (widest as u16)
+        .saturating_add(4)
+        .max(title.chars().count() as u16 + 2)
+        .clamp(30, 120)
+        .min(screen.width);
+    let height = (rows.len() as u16)
+        .saturating_add(4)
+        .clamp(5, 16)
+        .min(screen.height);
+    let area = centered_rect_fixed(width, height, screen);
+    frame.render_widget(Clear, area);
+    app.backend_panel_area = area;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let list_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let active_style = Style::default().fg(Color::Green);
+    let normal_style = Style::default().fg(Color::White);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|row| {
+            let marker = if row.active { " [active]" } else { "" };
+            let detail = row
+                .detail
+                .as_deref()
+                .map(|d| format!(" - {d}"))
+                .unwrap_or_default();
+            let style = if !row.health_ok {
+                dim_style
+            } else if row.active {
+                active_style
+            } else {
+                normal_style
+            };
+            let summary = format!(
+                "{}{marker}{detail}",
+                truncate_bytes_no_ellipsis(&row.connection, 40),
+            );
+            let line = format!(
+                "> {:<id_w$} {:<kind_w$} {:<health_w$} {summary}",
+                truncate_bytes_no_ellipsis(&row.id, id_w),
+                truncate_bytes_no_ellipsis(row.kind, kind_w),
+                truncate_bytes_no_ellipsis(row.health, health_w),
+            );
+            ListItem::new(Line::from(Span::styled(line, style)))
+        })
+        .collect();
+
+    let selected = panel.cursor.min(rows.len().saturating_sub(1));
+    let list = List::new(items).highlight_style(cursor_style);
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Up/Down move  Enter switch  Esc close",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .alignment(Alignment::Center),
+        footer_area,
+    );
 }
 
 /// Render the connector-catalogue browse panel (`/connectors claude`).
@@ -510,7 +652,7 @@ fn connector_catalogue_footer(
         return Line::from(Span::styled(notice.to_string(), installed_style));
     }
     Line::from(Span::styled(
-        "Up/Down move  Enter install  c category  Esc close".to_string(),
+        ragent_config::i18n::t(ragent_config::i18n::MessageKey::CatalogueFooter).into_owned(),
         dim_style,
     ))
 }

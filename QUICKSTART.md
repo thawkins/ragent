@@ -442,9 +442,47 @@ Ragent loads configuration from multiple sources (last wins):
       "cache_ttl_secs": 3600
     },
     "credentials": {}           // non-secret credential-name mapping by connector id
+  },
+
+  // Execution backend (optional). Omitted = `local` (host execution). A
+  // `docker`/`podman` label runs shell/file/search tools inside a container whose
+  // workspace is a named volume, never a host bind mount; `remote` drives a
+  // second ragent server. `credentials` names encrypted-store secrets injected as
+  // container env vars at spawn time (the value is never in this file).
+  "execution_backend": "podman",
+  "backends": [
+    { "id": "sandbox", "name": "Podman sandbox", "kind": "podman",
+      "image": "ghcr.io/yourorg/ragent-sandbox:latest", "workspace": "/projects",
+      "credentials": ["EXAMPLE_API_KEY"] }
+  ],
+
+  // LLM security analyzer (optional; off by default). A tightening-only layer
+  // over the static permission rules: each proposed tool action gets an
+  // allow/ask/deny verdict with a rationale, published before it runs.
+  "security_analyzer": {
+    "enabled": true,
+    "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" }
+  },
+
+  // OpenAI-compatible inbound surface (optional). When `enabled` is true a
+  // `token` (or the ambient `RAGENT_TOKEN`) is required or `ragent serve`
+  // refuses to start the surface.
+  "openai": {
+    "enabled": true,
+    "token": "sk-ragent-local"
+  },
+
+  // UI internationalisation (optional). A non-English ambient `LANG` with an
+  // installed catalog enables it automatically.
+  "i18n": {
+    "enabled": true,
+    "locale": "fr"
   }
 }
 ```
+
+See SPEC.md §19D (execution backends), §19E (ACP), and §19F (automation) for
+the full schemas, plus the manuals in `docs/howtos/slashcommands/`.
 
 View the resolved config at any time:
 
@@ -747,8 +785,10 @@ The AI agent can use these tools during a session:
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
 
-149 tools are registered in total across 21 categories — run `/tools` in the
-TUI to list them all.
+148 tools are registered in the default build across 21 categories — run
+`/tools` in the TUI to list them all. (`mf_screenshot` is registered only when a
+drivable headless browser engine is present — spec `openhands` FR-029 — so the
+default build advertises 148; with a bundled driver it is 149.)
 
 The **PDF family** (`pdf_read`, `pdf_write`) reads and writes PDF files
 entirely in-process (see [`docs/howtos/office.md`](docs/howtos/office.md)).
@@ -774,6 +814,17 @@ raw JSON. See SPEC.md section 5.6 for details.
 MCP servers can provide additional tools that are automatically discovered and
 made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP
 tools use the official `rmcp` SDK and support both stdio and HTTP transports.
+
+UI internationalisation is opt-in and English by default. Install a locale
+message catalog at `<project>/.ragent/locales/<locale>.json` (or
+`~/.config/ragent/locales/<locale>.json`), then enable it with the **`/i18n`**
+slash command: `/i18n on`, `/i18n fr` (or any locale tag such as
+`/i18n de_DE.UTF-8`), `/i18n off`, `/i18n status`, `/i18n list`, and
+`/i18n help`. Translated keys render from the catalog; any key the catalog does
+not translate falls back to the compiled English text (never a raw key or a
+blank). With no `i18n` config section, a non-English `LANG`/`LC_ALL` with an
+installed catalog enables translation automatically. A catalog is JSON:
+`{"locale":"fr","messages":{"status.project":"Projet : "}}`.
 
 ---
 
@@ -874,6 +925,39 @@ EOF
 ```
 
 Then use `/code-review` in any project.
+
+### AgentSkills Packs
+
+ragent also loads the AgentSkills convention: a directory of packs under
+`.agents/skills/` (project) or `~/.agents/skills/` (user), each pack a directory
+holding a `SKILL.md` whose YAML frontmatter declares at least `name` and
+`description`:
+
+```bash
+mkdir -p .agents/skills/tiny
+cat > .agents/skills/tiny/SKILL.md << 'EOF'
+---
+name: tiny
+description: A trivial pack used by the manual test plan.
+---
+
+# Tiny skill
+
+When asked, reply with exactly: TINY-OK
+EOF
+```
+
+List the registered packs with `/skills` (or `/skill`), and load one explicitly
+with `/skill <name> [args]` (or the bare `/<name>` trigger):
+
+```
+/skill
+/skill tiny
+```
+
+On a name clash the existing higher-scope pack wins, so an AgentSkills pack never
+shadows a same-named `.ragent/skills/` pack. Reload after edits with
+`/reload skills`.
 
 ---
 
@@ -1130,6 +1214,7 @@ ragent serve --port 8080
 | Method | Path                                     | Description                    |
 |--------|------------------------------------------|--------------------------------|
 | GET    | `/health`                                | Health check (no auth)         |
+| GET    | `/openapi.json`                          | OpenAPI 3.1 document (no auth) |
 | GET    | `/config`                                | Get resolved configuration     |
 | GET    | `/providers`                             | List providers and models      |
 | POST   | `/sessions`                              | Create a new session           |
@@ -1140,14 +1225,119 @@ ragent serve --port 8080
 | POST   | `/sessions/{id}/abort`                   | Abort session (archives and publishes `SessionAborted` event) |
 | POST   | `/sessions/{id}/permission/{req_id}`     | Reply to a permission request  |
 | GET    | `/events`                                | SSE event stream               |
+| GET    | `/v1/models`                             | OpenAI-compatible model list   |
+| POST   | `/v1/chat/completions`                   | OpenAI-compatible chat completion (stream:false JSON; stream:true SSE) |
 
-All endpoints except `/health` require the bearer token:
+The full REST surface is described by an OpenAPI 3.1 document served at
+`/openapi.json` (public — it carries no runtime data or secrets). It is rendered
+from a single route table so it cannot drift from the served routes, and the same
+table generates a dependency-free typed TypeScript client checked in at
+[`docs/openapi/ragent-client.d.ts`](docs/openapi/ragent-client.d.ts):
+
+```bash
+ragent openapi              # print the OpenAPI 3.1 document
+ragent openapi --client     # print the generated typed TypeScript client
+```
+
+All endpoints except `/health` and `/openapi.json` require the bearer token:
 
 ```bash
 curl -H "Authorization: Bearer <token>" http://localhost:3000/providers
 ```
 
 Rate limit: 60 requests per minute per session on the messages endpoint.
+
+MCP servers come in three transports — `stdio` (a child process), `sse`, and
+`http` (Streamable-HTTP request/response). An `http` server connects over plain
+HTTP alongside stdio:
+
+```json
+{
+  "mcp": {
+    "my-http-server": { "type": "http", "url": "http://127.0.0.1:3000/mcp" }
+  }
+}
+```
+
+### ACP server for IDE clients (`ragent acp-server`)
+
+ragent can serve the Agent Client Protocol (ACP) over stdio so an ACP-capable
+editor (Zed, VS Code, JetBrains) can attach to it. This is **feature-gated and
+disabled by default** — build with `--features acp-server` and set
+`acp.server_enabled: true`:
+
+```json
+{
+  "acp": {
+    "server_enabled": true,
+    "server_agent": "coder",
+    "agents": { "claude": { "id": "claude", "command": "claude-code-acp" } }
+  }
+}
+```
+
+```bash
+cargo build --features acp-server
+ragent acp-server            # editor attaches over stdin/stdout
+```
+
+When either gate is closed the command exits with a usage error (code 2) rather
+than serving. The endpoint handles `initialize`, `session/new`, `session/prompt`,
+and `session/cancel`, streaming the driven session's text, reasoning, and tool
+calls back as ACP `session/update` notifications.
+
+### Execution backends (`/backend`)
+
+A pluggable execution backend selects **where** a session's tools run. The
+default is `local` (the host, exactly as before); `docker`/`podman` run them
+inside a per-session container, and `remote` drives a second ragent server over
+REST+SSE and mirrors its events locally.
+
+```
+/backend            # open the switcher: active backend + each backend's health
+/backend podman     # switch directly to a backend by kind or id
+/backend help
+```
+
+The container workspace is a **named volume, never a host bind mount**, so a
+sandboxed tool cannot read or write the host working directory; `bash` is still
+gated by the full 7-layer host validator, and a provisioning failure fails the
+turn instead of falling back to the host. Configure backends under the
+`execution_backend` / `backends` keys (see the example `ragent.json` above).
+`ragent config` prints the resolved registry.
+
+### LLM security analyzer (`/security`)
+
+An opt-in mode that asks an LLM to judge each proposed tool action and returns an
+`allow` / `ask` / `deny` verdict with a rationale, published *before* the action
+runs. It only ever **tightens** the static rules: a `deny` is hard, an `allow`
+never overrides an explicit policy `deny`, and any analyzer failure (missing
+model, provider error, timeout) degrades to the normal interactive prompt.
+
+```
+/security on        # enable and persist security_analyzer.enabled: true
+/security off       # disable
+/security status    # current state and the model used
+/security revert    # clear the setting
+/security help
+```
+
+### OpenAI-compatible surface
+
+When enabled, `ragent serve` exposes `POST /v1/chat/completions` and
+`GET /v1/models` behind the native bearer token, bridging to the same agent loop
+(permission checks preserved):
+
+```bash
+curl -s http://127.0.0.1:3000/v1/chat/completions \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"model":"<MODEL>","stream":false,"messages":[{"role":"user","content":"say hello"}]}'
+```
+
+`stream:false` returns an OpenAI `chat.completion` object; `stream:true` returns a
+`chat.completion.chunk` `text/event-stream` ending in `data: [DONE]`. Enabling the
+surface without a token makes `ragent serve` refuse to start it rather than serve
+it unauthenticated.
 
 ---
 
@@ -1785,6 +1975,72 @@ curl http://localhost:3000/orchestrator/metrics \
 
 ---
 
+## Automation Service
+
+The automation service runs a named agent on a **schedule** or from a
+**webhook**, confined to a chosen execution backend, with durable run history
+(spec `openhands` FR-013, FR-014, FR-018, FR-033).
+
+Declare automations under the `automation` block in `.ragent/ragent.json`:
+
+```jsonc
+{
+  "automation": {
+    "enabled": true,
+    "automations": [
+      {
+        "id": "on-issue",
+        "agent": "general",
+        "prompt": "Triage issue {{payload}}",
+        "trigger": { "kind": "webhook" },
+        "backend": "local"
+      },
+      {
+        "id": "nightly",
+        "trigger": { "kind": "schedule", "schedule": "every 2m" },
+        "backend": "local"
+      }
+    ]
+  }
+}
+```
+
+The service starts only when `automation.enabled` is `true`; an absent block
+leaves it inert.
+
+### TUI and CLI
+
+```
+/automation                  # list automations, trigger, backend, next-due
+/automation runs on-issue    # durable run history
+/automation run nightly      # enqueue a manual run now
+/automation help
+
+ragent automation list
+ragent automation runs on-issue
+ragent automation run nightly
+```
+
+### HTTP
+
+```sh
+# Webhook ingress (public; no bearer token)
+curl -s -X POST http://127.0.0.1:3000/auto/on-issue \
+  -H "Content-Type: application/json" \
+  -d '{"issue":"42","title":"fix login"}'
+# → 202 {"run_id":"...","automation_id":"on-issue","trigger":"webhook","backend":"local"}
+
+# Inspect run history (bearer-authenticated)
+curl -s http://127.0.0.1:3000/automation/runs/on-issue \
+  -H "Authorization: Bearer <token>"
+```
+
+A completed run can notify Slack, GitHub, Linear, Notion, or a generic webhook;
+each dispatch target names the environment variable holding its credential
+(`token_env`), so no secret is stored in `ragent.json`.
+
+---
+
 ## Troubleshooting
 
 **"No Copilot token found"**
@@ -1857,8 +2113,41 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Unreleased
+## Version 1.0.131
 
+- **OpenHands-parity release** — the pluggable execution backends (`/backend`,
+  `execution_backend`/`backends`), the LLM security analyzer (`/security`), the
+  OpenAI-compatible surface (`/v1/chat/completions`, `/v1/models`), the generated
+  OpenAPI 3.1 contract and `/openapi.json` HTTP MCP transport, the ACP client plus the
+  feature-gated `ragent acp-server`, the automation service (`/automation`,
+  `POST /auto/{id}`), AgentSkills discovery, and the i18n catalog now ship as a tagged
+  release. The 7-layer bash validation, path containment, and permission system are
+  unchanged and gate every new surface. See SPEC.md §19D, §19E, §19F.
+- **Quality-gate fixes** — the fast-path schema tests assert the crate's exported
+  `SCHEMA_VERSION` (now 2, the `automation_runs` table); `PluginStoreBrowser::set_index`
+  keeps document order; the `mask_key` doctest expects `[REDACTED]`; `machine_output`
+  routes tracing to stderr for the report subcommands (`openapi`, `plugins`,
+  `connectors`, `automation`, `new`, `spec`, `session`, `config`, `research`) so their
+  machine-readable stdout stays clean; and the unused `ragent-storage` dependency is
+  dropped from `ragent-tools-extended`.
+
+## Version 1.0.130
+
+- **OpenHands parity acceptance and quality gates (spec `openhands` T-019)** —
+  the `openhands` delta is complete and verified: pluggable execution backends
+  (`/backend`, `execution_backend`/`backends`), an LLM security analyzer
+  (`/security`), the OpenAI-compatible surface (`/v1/chat/completions`,
+  `/v1/models`), the generated OpenAPI 3.1 contract and `/openapi.json` HTTP MCP
+  transport, ACP client + feature-gated `ragent acp-server`, the automation service
+  (`/automation`, `POST /auto/{id}`), AgentSkills discovery, and the i18n catalog.
+  The manual test plan `specs/openhands/TESTPLAN.md` (TC-001..TC-016) walks
+  acceptance criteria 1-14; the CI gates (`cargo fmt`, `cargo clippy --workspace`,
+  `cargo check --workspace`) pass. See SPEC.md §19D, §19E, §19F.
+- **Stable-toolchain `/events` SSE cap fix** — the `/events` connection budget used
+  `AtomicUsize::try_update`, an unstable library feature, which failed to compile
+  on a stable toolchain (`error[E0658]`). The reservation is now a
+  `compare_exchange_weak` loop, preserving the semantics (reject with `503` once
+  `MAX_SSE_CONNECTIONS` is reached).
 - **Plugin-store category navigator (spec `catnav`)** — `/plugins codex` and
   `/plugins claude` gain a left-hand category navigator: `ALL` plus the distinct
   categories and tags the fetched index declares, driven by keyboard (`Tab`

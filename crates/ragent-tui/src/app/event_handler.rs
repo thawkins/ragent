@@ -1148,6 +1148,27 @@ impl App {
                     ),
                 );
             }
+            Event::SecurityVerdict {
+                ref session_id,
+                ref tool,
+                ref verdict,
+                ref rationale,
+            } if self.is_current_session(session_id) => {
+                // FR-006 / FR-017: surface the LLM security analyzer's verdict
+                // and rationale so the user sees *why* a proposed action was
+                // allowed, denied, or escalated to a prompt.
+                self.security_verdicts = self.security_verdicts.saturating_add(1);
+                let level = if verdict == "allow" {
+                    LogLevel::Info
+                } else {
+                    LogLevel::Warn
+                };
+                self.status = format!("security: {verdict} {tool}");
+                self.push_log_no_agent(
+                    level,
+                    format!("security analyzer: {verdict} {tool} - {rationale}"),
+                );
+            }
             Event::QuotaUpdate {
                 ref session_id,
                 percent,

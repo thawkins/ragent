@@ -10,7 +10,6 @@ repository = "https://github.com/thawkins/ragent"
 [dependencies]
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
-ragent-storage = { path = "../ragent-storage" }
 ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-types = { path = "../ragent-types" }
 
@@ -63,6 +62,10 @@ optional = true
 [features]
 default = []
 embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+# Spec `openhands` FR-029 (T-017): opt-in bundled headless-browser driver. Off
+# by default (no new mandatory runtime dependency, assumption A10). When on,
+# `mf_screenshot` is registered only while an engine binary resolves on `PATH`.
+headless-browser = []
 
 [package.metadata.cargo-machete]
 # readability-rs is used via its lib name `readability` (extractor.rs,

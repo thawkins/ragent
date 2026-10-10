@@ -17,24 +17,350 @@
 
 ## [Unreleased]
 
+## [1.0.131] - 2026-10-10
+
+*Patch release on the OpenHands-parity delta. The full acceptance walk and the
+pluggable-execution-backend / LLM security-analyzer / OpenAI-surface / ACP-server
+/ automation / i18n feature set described in the `Added` entries below now ship
+as a tagged release, together with the quality-gate fixes collected on top of
+`2ed21e3d` (v1.0.130).*
+
+### Fixed
+
+- **Schema-version tests assert the exposed constant.** The fast-path schema tests
+  in `crates/ragent-storage/tests/test_schema_version_fast_path.rs` now assert
+  against the crate's exported `SCHEMA_VERSION` instead of a hard-coded `"1"`, so
+  the suite tracks the schema bump to version 2 (the `automation_runs` table)
+  rather than pinning a stale literal.
+- **Plugin-store browse panel keeps document order.** `PluginStoreBrowser::set_index`
+  no longer re-sorts the fetched index, so the navigator and detail panes render
+  entries in the order the marketplace declares them.
+- **`mask_key` doctest uses the registered-secret placeholder.** The
+  `crates/ragent-types/src/sanitize.rs` doctest now expects `[REDACTED]`, the
+  placeholder the shared redaction registry actually emits.
+- **Report commands keep stdout clean.** `machine_output` in `src/main.rs` now
+  routes tracing to stderr for the report subcommands (`openapi`, `plugins`,
+  `connectors`, `automation`, `new`, `spec`, `session`, `config`, `research`), so
+  `ERROR ... connection failed` diagnostics no longer pollute a command's
+  machine-readable stdout.
+
+### Changed
+
+- **Dropped an unused `ragent-storage` dependency** from
+  `crates/ragent-tools-extended/Cargo.toml` (flagged by `cargo machete`).
+
+### Added
+
+- **OpenHands parity acceptance walk, documentation, and quality gates (spec
+  `openhands` T-019; Acceptance 1-14).** The capstone task closes the delta: it
+  walks the manual test plan against the build, updates the user-facing docs, and
+  runs the workspace gates.
+  - **Acceptance walk.** Every item of `specs/openhands/TESTPLAN.md` (TC-001..TC-016)
+    was exercised against the built binary and its automated coverage verified. The
+    hermetic suites assert the invariant half of each criterion on any host -
+    backend registry and `local` default (`test_backend_registry.rs`), container
+    runtime detection / `podman` default / fail-without-fallback
+    (`test_container_backend.rs`), the 7-layer gate and no-host-leak invariants
+    (`test_hardening_invariants.rs`), secret resolution and redaction
+    (`test_sandbox_secrets.rs`), remote registration and unreachability
+    (`test_remote_backend.rs`), ACP client/server transports (`test_acp_client.rs`,
+    `test_acp_server.rs`), the OpenAI surface and refuse-to-start gate
+    (`test_openai_surface.rs`, `test_serve_openai_gate.rs`), the OpenAPI contract
+    (`test_openapi_document.rs`), HTTP MCP transport (`test_mcp_http_transport.rs`),
+    AgentSkills discovery (`test_agentskills_discovery.rs`, `test_skill_command.rs`),
+    the security analyzer (`test_security_analyzer.rs`, `test_security_analyzer_loop.rs`,
+    `test_security_command.rs`), automations (`test_automation_surface.rs`,
+    `test_automation_runs_table.rs`, `test_automation_command.rs`), and i18n
+    (`test_i18n_catalog.rs`, `test_i18n_command.rs`). All pass on this tree.
+  - **Docs.** `README.md` gains the pluggable-execution-backend and LLM
+    security-analyzer feature bullets and the `execution_backend`/`backends`,
+    `security_analyzer`, `openai`, and `i18n` config blocks; `SPEC.md` records the
+    `/backend`, `/security`, `/automation`, and `/i18n` slash commands, the new
+    `/auto/{id}` and `/automation*` HTTP routes, and the `/backend` TUI surface and
+    security-analyzer sections (§19D.7, §19D.8); `QUICKSTART.md` documents the
+    backend switcher, the security analyzer, the OpenAI-compatible surface, and the
+    full config example. `docs/howtos/tools/masterfetch.md`, `tool-visibility.md`,
+    `config.md`, and `permissions.md` note the engine-gated `mf_screenshot` tool.
+  - **Quality gates.** `cargo fmt --all -- --check`, `cargo check --workspace`, and
+    `cargo clippy --workspace -- -D warnings -A clippy::used_underscore_items -A
+    clippy::redundant_pub_crate -A clippy::wildcard_imports` (the exact CI
+    invocation) all pass clean with every in-scope module present (Acceptance 14).
+    Two lints surfaced on the new code and were fixed: an unused
+    `unused_assignments` guard in the OpenAI streaming relay
+    (`crates/ragent-server/src/routes/openai.rs`) and an empty-format-string
+    `print_literal` in the `ragent automation list` header (`src/cli.rs`).
+- **Engine-gated screenshot capability (spec `openhands` FR-029, T-017).** The
+  always-erroring `mf_screenshot` stub is no longer advertised: the capability is
+  registered **only** when a headless browser engine ragent can actually drive is
+  present, so it is never offered when it cannot work (test-plan TC-014). A new
+  `masterfetch::tools::screenshot::headless_engine_present()` seam (plus
+  `detect_headless_engine()`, a pure `PATH` probe over the known engine binaries)
+  gates the registration in `create_extended_registry()`, and a new opt-in
+  `headless-browser` Cargo feature (off by default, assumption A10) is the switch
+  a future bundled driver flips. The default build therefore advertises **148**
+  tools across 21 categories (the `web` family drops 6 -> 5); the five other
+  `mf_*` tools are unchanged. New `crates/ragent-tools-extended/tests/test_browser_gate.rs`
+  pins the "no engine, no capability" default (and the host-agnostic `PATH`
+  probe), and the existing `test_mf_permission_categories.rs` / `test_mf_visibility.rs`
+  registry checks now treat `mf_screenshot` as conditional on
+  `headless_engine_present()`.
+- **Automation service (spec `openhands` T-016; FR-013, FR-014, FR-018,
+  FR-033).** Named, schedulable or webhook-triggered agent runs with durable run
+  history and execution-backend confinement:
+  - `crates/ragent-config/src/automation.rs` adds the `automation` config block
+    (`AutomationConfig`, `AutomationDefinition`, `AutomationTriggerKind`,
+    `DispatchTarget`), inert unless an explicit `enabled: true` is present.
+  - `crates/ragent-agent/src/automation/` implements the `AutomationService`
+    (enqueue, manual run, scheduler loop) and third-party dispatch
+    (`slack`/`github`/`linear`/`notion`/`webhook`); a run is confined to its
+    configured backend via a per-session override applied by the session loop
+    (FR-033).
+  - `crates/ragent-storage` adds the `automation_runs` table and its CRUD
+    (`insert`/`finish`/`list`/`prune`), schema version bumped to 2 (FR-018).
+  - `crates/ragent-server/src/routes/automation.rs` adds the public webhook
+    ingress `POST /auto/{id}` and the bearer-authenticated
+    `GET /automation`, `GET /automation/runs/{id}`, `POST /automation/{id}/run`;
+    all four routes are in the OpenAPI route table.
+  - TUI `/automation [list]`, `/automation runs <id>`, `/automation run <id>`,
+    `/automation help` and CLI `ragent automation ...` parity surfaces. See
+    `docs/howtos/slashcommands/automation.md`.
+
 ### Commits (last 10)
 
+- **`e617bcef` - plugin-store category navigator and `browser` tool removal.**
+  The `/plugins codex` and `/plugins claude` browse panels gain a left-hand
+  category navigator (`ALL` plus the distinct categories and tags the fetched
+  index declares; `Tab` focus, `Up`/`Down` move-and-apply, `Enter` apply, `c`
+  clear, mouse click/scroll), with a `--category <name>` launch pre-selection
+  and an optional `category` field on `StoreEntry` (spec `catnav`); new
+  `/plugins codex|claude|stores` subcommands; and the `browser` CDP tool and its
+  whole `ragent-tools-extended::browser` stack (`actions.rs`, `cdp.rs`,
+  `launch.rs`, `mod.rs`) are deleted together with `BrowserConfig`, the
+  `tool_visibility.browser` switch, and the `tokio-tungstenite` dependency, so
+  the registered count falls 152 -> 151 across 22 categories. MCP discovery now
+  scans the ragent-native `~/.config/ragent/servers/` directory first, startup
+  failures echo to stdout when the TUI stderr spool is active, and an
+  unreachable store marketplace renders a clean
+  `<Store> plugin marketplace is unavailable (...)` row. Described in detail in
+  the `catnav` / `browser`-removal entries below and in `[1.0.129]`.
+- **`2ed21e3d` (v1.0.130)** - the stable-toolchain fix for the `/events` SSE
+  connection cap (`AtomicUsize::try_update` replaced with a
+  `compare_exchange_weak` loop); see `[1.0.130]`.
 - **`054e5154`, `f87e2d95`, `87024938`, `d0eaa4e1`, `b2b46d5d`, `80fac9fb`,
-  `f6199c1c`, `0647d365`, `6cf0b60f`, `da83d927` - the v1.0.122..v1.0.129
-  release line.** Each is a `Version: X.Y.Z` release commit or a security
-  milestone (`da83d927` MS-03 network/secret hardening, `6cf0b60f` MS-04
-  defence in depth) already documented in its own `[1.0.12x]` section below.
-  The working-tree entry that follows records the unreleased `catnav` /
-  `browser`-removal / MCP-discovery / startup-diagnostics set collected on top
-  of `054e5154`.
+  `f6199c1c`, `0647d365` - the v1.0.122..v1.0.129 release line.** Each is a
+  `Version: X.Y.Z` release commit already documented in its own `[1.0.12x]`
+  section below. The working-tree entry that follows records the unreleased
+  OpenHands-parity / `catnav` / `browser`-removal / MCP-discovery /
+  startup-diagnostics set collected on top of `2ed21e3d`.
 
 ### Working tree (uncommitted)
 
 The following entries describe the uncommitted working-tree set on top of
-`054e5154` (v1.0.129).
+`2ed21e3d` (v1.0.130). The `catnav` navigator and `browser`-tool removal
+described in the `Removed` subsection below have since been committed as
+`e617bcef`; they are retained here because the same section also records the
+OpenHands-parity delta that remains uncommitted on top of `2ed21e3d`.
 
 #### Added
 
+- **Durable backend registry with health probing (spec `openhands` FR-004, FR-030,
+  T-004).** A new `crates/ragent-agent/src/backend/registry.rs` builds a durable
+  registry entry for every configured execution backend, derived from the config
+  (the config file is the durable record, the registry is its resolved read
+  model). Each `BackendRegistryEntry` carries a stable id, a display name, a kind
+  (`local`/`docker`/`podman`/`remote`), a `ConnectionDescriptor`, and a
+  `HealthState`. The built-in `local` entry is always present and always `ok`
+  (FR-019); container entries are `ok` when their runtime resolves on `PATH` and
+  `unavailable` with a detail naming the missing binary otherwise (FR-026); remote
+  entries are `ok` when a base URL and a key are configured (FR-030). A remote
+  backend is registered by URL and key via `BackendRegistry::register_remote`, and
+  `refresh_health`/`probe_remote` refine a remote's state with a live probe of the
+  server's public `/health` endpoint (FR-004). The descriptor is secret-free: it
+  records key *presence* and credential *names* only, never a value (FR-035), and
+  `ConnectionDescriptor::summary` is safe to render. New
+  `crates/ragent-agent/tests/test_backend_registry.rs` (14 tests) covers registry
+  construction, kind/descriptor fidelity, active-backend resolution, remote
+  registration/replacement, secret-free descriptors, runtime-presence health, and
+  the live `/health` probe against an in-process mock.
+- **Sandbox secret injection and workspace persistence (spec `openhands` FR-010,
+  FR-023, T-006).** A `docker`/`podman`/`remote` backend descriptor may now list
+  `credentials` - non-secret *names* stored in the encrypted credential store -
+  and the value is resolved **at spawn time** and injected as a container
+  environment variable (`<runtime> run ... -e NAME=VALUE ...`), never baked into
+  an image or written into the workspace (FR-010). The new
+  `crates/ragent-agent/src/backend/secrets.rs` introduces the `SecretResolver`
+  seam: `StorageSecretResolver` reads the encrypted SQLite store
+  (`Storage::get_provider_auth`, the same table `/auth` writes to) and
+  `MapSecretResolver` is the in-memory test double. A name the store does not
+  hold fails the provision with a `Provision` error rather than starting a
+  sandbox without it; each resolved value is registered with the shared
+  redaction registry, so a later rendering masks it (FR-035). A `remote`
+  descriptor with no literal `api_key` resolves its bearer key from the same
+  store (`RemoteBackend::resolve_credentials`); a missing credential fails the
+  turn rather than relaying it unauthenticated, while a literal `api_key` still
+  works and takes precedence. `resolve_backend_with_secrets` wires the store into
+  the container and remote adapters from the session's `ToolContext` (FR-010).
+  **Workspace persistence (FR-023):** the sandbox volume name is now derived from
+  the *project* identity only, so it survives replacement of the container, while
+  the *container* name folds in the credential names, so a changed credential set
+  provisions a fresh environment over the same persisted volume.
+  `ContainerBackend` gained `with_secret_resolver`, `credential_names`, and a
+  redacted `injected_env_summary`; `RemoteBackend` gained `has_bearer_key` and a
+  hand-written `Debug` that never prints the key. New
+  `crates/ragent-agent/tests/test_sandbox_secrets.rs` (15 tests) covers
+  resolution, the missing-credential failure, redaction registration, the
+  stable-volume/rotated-container naming, the store-resolved remote key, and - 
+  when a runtime and image are present - the live env-var / not-in-workspace and
+  workspace-survival cases.
+- **OpenAI-compatible streaming, bearer-token gate (spec `openhands` FR-012,
+  FR-024, FR-032, T-010).** `POST /v1/chat/completions` now implements the
+  streaming path: with `stream: true` the surface answers a `text/event-stream`
+  of OpenAI `chat.completion.chunk` events - an opening `delta.role = "assistant"`
+  chunk, one chunk per assistant `TextDelta`, and a terminal chunk carrying the
+  mapped `finish_reason` (`stop` / `length` / `tool_calls` / `content_filter`) -
+  terminated by a `data: [DONE]` sentinel (FR-012); `stream: false` still returns
+  the buffered `chat.completion` object (FR-011). Both paths share one validated
+  turn setup and preserve the permission checks (FR-038). A new `openai` config
+  section (`openai.enabled`, `openai.token`; `crates/ragent-config/src/openai.rs`,
+  `Config::openai_surface_enabled()` / `Config::openai_surface_token()`) carries
+  the surface's bearer token and arms the FR-032 refuse-to-start gate: `ragent
+  serve` exits with an error when the surface is enabled (FR-024) without a
+  configured `openai.token` or ambient `RAGENT_TOKEN`. The token is the server's
+  single bearer token - ragent runs no second credential for `/v1`. The untrusted
+  project overlay cannot set the section (`merge_project` drops it, FR-035). New
+  tests: `crates/ragent-server/tests/test_openai_surface.rs` gains
+  `test_streaming_completion_emits_chunks_and_done` and
+  `test_streaming_requires_auth`; the new
+  `crates/ragent-config/tests/test_openai_config.rs` covers the token gate.
+- **ACP server endpoint on stdio for IDE clients (spec `openhands` FR-022,
+  FR-028, T-008).** ragent can now act as an ACP **server** as well as a client:
+  `crates/ragent-agent/src/acp/server.rs` serves ACP-capable editors (Zed, VS
+  Code, JetBrains) over JSON-RPC 2.0 on ragent's own stdin/stdout. Each editor
+  session maps onto a local ragent session and that session's agent-loop events
+  stream back as ACP `session/update` notifications (`initialize`,
+  `session/new`, `session/prompt`, `session/cancel`; text/thought chunks and
+  tool calls are rendered, and the reply carries the mapped `stopReason`) —
+  satisfying FR-022 in the server direction too. The endpoint is **feature-gated
+  and disabled by default**: it compiles only behind the new `ragent-agent`
+  /`ragent` `acp-server` Cargo feature and runs only when `acp.server_enabled:
+  true`, and it is reachable only through the new `ragent acp-server` subcommand
+  (FR-028). When either gate is closed the command prints a diagnostic and exits
+  with a usage error. Two new config keys (`acp.server_enabled`,
+  `acp.server_agent`) with `Config::acp_server_enabled()` /
+  `Config::acp_server_agent()` helpers; a malformed request frame is skipped
+  rather than tearing the connection down, and an unknown method gets a JSON-RPC
+  "method not found". `crates/ragent-agent/tests/test_acp_server.rs` (9 tests,
+  feature-gated) drives the real transport over an in-memory duplex pipe with a
+  mock provider.
+- **Remote execution backend (spec `openhands` FR-001, FR-004, FR-009, FR-021,
+  FR-031, FR-034, T-003).** ragent can now run a session **against a second ragent
+  server** instead of on the local host. `crates/ragent-agent/src/backend/remote.rs`
+  implements `RemoteBackend`: it opens (or reuses) a session at
+  `POST <url>/sessions`, posts the prompt to `POST <url>/sessions/{id}/messages`,
+  and decodes the server's `text/event-stream` into `RemoteUpdate`s; the new
+  `crates/ragent-agent/src/session/remote_dispatch.rs` mirrors each update onto the
+  local event bus under the local session id, so a remote turn renders exactly like
+  a local one (FR-021). The assistant placeholder is persisted and updated with the
+  mirrored text, so a remote turn stays resumable. A `remote` descriptor's `url` is
+  the base URL and `api_key` the bearer token (FR-004, FR-030); the key is redacted
+  from diagnostics. One `RemoteBackend` is cached per `(id, url, api_key)` and the
+  remote session id per `(backend id, local session id)`, so a later turn continues
+  the same remote conversation over one connection pool (FR-009). A missing `url`,
+  an unreachable server, or a stream that drops part-way through the turn fails the
+  turn - surfaced as an `AgentError` in the TUI - and never re-runs the turn's tools
+  locally (FR-031, FR-034); an explicit cancellation stops promptly. `RemoteBackend`
+  refuses every local tool dispatch, so a leaked dispatch cannot execute on the host
+  either. The relay is bounded by a turn timeout and polls the cancellation flag, so
+  an unresponsive server cannot hang the session. New tests:
+  `crates/ragent-agent/tests/test_remote_backend.rs` (14 cases - config resolution,
+  fail-without-fallback for a URL-less backend, local-dispatch refusal, the error
+  taxonomy, the remote-session cache, the SSE frame decoder, and live cases against
+  an in-process Axum mock: streamed-and-mirrored turns, session reuse, unreachability,
+  a mid-turn stream drop, and cancellation).
+- **Container execution backend (`docker`/`podman`) (spec `openhands` FR-001,
+  FR-002, FR-009, FR-020, FR-026, FR-031, FR-035, T-002).** ragent can now run a
+  session's shell, file, and search tools **inside a container** instead of on
+  the host. `crates/ragent-agent/src/backend/container.rs` implements
+  `ContainerBackend`, which provisions one long-lived sandbox per session
+  (`<runtime> run -d --name ragent-sandbox-<hash> -v ragent-sandbox-vol-<hash>:/projects
+  -w /projects <image> sleep infinity`) and dispatches each tool call with
+  `<runtime> exec`. The workspace is a **container-named volume, never a host bind
+  mount**, so a sandboxed tool cannot read or write the host working directory
+  (FR-020, FR-035; test-plan TC-003's `HOST_MARKER_NOT_VISIBLE`). `bash` is gated by
+  the existing host 7-layer validator before it runs, so the sandbox cannot be used
+  to bypass the security model (FR-002, FR-037); a file/search subset (`read`,
+  `write`, `create`, `append_file`, `rm`, `mkdir`, `list`, `glob`, `grep`) is
+  translated to confined sandbox `exec` scripts; every other tool is refused with no
+  host fallback (FR-031). A provisioning failure (missing runtime, missing or
+  unpullable image) fails the turn with a `Provision` error and never runs the tool
+  on the host. New `crates/ragent-agent/src/backend/detection.rs` probes `PATH` for
+  `podman`/`docker` and fixes `podman` as the default container runtime when none is
+  specified (FR-026). `Config::effective_backend_config()` resolves both config
+  spellings (a bare `execution_backend: "podman"` label and an inline descriptor with
+  `image`/`workspace`), and the processor now resolves the backend through
+  `resolve_backend_for_config`, caching one `ContainerBackend` per `(kind, id, image,
+  workspace, working dir)` so a session's container is provisioned once and reused.
+  New tests: `crates/ragent-agent/tests/test_container_backend.rs` (12 cases -
+  runtime detection and the podman default, fail-without-fallback for a missing
+  image and a bad image, unadapted-tool refusal, workspace path confinement, and
+  live sandbox cases for `bash` and the routed file/search tools, which skip when no
+  runtime/image is present).
+- **UI locale message catalog with English fallback (spec `openhands` FR-027,
+  T-014).** ragent now renders user-facing strings (the status-bar
+  `Project:`/`Branch:`/`Ready`/`Model:`/`Thinking:` labels, the `/help` header,
+  and the connector-catalogue footer) through `ragent_config::i18n::t`, which
+  serves a locale message catalog and falls back to the compiled-in English text
+  for any key the catalog does not translate (never a raw key or blank). The
+  `i18n` config section (`{ "i18n": { "enabled": true, "locale": "fr" } }`) is
+  opt-in and absent by default; catalogs are JSON files discovered at
+  `<project>/.ragent/locales/<locale>.json` then
+  `~/.config/ragent/locales/<locale>.json`, with a locale tag (`fr_FR.UTF-8`)
+  expanding to `/`-less file names (`fr_fr`, `fr`) most-specific-first. With no
+  `i18n` section a non-English ambient `LANG`/`LC_ALL`/`LC_MESSAGES` with an
+  installed catalog enables translation automatically. The new `/i18n`
+  command (`on|off|status|list|<locale>|help`) reports and persists the setting;
+  `ragent_config::sync_runtime_flags` wires the resolved state at startup.
+  New tests: `test_i18n_catalog.rs` (config shape, English fallback, malformed
+  catalog, candidate expansion, project-over-global precedence) and
+  `test_i18n_command.rs` (`/i18n` dispatch plus status-bar translation).
+- **AgentSkills pack discovery (spec `openhands` FR-005, T-012).** ragent now
+  discovers AgentSkills-format packs (a directory of `<name>/SKILL.md` with YAML
+  frontmatter declaring at least `name` and `description`) from the project
+  `.agents/skills/` directory and the user `~/.agents/skills/` directory, loaded
+  alongside the existing `.agent`/`.claude` OpenSkills variants and ragent's own
+  `.ragent/skills/` packs. Discovery is now driven by a single ordered
+  `skill::loader::discovery_roots` helper (`.agents` first at each level) which
+  `discover_skills` scans and `SessionProcessor::skill_registry` watches for cache
+  invalidation, so the scan and the cache key cannot drift. The convention is
+  additive (A7): on a name clash the existing higher-scope ragent pack wins, and
+  `.agents/skills/` skills override the user-global scope. New tests:
+  `test_agentskills_discovery.rs` (end-to-end `SkillRegistry::load` discovery,
+  frontmatter-name precedence, existing-pack clash precedence, multi-pack trees,
+  SKILL.md-less directories) plus `discovery_roots` unit tests in
+  `tests/inline/skill_loader.rs`.
+  - **AgentSkills TUI `/skill` surface (spec `openhands` FR-005, T-013).** The
+    TUI gains a first-class `/skill` command beside the existing `/skills`
+    listing: `/skill` (or `/skill list`) lists every registered pack, and
+    `/skill <name> [args...]` loads and invokes a named pack exactly as the bare
+    `/<name>` trigger does. Both the list form and the invocation form resolve
+    through the same `SkillRegistry`, so an AgentSkills pack discovered under
+    `.agents/skills/` (project) or `~/.agents/skills/` (user) is listable and
+    loadable by its frontmatter name. The bare-`/<name>` fall-through arm and the
+    new command share one `App::invoke_skill_command` helper (returns whether a
+    pack matched so the caller can still report an unknown command) and one
+    `App::render_skill_list` helper (so `/skills`, `/skill`, and `/skill list`
+    render identical output); the empty-registry hint now names the AgentSkills
+    paths alongside the ragent ones. On a name clash the existing higher-scope
+    ragent pack still wins (A7). `/skill` is registered in `SLASH_COMMANDS` and
+    the `commands_info` mirror (kept in sync by the drift test). New tests:
+    `crates/ragent-tui/tests/test_skill_command.rs` (help, list via `/skill` /
+    `/skill list` / `/skills`, AgentSkills pack rendering with
+    `scope: openskills-project`, load-starts-invocation, unknown-pack not-found,
+    and the clash precedence) and a new
+    `test_agentskills_pack_is_loadable_and_invocable` case in
+    `crates/ragent-agent/tests/test_agentskills_discovery.rs`. Docs:
+    `SPEC.md` section 12.4, `docs/howtos/slashcommands/skill.md` (new) and the
+    `INDEX.md`, and `specs/openhands/TESTPLAN.md` TC-011 automated coverage.
 - **Plugin-store category navigator (spec `catnav`).** The `/plugins codex` and
   `/plugins claude` browse panels gain a left-hand category navigator: `ALL` plus
   the distinct non-empty categories the fetched store index declares (sorted
@@ -63,9 +389,58 @@ The following entries describe the uncommitted working-tree set on top of
   `~/.cline/mcp-servers`, and the legacy `~/.mcp/servers`). The legacy location
   is still scanned for backwards compatibility. Documented in the new
   `docs/howtos/mcp.md`.
+- **OpenAPI 3.1 contract, generated typed client, and `ragent openapi` CLI
+  (spec `openhands` FR-007).** The REST API is now described by an OpenAPI 3.1
+  document served at `GET /openapi.json`. The document and the generated client
+  are both rendered from one route table
+  (`crates/ragent-server/src/routes/openapi.rs::ROUTES`), so they cannot drift
+  from each other; a companion integration test
+  (`crates/ragent-server/tests/test_openapi_document.rs`) asserts the table and
+  the served router agree in both directions — it scrapes every
+  `.route(...)`/`.nest(...)` literal from `src/routes/` and compares it to the
+  table, then probes every documented parameterless `GET` through the live
+  router. Every protected operation declares the native bearer `security`
+  scheme; `/openapi.json` itself is public (it carries no runtime data, tokens, or
+  secrets — asserted by the test, FR-035). A dependency-free typed TypeScript
+  client is generated from the same table and checked in at
+  `docs/openapi/ragent-client.d.ts`; `ragent openapi` prints the document and
+  `ragent openapi --client` prints the client, with tracing routed to stderr for
+  that command so the machine-readable stdout stays clean.
+- **End-to-end HTTP MCP transport test (spec `openhands` FR-025).** The existing
+  Streamable-HTTP MCP client (`HttpMcpClient`) is now proven through the ordinary
+  [`McpClient`](crates/ragent-agent/src/mcp/mod.rs) entry point against a live
+  HTTP mock: connect, list tools, invoke a tool, and disconnect — alongside the
+  `stdio` transport rather than only in a unit fixture
+  (`crates/ragent-agent/tests/test_mcp_http_transport.rs`).
+- **Hardening and secret-safety verification (spec `openhands` FR-002, FR-024,
+  FR-032, FR-035, FR-037, FR-038, T-018).** Two hermetic test suites pin the
+  security invariants the new execution/interop surfaces must not weaken.
+  `crates/ragent-agent/tests/test_hardening_invariants.rs` (4 tests) proves the
+  7-layer bash validator gates every sandbox `bash` call *before* a container is
+  provisioned — a banned tool, a denied command name, a denied pattern, a
+  directory escape, and a base64-decode-to-shell obfuscation are each rejected
+  with the tool never executing on the host, and the assertion needs no container
+  runtime (FR-002, FR-037); it also pins that a remote backend's `Debug` never
+  prints its bearer key and that a sandbox's workspace is the in-container
+  `/projects` named-volume mount, never the host working directory (FR-035).
+  `tests/test_serve_openai_gate.rs` (2 tests) spawns the built binary and proves
+  `ragent serve` refuses to start the OpenAI-compatible surface when it is enabled
+  without a token (non-zero exit, actionable message) while a configured token
+  starts it (FR-024, FR-032). The permission path on the OpenAI surface and the
+  `GET /config` redactor were already covered by
+  `ragent-server/tests/test_openai_surface.rs` and `test_config_redaction.rs`;
+  the sandbox path-containment guard by `test_container_backend.rs`.
 
 #### Fixed
 
+- **`ragent acp-server` names the specific closed gate.** With both ACP-server
+  gates closed the command reported only "the endpoint is disabled", which reads as
+  a config problem even in a build that lacks the feature entirely. It now
+  distinguishes the two: the default build (no `acp-server` feature) says to
+  rebuild with `cargo build --features acp-server` **and** set
+  `acp.server_enabled: true`, while a feature build with the key unset keeps the
+  config-key message. Both paths exit with a usage error (code 2), satisfying
+  test-plan TC-016's FR-028 wording (`src/acp_server.rs`).
 - **Startup errors are no longer swallowed by the TUI stderr spool.** In TUI
   mode stderr is redirected into the log spool, so an error that aborted startup
   (a config parse failure, a storage open failure) printed its `Error:` line to

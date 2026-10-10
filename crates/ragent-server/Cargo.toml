@@ -21,14 +21,26 @@ tower = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "cors", "timeout"] }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
+async-stream = { workspace = true }
 uuid = { workspace = true }
 blake3 = { workspace = true }
+# Automation service surface (spec `openhands` T-016): run-history types and
+# the schedule next-due computation.
+ragent-types = { workspace = true }
+ragent-config = { path = "../ragent-config" }
+chrono = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
 parking_lot = { workspace = true }
 http-body-util = "0.1"
 serde_json = { workspace = true }
+# The OpenAI-surface integration test scripts a local `Provider`/`LlmClient`
+# so the agent loop can run without a network call; `async-trait` is needed to
+# implement those traits and `ragent-types` for the shared message/thinking
+# types the mock returns.
+async-trait = { workspace = true }
+ragent-types = { workspace = true }
 
 [[bench]]
 name = "bench_sse"
