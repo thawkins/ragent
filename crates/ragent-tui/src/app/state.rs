@@ -935,11 +935,11 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "plugins",
-        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | help",
+        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | marketplace show | help",
     },
     SlashCommandDef {
         trigger: "connectors",
-        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | marketplace show | help",
     },
     SlashCommandDef {
         trigger: "research",
@@ -1443,6 +1443,36 @@ pub struct QueuedInput {
     pub image_paths: Vec<std::path::PathBuf>,
 }
 
+/// One message from the off-loop manifest-metadata enrichment of a store index
+/// (spec `pluginstores` FR-048).
+///
+/// The enrichment worker ([`App::start_store_enrichment`]) pushes one
+/// [`StoreEnrichResult::Update`] per entry that resolved metadata, then a single
+/// terminal [`StoreEnrichResult::Finished`]; the UI thread drains the queue in
+/// [`App::poll_store_enrichment`] and applies each update to the open browser and
+/// clears the title's loading hint on `Finished`. Every message carries the
+/// generation of the index it belongs to, so a worker whose index is no longer
+/// loaded has its messages dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreEnrichResult {
+    /// One entry's manifest metadata resolved.
+    Update {
+        /// The enrichment generation this update belongs to.
+        generation: u64,
+        /// The store the index was fetched for.
+        kind: StoreKind,
+        /// The resolved metadata for one entry.
+        update: ragent_plugins::ManifestUpdate,
+    },
+    /// The enrichment of the index at `generation` finished.
+    Finished {
+        /// The enrichment generation that completed.
+        generation: u64,
+        /// The store the index was fetched for.
+        kind: StoreKind,
+    },
+}
+
 /// The outcome of one off-loop store-index fetch, tagged with the store it was
 /// requested for (spec `pluginstores` T-008; FR-007, FR-013, FR-016, FR-026).
 ///
@@ -1502,6 +1532,10 @@ pub struct ConnectorCatalogueResult {
     /// How many catalogue entries the parser skipped as malformed or
     /// unexpressible.
     pub skipped: usize,
+    /// The first refusal a configured added marketplace produced during the
+    /// merge, when any (spec `connectors` FR-043). Surfaced to the message
+    /// window as a warning; a refused added marketplace never blinds the panel.
+    pub refused_marketplace: Option<String>,
 }
 
 /// The outcome of one off-loop `ENTER` install from the connector-catalogue
@@ -1524,6 +1558,32 @@ pub struct ConnectorCatalogueInstallResult {
     /// Whether the install committed, so the poll re-derives the installed set
     /// and the row re-colours.
     pub succeeded: bool,
+}
+
+/// One message from the off-loop manifest-metadata enrichment of a connector
+/// catalogue (spec `connectors` FR-044).
+///
+/// The enrichment worker ([`App::start_catalogue_enrichment`]) pushes one
+/// [`ConnectorEnrichResult::Update`] per entry that resolved metadata, then a
+/// single terminal [`ConnectorEnrichResult::Finished`]; the UI thread drains the
+/// queue in [`App::poll_connector_enrichment`] and applies each update to the
+/// open browser, clearing the title's loading hint on `Finished`. Every message
+/// carries the generation of the catalogue it belongs to, so a worker whose
+/// catalogue is no longer loaded has its messages dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorEnrichResult {
+    /// One entry's manifest metadata resolved.
+    Update {
+        /// The enrichment generation this update belongs to.
+        generation: u64,
+        /// The resolved metadata for one entry.
+        update: ragent_connectors::catalogue_enrich::ManifestUpdate,
+    },
+    /// The enrichment of the catalogue at `generation` finished.
+    Finished {
+        /// The enrichment generation that completed.
+        generation: u64,
+    },
 }
 
 /// The load state of a plugin-store browser (spec `pluginstores` T-004;
@@ -1562,10 +1622,12 @@ pub struct PluginStoreBrowser {
     pub installed: BTreeSet<String>,
     /// The current search query (FR-008, FR-009).
     pub query: String,
-    /// Every entry fetched from the store index, in document order (FR-003).
+    /// Every entry fetched from the store index, sorted alphabetically by id
+    /// (FR-003, FR-050).
     ///
-    /// The list keeps the order the index arrived in; filtering narrows it without
-    /// reordering. The navigator's derived category set is sorted separately
+    /// The list is sorted when the index lands ([`Self::set_index`]); filtering
+    /// narrows it without reordering, so the survivors keep their alphabetical
+    /// order. The navigator's derived category set is sorted separately
     /// (spec `catnav` FR-001).
     pub all: Vec<StoreEntry>,
     /// Indices into [`Self::all`] that match [`Self::query`], in order (FR-008).
@@ -1631,6 +1693,15 @@ pub struct PluginStoreBrowser {
     /// exactly as an in-panel selection is validated, and report an unknown name in
     /// the footer instead of leaving the panel silently empty.
     pub pending_category: Option<CategoryFilter>,
+    /// Whether the off-loop manifest-metadata enrichment (spec `pluginstores`
+    /// FR-048) has finished for the current index.
+    ///
+    /// The store index lands first, then each entry's own manifest is fetched
+    /// off-loop to fill the version/description the index omitted; while this is
+    /// `false` the panel renders a small `loading details...` hint in its title so
+    /// a still-blank description reads as pending rather than missing. It is set
+    /// `true` once the enrichment for the currently loaded index has drained.
+    pub enriching: bool,
 }
 
 impl PluginStoreBrowser {
@@ -1660,11 +1731,23 @@ impl PluginStoreBrowser {
             category_viewport: 0,
             nav_focused: false,
             pending_category: None,
+            enriching: false,
         };
         if !prefill.is_empty() {
             browser.set_query(prefill.to_string());
         }
         browser
+    }
+
+    /// The result list in ascending alphabetical order of entry id, case-insensitively
+    /// with a byte-wise tiebreak (FR-050).
+    ///
+    /// The browser stores its result set sorted so the displayed order is independent
+    /// of the fetch, marketplace-merge, and filter order; this derives the order from
+    /// the shared comparator in `ragent_plugins` (one implementation across the crate
+    /// boundary).
+    fn sort_entries(&mut self) {
+        ragent_plugins::sort_store_entries(&mut self.all);
     }
 
     /// Replace the query and re-apply the filter (FR-008).
@@ -1698,8 +1781,8 @@ impl PluginStoreBrowser {
     /// The match is a case-insensitive substring over the entry id, name,
     /// description, and tags; an empty query matches every entry. The category
     /// predicate keeps an entry under the active category when its declared
-    /// `category` matches, or - for a tag-derived row (spec `catnav` FR-021) - when
-    /// any of its `tags` matches; `ALL` keeps every entry.
+    /// `category` matches (spec `catnav` FR-003); `ALL` keeps every entry, and an
+    /// entry's `tags` never select a category.
     fn apply_filter(&mut self) {
         let needle = self.query.to_lowercase();
         let category = self.categories.filter().clone();
@@ -1708,13 +1791,7 @@ impl PluginStoreBrowser {
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry_matches(entry, &needle))
-            .filter(|(_, entry)| {
-                category.matches_category(entry.category.as_deref())
-                    || entry
-                        .tags
-                        .iter()
-                        .any(|tag| category.matches_category(Some(tag)))
-            })
+            .filter(|(_, entry)| category.matches_category(entry.category.as_deref()))
             .map(|(index, _)| index)
             .collect();
         self.cursor = 0;
@@ -1791,9 +1868,19 @@ impl PluginStoreBrowser {
     /// loaded and [`PluginStoreStatus::Empty`] otherwise (FR-017); the filter is
     /// re-applied so any prefilled query still constrains the result set.
     ///
-    /// The entries keep the order the index arrived in (document order), which the
-    /// result pane renders as-is; only the navigator's category set is sorted
-    /// (spec `catnav` FR-001).
+    /// The entries are sorted alphabetically by id (FR-050) before the filter is
+    /// derived, so the result pane renders an alphabetical list and the order is
+    /// independent of the fetch and marketplace-merge order.
+    ///
+    /// The navigator's category set is derived *before* the sort, from the index's
+    /// own order, so a category's first-seen spelling (the label a case-insensitive
+    /// collision keeps) does not depend on the result ordering - the sort is a display
+    /// concern and must not relabel a category (spec `catnav` FR-001).
+    ///
+    /// Manifest-metadata enrichment (FR-048) is *not* started here: [`Self::set_index`]
+    /// is also the path a hand-built test entry list takes, so the caller that
+    /// owns the fetch ([`App::poll_plugin_store_result`]) starts the off-loop
+    /// enrichment and marks the panel [`Self::enriching`] while it runs.
     pub fn set_index(&mut self, index: StoreIndex) {
         self.all = index.entries;
         self.skipped = index.skipped;
@@ -1803,38 +1890,105 @@ impl PluginStoreBrowser {
             PluginStoreStatus::Ready
         };
         self.rebuild_categories();
+        self.sort_entries();
         self.apply_filter();
+    }
+
+    /// Apply one enrichment update ([`ManifestUpdate`]) to the entry it names, then
+    /// re-apply the filter so a newly filled description becomes searchable (spec
+    /// `pluginstores` FR-048).
+    ///
+    /// Fills only fields the index left blank, so an index that already declared a
+    /// version keeps it. A no-op when no entry carries `id`.
+    ///
+    /// Unlike a user edit, a background enrichment must not disturb the browsing
+    /// position: the filter result set is unchanged by the update (matching uses
+    /// entry id/name/description/tags, none of which an enrichment can remove from
+    /// the index), so the cursor and scroll are preserved across the re-filter.
+    /// Without this, the per-entry enrichment stream would bounce the cursor back
+    /// to row 0 on every resolved manifest, making scrolling impossible while the
+    /// enrichment runs.
+    pub fn apply_manifest_update(&mut self, update: ragent_plugins::ManifestUpdate) {
+        let Some(position) = self.all.iter().position(|entry| entry.id == update.id) else {
+            return;
+        };
+        let entry = &mut self.all[position];
+        let mut changed = false;
+        if entry.version.trim().is_empty()
+            && let Some(version) = update.meta.version
+        {
+            entry.version = version;
+            changed = true;
+        }
+        if entry.description.trim().is_empty()
+            && let Some(description) = update.meta.description
+        {
+            entry.description = description;
+            changed = true;
+        }
+        if changed {
+            self.reapply_filter_preserving_cursor();
+        }
+    }
+
+    /// Re-derive [`Self::filtered`] like [`Self::apply_filter`], but keep the
+    /// user's browsing position: the result cursor is placed on the same
+    /// underlying entry as before the re-filter (when that entry still matches),
+    /// and the scroll offset is left where the user put it.
+    ///
+    /// Used by background updates (enrichment) that may refine a row's display
+    /// fields but never remove the entry from the result set. If the previously
+    /// selected entry is gone (shouldn't happen for enrichment, but safe
+    /// fallback), the cursor stays at its filtered-index position clamped to the
+    /// new set, so the panel never leaps to the top mid-scroll.
+    fn reapply_filter_preserving_cursor(&mut self) {
+        let selected_all_index = self.filtered.get(self.cursor).copied();
+        let needle = self.query.to_lowercase();
+        let category = self.categories.filter().clone();
+        self.filtered = self
+            .all
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry_matches(entry, &needle))
+            .filter(|(_, entry)| category.matches_category(entry.category.as_deref()))
+            .map(|(index, _)| index)
+            .collect();
+        self.cursor = selected_all_index
+            .and_then(|index| self.filtered.iter().position(|&i| i == index))
+            .unwrap_or_else(|| self.cursor.min(self.filtered.len().saturating_sub(1)));
+        if self.filtered.is_empty() {
+            self.scroll = 0;
+        }
+    }
+
+    /// Mark the off-loop manifest enrichment finished (spec `pluginstores` FR-048).
+    ///
+    /// Clears the title's `loading details...` hint; the accumulated updates have
+    /// already been applied through [`Self::apply_manifest_update`].
+    pub fn finish_enrichment(&mut self) {
+        self.enriching = false;
     }
 
     /// Re-derive the distinct category set from [`Self::all`], keeping the active
     /// category only while the new index still declares it (spec `catnav` FR-001,
-    /// FR-018, FR-021, FR-027).
+    /// FR-018, FR-027).
     ///
     /// The set is the sorted, case-insensitive distinct non-blank categories
     /// present in the loaded entries ([`CategoryFilterState::from_categories`]),
-    /// followed by each distinct non-empty `tag` of an entry that also declares a
-    /// category (FR-021, A7), with `ALL` implicit and always first. An index that
-    /// declares no category therefore still renders `ALL` only (FR-018). A category
-    /// no entry declares is dropped and the selection falls back to `ALL`, so the
-    /// navigator never shows a row that selects nothing, and the cursor is placed on
-    /// the surviving selection's row.
+    /// with `ALL` implicit and always first. An index that declares no category
+    /// therefore still renders `ALL` only (FR-018). A category no entry declares is
+    /// dropped and the selection falls back to `ALL`, so the navigator never shows a
+    /// row that selects nothing, and the cursor is placed on the surviving
+    /// selection's row.
+    ///
+    /// Only the declared `category` field forms a row: an entry's `tags` are search
+    /// terms, never navigator rows, so a single plugin with a long `keywords` list
+    /// cannot flood the navigator (spec `catnav` FR-021 withdrawn).
     fn rebuild_categories(&mut self) {
         let previous = self.categories.filter().label().to_string();
-        let mut categories = CategoryFilterState::from_categories(
+        let categories = CategoryFilterState::from_categories(
             self.all.iter().filter_map(|e| e.category.as_deref()),
         );
-        // Tag-derived rows follow the declared categories (FR-021): only an entry
-        // that also declares a category contributes its tags, so an uncategorised
-        // index stays `ALL`-only (FR-018). `add_category` dedups case-insensitively
-        // against the declared set.
-        for tag in self
-            .all
-            .iter()
-            .filter(|e| e.category.is_some())
-            .flat_map(|e| e.tags.iter())
-        {
-            categories.add_category(tag);
-        }
         self.categories = categories;
         // The boolean is informational; the side effect (falling back to `ALL`
         // when the category is no longer declared) is what matters here, and the
@@ -2083,6 +2237,9 @@ impl PluginStoreBrowser {
     /// Record a failed fetch for inline rendering (T-008, FR-013).
     pub fn set_failed(&mut self, detail: String) {
         self.status = PluginStoreStatus::Failed(detail);
+        // A failed index has nothing to enrich, so a stale in-flight marker must
+        // not keep the title's `loading details...` hint up (FR-013).
+        self.enriching = false;
     }
 
     /// Replace the derived installed-plugin-id set (T-007, FR-005).
@@ -2388,6 +2545,31 @@ pub struct App {
     /// behaviour can be exercised for both stores with no network access
     /// (FR-032, FR-037, NFR-003, NFR-004).
     pub plugin_store_fetcher: Arc<dyn StoreIndexFetcher>,
+    /// The injectable manifest-metadata source the enrichment path drives (spec
+    /// `pluginstores` FR-048).
+    ///
+    /// Defaults to the production HTTPS source
+    /// ([`ragent_plugins::NetworkManifestSource`]), so the live launch path fetches
+    /// each entry's own manifest to fill the version/description the store index
+    /// omitted. Tests replace it with an offline implementation via
+    /// [`App::set_manifest_source`], so the enrichment path can be exercised with no
+    /// network access (NFR-003).
+    pub store_manifest_source: Arc<dyn ragent_plugins::ManifestSource>,
+    /// Pending per-entry manifest enrichment updates (spec `pluginstores` FR-048).
+    ///
+    /// The off-loop enrichment worker ([`App::start_store_enrichment`]) pushes each
+    /// resolved [`ragent_plugins::ManifestUpdate`] here as it arrives, then a
+    /// terminal [`StoreEnrichResult::Finished`]; the UI thread drains the queue in
+    /// [`App::poll_store_enrichment`] and applies each update to the open browser, so
+    /// metadata streams in without re-rendering the whole list at once.
+    pub store_enrich_result: Arc<std::sync::Mutex<Vec<StoreEnrichResult>>>,
+    /// A generation counter guarding the enrichment of the currently loaded index.
+    ///
+    /// The index fetch is tagged with the value of this counter when the enrichment
+    /// worker starts; a worker whose generation no longer matches (the panel was
+    /// re-opened, switched stores, or re-fetched) has its updates dropped rather than
+    /// applied to the wrong entries.
+    pub store_enrich_generation: Arc<std::sync::atomic::AtomicU64>,
     /// Cached area of the plugin-store browse panel (set during render). Kept in
     /// [`Rect::default`] while no panel is open (spec `pluginstores` FR-018).
     ///
@@ -2431,9 +2613,51 @@ pub struct App {
     /// installed set so the newly installed row re-colours.
     pub connector_catalogue_install_result:
         Arc<std::sync::Mutex<Option<ConnectorCatalogueInstallResult>>>,
+    /// The injectable manifest-metadata source the catalogue enrichment drives
+    /// (spec `connectors` FR-044).
+    ///
+    /// Defaults to the production HTTPS source, so the live launch path fetches
+    /// each entry's own manifest to fill the description the catalogue omitted.
+    /// Tests replace it with an offline implementation via
+    /// [`App::set_catalogue_manifest_source`], so the enrichment path can be
+    /// exercised with no network access (NFR-003).
+    pub catalogue_manifest_source: Arc<dyn ragent_connectors::catalogue_enrich::ManifestSource>,
+    /// Pending per-entry catalogue manifest enrichment updates (spec `connectors`
+    /// FR-044).
+    ///
+    /// The off-loop enrichment worker ([`App::start_catalogue_enrichment`]) pushes
+    /// each resolved [`ragent_connectors::catalogue_enrich::ManifestUpdate`]
+    /// here as it arrives, then a terminal [`ConnectorEnrichResult::Finished`]; the
+    /// UI thread drains the queue in [`App::poll_connector_enrichment`] and applies
+    /// each update to the open browser, so metadata streams in without re-rendering
+    /// the whole list at once.
+    pub connector_enrich_result: Arc<std::sync::Mutex<Vec<ConnectorEnrichResult>>>,
+    /// A generation counter guarding the enrichment of the currently loaded
+    /// connector catalogue.
+    ///
+    /// The catalogue fetch is tagged with the value of this counter when the
+    /// enrichment worker starts; a worker whose generation no longer matches (the
+    /// panel was reopened or re-fetched) has its updates dropped rather than applied
+    /// to the wrong entries.
+    pub connector_enrich_generation: Arc<std::sync::atomic::AtomicU64>,
     /// Cached area of the connector-catalogue browse panel (set during render).
     /// Kept in [`Rect::default`] while no panel is open.
     pub connector_store_area: Rect,
+    /// Cached area of the connector-catalogue panel's left category-navigator
+    /// column (set during render).
+    ///
+    /// Recomputed from the panel body every frame so a terminal resize re-derives
+    /// it; tests and mouse hit-testing read it back to locate the navigator.
+    /// Kept in [`Rect::default`] while no panel is open.
+    pub connector_store_nav_area: Rect,
+    /// Cached area of the connector-catalogue panel's result-list column (set
+    /// during render).
+    ///
+    /// Recomputed from the panel body every frame alongside the navigator; kept
+    /// in [`Rect::default`] while no panel is open. Anchored on the scrolling
+    /// list *below* the pinned column-heading row, so mouse hit-testing treats a
+    /// click or wheel on the heading as inert.
+    pub connector_store_result_area: Rect,
     /// The `/backend` switcher panel state, present while it is open
     /// (spec `openhands` FR-008). `None` when no panel is showing; while it is
     /// `Some` the panel swallows every keystroke and locks the input field.

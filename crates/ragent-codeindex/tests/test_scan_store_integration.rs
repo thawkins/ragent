@@ -165,7 +165,7 @@ fn test_scan_to_store_round_trip() {
     // First time: everything is "to_add"
     assert_eq!(diff.to_add.len(), files.len());
     assert!(diff.to_update.is_empty());
-    assert!(diff.to_remove.is_empty());
+    assert_eq!(diff.to_remove, [] as [std::string::String; 0]);
 
     // Apply
     store.apply_diff(&diff).unwrap();
@@ -175,7 +175,7 @@ fn test_scan_to_store_round_trip() {
     let stored = store.list_files().unwrap();
     assert_eq!(stored.len(), files.len());
     for entry in &stored {
-        assert!(!entry.content_hash.is_empty());
+        assert_ne!(entry.content_hash, "");
         assert!(entry.byte_size > 0);
     }
 

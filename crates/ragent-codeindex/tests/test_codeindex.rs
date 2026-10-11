@@ -246,7 +246,7 @@ fn test_status() {
     assert_eq!(stats.files_indexed, 2);
     assert!(stats.total_symbols > 0);
     assert!(stats.total_bytes > 0);
-    assert!(!stats.languages.is_empty());
+    assert_ne!(stats.languages, [] as [(std::string::String, u64); 0]);
     assert!(
         stats.index_size_bytes > 0,
         "on-disk size should be computed"

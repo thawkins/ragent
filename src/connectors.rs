@@ -3,9 +3,10 @@
 //!
 //! Mirrors the TUI `/connectors` slash family so the connector store can be
 //! managed from a shell without launching the TUI:
-//! `ragent connectors <sub> [args...]` for the twelve subcommands (`list`,
-//! `search`, `add`, `remove`, `enable`, `disable`, `connect`, `disconnect`,
-//! `auth`, `test`, `stores`, `help`). The parse-and-run logic lives entirely in
+//! `ragent connectors <sub> [args...]` for the twelve core subcommands (`list`,
+//! `claude`, `add`, `remove`, `enable`, `disable`, `connect`, `disconnect`,
+//! `auth`, `test`, `stores`, `help`) plus the `marketplace` sub-subcommand
+//! family (`show`, `claude list|add|remove`). The parse-and-run logic lives entirely in
 //! the `ragent-connectors` crate ([`ragent_connectors::run_connector_subcommand`]
 //! for the session-free subcommands and
 //! [`ragent_connectors::run_connector_subcommand_env`] for the management

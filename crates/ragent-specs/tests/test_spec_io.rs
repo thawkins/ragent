@@ -176,7 +176,7 @@ async fn test_read_spec_without_feedback_md_defaults_empty() {
         .await
         .unwrap();
     let spec = SpecIo::read_spec(root, &id).await.unwrap();
-    assert!(spec.feedback_md.is_empty());
+    assert_eq!(spec.feedback_md, "");
 }
 
 #[tokio::test]
@@ -250,5 +250,5 @@ fn test_spec_feedback_md_path() {
 fn test_spec_new_feedback_md_empty() {
     let id = SpecId::new("new-test").unwrap();
     let spec = Spec::new(id, "Test");
-    assert!(spec.feedback_md.is_empty());
+    assert_eq!(spec.feedback_md, "");
 }

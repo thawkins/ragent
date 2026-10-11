@@ -38,7 +38,7 @@ async fn full_create_list_show_delete_flow() {
     // Delete
     mgr.delete("rust-async").await.unwrap();
     let list = mgr.list(true).await.unwrap();
-    assert!(list.is_empty());
+    assert_eq!(list, [] as [ragent_research::ResearchItem; 0]);
 }
 
 #[tokio::test]
@@ -149,7 +149,10 @@ async fn archive_then_default_list_excludes_item() {
         .await
         .unwrap();
     mgr.archive("rust-async").await.unwrap();
-    assert!(mgr.list(false).await.unwrap().is_empty());
+    assert_eq!(
+        mgr.list(false).await.unwrap(),
+        [] as [ragent_research::ResearchItem; 0]
+    );
     let all = mgr.list(true).await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].status, ResearchStatus::Archived);

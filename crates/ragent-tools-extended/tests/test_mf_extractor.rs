@@ -83,7 +83,7 @@ fn test_format_markdown_default() {
     let html = article_html("This is a test paragraph with some content. ");
     let opts = ExtractOptions::default();
     let result = extract(&html, "https://example.com", "text/html", &opts).unwrap();
-    assert!(!result.content.is_empty());
+    assert_ne!(result.content, "");
     // Should have used one of the extraction chain methods.
     assert!(
         result.method == ExtractMethod::Readability
@@ -162,7 +162,7 @@ fn test_readability_extracts_long_article() {
         assert!(result.content.contains("substantial"));
     }
     // Either way, content should not be empty.
-    assert!(!result.content.is_empty());
+    assert_ne!(result.content, "");
 }
 
 #[test]

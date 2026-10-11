@@ -610,7 +610,10 @@ fn test_total_merged_results_after_dedup() {
 #[test]
 fn test_merge_empty_reports() {
     let output = merge_and_rank(&[], "test");
-    assert!(output.results.is_empty());
+    assert_eq!(
+        output.results,
+        [] as [ragent_tools_extended::masterfetch::search::ConsensusResult; 0]
+    );
     assert_eq!(output.total_engines, 0);
 }
 
@@ -621,7 +624,10 @@ fn test_merge_all_engines_blocked() {
         EngineReport::blocked("brave", "rate-limited"),
     ];
     let output = merge_and_rank(&reports, "test");
-    assert!(output.results.is_empty());
+    assert_eq!(
+        output.results,
+        [] as [ragent_tools_extended::masterfetch::search::ConsensusResult; 0]
+    );
     assert_eq!(output.blocked_engines.len(), 2);
     assert_eq!(output.total_engines, 2);
 }
@@ -633,9 +639,12 @@ fn test_merge_all_engines_empty_results() {
         EngineReport::ok("brave", vec![]),
     ];
     let output = merge_and_rank(&reports, "test");
-    assert!(output.results.is_empty());
+    assert_eq!(
+        output.results,
+        [] as [ragent_tools_extended::masterfetch::search::ConsensusResult; 0]
+    );
     assert_eq!(output.total_engines, 2);
-    assert!(output.blocked_engines.is_empty());
+    assert_eq!(output.blocked_engines, [] as [std::string::String; 0]);
 }
 
 // ===========================================================================
@@ -760,7 +769,7 @@ fn test_mine_related_queries_excludes_stopwords() {
 #[test]
 fn test_mine_related_queries_empty_input() {
     let related = mine_related_queries(&[], "test");
-    assert!(related.is_empty());
+    assert_eq!(related, [] as [std::string::String; 0]);
 }
 
 #[test]

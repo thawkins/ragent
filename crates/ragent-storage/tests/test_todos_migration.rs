@@ -112,7 +112,7 @@ fn test_list_tasks_reads_populated_task_columns() {
     assert_eq!(a.active_form.as_deref(), Some("Implementing Task A"));
     assert_eq!(a.owner.as_deref(), Some("coder"));
     assert_eq!(a.metadata, r#"{"priority":"high"}"#);
-    assert!(a.blocked_by.is_empty());
+    assert_eq!(a.blocked_by, [] as [std::string::String; 0]);
 
     let b = todos.iter().find(|t| t.id == "todo-b").expect("todo-b");
     assert_eq!(b.active_form.as_deref(), Some("Waiting on Task A"));
@@ -180,7 +180,7 @@ fn test_blocked_by_invalid_json_falls_back_to_empty() {
         .expect("get todos");
     assert_eq!(todos.len(), 1);
     // Invalid JSON should fall back to empty Vec, not panic.
-    assert!(todos[0].blocked_by.is_empty());
+    assert_eq!(todos[0].blocked_by, [] as [std::string::String; 0]);
 }
 
 /// Verify the migration is idempotent: calling `migrate` again (or
@@ -216,7 +216,7 @@ fn test_migration_is_idempotent() {
         assert!(todos[0].active_form.is_none());
         assert!(todos[0].owner.is_none());
         assert_eq!(todos[0].metadata, "{}");
-        assert!(todos[0].blocked_by.is_empty());
+        assert_eq!(todos[0].blocked_by, [] as [std::string::String; 0]);
     }
 
     let _ = std::fs::remove_dir_all(&dir);

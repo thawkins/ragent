@@ -438,7 +438,7 @@ fn test_task_get_tool_name() {
 #[test]
 fn test_task_get_tool_description() {
     let tool = TaskGetTool;
-    assert!(!tool.description().is_empty());
+    assert_ne!(tool.description(), "");
     assert!(tool.description().contains("task_id"));
 }
 

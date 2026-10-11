@@ -9,9 +9,10 @@
 
 use std::sync::Arc;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest, ToolDefinition};
 use serde_json::json;
+use std::hint::black_box;
 
 /// Build a [`ChatRequest`] with `n` messages and `t` tools.
 fn build_request(msg_count: usize, tool_count: usize) -> ChatRequest {

@@ -32,6 +32,7 @@ fn entry(id: &str, category: Option<&str>) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: category.map(str::to_string),
     }
 }
@@ -147,8 +148,8 @@ async fn moving_the_category_cursor_applies_the_category_and_narrows_results() {
 
     handle_key(&mut app, key(KeyCode::Down)).await;
     // `Utility` folds the `Utility`/`utility` spellings into one exact,
-    // case-insensitive match, so both survive (FR-007).
-    assert_eq!(filtered_ids(&app), ["codex-time", "codex-shell"]);
+    // case-insensitive match, so both survive (FR-007) in alphabetical order.
+    assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
     handle_key(&mut app, key(KeyCode::Down)).await;
     assert_eq!(
@@ -159,11 +160,12 @@ async fn moving_the_category_cursor_applies_the_category_and_narrows_results() {
 
     handle_key(&mut app, key(KeyCode::Up)).await;
     handle_key(&mut app, key(KeyCode::Up)).await;
-    // Back to `ALL`: every entry, including the uncategorised one, returns.
+    // Back to `ALL`: every entry, including the uncategorised one, returns
+    // alphabetically by id (FR-050).
     assert_eq!(browser(&app).active_category(), "ALL");
     assert_eq!(
         filtered_ids(&app),
-        ["codex-weather", "codex-time", "codex-shell", "codex-uncat"]
+        ["codex-shell", "codex-time", "codex-uncat", "codex-weather"]
     );
 }
 
@@ -232,8 +234,8 @@ async fn enter_on_the_result_list_still_starts_an_install() {
 
     assert_eq!(
         browser(&app).last_install.as_deref(),
-        Some("installing codex-weather..."),
-        "ENTER over the result list runs the normal install"
+        Some("installing codex-shell..."),
+        "ENTER over the result list runs the normal install on the first row"
     );
 }
 
@@ -244,7 +246,7 @@ async fn the_clear_key_sets_the_category_to_all_and_restores_the_full_set() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
     handle_key(&mut app, key(KeyCode::Down)).await;
-    assert_eq!(filtered_ids(&app), ["codex-time", "codex-shell"]);
+    assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
     handle_key(&mut app, key(KeyCode::Char('c'))).await;
 
@@ -254,7 +256,7 @@ async fn the_clear_key_sets_the_category_to_all_and_restores_the_full_set() {
     assert_eq!(browser(&app).category_cursor_row(), 0);
     assert_eq!(
         filtered_ids(&app),
-        ["codex-weather", "codex-time", "codex-shell", "codex-uncat"]
+        ["codex-shell", "codex-time", "codex-uncat", "codex-weather"]
     );
     assert!(
         browser(&app).query.is_empty(),

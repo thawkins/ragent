@@ -45,7 +45,8 @@ pub use config::{
     default_acp_turn_timeout_secs, tool_family_names,
 };
 pub use connectors::{
-    ConnectorCredentialsConfig, ConnectorStoreEndpoint, ConnectorStoresConfig, ConnectorsConfig,
+    ConnectorCredentialsConfig, ConnectorMarketplaceEntry, ConnectorStoreEndpoint,
+    ConnectorStoresConfig, ConnectorsConfig,
 };
 pub use gcf::GcfConfig;
 pub use i18n::{I18nConfig, LocaleCatalog, MessageKey};
@@ -54,7 +55,7 @@ pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,
     PermissionRule,
 };
-pub use plugins::{PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
+pub use plugins::{MarketplaceEntry, PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
 pub use security_analyzer::{AnalyzerModelRef, SecurityAnalyzerConfig};
 pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};
 pub use trigger::{McpNotificationMode, TriggerConfig};

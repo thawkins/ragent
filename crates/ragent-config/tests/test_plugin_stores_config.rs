@@ -107,6 +107,7 @@ fn stores_serialise_roundtrip() {
                 url: Some("https://example.org/codex.json".to_string()),
             }),
             claude: None,
+            marketplaces: Vec::new(),
             timeout_ms: 5_000,
             max_index_bytes: 512_000,
             cache_ttl_secs: 60,

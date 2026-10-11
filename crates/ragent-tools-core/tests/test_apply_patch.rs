@@ -306,7 +306,7 @@ async fn test_apply_patch_log_success_writes_jsonl() {
     .expect("execute");
 
     let entries = read_log_lines(&log_dir);
-    assert!(!entries.is_empty());
+    assert_ne!(entries, [] as [serde_json::Value; 0]);
     let entry = &entries[0];
     assert_eq!(entry["tool"], "apply_patch");
     assert!(

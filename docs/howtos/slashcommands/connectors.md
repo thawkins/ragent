@@ -1,5 +1,5 @@
 # /connectors
-> Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help
+> Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | marketplace show | help
 
 ## Overview
 
@@ -36,6 +36,8 @@ The system is specified in [`specs/connectors/SPEC.md`](../../../specs/connector
 /connectors auth <id>                              # manage credential / report auth state
 /connectors test <id>                              # isolated connect-and-invoke harness
 /connectors stores [--check]                       # report catalogue endpoints + provenance
+/connectors marketplace show                        # list configured marketplaces
+/connectors marketplace claude list|add|remove      # manage added marketplaces
 /connectors help                                   # usage block
 ```
 
@@ -43,8 +45,8 @@ The system is specified in [`specs/connectors/SPEC.md`](../../../specs/connector
 
 | Form | Description |
 | --- | --- |
-| `/connectors list [--verbose] [--category <name>]` | One row per installed connector showing state, auth state, category, and bridged server/tool counts. `--verbose` adds detail. `--category` restricts the rows; `ALL` (any case) or a blank value clears the filter; an unknown category is refused with an `[err]` row and changes no state. |
-| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser: a title line (catalogue name, query, active category, visible/total count), a scrollable result list with the block cursor on the highlighted row, an `[installed]` marker and distinct colour on already-installed connectors, and a footer of key hints. The optional `query` pre-fills the search field, `--category <name>` pre-selects the category filter (an unknown category is refused in the footer and no row is hidden), and `--refresh` bypasses the catalogue cache. Press `c` while the panel is open to cycle the filter through the catalogue's categories and back to `ALL`. |
+| `/connectors list [--verbose] [--category <name>]` | One row per installed connector showing state, auth state, category, and bridged server/tool counts, sorted alphabetically by connector id (case-insensitive). `--verbose` adds detail. `--category` restricts the rows, which keep their alphabetical order; `ALL` (any case) or a blank value clears the filter; an unknown category is refused with an `[err]` row and changes no state. |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser: a title line (catalogue name, query, active category, visible/total count, plus a `loading details...` hint while the manifest-description enrichment runs), a fixed dark-on-light column-heading row (`Id`, `Category`, `Marketplace`, `Description`) pinned above a scrollable result list with the block cursor on the highlighted row (each row shows the connector id, its category, the marketplace it came from, and its description), an `[installed]` marker and distinct colour on already-installed connectors, and a footer of key hints. The optional `query` pre-fills the search field, `--category <name>` pre-selects the category filter (an unknown category is refused in the footer and no row is hidden), and `--refresh` bypasses the catalogue cache. The panel merges the base catalogue endpoint and every marketplace added with `/connectors marketplace claude add`, and fills each entry's blank description from its own repository manifest off the event loop. A left-hand category navigator lists `ALL` plus the catalogue's categories: `Tab` moves focus between it and the results, `Up`/`Down` over the navigator apply the highlighted category, `ENTER` over the navigator applies and returns focus to the results, and `c` clears the filter back to `ALL`. Clicking a navigator row applies it and the wheel scrolls the navigator. |
 | `/connectors add <id\|source> [--force]` | Install a connector from a catalogue id, a local directory holding a connector manifest, a local `.zip`/`.tar.gz`, or an `https://` URL naming a package. A fresh install is recorded **enabled**; run `/connectors enable <id>` to connect its servers now in a running session. A duplicate id is refused unless `--force` is given. |
 | `/connectors remove <id>` | Uninstall a connector. Refused while the connector is enabled. |
 | `/connectors enable <id>` | Enable a connector and connect its servers now. |
@@ -54,6 +56,8 @@ The system is specified in [`specs/connectors/SPEC.md`](../../../specs/connector
 | `/connectors auth <id>` | Manage a connector's credential (token, client secret) and report its auth state. Secrets live in the encrypted credential store; the manifest stores only the credential *name*. |
 | `/connectors test <id>` | Connect in isolation with a throwaway probe, invoke one tool, and report per-step `[ ok ]`/`[fail]` results. Never touches the live session. |
 | `/connectors stores [--check]` | Report each catalogue endpoint and its provenance (`default` or `config`); `--check` also probes each endpoint. |
+| `/connectors marketplace show` | List the marketplaces configured for the Claude catalogue (the base endpoint plus each added marketplace, tagged `default`/`config`/`added`). A pure config read. |
+| `/connectors marketplace claude list\|add <source> [--force]\|remove <name>` | List one catalogue's configured marketplaces, add an additional marketplace (an `owner/repo` slug, a `git@github.com:owner/repo.git` SSH remote, an `https://` marketplace-index URL, or a local directory), or remove one by name. Written to the user-global `connectors.stores.marketplaces`. |
 | `/connectors help` | Print the usage block. A bare `/connectors` or an unknown subcommand does the same. |
 
 ### Sources accepted by `/connectors add`

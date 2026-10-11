@@ -30,6 +30,7 @@ fn entry(id: &str, name: &str, description: &str, tags: &[&str]) -> StoreEntry {
         dialect: None,
         tags: tags.iter().map(|t| (*t).to_string()).collect(),
         homepage: None,
+        marketplace: String::new(),
         category: None,
     }
 }
@@ -70,8 +71,8 @@ fn open_sets_a_loading_browser_for_the_requested_store() {
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(browser.kind, StoreKind::Codex);
     assert_eq!(browser.status, PluginStoreStatus::Loading);
-    assert!(browser.query.is_empty());
-    assert!(browser.all.is_empty());
+    assert_eq!(browser.query, "");
+    assert_eq!(browser.all, [] as [ragent_plugins::StoreEntry; 0]);
     assert_eq!(browser.cursor, 0);
     assert!(!browser.refresh);
     assert!(app.needs_redraw, "opening the panel requests a repaint");
@@ -101,7 +102,7 @@ fn a_prefilled_query_is_applied_on_open() {
     assert_eq!(browser.query, "weather");
     // No entries have arrived yet, so the filter set is empty; the query is
     // already recorded and will constrain the set once the fetch lands (FR-020).
-    assert!(browser.filtered.is_empty());
+    assert_eq!(browser.filtered, [] as [usize; 0]);
 }
 
 #[test]
@@ -204,7 +205,7 @@ async fn esc_on_a_non_empty_query_edits_rather_than_closing() {
 
     assert!(action.is_none());
     assert!(app.plugin_store.is_some(), "the panel stays open (FR-009)");
-    assert!(query(&app).is_empty());
+    assert_eq!(query(&app), "");
 }
 
 #[tokio::test]
@@ -280,7 +281,7 @@ async fn an_unhandled_key_is_swallowed_and_changes_nothing() {
 
     assert!(action.is_none(), "the panel swallows every other key");
     assert!(app.plugin_store.is_some());
-    assert!(query(&app).is_empty());
+    assert_eq!(query(&app), "");
     assert_eq!(app.input, "draft");
 }
 

@@ -98,7 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.131). The core architecture, tool system,
+Ragent is in **beta** (v1.0.132). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -134,7 +134,7 @@ below documents the current state of all subsystems.
 - **Plugin-store category navigator (spec `catnav`) and `browser` removal
   (v1.0.130, commit `e617bcef`)** — the `/plugins codex` and `/plugins claude` browse
   panels gain a left-hand category navigator (§6.5): `ALL` plus the distinct
-  categories and tags the fetched index declares, driven by keyboard (`Tab`
+  categories the fetched index declares, driven by keyboard (`Tab`
   focus, `Up`/`Down` move-and-apply, `Enter` apply, `c` clear) and mouse
   (click/scroll); a `--category <name>` launch argument pre-selects a row; the
   `StoreEntry` model gains an optional `category` field. The `browser` tool and
@@ -173,6 +173,27 @@ below documents the current state of all subsystems.
   reference in a single allocating pass (exact id > case-insensitive id >
   case-insensitive name). Dead `theme::think_summary` /
   `memory_clear_confirm_area` items and several stale doc references are removed.
+- **Plugin and connector marketplace browsers (spec `pluginstores`
+    FR-047..FR-050, `connectors` FR-042..FR-046; v1.0.132)** - the
+    `/plugins codex|claude` and `/connectors claude` browse panels
+    each merge their store's base endpoint with every additional marketplace
+  registered through the new `/plugins marketplace` / `/connectors marketplace`
+  sub-subcommand families (`show`, `<store> list|add <source> [--force]|remove
+  <name>`), recorded in the user-global `plugins.stores.marketplaces` /
+  `connectors.stores.marketplaces` arrays by an atomic config splice. Each result
+  row now shows the plugin/connector id, its version (plugin store), the
+  **marketplace it came from**, and its description; the connector panel pins a
+  dark-on-light column-heading row above its scrolling list, and both panels
+  resolve each entry's blank description (and, for the plugin store, its version)
+  from the entry's own repository manifest off the event loop via a bounded thread
+  pool with an injectable `ManifestSource` seam (`ragent_plugins::store_enrich`,
+  `ragent_connectors::catalogue_enrich`). Every connector and plugin-store list is
+  now sorted in ascending alphabetical order of id, case-insensitively with a
+  byte-wise tiebreak (`compare_connector_ids` / `compare_store_ids`), applied
+  before any query or category filter so the survivors keep their order. The
+  plugin-store navigator no longer derives rows from entry `tags`/`keywords`
+  (`catnav` FR-021 withdrawn): it lists only the `category` values the index
+  declares, so a plugin's long `keywords` list can no longer flood it.
 
 
 - **`/memory clear` (§ Memory)** — `/memory clear` opens a
@@ -204,13 +225,16 @@ below documents the current state of all subsystems.
   the wider community catalogue) carrying a category, an auth shape, and one or
   more MCP servers, resolved onto the existing `McpClient` and the durable
   `mcp_state.json` enable ledger. It is driven by the twelve-subcommand
-  `/connectors` family (with an interactive off-the-event-loop catalogue browser
+  `/connectors` family plus the `/connectors marketplace` sub-subcommand family
+  (with an interactive off-the-event-loop catalogue browser
   `/connectors claude [query] [--category <name>] [--refresh]`, an isolated
-  `test` harness, and endpoint-provenance
-  reporting via `stores [--check]`), a `ragent connectors` CLI parity surface,
+  `test` harness, endpoint-provenance
+  reporting via `stores [--check]`, and a `/connectors marketplace` family that
+  manages the additional catalogues the browser fetches and merges into one
+  panel with per-row attribution), a `ragent connectors` CLI parity surface,
   and a `connectors` config block (master switch, store dir, catalogue endpoints
-  and fetch budgets, credential-name mapping). Spec `connectors` FR-001..FR-041
-  / NFR-001..003, plan T-001..T-021, plus `assets/connectors/fixtures/` and an
+  and fetch budgets, credential-name mapping). Spec `connectors` FR-001..FR-044
+  / NFR-001..003, plan T-001..T-026, plus `assets/connectors/fixtures/` and an
   acceptance walk.
 - **ANTIPAT M1 ASCII sweep (TUI)** — the message-window tool-category icons and
   the status-bar service icons are now plain ASCII marker prefixes (`[file]`,
@@ -1875,8 +1899,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spawn <agent> <prompt...>` | Launch a detached fire-and-forget background sub-agent from the input line (spec `spawnagent`); not listed by `list_agents`, not awaitable via `wait_agents`, its result never injected back into the chat |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories and tags the fetched index declares) operated by keyboard and mouse, its own document shape normalised by that store's `StoreProvider`; `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
-| `/connectors list\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude [query] [--category <name>] [--refresh]` opens the interactive catalogue browser (the single catalogue surface); `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|marketplace\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories the fetched index declares) operated by keyboard and mouse, its own document shape normalised by that store's `StoreProvider`, and each row showing the plugin id, version, the marketplace it came from, and the description; `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins marketplace show` lists the marketplaces configured for both stores in one section each (Codex, Claude) as a name/url/description table; `/plugins marketplace <codex|claude> add <source> [--force]|remove <name>|list` manages additional marketplaces (from an `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory) in the user-global `plugins.stores.marketplaces`, which the two browse panels fetch and merge into the one panel; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/connectors list\|claude\|add\|remove\|enable\|disable\|connect\|disconnect\|auth\|test\|stores\|marketplace\|help` | Manage MCP-backed connectors (named integrations carrying a category, an auth shape, and one or more MCP servers); `/connectors claude [query] [--category <name>] [--refresh]` opens the interactive catalogue browser (the single catalogue surface), which merges the base catalogue endpoint and every marketplace added with `/connectors marketplace claude add`, shows each row's id, category, the marketplace it came from, and its description, and resolves blank descriptions from each entry's own repository manifest off-loop with a `loading details...` title hint; `/connectors marketplace show` lists the marketplaces configured for the Claude catalogue and `/connectors marketplace claude list\|add <source> [--force]\|remove <name>` manages them in the user-global `connectors.stores.marketplaces`; `/connectors test` runs an isolated connect-and-invoke harness; `/connectors stores [--check]` reports each catalogue endpoint's provenance; `/connectors add` accepts a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL; CLI parity via `ragent connectors` (spec `connectors`, section 19C) |
 | `/backend [<kind>]` | Open the execution-backend switcher (active backend + each backend's health) or switch to a kind/id directly; `/backend help`. See section 19D (spec `openhands` FR-008) |
 | `/security on\|off\|status\|revert\|help` | LLM security-analyzer mode (spec `openhands` FR-006, FR-017). `security-analyzer` is accepted as an alias. See section 19D.7 |
 | `/automation [list]\|runs <id>\|run <id>\|help` | Manage the automation service (spec `openhands` FR-013, FR-014, FR-018). See section 19F |
@@ -1922,8 +1946,7 @@ The plugin-store browse panel opened by `/plugins codex` and `/plugins claude`
 (spec `catnav`) splits its inner area into a left-hand **category navigator** and
 the existing result column. The navigator lists the `ALL` sentinel first, then the
 distinct non-empty categories the fetched store index declares (sorted
-case-insensitively, folding case-only duplicates), followed by each distinct
-non-empty `tag` of an entry that also declares a category (FR-021); an index that
+case-insensitively, folding case-only duplicates); an index that
 declares no category renders `ALL` only and still browses normally (FR-018). The
 active category is shown in the panel title (`-- category <name>`) and painted in a
 distinct colour; the row under the category cursor carries a block cursor
@@ -1951,6 +1974,46 @@ falls back to `ALL` (FR-027). A `--category <name>` launch argument holds the
 requested filter until the index lands, then validates it against the derived rows
 exactly like an in-panel selection, reporting an unknown name in the footer while
 leaving every row visible (FR-022).
+
+Each result row renders the plugin id, its version, **the marketplace the entry came
+from**, and its description, and the panel clamps to a 140-column ceiling (a third wider
+than the original 100) so the marketplace column has room. The marketplace column names
+the added marketplace an entry was fetched from (the `name` it was added under, matched by
+resolved URL), or the store label (`Codex`/`Claude`) for the store's base endpoint, so a
+merged multi-marketplace panel shows each row's source (FR-048). The marketplace and
+description columns share the flexible remainder, so a longer marketplace name is shown
+in full when the terminal has room and clipped without pushing the fixed id/version
+columns or the trailing `[installed]` marker off the row when it does not.
+
+A vendor marketplace is a *listing* rather than a native index: the Codex catalogue
+carries neither a version nor a description, and the Claude catalogue carries a
+description but only sometimes a version. After the index lands, the panel resolves each
+plugin's `version` and `description` from the plugin's **own manifest**, fetched off the
+event loop from the raw URL derived from its install source when that source is a
+`github.com` git source - `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<subpath>/<manifest>`,
+with the store's dialect-appropriate manifest name (`.codex-plugin/plugin.json` for
+Codex, `.claude-plugin/plugin.json` for Claude) tried first and a bare `plugin.json` as a
+fallback. The provider transform (`transform_vendor_entry`) reads what the listing
+declares, including the entry's `interface.displayName`/`shortDescription`/
+`longDescription`, and leaves an absent version blank rather than fabricating a `0`. The
+enrichment (`ragent-plugins/src/store_enrich.rs`) is best-effort and never fatal (a
+missing manifest, a transport failure, non-JSON bytes, or an oversized body yields no
+update), runs on a bounded thread pool, caches each URL's result (including a negative
+result) across opens, and is injectable so the tests run offline. The title shows
+`loading details...` while it runs; a version that stays unknown renders an explicit `-`
+rather than a blank cell, and enrichment never overwrites a value the index declared.
+
+The result list itself is rendered in ascending alphabetical order of plugin id,
+case-insensitively with a byte-wise tiebreak, derived from the id alone rather than the
+order the store index declared the entries in or the order the configured marketplaces
+were merged (FR-050). The sort is applied when the index lands, before the filter is
+derived, so a free-text query and an active category both narrow an already-sorted set
+and the survivors keep their alphabetical order. One comparator is shared by every store
+surface (`compare_store_ids`/`sort_store_entries` in `ragent-plugins`), mirroring the
+connector system's `compare_connector_ids`. The navigator's category rows keep their own
+case-insensitive sort, and a case-insensitive category collision (for example `Utility`
+and `utility`) keeps the first spelling the index declares, so the result sort never
+relabels a category.
 
 ### 6.4 Permission Dialog Countdown
 
@@ -3677,7 +3740,7 @@ credential must be resolved from an environment variable.
 
 ### 19C.6 The `/connectors` command family
 
-Twelve subcommands, dispatched through
+Thirteen subcommands, dispatched through
 `crates/ragent-tui/src/app/connector.rs`, registered in `SLASH_COMMANDS`, and
 listed in the command catalog and the `/` autocomplete menu (seeded from the
 crate's `CONNECTOR_SUBCOMMANDS` token list so the menu cannot drift from the
@@ -3696,6 +3759,7 @@ usage block) (FR-004):
 | `/connectors auth <id>` | Manage the credential and report auth state (FR-014) |
 | `/connectors test <id>` | Isolated connect-and-invoke harness (FR-015, FR-016) |
 | `/connectors stores [--check]` | Report each catalogue endpoint's provenance (FR-036) |
+| `/connectors marketplace show` / `marketplace claude list\|add\|remove` | Manage the additional catalogues the browser fetches (FR-042, FR-043) |
 | `/connectors help` | Usage block (FR-017) |
 
 A bare `/connectors`, `/connectors help`, and an unrecognised subcommand all
@@ -3726,9 +3790,12 @@ connected after startup reports a real count (T-008).
 
 A modal overlay in `crates/ragent-tui/src/layout.rs`, modelled on the
 plugin-store panel: a title line (catalogue name, query, active category, and
-visible/total result count), a scrollable result list with the block cursor on
-the highlighted row, an `[installed]` marker and distinct colour on
-already-installed connectors, and a footer of key hints. The catalogue fetch and
+visible/total result count; a `loading details...` hint is appended while the
+manifest-description enrichment is still running), a scrollable result list with
+the block cursor on the highlighted row, each row showing the connector id, its
+category, the marketplace it came from (or `-` for a local install) and its
+description, an `[installed]` marker and distinct colour on already-installed
+connectors, and a footer of key hints. The catalogue fetch and
 the `ENTER` install both run **off the event loop** on a blocking worker and
 deposit their result for the UI thread to drain, so the fetch never blocks the
 loop or an agent turn. While open the panel owns the keyboard (`Up`/`Down` move
@@ -3740,6 +3807,30 @@ pre-filled query may contain spaces) and validates the category against the
 categories the fetched catalogue actually declares, falling back to an
 unfiltered launch when it is unknown; a refused category is reported in the
 footer while every row stays visible (FR-041).
+
+### 19C.7a Catalogue marketplaces and description enrichment
+
+The panel fetches the base catalogue endpoint and every marketplace added
+through `/connectors marketplace claude add`, merging their entries into the one
+list (`store_ops::fetch_all_catalogues`,
+`CatalogueKind::effective_endpoints_with_source`); a duplicate id keeps the first
+occurrence (the base endpoint's) and a refused added URL is skipped and surfaced
+as a warning in the message window rather than blinding the panel. Each merged
+entry carries the display name of the marketplace it came from in its
+`marketplace` field (`marketplace_name_for`: the added marketplace's `name`, or
+the catalogue label for the base endpoint), rendered in the browse row.
+
+After the catalogue lands, each entry whose `source` is a `github.com` `git+`
+source has its **blank** description resolved from its own repository manifest off
+the event loop (`crates/ragent-connectors/src/catalogue_enrich.rs`, ported from
+`ragent_plugins::store_enrich`): the raw URL
+`https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<subpath>/connector.json`
+is fetched (with `.claude-plugin/connector.json` tried after it) through a
+bounded thread pool, best-effort and never fatal, cached per URL, and behind the
+injectable `ManifestSource` seam (the production `NetworkManifestSource`).
+`/connectors marketplace show` and `/connectors marketplace claude list|add|remove`
+manage the `connectors.stores.marketplaces` array in the user-global config
+(atomic splice, duplicate name refused without `--force`) (FR-042..FR-044).
 
 ### 19C.8 Configuration
 
@@ -4209,6 +4300,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.132 | 2026-10-12 | Merged connector/plugin marketplace browsers and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050, `connectors` FR-042..FR-046). The `/plugins codex\|claude` and `/connectors claude` browse panels each merge their store's base endpoint with every additional marketplace registered through the new `/plugins marketplace` / `/connectors marketplace` sub-subcommand families (`show`, `<store> list\|add <source> [--force]\|remove <name>`), recorded in the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces` arrays by an atomic config splice. Each result row shows the plugin/connector id, its version (plugin store), the marketplace it came from, and its description; the connector panel pins a dark-on-light column-heading row above its scrolling list, and both panels resolve each entry's blank description (and, for the plugin store, its version) from the entry's own repository manifest off the event loop via a bounded thread pool with an injectable `ManifestSource` seam (`ragent_plugins::store_enrich`, `ragent_connectors::catalogue_enrich`). Every connector and plugin-store list is sorted in ascending alphabetical order of id, case-insensitively with a byte-wise tiebreak (`compare_connector_ids` / `compare_store_ids`), applied before any query or category filter. The plugin-store category navigator no longer derives rows from entry `tags`/`keywords` (`catnav` FR-021 withdrawn). Registry fixes: the `/events` SSE connection cap builds on stable Rust (`compare_exchange_weak` loop replacing `AtomicUsize::try_update`); connectors install enabled; `catnav` FR-021 withdrawn retaining its number. |
 | v1.0.131 | 2026-10-10 | OpenHands-parity release. The pluggable execution backends (`local`/`docker`/`podman`/`remote`, §19D) with a health-visible registry and TUI `/backend` switcher, sandbox secret injection resolved from the encrypted store at spawn time, the ACP client plus the feature-gated ACP server (§19E), the OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) with a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport, the automation service (webhook ingress `POST /auto/{id}`, scheduler, durable run history, backend confinement, §19F), AgentSkills (`.agents/skills/`) discovery, and the opt-in LLM security analyzer (`/security`) now ship as a tagged release. The 7-layer bash validation, path containment, and permission system are unchanged and gate every new surface. Registry fixes: the fast-path schema tests assert the crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table); `PluginStoreBrowser::set_index` keeps document order; the `mask_key` doctest expects `[REDACTED]`; `machine_output` routes tracing to stderr for the report subcommands so machine-readable stdout stays clean; and the unused `ragent-storage` dependency is dropped from `ragent-tools-extended`. |
 | v1.0.130 | 2026-10-09 | OpenHands parity delta (spec `openhands`, FR-001..FR-038 / T-001..T-019). Pluggable execution backends (`local`/`docker`/`podman`/`remote`) with a health-visible registry and TUI `/backend` switcher (§19D); sandbox secret injection resolved from the encrypted store at spawn time; an ACP client and a feature-gated ACP server (§19E); an OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) plus a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport; the automation service with webhook ingress (`POST /auto/{id}`), scheduler, durable run history, and backend confinement (§19F); AgentSkills (`.agents/skills/`) discovery; and an opt-in LLM security analyzer (`/security`, tightening-only over the static rules). Plugin-store category navigator (`catnav`) for `/plugins codex|claude` and removal of the `browser` CDP tool (registered count 152 -> 151 across 22 categories). The engine-gated `mf_screenshot` capability (FR-029) is registered only when a drivable headless browser is present, so the default build advertises 148 tools across 21 categories. Also fixes the stable-toolchain `/events` SSE connection cap (`AtomicUsize::try_update` -> `compare_exchange_weak` loop). |
 | v1.0.129 | 2026-10-07 | Code-audit remediation complete through M9 (`docs/plans/code-audit.md`), landed as uncommitted working-tree work. **M5 dead-code removal:** the unreferenced `ragent-agent::snapshot` module (a stale near-copy of `ragent-storage::snapshot`) and the duplicated inline `ragent-tools-core` schema test suite are deleted; the placeholder `test_precompiled_regexes` bodies gain real assertions; the dead connector `NeverProbe`/`NoProbe` fallbacks and the `probe`/`workdir` parameters they alone used are removed, and `run_connector_subcommand_env` now takes `(&mut env, sub, rest)`; and the new 18th workspace crate `ragent-surface` owns the shared `/plugins`/`/connectors` surface glue (`ragent_surface::help` attribution + subcommand tokeniser, `ragent_surface::store` two-root store-dir resolution + symlink-containment guard, `ragent_surface::harness` step model with `sample_for_schema`/`schema_type`/`truncate`/`step`). **M6 test hygiene:** test scratch paths move off `/tmp` to `target/temp` (31 sites / 24 files); `ragent-plugins` and `ragent-connectors` each gain one `tests/support` `TempTree` (replacing 18 and 10 copy-pasted definitions); `test_mf_orchestrator_diag`/`test_fts_diag` and the live-network `test_ollama_cloud_real` are `#[ignore]`-gated; the three per-key config test files collapse to the table-driven `test_api_key_config_fields.rs`; the three scoreboard tests share `tests/support/scoreboard_fixture.rs`; weak `.is_some()` assertions bind concrete values; and four test files are renamed to `test_<component>_<scenario>`. **M7 new coverage:** new `tests/` suites for the calculator (24 tests), `agent_complete`/`bash_reset`/`xlsx`, the Azure AI Foundry provider (5 tests), the agent-loop step harness (3 tests), and the orchestrator `Coordinator` (13 tests) - the last fixing a real production bug where `active_jobs` was incremented after spawning and never on the synchronous paths, underflowing `AtomicU64` to `u64::MAX` (new `ActiveJobsGuard::enter` increments exactly once before the guard is installed). **M8 standards:** GitHub/GitLab acronym casing standardised across `ragent-tools-vcs` (31 tool types + shared helpers), the three user-facing/external-input unwraps removed, emoji/box-drawing glyphs stripped from production-source comments, six named modules gain `//!` headers, `MultiPlEAdapter` -> `MultipleAdapter`, the four `Regex::new(...)` sites in `slash.rs` use `.expect("valid ... regex")`, the `CollectingTierRouterObserver` test double is a real `pub` type, and `test_codeindex_backward_compat` asserts against the `SLASH_COMMANDS` data model instead of scraping source. **M9 dependency upkeep:** the yanked `yoke-derive@0.8.3` is cleared; the workspace converges on `thiserror 2`, `reqwest 0.13` (the `ragent-llm` pin now uses `workspace = true`), `rand 0.10`, and `criterion 0.8`; `ragent-storage` moves from `rand 0.8` to `0.10`; `lopdf` converges on `0.44` and the dedicated `vendor/lopdf` crate is deleted (the `MAX_OBJECT_DEPTH` recursion guard is no longer needed); `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp` migrate 0.29 -> 0.33 (the Prometheus scrape endpoint enables `experimental_metrics_custom_reader`); and `notify` 7 -> 8.2, `rquickjs` 0.10 -> 0.14, `tree-sitter` 0.26 -> 0.27, `chacha20poly1305` 0.10 -> 0.11, and `which` 7 -> 8 land. **M1 secret hardening:** `.gitignore` gains `*.db-wal`/`*.db-shm` (SQLite sidecars can hold plaintext credential-store and session pages) and the certificate/credential patterns `*.pem`, `*.p12`, `*.pfx`, `service-account.json`, `credentials.json`; a tracked `.env.example` template lists every credential env var ragent reads. Also fixes `Config::write_config_if_changed` folding a corrupt existing file to `Value::Null` (now logs and forces a rewrite). |
@@ -4807,7 +4899,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spawn <agent> <prompt...>` | Launch a detached fire-and-forget background sub-agent from the input line (spec `spawnagent`); not listed by `list_agents`, not awaitable via `wait_agents`, its result never injected back into the chat |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
-| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories and tags the fetched index declares) operated by keyboard and mouse (its own document shape is normalised by that store's `StoreProvider`); `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
+| `/plugins list\|add\|remove\|enable\|disable\|test\|stores\|marketplace\|help` | Manage sandboxed Codex/Claude plugins; `/plugins test` runs an isolated harness; `/plugins codex [query] [--category <name>] [--refresh]` and `/plugins claude [query] [--category <name>] [--refresh]` browse each store's official marketplace with a left-hand category navigator (`ALL` plus the distinct categories the fetched index declares) operated by keyboard and mouse (its own document shape is normalised by that store's `StoreProvider`), and each row showing the plugin id, version, the marketplace it came from, and the description; `/plugins stores [--check]` reports each store's effective endpoint and its source, and with `--check` also contacts each store to report availability and plugin count; `/plugins marketplace show` lists the marketplaces configured for both stores in one section each (Codex, Claude) as a name/url/description table; `/plugins marketplace <codex|claude> add <source> [--force]|remove <name>|list` manages additional marketplaces (from an `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory) in the user-global `plugins.stores.marketplaces`, which the two browse panels fetch and merge into the one panel; `/plugins add` accepts a `git+<https-url>#<ref>[:<subpath>]` git source; CLI parity via `ragent plugins` |
 | `/queue list\|clear\|next\|help` | Inspect the message input queue (messages and slash commands submitted while the agent executes; spec `inputqueue` FR-013/FR-017 amendment) |
 | `/todo` `/task` | Open the TASKS side panel |
 | `/skill help\|list\|<name> [args]` | Load or inspect skill packs: list them, or load and invoke `<name>` |

@@ -168,7 +168,7 @@ fn recorded_checkpoint_has_nonempty_event_id() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");
     let cp = log.record_checkpoint(&run, "cp").expect("checkpoint");
-    assert!(!cp.id.as_str().is_empty());
+    assert_ne!(cp.id.as_str(), "");
 }
 
 #[test]

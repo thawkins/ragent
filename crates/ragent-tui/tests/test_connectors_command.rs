@@ -71,6 +71,7 @@ fn connectors_registered_in_slash_commands() {
         "auth",
         "test",
         "stores",
+        "marketplace",
         "help",
     ] {
         assert!(
@@ -110,6 +111,7 @@ fn connectors_suggestions_list_all_subcommands() {
         "auth",
         "test",
         "stores",
+        "marketplace",
         "help",
     ] {
         assert!(
@@ -269,6 +271,7 @@ async fn list_reports_a_bridged_server_connected_from_the_live_client() {
         category: "code".to_string(),
         tags: Vec::new(),
         source: String::new(),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ragent_connectors::ConnectorAuthShape::None,
         auth_scope: Vec::new(),

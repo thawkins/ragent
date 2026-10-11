@@ -18,9 +18,9 @@ fn test_loop_spec_new_defaults_checkpoints_on_and_no_limits() {
     assert_eq!(spec.agent, "coder");
     assert_eq!(spec.goal, "all existing tests should pass");
     assert!(spec.verify_cmd.is_none());
-    assert!(spec.scope.is_empty());
-    assert!(spec.read_only.is_empty());
-    assert!(spec.tool_set.is_empty());
+    assert_eq!(spec.scope, [] as [std::string::String; 0]);
+    assert_eq!(spec.read_only, [] as [std::string::String; 0]);
+    assert_eq!(spec.tool_set, [] as [std::string::String; 0]);
     assert!(spec.max_steps.is_none());
     assert!(spec.cost_limit.is_none());
     // Checkpoints default on (destructive-action safety, FR-015).

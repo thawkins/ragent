@@ -104,7 +104,10 @@ fn reorder_breaks_cycles_without_dropping_findings() {
 
 #[test]
 fn reorder_is_noop_for_empty_or_single_finding() {
-    assert!(reorder_findings_by_dependency(&[]).is_empty());
+    assert_eq!(
+        reorder_findings_by_dependency(&[]),
+        [] as [std::string::String; 0]
+    );
     let single = vec!["Only finding.".into()];
     assert_eq!(reorder_findings_by_dependency(&single), single);
 }
@@ -378,7 +381,7 @@ fn parse_with_outcome_empty_response_falls_back() {
     let (result, outcome) = parse_analysis_response_with_outcome("", &sources);
     assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
     // FR-011 / T-010: fallback always produces >=1 finding.
-    assert!(!result.findings.is_empty());
+    assert_ne!(result.findings, [] as [std::string::String; 0]);
     assert!(result.findings[0].contains("**Observation:**"));
     assert!(result.findings[0].contains("**Analysis:**"));
     assert!(result.findings[0].contains("**Analysis:**"));
@@ -393,7 +396,7 @@ fn parse_with_outcome_no_findings_section_falls_back() {
     let sources = vec![src_body(1, None)];
     let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
     assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
-    assert!(!result.findings.is_empty());
+    assert_ne!(result.findings, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -403,7 +406,7 @@ fn parse_with_outcome_finding_missing_labels_falls_back() {
     let sources = vec![src_body(1, None)];
     let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
     assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
-    assert!(!result.findings.is_empty());
+    assert_ne!(result.findings, [] as [std::string::String; 0]);
     // The mechanical fallback inserts the missing labels as placeholders.
     assert!(result.findings[0].contains("**Observation:**"));
 }

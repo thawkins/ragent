@@ -42,11 +42,13 @@ pub mod host_api;
 pub mod lifecycle;
 pub mod manifest;
 pub mod marketplace;
+pub mod marketplace_ops;
 pub mod remove;
 pub mod report;
 pub mod runtime;
 pub mod session;
 pub mod store;
+pub mod store_enrich;
 pub mod store_fetch;
 pub mod store_index;
 pub mod store_provider;
@@ -67,9 +69,11 @@ pub use command_adapter::{
     PluginCommandAdapter, dispatch_command_sandbox, substitute_command_args,
 };
 pub use commands::{
-    StoreArgError, StoreCommand, StoreProbe, parse_store_command, probe_stores,
-    render_stores_report, render_stores_report_with_probes, run_store_command,
-    stores_check_requested,
+    MarketplaceArgError, MarketplaceCommand, StoreArgError, StoreCommand, StoreProbe,
+    marketplace_bare, marketplace_command_requested, marketplace_show_requested,
+    parse_marketplace_command, parse_store_command, probe_stores, render_marketplace_list_report,
+    render_marketplace_show_report, render_stores_report, render_stores_report_with_probes,
+    run_marketplace_command, run_store_command, stores_check_requested,
 };
 pub use control::{
     ControlArgError, ControlCommand, disable_error_report, disable_report,
@@ -115,12 +119,18 @@ pub use store::{
     LifecycleState, PluginState, STATE_FILE, ScanFailure, ScannedPlugin, StoreDirs, StoreLedger,
     TelemetryCounters, installed_ids, scan, scan_dirs, store_dirs, store_dirs_at,
 };
+pub use store_enrich::{
+    ENRICH_CONCURRENCY, MANIFEST_TIMEOUT, MAX_ENRICH_ENTRIES, MAX_MANIFEST_BYTES, ManifestMeta,
+    ManifestSource, ManifestUpdate, NetworkManifestSource, enrich_into, manifest_urls,
+    parse_manifest_meta,
+};
 pub use store_fetch::{
     FetchLimits, StoreError, StoreIndex, fetch_bytes, fetch_index, read_capped, store_label,
 };
 pub use store_index::{
     DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, EndpointSource, StoreCatalog, StoreEndpoint,
-    StoreEndpointError, StoreEntry, StoreEntryError, StoreKind,
+    StoreEndpointError, StoreEntry, StoreEntryError, StoreKind, compare_store_ids,
+    marketplace_name_for, sort_store_entries,
 };
 pub use store_provider::{ClaudeStoreProvider, CodexStoreProvider, StoreProvider, provider_for};
 pub use store_seam::{

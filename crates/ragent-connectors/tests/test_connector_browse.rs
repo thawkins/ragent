@@ -34,6 +34,7 @@ fn descriptor(id: &str, category: &str) -> ConnectorDescriptor {
         category: category.to_string(),
         tags: Vec::new(),
         source: String::new(),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),
@@ -136,7 +137,10 @@ fn build_categories_prefers_the_installed_spelling() {
 fn build_categories_is_empty_when_no_connector_declares_one() {
     let installed = [descriptor("a", "")];
     let catalogue = [descriptor("b", "   ")];
-    assert!(build_categories(&installed, &catalogue).is_empty());
+    assert!(
+        build_categories(&installed, &catalogue).is_empty(),
+        "a catalogue with no usable categories must contribute no navigator rows"
+    );
 }
 
 // -- CategoryFilterState: default ALL, selection, visible/count (FR-039, FR-040) -
@@ -146,7 +150,10 @@ fn a_fresh_state_is_on_all_with_no_categories() {
     let state = CategoryFilterState::new();
     assert!(state.is_all());
     assert_eq!(state.filter(), &CategoryFilter::All);
-    assert!(state.categories().is_empty());
+    assert!(
+        state.categories().is_empty(),
+        "a fresh state must start with no categories"
+    );
 }
 
 #[test]
@@ -203,7 +210,10 @@ fn a_unknown_category_matches_nothing_and_is_not_all() {
     let mut state = CategoryFilterState::new();
     state.select_by_name("nosuch");
     assert!(!state.is_all());
-    assert!(state.visible(&all).is_empty());
+    assert!(
+        state.visible(&all).is_empty(),
+        "an unmatched category name must select nothing"
+    );
     assert_eq!(state.count_in(&all), 0);
 }
 
@@ -288,8 +298,14 @@ use ragent_connectors::{CatalogueBrowseStatus, CatalogueBrowser, browse_install_
 fn a_new_browser_starts_loading_and_empty() {
     let browser = CatalogueBrowser::new("", false);
     assert_eq!(browser.status, CatalogueBrowseStatus::Loading);
-    assert!(browser.all.is_empty());
-    assert!(browser.filtered.is_empty());
+    assert!(
+        browser.all.is_empty(),
+        "a fresh browser starts with no rows"
+    );
+    assert!(
+        browser.filtered.is_empty(),
+        "a fresh browser starts with no visible rows"
+    );
     assert!(!browser.has_results());
     assert_eq!(browser.selected_category_label(), ALL_CATEGORY);
     assert!(!browser.refresh);
@@ -347,7 +363,10 @@ fn the_query_and_the_category_both_narrow_the_filtered_set() {
     browser.set_query("git".to_string());
     assert_eq!(browser.filtered.len(), 1);
     browser.set_query("drive".to_string());
-    assert!(browser.filtered.is_empty());
+    assert!(
+        browser.filtered.is_empty(),
+        "a query with no match must leave no visible rows"
+    );
 
     // Clearing the category restores the query-only view.
     assert!(browser.select_category(ALL_CATEGORY));
@@ -441,4 +460,48 @@ fn the_browse_install_report_names_the_install_and_its_enabled_posture() {
     assert!(report.contains("/store/github"));
     assert!(report.contains("recorded **enabled**"));
     assert!(report.contains("/connectors enable github"));
+}
+
+#[test]
+fn set_entries_sorts_entries_by_id_regardless_of_input_order() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(
+        vec![
+            descriptor("slack", "communication"),
+            descriptor("github", "developer"),
+            descriptor("google-drive", "productivity"),
+        ],
+        0,
+    );
+    let ids: Vec<&str> = browser.all.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["github", "google-drive", "slack"],
+        "the browser sorts the entries by id on load"
+    );
+}
+
+#[test]
+fn a_category_filter_narrows_the_already_sorted_set() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(
+        vec![
+            descriptor("zeta", "developer"),
+            descriptor("alpha", "developer"),
+            descriptor("slack", "communication"),
+        ],
+        0,
+    );
+    // Filtering to a category keeps the alphabetical order of the survivors.
+    assert!(browser.select_category("developer"));
+    let visible: Vec<&str> = browser
+        .filtered
+        .iter()
+        .map(|&index| browser.all[index].id.as_str())
+        .collect();
+    assert_eq!(
+        visible,
+        vec!["alpha", "zeta"],
+        "rows stay alphabetically sorted under a category filter"
+    );
 }

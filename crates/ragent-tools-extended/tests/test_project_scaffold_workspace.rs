@@ -190,7 +190,7 @@ fn test_workspace_agents_dir_placeholder_mentions_agents() {
     let planned = workspace_artifacts(recipe, "myproj");
     let readme = artifact(&planned, ".ragent/agents/README.md");
     assert!(readme.content.contains("agent"));
-    assert!(!readme.content.is_empty());
+    assert_ne!(readme.content, "");
 }
 
 #[test]
@@ -199,5 +199,5 @@ fn test_workspace_specs_dir_placeholder_mentions_specs() {
     let planned = workspace_artifacts(recipe, "myproj");
     let readme = artifact(&planned, "specs/README.md");
     assert!(readme.content.contains("/spec"));
-    assert!(!readme.content.is_empty());
+    assert_ne!(readme.content, "");
 }

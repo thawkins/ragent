@@ -208,14 +208,13 @@ async fn tc_001_navigator_lists_all_and_the_distinct_fixture_categories_sorted()
     open_fixture(&mut app, StoreKind::Codex, codex_index()).await;
 
     // The declared categories fold case-insensitively and sort
-    // (`Utility`/`utility` collapse into one row). Because `codex-weather` also
-    // declares tags and FR-021 is implemented, its distinct tags follow the
-    // declared set as extra rows; only an entry that also declares a category
-    // contributes tags, so the tag-less `codex-uncat` adds nothing.
+    // (`Utility`/`utility` collapse into one row). `codex-weather` declares tags,
+    // but FR-021 (tag-derived rows) is withdrawn, so no `weather`/`http` row
+    // appears; the tag-less `codex-uncat` declares no category either.
     assert_eq!(
         category_rows(&app),
-        ["Database", "Language", "Utility", "Web", "weather", "http"],
-        "the declared categories fold and sort, then the tag rows follow (FR-021)"
+        ["Database", "Language", "Utility", "Web"],
+        "only the declared categories form navigator rows (FR-001, FR-021 withdrawn)"
     );
     // The uncategorised `codex-uncat` declares no row (FR-003, FR-027).
     assert!(
@@ -231,10 +230,11 @@ async fn tc_001_navigator_lists_all_and_the_distinct_fixture_categories_sorted()
         "ALL is selected first"
     );
 
-    // The Claude panel shows its own categories from the same navigator (FR-006).
+    // The Claude panel shows its own categories from the same navigator (FR-006);
+    // the `todo` tag of `claude-todo` is not a row (FR-021 withdrawn).
     let mut claude = new_app();
     open_fixture(&mut claude, StoreKind::Claude, claude_index()).await;
-    assert_eq!(category_rows(&claude), ["Database", "Productivity", "todo"]);
+    assert_eq!(category_rows(&claude), ["Database", "Productivity"]);
 
     // The panel keeps its title, search field, and ASCII-only body (FR-004).
     let terminal = render(&mut app, 120, 40);
@@ -320,7 +320,7 @@ async fn tc_004_category_and_query_compose_then_clearing_restores() {
     open_fixture(&mut app, StoreKind::Codex, codex_index()).await;
 
     select_category(&mut app, "Utility").await;
-    assert_eq!(filtered_ids(&app), ["codex-time", "codex-shell"]);
+    assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
     // Typing filters within the category (FR-017 still routes printable keys to
     // the query while the navigator is focused).
@@ -333,7 +333,7 @@ async fn tc_004_category_and_query_compose_then_clearing_restores() {
     for _ in 0..4 {
         handle_key(&mut app, key(KeyCode::Backspace)).await;
     }
-    assert_eq!(filtered_ids(&app), ["codex-time", "codex-shell"]);
+    assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
     // A combination that matches nothing shows the explicit empty line while the
     // navigator stays visible (FR-019).
@@ -556,7 +556,7 @@ async fn tc_010_a_category_matches_its_entries_case_insensitively() {
     assert_eq!(utility_rows, 1, "one Utility-equivalent row only");
 
     select_category(&mut app, "Utility").await;
-    assert_eq!(filtered_ids(&app), ["codex-time", "codex-shell"]);
+    assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
     assert!(
         !filtered_ids(&app).iter().any(|id| id == "codex-uncat"),
         "the uncategorised entry is not under a specific category"

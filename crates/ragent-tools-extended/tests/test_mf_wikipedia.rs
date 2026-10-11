@@ -129,28 +129,28 @@ fn test_parse_search_response_skips_entries_without_title() {
 fn test_parse_search_response_empty_search_array() {
     let value = json!({ "query": { "search": [] } });
     let titles = parse_search_response(&value);
-    assert!(titles.is_empty());
+    assert_eq!(titles, [] as [std::string::String; 0]);
 }
 
 #[test]
 fn test_parse_search_response_missing_query_field() {
     let value = json!({ "batchcomplete": "" });
     let titles = parse_search_response(&value);
-    assert!(titles.is_empty());
+    assert_eq!(titles, [] as [std::string::String; 0]);
 }
 
 #[test]
 fn test_parse_search_response_missing_search_field() {
     let value = json!({ "query": { "pages": {} } });
     let titles = parse_search_response(&value);
-    assert!(titles.is_empty());
+    assert_eq!(titles, [] as [std::string::String; 0]);
 }
 
 #[test]
 fn test_parse_search_response_not_an_object() {
     let value = json!([1, 2, 3]);
     let titles = parse_search_response(&value);
-    assert!(titles.is_empty());
+    assert_eq!(titles, [] as [std::string::String; 0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ fn test_parse_summary_response_with_title_but_no_extract() {
     assert_eq!(result.title, "Only Title");
     assert_eq!(result.url, "https://en.wikipedia.org/wiki/Only_Title");
     // Snippet is empty (no description, no extract)
-    assert!(result.snippet.is_empty());
+    assert_eq!(result.snippet, "");
 }
 
 #[test]
@@ -390,7 +390,10 @@ fn func035_empty_success_is_not_an_error() {
     // empty result, not a dead engine.
     let outcomes = vec![Ok(None), Ok(None)];
     let result = partition_summary_outcomes(outcomes).expect("empty success is ok");
-    assert!(result.is_empty());
+    assert_eq!(
+        result,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
@@ -399,5 +402,8 @@ fn func035_all_failures_but_one_empty_success_is_ok() {
     // successful fetch, so the engine is not "dead".
     let outcomes = vec![Ok(None), Err("summary HTTP 429".to_string())];
     let result = partition_summary_outcomes(outcomes).expect("one success is enough");
-    assert!(result.is_empty());
+    assert_eq!(
+        result,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }

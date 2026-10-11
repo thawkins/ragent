@@ -352,5 +352,5 @@ fn test_dedup_skips_invalid() {
 #[test]
 fn test_dedup_empty_input() {
     let deduped = dedup_urls(&[]);
-    assert!(deduped.is_empty());
+    assert_eq!(deduped, [] as [std::string::String; 0]);
 }

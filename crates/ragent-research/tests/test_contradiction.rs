@@ -116,7 +116,10 @@ fn graph_can_lookup_edges_by_source_index() {
     let graph = build_contradiction_graph(&sources);
     assert_eq!(graph.edges_for_source(1).len(), 1);
     assert_eq!(graph.edges_for_source(2).len(), 1);
-    assert!(graph.edges_for_source(3).is_empty());
+    assert_eq!(
+        graph.edges_for_source(3),
+        [] as [&ragent_research::ContradictionEdge; 0]
+    );
 }
 
 #[test]

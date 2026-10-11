@@ -70,10 +70,10 @@ fn build_session_config_parses_mode() {
 #[test]
 fn nested_defaults_match_legacy_flat_defaults() {
     let cfg = SessionConfig::default();
-    assert!(cfg.input.topic.is_empty());
+    assert_eq!(cfg.input.topic, "");
     assert!(cfg.input.sources_dir.is_none());
-    assert!(cfg.input.from_urls.is_empty());
-    assert!(cfg.input.from_files.is_empty());
+    assert_eq!(cfg.input.from_urls, [] as [std::string::String; 0]);
+    assert_eq!(cfg.input.from_files, [] as [std::path::PathBuf; 0]);
     assert!(cfg.output.template.is_none());
     assert_eq!(cfg.output.output_format, OutputFormat::Report);
     // Default config uses the 0 sentinel = derive the web budget from

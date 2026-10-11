@@ -113,7 +113,7 @@ fn truncate_title_words_keeps_short_input_intact() {
 #[test]
 fn truncate_title_words_returns_empty_for_empty_input() {
     let out = truncate_title_words("", 120);
-    assert!(out.is_empty());
+    assert_eq!(out, "");
 }
 
 // -- relevance tests -------------------------------------------------------

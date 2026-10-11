@@ -1,5 +1,5 @@
 # /plugins
-> Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | codex [query] [--category <name>] [--refresh] | claude [query] [--category <name>] [--refresh] | stores [--check] | help
+> Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | codex [query] [--category <name>] [--refresh] | claude [query] [--category <name>] [--refresh] | stores [--check] | marketplace show | marketplace <store> list | marketplace <store> add <source> [--force] | marketplace <store> remove <name> | help
 
 ## Overview
 
@@ -29,6 +29,11 @@ handlers.
 /plugins codex [query] [--category <name>] [--refresh]    # browse the Codex marketplace
 /plugins claude [query] [--category <name>] [--refresh]   # browse the Claude marketplace
 /plugins stores [--check]      # report each store's endpoint and provenance
+/plugins marketplace show      # list the configured marketplaces (both stores) in one name/url/description table each
+/plugins marketplace claude list                         # list one store's marketplaces
+/plugins marketplace claude add anthropics/claude-plugins-community  # add a marketplace
+/plugins marketplace claude add owner/repo --force        # replace an existing marketplace
+/plugins marketplace claude remove claude-plugins-community  # remove a marketplace
 /plugins help                  # usage block
 ```
 
@@ -43,10 +48,38 @@ handlers.
 | `/plugins enable <pluginid>` | Mark the plugin enabled, load it into the current session, and register its tools and commands. Reports the declared permissions and the load outcome. |
 | `/plugins disable <pluginid>` | Mark the plugin disabled, unload it, and deregister every tool and command it contributed, confirming how many of each were removed. Files are not deleted. |
 | `/plugins test <pluginid>` | Load the plugin in an isolated harness (never touching the live session), invoke each contributed tool once with schema-derived sample arguments, and report per-step `[ ok ]`/`[fail]` results with wall-clock time. |
-| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex marketplace browser over the store index: `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses on-disk store cache. The left-hand navigator lists `ALL` plus the distinct categories and tags the index declares (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear, or click/scroll with the mouse). |
-| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude marketplace browser, with the same `query`, `--category`, and `--refresh` arguments. |
+| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex marketplace browser over the store index: `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses on-disk store cache. The left-hand navigator lists `ALL` plus the distinct categories the index declares (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear, or click/scroll with the mouse). Result rows are sorted alphabetically by plugin id, and a query or category filter narrows the already-sorted set. |
+| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude marketplace browser, with the same `query`, `--category`, and `--refresh` arguments (and the same alphabetical result ordering). |
 | `/plugins stores [--check]` | Report each store's effective endpoint and its source; `--check` also contacts each store and reports availability and plugin count. |
+| `/plugins marketplace show` | List the marketplaces configured for both stores: one section per store (Codex, Claude), each a table with one row per marketplace showing name, url, and description (store label plus `config`/`default`/`added` provenance). A pure config read - no network. |
+| `/plugins marketplace <store> list` | List one store's configured marketplaces (the base endpoint plus every added marketplace, tagged `default`/`config`/`added`). `<store>` is `codex` or `claude`. |
+| `/plugins marketplace <store> add <source> [--force]` | Add a marketplace to a store. `<source>` is an `owner/repo` GitHub slug, a `git@github.com:owner/repo.git` SSH remote, an `https://` marketplace-index URL, or a local marketplace directory. GitHub forms resolve to that store's raw marketplace document on branch `main`. The marketplace is written to your **user-global** config (`plugins.stores.marketplaces`) and used by the next `/plugins <store>` browse; `--force` replaces an existing marketplace with the same name. |
+| `/plugins marketplace <store> remove <name>` | Remove an added marketplace from a store by name. |
 | `/plugins help` | Print the usage block. A bare `/plugins` or an unknown subcommand does the same. |
+
+### Adding marketplaces
+
+`/plugins codex` and `/plugins claude` browse the union of the store's base endpoint
+and every marketplace added for that store, so a community or private catalogue appears
+alongside the official one in the same panel (entries are de-duplicated by plugin id):
+
+```
+/plugins marketplace claude add anthropics/claude-plugins-community
+/plugins marketplace claude add https://example.org/internal/marketplace.json
+/plugins marketplace claude add ./my-marketplace
+/plugins claude                 # now lists both the official and the added marketplaces
+/plugins marketplace claude list
+/plugins marketplace claude remove claude-plugins-community
+```
+
+### Plugin details (version and description)
+
+A vendor marketplace is a listing and often omits the plugin's version, and the Codex
+catalogue omits a description as well. After the index loads, the browser fetches each
+plugin's own manifest to fill those in, showing a `loading details...` hint in the title
+while it works. A version that stays unknown (for example a plugin whose source is an
+archive with no GitHub repository to read a manifest from) renders as `-` rather than a
+blank cell. No plugin code is executed to read a manifest.
 
 ### Sources accepted by `/plugins add`
 

@@ -755,12 +755,59 @@ lists the plugins it declares, narrows by the typed `query`, and installs the
 selected plugin on `Enter`. `--refresh` bypasses the on-disk store cache and
 `--category <name>` pre-selects a category row once the index has landed.
 
+A vendor marketplace is a *listing*: the Codex catalogue carries neither a version
+nor a description, and the Claude catalogue carries a description but only sometimes
+a version. After the index lands, the panel resolves each plugin's `version` and
+`description` from the plugin's **own manifest**, fetched off the event loop from the
+raw URL derived from its install source (a `github.com` git source), with the store's
+dialect-appropriate manifest name tried first. The title shows `loading details...`
+while that runs, and a version that remains unknown renders as `-`. The lookups are
+bounded in concurrency and size, cached across opens, and never fatal: a plugin with
+no derivable manifest (an archive source, a non-GitHub host) keeps the listing's own
+fields. No plugin JavaScript is executed to read a manifest.
+
+### 9.0 Adding a marketplace
+
+A store does not only browse its one official marketplace: `/plugins
+marketplace <store> add <source>` registers additional marketplaces, and the two
+browse panels fetch **all** of them and merge the entries into the one panel
+(de-duplicated by plugin id). `<store>` is `codex` or `claude`, and `<source>`
+takes any of the forms the Claude Code `/plugin marketplace add` prompt accepts:
+
+| Source form | Resolves to |
+| ----------- | ----------- |
+| `owner/repo` | `https://raw.githubusercontent.com/owner/repo/main/<store marketplace document>` (`.agents/plugins/marketplace.json` for Codex, `.claude-plugin/marketplace.json` for Claude). |
+| `git@github.com:owner/repo.git` | The same raw document as `owner/repo`. |
+| `https://.../marketplace.json` | Used verbatim (any `https` marketplace-index URL). |
+| `./path/to/marketplace` | A local marketplace directory; its manifest `name` is recorded and it is not fetched remotely. |
+
+```
+/plugins marketplace claude add anthropics/claude-plugins-community
+/plugins marketplace claude add https://example.org/internal/marketplace.json
+/plugins marketplace claude add ./my-marketplace
+/plugins marketplace claude list                  # base endpoint + added marketplaces
+/plugins claude                                   # now lists both marketplaces' plugins
+/plugins marketplace claude remove claude-plugins-community
+```
+
+The marketplace is written to the **user-global** config
+(`plugins.stores.marketplaces` in `~/.config/ragent/ragent.json`), never the
+untrusted project config, and is picked up by the next `/plugins <store>` browse.
+`--force` replaces an existing marketplace with the same name; without it a
+duplicate name is refused. `/plugins marketplace show` lists every configured
+marketplace for **both** stores in one section each; `/plugins marketplace
+<store> list` lists one store's. Both are pure config reads (no network). A base
+endpoint that cannot be reached renders the inline "unavailable" row; an added
+marketplace URL that is refused (non-`https`) is skipped rather than blinding the
+whole store.
+
 ### 9.1 The category navigator
 
 Both panels carry a left-hand **category navigator**: `ALL` first, then the
 distinct non-empty categories the fetched index declares (sorted
-case-insensitively), followed by each distinct non-empty `tag` of an entry that
-also declares a category. It is driven by keyboard and mouse:
+case-insensitively). An entry's `tags` are query-search terms only and never form
+a navigator row (FR-021 withdrawn), so a plugin carrying a long `keywords` list
+adds a single category row at most. It is driven by keyboard and mouse:
 
 | Input | Effect |
 | ----- | ------ |
@@ -782,6 +829,32 @@ raw transport error.
 Every mouse path is a convenience over the keyboard path, so a terminal without
 mouse reporting still reaches every category, and no navigator action ever
 installs, downloads, or runs plugin JavaScript.
+
+Each result row renders four columns: the plugin **id**, its **version**, the
+**marketplace it came from**, and its **description**. The marketplace column
+names the added marketplace an entry was fetched from (the `name` it was added
+under), or the store label (`Codex`/`Claude`) for the store's base endpoint, so
+a merged multi-marketplace panel shows each row's source at a glance. The panel
+widens up to a 140-column ceiling (a third wider than before) and the
+marketplace and description columns share the flexible remainder, so a longer
+marketplace name is shown when the terminal has room and clipped gracefully
+(without pushing the fixed columns or the `[installed]` marker off the row)
+when it does not.
+
+A fixed column-heading row (`Id`, `Version`, `Marketplace`, `Description`) sits
+directly above the result list and never scrolls with the rows. It uses the same
+column template as a result row so each label sits above its column, and is
+painted dark-on-light (dark text on a light background) so it reads as a pinned
+label rather than a result row. A click or wheel on the heading row is inert.
+
+The result list is rendered in **ascending alphabetical order of plugin id**
+(case-insensitively), derived from the id alone rather than the order the index
+or the marketplace merge delivered the entries in. The order is applied when the
+index lands, so a free-text query and a category filter both narrow the
+already-sorted set and the survivors keep their alphabetical order; the
+navigator's category rows are sorted separately (`ALL` first, then the distinct
+categories case-insensitively), and a case-insensitive category collision (for
+example `Utility` and `utility`) keeps the first spelling the index declares.
 
 ### 9.2 Claude Code / Claude Desktop plugins
 

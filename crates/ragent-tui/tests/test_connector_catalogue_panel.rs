@@ -39,6 +39,7 @@ fn descriptor(id: &str, category: &str) -> ConnectorDescriptor {
         category: category.to_string(),
         tags: Vec::new(),
         source: format!("https://example.org/{id}.json"),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),
@@ -99,6 +100,14 @@ fn row_text(terminal: &Terminal<TestBackend>, y: u16, x0: u16, x1: u16) -> Strin
         .collect()
 }
 
+/// Read one painted result-list row across the result column (the panel body is
+/// split into the category navigator and the result column; `x0`/`x1` are the
+/// result column bounds).
+fn result_row_text(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> String {
+    let area = app.connector_store_result_area;
+    row_text(terminal, y, area.x, area.x + area.width)
+}
+
 /// Every painted row of the panel's inner area (borders stripped).
 fn panel_rows(terminal: &Terminal<TestBackend>, app: &App) -> Vec<String> {
     let area = app.connector_store_area;
@@ -117,10 +126,14 @@ fn full_row(terminal: &Terminal<TestBackend>, y: u16) -> String {
 
 /// Background colour of the first non-space glyph on painted panel row `y`.
 fn first_glyph_bg(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> Color {
-    let area = app.connector_store_area;
+    // The panel body is split into the category navigator and the result
+    // column; scan the result column's first painted glyph so a navigator row's
+    // highlight on the same buffer row cannot be mistaken for the result
+    // cursor.
+    let area = app.connector_store_result_area;
     let buffer = terminal.backend().buffer();
-    let x0 = area.x + 1;
-    let x1 = area.x + area.width.saturating_sub(1);
+    let x0 = area.x;
+    let x1 = area.x + area.width;
     (x0..x1)
         .find(|&x| buffer[(x, y)].symbol() != " ")
         .map(|x| buffer[(x, y)].bg)
@@ -185,10 +198,14 @@ fn the_footer_lists_the_available_keys() {
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app);
     let footer = rows.last().expect("footer row");
-    assert!(footer.contains("Enter install"), "footer: {footer:?}");
+    assert!(
+        footer.contains("Enter select/install"),
+        "footer: {footer:?}"
+    );
     assert!(footer.contains("Esc close"), "footer: {footer:?}");
     assert!(footer.contains("Up/Down"), "footer: {footer:?}");
-    assert!(footer.contains("c category"), "footer: {footer:?}");
+    assert!(footer.contains("c clear"), "footer: {footer:?}");
+    assert!(footer.contains("Tab categories"), "footer: {footer:?}");
 }
 
 #[test]
@@ -210,12 +227,15 @@ fn every_painted_glyph_in_the_panel_is_ascii() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_result_rows_list_the_id_category_and_description() {
+fn the_result_rows_list_the_id_category_marketplace_and_description() {
     let mut app = open(sample(), &[], 0);
-    let terminal = render(&mut app, 100, 30);
+    // 160 columns: with the category navigator sharing the body, the result
+    // column needs the extra width to paint all four row fields (id, category,
+    // marketplace, description) in full.
+    let terminal = render(&mut app, 160, 30);
 
     let row = find_row(&terminal, &app, "google-drive").expect("row painted");
-    let text = row_text(&terminal, row, app.connector_store_area.x + 1, 99);
+    let text = result_row_text(&terminal, &app, row);
     assert!(text.contains("google-drive"), "row id: {text:?}");
     assert!(text.contains("productivity"), "row category: {text:?}");
     assert!(text.contains("description"), "row description: {text:?}");
@@ -227,8 +247,9 @@ fn the_highlighted_row_carries_a_full_row_block_cursor() {
     let terminal = render(&mut app, 100, 30);
 
     // The first row is highlighted; its leading marker cell is painted with the
-    // block-cursor background.
-    let row = find_row(&terminal, &app, "google-drive").expect("row painted");
+    // block-cursor background. The catalogue sorts by id (FR-046), so the first row
+    // is `github`.
+    let row = find_row(&terminal, &app, "github").expect("row painted");
     assert_eq!(
         first_glyph_bg(&terminal, &app, row),
         Color::Magenta,
@@ -242,9 +263,7 @@ fn an_installed_row_carries_an_installed_marker() {
     let terminal = render(&mut app, 100, 30);
 
     let row = find_row(&terminal, &app, "github").expect("row painted");
-    let x0 = app.connector_store_area.x + 1;
-    let x1 = app.connector_store_area.x + app.connector_store_area.width.saturating_sub(1);
-    let text = row_text(&terminal, row, x0, x1);
+    let text = result_row_text(&terminal, &app, row);
     assert!(
         text.contains("[installed]"),
         "installed row carries the marker: {text:?}"
@@ -252,7 +271,7 @@ fn an_installed_row_carries_an_installed_marker() {
 
     // A row that is not installed carries no marker.
     let other = find_row(&terminal, &app, "slack").expect("row painted");
-    let other_text = row_text(&terminal, other, x0, x1);
+    let other_text = result_row_text(&terminal, &app, other);
     assert!(
         !other_text.contains("[installed]"),
         "uninstalled row carries no marker: {other_text:?}"
@@ -333,7 +352,9 @@ async fn down_moves_the_block_cursor_to_the_next_row() {
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Down)).await;
     let terminal = render(&mut app, 100, 30);
 
-    let row = find_row(&terminal, &app, "github").expect("row painted");
+    // After one Down the cursor sits on the second row. The catalogue sorts by id
+    // (FR-046): first `github`, second `google-drive`.
+    let row = find_row(&terminal, &app, "google-drive").expect("row painted");
     assert_eq!(
         first_glyph_bg(&terminal, &app, row),
         Color::Magenta,
@@ -379,12 +400,14 @@ async fn enter_on_an_empty_result_set_records_a_notice_and_installs_nothing() {
 
 #[tokio::test]
 async fn enter_on_an_installed_row_is_refused() {
-    let mut app = open(sample(), &["google-drive"], 0);
+    // The catalogue sorts by id (FR-046), so row 0 is `github`; mark it installed so
+    // Enter on the highlighted row is refused.
+    let mut app = open(sample(), &["github"], 0);
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Enter)).await;
     let browser = app.connector_store.as_ref().expect("panel still open");
     assert_eq!(
         browser.last_install.as_deref(),
-        Some("connector google-drive is already installed")
+        Some("connector github is already installed")
     );
 }
 
@@ -458,42 +481,247 @@ fn a_launch_category_all_leaves_every_row_visible() {
 }
 
 #[tokio::test]
-async fn c_cycles_the_category_filter_over_the_fetched_categories() {
-    let mut app = open(sample(), &[], 0);
-    // The fetched catalogue declares communication, developer, and productivity,
-    // sorted case-insensitively by `build_categories`.
-    let mut seen = Vec::new();
-    for _ in 0..4 {
-        ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
+async fn c_clears_the_category_filter_back_to_all() {
+    let mut app = open_with_category(sample(), CategoryFilter::parse("developer"));
+    // With `developer` active the panel shows only the matching row; `c` is the
+    // navigator's clear key: it restores the unfiltered `ALL` view rather than
+    // stepping to the next category (the navigator rows do the stepping).
+    {
         let browser = app.connector_store.as_ref().expect("panel open");
-        seen.push(browser.selected_category_label().to_string());
+        assert_eq!(browser.selected_category_label(), "developer");
     }
-    assert_eq!(
-        seen,
-        vec![
-            "communication".to_string(),
-            "developer".to_string(),
-            "productivity".to_string(),
-            "ALL".to_string(),
-        ],
-        "the cycle runs over the catalogue categories and back to ALL"
-    );
-
-    // With `developer` active the panel shows only the matching row.
-    ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
     let browser = app.connector_store.as_ref().expect("panel open");
-    assert_eq!(browser.selected_category_label(), "developer");
+    assert_eq!(
+        browser.selected_category_label(),
+        "ALL",
+        "`c` clears the active category back to ALL"
+    );
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app).join("\n");
-    assert!(rows.contains("github"), "matching row painted: {rows:?}");
+    for id in ["google-drive", "github", "slack"] {
+        assert!(rows.contains(id), "every row is visible again: {rows:?}");
+    }
+    let title = full_row(&terminal, app.connector_store_area.y);
     assert!(
-        !rows.contains("google-drive") && !rows.contains("slack"),
+        title.contains("category ALL"),
+        "the title names the cleared category: {title:?}"
+    );
+}
+
+#[tokio::test]
+async fn tab_routes_up_down_to_the_category_navigator() {
+    let mut app = open(sample(), &[], 0);
+    // Result rows focused by default: Down moves the result cursor and leaves
+    // the category alone.
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Down)).await;
+    {
+        let browser = app.connector_store.as_ref().expect("panel open");
+        assert_eq!(browser.cursor, 1, "Down moved the result cursor");
+        assert_eq!(browser.selected_category_label(), "ALL");
+    }
+    // Tab hands focus to the navigator: Down applies the first category row on
+    // the same keypress.
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Tab)).await;
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Down)).await;
+    {
+        let browser = app.connector_store.as_ref().expect("panel open");
+        assert_eq!(
+            browser.selected_category_label(),
+            "communication",
+            "Down over the navigator applies the highlighted category"
+        );
+    }
+    // Enter over the navigator applies the category and hands focus back to the
+    // result list; the next Down moves the result cursor again.
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Enter)).await;
+    {
+        let browser = app.connector_store.as_ref().expect("panel open");
+        assert!(
+            !browser.nav_focused,
+            "Enter over the navigator returns focus to the results"
+        );
+        assert_eq!(
+            browser.selected_category_label(),
+            "communication",
+            "the applied category sticks"
+        );
+    }
+    let terminal = render(&mut app, 100, 30);
+    let rows = panel_rows(&terminal, &app).join("\n");
+    assert!(rows.contains("slack"), "matching row painted: {rows:?}");
+    assert!(
+        !rows.contains("google-drive") && !rows.contains("github"),
         "non-matching rows are filtered out: {rows:?}"
     );
     let title = full_row(&terminal, app.connector_store_area.y);
     assert!(
-        title.contains("category developer"),
-        "the title names the cycled category: {title:?}"
+        title.contains("category communication"),
+        "the title names the navigator-applied category: {title:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FR-044 - the marketplace column and the enrichment loading hint
+// ---------------------------------------------------------------------------
+
+/// A descriptor whose `marketplace` names the source it came from.
+fn attributed(id: &str, marketplace: &str) -> ConnectorDescriptor {
+    let mut entry = descriptor(id, "developer");
+    entry.marketplace = marketplace.to_string();
+    entry
+}
+
+#[test]
+fn a_row_names_the_marketplace_it_came_from() {
+    let mut app = open(vec![attributed("community-one", "acme")], &[], 0);
+    let terminal = render(&mut app, 160, 30);
+
+    let row = find_row(&terminal, &app, "community-one").expect("row painted");
+    let text = result_row_text(&terminal, &app, row);
+    assert!(
+        text.contains("acme"),
+        "the row names its marketplace: {text:?}"
+    );
+}
+
+#[test]
+fn a_row_with_no_marketplace_shows_a_dash_marker() {
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 160, 30);
+
+    let row = find_row(&terminal, &app, "google-drive").expect("row painted");
+    let text = result_row_text(&terminal, &app, row);
+    // The marketplace cell of a hand-built entry is blank, rendered as `-`.
+    assert!(
+        text.contains(" - "),
+        "a blank marketplace renders as a dash: {text:?}"
+    );
+}
+
+#[test]
+fn the_title_shows_a_loading_details_hint_while_enrichment_runs() {
+    let mut app = open(sample(), &[], 0);
+    {
+        let browser = app.connector_store.as_mut().expect("panel open");
+        browser.enriching = true;
+    }
+    let terminal = render(&mut app, 120, 30);
+    let title = full_row(&terminal, app.connector_store_area.y);
+    assert!(
+        title.contains("loading details..."),
+        "the title shows the enrichment hint: {title:?}"
+    );
+
+    // Clearing the flag (as the terminal `Finished` message does) removes it.
+    app.connector_store
+        .as_mut()
+        .expect("panel open")
+        .finish_enrichment();
+    let terminal = render(&mut app, 120, 30);
+    let title = full_row(&terminal, app.connector_store_area.y);
+    assert!(
+        !title.contains("loading details..."),
+        "the hint clears when enrichment finishes: {title:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The pinned, dark-on-light column-heading row
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_column_headings_render_above_the_rows_and_do_not_scroll() {
+    // The headings sit one row above the first result row, aligned with their
+    // columns, so each label reads as a pinned header rather than a result row.
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 160, 30);
+
+    let list = app.connector_store_result_area;
+    // The catalogue sorts by id (FR-046), so the first result row is `github`.
+    let first_row = find_row(&terminal, &app, "github").expect("result row painted");
+    assert_eq!(
+        first_row, list.y,
+        "the first result row sits at the top of the scrolling list"
+    );
+
+    let heading_y = list.y - 1;
+    let heading = row_text(&terminal, heading_y, list.x, list.x + list.width);
+    assert!(
+        heading.contains("Id")
+            && heading.contains("Category")
+            && heading.contains("Marketplace")
+            && heading.contains("Description"),
+        "the heading row names every column: {heading:?}"
+    );
+
+    // Each heading label starts exactly where its column's values start.
+    let row = row_text(&terminal, first_row, list.x, list.x + list.width);
+    let heading_id = heading.find("Id").expect("Id label painted");
+    let row_id = row.find("github").expect("id value painted");
+    assert_eq!(
+        heading_id, row_id,
+        "the Id label aligns with its column: {heading:?} vs {row:?}"
+    );
+}
+
+#[test]
+fn the_column_headings_are_dark_on_light_and_not_a_result_row() {
+    // The heading cells are dark text on a light background so the pinned row is
+    // visibly distinct from the normal and installed row colours.
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 160, 30);
+
+    let list = app.connector_store_result_area;
+    let buffer = terminal.backend().buffer();
+    let id_x = (list.x..list.x + list.width)
+        .find(|&x| buffer[(x, list.y - 1)].symbol() == "I")
+        .expect("Id heading painted");
+    let heading_cell = &buffer[(id_x, list.y - 1)];
+    assert_eq!(
+        heading_cell.fg,
+        Color::Black,
+        "the heading text is dark (fg)"
+    );
+    assert_eq!(
+        heading_cell.bg,
+        Color::Gray,
+        "the heading background is light (bg)"
+    );
+
+    // The first data row is the list's top row, below the heading, so finding a
+    // row by id can never land on the heading itself. Sorted by id (FR-046) makes
+    // `github` the top row.
+    let first = find_row(&terminal, &app, "github").expect("result row painted");
+    assert_eq!(first, list.y);
+}
+
+#[test]
+fn the_column_headings_stay_pinned_when_the_rows_scroll() {
+    // A catalogue too long for the panel forces the list to scroll; the heading
+    // row must remain above the list, never scrolled away with the rows.
+    let entries: Vec<_> = (0..40)
+        .map(|i| descriptor(&format!("conn-{i:02}"), "developer"))
+        .collect();
+    let mut app = open(entries, &[], 0);
+    app.connector_store.as_mut().expect("panel open").cursor = 39;
+    let terminal = render(&mut app, 160, 30);
+
+    let list = app.connector_store_result_area;
+    let heading = row_text(&terminal, list.y - 1, list.x, list.x + list.width);
+    assert!(
+        heading.contains("Category") && heading.contains("Marketplace"),
+        "the heading stays pinned above the scrolled list: {heading:?}"
+    );
+
+    // The list scrolled: its top row is a data row far from the first entry.
+    let top = row_text(&terminal, list.y, list.x, list.x + list.width);
+    assert!(
+        top.contains("conn-") && !top.contains("conn-00"),
+        "the list scrolled past the first entry: {top:?}"
+    );
+    assert!(
+        !top.contains("Category"),
+        "no column heading scrolled into the list body: {top:?}"
     );
 }

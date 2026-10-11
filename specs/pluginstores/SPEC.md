@@ -42,16 +42,19 @@ turns that into: type the command, type a few letters, press `ENTER`.
 
 ```text
 +-- Codex Plugin Store ---- search: weather ----------- 12 of 340 --+
-|  > codex-weather   1.2.0   Weather lookups for the agent          |
-|    codex-time      0.9.1   Time and timezone helpers              |
-|    codex-shell     2.0.0   [installed] Shell command wrappers     |
-|                                                                   |
-| Up/Down move  Enter install  Esc close                            |
-+-------------------------------------------------------------------+
+|  ALL  |  > codex-weather  1.2.0  Codex      Weather lookups for the agent |
+|  Web  |    codex-time     0.9.1  community  Time and timezone helpers     |
+| Tools |    codex-shell    2.0.0  Codex      [installed] Shell wrappers    |
+|       |                                                                 |
+| Up/Down move  Enter install  Esc close                                  |
++-------------------------------------------------------------------------+
 ```
 
 The `>` block cursor marks the highlighted row; an already-installed row is painted in
-the installed colour and carries an `[installed]` marker (FR-011, FR-012).
+the installed colour and carries an `[installed]` marker (FR-011, FR-012). Each result
+row names the **marketplace it came from** (the added marketplace's configured name, or
+the store label for the base endpoint) in its own column, so a merged multi-marketplace
+panel shows each source at a glance (FR-048).
 
 ## Assumptions and interpretation (read before implementing)
 
@@ -61,7 +64,13 @@ the installed colour and carries an `[installed]` marker (FR-011, FR-012).
   `/plugins add` accepts). Optional per-entry fields (`dialect`, `homepage`, `tags`,
   `checksum`) are rendered when present and ignored when absent. This format is fixed
   by this spec so the feature is testable; a future revision may add an adapter per
-  vendor.
+  vendor. In practice the two real vendor catalogues are **listings**, not native
+  indexes: the Codex marketplace carries neither a version nor a description, and the
+  Claude marketplace carries a description but only sometimes a version. The provider
+  transform (FR-043) reads what the listing declares (including the entry's
+  `interface.displayName`/`shortDescription`/`longDescription`), leaves an absent
+  version blank, and the browse panel fills the remainder from each plugin's own
+  manifest (FR-049).
 - **A2 - Two stores, one browser.** The Codex and Claude browsers are the *same* panel
   implementation parameterised by the store endpoint and the dialect label. There is
   one `PluginStoreBrowser` state machine, not two.
@@ -135,11 +144,20 @@ dispatch arm, listed in the autocomplete menu, and documented in `/plugins help`
 
 **FR-003** - The system shall fetch and parse a store index into a list of result
 entries carrying at minimum the plugin id, display name, version, description, and
-install source, and shall tolerate absent optional fields.
+install source, and shall tolerate absent optional fields. A vendor listing that
+omits a version (or, for Codex, a description) is tolerated: the field is left blank
+rather than fabricated, and the browse panel fills it from the plugin's own manifest
+(FR-049).
 
 **FR-004** - The system shall render the browse panel as a bordered, titled modal
 overlay containing a title line with the store name, a search-query field, a scrollable
-result list, and a footer listing the available keys, using only ASCII glyphs.
+result list, and a footer listing the available keys, using only ASCII glyphs. The panel
+width shall clamp to at most 140 terminal columns (a third wider than the original 100)
+so the added marketplace column is comfortably visible, and each result row shall render
+the plugin id, version, the **marketplace the entry came from**, and the description,
+with the marketplace and description columns sharing the flexible remainder. A version
+the index did not declare and enrichment did not fill renders an explicit `-` marker
+rather than a blank cell (FR-049).
 
 **FR-005** - The system shall render the highlighted result row with a **block cursor**
 (a background-filled, full-width row) and shall render every result whose plugin id is
@@ -376,6 +394,43 @@ configuration error and without refusing to launch.
 it was sourced from configuration or from the compiled default, through the
 `/plugins stores` subcommand, so a user can confirm whether an override is in effect.
 
+### Marketplace listing
+
+**FR-047** - The system shall provide a `/plugins marketplace show` subcommand that
+lists the marketplaces configured for both stores: one section per store (Codex, then
+Claude), each containing a table with one row per marketplace endpoint showing its
+name (the store token), url (the effective endpoint), and description (the store label
+with its `config`/`default` provenance). The report is a pure configuration read
+matching FR-040: no network request, no store scan, and a missing `plugins.stores`
+block or a disabled subsystem still lists the compiled default marketplace for each
+store. A configured endpoint refused by the FR-024 scheme guard shall be rendered as
+an `[err]` row naming the refusal rather than being omitted from its section.
+
+**FR-048** - The system shall provide `/plugins marketplace <codex|claude> add <source>
+[--force]`, `/plugins marketplace <codex|claude> remove <name>`, and `/plugins
+marketplace <codex|claude> list` sub-subcommands that manage the set of additional
+marketplaces a store's browse panel fetches. Accepted `<source>` forms mirror the Claude
+Code `/plugin marketplace add` prompt: an `owner/repo` GitHub slug, a
+`git@github.com:owner/repo.git` SSH remote, an `https://` marketplace-index URL, or a
+local marketplace directory. An `owner/repo`, an SSH remote, and a GitHub repo URL are
+resolved syntactically to `https://raw.githubusercontent.com/<owner>/<repo>/main/<store
+marketplace document>` (`.agents/plugins/marketplace.json` for Codex,
+`.claude-plugin/marketplace.json` for Claude); any other `https://` URL is used verbatim;
+a local directory is recorded with its manifest `name` and no fetch URL. `add` records
+the marketplace under `plugins.stores.marketplaces` in the **user-global** config
+(`~/.config/ragent/ragent.json`), refusing a duplicate name without `--force`; `remove`
+drops an entry by name; both render an `[ok]`/`[err]` report. The `/plugins codex` and
+`/plugins claude` browse panels shall fetch every marketplace configured for the store
+(the base endpoint first, then each added marketplace) and merge their entries into the
+one panel, dropping an entry whose id was already seen. A refused base endpoint
+(non-`https` or malformed) is reported as the panel's inline error; a refused added
+marketplace URL is skipped rather than blinding the whole store. `/plugins marketplace
+<store> list` and `show` render one row per configured marketplace (`show` for both
+stores, `list` for one), tagging each `default`/`config`/`added`. Every entry fetched
+from a marketplace shall be attributed to that marketplace's display name (the added
+marketplace's `name`, or the store label for the base endpoint) and the browse row shall
+show it, so a merged multi-marketplace panel names each row's source (FR-004).
+
 ### Store availability check
 
 **FR-039** - Where `/plugins stores` is invoked with a `--check` flag, the system shall
@@ -405,7 +460,7 @@ through a `StoreProvider` trait (one implementation per store, selected by
 
 **FR-044** - A provider shall normalise a vendor marketplace entry into the
 internal model without requiring the native `id` field: the entry `name` supplies
-the id, the `version` is optional (defaulting when absent), and the `source` may
+the id, the `version` is optional, and the `source` may
 be a repo-relative string or an object (`local`, `url`, or `git-subdir`).
 Repo-relative sources shall be resolved against the marketplace document's
 repository root **as an installable git source** (`git+<https-repo>#<ref>:<path>`)
@@ -425,6 +480,35 @@ install paths resolve entries from the real catalogues.
 subdirectory through a shallow, sparse `git clone`. A git source with a non-`https`
 remote (other than a local `file://` mirror, which mirrors the accepted local
 directory source) shall be refused before any clone is attempted (FR-024).
+
+**FR-049** - When a store index has loaded into the browse panel, the system shall
+additionally resolve, off the event loop, each entry's `version` and `description`
+from the plugin's own manifest, because a vendor listing commonly omits one or both
+(A1), and shall fill the entry's blank fields with the resolved values (never
+overwriting a value the index already declared). The manifest URL shall be derived
+from the entry's install source when that source is a `github.com` git source, as
+`https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<subpath>/<manifest>` where
+`<manifest>` is the dialect-appropriate name (`.codex-plugin/plugin.json` for Codex,
+`.claude-plugin/plugin.json` for Claude) with a bare `plugin.json` as a fallback;
+`version` and `description` (falling back to the manifest's `interface` block) shall
+be read. The resolution shall be best-effort and never fatal (FR-025), bounded in
+concurrency and per-fetch size, cached per manifest URL across opens, run through an
+injectable seam so it is testable offline (NFR-003), and shall show a `loading
+details...` hint in the panel title while it is still running. A row whose version
+remains unknown after enrichment shall render an explicit `-` version marker rather
+than a blank cell (FR-004).
+
+**FR-050** - The system shall render the browse panel's result list in ascending
+alphabetical order of entry id, case-insensitively with a byte-wise tiebreak, on both
+stores. The order shall be derived from the entry id alone, not from the fetch order or
+the marketplace-merge order, and shall hold while a search query and a category filter
+are active - they narrow the already-sorted set and the survivors keep their
+alphabetical order. One comparator shall be shared across the store surfaces so they
+cannot disagree about the order; it is the store analogue of the connector system's
+FR-046 comparator. The navigator's derived category set keeps its own case-insensitive
+sort (spec `catnav` FR-001), and the first-seen spelling a case-insensitive category
+collision keeps is derived from the index's own order, never from the sorted result
+order.
 
 ### Default store browser functional tests
 
@@ -485,6 +569,61 @@ the suite performs no live network access and installs nothing from the real cat
 ## Plan Tasks (store availability check)
 
 - `T-022` - Add the opt-in `/plugins stores --check` availability probe reporting per-store availability and plugin count (FR-039, FR-040, FR-041, FR-042).
+- `T-026` - Add the `/plugins marketplace show` report listing the configured marketplaces of both stores in one name/url/description table per section (FR-047).
+- `T-027` - Add `/plugins marketplace <store> add|remove|list`, the source-form resolver (`owner/repo`, `git@github.com:...`, `https://`, local directory), and the `plugins.stores.marketplaces` user-global ledger (FR-048).
+- `T-028` - Fetch and merge every marketplace configured for a store into the one browse panel, deduplicating by entry id (FR-048).
+- `T-029` - Attribute every fetched entry to the marketplace it came from and render that marketplace name as a per-row column, widening the browse panel to a 140-column ceiling (FR-004, FR-048).
+
+### T-029 - Per-row marketplace attribution and a wider panel
+
+Set `StoreEntry::marketplace` (a `serde(default)` field never carried by a marketplace
+document) to the display name of the marketplace each entry was fetched from: the added
+marketplace's `name`, or the store label for the base endpoint (`marketplace_name_for`,
+exported from `ragent_plugins::store_index`). Render it as a per-row column in the
+plugin-store browse panel and widen the panel from a 100- to a 140-column ceiling
+(`crates/ragent-tui/src/layout.rs`), splitting the flexible remainder between the
+marketplace and description columns (`plugin_store_flex_widths`) so the fixed id/version
+columns and the trailing `[installed]` marker are never pushed off the row (FR-004,
+FR-048). Covered by `crates/ragent-plugins/tests/test_store_index.rs`
+(`marketplace_name_for`), `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`
+(fetch attribution) and `crates/ragent-tui/tests/test_plugin_store_panel.rs` (render).
+
+### T-026 - `/plugins marketplace show` marketplace listing
+
+Add `ragent_plugins::commands::render_marketplace_show_report` and dispatch
+`marketplace show` through the shared `run_plugin_subcommand` ladder (TUI and CLI),
+guarded by `marketplace_show_requested` so a bare `/plugins marketplace` (or an
+unknown sub-subcommand) falls back to the usage block (FR-014). The report renders one
+`## <Store> marketplace` section per store with a `| Name | Url | Description |` table
+row resolved through `effective_endpoint_with_source`, and makes no network request,
+store scan, or session (FR-047). `marketplace` joins `PLUGIN_SUBCOMMANDS`, the usage
+block, the autocomplete suggestion list, and the `SLASH_COMMANDS` description. Covered
+by offline tests in `crates/ragent-plugins/tests/test_marketplace_show.rs` (renderer +
+dispatch), `crates/ragent-tui/tests/test_plugins_command.rs` (TUI surface), and
+`tests/test_plugins_cli_command.rs` (CLI parity).
+
+### T-027 - Additional marketplaces (`marketplace <store> add|remove|list`)
+
+Add `crates/ragent-plugins/src/marketplace_ops.rs`: `resolve_source(store, source, cwd)`
+turns `owner/repo`, `git@github.com:owner/repo.git`, an `https://` URL, or a local
+directory into a `(name, url)` pair (the store-specific raw marketplace document for a
+GitHub slug), and `add_marketplace`/`remove_marketplace` edit the **user-global**
+`plugins.stores.marketplaces` array with an atomic JSON splice (invalidating the config
+crate's load cache). `commands::parse_marketplace_command` / `run_marketplace_command`
+add the `show`/`list`/`add`/`remove` dispatch ladder (FR-048); `plugins.stores.marketplaces`
+and `MarketplaceEntry` extend the config schema and `EndpointSource::Added` tags the new
+sources. Covered by `crates/ragent-plugins/tests/test_marketplace_ops.rs` (resolver +
+ledger) and `test_marketplace_add.rs` (dispatch).
+
+### T-028 - Merge every configured marketplace into the browse panel
+
+Extend `StoreKind::effective_endpoints_with_source` to yield the base endpoint (config
+override or compiled default) followed by every added marketplace for the store, and
+change `App::spawn_plugin_store_fetch_with_stores` to fetch each in turn off-loop,
+merging the entries into one `StoreIndex` and de-duplicating by entry id, so the one
+panel lists the union (FR-048). A refused base endpoint is reported as the panel's
+inline error; a refused added URL is skipped. Covered by
+`crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`.
 
 ### T-022 - `/plugins stores --check` availability probe
 

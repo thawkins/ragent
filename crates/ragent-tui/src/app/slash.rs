@@ -1005,6 +1005,7 @@ impl App {
                 "disable".to_string(),
                 "test".to_string(),
                 "stores".to_string(),
+                "marketplace".to_string(),
                 "help".to_string(),
                 "--verbose".to_string(),
                 "--force".to_string(),

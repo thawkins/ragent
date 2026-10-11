@@ -104,13 +104,16 @@ fn enable_loads_a_skill_only_plugin_inertly() {
 
     assert_eq!(report.state, LifecycleState::Loaded);
     assert_eq!(report.error, None);
-    assert!(report.tools.is_empty());
-    assert!(report.commands.is_empty());
+    assert_eq!(report.tools, [] as [std::string::String; 0]);
+    assert_eq!(report.commands, [] as [std::string::String; 0]);
 
     // No JavaScript ran: there is no live sandbox context and no messages.
     let loaded = manager.get("mongodb").expect("tracked");
     assert!(loaded.context().is_none());
-    assert!(loaded.calls.messages().is_empty());
+    assert_eq!(
+        loaded.calls.messages(),
+        [] as [ragent_plugins::PluginMessage; 0]
+    );
 }
 
 // -- Harness (FR-013) --------------------------------------------------------

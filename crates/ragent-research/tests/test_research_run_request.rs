@@ -23,8 +23,8 @@ fn build_session_config_applies_defaults_with_no_overrides() {
 
     // Input
     assert_eq!(cfg.input.topic, "test topic");
-    assert!(cfg.input.from_urls.is_empty());
-    assert!(cfg.input.from_files.is_empty());
+    assert_eq!(cfg.input.from_urls, [] as [std::string::String; 0]);
+    assert_eq!(cfg.input.from_files, [] as [std::path::PathBuf; 0]);
     assert!(cfg.input.sources_dir.is_none());
 
     // Output

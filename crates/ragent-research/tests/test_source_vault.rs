@@ -52,7 +52,7 @@ fn vault_stores_source_and_writes_raw_file() {
     assert_eq!(stored.search_tool, source.search_tool);
     assert_eq!(stored.search_engine, source.search_engine);
     assert_eq!(stored.media_type, source.media_type);
-    assert!(!stored.source_id.is_empty());
+    assert_ne!(stored.source_id, "");
     assert!(stored.content_path.exists());
     assert!(stored.content_path.starts_with(vault.raw_dir()));
 

@@ -155,7 +155,7 @@ fn recorded_termination_has_nonempty_event_id() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-1");
     let term = log.record_interruption(&run).expect("term");
-    assert!(!term.id.as_str().is_empty());
+    assert_ne!(term.id.as_str(), "");
 }
 
 #[test]

@@ -102,6 +102,11 @@ and an `[installed]` marker (FR-005). Only ASCII glyphs are used (FR-004).
 | FR-036 No-config launch opens both stores, no error (tests) | T-019, T-021 |
 | FR-037 Default-endpoint tests use an offline fixture fetch seam | T-019, T-021 |
 | FR-038 `/plugins stores` tags default-sourced endpoints (tests) | T-021 |
+| FR-046 `git+` install sources | T-025 |
+| FR-047 `/plugins marketplace show` report | T-026 |
+| FR-048 Additional marketplaces + merge + row attribution | T-027, T-028, T-029 |
+| FR-049 Manifest-metadata enrichment (version/description) | T-030 |
+| FR-050 Alphabetical result ordering | T-031 |
 | NFR-001 Default URL literals declared once | T-014 |
 | NFR-002 Endpoint resolved at launch, absence never fails | T-015, T-018 |
 | NFR-003 Default-endpoint tests deterministic and offline | T-019, T-021 |
@@ -138,6 +143,13 @@ and an `[installed]` marker (FR-005). Only ASCII glyphs are used (FR-004).
 | T-023 | Add the `StoreProvider` trait with per-store Codex and Claude implementations normalising each vendor marketplace shape | FR-043, FR-044, NFR-005 | M | High | completed | T-002, T-014 |
 | T-024 | Thread the store kind through the fetch seam so every fetch parses through the store's provider | FR-043, FR-044 | S | High | completed | T-003, T-023 |
 | T-025 | Accept `git+<https-url>#<ref>[:<subpath>]` sources in the install pipeline via a shallow sparse git clone | FR-046, NFR-005 | M | High | completed | T-006, T-023 |
+| T-026 | Add the `/plugins marketplace show` report listing the configured marketplaces of both stores in one name/url/description table per section | FR-047 | S | Medium | completed | T-017 |
+| T-027 | Add `/plugins marketplace <store> add|remove|list` source resolution and the `plugins.stores.marketplaces` user-global ledger | FR-048 | M | Medium | completed | T-017 |
+| T-028 | Fetch and merge every configured marketplace for a store into the one browse panel | FR-048 | M | Medium | completed | T-008, T-026, T-027 |
+| T-029 | Attribute every fetched entry to its marketplace and render that name as a per-row column, widening the panel to a 140-column ceiling | FR-004, FR-048 | S | Medium | completed | T-028 |
+| T-030 | Enrich each loaded entry's version/description from the plugin's own manifest, off the event loop, with an injectable source, a cache, and a title loading hint; render `-` for a still-unknown version | FR-003, FR-004, FR-049 | M | High | completed | T-008, T-023 |
+| T-031 | Sort the browse result set alphabetically by entry id via a shared comparator (`compare_store_ids`/`sort_store_entries` in `ragent-plugins`), applied in `set_index`; keep the category set derived from the index order | FR-050 | S | Medium | completed | T-005, T-006 |
+
 ## Task Details
 
 ### T-001 - `plugins.stores` configuration block
@@ -386,3 +398,57 @@ committing the result into the store. The ref defaults to the remote default bra
 absent or `HEAD`; a non-`https` remote is refused before cloning (FR-024) and git never
 prompts for credentials. Tests:
 `crates/ragent-plugins/tests/test_store_git_source.rs` (local `file://` remote, NFR-005).
+
+### T-029 - Per-row marketplace attribution and a wider panel
+
+`StoreEntry` gains a `serde(default)` `marketplace` string, set at fetch time (never
+carried by a marketplace document). `ragent_plugins::store_index::marketplace_name_for`
+resolves each fetched endpoint to the added marketplace's configured `name` (matched by
+resolved URL) or the store label for the base endpoint, and
+`App::spawn_plugin_store_fetch_with_stores` attributes every entry to it before merging.
+`render_plugin_store_panel` renders the marketplace as a per-row column and widens the
+panel from a 100- to a 140-column ceiling; `plugin_store_flex_widths` splits the flexible
+remainder between the marketplace and description columns so the fixed id/version columns
+and the trailing `[installed]` marker are never clipped (FR-004, FR-048). Tests:
+`crates/ragent-plugins/tests/test_store_index.rs` (`marketplace_name_for`),
+`crates/ragent-tui/tests/test_plugin_store_marketplaces.rs` (fetch attribution) and
+`crates/ragent-tui/tests/test_plugin_store_panel.rs` (render).
+
+### T-030 - Manifest-metadata enrichment
+
+Add `crates/ragent-plugins/src/store_enrich.rs`: a `ManifestSource` trait
+(`manifest_meta(entry, kind)`) with a production `NetworkManifestSource` that derives
+the raw manifest URL(s) from an entry's `github.com` git source
+(`manifest_urls`) and parses `version` / `description` (falling back to the
+`interface` block) with `parse_manifest_meta`; a process-global URL-keyed cache
+(hits and misses); and `enrich_into`, which runs the per-entry lookups on a bounded
+thread pool (`ENRICH_CONCURRENCY`) and streams `ManifestUpdate`s to a sink. The
+provider transform reads the entry's own `interface.displayName`/`shortDescription`/
+`longDescription` and leaves an absent version blank (`transform_vendor_entry`). On
+the TUI side, `App::start_store_enrichment` snapshots the loaded entries after
+`poll_plugin_store_result` lands an index, bumps a generation, and spawns the
+worker; `App::poll_store_enrichment` applies each streamed update (dropping a stale
+generation) and `PluginStoreBrowser::apply_manifest_update` fills only blank fields.
+`render_plugin_store_panel` shows `-` for a still-blank version (`version_display`)
+and a `loading details...` title hint while `PluginStoreBrowser::enriching`.
+An injectable seam (`App::set_manifest_source`) keeps the tests offline (NFR-003).
+Tests: `crates/ragent-plugins/tests/test_store_enrich.rs` (URL derivation + parsing +
+driver), `crates/ragent-tui/tests/test_plugin_store_enrich.rs` (off-loop enrichment
+through the real poll path), and the version/title cases added to
+`crates/ragent-tui/tests/test_plugin_store_panel.rs`.
+
+### T-031 - Alphabetical result ordering
+
+Add `compare_store_ids` / `sort_store_entries` to `crates/ragent-plugins/src/store_index.rs`
+(FR-050): one comparator (case-insensitive on the id with a byte-wise tiebreak) shared
+by every store surface, mirroring the connector system's `compare_connector_ids`. Apply
+it in `PluginStoreBrowser::set_index` (via a small `sort_entries` helper) after the
+index lands and before the filter is derived, so the result list is an
+alphabetical set that a query or category narrows without reordering. The category set
+is rebuilt from the index's own order, so a case-insensitive `Utility`/`utility`
+collision keeps the first-seen spelling independently of the result sort (spec `catnav`
+FR-001). Enrichment (`apply_manifest_update`) preserves the order because it only edits
+fields, never ids. Tests: ordering cases added to
+`crates/ragent-tui/tests/test_plugin_store_filter.rs`, the category/nav/mouse/acceptance
+suites (sorted survivor order), and the panel tests (the block cursor now starts on the
+alphabetically first row).

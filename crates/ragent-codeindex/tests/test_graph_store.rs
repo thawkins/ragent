@@ -46,7 +46,10 @@ fn test_graph_edges_table_exists() {
 fn test_communities_table_exists() {
     let store = IndexStore::open_in_memory().unwrap();
     assert_eq!(store.community_count().unwrap(), 0);
-    assert!(store.query_all_communities().unwrap().is_empty());
+    assert_eq!(
+        store.query_all_communities().unwrap(),
+        [] as [(i64, i64, std::option::Option<std::string::String>); 0]
+    );
 }
 
 #[test]
@@ -292,7 +295,10 @@ fn test_clear_communities() {
 
     store.clear_communities().unwrap();
     assert_eq!(store.community_count().unwrap(), 0);
-    assert!(store.query_all_communities().unwrap().is_empty());
+    assert_eq!(
+        store.query_all_communities().unwrap(),
+        [] as [(i64, i64, std::option::Option<std::string::String>); 0]
+    );
 }
 
 #[test]
@@ -376,7 +382,7 @@ fn test_existing_tables_unchanged() {
     store
         .set_file_deps(file_id, &[("b.rs".to_string(), "imports".to_string())])
         .unwrap();
-    assert!(!store.get_dependents("b.rs").unwrap().is_empty());
+    assert_ne!(store.get_dependents("b.rs").unwrap(), [] as [i64; 0]);
 }
 // -- edge_count_by_kind / graph_node_count (graph status helpers) -------------
 

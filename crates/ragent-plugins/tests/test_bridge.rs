@@ -65,8 +65,11 @@ fn extract_skill_dirs_accepts_string_and_array() {
         extract_skill_dirs(Some(&serde_json::json!(["./a", "./b"]))),
         vec!["./a".to_string(), "./b".to_string()]
     );
-    assert!(extract_skill_dirs(Some(&serde_json::json!({ "dir": "x" }))).is_empty());
-    assert!(extract_skill_dirs(None).is_empty());
+    assert_eq!(
+        extract_skill_dirs(Some(&serde_json::json!({ "dir": "x" }))),
+        [] as [std::string::String; 0]
+    );
+    assert_eq!(extract_skill_dirs(None), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -132,8 +135,14 @@ fn plugin_skill_names_lists_skill_subdirectories_only() {
     assert_eq!(names, vec!["mongodb-setup".to_string()]);
 
     // A missing directory (or no declaration) contributes nothing.
-    assert!(plugin_skill_names(&plugin, &["./absent/".to_string()]).is_empty());
-    assert!(plugin_skill_names(&plugin, &[]).is_empty());
+    assert_eq!(
+        plugin_skill_names(&plugin, &["./absent/".to_string()]),
+        [] as [std::string::String; 0]
+    );
+    assert_eq!(
+        plugin_skill_names(&plugin, &[]),
+        [] as [std::string::String; 0]
+    );
 }
 
 // -- MCP mapping -------------------------------------------------------------
@@ -191,7 +200,10 @@ fn scanned_plugin_skill_dirs_only_include_enabled_plugins() {
     let plugin = stage_plugin(&tree.store());
 
     // Disabled (not yet enabled): contributes nothing (FR-016).
-    assert!(scanned_plugin_skill_dirs(&tree.dirs()).is_empty());
+    assert_eq!(
+        scanned_plugin_skill_dirs(&tree.dirs()),
+        [] as [std::path::PathBuf; 0]
+    );
 
     enable(&tree.dirs(), "mongodb");
     let dirs = scanned_plugin_skill_dirs(&tree.dirs());
@@ -262,8 +274,14 @@ fn plugin_agent_files_resolve_bare_names_and_refuse_escape() {
         ]
     );
     // `..` escape and absolute paths are dropped.
-    assert!(plugin_agent_files(root, &["../../etc/passwd.md".to_string()]).is_empty());
-    assert!(plugin_agent_files(root, &["/abs.md".to_string()]).is_empty());
+    assert_eq!(
+        plugin_agent_files(root, &["../../etc/passwd.md".to_string()]),
+        [] as [std::path::PathBuf; 0]
+    );
+    assert_eq!(
+        plugin_agent_files(root, &["/abs.md".to_string()]),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]

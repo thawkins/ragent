@@ -36,6 +36,7 @@ fn entry(id: &str, description: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: None,
     }
 }

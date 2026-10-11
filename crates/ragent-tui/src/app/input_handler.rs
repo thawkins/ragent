@@ -147,6 +147,77 @@ impl App {
         }
     }
 
+    /// Handle a mouse event while the connector-catalogue browse panel is open.
+    ///
+    /// Same ownership and hit-testing rules as
+    /// [`Self::handle_plugin_store_mouse`]: a left-click in the navigator column
+    /// selects and applies a category row and focuses the navigator, a wheel over
+    /// the navigator scrolls its viewport without changing the active category,
+    /// and a left-click or wheel over the result column moves the result cursor
+    /// while leaving the active category unchanged. Every path is pure in-memory
+    /// bookkeeping and installs nothing. A click or wheel that lands on the modal
+    /// but outside both columns is swallowed, so nothing behind the panel reacts.
+    fn handle_connector_catalogue_mouse(&mut self, event: MouseEvent) {
+        let nav_area = self.connector_store_nav_area;
+        let result_area = self.connector_store_result_area;
+        let pos = (event.column, event.row).into();
+        let in_nav = nav_area.contains(pos);
+        let in_results = result_area.contains(pos);
+
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) if in_nav => {
+                let row = event.row.saturating_sub(nav_area.y) as usize;
+                if let Some(browser) = self.connector_store.as_mut() {
+                    // Map the clicked viewport row to an absolute navigator row
+                    // through the current scroll offset; a row past the last
+                    // category is refused by `category_select_row`.
+                    let target = browser.category_scroll.saturating_add(row);
+                    browser.category_select_row(target);
+                    browser.nav_focused = true;
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_results => {
+                let row = event.row.saturating_sub(result_area.y) as usize;
+                if let Some(browser) = self.connector_store.as_mut() {
+                    // The result list scrolls as its cursor moves; an out-of-range
+                    // row is ignored. The active category is left unchanged.
+                    let target = browser.cursor.saturating_add(row);
+                    if target < browser.filtered.len() {
+                        browser.cursor = target;
+                    }
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_nav => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.category_scroll_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_nav => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.category_scroll_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_results => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.scroll_results_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_results => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.scroll_results_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            // Anything else over the modal is swallowed so nothing behind it reacts.
+            _ => {}
+        }
+    }
+
     /// Handle a mouse event while the plugin-store browse panel is open (spec
     /// `catnav` FR-011, FR-012, FR-013, FR-023, FR-024, FR-028).
     ///
@@ -240,6 +311,19 @@ impl App {
             self.handle_plugin_store_mouse(event);
             self.assert_ui_invariants();
             self.debug_log_input_transition("mouse-plugin-store", &before_input, before_cursor);
+            return;
+        }
+        // While the connector-catalogue browse panel is open it owns the mouse as
+        // well as the keyboard, exactly as the plugin-store panel does: every
+        // mouse event is routed to the panel and swallowed.
+        if self.connector_store.is_some() {
+            self.handle_connector_catalogue_mouse(event);
+            self.assert_ui_invariants();
+            self.debug_log_input_transition(
+                "mouse-connector-catalogue",
+                &before_input,
+                before_cursor,
+            );
             return;
         }
         // Self-heal any selection/menu anchored on a panel that a recent

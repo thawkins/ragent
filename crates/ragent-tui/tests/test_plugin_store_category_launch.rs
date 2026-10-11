@@ -1,12 +1,11 @@
 //! Pure unit tests for the plugin-store category-launch paths (spec `catnav`
-//! T-008; FR-021, FR-022).
+//! T-008; FR-021 withdrawn, FR-022).
 //!
 //! These drive [`PluginStoreBrowser`] directly with an in-memory entry list, no
 //! renderer, and no I/O, so they are deterministic and contact no store endpoint.
-//! They pin the two optional category sources: the `--category <name>` launch
-//! filter, held until the fetched index is known and then validated against the
-//! categories it actually declares; and the extra navigator rows derived from the
-//! entries' `tags`.
+//! They pin the `--category <name>` launch filter, held until the fetched index is
+//! known and then validated against the categories it actually declares; and they
+//! pin that an entry's `tags` never form a navigator row (FR-021 withdrawn).
 
 use ragent_connectors::CategoryFilter;
 use ragent_plugins::{StoreEntry, StoreKind};
@@ -23,6 +22,7 @@ fn entry(id: &str, category: Option<&str>, tags: &[&str]) -> StoreEntry {
         dialect: None,
         tags: tags.iter().map(|t| (*t).to_string()).collect(),
         homepage: None,
+        marketplace: String::new(),
         category: category.map(str::to_string),
     }
 }
@@ -130,78 +130,59 @@ fn an_all_launch_category_holds_no_filter_and_is_a_noop() {
     );
 }
 
-// -- Tag-derived navigator rows (FR-021) -------------------------------------
+// -- A withdrawn FR-021: tags never form navigator rows ----------------------
 
 #[test]
-fn distinct_tags_of_categorised_entries_follow_the_declared_categories() {
+fn tags_of_categorised_entries_do_not_add_navigator_rows() {
     let browser = loaded(vec![
         entry("a", Some("Web"), &["http", "api"]),
         entry("b", Some("Database"), &["sql"]),
-        entry("c", Some("Web"), &["http"]), // duplicate tag, folded
+        entry("c", Some("Web"), &["http"]),
     ]);
 
-    // Declared categories sort first, then the tags in first-seen order (FR-021).
-    assert_eq!(
-        category_rows(&browser),
-        ["Database", "Web", "http", "api", "sql"]
-    );
+    // FR-021 is withdrawn: only the declared categories form rows, so the tags add
+    // nothing and `ALL` stays implicit and first.
+    assert_eq!(category_rows(&browser), ["Database", "Web"]);
     assert_eq!(
         browser.category_row_count(),
-        6,
-        "ALL plus two categories plus three tags"
+        3,
+        "ALL plus the two declared categories"
     );
 }
 
 #[test]
-fn a_tag_row_selects_only_the_entries_carrying_that_tag() {
+fn a_tag_never_selects_a_category() {
     let mut browser = loaded(vec![
         entry("a", Some("Web"), &["http"]),
         entry("b", Some("Database"), &["sql"]),
         entry("c", Some("Web"), &["http", "api"]),
     ]);
-    let http_row = browser
-        .categories
-        .categories()
-        .iter()
-        .position(|c| c == "http")
-        .expect("the http tag is a row")
-        + 1;
 
-    assert!(browser.category_select_row(http_row));
-
-    assert_eq!(browser.active_category(), "http");
+    // No `http` row exists, and a category row is matched by `category` alone: under
+    // `Database` the `sql` tag of `b` is irrelevant, and the `Web` entries stay out
+    // (FR-021 withdrawn, FR-003).
+    assert!(
+        !browser.categories.categories().iter().any(|c| c == "http"),
+        "a tag is not a navigator row"
+    );
+    assert!(browser.category_select_row(1)); // `Database`
+    assert_eq!(browser.active_category(), "Database");
     assert_eq!(
         filtered_ids(&browser),
-        ["a", "c"],
-        "the tag predicate matches the entries that carry it"
-    );
-}
-
-#[test]
-fn a_tag_colliding_with_a_declared_category_is_not_duplicated() {
-    let browser = loaded(vec![
-        entry("a", Some("Web"), &["web"]),
-        entry("b", Some("Web"), &[]),
-    ]);
-
-    // The tag folds case-insensitively into the declared `Web` row (FR-021).
-    assert_eq!(category_rows(&browser), ["Web"]);
-    assert_eq!(
-        browser.category_row_count(),
-        2,
-        "ALL plus the single Web row"
+        ["b"],
+        "matching is on the declared category only"
     );
 }
 
 #[test]
 fn an_uncategorised_index_with_tags_stays_all_only() {
     let mut browser = loaded(vec![
-        entry("a", None, &["alpha"]),
         entry("b", None, &["beta"]),
+        entry("a", None, &["alpha"]),
     ]);
 
     // With no declared category the navigator is ALL only, so it still browses
-    // normally rather than becoming a tag menu (FR-018, A7).
+    // normally rather than becoming a tag menu (FR-018, A7) and sorted by id (FR-050).
     assert_eq!(browser.category_row_count(), 1);
     assert_eq!(browser.category_row_label(0), "ALL");
     assert_eq!(category_rows(&browser).len(), 0);
@@ -210,20 +191,21 @@ fn an_uncategorised_index_with_tags_stays_all_only() {
 }
 
 #[test]
-fn tag_rows_survive_a_re_fetch_that_keeps_the_category() {
+fn a_category_survives_a_re_fetch_that_keeps_it() {
     let mut browser = loaded(vec![entry("a", Some("Web"), &["http"])]);
+    // `Web` is the only non-`ALL` row: the `http` tag adds none.
+    assert_eq!(category_rows(&browser), ["Web"]);
     assert!(browser.category_select_row(1)); // `Web`
     assert_eq!(browser.active_category(), "Web");
 
-    // Re-fetch with the same category: the selection survives and the tag row is
-    // rederived (FR-021, FR-027).
+    // Re-fetch with the same category: the selection survives (FR-003, FR-027).
     browser.set_entries(vec![
         entry("a", Some("Web"), &["http"]),
         entry("b", Some("Web"), &[]),
     ]);
 
     assert_eq!(browser.active_category(), "Web");
-    assert_eq!(category_rows(&browser), ["Web", "http"]);
+    assert_eq!(category_rows(&browser), ["Web"]);
     assert_eq!(
         filtered_ids(&browser),
         ["a", "b"],

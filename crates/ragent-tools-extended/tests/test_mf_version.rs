@@ -181,7 +181,7 @@ async fn test_execute_succeeds_with_arbitrary_input() {
         .execute(serde_json::json!({"foo": "bar"}), &ctx())
         .await
         .unwrap();
-    assert!(!output.content.is_empty());
+    assert_ne!(output.content, "");
 }
 
 #[tokio::test]

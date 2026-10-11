@@ -84,7 +84,7 @@ cursor. Only ASCII glyphs are used (FR-004).
 | FR-018 No categories: ALL-only, browse normally | T-003, T-004 |
 | FR-019 Empty result state with navigator visible | T-004 |
 | FR-020 Resize re-derives navigator width | T-004 |
-| FR-021 Optional tag-derived rows | T-008 |
+| FR-021 Withdrawn (tag-derived rows dropped) | T-008 |
 | FR-022 Optional `--category <name>` pre-selection | T-008 |
 | FR-023 Mouse-less terminals keep keyboard path | T-006 |
 | FR-024 No install/download from navigator | T-005, T-006 |
@@ -105,7 +105,7 @@ cursor. Only ASCII glyphs are used (FR-004).
 | T-005 | Keyboard routing: focus transfer, Up/Down move + apply, Enter apply + focus results, clear-category key, navigator scroll | FR-007, FR-008, FR-009, FR-010, FR-015, FR-017, FR-024 | M | Critical | completed | T-003, T-004 |
 | T-006 | Mouse routing: hit-test the navigator column, left-click select, wheel scroll navigator, result-row click keeps category | FR-011, FR-012, FR-013, FR-023, FR-024, FR-028 | M | High | completed | T-004 |
 | T-007 | Unit tests for category filtering composition, cursor movement, clear-to-ALL, and re-derivation on category change | FR-007, FR-008, FR-014, FR-015, FR-018 | M | High | completed | T-003, T-005 |
-| T-008 | Optional: `--category <name>` pre-selection on launch and tag-derived category rows | FR-021, FR-022 | S | Low | completed | T-005 |
+| T-008 | Optional: `--category <name>` pre-selection on launch (tag-derived rows withdrawn, FR-021) | FR-021, FR-022 | S | Low | completed | T-005 |
 | T-009 | Fixture store index with categories + manual acceptance walk of the test plan + quality gates (`fmt`, `clippy`, `check --workspace`) | Acceptance 1-10 | M | High | completed | T-004, T-005, T-006 |
 ## Task Details
 
@@ -175,13 +175,13 @@ selecting a category resetting the result cursor; an index with no categories yi
 `ALL`-only navigator; a category selecting nothing after a re-fetch being dropped
 (FR-007, FR-008, FR-014, FR-015, FR-018).
 
-### T-008 - Optional launch flag and tag-derived rows
+### T-008 - Optional launch flag (tag-derived rows withdrawn)
 
 Parse an optional `--category <name>` on `/plugins codex` / `/plugins claude` and
 pre-select the named category once the index lands (validated like an in-panel selection,
-refused name reported in the footer). Optionally list distinct non-empty `tags` as extra
-category rows after the declared categories. Both are optional and may be dropped by a
-reviewer (FR-021, FR-022).
+refused name reported in the footer). FR-021's optional tag-derived rows are **withdrawn**:
+navigator rows come from the declared `category` field only, so a plugin with a long
+`tags`/`keywords` list cannot flood the navigator (FR-021, FR-022).
 
 ### T-009 - Fixtures, acceptance walk, quality gates
 

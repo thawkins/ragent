@@ -51,8 +51,8 @@ fn parses_the_spec_object_shape_and_captures_the_store_token() {
     assert_eq!(first.tags, vec!["weather".to_string(), "http".to_string()]);
     // The second entry omits optional fields and is still accepted (FR-003).
     assert_eq!(index.entries[1].id, "codex-time");
-    assert!(index.entries[1].description.is_empty());
-    assert!(index.entries[1].tags.is_empty());
+    assert_eq!(index.entries[1].description, "");
+    assert_eq!(index.entries[1].tags, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn parses_a_bare_top_level_array() {
 #[test]
 fn accepts_an_empty_plugins_array() {
     let index = StoreIndex::from_bytes(br#"{"plugins":[]}"#).expect("valid");
-    assert!(index.entries.is_empty());
+    assert_eq!(index.entries, [] as [ragent_plugins::StoreEntry; 0]);
     assert_eq!(index.skipped, 0);
 }
 
@@ -83,7 +83,7 @@ fn accepts_an_object_with_only_a_store_token_and_no_plugins() {
     let body = br#"{"store":"codex","plugins":[]}"#;
     let index = StoreIndex::from_bytes(body).expect("valid");
     assert_eq!(index.store.as_deref(), Some("codex"));
-    assert!(index.entries.is_empty());
+    assert_eq!(index.entries, [] as [ragent_plugins::StoreEntry; 0]);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn rejects_plugins_that_is_not_an_array() {
 fn rejects_malformed_json_with_a_detail() {
     let err = StoreIndex::from_bytes(b"{ not json").expect_err("must reject");
     match err {
-        StoreError::MalformedJson { detail } => assert!(!detail.is_empty()),
+        StoreError::MalformedJson { detail } => assert_ne!(detail, ""),
         other => panic!("expected MalformedJson, got {other:?}"),
     }
 }
@@ -144,7 +144,7 @@ fn skips_malformed_entries_and_counts_them() {
 fn a_single_malformed_entry_does_not_fail_the_whole_index() {
     let body = br#"{"plugins":[{"name":"no id"}]}"#;
     let index = StoreIndex::from_bytes(body).expect("still a valid index");
-    assert!(index.entries.is_empty());
+    assert_eq!(index.entries, [] as [ragent_plugins::StoreEntry; 0]);
     assert_eq!(index.skipped, 1);
 }
 
@@ -174,7 +174,7 @@ fn read_capped_aborts_past_the_ceiling() {
 #[test]
 fn read_capped_handles_an_empty_body() {
     let out = ragent_plugins::read_capped(Cursor::new(Vec::<u8>::new()), 10).expect("empty");
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [u8; 0]);
 }
 
 // -- FetchLimits (FR-016; config wiring) -------------------------------------

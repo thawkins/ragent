@@ -194,7 +194,7 @@ pub fn scanned_bridge<'c>(
 /// Shared by the bridge so the enable/parse filter lives in one place; a disabled
 /// connector or one whose manifest cannot be parsed contributes nothing.
 fn enabled_descriptors(dirs: &StoreDirs) -> Vec<ConnectorDescriptor> {
-    scan_dirs(dirs.clone())
+    scan_dirs(dirs)
         .into_iter()
         .filter(|connector| connector.enabled)
         .filter_map(|connector| connector.outcome.ok())

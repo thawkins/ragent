@@ -917,7 +917,7 @@ fn test_fixture_pre_tool_use_exit_2_takes_precedence_over_allow_in_same_stdout()
     match result {
         PreToolUseResult::Blocked { reason } => {
             // stderr was empty, so reason should be empty.
-            assert!(reason.is_empty());
+            assert_eq!(reason, "");
         }
         other => panic!("expected Blocked (exit 2 precedence), got {:?}", other),
     }

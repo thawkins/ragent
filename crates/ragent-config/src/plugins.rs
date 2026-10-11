@@ -85,17 +85,46 @@ pub struct PluginStoresConfig {
     /// compiled default endpoint is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude: Option<PluginStoreEndpoint>,
+    /// Additional named marketplaces for the Codex and Claude stores (spec
+    /// `pluginstores` FR-048). Each entry extends the store it names, so the
+    /// browse panel lists the union of the compiled default and every added
+    /// marketplace. Written by `/plugins marketplace <store> add <source>` and
+    /// removed by `/plugins marketplace <store> remove <name>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marketplaces: Vec<MarketplaceEntry>,
     /// Per-fetch wall-clock budget in milliseconds. Default: 10000.
-    #[serde(default = "default_store_timeout_ms")]
+    #[serde(default = "crate::config::default_store_timeout_ms")]
     pub timeout_ms: u64,
     /// Maximum accepted store-index size in bytes; a larger index aborts the
     /// fetch. Default: 2097152 (2 MiB).
-    #[serde(default = "default_max_index_bytes")]
+    #[serde(default = "crate::config::default_max_index_bytes")]
     pub max_index_bytes: u64,
     /// Time-to-live for a cached store index in seconds; `0` disables the
     /// index cache. Default: 3600.
-    #[serde(default = "default_cache_ttl_secs")]
+    #[serde(default = "crate::config::default_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
+}
+
+/// One named plugin marketplace attached to a store (spec `pluginstores`
+/// FR-048).
+///
+/// `store` names which store the marketplace extends (`codex` or `claude`);
+/// `source` is the user-typed source in any of the accepted forms (`owner/repo`,
+/// `git@github.com:owner/repo.git`, `https://.../marketplace.json`, or a local
+/// directory holding a marketplace manifest). `name` is the resolved display
+/// name (used by `remove`) and `url` is the resolved `https` marketplace URL,
+/// recorded at add time so the panel does not have to re-resolve the source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MarketplaceEntry {
+    /// Which store the marketplace extends (`codex` or `claude`).
+    pub store: String,
+    /// The display name (used by `/plugins marketplace <store> remove <name>`).
+    pub name: String,
+    /// The marketplace index `https://` URL, resolved at add time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The source string exactly as typed by the user (informational).
+    pub source: String,
 }
 
 impl Default for PluginStoresConfig {
@@ -103,9 +132,10 @@ impl Default for PluginStoresConfig {
         Self {
             codex: None,
             claude: None,
-            timeout_ms: default_store_timeout_ms(),
-            max_index_bytes: default_max_index_bytes(),
-            cache_ttl_secs: default_cache_ttl_secs(),
+            marketplaces: Vec::new(),
+            timeout_ms: crate::config::default_store_timeout_ms(),
+            max_index_bytes: crate::config::default_max_index_bytes(),
+            cache_ttl_secs: crate::config::default_cache_ttl_secs(),
         }
     }
 }
@@ -146,6 +176,12 @@ impl PluginsConfig {
     pub fn stores_or_default(&self) -> PluginStoresConfig {
         self.stores.clone().unwrap_or_default()
     }
+
+    /// Ensure a `stores` block is present (for mutation) and return it mutably,
+    /// creating the compiled-default block when the section is absent.
+    pub fn stores_mut(&mut self) -> &mut PluginStoresConfig {
+        self.stores.get_or_insert_with(PluginStoresConfig::default)
+    }
 }
 
 const fn default_max_execution_ms() -> u64 {
@@ -158,16 +194,4 @@ const fn default_max_entry_ms() -> u64 {
 
 const fn default_max_memory_mb() -> u64 {
     64
-}
-
-const fn default_store_timeout_ms() -> u64 {
-    10_000
-}
-
-const fn default_max_index_bytes() -> u64 {
-    2 * 1024 * 1024
-}
-
-const fn default_cache_ttl_secs() -> u64 {
-    3_600
 }

@@ -585,7 +585,7 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
     // The real metadata construction runs inside execute(); here we just
     // ensure the orchestrator exposes the expected engine list so research
     // provenance can be derived.
-    assert!(!names.is_empty());
+    assert_ne!(names, [] as [&str; 0]);
     let _ = opts;
 }
 

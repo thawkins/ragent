@@ -1061,7 +1061,7 @@ async fn test_task_update_cycle_three_nodes() {
 
     let tasks = storage.list_tasks("test-session", None).unwrap();
     let t1 = tasks.iter().find(|t| t.id == "t1").unwrap();
-    assert!(t1.blocked_by.is_empty());
+    assert_eq!(t1.blocked_by, [] as [std::string::String; 0]);
 }
 
 /// A valid dependency chain (no cycle) should succeed.

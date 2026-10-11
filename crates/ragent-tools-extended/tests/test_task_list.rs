@@ -548,7 +548,7 @@ fn test_task_list_tool_name() {
 #[test]
 fn test_task_list_tool_description() {
     let tool = TaskListTool;
-    assert!(!tool.description().is_empty());
+    assert_ne!(tool.description(), "");
     assert!(tool.description().contains("status"));
 }
 

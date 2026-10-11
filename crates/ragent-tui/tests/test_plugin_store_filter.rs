@@ -3,7 +3,9 @@
 //! FR-008, FR-010, FR-017, FR-022).
 //!
 //! These drive `PluginStoreBrowser` directly with an in-memory entry list and no
-//! renderer, so they are deterministic and touch no store endpoint (FR-022).
+//! renderer, so they are deterministic and touch no store endpoint (FR-022). The
+//! result list is stored in ascending alphabetical order of id (FR-050), so every
+//! assertion below is against sorted survivors.
 
 use ragent_plugins::{StoreEntry, StoreKind};
 use ragent_tui::app::{PluginStoreBrowser, PluginStoreStatus};
@@ -18,6 +20,7 @@ fn entry(id: &str, name: &str, description: &str, tags: &[&str]) -> StoreEntry {
         dialect: None,
         tags: tags.iter().map(|t| (*t).to_string()).collect(),
         homepage: None,
+        marketplace: String::new(),
         category: None,
     }
 }
@@ -71,6 +74,19 @@ fn an_empty_query_matches_every_entry() {
     assert!(browser.has_results());
 }
 
+// -- Alphabetical ordering (FR-050) ------------------------------------------
+
+#[test]
+fn the_result_set_is_sorted_alphabetically_by_id_on_load() {
+    // The fixture is declared weather/todo/notes; the browser sorts it by id, so
+    // the survivors read notes, todo, weather regardless of the input order.
+    let browser = loaded(sample());
+    assert_eq!(
+        filtered_ids(&browser),
+        ["codex-notes", "codex-todo", "codex-weather"]
+    );
+}
+
 #[test]
 fn the_match_is_case_insensitive_over_every_field() {
     let mut browser = loaded(sample());
@@ -90,17 +106,17 @@ fn the_match_is_case_insensitive_over_every_field() {
 }
 
 #[test]
-fn a_shared_tag_returns_every_matching_entry_in_document_order() {
+fn a_shared_tag_returns_every_matching_entry_in_alphabetical_order() {
     let mut browser = loaded(sample());
     browser.set_query("productivity".to_string());
-    assert_eq!(filtered_ids(&browser), ["codex-todo", "codex-notes"]);
+    assert_eq!(filtered_ids(&browser), ["codex-notes", "codex-todo"]);
 }
 
 #[test]
 fn a_query_that_matches_nothing_yields_no_results_and_keeps_the_entries() {
     let mut browser = loaded(sample());
     browser.set_query("zzz-no-match".to_string());
-    assert!(browser.filtered.is_empty());
+    assert_eq!(browser.filtered, [] as [usize; 0]);
     assert!(!browser.has_results());
     assert!(browser.selected().is_none());
     // The full entry list is retained so clearing the query restores the set.
@@ -117,13 +133,13 @@ fn each_keystroke_re_filters_and_resets_the_cursor_to_the_first_match() {
     // A new character re-derives the filtered set and resets the cursor.
     browser.push_char('x');
     assert_eq!(browser.query, "productivityx");
-    assert!(browser.filtered.is_empty());
+    assert_eq!(browser.filtered, [] as [usize; 0]);
     assert_eq!(browser.cursor, 0);
 
     // Removing it restores the survivors and still resets the cursor.
     assert!(browser.backspace());
     assert_eq!(browser.query, "productivity");
-    assert_eq!(filtered_ids(&browser), ["codex-todo", "codex-notes"]);
+    assert_eq!(filtered_ids(&browser), ["codex-notes", "codex-todo"]);
     assert_eq!(browser.cursor, 0);
 }
 

@@ -7,9 +7,10 @@
 
 #![allow(missing_docs)]
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_agent::event::{Event, FinishReason};
 use ragent_server::sse::{event_to_parts, event_to_sse};
+use std::hint::black_box;
 
 fn make_events() -> Vec<(&'static str, Event)> {
     vec![

@@ -213,9 +213,14 @@ the navigator stays fully visible.
 
 ### Optional requirements
 
-**FR-021** - Where the store index entry supplies one or more `tags` in addition to a
-category, the system may list each distinct non-empty tag as a category row following
-the declared categories.
+**FR-021 - WITHDRAWN (tag-derived rows).** An earlier revision offered each distinct
+non-empty `tag` of a categorised entry as an extra navigator row. This was withdrawn:
+navigator rows are derived from the declared `category` field only (FR-003), so a
+single plugin carrying a long `keywords`/`tags` list can no longer flood the
+navigator with rows that each select that one plugin. An entry's `tags` remain a
+query-search term only (FR-008); they never form a navigator row and never select a
+category. The requirement number is retained (withdrawn, not renumbered) so FR-022
+and FR-023 stay stable.
 
 **FR-022** - Where `/plugins codex` or `/plugins claude` is invoked with a
 `--category <name>` argument, the system may open the panel with that category
@@ -313,5 +318,8 @@ Focus cycles between two panes inside the panel:
 2. **Apply-on-move vs. apply-on-confirm.** A4 fixes selection as immediate on cursor
    move. If a reviewer prefers an explicit confirm step, FR-007/FR-008 are the
    requirements to change.
-3. **Tag-derived rows.** FR-021 offers tags as extra category rows. If tag lists are
-   long, the navigator may become unwieldy; a reviewer may drop FR-021 entirely.
+3. **Tag-derived rows (resolved).** FR-021 offered tags as extra category rows. It is
+   withdrawn: the Claude marketplace ships one plugin (`convex`) with a fifteen-item
+   `keywords` array and no other tag-declaring entry, so the navigator degenerated
+   into a long run of rows that each selected that single plugin. Navigator rows now
+   come only from the declared `category` field.

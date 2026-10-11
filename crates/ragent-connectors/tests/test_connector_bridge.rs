@@ -39,6 +39,7 @@ fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
         category: String::new(),
         tags: Vec::new(),
         source: String::new(),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),

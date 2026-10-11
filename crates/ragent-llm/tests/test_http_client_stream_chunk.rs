@@ -13,7 +13,7 @@ fn multibyte_char_split_across_chunks_is_preserved() {
 
     append_stream_chunk(&mut out, &mut pending, &[0xA9]);
     assert_eq!(out, "caf\u{e9}");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }
 
 #[test]
@@ -21,12 +21,12 @@ fn multibyte_char_split_three_ways_across_chunks() {
     // '-' is 0xE2 0x94 0x80 - three bytes.
     let (mut out, mut pending) = (String::new(), Vec::new());
     append_stream_chunk(&mut out, &mut pending, &[0xE2]);
-    assert!(out.is_empty());
+    assert_eq!(out, "");
     append_stream_chunk(&mut out, &mut pending, &[0x94]);
-    assert!(out.is_empty());
+    assert_eq!(out, "");
     append_stream_chunk(&mut out, &mut pending, &[0x80]);
     assert_eq!(out, "\u{2500}");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn invalid_byte_is_replaced_in_place_and_does_not_stall() {
     append_stream_chunk(&mut out, &mut pending, &[0xFF]);
     append_stream_chunk(&mut out, &mut pending, b"tail");
     assert_eq!(out, "ok\u{FFFD}tail");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn invalid_byte_then_valid_head_is_not_double_corrupted() {
     append_stream_chunk(&mut out, &mut pending, &[0xFF, 0xC3]);
     append_stream_chunk(&mut out, &mut pending, &[0xA9]);
     assert_eq!(out, "\u{FFFD}\u{e9}");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn multiple_invalid_bytes_each_emit_one_replacement() {
     let (mut out, mut pending) = (String::new(), Vec::new());
     append_stream_chunk(&mut out, &mut pending, &[0xFF, 0xFE, 0xFF]);
     assert_eq!(out, "\u{FFFD}\u{FFFD}\u{FFFD}");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }
 
 #[test]
@@ -73,5 +73,5 @@ fn clean_ascii_chunks_stream_unchanged() {
         append_stream_chunk(&mut out, &mut pending, chunk);
     }
     assert_eq!(out, "hello world");
-    assert!(pending.is_empty());
+    assert_eq!(pending, [] as [u8; 0]);
 }

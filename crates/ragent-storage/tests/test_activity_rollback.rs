@@ -179,7 +179,10 @@ fn rollback_to_zero_on_empty_run() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-empty");
     let result = log.rollback_to_seq(&run, 0).expect("rollback");
-    assert!(result.projection.messages.is_empty());
+    assert_eq!(
+        result.projection.messages,
+        [] as [ragent_types::ProjectedMessage; 0]
+    );
     assert_eq!(result.ignored_count, 0);
 }
 

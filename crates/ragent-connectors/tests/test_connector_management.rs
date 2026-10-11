@@ -689,7 +689,7 @@ async fn dispatcher_honours_the_master_switch() {
             "`{sub}` must report the disabled subsystem: {report}"
         );
     }
-    assert!(env.enabled_calls.is_empty());
+    assert_eq!(env.enabled_calls, [] as [std::string::String; 0]);
 
     // `help` stays available while disabled (FR-021).
     let help = run_connector_subcommand_env(&mut env, "help", "")
@@ -877,4 +877,102 @@ fn list_reports_a_connected_server_with_no_live_count_as_unknown() {
     let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
 
     assert!(report.contains("1 server(s), 2 tool(s)"), "{report}");
+}
+
+// -- alphabetical order under a category filter (FR-046) ----------------------
+
+#[test]
+fn list_renders_rows_alphabetically_by_id() {
+    let tree = gdrive_tree("list-sorted");
+    for (id, category) in [
+        ("slack", "communication"),
+        ("github", "developer"),
+        ("google-drive", "developer"),
+        ("alpha", "developer"),
+    ] {
+        let dir = tree.store().join(id);
+        std::fs::create_dir_all(&dir).expect("connector dir");
+        std::fs::write(
+            dir.join("connector.json"),
+            serde_json::to_string(&descriptor(id, id, category)).expect("serialisable"),
+        )
+        .expect("manifest writable");
+    }
+    let dirs = tree.dirs();
+    let input = ListInput {
+        dirs: &dirs,
+        statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
+    };
+    let report = render_list(&input, &CategoryFilter::all(), false).expect("filter known");
+    let order: Vec<usize> = ["alpha", "gdrive", "github", "google-drive", "slack"]
+        .iter()
+        .filter_map(|id| report.find(&format!("- {id}:")))
+        .collect();
+    let mut sorted = order.clone();
+    sorted.sort_unstable();
+    assert_eq!(order, sorted, "rows render alphabetically by id: {report}");
+}
+
+#[test]
+fn list_keeps_alphabetical_order_under_a_category_filter() {
+    let tree = gdrive_tree("list-sorted-category");
+    for (id, category) in [
+        ("zeta", "developer"),
+        ("alpha", "developer"),
+        ("slack", "communication"),
+    ] {
+        let dir = tree.store().join(id);
+        std::fs::create_dir_all(&dir).expect("connector dir");
+        std::fs::write(
+            dir.join("connector.json"),
+            serde_json::to_string(&descriptor(id, id, category)).expect("serialisable"),
+        )
+        .expect("manifest writable");
+    }
+    let dirs = tree.dirs();
+    let input = ListInput {
+        dirs: &dirs,
+        statuses: &[],
+        tool_counts: &std::collections::BTreeMap::new(),
+    };
+    let report =
+        render_list(&input, &CategoryFilter::parse("developer"), false).expect("filter known");
+    let alpha = report.find("- alpha:").expect("alpha row");
+    let zeta = report.find("- zeta:").expect("zeta row");
+    assert!(
+        alpha < zeta,
+        "the filtered rows stay alphabetical: {report}"
+    );
+    assert!(
+        !report.contains("- slack:"),
+        "other categories filtered out"
+    );
+}
+
+#[test]
+fn search_renders_matches_alphabetically_by_id() {
+    let catalogue = vec![
+        descriptor("zeta", "Zeta", "developer"),
+        descriptor("slack", "Slack", "communication"),
+        descriptor("alpha", "Alpha", "developer"),
+    ];
+    let report = render_search("a", &catalogue, &CategoryFilter::all()).expect("filter known");
+    let alpha = report.find("- alpha:").expect("alpha row");
+    let slack = report.find("- slack:").expect("slack row");
+    let zeta = report.find("- zeta:").expect("zeta row");
+    assert!(
+        alpha < slack && slack < zeta,
+        "search matches render alphabetically: {report}"
+    );
+
+    // Under a category filter the survivors keep the alphabetical order.
+    let filtered =
+        render_search("a", &catalogue, &CategoryFilter::parse("developer")).expect("filter known");
+    let alpha = filtered.find("- alpha:").expect("alpha row");
+    let zeta = filtered.find("- zeta:").expect("zeta row");
+    assert!(
+        alpha < zeta,
+        "the filtered search matches stay alphabetical: {filtered}"
+    );
 }

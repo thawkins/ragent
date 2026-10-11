@@ -21,6 +21,10 @@ fn usage_block_documents_every_subcommand_and_source_form() {
         "`/plugins disable <pluginid>`",
         "`/plugins test <pluginid>`",
         "`/plugins stores`",
+        "`/plugins marketplace show`",
+        "`/plugins marketplace <store> list`",
+        "`/plugins marketplace <store> add <source> [--force]`",
+        "`/plugins marketplace <store> remove <name>`",
         "`/plugins codex [query] [--category <name>] [--refresh]`",
         "`/plugins claude [query] [--category <name>] [--refresh]`",
         "`/plugins help`",
@@ -61,7 +65,15 @@ fn subcommand_list_matches_the_documented_family() {
     assert_eq!(
         PLUGIN_SUBCOMMANDS,
         [
-            "list", "add", "remove", "enable", "disable", "test", "stores", "help"
+            "list",
+            "add",
+            "remove",
+            "enable",
+            "disable",
+            "test",
+            "stores",
+            "marketplace",
+            "help"
         ]
     );
     // Every listed token appears in the usage block.

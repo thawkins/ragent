@@ -233,18 +233,26 @@ fn transform_vendor_entry(
     let id = required_str(map, "id")
         .or_else(|| name_field.clone())
         .ok_or(StoreEntryError::EmptyField("id"))?;
-    let name = name_field.unwrap_or_else(|| id.clone());
-    let version = map
-        .get("version")
-        .and_then(Value::as_str)
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or("0")
-        .to_string();
-    let description = map
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    // The display name is the entry's own `interface.displayName` when it ships
+    // one (the human title), else the listing `name`, else the id (FR-043).
+    let interface = map.get("interface").and_then(Value::as_object);
+    let name = interface
+        .and_then(|block| nonblank_field(block, "displayName"))
+        .or(name_field)
+        .unwrap_or_else(|| id.clone());
+    // The listing often omits `version`; leave it blank so the browser can show an
+    // explicit unknown marker rather than a misleading zero, and let the manifest
+    // enrichment (spec `pluginstores` FR-048) fill it in from the plugin's own
+    // manifest (FR-043).
+    let version = required_str(map, "version").unwrap_or_default();
+    // The description falls back through the `interface` block's short then long
+    // description, so a Codex-style entry that ships only the interface block is
+    // still described (FR-043).
+    let description = required_str(map, "description")
+        .or_else(|| interface.and_then(|block| nonblank_field(block, "shortDescription")))
+        .or_else(|| interface.and_then(|block| nonblank_field(block, "longDescription")))
+        .or_else(|| interface.and_then(|block| nonblank_field(block, "description")))
+        .unwrap_or_default();
     let homepage = map
         .get("homepage")
         .and_then(Value::as_str)
@@ -276,6 +284,7 @@ fn transform_vendor_entry(
         tags,
         homepage,
         category,
+        marketplace: String::new(),
     })
 }
 
@@ -285,6 +294,15 @@ fn required_str(map: &Map<String, Value>, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .filter(|s| !s.trim().is_empty())
+}
+
+/// A non-empty, trimmed string field of an already-resolved object, or `None`.
+fn nonblank_field(map: &Map<String, Value>, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Collect `tags` (or, as a fallback, `keywords`) from a vendor entry.

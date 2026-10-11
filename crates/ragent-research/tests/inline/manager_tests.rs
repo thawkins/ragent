@@ -67,7 +67,7 @@ async fn delete_then_list_excludes_item() {
         .unwrap();
     mgr.delete("rust-async").await.unwrap();
     let list = mgr.list(true).await.unwrap();
-    assert!(list.is_empty());
+    assert_eq!(list, [] as [crate::item::ResearchItem; 0]);
 }
 
 #[tokio::test]
@@ -110,7 +110,7 @@ async fn search_returns_empty_for_empty_query() {
     let tmp = TempDir::new().unwrap();
     let mgr = ResearchManager::new(tmp.path());
     let hits = mgr.search("", 10).await.unwrap();
-    assert!(hits.is_empty());
+    assert_eq!(hits, [] as [crate::manager::SearchHit; 0]);
 }
 
 #[tokio::test]
@@ -200,7 +200,7 @@ async fn g001_refresh_index_writes_index_json_cache() {
     assert_eq!(cache.entries[0].title, "Rust Async");
     assert_eq!(cache.entries[0].topic, "async/await");
     assert_eq!(cache.entries[0].status, "draft");
-    assert!(cache.entries[0].tags.is_empty());
+    assert_eq!(cache.entries[0].tags, [] as [std::string::String; 0]);
     // search_text should contain the body text (title appears in body).
     assert!(cache.entries[0].search_text.contains("Rust Async"));
 }
@@ -442,7 +442,7 @@ fn extract_one_line_summary_truncates_multibyte_safely() {
     let summary = "\u{e9}".repeat(150);
     let body = format!("## Executive Summary\n\n{summary}\n\n## Findings\n\n");
     let got = extract_one_line_summary(&body);
-    assert!(!got.is_empty());
+    assert_ne!(got, "");
     assert!(
         got.ends_with("..."),
         "expected truncated summary to end with ellipsis: {got}"

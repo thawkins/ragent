@@ -373,7 +373,7 @@ fn test_dedup_preserves_order() {
 #[test]
 fn test_dedup_empty_input() {
     let result = normalize_and_dedup(&[]);
-    assert!(result.is_empty());
+    assert_eq!(result, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -454,7 +454,7 @@ fn test_config_defaults() {
     assert!(config.focus.is_none());
     assert_eq!(config.sitemap, SitemapMode::Off);
     assert!(!config.discover_only);
-    assert!(config.crawl_urls.is_empty());
+    assert_eq!(config.crawl_urls, [] as [std::string::String; 0]);
     assert!(!config.respect_robots);
 }
 
@@ -723,7 +723,7 @@ async fn test_discover_only_does_not_store_pages() {
     assert_eq!(result.total_pages, 0);
     assert!(result.pages.is_empty());
     // But discovered URLs should be populated.
-    assert!(!result.discovered_urls.is_empty());
+    assert_ne!(result.discovered_urls, [] as [std::string::String; 0]);
 }
 
 // ===========================================================================

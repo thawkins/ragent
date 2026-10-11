@@ -26,7 +26,7 @@ async fn test_manager_real_project_discover() {
 async fn test_manager_real_project_list_all() {
     let mgr = SpecManager::new(specs_root());
     let specs = mgr.list_specs(&SpecFilter::new()).await.unwrap();
-    assert!(!specs.is_empty());
+    assert_ne!(specs, [] as [ragent_specs::Spec; 0]);
     for spec in &specs {
         assert!(
             spec.status != SpecStatus::Archived || specs.len() == 1,
@@ -66,7 +66,7 @@ async fn test_manager_real_project_search() {
 async fn test_manager_real_project_search_snippets() {
     let mgr = SpecManager::new(specs_root());
     let results = mgr.search_specs("requirement").await.unwrap();
-    assert!(!results.is_empty());
+    assert_ne!(results, [] as [ragent_specs::SpecSearchResult; 0]);
     for result in &results {
         assert!(
             !result.snippets.is_empty(),

@@ -157,7 +157,10 @@ fn test_parse_response_json_extracts_search_results() {
 #[test]
 fn test_parse_response_json_missing_search_results() {
     let value = json!({"choices": [{"message": {"content": "answer"}}]});
-    assert!(parse_response_json(&value).is_empty());
+    assert_eq!(
+        parse_response_json(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
@@ -218,7 +221,10 @@ fn test_parse_response_json_falls_back_to_citations() {
 fn test_parse_response_json_empty_citations() {
     let value = json!({"citations": []});
     let results = parse_response_json(&value);
-    assert!(results.is_empty());
+    assert_eq!(
+        results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]

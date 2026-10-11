@@ -525,7 +525,7 @@ async fn test_auto_approve_without_checkpoints_executes() -> Result<()> {
     let requests = drain_events(&mut rx, |event| {
         matches!(event, Event::PermissionRequested { .. })
     });
-    assert!(requests.is_empty());
+    assert_eq!(requests, [] as [ragent_agent::Event; 0]);
     Ok(())
 }
 

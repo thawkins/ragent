@@ -79,7 +79,7 @@ fn test_create_task_minimal_args_defaults() {
     assert!(row.active_form.is_none());
     assert!(row.owner.is_none());
     assert_eq!(row.metadata, "{}");
-    assert!(row.blocked_by.is_empty());
+    assert_eq!(row.blocked_by, [] as [std::string::String; 0]);
 }
 
 /// Verify that `get_task` returns None for a non-existent task.
@@ -515,7 +515,7 @@ fn test_update_task_clear_blocked_by() {
         .get_task("task-cbb", "sess-clear-bb")
         .unwrap()
         .unwrap();
-    assert!(row.blocked_by.is_empty());
+    assert_eq!(row.blocked_by, [] as [std::string::String; 0]);
 }
 
 /// Verify that `update_task` with all fields None only updates
@@ -665,7 +665,7 @@ fn test_legacy_create_task_simple_readable_via_get_task() {
     assert!(row.active_form.is_none());
     assert!(row.owner.is_none());
     assert_eq!(row.metadata, "{}");
-    assert!(row.blocked_by.is_empty());
+    assert_eq!(row.blocked_by, [] as [std::string::String; 0]);
 }
 
 /// Verify that a task created via `create_task` can be updated via the

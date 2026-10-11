@@ -178,7 +178,7 @@ fn derive_gap_queries_includes_shallow_and_opposing() {
         }],
     };
     let queries = derive_gap_queries(&report, &loci, "AI coding agents");
-    assert!(!queries.is_empty());
+    assert_ne!(queries, [] as [std::string::String; 0]);
     assert!(queries.iter().any(|q| q.contains("cost evidence")));
     assert!(queries.iter().any(|q| q.contains("opposing view")));
 }

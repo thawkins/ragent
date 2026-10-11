@@ -36,6 +36,7 @@ fn descriptor(
         category: "developer".to_string(),
         tags: vec!["test".to_string()],
         source: "catalogue:test".to_string(),
+        marketplace: String::new(),
         provenance: ConnectorProvenance::Catalogue,
         auth,
         auth_scope: scopes.iter().map(|s| (*s).to_string()).collect(),

@@ -8,7 +8,7 @@ use super::*;
 async fn heuristic_plan_returns_sub_questions() {
     let planner = HeuristicPlanner::new();
     let plan = planner.plan("Rust async runtimes").await.unwrap();
-    assert!(!plan.sub_questions.is_empty());
+    assert_ne!(plan.sub_questions, [] as [crate::state::SubQuestion; 0]);
     assert_eq!(plan.topic, "Rust async runtimes");
     assert!(
         plan.sub_questions

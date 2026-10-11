@@ -162,15 +162,11 @@ fn parse_caption_xml_empty_body_yields_empty_transcript() {
     // A 0-byte caption response (bot-gating / consent interstitial) parses
     // successfully - the empty-body guard lives in
     // `extract_transcript_from_watch_page` / `caption_xml_to_transcript`.
-    assert!(
-        parse_caption_xml("")
-            .expect("empty XML must not error")
-            .is_empty()
-    );
-    assert!(
+    assert_eq!(parse_caption_xml("").expect("empty XML must not error"), "");
+    assert_eq!(
         parse_caption_xml("<transcript></transcript>")
-            .expect("empty transcript element must not error")
-            .is_empty()
+            .expect("empty transcript element must not error"),
+        ""
     );
 }
 

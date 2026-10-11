@@ -69,7 +69,7 @@ pub enum RemoveError {
 /// [`RemoveError::Enabled`] when the connector is enabled, or
 /// [`RemoveError::Io`] when the directory cannot be deleted.
 pub fn remove(dirs: &StoreDirs, id: &str) -> Result<RemoveOutcome, RemoveError> {
-    let found = scan_dirs(dirs.clone())
+    let found = scan_dirs(dirs)
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| RemoveError::UnknownConnector(id.to_string()))?;

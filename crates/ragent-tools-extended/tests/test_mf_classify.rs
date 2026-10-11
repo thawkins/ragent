@@ -108,7 +108,7 @@ fn test_article_detected_and_extracted() {
     );
     assert_eq!(result.page_type, PageType::Article);
     assert!(result.content_ok);
-    assert!(!result.content.is_empty());
+    assert_ne!(result.content, "");
 }
 
 #[test]
@@ -560,7 +560,7 @@ fn test_summary_empty_when_no_text_and_no_metadata() {
         "text/html",
         &ClassifyOptions::default(),
     );
-    assert!(result.summary.is_empty());
+    assert_eq!(result.summary, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +736,7 @@ fn test_classify_then_focus_article() {
     );
     // The classify output can be passed to focus_content for BM25 filtering.
     let focused = focus_content(&result.content, "article");
-    assert!(!focused.is_empty());
+    assert_ne!(focused, "");
 }
 
 // ---------------------------------------------------------------------------

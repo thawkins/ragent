@@ -139,13 +139,13 @@ fn rejects_empty_name_when_only_whitespace_after_colon() {
 fn returns_empty_vec_when_no_declarations() {
     let plan = "# Plan\n\nNothing here.\n";
     let deps = parse_research_dependencies(plan).unwrap();
-    assert!(deps.is_empty());
+    assert_eq!(deps, [] as [crate::plan_dep::ResearchDependency; 0]);
 }
 
 #[test]
 fn returns_empty_vec_for_empty_input() {
     let deps = parse_research_dependencies("").unwrap();
-    assert!(deps.is_empty());
+    assert_eq!(deps, [] as [crate::plan_dep::ResearchDependency; 0]);
 }
 
 #[test]

@@ -62,7 +62,7 @@ fn replay_run_empty_yields_empty_projection() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-empty");
     let proj = log.replay_run(&run).expect("replay");
-    assert!(proj.messages.is_empty());
+    assert_eq!(proj.messages, [] as [ragent_types::ProjectedMessage; 0]);
     assert_eq!(proj.status, RunStatus::Active);
 }
 
@@ -71,7 +71,7 @@ fn replay_run_upto_zero_on_empty_run() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-empty");
     let proj = log.replay_run_upto(&run, 0).expect("replay");
-    assert!(proj.messages.is_empty());
+    assert_eq!(proj.messages, [] as [ragent_types::ProjectedMessage; 0]);
 }
 
 #[test]

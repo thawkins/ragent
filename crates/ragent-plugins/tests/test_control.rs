@@ -680,7 +680,7 @@ fn run_control_command_reports_disabled_subsystem_master_switch() {
     }
     // Nothing was loaded or registered.
     assert!(surface.tools.is_empty());
-    assert!(session.reports().is_empty());
+    assert_eq!(session.reports(), []);
 }
 
 #[test]

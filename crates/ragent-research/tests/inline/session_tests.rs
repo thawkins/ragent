@@ -258,7 +258,7 @@ async fn session_runs_end_to_end_and_writes_document() {
         outcome.web_queries,
         vec!["Rust async runtimes in 2024".to_string()]
     );
-    assert!(!outcome.sources.is_empty());
+    assert_ne!(outcome.sources, [] as [crate::source::Source; 0]);
     // Document should exist on disk.
     let p = research_root.join("rust-async/RESEARCH.md");
     assert!(p.is_file());
@@ -2863,5 +2863,5 @@ async fn competitive_mode_caps_researchers_at_max_concurrent_units() {
         calls <= 4,
         "capped competitive run should issue a handful of searches, got {calls}"
     );
-    assert!(!outcome.sources.is_empty());
+    assert_ne!(outcome.sources, [] as [crate::source::Source; 0]);
 }

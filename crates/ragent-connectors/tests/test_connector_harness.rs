@@ -35,6 +35,7 @@ fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
         category: String::new(),
         tags: Vec::new(),
         source: String::new(),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),
@@ -334,8 +335,11 @@ async fn harness_reports_connect_failure_and_makes_no_change_to_the_session() {
     }
     // A failed connect is never invoked and never disconnected (nothing to
     // tear down), so the live session sees no change.
-    assert!(probe.call_calls().is_empty());
-    assert!(probe.disconnect_calls().is_empty());
+    assert_eq!(
+        probe.call_calls(),
+        [] as [(std::string::String, std::string::String, serde_json::Value); 0]
+    );
+    assert_eq!(probe.disconnect_calls(), [] as [std::string::String; 0]);
 
     let rendered = render_report(&report);
     assert!(rendered.contains("[fail] connect bad.main"));
@@ -400,7 +404,10 @@ async fn harness_reports_a_connector_that_advertises_no_tool_without_failing() {
     .await;
 
     assert!(report.passed(), "{:?}", report.steps);
-    assert!(probe.call_calls().is_empty());
+    assert_eq!(
+        probe.call_calls(),
+        [] as [(std::string::String, std::string::String, serde_json::Value); 0]
+    );
     let detail = step(&report, "sample invocation on bare.main")
         .detail
         .clone()
@@ -460,7 +467,7 @@ async fn harness_refuses_when_the_declared_credential_is_missing() {
         other => panic!("expected auth failure, got {other:?}"),
     }
     // An unsatisfied auth gate refuses the connect entirely (FR-022, FR-032).
-    assert!(probe.connect_calls().is_empty());
+    assert_eq!(probe.connect_calls(), [] as [std::string::String; 0]);
 }
 
 #[tokio::test]
@@ -583,7 +590,7 @@ async fn run_harness_refuses_when_the_subsystem_is_disabled() {
     .await;
 
     assert_eq!(outcome, Err(HarnessError::Disabled));
-    assert!(probe.connect_calls().is_empty());
+    assert_eq!(probe.connect_calls(), [] as [std::string::String; 0]);
     let rendered = HarnessError::Disabled.report("echo");
     assert!(rendered.contains("[err]"), "{rendered}");
     assert!(rendered.contains("disabled"), "{rendered}");

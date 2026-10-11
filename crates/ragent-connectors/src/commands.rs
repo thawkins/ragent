@@ -52,8 +52,8 @@ use crate::report::{
     add_error_report, add_report, disabled_subsystem_report, remove_error_report, remove_report,
 };
 use crate::store::{StoreDirs, store_dirs};
-use crate::store_index::CatalogueKind;
-use crate::store_ops::{fetch_effective_catalogue, stores_report_with_check};
+use crate::store_index::{CatalogueKind, EndpointSource, marketplace_name_for};
+use crate::store_ops::stores_report_with_check;
 
 /// A parsed `/connectors` subcommand (FR-004).
 ///
@@ -183,6 +183,306 @@ pub fn store_and_config(workdir: &Path) -> (StoreDirs, ConnectorsConfig) {
 pub fn is_known_subcommand(sub: &str) -> bool {
     CONNECTOR_SUBCOMMANDS.contains(&sub)
 }
+
+// ---------------------------------------------------------------------------
+// `/connectors marketplace` sub-subcommand family (FR-042, FR-043)
+// ---------------------------------------------------------------------------
+
+/// Whether a `/connectors marketplace <args>` invocation is the `show` report
+/// (`/connectors marketplace show`). A bare `/connectors marketplace` is not
+/// `show` and falls through to the usage block.
+#[must_use]
+pub fn marketplace_show_requested(args: &str) -> bool {
+    args.split_whitespace().next() == Some("show")
+}
+
+/// Whether a `/connectors marketplace <args>` invocation is a recognised
+/// marketplace subcommand (spec `connectors` FR-042, FR-043). Anything else
+/// (including a bare `marketplace` or an unknown verb) falls through to the
+/// usage block.
+#[must_use]
+pub fn marketplace_command_requested(args: &str) -> bool {
+    parse_marketplace_command(args).is_some()
+}
+
+/// A parsed `/connectors marketplace` sub-subcommand (spec `connectors`
+/// FR-042, FR-043).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarketplaceCommand {
+    /// `show` - list the configured marketplaces for the Claude catalogue.
+    Show,
+    /// `<store> list` - list one catalogue's configured marketplaces. The only
+    /// catalogue today is Claude; any other store token fails to parse and the
+    /// caller renders usage.
+    List,
+    /// `<store> add <source> [--force]` - add an additional marketplace.
+    Add {
+        /// The user-typed source.
+        source: String,
+        /// Replace an existing marketplace with the same resolved name.
+        force: bool,
+    },
+    /// `<store> remove <name>` - drop an additional marketplace.
+    Remove {
+        /// The marketplace display name to remove.
+        name: String,
+    },
+}
+
+/// Why a `/connectors marketplace <store> ...` invocation could not be parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketplaceArgError {
+    /// `add` was given no source.
+    MissingAddSource,
+    /// `remove` was given no marketplace name.
+    MissingRemoveName,
+}
+
+impl MarketplaceArgError {
+    /// Render the usage error for the offending sub-subcommand.
+    #[must_use]
+    pub fn report(self) -> String {
+        format!(
+            "{}\n\n[err] {}\n\nUsage: `/connectors marketplace claude add <source> [--force]` \
+             or `/connectors marketplace claude remove <name>`",
+            attribution("marketplace"),
+            match self {
+                Self::MissingAddSource => "Missing <source>.",
+                Self::MissingRemoveName => "Missing <name>.",
+            }
+        )
+    }
+}
+
+/// Parse `/connectors marketplace <args>` into a [`MarketplaceCommand`].
+///
+/// Returns `None` when the invocation is neither `show` nor a `claude
+/// add|remove|list` operation (the caller renders usage), `Some(Err(_))` for a
+/// malformed operation, and `Some(Ok(_))` otherwise. `--force` is accepted
+/// anywhere in an `add` argument list; the remaining tokens joined by a single
+/// space form the source (so a URL or path with no spaces still resolves).
+#[must_use]
+pub fn parse_marketplace_command(
+    args: &str,
+) -> Option<Result<MarketplaceCommand, MarketplaceArgError>> {
+    let mut tokens = args.split_whitespace();
+    let first = tokens.next()?;
+    if first == "show" {
+        return Some(Ok(MarketplaceCommand::Show));
+    }
+    // The only catalogue with a compiled default today is Claude; the token is
+    // matched case-insensitively and any other value is not a known store.
+    if !first.eq_ignore_ascii_case(CatalogueKind::Claude.token()) {
+        return None;
+    }
+    let verb = tokens.next()?;
+    match verb {
+        "list" => Some(Ok(MarketplaceCommand::List)),
+        "add" => {
+            let mut force = false;
+            let mut source_tokens: Vec<&str> = Vec::new();
+            for token in tokens {
+                if token == "--force" {
+                    force = true;
+                } else {
+                    source_tokens.push(token);
+                }
+            }
+            if source_tokens.is_empty() {
+                return Some(Err(MarketplaceArgError::MissingAddSource));
+            }
+            Some(Ok(MarketplaceCommand::Add {
+                source: source_tokens.join(" "),
+                force,
+            }))
+        }
+        "remove" => match tokens.next() {
+            Some(name) => Some(Ok(MarketplaceCommand::Remove {
+                name: name.to_string(),
+            })),
+            None => Some(Err(MarketplaceArgError::MissingRemoveName)),
+        },
+        _ => None,
+    }
+}
+
+/// Run a recognised `/connectors marketplace` sub-subcommand and return the
+/// report string, or `None` when the invocation is not recognised (the caller
+/// renders usage).
+///
+/// `show` and `<store> list` are pure config reads (FR-042). `add` and `remove`
+/// edit the **user-global** `connectors.stores.marketplaces` array (FR-043) and
+/// report the outcome; a malformed argument renders an `[err]` usage report
+/// that changes no state. No network access happens here - the added URL is
+/// recorded for the browser to fetch later.
+#[must_use]
+pub fn run_marketplace_command(args: &str) -> Option<String> {
+    let parsed = match parse_marketplace_command(args)? {
+        Ok(command) => command,
+        Err(err) => return Some(err.report()),
+    };
+    let (_, config) = store_and_config(Path::new("."));
+    match parsed {
+        MarketplaceCommand::Show => Some(render_marketplace_show_report(&config)),
+        MarketplaceCommand::List => Some(render_marketplace_list_report(&config)),
+        MarketplaceCommand::Add { source, force } => Some(run_marketplace_add(&source, force)),
+        MarketplaceCommand::Remove { name } => Some(run_marketplace_remove(&name)),
+    }
+}
+
+/// Whether a `/connectors marketplace` invocation carries no sub-subcommand, so
+/// the surfaces render usage for it as they do for a bare `/connectors`.
+#[must_use]
+pub fn marketplace_bare(args: &str) -> bool {
+    args.trim().is_empty()
+}
+
+/// Render the `show` report: one section for the Claude catalogue with a
+/// `| Name | Url | Description |` table over the base endpoint plus every added
+/// marketplace, tagging each `default`/`config`/`added` (FR-042).
+///
+/// A pure configuration read - no network, no store scan - so a missing
+/// `connectors.stores` block still lists the compiled default marketplace, and
+/// a configured endpoint refused by the FR-037 scheme guard renders an `[err]`
+/// row naming the refusal rather than being omitted.
+#[must_use]
+pub fn render_marketplace_show_report(config: &ConnectorsConfig) -> String {
+    let kind = CatalogueKind::Claude;
+    let mut out = attribution("marketplace show");
+    out.push_str(&format!(
+        "\n\n## {} connector catalogue marketplace\n\n",
+        kind.label()
+    ));
+    out.push_str("| Name | Url | Description |\n|---|---|---|\n");
+    let (endpoints, refused) = kind.effective_endpoints_with_source(config);
+    for (index, (endpoint, source)) in endpoints.iter().enumerate() {
+        if *source == EndpointSource::Added {
+            let name = marketplace_name_for(kind, config, endpoint);
+            out.push_str(&format!(
+                "| {name} | {} | {} connector catalogue marketplace ({}) |\n",
+                endpoint.as_str(),
+                kind.label(),
+                source.tag(),
+            ));
+        } else {
+            let first_base = index == 0;
+            let name = if first_base {
+                kind.token().to_string()
+            } else {
+                marketplace_name_for(kind, config, endpoint)
+            };
+            out.push_str(&format!(
+                "| {name} | {} | {} connector catalogue marketplace ({}) |\n",
+                endpoint.as_str(),
+                kind.label(),
+                source.tag(),
+            ));
+        }
+    }
+    if let Some(err) = refused {
+        out.push_str(&format!(
+            "| {} | [err] {} | {} connector catalogue marketplace (invalid) |\n",
+            kind.token(),
+            err,
+            kind.label(),
+        ));
+    }
+    out
+}
+
+/// Render the `claude list` report: the base endpoint plus every added
+/// marketplace for the one catalogue (FR-043).
+#[must_use]
+pub fn render_marketplace_list_report(config: &ConnectorsConfig) -> String {
+    let kind = CatalogueKind::Claude;
+    let mut out = format!(
+        "{}\n\n## {} connector catalogue marketplace\n\n",
+        attribution("marketplace"),
+        kind.label()
+    );
+    out.push_str("| Name | Url | Description |\n|---|---|---|\n");
+    let (endpoints, refused) = kind.effective_endpoints_with_source(config);
+    for (index, (endpoint, source)) in endpoints.iter().enumerate() {
+        let name = if index == 0 && *source != EndpointSource::Added {
+            kind.token().to_string()
+        } else {
+            marketplace_name_for(kind, config, endpoint)
+        };
+        out.push_str(&format!(
+            "| {name} | {} | {} connector catalogue marketplace ({}) |\n",
+            endpoint.as_str(),
+            kind.label(),
+            source.tag(),
+        ));
+    }
+    if let Some(err) = refused {
+        out.push_str(&format!(
+            "| {} | [err] {} | {} connector catalogue marketplace (invalid) |\n",
+            kind.token(),
+            err,
+            kind.label(),
+        ));
+    }
+    out
+}
+
+/// Resolve and record one added marketplace, returning the report (FR-043).
+fn run_marketplace_add(source: &str, force: bool) -> String {
+    let kind = CatalogueKind::Claude;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let resolved = match crate::marketplace_ops::resolve_source(source, &cwd) {
+        Ok(resolved) => resolved,
+        Err(err) => return format!("{}\n\n[err] {err}", attribution("marketplace")),
+    };
+    match crate::marketplace_ops::add_marketplace(
+        kind.token(),
+        &resolved.name,
+        resolved.url.as_deref(),
+        source,
+        force,
+    ) {
+        Ok(true) => format!(
+            "{}\n\n[ok] added {label} marketplace `{name}`{url}\n\
+             It is written to your user-global config and used by the next `/connectors {token}` browse.",
+            attribution("marketplace"),
+            label = kind.label(),
+            name = resolved.name,
+            token = kind.token(),
+            url = resolved
+                .url
+                .as_deref()
+                .map(|u| format!("\nUrl: {u}"))
+                .unwrap_or_else(|| "\n(local marketplace - not fetched remotely)".to_string()),
+        ),
+        Ok(false) => format!(
+            "{}\n\n[err] a {label} marketplace named `{name}` already exists; pass `--force` to replace it.",
+            attribution("marketplace"),
+            label = kind.label(),
+            name = resolved.name,
+        ),
+        Err(detail) => format!("{}\n\n[err] {detail}", attribution("marketplace")),
+    }
+}
+
+/// Remove one added marketplace, returning the report (FR-043).
+fn run_marketplace_remove(name: &str) -> String {
+    let kind = CatalogueKind::Claude;
+    match crate::marketplace_ops::remove_marketplace(kind.token(), name) {
+        Ok(true) => format!(
+            "{}\n\n[ok] removed {label} marketplace `{name}`.",
+            attribution("marketplace"),
+            label = kind.label(),
+        ),
+        Ok(false) => format!(
+            "{}\n\n[err] no {label} marketplace named `{name}` is configured.",
+            attribution("marketplace"),
+            label = kind.label(),
+        ),
+        Err(detail) => format!("{}\n\n[err] {detail}", attribution("marketplace")),
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 /// The optional `--category <name>` argument on `list`/`claude` (FR-041).
 ///
@@ -323,6 +623,16 @@ pub fn run_connector_subcommand(workdir: &Path, sub: &str, rest: &str) -> Option
     // `help` is a pure usage render with no store or config access (FR-017).
     if sub == "help" {
         return Some(render_help(sub));
+    }
+
+    // The `marketplace` family parses from `rest` (its own sub-subcommand
+    // namespace) rather than the fixed-arity `ConnectorCommand` table (FR-042,
+    // FR-043). It is dispatched *before* the master switch: `show` and `list`
+    // are pure configuration reads, so a disabled subsystem still lists the
+    // compiled default marketplace and refuses nothing (FR-042, mirroring
+    // `ragent_plugins::run_plugin_subcommand`).
+    if sub == "marketplace" {
+        return Some(run_marketplace_command(rest).unwrap_or_else(|| render_help("marketplace")));
     }
 
     let (dirs, config) = store_and_config(workdir);
@@ -717,24 +1027,65 @@ pub fn fetch_catalogue_descriptors_network(
 pub fn fetch_catalogue_descriptors_with_skipped(
     config: &ConnectorsConfig,
 ) -> Result<(Vec<ConnectorDescriptor>, usize), String> {
+    fetch_catalogue_descriptors_full(config).map(|full| (full.descriptors, full.skipped))
+}
+
+/// The full result of fetching every configured connector catalogue: the merged
+/// descriptors, the parser's skip count, and the first refusal a configured
+/// added marketplace produced (FR-043).
+///
+/// The merge runs the base endpoint first and then each added marketplace
+/// ([`crate::store_ops::fetch_all_catalogues`]); a refused added marketplace URL
+/// is skipped, recorded on the result, and never blinds the whole catalogue.
+#[derive(Debug, Default)]
+pub struct CatalogueDescriptors {
+    /// The merged, deduplicated catalogue descriptors.
+    pub descriptors: Vec<ConnectorDescriptor>,
+    /// The total number of entries the merged parsers skipped.
+    pub skipped: usize,
+    /// The first refusal a configured added marketplace produced, when any.
+    pub refused_marketplace: Option<String>,
+}
+
+/// [`fetch_catalogue_descriptors_with_skipped`] with the refused-marketplace
+/// detail carried too (FR-043).
+///
+/// # Errors
+///
+/// Returns a short ASCII cause when no catalogue could be fetched.
+pub fn fetch_catalogue_descriptors_full(
+    config: &ConnectorsConfig,
+) -> Result<CatalogueDescriptors, String> {
     let limits = CatalogueLimits::from(&config.stores_or_default());
     let cache = CatalogueCache::default_cache();
     let now = now_unix_secs();
     let mut descriptors = Vec::new();
     let mut skipped = 0;
     let mut first_failure: Option<String> = None;
+    let mut refused_marketplace: Option<String> = None;
+    let fetcher = default_fetcher();
     for kind in CatalogueKind::ALL {
-        match fetch_effective_catalogue(
-            default_fetcher().as_ref(),
+        match crate::store_ops::fetch_all_catalogues(
+            fetcher.as_ref(),
             kind,
             config,
             &limits,
             cache.as_ref(),
             now,
         ) {
-            Ok(fetched) => {
-                descriptors.extend(fetched.catalogue.connectors);
-                skipped += fetched.catalogue.skipped;
+            Ok(merged) => {
+                descriptors.extend(merged.connectors);
+                skipped += merged.skipped;
+                if let Some(refused) = merged.refused {
+                    if refused_marketplace.is_none() {
+                        refused_marketplace = Some(refused.to_string());
+                    }
+                    tracing::warn!(
+                        catalogue = kind.token(),
+                        error = %refused,
+                        "a configured connector marketplace was refused by the https guard"
+                    );
+                }
             }
             Err(error) => {
                 tracing::warn!(
@@ -748,7 +1099,11 @@ pub fn fetch_catalogue_descriptors_with_skipped(
     }
     match (descriptors.is_empty(), first_failure) {
         (true, Some(cause)) => Err(cause),
-        _ => Ok((descriptors, skipped)),
+        _ => Ok(CatalogueDescriptors {
+            descriptors,
+            skipped,
+            refused_marketplace,
+        }),
     }
 }
 
@@ -786,8 +1141,24 @@ pub fn search_installable_catalogue_with_skipped(
     config: &ConnectorsConfig,
     dirs: &crate::store::StoreDirs,
 ) -> Result<(Vec<ConnectorDescriptor>, usize), String> {
-    let (descriptors, skipped) = fetch_catalogue_descriptors_with_skipped(config)?;
-    let installed: std::collections::BTreeSet<String> = crate::store::scan_dirs(dirs.clone())
+    search_installable_catalogue_full(config, dirs).map(|full| (full.descriptors, full.skipped))
+}
+
+/// [`search_installable_catalogue_with_skipped`] with the refused-marketplace
+/// detail carried too (FR-043): the TUI browse panel logs the skipped
+/// marketplace as a warning rather than dropping it silently.
+///
+/// # Errors
+///
+/// Returns a short ASCII cause when no catalogue could be fetched.
+pub fn search_installable_catalogue_full(
+    config: &ConnectorsConfig,
+    dirs: &crate::store::StoreDirs,
+) -> Result<CatalogueDescriptors, String> {
+    let full = fetch_catalogue_descriptors_full(config)?;
+    let skipped = full.skipped;
+    let descriptors = full.descriptors;
+    let installed: std::collections::BTreeSet<String> = crate::store::scan_dirs(dirs)
         .into_iter()
         .filter_map(|connector| connector.outcome.ok())
         .map(|descriptor| descriptor.id.as_str().to_string())
@@ -798,7 +1169,11 @@ pub fn search_installable_catalogue_with_skipped(
         .filter(|descriptor| !installed.contains(descriptor.id.as_str()))
         .collect();
     let omitted = before.saturating_sub(descriptors.len());
-    Ok((descriptors, skipped + omitted))
+    Ok(CatalogueDescriptors {
+        descriptors,
+        skipped: skipped + omitted,
+        refused_marketplace: full.refused_marketplace,
+    })
 }
 
 /// Render the `[err]` report for a refused lifecycle transition (FR-016).

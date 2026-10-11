@@ -112,9 +112,9 @@ fn test_emit_workspace_artifacts_twice_all_skipped() {
     let artifacts = workspace_artifacts(recipe, "myproj");
     let first = emit_files(root.path(), &artifacts).expect("first emit");
     assert_eq!(first.created.len(), 5);
-    assert!(first.skipped_existing.is_empty());
+    assert_eq!(first.skipped_existing, [] as [std::string::String; 0]);
     let second = emit_files(root.path(), &artifacts).expect("second emit");
-    assert!(second.created.is_empty());
+    assert_eq!(second.created, [] as [std::string::String; 0]);
     assert_eq!(second.skipped_existing.len(), 5);
     // Spot-check: content unchanged by the second pass.
     assert!(read(&root, "specs/README.md").contains("/spec"));
@@ -132,7 +132,7 @@ fn test_emit_layout_and_workspace_merge_report() {
     let mut report = layout_report;
     report.merge(workspace_report);
     assert_eq!(report.created.len(), 7);
-    assert!(report.skipped_existing.is_empty());
+    assert_eq!(report.skipped_existing, [] as [std::string::String; 0]);
     assert!(root.path().join("src/main.rs").is_file());
     assert!(root.path().join(".ragent/config.json").is_file());
 }

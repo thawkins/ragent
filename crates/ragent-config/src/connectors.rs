@@ -71,16 +71,23 @@ pub struct ConnectorStoresConfig {
     /// the compiled default for that catalogue (FR-024, FR-035).
     #[serde(default, flatten)]
     pub catalogues: BTreeMap<String, ConnectorStoreEndpoint>,
+    /// Additional named marketplaces for the catalogues (spec `connectors`
+    /// FR-043). Each entry extends the catalogue it names, so the browse panel
+    /// lists the union of the base endpoint and every added marketplace.
+    /// Written by `/connectors marketplace <store> add <source>` and removed by
+    /// `/connectors marketplace <store> remove <name>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marketplaces: Vec<ConnectorMarketplaceEntry>,
     /// Per-fetch wall-clock budget in milliseconds. Default: 10000.
-    #[serde(default = "default_store_timeout_ms")]
+    #[serde(default = "crate::config::default_store_timeout_ms")]
     pub timeout_ms: u64,
     /// Maximum accepted catalogue-index size in bytes; a larger index aborts the
     /// fetch (FR-031). Default: 2097152 (2 MiB).
-    #[serde(default = "default_max_index_bytes")]
+    #[serde(default = "crate::config::default_max_index_bytes")]
     pub max_index_bytes: u64,
     /// Time-to-live for a cached catalogue in seconds; `0` disables the index
     /// cache. Default: 3600.
-    #[serde(default = "default_cache_ttl_secs")]
+    #[serde(default = "crate::config::default_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
 }
 
@@ -115,13 +122,36 @@ impl Default for ConnectorsConfig {
     }
 }
 
+/// One named connector marketplace attached to a catalogue (spec `connectors`
+/// FR-043).
+///
+/// `store` names which catalogue the marketplace extends (`claude`); `source`
+/// is the user-typed source in any of the accepted forms (`owner/repo`,
+/// `git@github.com:owner/repo.git`, `https://.../marketplace.json`, or a local
+/// directory holding a marketplace manifest). `name` is the resolved display
+/// name (used by `remove`) and `url` is the resolved `https` marketplace URL,
+/// recorded at add time so the panel does not have to re-resolve the source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConnectorMarketplaceEntry {
+    /// Which catalogue the marketplace extends (`claude`).
+    pub store: String,
+    /// The display name (used by `/connectors marketplace claude remove <name>`).
+    pub name: String,
+    /// The marketplace index `https://` URL, resolved at add time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The source string exactly as typed by the user (informational).
+    pub source: String,
+}
+
 impl Default for ConnectorStoresConfig {
     fn default() -> Self {
         Self {
             catalogues: BTreeMap::new(),
-            timeout_ms: default_store_timeout_ms(),
-            max_index_bytes: default_max_index_bytes(),
-            cache_ttl_secs: default_cache_ttl_secs(),
+            marketplaces: Vec::new(),
+            timeout_ms: crate::config::default_store_timeout_ms(),
+            max_index_bytes: crate::config::default_max_index_bytes(),
+            cache_ttl_secs: crate::config::default_cache_ttl_secs(),
         }
     }
 }
@@ -140,6 +170,13 @@ impl ConnectorsConfig {
         self.stores.clone().unwrap_or_default()
     }
 
+    /// Ensure a `stores` block is present (for mutation) and return it mutably,
+    /// creating the compiled-default block when the section is absent.
+    pub fn stores_mut(&mut self) -> &mut ConnectorStoresConfig {
+        self.stores
+            .get_or_insert_with(ConnectorStoresConfig::default)
+    }
+
     /// The configured URL for the named catalogue, if any (FR-024). A `None` or
     /// empty value means the compiled default endpoint applies.
     #[must_use]
@@ -150,16 +187,4 @@ impl ConnectorsConfig {
             .and_then(|endpoint| endpoint.url.as_deref())
             .filter(|url| !url.trim().is_empty())
     }
-}
-
-const fn default_store_timeout_ms() -> u64 {
-    10_000
-}
-
-const fn default_max_index_bytes() -> u64 {
-    2 * 1024 * 1024
-}
-
-const fn default_cache_ttl_secs() -> u64 {
-    3_600
 }

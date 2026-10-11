@@ -703,7 +703,7 @@ async fn test_multiedit_log_failure_writes_jsonl() {
     let path = wait_for_edit_log_file(&log_dir).expect("edit log file should be created");
     let content = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = content.lines().collect();
-    assert!(!lines.is_empty());
+    assert_ne!(lines, [] as [&str; 0]);
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(entry["tool"], "multi_edit");
     assert!(

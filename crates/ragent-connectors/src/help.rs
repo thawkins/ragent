@@ -14,7 +14,7 @@
 /// The `/connectors` subcommand tokens, in display order (FR-004). Used to seed
 /// the autocomplete menu, to recognise a known subcommand, and to document the
 /// family in the usage block.
-pub const CONNECTOR_SUBCOMMANDS: [&str; 12] = [
+pub const CONNECTOR_SUBCOMMANDS: [&str; 13] = [
     "list",
     "claude",
     "add",
@@ -26,6 +26,7 @@ pub const CONNECTOR_SUBCOMMANDS: [&str; 12] = [
     "auth",
     "test",
     "stores",
+    "marketplace",
     "help",
 ];
 
@@ -76,6 +77,10 @@ reach an external system through one or more MCP servers.
 | `/connectors auth <id>` | required `id` | Manage a connector's credential and report its auth state. |
 | `/connectors test <id>` | required `id` | Connect in isolation, invoke one tool, and report per-step results. |
 | `/connectors stores [--check]` | optional `--check` | Report each catalogue endpoint and its source; `--check` probes it. |
+| `/connectors marketplace show` | none | List the marketplaces configured for the Claude catalogue (base endpoint plus each added marketplace, tagged `default`/`config`/`added`). |
+| `/connectors marketplace claude list` | none | List the Claude catalogue's configured marketplaces. |
+| `/connectors marketplace claude add <source> [--force]` | required `source` | Add a catalogue marketplace: `owner/repo`, a GitHub SSH remote, an `https://` marketplace-index URL, or a local marketplace directory. Recorded in the user-global config. |
+| `/connectors marketplace claude remove <name>` | required `name` | Remove a previously added catalogue marketplace. |
 | `/connectors help` | none | Show this usage block. |
 
 ### Sources accepted by `/connectors add`

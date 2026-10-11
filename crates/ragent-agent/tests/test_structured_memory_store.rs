@@ -41,7 +41,7 @@ fn test_structured_memory_new() {
     assert_eq!(mem.content, "Use Result<T, E>");
     assert_eq!(mem.category, "pattern");
     assert_eq!(mem.confidence, 0.7);
-    assert!(mem.tags.is_empty());
+    assert_eq!(mem.tags, [] as [std::string::String; 0]);
 }
 
 #[allow(clippy::float_cmp)]

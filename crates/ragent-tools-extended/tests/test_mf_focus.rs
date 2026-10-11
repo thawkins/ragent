@@ -113,7 +113,7 @@ fn test_does_not_preserve_heading_for_kept_heading_block() {
     // If the kept block is itself a heading, no extra heading is preserved.
     let text = "# Heading One\n\n# Heading Two About Rust\n\nOther content";
     let focused = focus_content(text, "rust");
-    assert!(!focused.is_empty());
+    assert_ne!(focused, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ fn test_fallback_returns_content_when_nothing_clears_threshold() {
     };
     let focused = focus_content_with_params(text, "completely unrelated xyzzy", &params);
     assert!(focused.starts_with("[Focus: "));
-    assert!(!focused.is_empty());
+    assert_ne!(focused, "");
 }
 
 #[test]

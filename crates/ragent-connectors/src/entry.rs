@@ -181,6 +181,7 @@ impl ConnectorEntry {
             category: self.category.clone(),
             tags: self.tags.clone(),
             source: self.source.clone(),
+            marketplace: String::new(),
             provenance,
             auth: self.auth,
             auth_scope: self.auth_scope.clone(),
@@ -227,7 +228,8 @@ fn parse_servers(map: &Map<String, Value>) -> Result<Vec<ConnectorServer>, Conne
     if let Some(Value::Array(items)) = map.get("servers") {
         let mut servers = Vec::with_capacity(items.len());
         for item in items {
-            servers.push(parse_server(item, None)?);
+            let entry = item.as_object().ok_or(ConnectorEntryError::NotAnObject)?;
+            servers.push(parse_server(entry, None)?);
         }
         if servers.is_empty() {
             return Err(ConnectorEntryError::EmptyField("servers"));
@@ -237,7 +239,8 @@ fn parse_servers(map: &Map<String, Value>) -> Result<Vec<ConnectorServer>, Conne
     if let Some(Value::Object(mcp)) = map.get("mcpServers") {
         let mut servers = Vec::with_capacity(mcp.len());
         for (name, value) in mcp {
-            servers.push(parse_server(value, Some(name))?);
+            let entry = value.as_object().ok_or(ConnectorEntryError::NotAnObject)?;
+            servers.push(parse_server(entry, Some(name))?);
         }
         if servers.is_empty() {
             return Err(ConnectorEntryError::EmptyField("servers"));
@@ -248,14 +251,13 @@ fn parse_servers(map: &Map<String, Value>) -> Result<Vec<ConnectorServer>, Conne
         // The Claude connector-directory form: a single remote server. The server
         // id is a stable `main` (the feed's `server_label` is a hostname, not a
         // usable identifier); the connector id already namespaces the bridge.
-        return Ok(vec![parse_server(
-            &Value::Object(remote.clone()),
-            Some("main"),
-        )?]);
+        // The object is passed by reference rather than deep-cloned into a
+        // throwaway `Value`.
+        return Ok(vec![parse_server(remote, Some("main"))?]);
     }
     // A top-level `command`/`url` describes a single server directly.
     if map.contains_key("command") || map.contains_key("url") {
-        return Ok(vec![parse_server(&Value::Object(map.clone()), None)?]);
+        return Ok(vec![parse_server(map, None)?]);
     }
     Err(ConnectorEntryError::EmptyField("servers"))
 }
@@ -264,10 +266,9 @@ fn parse_servers(map: &Map<String, Value>) -> Result<Vec<ConnectorServer>, Conne
 /// name, normalising the transport, and defaulting an unnamed server to
 /// `fallback_id` (or `main`).
 fn parse_server(
-    item: &Value,
+    map: &Map<String, Value>,
     fallback_id: Option<&str>,
 ) -> Result<ConnectorServer, ConnectorEntryError> {
-    let map = item.as_object().ok_or(ConnectorEntryError::NotAnObject)?;
     let id = optional_str(map, "id")
         .or_else(|| fallback_id.map(str::to_string))
         .or_else(|| optional_str(map, "name"))

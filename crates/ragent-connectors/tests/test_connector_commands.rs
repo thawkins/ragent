@@ -17,9 +17,10 @@ use std::sync::{Mutex, OnceLock};
 use ragent_config::ConnectorsConfig;
 use ragent_connectors::{
     ALL_CATEGORY, CONNECTOR_FLAGS, CONNECTOR_SUBCOMMANDS, CategoryFilter, ConnectorArgError,
-    ConnectorCommand, ConnectorDescriptor, MANIFEST_FILE, attribution, autocomplete_tokens,
-    disabled_subsystem_report, is_known_subcommand, parse_connector_command, render_help,
-    run_connector_subcommand, store_and_config, subcommand_of,
+    ConnectorCommand, ConnectorDescriptor, DEFAULT_CLAUDE_CATALOGUE_URL, MANIFEST_FILE,
+    attribution, autocomplete_tokens, disabled_subsystem_report, is_known_subcommand,
+    parse_connector_command, render_help, run_connector_subcommand, store_and_config,
+    subcommand_of,
 };
 
 /// Serialise cwd-mutating tests in this binary.
@@ -275,6 +276,7 @@ fn known_subcommand_covers_the_whole_family() {
         "auth",
         "test",
         "stores",
+        "marketplace",
         "help",
     ] {
         assert!(
@@ -283,7 +285,7 @@ fn known_subcommand_covers_the_whole_family() {
         );
     }
     assert!(!is_known_subcommand("bogus"));
-    assert_eq!(CONNECTOR_SUBCOMMANDS.len(), 12);
+    assert_eq!(CONNECTOR_SUBCOMMANDS.len(), 13);
 }
 
 // -- help / attribution (FR-006, FR-017) -------------------------------------
@@ -534,6 +536,37 @@ fn disabled_subsystem_reports_for_every_non_help_subcommand() {
     // `help` remains available while the subsystem is disabled (FR-021).
     let help = run_connector_subcommand(tree.path(), "help", "").expect("help renders");
     assert!(help.contains("command reference"));
+}
+
+#[test]
+fn marketplace_reports_stay_available_while_the_subsystem_is_disabled() {
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, tree) = enter_temp_dir("disabled-marketplace");
+    write_connectors_config(&tree, r#"{ "enabled": false }"#);
+
+    // `show` and `list` are pure config reads, so a disabled subsystem still
+    // lists the compiled default marketplace and refuses nothing (FR-042).
+    let show = run_connector_subcommand(tree.path(), "marketplace", "show")
+        .expect("marketplace show renders");
+    assert!(
+        show.contains("From: /connectors marketplace show"),
+        "the show report must render while disabled: {show}"
+    );
+    assert!(
+        show.contains(DEFAULT_CLAUDE_CATALOGUE_URL) && show.contains("(default)"),
+        "the compiled default marketplace must be listed while disabled: {show}"
+    );
+    assert!(
+        !show.contains("[err]") && !show.contains("disabled"),
+        "the disabled report must not be rendered for show: {show}"
+    );
+
+    let list = run_connector_subcommand(tree.path(), "marketplace", "claude list")
+        .expect("marketplace list renders");
+    assert!(
+        list.contains(DEFAULT_CLAUDE_CATALOGUE_URL),
+        "list must render while disabled: {list}"
+    );
 }
 
 #[test]

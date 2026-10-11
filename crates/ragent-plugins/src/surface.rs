@@ -150,6 +150,18 @@ pub fn run_plugin_subcommand(
         ));
     }
 
+    // `/plugins marketplace show|<store> add|remove|list` renders a report
+    // (name/url/description for `show`/`list`, an outcome line for `add`/`remove`).
+    // `show`/`list` are pure config reads; `add`/`remove` edit the user-global
+    // `plugins.stores.marketplaces` array (FR-047, FR-048). A bare `/plugins
+    // marketplace` or an unknown tail is not recognised and falls through to the
+    // usage block.
+    if sub == "marketplace"
+        && let Some(report) = crate::commands::run_marketplace_command(rest)
+    {
+        return Some(report);
+    }
+
     // Store subcommands (add / remove) need no live session.
     if let Some(report) = run_store_command(&config, &dirs, workdir, sub, rest) {
         return Some(report);

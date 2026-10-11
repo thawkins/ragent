@@ -1310,6 +1310,25 @@ pub(crate) const fn default_true() -> bool {
     true
 }
 
+/// Serde/section default for the shared store-fetch wall-clock budget, in
+/// milliseconds. `pub(crate)` so the `connectors` and `plugins` store configs
+/// reuse one value rather than each declaring a copy (ANTIPAT M-8).
+pub(crate) const fn default_store_timeout_ms() -> u64 {
+    10_000
+}
+
+/// Serde/section default for the maximum accepted store-index size in bytes.
+/// Shared by the `connectors` and `plugins` store configs (ANTIPAT M-8).
+pub(crate) const fn default_max_index_bytes() -> u64 {
+    2 * 1024 * 1024
+}
+
+/// Serde/section default for the store-index cache TTL, in seconds. Shared by
+/// the `connectors` and `plugins` store configs (ANTIPAT M-8).
+pub(crate) const fn default_cache_ttl_secs() -> u64 {
+    3_600
+}
+
 impl Default for Capabilities {
     fn default() -> Self {
         Self {

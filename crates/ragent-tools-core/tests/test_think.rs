@@ -31,7 +31,7 @@ async fn test_think_tool_returns_full_thought_in_metadata() {
         .await
         .expect("think tool should succeed");
 
-    assert!(output.content.is_empty());
+    assert_eq!(output.content, "");
     let metadata = output
         .metadata
         .expect("think output should include metadata");

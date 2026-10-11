@@ -1,8 +1,33 @@
 # Changelog
 
-## [1.0.130] - 2026-10-08
+## [Unreleased]
+
+## [1.0.132] - 2026-10-12
+
+*Patch release on the merged connector/plugin marketplace work. Promotes the
+uncommitted delta on top of `1e08279f` (v1.0.131) to a tagged release: the
+connector and plugin-store browse panels now merge every configured marketplace
+and enrich each entry's blank description (and the plugin store's version) from
+its own repository manifest off the event loop, both store surfaces list
+alphabetically by id, the connector catalogue pins a dark-on-light column-heading
+row above its results, and the `/plugins marketplace` and `/connectors
+marketplace` command families manage the additional catalogues.*
 
 ### Fixed
+
+- **`/plugins codex` and `/plugins claude` result lists now sort alphabetically by
+  plugin id (spec `pluginstores` FR-050).** The browse panel previously rendered its
+  results in the order the store index arrived in (and, with additional marketplaces,
+  in merge order), so the same catalogue could list differently run to run. The result
+  set is now sorted in ascending alphabetical order of entry id, case-insensitively with
+  a byte-wise tiebreak, when the index lands - before the filter is derived - so a
+  free-text query and a category filter both narrow an already-sorted set and the
+  survivors keep their alphabetical order. One comparator (`compare_store_ids` /
+  `sort_store_entries` in `ragent-plugins`) is shared across the store surfaces, the
+  store analogue of the connector system's `compare_connector_ids` (FR-046). The
+  navigator's category rows keep their own case-insensitive sort and a
+  case-insensitive category collision (`Utility`/`utility`) still keeps the first
+  spelling the index declares, so the result sort never relabels a category.
 
 - **`/events` SSE connection-cap now builds on stable Rust.** The connection
   budget reservation in `crates/ragent-server/src/routes/mod.rs` used
@@ -15,7 +40,219 @@
   and preserves the exact semantics (reserve a slot while the count is below
   [`MAX_SSE_CONNECTIONS`], otherwise reject with `503`).
 
-## [Unreleased]
+### Changed
+
+- **Plugin-store category navigator drops tag-derived rows (spec `catnav`
+  FR-021 withdrawn).** The `/plugins codex` and `/plugins claude` left-hand category
+  navigator now lists only the distinct `category` values the fetched index declares
+  (`ALL` plus the declared categories, sorted case-insensitively); an entry's
+  `tags`/`keywords` no longer add navigator rows and no longer select a category, so
+  a plugin carrying a long `keywords` list cannot flood the navigator with rows that
+  each select a single plugin. The Claude marketplace's `convex` entry (one
+  `category: "database"` plus a fifteen-item `keywords` array, and the only entry in
+  the catalogue declaring `keywords`) is the motivating case: it previously appeared
+  as the sole result under fifteen extra navigator rows. The category predicate is
+  now `entry.category` alone; `tags` remain a free-text query match. `catnav` FR-021
+  is marked withdrawn in the spec (retaining its number so FR-022/FR-023 stay
+  stable), the plan/test-plan and the plugins howto updated, and the affected
+  navigator tests re-pointed at the withdrawn behaviour.
+
+### Added
+
+- **Connector lists sort alphabetically by id, filtered or not (spec `connectors`
+  FR-046).** Every connector surface now renders in ascending alphabetical order of
+  connector id, case-insensitively with a byte-wise tiebreak, derived from the id
+  alone rather than the fetch/scan/filter order. The `/connectors claude` browse panel
+  sorts its entries on load (`CatalogueBrowser::set_entries`), and the `/connectors
+  list` and `/connectors search` reports sort their rows by id; all three share one
+  `compare_connector_ids` comparator so they cannot drift. A category filter now
+  narrows the already-sorted set, so the survivors keep their alphabetical order. New
+  cases in `crates/ragent-connectors/tests/test_connector_descriptor.rs`,
+  `.../test_connector_browse.rs`, and `.../test_connector_management.rs`; the existing
+  browse/list/search tests updated for the sorted first row.
+- **`/connectors claude`: a fixed, dark-on-light column-heading row (spec
+  `connectors` FR-045).** The connector-catalogue browse panel now pins a
+  column-heading row (`Id`, `Category`, `Marketplace`, `Description`) directly
+  above its result list, drawn outside the list's own scroll so the labels stay
+  visible while the rows scroll beneath them. The heading uses the same column
+  template as a result row, so each label sits exactly above its column, and is
+  painted dark-on-light (dark foreground, light background) to read as a pinned
+  label rather than a result or installed row. The cached
+  `App::connector_store_result_area` is now anchored on the scrolling list
+  *below* the heading, so a click or wheel on the heading row is inert. Covered
+  by new cases in `crates/ragent-tui/tests/test_connector_catalogue_panel.rs`
+  and `crates/ragent-tui/tests/test_connector_catalogue_mouse.rs`.
+- **`/connectors claude`: merged marketplaces, a per-row marketplace column, and
+  description enrichment (spec `connectors` FR-043, FR-044, T-023..T-026).** The
+  connector catalogue browser now reaches feature parity with the plugin-store
+  browser:
+  - `/connectors marketplace show` / `marketplace claude list|add|remove` manage the
+    additional catalogues the `/connectors claude` browser fetches. A source resolves
+    as an `owner/repo` slug, a `git@github.com:owner/repo.git` SSH remote, an
+    `https://` marketplace-index URL, or a local marketplace directory, recorded in
+    the **user-global** `connectors.stores.marketplaces` array
+    (`~/.config/ragent/ragent.json`) by the new
+    `ragent_connectors::marketplace_ops::add_marketplace` / `remove_marketplace`
+    (atomic splice that invalidates the config cache); a duplicate name is refused
+    without `--force`.
+  - The browser fetch merges the base catalogue endpoint and every added marketplace
+    (`store_ops::fetch_all_catalogues`, `CatalogueKind::effective_endpoints_with_source`),
+    de-duplicating by id (first occurrence, the base endpoint's, wins); a refused added
+    URL is skipped and surfaced as a warning in the message window rather than blinding
+    the panel.
+  - `ConnectorDescriptor` gains a `serde(default)` `marketplace` field, set at fetch
+    time via `marketplace_name_for` (the added marketplace's `name`, or the catalogue
+    label for the base endpoint), and the browse row renders a fourth **marketplace**
+    column (rendering `-` for a local install) alongside id, category, and description.
+  - After the catalogue loads the panel resolves each entry's blank description from
+    its own repository manifest off the event loop: the new
+    `crates/ragent-connectors/src/catalogue_enrich.rs` (ported from
+    `ragent_plugins::store_enrich`) derives the raw manifest URL from a `github.com`
+    `git+` source (`connector.json`, then `.claude-plugin/connector.json`), fetches it
+    on a bounded thread pool (`enrich_catalogue_into`, the `ManifestSource` trait with
+    the production `NetworkManifestSource`), fills only a blank description, and caches
+    results per URL. The TUI wires it through
+    `App::start_catalogue_enrichment` / `App::poll_connector_enrichment` /
+    `CatalogueBrowser::apply_manifest_update`, never overwriting a catalogue-declared
+    value, dropping stale-generation updates, showing a `loading details...` title hint
+    while running, and remaining injectable (`App::set_catalogue_manifest_source`) so
+    tests run offline. This also repairs a build break where `session_ops.rs` called an
+    unimplemented `start_catalogue_enrichment`. Covered by
+    `crates/ragent-connectors/tests/test_catalogue_enrich.rs`,
+    `test_marketplace_ops.rs`, `test_marketplace_merge.rs`, `test_marketplace_show.rs`,
+    and `crates/ragent-tui/tests/test_connector_catalogue_enrich.rs` plus new cases in
+    `test_connector_catalogue_panel.rs`.
+- **Plugin version and description from each plugin's own manifest (spec
+  `pluginstores` FR-049, T-030).** The `/plugins codex` and `/plugins claude` browse
+  panels now fill each result row's **version** and **description** from the plugin's
+  own manifest, because the vendor marketplaces are *listings*: the Codex catalogue
+  carries neither field, and the Claude catalogue carries a description but only
+  sometimes a version, so a browser over the raw index showed no version at all and a
+  Codex panel showed no descriptions. After an index loads, the new
+  `crates/ragent-plugins/src/store_enrich.rs` derives the raw manifest URL(s) from each
+  entry's `github.com` git source (`manifest_urls`), fetches them off the event loop on
+  a bounded thread pool (`enrich_into`, `ManifestSource` trait with the production
+  `NetworkManifestSource`), parses `version`/`description` (falling back to the
+  manifest's `interface` block), and caches results per URL across opens. The provider
+  transform now reads an entry's own `interface.displayName`/`shortDescription`/
+  `longDescription` and leaves a missing version blank rather than fabricating `0`. On
+  the TUI side the enrichment streams into the open panel
+  (`App::start_store_enrichment` / `App::poll_store_enrichment` /
+  `PluginStoreBrowser::apply_manifest_update`), never overwrites a value the index
+  declared, drops stale-generation updates, shows a `loading details...` title hint
+  while running, and renders an explicit `-` for a version that stays unknown
+  (`version_display`). It is injectable (`App::set_manifest_source`) so the tests run
+  offline. Covered by `crates/ragent-plugins/tests/test_store_enrich.rs`,
+  `crates/ragent-tui/tests/test_plugin_store_enrich.rs`, and the version/title cases
+  in `crates/ragent-tui/tests/test_plugin_store_panel.rs`.
+- **Per-row marketplace column and a wider `/plugins codex|claude` browse panel
+  (spec `pluginstores` FR-004/FR-048, T-029).** Each result row in the plugin-store
+  browser now renders four columns - plugin id, version, the **marketplace the entry
+  came from**, and the description - and the panel widens from a 100- to a 140-column
+  ceiling (a third wider) to give the new column room. The marketplace column names the
+  added marketplace an entry was fetched from (the `name` it was added under, matched by
+  resolved URL) or the store label (`Codex`/`Claude`) for the store's base endpoint, via
+  the new `ragent_plugins::marketplace_name_for`; `StoreEntry` gains a `serde(default)`
+  `marketplace` field set at fetch time (never carried by a marketplace document), and
+  `App::spawn_plugin_store_fetch_with_stores` attributes every entry before merging. The
+  marketplace and description columns share the flexible remainder
+  (`plugin_store_flex_widths`), so a long marketplace name is shown in full when the
+  terminal has room and clipped without pushing the fixed id/version columns or the
+  `[installed]` marker off the row when it does not. Covered by
+  `crates/ragent-plugins/tests/test_store_index.rs`,
+  `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`, and
+  `crates/ragent-tui/tests/test_plugin_store_panel.rs`.
+- **`/plugins marketplace <store> add|remove|list` and multi-marketplace browse
+  (spec `pluginstores` FR-048, T-027/T-028).** A store no longer browses only its
+  one official marketplace. `/plugins marketplace <codex|claude> add <source>
+  [--force]` registers an additional marketplace, resolving the same source forms
+  the Claude Code `/plugin marketplace add` prompt accepts: an `owner/repo` GitHub
+  slug, a `git@github.com:owner/repo.git` SSH remote, an `https://` marketplace-index
+  URL, or a local marketplace directory. GitHub forms resolve to
+  `https://raw.githubusercontent.com/<owner>/<repo>/main/<store marketplace
+  document>` (`new` `ragent_plugins::marketplace_ops::resolve_source`, using
+  `.agents/plugins/marketplace.json` for Codex and `.claude-plugin/marketplace.json`
+  for Claude); a non-GitHub `https://` URL is used verbatim; a local directory is
+  recorded with its manifest `name` and never fetched. The marketplace is written to
+  the **user-global** `plugins.stores.marketplaces` array
+  (`~/.config/ragent/ragent.json`) with an atomic splice that invalidates the config
+  load cache, so it is never shadowed by an untrusted project config; a duplicate
+  name is refused without `--force`. `/plugins marketplace <store> list` and
+  `/plugins marketplace show` (now listing added marketplaces tagged `added`) are
+  pure config reads. The `/plugins codex` and `/plugins claude` browse panels fetch
+  every configured marketplace for the store (`StoreKind::effective_endpoints_with_source`)
+  and merge their entries into the one panel, de-duplicating by plugin id; a refused
+  base endpoint is reported as the panel's inline error while a refused added URL is
+  skipped. New `EndpointSource::Added`, config `MarketplaceEntry`, module
+  `ragent_plugins::marketplace_ops`, and dispatch helpers `parse_marketplace_command`
+  / `run_marketplace_command` / `marketplace_command_requested`. Covered by
+  `crates/ragent-plugins/tests/test_marketplace_ops.rs` and `test_marketplace_add.rs`
+  and `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`.
+- **`/plugins marketplace show` subcommand (spec `pluginstores` FR-047, T-026).**
+  Lists the marketplaces configured for both plugin stores in one section each
+  (Codex, then Claude), each section carrying a markdown table with one row per
+  marketplace endpoint showing its name (store token), url (effective endpoint),
+  and description (store label plus the `config`/`default` provenance tag). The
+  report is a pure configuration read shared by the TUI slash command and the
+  `ragent plugins marketplace show` CLI parity surface: no network request, no
+  store scan, and a missing `plugins.stores` block or a disabled subsystem still
+  lists each store's compiled default marketplace. A bare `/plugins marketplace`
+  or an unknown sub-subcommand renders the usage block; a configured endpoint
+  refused by the `https` guard renders as an `[err]` row rather than being
+  omitted. `marketplace` joins `PLUGIN_SUBCOMMANDS`, the autocomplete
+  suggestions, the usage block, and the `SLASH_COMMANDS` description. Covered by
+  `crates/ragent-plugins/tests/test_marketplace_show.rs`,
+  `crates/ragent-tui/tests/test_plugins_command.rs` (three new cases), and
+  `tests/test_plugins_cli_command.rs` (two CLI parity cases).
+
+### Commits (last 10)
+
+- **`1e08279f` - Version: 1.0.131 ("backends support").** Release commit that tags
+  the OpenHands-parity delta: pluggable execution backends (local/docker/podman/
+  remote) with a health-visible registry and TUI `/backend` switcher, sandbox
+  secret injection, an ACP client plus a feature-gated ACP server, an
+  OpenAI-compatible inbound surface and a generated OpenAPI 3.1 contract with
+  HTTP MCP transport, the automation service (webhook ingress, scheduler, run
+  history, backend confinement), AgentSkills (`.agents/skills/`) discovery, and
+  the LLM security analyzer. Detailed in `[1.0.131]` below.
+- **`2ed21e3d` (v1.0.130)** - the stable-toolchain fix for the `/events` SSE
+  connection cap (`AtomicUsize::try_update` replaced with a `compare_exchange_weak`
+  loop); see `[1.0.130]`.
+- **`e617bcef` - plugin-store category navigator and `browser` tool removal.** The
+  `/plugins codex` and `/plugins claude` browse panels gained a left-hand category
+  navigator, new `/plugins codex|claude|stores` subcommands, and the `browser` CDP
+  tool and its whole `ragent-tools-extended::browser` stack were deleted together
+  with `BrowserConfig`, the `tool_visibility.browser` switch, and `tokio-tungstenite`
+  (the registered count falls 152 -> 151 across 22 categories).
+- **`054e5154` (v1.0.129)** - release of the completed M5-M9 code-audit remediation
+  and the M1 secret hardening; see `[1.0.129]`.
+- **`f87e2d95` (v1.0.128)** - MCP startup fix; see `[1.0.128]`.
+- **`87024938` (v1.0.127)** - "strip unnecessary tools"; added `TOOLREP.md`; see
+  `[1.0.127]`.
+- **`d0eaa4e1` (v1.0.126)** - Office / LibreOffice tool removal and the finance and
+  plotter tool removals; see `[1.0.126]`.
+- **`b2b46d5d` (v1.0.125)** - the `os_info` host-introspection tool and the `/osinfo`
+  slash family, the research `--papers` default flip, and new tracked research
+  items; see `[1.0.125]`.
+- **`80fac9fb` (v1.0.124)** - `/memory clear` confirmation dialog, session-start
+  connector lifecycle, MCP orphan-sweep fix, and memory project-scope de-duplication;
+  see `[1.0.124]`.
+- **`f6199c1c` (v1.0.123)** - research system and the new `ragent-connectors` crate;
+  see `[1.0.123]`.
+
+### Released (working tree)
+
+The `Fixed`, `Changed`, and `Added` entries above promoted the uncommitted
+working-tree set on top of `1e08279f` (v1.0.131) to the v1.0.132 tagged release:
+the merged connector/plugin marketplace browsers (additional marketplaces, a
+per-row marketplace column, and off-loop description/version enrichment), the
+connector and plugin-store alphabetical id sort (FR-046 / FR-050), the
+connector-catalogue pinned heading row (FR-045), the plugin-store navigator
+tag-row withdrawal (`catnav` FR-021), and the `/plugins marketplace` /
+`/connectors marketplace` command families. Touched crates: `ragent-connectors`,
+`ragent-plugins`, `ragent-config`, `ragent-tui`, `ragent-surface`, and the root
+`src/`/`tests/` parity surfaces, with spec/plan/test-plan updates in
+`specs/catnav`, `specs/connectors`, and `specs/pluginstores`.
 
 ## [1.0.131] - 2026-10-10
 

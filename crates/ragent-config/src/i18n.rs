@@ -84,7 +84,9 @@ impl MessageKey {
             Self::StatusModel => "Model: ",
             Self::StatusThinking => " Thinking:",
             Self::HelpHeader => "From: /help\nAvailable commands:",
-            Self::CatalogueFooter => "Up/Down move  Enter install  c category  Esc close",
+            Self::CatalogueFooter => {
+                "Tab categories  Up/Down move  Enter select/install  c clear  Esc close"
+            }
         }
     }
 

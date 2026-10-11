@@ -223,7 +223,7 @@ pub struct ScanFailure {
 #[must_use]
 pub fn scan(workdir: &Path, store_dir_override: Option<&Path>) -> Vec<ScannedConnector> {
     let dirs = store_dirs(workdir, store_dir_override);
-    scan_dirs(dirs)
+    scan_dirs(&dirs)
 }
 
 /// Scan a pre-resolved [`StoreDirs`] set (testable core of [`scan`]).
@@ -231,13 +231,16 @@ pub fn scan(workdir: &Path, store_dir_override: Option<&Path>) -> Vec<ScannedCon
 /// Iterates global first, then project, with later entries overwriting earlier
 /// ones on connector-id collision (project wins, FR-001).
 #[must_use]
-pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
+pub fn scan_dirs(dirs: &StoreDirs) -> Vec<ScannedConnector> {
     let mut by_id: BTreeMap<String, ScannedConnector> = BTreeMap::new();
     // Global first, project last: later entries overwrite earlier on id
     // collision ("closest wins", FR-001).
-    for store in [dirs.global, dirs.project].into_iter().flatten() {
-        let ledger = StoreLedger::load(&store);
-        let read_dir = match std::fs::read_dir(&store) {
+    for store in [dirs.global.as_ref(), dirs.project.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let ledger = StoreLedger::load(store);
+        let read_dir = match std::fs::read_dir(store) {
             Ok(rd) => rd,
             Err(_) => continue, // store absent or unreadable: nothing to scan
         };
@@ -247,7 +250,7 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
             if name == STATE_FILE || name.starts_with('.') {
                 continue;
             }
-            if !ragent_surface::store::store_entry_is_dir(&store, &dir, "connector") {
+            if !ragent_surface::store::store_entry_is_dir(store, &dir, "connector") {
                 continue;
             }
             if !dir.join(MANIFEST_FILE).is_file() {
@@ -294,7 +297,7 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedConnector> {
 #[must_use]
 pub fn descriptor_by_id(dirs: &StoreDirs, reference: &str) -> Option<ConnectorDescriptor> {
     let reference = reference.trim();
-    let descriptors = scan_dirs(dirs.clone())
+    let descriptors = scan_dirs(dirs)
         .into_iter()
         .filter_map(|connector| connector.outcome.ok());
     // Match precedence: exact id, then case-insensitive id, then

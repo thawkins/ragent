@@ -55,8 +55,8 @@ fn test_initiative_round_trip_fields() {
     assert_eq!(row.project, PROJECT);
     assert_eq!(row.session_id, "sess-9");
     assert!(row.closed_at.is_none());
-    assert!(!row.created_at.is_empty());
-    assert!(!row.updated_at.is_empty());
+    assert_ne!(row.created_at, "");
+    assert_ne!(row.updated_at, "");
 
     let milestones = row.milestones();
     assert_eq!(milestones.len(), 2);
@@ -205,5 +205,8 @@ fn test_initiative_milestone_malformed_json_safe() {
         milestones_json: "not-json{{{".to_string(),
         ..row
     };
-    assert!(broken.milestones().is_empty());
+    assert_eq!(
+        broken.milestones(),
+        [] as [ragent_storage::InitiativeMilestone; 0]
+    );
 }

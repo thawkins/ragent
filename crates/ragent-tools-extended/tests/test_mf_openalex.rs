@@ -258,13 +258,19 @@ fn test_parse_response_url_fallback_to_doi() {
 #[test]
 fn test_parse_response_missing_results_returns_empty() {
     let value = json!({"meta": {"count": 0}});
-    assert!(parse_response(&value).is_empty());
+    assert_eq!(
+        parse_response(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
 fn test_parse_response_empty_results_array() {
     let value = json!({"results": []});
-    assert!(parse_response(&value).is_empty());
+    assert_eq!(
+        parse_response(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]

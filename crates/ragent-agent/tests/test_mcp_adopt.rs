@@ -27,7 +27,10 @@ fn stdio(args: &[&str]) -> McpServerConfig {
 #[test]
 fn stdio_without_a_port_declares_no_candidates() {
     let config = stdio(&["-y", "mongodb-mcp-server"]);
-    assert!(adopt_candidate_urls(&config).is_empty());
+    assert_eq!(
+        adopt_candidate_urls(&config),
+        [] as [std::string::String; 0]
+    );
 }
 
 /// `--httpPort 3000` is the MongoDB MCP server's own spelling, and must be

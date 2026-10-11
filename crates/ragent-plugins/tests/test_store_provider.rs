@@ -36,7 +36,8 @@ const CODEX_MARKETPLACE: &[u8] = br#"{
     {
       "name": "crowdstrike-falcon-foundry",
       "source": { "source": "url", "url": "https://github.com/CrowdStrike/foundry-skills.git" },
-      "policy": { "installation": "AVAILABLE" }
+      "policy": { "installation": "AVAILABLE" },
+      "interface": { "displayName": "CrowdStrike Falcon Foundry" }
     },
     {
       "name": "amazon-location-service",
@@ -118,9 +119,11 @@ fn codex_provider_normalises_the_vendor_marketplace() {
         .iter()
         .find(|e| e.id == "linear")
         .expect("linear entry present");
-    // The id is the entry `name`; the version defaults when the vendor omits it.
+    // The id is the entry `name`; the version is left blank when the vendor omits
+    // it, so the browser shows an explicit unknown rather than a misleading zero
+    // and the manifest enrichment can fill it in (FR-043, FR-048).
     assert_eq!(linear.name, "linear");
-    assert_eq!(linear.version, "0");
+    assert_eq!(linear.version, "");
     assert_eq!(linear.dialect.as_deref(), Some("codex"));
     // FR-003: a declared category is carried into the entry model.
     assert_eq!(linear.category.as_deref(), Some("Productivity"));
@@ -138,6 +141,10 @@ fn codex_provider_normalises_the_vendor_marketplace() {
         .expect("crowdstrike entry present");
     // FR-003: a vendor entry that omits `category` stays uncategorised.
     assert!(crowdstrike.category.is_none());
+    // FR-043: the entry's own `interface.displayName` becomes the display name,
+    // while the listing name remains the id.
+    assert_eq!(crowdstrike.name, "CrowdStrike Falcon Foundry");
+    assert_eq!(crowdstrike.id, "crowdstrike-falcon-foundry");
     // A whole-repo `url` source becomes a git source at HEAD, sans `.git`.
     assert_eq!(
         crowdstrike.source,

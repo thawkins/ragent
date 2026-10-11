@@ -58,8 +58,34 @@ const MODEL_PICKER_HEADERS: [&str; 5] = ["Model", "Context", "Cost", "Thinking",
 const MODEL_PICKER_COLUMN_SPACING: usize = 1;
 
 /// Maximum terminal columns reserved for a plugin-store row description before
-/// it is truncated (spec `pluginstores` FR-004).
-const PLUGIN_STORE_DESC_MAX: u16 = 40;
+/// it is truncated (spec `pluginstores` FR-004). 75 rather than 60 so the
+/// description absorbs the 15 columns the marketplace column gave up.
+const PLUGIN_STORE_DESC_MAX: u16 = 75;
+
+/// Fixed terminal columns reserved for a plugin-store row's plugin-id column
+/// (spec `pluginstores` FR-004). Wider than the original 22 so the id column
+/// keeps a comfortable width now the panel is a third wider.
+const PLUGIN_STORE_ID_MAX: usize = 24;
+
+/// Fixed terminal columns reserved for a plugin-store row's version column
+/// (spec `pluginstores` FR-004).
+const PLUGIN_STORE_VERSION_MAX: usize = 8;
+
+/// Ceiling on the terminal columns reserved for a plugin-store row's marketplace
+/// column before it is truncated (spec `pluginstores` FR-048). 15 columns below
+/// the original 24 so the freed space moves to the description; still wide
+/// enough for common marketplace labels.
+const PLUGIN_STORE_MARKETPLACE_MAX: usize = 9;
+
+/// The pinned column-heading labels of the plugin-store result list (FR-004).
+/// Each label renders directly above its column; a label longer than its column
+/// is clipped by the row template, so the headings never push a value off the
+/// row. The two leading spaces mirror the `> ` row prefix so the labels align
+/// with the values beneath.
+const PLUGIN_STORE_HEADING_ID: &str = "Id";
+const PLUGIN_STORE_HEADING_VERSION: &str = "Version";
+const PLUGIN_STORE_HEADING_MARKETPLACE: &str = "Marketplace";
+const PLUGIN_STORE_HEADING_DESCRIPTION: &str = "Description";
 
 /// Narrowest terminal columns the plugin-store category navigator is drawn in
 /// (spec `catnav` FR-020).
@@ -82,7 +108,9 @@ const PLUGIN_STORE_NAV_GAP: u16 = 1;
 /// before it is truncated (spec `connectors`).
 ///
 /// Wider than [`PLUGIN_STORE_DESC_MAX`] because the connector-catalogue panel is
-/// given a wider maximum (see [`render_connector_catalogue_panel`]).
+/// wider, and clamped against the live result-column width at draw time: the
+/// category navigator takes a share of the body, so an unclamped 90-column
+/// description would spill past the result column's edge.
 const CONNECTOR_CATALOGUE_DESC_MAX: u16 = 90;
 
 /// Maximum terminal columns reserved for a connector-catalogue row name (id)
@@ -92,6 +120,24 @@ const CONNECTOR_CATALOGUE_NAME_MAX: usize = 26;
 /// Maximum terminal columns reserved for a connector-catalogue row category
 /// before it is truncated (spec `connectors`).
 const CONNECTOR_CATALOGUE_CATEGORY_MAX: u16 = 22;
+
+/// Ceiling on the terminal columns reserved for a connector-catalogue row's
+/// marketplace column before it is truncated (spec `connectors` FR-043).
+///
+/// Mirrors [`PLUGIN_STORE_MARKETPLACE_MAX`]: wide enough for common marketplace
+/// labels, and the freed space moves to the description.
+const CONNECTOR_CATALOGUE_MARKETPLACE_MAX: u16 = 9;
+
+/// The pinned column-heading labels of the connector-catalogue result list.
+///
+/// Each label renders directly above its column; a label longer than its column
+/// is clipped by the row template, so the headings never push a value off the
+/// row. The two leading spaces mirror the `> ` row prefix so the labels align
+/// with the values beneath (mirrors [`PLUGIN_STORE_HEADING_ID`]).
+const CONNECTOR_CATALOGUE_HEADING_ID: &str = "Id";
+const CONNECTOR_CATALOGUE_HEADING_CATEGORY: &str = "Category";
+const CONNECTOR_CATALOGUE_HEADING_MARKETPLACE: &str = "Marketplace";
+const CONNECTOR_CATALOGUE_HEADING_DESCRIPTION: &str = "Description";
 
 /// An ASCII-only border set for the plugin-store panel (spec `pluginstores`
 /// FR-004, acceptance criterion 10).
@@ -297,6 +343,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         render_connector_catalogue_panel(frame, app);
     } else {
         app.connector_store_area = Rect::default();
+        app.connector_store_nav_area = Rect::default();
+        app.connector_store_result_area = Rect::default();
     }
     // `/backend` switcher panel (spec `openhands` FR-008) - drawn last so it sits
     // above every other overlay while it owns the keyboard.
@@ -446,8 +494,14 @@ fn render_backend_panel(frame: &mut Frame, app: &mut App) {
 ///
 /// Modelled on [`render_plugin_store_panel`]: a bordered, titled modal overlay
 /// presenting a title line with the catalogue name, the current search query,
-/// the active category, and the visible/total result count; a scrollable result
-/// list; and a footer of key hints. Only ASCII glyphs are used in the body.
+/// the active category, and the visible/total result count; a fixed
+/// column-heading row above a scrollable result list; and a footer of key hints.
+/// Only ASCII glyphs are used in the body.
+///
+/// The result column carries a pinned column-heading row (`Id`, `Category`,
+/// `Marketplace`, `Description`) painted dark-on-light directly above the list,
+/// outside the list's own scroll, so the headings stay visible while the rows
+/// scroll beneath them.
 ///
 /// The highlighted result row carries the block cursor: a full-row background
 /// applied through [`ratatui::widgets::List::highlight_style`]. A row whose
@@ -462,12 +516,21 @@ fn render_backend_panel(frame: &mut Frame, app: &mut App) {
 /// The panel area is recomputed from `Frame::area` every frame, so a terminal
 /// resize re-derives a centred, fully visible modal; it is stored back in
 /// [`App::connector_store_area`] for tests and hit-testing.
+///
+/// The body is split into the left category navigator and the result column:
+/// `ALL` first, then the distinct categories the catalogue declares, with the
+/// active category in the active-category colour and a block cursor on the
+/// category row under the category cursor. The navigator stays visible and
+/// operable while the fetch is loading or the result set is empty. The
+/// navigator area and the scrolling list area (below the pinned heading) are
+/// recomputed from the current frame and stored back in
+/// [`App::connector_store_nav_area`] and [`App::connector_store_result_area`].
 fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
-    let Some(browser) = app.connector_store.as_ref() else {
+    if app.connector_store.is_none() {
         return;
-    };
+    }
 
     let screen = frame.area();
     let width = screen
@@ -484,8 +547,14 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, area);
     app.connector_store_area = area;
 
-    let title = connector_catalogue_title(browser);
-    let visible = browser.filtered.len();
+    // The title names the catalogue, the search field, the counts, and the
+    // active category; it needs only an immutable read of the browser.
+    let title = match app.connector_store.as_ref() {
+        Some(browser) => connector_catalogue_title(browser),
+        // The early return above guarantees `Some`, but read defensively so no
+        // path can panic if that guard ever drifts.
+        None => String::new(),
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_set(PLUGIN_STORE_ASCII_BORDER)
@@ -503,19 +572,132 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
-    let list_area = chunks[0];
+    let body_area = chunks[0];
     let footer_area = chunks[1];
 
-    let cursor_style = Style::default()
-        .fg(Color::Black)
-        .bg(Color::Magenta)
-        .add_modifier(Modifier::BOLD);
+    // Split the body into the left category navigator and the result column. The
+    // navigator width is recomputed from the current frame every draw, so a
+    // terminal resize re-derives it and the column stays fully visible.
+    let nav_width = plugin_store_nav_width(body_area.width);
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(nav_width),
+            Constraint::Length(PLUGIN_STORE_NAV_GAP),
+            Constraint::Min(0),
+        ])
+        .split(body_area);
+    let nav_area = columns[0];
+    let result_area = columns[2];
+    app.connector_store_nav_area = nav_area;
+    // The result column splits vertically into a fixed column-heading row (always
+    // painted, never scrolled) and the scrolling result list beneath it. The
+    // headings are drawn outside the `List`, so the list's own scroll keeps rows
+    // under the cursor visible while the headings stay pinned.
+    let result_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(result_area);
+    let heading_area = result_chunks[0];
+    let list_area = result_chunks[1];
+    // Mouse hit-testing and the cursor-to-row mapping both reason about result
+    // rows; anchor the cached area on the list (below the heading) so a click or
+    // wheel on the heading row is inert.
+    app.connector_store_result_area = list_area;
+
     let normal_style = Style::default().fg(Color::White);
+    let active_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let installed_style = Style::default().fg(Color::Green);
     let dim_style = Style::default().fg(Color::DarkGray);
 
+    let Some(browser) = app.connector_store.as_mut() else {
+        return;
+    };
+    // Focus distinction: the pane that holds keyboard focus paints its cursor in
+    // its filled colour; the other pane's cursor is dimmed, so which pane owns
+    // `Up`/`Down` is visible at a glance. The navigator cursor keeps its own
+    // colour independent of the result cursor.
+    let focused_result_cursor = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let focused_nav_cursor = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let unfocused_cursor = Style::default().fg(Color::White).bg(Color::DarkGray);
+    let nav_focused = browser.nav_focused;
+    let nav_cursor_style = if nav_focused {
+        focused_nav_cursor
+    } else {
+        unfocused_cursor
+    };
+    let cursor_style = if nav_focused {
+        unfocused_cursor
+    } else {
+        focused_result_cursor
+    };
+
+    // The category navigator: `ALL` first, then the derived categories.
+    render_connector_catalogue_navigator(
+        frame,
+        browser,
+        nav_area,
+        nav_cursor_style,
+        active_style,
+        normal_style,
+    );
+
+    // The body: result rows, or one explicit state line. The navigator stays
+    // visible beside either case.
+    //
+    // The row layout is fixed-priority over the shared result column: the id
+    // field shrinks first (its right-hand padding can yield without cutting a
+    // visible glyph), then the description keeps at least DESC_MIN columns; the
+    // category column is last to clip, so a longer-than-usual category name is
+    // truncated rather than squeezing the description below its readable floor.
+    let row_budget = result_area.width as usize;
+    const MARKER: &str = " [installed]";
+    const DESC_MIN: usize = 20;
+    let name_width = CONNECTOR_CATALOGUE_NAME_MAX
+        .min(row_budget / 3)
+        .max(6)
+        .min(row_budget / 2);
+    let category_width = (CONNECTOR_CATALOGUE_CATEGORY_MAX as usize)
+        .min(row_budget.saturating_sub(2 + name_width + 1 + DESC_MIN + MARKER.len()))
+        .max(6);
+    let marketplace_width = (CONNECTOR_CATALOGUE_MARKETPLACE_MAX as usize)
+        .min(
+            row_budget
+                .saturating_sub(2 + name_width + 1 + category_width + 1 + DESC_MIN + MARKER.len()),
+        )
+        .max(6);
+    let desc_budget = row_budget
+        .saturating_sub(
+            2 + name_width + 1 + category_width + 1 + marketplace_width + 1 + MARKER.len(),
+        )
+        .min(CONNECTOR_CATALOGUE_DESC_MAX as usize);
+
     match connector_catalogue_body(browser) {
         PluginStoreBody::Rows => {
+            let visible = browser.filtered.len();
+            // The pinned column-heading row: the same column template as a result
+            // row so each label sits exactly above its column, painted once above
+            // the list so it never scrolls. The dark-on-light style distinguishes
+            // it from both the normal and installed row colours.
+            let heading_style = Style::default()
+                .fg(Color::Black)
+                .bg(Color::Gray)
+                .add_modifier(Modifier::BOLD);
+            let heading = format!(
+                "  {CONNECTOR_CATALOGUE_HEADING_ID:<name_width$} {CONNECTOR_CATALOGUE_HEADING_CATEGORY:<category_width$} {CONNECTOR_CATALOGUE_HEADING_MARKETPLACE:<marketplace_width$} {CONNECTOR_CATALOGUE_HEADING_DESCRIPTION:<desc_budget$}",
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(heading, heading_style))),
+                heading_area,
+            );
             let items: Vec<ListItem> = browser
                 .filtered
                 .iter()
@@ -523,7 +705,7 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
                     let entry = &browser.all[index];
                     let id = entry.id.as_str();
                     let marker = if browser.is_installed(id) {
-                        " [installed]"
+                        MARKER
                     } else {
                         ""
                     };
@@ -532,18 +714,17 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
                     } else {
                         normal_style
                     };
+                    let name_field = truncate_bytes_no_ellipsis(id, name_width);
+                    let category_field =
+                        truncate_bytes_no_ellipsis(&entry.category, category_width);
+                    let marketplace_field = if entry.marketplace.trim().is_empty() {
+                        "-".to_string()
+                    } else {
+                        truncate_bytes_no_ellipsis(&entry.marketplace, marketplace_width)
+                    };
+                    let desc_field = truncate_bytes_no_ellipsis(&entry.description, desc_budget);
                     let row = format!(
-                        "> {:<26} {:<22} {}{}",
-                        truncate_bytes_no_ellipsis(id, CONNECTOR_CATALOGUE_NAME_MAX),
-                        truncate_bytes_no_ellipsis(
-                            &entry.category,
-                            CONNECTOR_CATALOGUE_CATEGORY_MAX as usize
-                        ),
-                        truncate_bytes_no_ellipsis(
-                            &entry.description,
-                            CONNECTOR_CATALOGUE_DESC_MAX as usize
-                        ),
-                        marker,
+                        "> {name_field:<name_width$} {category_field:<category_width$} {marketplace_field:<marketplace_width$} {desc_field}{marker}",
                     );
                     ListItem::new(Line::from(Span::styled(row, style)))
                 })
@@ -557,10 +738,15 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
             frame.render_stateful_widget(list, list_area, &mut state);
         }
         PluginStoreBody::Line(text, style) => {
+            // Wrap rather than clip: with the navigator sharing the body, the
+            // result column is narrower, and a long state line (a failed fetch
+            // naming its cause) must stay fully readable instead of being
+            // silently truncated at the column edge.
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, style)))
                     .block(Block::default())
-                    .style(Style::default()),
+                    .style(Style::default())
+                    .wrap(Wrap { trim: false }),
                 list_area,
             );
         }
@@ -573,6 +759,61 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
             .wrap(Wrap { trim: true }),
         footer_area,
     );
+}
+
+/// Render the connector-catalogue category navigator into `area`.
+///
+/// The rows are the `ALL` sentinel first and then the derived, sorted distinct
+/// categories. The row under the category cursor carries a block cursor through
+/// [`ratatui::widgets::List::highlight_style`], independent of the result-list
+/// cursor; the active category is painted in the active-category colour. A
+/// still-loading or category-less catalogue yields an `ALL`-only navigator. The
+/// navigator viewport height is recorded on the browser so the handlers clamp a
+/// wheel scroll; the scroll offset is otherwise left exactly as the wheel set
+/// it, so scrolling away from the cursor sticks. Only ASCII glyphs are drawn.
+fn render_connector_catalogue_navigator(
+    frame: &mut Frame,
+    browser: &mut ragent_connectors::CatalogueBrowser,
+    area: Rect,
+    cursor_style: Style,
+    active_style: Style,
+    normal_style: Style,
+) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    // Record the navigator viewport height so the key and mouse handlers clamp
+    // the wheel scroll and keep the category cursor visible. The per-frame
+    // visibility sync is *not* done here: a wheel scroll deliberately moves the
+    // viewport away from the cursor, and a render-time re-sync would undo it.
+    // The move and clear handlers keep the cursor visible instead.
+    browser.category_viewport = area.height as usize;
+
+    let rows = browser.category_row_count();
+    let active = browser.active_category().to_string();
+    let items: Vec<ListItem> = (0..rows)
+        .map(|row| {
+            let label = browser.category_row_label(row);
+            let style = if label.eq_ignore_ascii_case(&active) {
+                active_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(label.to_string(), style)))
+        })
+        .collect();
+
+    let selected = browser.category_cursor_row();
+    let list = List::new(items)
+        .highlight_style(cursor_style)
+        .highlight_symbol("");
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    *state.offset_mut() = browser.category_scroll.min(rows.saturating_sub(1));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 /// The panel title line for the connector-catalogue browser.
@@ -593,6 +834,9 @@ fn connector_catalogue_title(browser: &ragent_connectors::CatalogueBrowser) -> S
     );
     if browser.skipped > 0 {
         title.push_str(&format!(" -- {} skipped", browser.skipped));
+    }
+    if browser.enriching {
+        title.push_str(" -- loading details...");
     }
     title.push(' ');
     title
@@ -946,7 +1190,7 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     let width = screen
         .width
         .saturating_sub(4)
-        .clamp(30, 100)
+        .clamp(30, 140)
         .min(screen.width);
     let height = screen
         .height
@@ -1003,7 +1247,20 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     let nav_area = columns[0];
     let result_area = columns[2];
     app.plugin_store_nav_area = nav_area;
-    app.plugin_store_result_area = result_area;
+    // The result column splits vertically into a fixed column-heading row (always
+    // painted, never scrolled) and the scrolling result list beneath it. The
+    // headings are drawn outside the `List`, so the list's own scroll keeps rows
+    // under the cursor visible while the headings stay pinned (FR-004).
+    let result_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(result_area);
+    let heading_area = result_chunks[0];
+    let list_area = result_chunks[1];
+    // Mouse hit-testing and the cursor-to-row mapping both reason about result
+    // rows; anchor the cached area on the list (below the heading) so a click or
+    // wheel on the heading row is inert.
+    app.plugin_store_result_area = list_area;
 
     let normal_style = Style::default().fg(Color::White);
     let active_style = Style::default()
@@ -1055,6 +1312,29 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     match body {
         PluginStoreBody::Rows => {
             let visible = browser.filtered.len();
+            // The id and version columns are fixed-width; the marketplace and
+            // description columns share the flexible remainder, so a wider panel shows
+            // a longer marketplace name (and a longer description) while a narrow one
+            // clips gracefully (FR-018, FR-048).
+            let id_width = PLUGIN_STORE_ID_MAX;
+            let version_width = PLUGIN_STORE_VERSION_MAX;
+            let (marketplace_width, desc_width) =
+                plugin_store_flex_widths(result_area.width as usize, id_width, version_width);
+            // The fixed column-heading row: the same column template as a result
+            // row so each label sits exactly above its column, painted once above
+            // the list so it never scrolls. The dark-on-light style distinguishes
+            // it from both the normal and installed row colours (FR-004).
+            let heading_style = Style::default()
+                .fg(Color::Black)
+                .bg(Color::Gray)
+                .add_modifier(Modifier::BOLD);
+            let heading = format!(
+                "  {PLUGIN_STORE_HEADING_ID:<id_width$} {PLUGIN_STORE_HEADING_VERSION:<version_width$} {PLUGIN_STORE_HEADING_MARKETPLACE:<marketplace_width$} {PLUGIN_STORE_HEADING_DESCRIPTION:<desc_width$}",
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(heading, heading_style))),
+                heading_area,
+            );
             let items: Vec<ListItem> = browser
                 .filtered
                 .iter()
@@ -1070,28 +1350,28 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
                     } else {
                         normal_style
                     };
+                    let id_field = truncate_bytes_no_ellipsis(&entry.id, id_width);
+                    let version_field =
+                        truncate_bytes_no_ellipsis(version_display(&entry.version), version_width);
+                    let marketplace_field =
+                        truncate_bytes_no_ellipsis(&entry.marketplace, marketplace_width);
+                    let desc_field = truncate_bytes_no_ellipsis(&entry.description, desc_width);
                     let row = format!(
-                        "> {:<22} {:<8} {}{}",
-                        truncate_bytes_no_ellipsis(&entry.id, 22),
-                        truncate_bytes_no_ellipsis(&entry.version, 8),
-                        truncate_bytes_no_ellipsis(
-                            &entry.description,
-                            PLUGIN_STORE_DESC_MAX as usize
-                        ),
-                        marker,
+                        "> {id_field:<id_width$} {version_field:<version_width$} {marketplace_field:<marketplace_width$} {desc_field}{marker}",
                     );
                     ListItem::new(Line::from(Span::styled(row, style)))
                 })
                 .collect();
             // Keep the block cursor within the filtered set. The list's own
-            // scroll keeps the selected row visible (FR-010).
+            // scroll keeps the selected row visible (FR-010) beneath the pinned
+            // heading row.
             let selected = browser.cursor.min(visible.saturating_sub(1));
             let list = List::new(items)
                 .highlight_style(cursor_style)
                 .highlight_symbol("");
             let mut state = ListState::default();
             state.select(Some(selected));
-            frame.render_stateful_widget(list, result_area, &mut state);
+            frame.render_stateful_widget(list, list_area, &mut state);
         }
         PluginStoreBody::Line(text, style) => {
             // Wrap rather than clip: with the navigator sharing the body, the
@@ -1129,6 +1409,55 @@ fn plugin_store_nav_width(body_width: u16) -> u16 {
     (body_width / 3)
         .clamp(PLUGIN_STORE_NAV_MIN, PLUGIN_STORE_NAV_MAX)
         .min(max_nav)
+}
+
+/// The version cell text: the entry's version, or `-` when it is blank.
+///
+/// A vendor index frequently omits the version (the Codex marketplace never
+/// declares one), so a blank field would otherwise be an invisible cell; `-`
+/// makes the unknown state explicit (FR-004).
+fn version_display(version: &str) -> &str {
+    if version.trim().is_empty() {
+        "-"
+    } else {
+        version
+    }
+}
+
+/// The marketplace and description column widths for one plugin-store result row
+/// of `row_width` columns (spec `pluginstores` FR-004, FR-048).
+///
+/// The id and version columns are fixed at `id_width` and `version_width`; the
+/// leading `> ` marker, the four single-space separators, and the `[installed]`
+/// marker are fixed overhead. The marketplace and description columns then split
+/// what remains: the marketplace takes at most half (and at most
+/// [`PLUGIN_STORE_MARKETPLACE_MAX`]), the description at most
+/// [`PLUGIN_STORE_DESC_MAX`], and any allowance the description does not use is
+/// handed to the marketplace so a long marketplace name is shown in full whenever
+/// the row has room. The two widths always sum to no more than the available space,
+/// so the description and the trailing `[installed]` marker are never pushed past
+/// the column edge on a narrow panel.
+fn plugin_store_flex_widths(
+    row_width: usize,
+    id_width: usize,
+    version_width: usize,
+) -> (usize, usize) {
+    const MARKER: &str = " [installed]";
+    // `> ` (2) + id + sep (1) + version + sep (1) + marketplace + sep (1) +
+    // description + marker.
+    let fixed = 2 + id_width + 1 + version_width + 1 + 1 + MARKER.len();
+    let available = row_width.saturating_sub(fixed);
+    // The marketplace is a short label: it takes at most half the flexible space
+    // (and at most its ceiling), so the description keeps room to breathe.
+    let marketplace = (available / 2).min(PLUGIN_STORE_MARKETPLACE_MAX);
+    let desc = available
+        .saturating_sub(marketplace)
+        .min(PLUGIN_STORE_DESC_MAX as usize);
+    // Hand whatever the description did not use back to the marketplace.
+    let marketplace = available
+        .saturating_sub(desc)
+        .min(PLUGIN_STORE_MARKETPLACE_MAX);
+    (marketplace, desc)
 }
 
 /// Render the plugin-store category navigator into `area` (spec `catnav` FR-001,
@@ -1201,7 +1530,10 @@ enum PluginStoreBody {
 /// Names the store, the live search field, the visible/total counts, the active
 /// category (spec `catnav` FR-005), and - when the parser skipped any malformed
 /// entries - the skipped count, so a partial result set is visible at a glance
-/// rather than silently short (FR-025). ASCII only (acceptance criterion 10).
+/// rather than silently short (FR-025). While the off-loop manifest enrichment is
+/// still running a `loading details...` hint is appended, so a still-blank
+/// version/description reads as pending rather than missing (FR-048). ASCII only
+/// (acceptance criterion 10).
 fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
     let total = browser.all.len();
     let visible = browser.filtered.len();
@@ -1215,6 +1547,9 @@ fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
     );
     if browser.skipped > 0 {
         title.push_str(&format!(" -- {} skipped", browser.skipped));
+    }
+    if browser.enriching {
+        title.push_str(" -- loading details...");
     }
     title.push(' ');
     title

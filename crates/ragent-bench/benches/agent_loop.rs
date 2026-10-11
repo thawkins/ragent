@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::StreamExt;
 use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest, LlmClient, ToolDefinition};
 use ragent_agent::message::{Message, MessagePart, Role};
@@ -33,6 +33,7 @@ use ragent_agent::session::processor::{
 use ragent_bench::{MockLlmClient, MockLlmScript};
 use ragent_types::StreamEvent;
 use serde_json::json;
+use std::hint::black_box;
 
 /// Build a synthetic history of `n` user/assistant turns with tool calls.
 fn synthetic_history(n: usize) -> Vec<Message> {

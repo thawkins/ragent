@@ -51,7 +51,7 @@ fn no_citations_passes_empty() {
     assert!(result.passed);
     assert!(result.gate_open);
     assert_eq!(result.checked, 0);
-    assert!(result.failed_claims.is_empty());
+    assert_eq!(result.failed_claims, [] as [std::string::String; 0]);
 }
 
 #[test]

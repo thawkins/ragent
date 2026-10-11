@@ -401,7 +401,7 @@ fn session_start_with_no_enabled_plugins_registers_nothing() {
         ragent_config::PluginsConfig::default(),
         &mut surface,
     );
-    assert!(session.reports().is_empty());
+    assert_eq!(session.reports(), []);
     assert!(surface.tools.is_empty());
     assert!(surface.commands.is_empty());
 }

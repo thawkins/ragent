@@ -32,6 +32,7 @@ fn entry(id: &str, category: Option<&str>) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: category.map(str::to_string),
     }
 }
@@ -160,7 +161,7 @@ async fn left_click_on_the_all_row_restores_the_full_set() {
     assert_eq!(browser(&app).active_category(), "ALL");
     assert_eq!(
         filtered_ids(&app),
-        ["codex-weather", "codex-time", "codex-shell", "codex-uncat"]
+        ["codex-shell", "codex-time", "codex-uncat", "codex-weather"]
     );
 }
 

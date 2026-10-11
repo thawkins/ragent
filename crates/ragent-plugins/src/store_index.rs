@@ -165,6 +165,73 @@ impl StoreKind {
         self.effective_endpoint_with_source(stores)
             .map(|(endpoint, _)| endpoint)
     }
+
+    /// Every marketplace entry configured for this store (spec `pluginstores`
+    /// FR-048): the base endpoint (the `plugins.stores.<name>.url` override or the
+    /// compiled default) followed by each `plugins.stores.marketplaces` entry that
+    /// names this store. Each endpoint is parsed through the [`StoreEndpoint`]
+    /// `https` guard, so a hand-edited non-`https` marketplace URL is dropped.
+    ///
+    /// Returns the accepted `(endpoint, provenance)` pairs together with the first
+    /// refusal encountered, when any. The caller keeps the accepted pair even when a
+    /// later added endpoint is refused, matching the tolerant per-entry discipline
+    /// of the store parser: one bad added URL does not blind the whole store.
+    #[must_use]
+    pub fn effective_endpoints_with_source(
+        self,
+        stores: &ragent_config::PluginStoresConfig,
+    ) -> (
+        Vec<(StoreEndpoint, EndpointSource)>,
+        Option<StoreEndpointError>,
+    ) {
+        let mut endpoints = Vec::new();
+        let mut first_err = None;
+        match self.effective_endpoint_with_source(stores) {
+            Ok(pair) => endpoints.push(pair),
+            Err(err) => first_err = Some(err),
+        }
+        for entry in &stores.marketplaces {
+            if !entry.store.eq_ignore_ascii_case(self.token()) {
+                continue;
+            }
+            let Some(raw) = entry.url.as_deref() else {
+                continue;
+            };
+            match StoreEndpoint::parse(raw) {
+                Ok(endpoint) => endpoints.push((endpoint, EndpointSource::Added)),
+                Err(err) => {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
+                }
+            }
+        }
+        (endpoints, first_err)
+    }
+}
+
+/// The display name of the marketplace named by `endpoint` for `kind` (FR-048).
+///
+/// Matched against the configured `plugins.stores.marketplaces` entries by
+/// resolved URL: the first entry for `kind` whose `url` equals the endpoint is
+/// the matching added marketplace. When no added marketplace matches - the
+/// store's base endpoint (a config override or the compiled default) - the
+/// store's own label is returned, so a browse row always names a source.
+#[must_use]
+pub fn marketplace_name_for(
+    kind: StoreKind,
+    stores: &ragent_config::PluginStoresConfig,
+    endpoint: &StoreEndpoint,
+) -> String {
+    stores
+        .marketplaces
+        .iter()
+        .find(|entry| {
+            entry.store.eq_ignore_ascii_case(kind.token())
+                && entry.url.as_deref() == Some(endpoint.as_str())
+        })
+        .map(|entry| entry.name.clone())
+        .unwrap_or_else(|| kind.label().to_string())
 }
 
 /// Where a store's effective endpoint came from (FR-031).
@@ -178,6 +245,9 @@ pub enum EndpointSource {
     Config,
     /// The compiled default endpoint (FR-027).
     Default,
+    /// An additional named marketplace added through
+    /// `/plugins marketplace <store> add` (FR-048).
+    Added,
 }
 
 impl EndpointSource {
@@ -187,6 +257,7 @@ impl EndpointSource {
         match self {
             Self::Config => "config",
             Self::Default => "default",
+            Self::Added => "added",
         }
     }
 }
@@ -364,6 +435,14 @@ pub struct StoreEntry {
     /// `None`, leaving the entry uncategorised.
     #[serde(default)]
     pub category: Option<String>,
+    /// The display name of the marketplace this entry was fetched from (FR-048).
+    ///
+    /// Set at fetch time (never carried by a marketplace document) so the browse
+    /// panel can show which configured marketplace contributed each row. A native
+    /// entry built without a fetch leaves it empty, in which case the panel renders
+    /// the store's own label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub marketplace: String,
 }
 
 impl StoreEntry {
@@ -402,6 +481,29 @@ fn normalise_category(category: Option<String>) -> Option<String> {
     category
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
+}
+
+/// The total order two store entry ids sort by, alphabetically (FR-050).
+///
+/// Case-insensitive on the id, with a byte-wise tiebreak so two ids differing only
+/// in case keep a stable, input-order-independent position. It is the store analogue
+/// of the connector system's `compare_connector_ids` comparator, so both browse panels
+/// order their rows the same way, and it is the one comparator every store surface
+/// reads so they cannot disagree about the result order.
+#[must_use]
+pub fn compare_store_ids(a: &str, b: &str) -> std::cmp::Ordering {
+    a.to_lowercase()
+        .cmp(&b.to_lowercase())
+        .then_with(|| a.cmp(b))
+}
+
+/// Sort store entries alphabetically by entry id (FR-050).
+///
+/// Applied to the browser's result set before the filter is derived, so a category
+/// filter narrows an already-sorted set and the displayed order never depends on the
+/// fetch or marketplace-merge order.
+pub fn sort_store_entries(entries: &mut [StoreEntry]) {
+    entries.sort_by(|a, b| compare_store_ids(a.id.as_str(), b.id.as_str()));
 }
 
 /// A store-index entry that could not be accepted (FR-025).

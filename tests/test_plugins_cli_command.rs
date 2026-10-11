@@ -276,6 +276,74 @@ fn stores_usage_documents_the_optional_check_flag() {
 }
 
 #[test]
+fn marketplace_show_lists_each_store_section_with_a_name_url_description_row() {
+    // `/plugins marketplace show` parity: one section per store (Codex,
+    // Claude), each a table with one row naming the marketplace (name, url,
+    // description). With no `plugins.stores` block both rows tag the compiled
+    // default endpoint.
+    let fx = Fixture::new();
+    let text = stdout(&fx.ragent(&["plugins", "marketplace", "show"]));
+
+    assert!(text.contains("ragent plugins marketplace show"), "{text}");
+    assert!(text.contains("## Codex marketplace"), "{text}");
+    assert!(text.contains("## Claude marketplace"), "{text}");
+    for (token, host) in [
+        ("codex", "raw.githubusercontent.com/openai/plugins"),
+        (
+            "claude",
+            "raw.githubusercontent.com/anthropics/claude-plugins-official",
+        ),
+    ] {
+        assert!(
+            text.contains(token) && text.contains(host),
+            "`{token}` row must name its default endpoint: {text}"
+        );
+    }
+    assert!(text.contains("(default)"), "{text}");
+
+    // A `plugins.stores.codex.url` override names the configured URL with a
+    // `(config)` description tag; the unconfigured store keeps its default.
+    std::fs::create_dir_all(fx.path().join(".ragent")).expect(".ragent dir");
+    std::fs::write(
+        fx.path().join(".ragent/ragent.json"),
+        r#"{ "plugins": { "stores": { "codex": { "url": "https://cfg.example/codex.json" } } } }"#,
+    )
+    .expect("config writable");
+
+    let overridden = stdout(&fx.ragent(&["plugins", "marketplace", "show"]));
+    assert!(
+        overridden.contains("codex | https://cfg.example/codex.json")
+            && overridden.contains("Codex plugin marketplace (config)"),
+        "the configured marketplace must name its URL: {overridden}"
+    );
+    assert!(
+        overridden.contains("raw.githubusercontent.com/anthropics/claude-plugins-official"),
+        "the unconfigured store keeps its default: {overridden}"
+    );
+}
+
+#[test]
+fn bare_marketplace_and_unknown_sub_subcommand_render_usage() {
+    // `ragent plugins marketplace` is only valid with an explicit `show`
+    // sub-subcommand; a bare or unknown tail renders the usage block.
+    let fx = Fixture::new();
+    for args in [
+        &["plugins", "marketplace"][..],
+        &["plugins", "marketplace", "bogus"][..],
+    ] {
+        let text = stdout(&fx.ragent(args));
+        assert!(
+            text.contains("## ragent plugins command reference"),
+            "`{args:?}` must render usage: {text}"
+        );
+        assert!(
+            !text.contains("## Codex marketplace"),
+            "`{args:?}` must not render the show report: {text}"
+        );
+    }
+}
+
+#[test]
 fn unknown_subcommand_renders_usage() {
     let fx = Fixture::new();
     let text = stdout(&fx.ragent(&["plugins", "frobnicate"]));

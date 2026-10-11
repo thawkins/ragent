@@ -276,7 +276,7 @@ fn test_reset_message_cache_clears_watermark_and_buffer() {
     app.reset_message_cache();
 
     assert!(app.message_line_cache.is_empty());
-    assert!(app.message_content_lines.is_empty());
+    assert_eq!(app.message_content_lines, [] as [std::string::String; 0]);
     assert_eq!(app.message_cache_dirty_from, 0);
 
     // The next frame rebuilds from scratch without a stale watermark.

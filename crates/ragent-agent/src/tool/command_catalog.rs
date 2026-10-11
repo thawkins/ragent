@@ -127,6 +127,7 @@ const CONNECTORS_SUBS: &[&str] = &[
     "auth",
     "test",
     "stores",
+    "marketplace",
     "help",
 ];
 const CONNECTORS_FLAGS: &[&str] = &["--verbose", "--category", "--force", "--check", "--refresh"];
@@ -433,13 +434,13 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "plugins",
-        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | help",
+        description: "Plugin management: /plugins list [--verbose] | add <source> [--force] | remove <pluginid> | enable <pluginid> | disable <pluginid> | test <pluginid> | stores | marketplace show | help",
         subcommands: PLUGINS_SUBS,
         flags: PLUGINS_FLAGS,
     },
     CommandCatalogEntry {
         trigger: "connectors",
-        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | help",
+        description: "Connector management: /connectors list [--verbose] [--category <name>] | claude [query] [--category <name>] [--refresh] | add <id|source> [--force] | remove <id> | enable <id> | disable <id> | connect <id> | disconnect <id> | auth <id> | test <id> | stores [--check] | marketplace show | help",
         subcommands: CONNECTORS_SUBS,
         flags: CONNECTORS_FLAGS,
     },

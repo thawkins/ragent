@@ -600,6 +600,40 @@ block.
   is left untouched (FR-024).
 - No test clones a real marketplace repository and no network is contacted (NFR-005).
 
+### TC-021 - Result rows render in ascending alphabetical order of id
+
+**Requirement:** FR-050
+
+**Preconditions:** `/plugins codex` panel open with the fixture index loaded (its
+`plugins` array is not in alphabetical order, so the browser's own sort is observable).
+
+**Steps:**
+1. Read the result rows top to bottom with no filter active and record the ids.
+2. Type a query that matches more than one entry (for example `codex`) and read the
+   surviving ids.
+3. Select a category that holds more than one entry (for example `Utility`) and read the
+   surviving ids.
+4. Clear the category and the query, then re-read the full list.
+
+**Expected results:**
+- Every list is in ascending alphabetical order of id, case-insensitively (for example
+  `codex-db`, `codex-lsp`, `codex-shell`, `codex-time`, `codex-uncat`, `codex-weather`),
+  regardless of the order the index declares the entries in (FR-050).
+- A query or category filter narrows the already-sorted set; the survivors keep their
+  alphabetical order (steps 2 and 3).
+- Clearing restores the full set, still alphabetical (step 4).
+- The navigator's category rows stay in their own case-insensitive sort (`Database`,
+  `Language`, `Utility`, `Web`) and the `Utility`/`utility` collision keeps the first
+  spelling the index declares (`Utility`), not one chosen by the result sort.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_filter.rs` (a shared-tag
+query returns its matches alphabetically), `crates/ragent-tui/tests/test_plugin_store_category_filter.rs`
+and `.../_nav.rs`/`.../_mouse.rs`/`.../_acceptance.rs` (a category filter and `ALL`
+restore the sorted survivor order, the `Utility` spelling survives), and
+`crates/ragent-tui/tests/test_plugin_store_panel.rs` (the block cursor starts on the
+alphabetically first row) - the store analogue of
+`crates/ragent-connectors/tests/test_connector_descriptor.rs` for FR-046.
+
 ## Cleanup
 
 1. Remove the scratch tree: `rm -rf ~/scratch/pluginstores-tests/`.

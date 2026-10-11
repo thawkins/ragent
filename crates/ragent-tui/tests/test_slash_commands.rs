@@ -5109,12 +5109,21 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
+    // Scope both checks to the seeded `configured` row: `/mcp list` merges the
+    // `ragent.json` `mcp` section, so the developer's real global config may
+    // contribute further servers (some legitimately disabled), and the assertion
+    // is only that *this* entry's seeded `Disabled` state was replaced by the
+    // client-derived `Connected` status.
+    let configured_row = joined
+        .lines()
+        .find(|l| l.trim_start().starts_with("| configured"))
+        .unwrap_or_else(|| panic!("the configured server must be listed: {joined}"));
     assert!(
-        joined.contains("connected"),
+        configured_row.contains("connected"),
         "the list must show the client-derived connected status: {joined}"
     );
     assert!(
-        !joined.contains("disabled"),
+        !configured_row.contains("disabled"),
         "the list must not still show the seeded disabled status: {joined}"
     );
 }

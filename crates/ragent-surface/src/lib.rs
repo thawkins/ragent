@@ -14,8 +14,10 @@
 //! | --------- | --------------------------------------------------------- |
 //! | [`harness`] | step model, [`harness::sample_for_schema`], [`harness::truncate`] |
 //! | [`help`]    | usage [`help::attribution`] and [`help::subcommand_of`]    |
+//! | [`manifest`] | shared manifest-enrichment client, cache, and parser     |
 //! | [`store`]   | [`store::StoreDirs`] resolution and store-entry checks     |
 
 pub mod harness;
 pub mod help;
+pub mod manifest;
 pub mod store;

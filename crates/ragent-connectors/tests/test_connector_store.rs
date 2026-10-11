@@ -81,7 +81,7 @@ fn scan_discovers_project_and_global_connectors_project_wins_on_collision() {
     // A connector present only in the global store is still discovered.
     write_connector(&global_store, "solo", &manifest_for("solo", "Solo global"));
 
-    let found = scan_dirs(store_dirs_at(
+    let found = scan_dirs(&store_dirs_at(
         &tree.0.join("proj"),
         None,
         Some(&global_root),
@@ -116,7 +116,7 @@ fn scan_surfaces_parse_failures_without_failing_the_scan() {
     write_connector(&project_store, "good", &manifest_for("good", "Good"));
     write_connector(&project_store, "broken", "{ not json");
 
-    let found = scan_dirs(store_dirs_at(&tree.0.join("proj"), None, None));
+    let found = scan_dirs(&store_dirs_at(&tree.0.join("proj"), None, None));
     assert_eq!(found.len(), 2);
 
     let broken = found
@@ -144,7 +144,7 @@ fn scan_marks_enabled_from_ledger() {
     ledger.state_mut("echo").enabled = true;
     ledger.save(&project_store).expect("ledger saves");
 
-    let found = scan_dirs(store_dirs_at(&tree.0.join("proj"), None, None));
+    let found = scan_dirs(&store_dirs_at(&tree.0.join("proj"), None, None));
     assert_eq!(found.len(), 1);
     assert!(found[0].enabled);
 }
@@ -158,7 +158,7 @@ fn scan_skips_entries_without_a_manifest() {
     // A stray file in the store is ignored.
     std::fs::write(project_store.join("stray.txt"), b"x").unwrap();
 
-    let found = scan_dirs(store_dirs_at(&tree.0.join("proj"), None, None));
+    let found = scan_dirs(&store_dirs_at(&tree.0.join("proj"), None, None));
     assert!(found.is_empty());
 }
 
@@ -182,7 +182,7 @@ fn scan_skips_symlinks_escaping_the_store() {
     )
     .expect("symlink creatable");
 
-    let found = scan_dirs(store_dirs_at(&tree.0.join("proj"), None, None));
+    let found = scan_dirs(&store_dirs_at(&tree.0.join("proj"), None, None));
     let ids: Vec<String> = found
         .iter()
         .filter_map(|c| c.outcome.as_ref().ok().map(|d| d.id.as_str().to_string()))
@@ -197,7 +197,7 @@ fn scan_skips_symlinks_escaping_the_store() {
 #[test]
 fn scan_treats_absent_store_as_empty() {
     let tree = TempTree::new("scan-absent");
-    let found = scan_dirs(store_dirs_at(
+    let found = scan_dirs(&store_dirs_at(
         &tree.0.join("no-such-proj"),
         None,
         Some(&tree.0.join("no-such-global")),

@@ -495,7 +495,7 @@ impl ConnectorSession {
         if !self.is_enabled() {
             return StartReport::default();
         }
-        let scanned = scan_dirs(self.dirs.clone());
+        let scanned = scan_dirs(&self.dirs);
         let mut reports = Vec::new();
         let mut disabled = Vec::new();
         for connector in scanned {
@@ -710,7 +710,7 @@ impl ConnectorSession {
         connected: &BTreeMap<String, (bool, usize)>,
     ) -> Vec<ConnectorStatus> {
         let mut statuses = Vec::new();
-        for connector in scan_dirs(self.dirs.clone()) {
+        for connector in scan_dirs(&self.dirs) {
             let Ok(descriptor) = connector.outcome else {
                 continue;
             };
@@ -908,7 +908,7 @@ impl ConnectorSession {
     /// Find a connector across the configured stores (project wins on collision),
     /// returning its descriptor and store directory (FR-001).
     fn locate(&self, id: &str) -> Result<(ConnectorDescriptor, PathBuf), LifecycleError> {
-        scan_dirs(self.dirs.clone())
+        scan_dirs(&self.dirs)
             .into_iter()
             .find_map(|connector| {
                 let descriptor = connector.outcome.ok()?;

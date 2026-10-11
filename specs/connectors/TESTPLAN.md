@@ -457,6 +457,7 @@ the same way); a configured LLM provider.
 4. Type `/connectors claude echo` and press `Enter`; read the panel, then `Esc`.
 5. Type `/mcp` and press `Enter`; check no connector-bridged server is connected.
 6. Type `/connectors help` and press `Enter`; read the usage block.
+7. Type `/connectors marketplace show` and press `Enter`; read the table.
 
 **Test data:** the `connectors.enabled: false` config block.
 
@@ -465,6 +466,11 @@ the same way); a configured LLM provider.
   catalogue fetch.
 - Step 5 shows no connector-bridged server connected.
 - Step 6 still prints the normal usage block (help remains available).
+- Step 7 still lists the compiled default Claude marketplace (tagged `default`) with no
+  `disabled` report: the `marketplace` reports are pure config reads dispatched before the
+  master switch (FR-042). Covered by
+  `crates/ragent-connectors/tests/test_connector_commands.rs`
+  (`marketplace_reports_stay_available_while_the_subsystem_is_disabled`).
 
 ### TC-016 - `ragent connectors` CLI parity
 
@@ -721,6 +727,165 @@ value `nosuch`.
   `developer`, confirming the query is combined with the category filter. An unknown launch
   category leaves every row visible and reports the refusal in the panel footer.
 
+### TC-025 - `/connectors marketplace` family manages the user-global marketplace ledger
+
+**Requirement:** FR-042, FR-043
+
+**Preconditions:** TUI running; the user-global `~/.config/ragent/ragent.json` backed up.
+Start a local HTTPS endpoint serving a small second catalogue fixture (two entries, one with
+an id that collides with the base catalogue).
+
+**Steps:**
+1. Run `/connectors marketplace show` and read the table.
+2. Run `/connectors marketplace claude add acme/connectors` and read the report, then read
+   the user-global config.
+3. Run `/connectors marketplace claude add acme/connectors` again (no `--force`).
+4. Run `/connectors marketplace claude list` and read the table.
+5. Edit the user-global config so a second marketplace entry carries an `http://` URL
+   (refused by the scheme guard), then run `/connectors marketplace show` again.
+6. Run `/connectors marketplace claude remove acme-connectors-2` (the https entry added in
+   step 2's edit).
+
+**Test data:** an `owner/repo` slug `acme/connectors`, a duplicate of it, and an
+`http://` marketplace URL.
+
+**Expected results:**
+- Step 1 lists the compiled default Claude catalogue tagged `default` and nothing else
+  (FR-042); the report makes no network request.
+- Step 2 reports `[ok]` naming the resolved raw URL
+  (`https://raw.githubusercontent.com/acme/connectors/main/.claude-plugin/marketplace.json`),
+  and the user-global `connectors.stores.marketplaces` array carries the entry (FR-043);
+  the *project* config is untouched.
+- Step 3 is refused with an `[err]` naming the duplicate; adding `--force` replaces the
+  entry instead.
+- Step 4 lists the base endpoint first and the added marketplace tagged `added`.
+- Step 5 renders the refused entry as an `[err]` row naming the refusal, not a dropped row.
+- Step 6 reports `[ok]` and the entry is gone from the config; removing a name that is not
+  configured reports `[err]` and changes nothing.
+
+Covered offline by `crates/ragent-connectors/tests/test_marketplace_show.rs` (the
+`show`/`list` renderers and the parse ladder) and
+`crates/ragent-connectors/tests/test_marketplace_ops.rs` (the source resolver and the
+user-global config splice).
+
+### TC-026 - The browse panel merges every configured marketplace
+
+**Requirement:** FR-043
+
+**Preconditions:** TUI running; the base catalogue fixture and the second catalogue fixture
+from TC-025 both resolvable (the second added through `/connectors marketplace claude add`).
+
+**Steps:**
+1. Run `/connectors claude --refresh` and read the panel rows.
+2. Find a row whose id exists in both catalogues and read its marketplace column.
+3. Make the second catalogue endpoint unreachable, close the panel, and re-open it.
+4. Remove the added marketplace (`/connectors marketplace claude remove <name>`) and
+   re-open the browser.
+
+**Expected results:**
+- Step 1 shows the union of both catalogues' entries; each row's marketplace column names the
+  marketplace it came from (the base row names the catalogue label; a local install renders
+  `-`).
+- Step 2 shows the duplicate id exactly once, attributed to the base catalogue (first
+  occurrence wins).
+- Step 3 opens with the base catalogue's rows and a warning in the message window naming the
+  skipped marketplace; the base rows are unaffected.
+- Step 4 shows only the base catalogue's rows again.
+
+Covered offline by `crates/ragent-connectors/tests/test_marketplace_merge.rs` (the
+`fetch_all_catalogues` merge, first-occurrence-wins dedup, and per-row attribution) and
+`crates/ragent-tui/tests/test_connector_catalogue_marketplace_warning.rs` (the refused
+added marketplace surfaces as a `warn` message-window line while the base rows survive).
+
+### TC-027 - Catalogue description enrichment fills blank descriptions off-loop
+
+**Requirement:** FR-044
+
+**Preconditions:** TUI running; a local HTTPS endpoint serving a catalogue fixture whose
+entries carry no `description` and a `git+https://github.com/...#ref:subpath` source, with
+matching `connector.json` manifest fixtures served under a raw.githubusercontent-shaped
+path; the injectable enrichment seam is exercised offline by the unit tests (NFR-003).
+
+**Steps:**
+1. Run `/connectors claude --refresh` against that catalogue and watch the panel title.
+2. Read a row whose description the catalogue left blank.
+3. Read a row whose description the catalogue declared.
+4. Make one manifest URL return a non-JSON body and re-open the browser.
+
+**Expected results:**
+- Step 1 shows `loading details...` in the panel title while enrichment runs and clears it
+  when the worker finishes; the panel keeps animating.
+- Step 2's row gains the manifest's description; a row with no derivable manifest (an entry
+  carrying no git source) stays as the catalogue declared it.
+- Step 3's row keeps the catalogue-declared description (enrichment never overwrites).
+- Step 4 leaves that entry's blank fields untouched; no failure is fatal, and the rest of
+  the enrichment completes.
+
+Covered offline by `crates/ragent-connectors/tests/test_catalogue_enrich.rs` (the
+`catalogue_manifest_urls` derivation and its git-ref/scheme guards, the per-URL cache, and
+`enrich_into`) and `crates/ragent-tui/tests/test_connector_catalogue_enrich.rs` (the
+off-loop worker, the `loading details...` hint, and the stale-generation discard).
+
+### TC-028 - The browse panel pins a dark-on-light column-heading row
+
+**Requirement:** FR-045
+
+**Preconditions:** TUI running; a local HTTPS endpoint serving a catalogue fixture with
+enough entries (more than the panel height) to force the result list to scroll.
+
+**Steps:**
+1. Run `/connectors claude` and read the row directly above the first result row.
+2. Note the foreground and background colour of the `Id` heading cell.
+3. Press `End` (or scroll the result list to the last entry) and re-read the row above the
+   first visible result row.
+4. Click, and scroll a wheel, on the heading row.
+
+**Expected results:**
+- Step 1 shows a heading row naming `Id`, `Category`, `Marketplace`, and `Description`, with
+  each label aligned above the values in its column.
+- Step 2 shows dark text on a light background, distinct from the normal (white) and
+  installed (green) row colours.
+- Step 3 shows the heading unchanged and still above the (now scrolled) list; no heading
+  label appears inside the list body.
+- Step 4 changes nothing: the heading row is outside the cached result-list area, so a click
+  or wheel on it moves no cursor and scrolls nothing.
+
+Covered offline by `crates/ragent-tui/tests/test_connector_catalogue_panel.rs` (the heading
+renders above the rows, aligned with its columns, dark-on-light, and stays pinned when the
+rows scroll) and `crates/ragent-tui/tests/test_connector_catalogue_mouse.rs` (a click or
+wheel on the heading row is inert).
+
+### TC-029 - Connector lists render alphabetically by id, filtered or not
+
+**Requirement:** FR-046
+
+**Preconditions:** TUI running; three connectors installed whose ids sort non-alphabetically
+in scan order (for example `zeta`, `alpha`, and `slack`) with `alpha`/`zeta` categorised
+`developer` and `slack` categorised `communication`.
+
+**Steps:**
+1. Run `/connectors list` and read the row order.
+2. Run `/connectors list --category developer` and read the row order.
+3. Run `/connectors claude`, read the result-row order, then select the `developer` category
+   row in the navigator and re-read the order.
+4. Run `/connectors search a` and read the matching-row order.
+
+**Expected results:**
+- Step 1 lists `alpha` before `zeta` before `slack` regardless of the order the store scanned
+  them in.
+- Step 2 shows only `alpha` and `zeta`, still in that alphabetical order, with the `slack` row
+  absent.
+- Step 3 shows the same alphabetical order in the panel, and the `developer` filter narrows
+  the already-sorted set to `alpha` then `zeta` (the `slack` row absent).
+- Step 4 lists its matches alphabetically by id.
+
+Covered offline by `crates/ragent-connectors/tests/test_connector_descriptor.rs`
+(`sort_connectors`/`compare_connector_ids` order by id, case-insensitively with a byte
+tiebreak), `crates/ragent-connectors/tests/test_connector_browse.rs` (the browser sorts on
+load and a category filter keeps the sorted order), and
+`crates/ragent-connectors/tests/test_connector_management.rs` (the `list` and `search`
+reports render rows alphabetically, filtered or not).
+
 ## Cleanup
 
 1. Disable every enabled connector: for each id shown by `/connectors list` (or
@@ -729,10 +894,11 @@ value `nosuch`.
 2. Remove the installed connectors: run `/connectors remove <id>` for each id, then confirm
    `~/scratch/connectors-tests/.ragent/connectors/` is empty or absent.
 3. Restore configuration: if you edited `~/scratch/connectors-tests/.ragent/ragent.json`
-   during TC-005, TC-006, TC-013, TC-015, TC-020, TC-021, or TC-022, restore it from the
-   backup made in Prerequisite 9, or delete the temporary `connectors` block, the temporary
-   `connectors.stores.community.url` entry, and every temporary
-   `connectors.stores.claude.url` override.
+   during TC-005, TC-006, TC-013, TC-015, TC-020, TC-021, TC-022, or TC-025..TC-027,
+   restore it from the backup made in Prerequisite 9, or delete the temporary `connectors`
+   block, the temporary `connectors.stores.community.url` entry, every temporary
+   `connectors.stores.claude.url` override, and every `connectors.stores.marketplaces`
+   entry; restore the user-global `~/.config/ragent/ragent.json` from its backup.
 4. Restore the shared MCP ledger: restore `<state dir>/mcp_state.json` from the backup made
    in Prerequisite 9, or manually remove the `echo.echo`, `two-server.*`, and
    `echo.echo` collision entries added during the tests.

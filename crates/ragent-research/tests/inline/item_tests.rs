@@ -132,7 +132,7 @@ fn render_frontmatter_round_trips_through_parse() {
     assert_eq!(parsed.status, item.status);
     assert_eq!(parsed.created_at, item.created_at);
     assert_eq!(parsed.modified_at, item.modified_at);
-    assert!(parsed.sources.is_empty());
+    assert_eq!(parsed.sources, [] as [crate::source::Source; 0]);
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn from_frontmatter_defaults_optional_fields() {
     let block = "---\n\n**name:** rust-async\n\n**title:** foo\n\n---\n\n";
     let item = ResearchItem::from_frontmatter(block).unwrap();
     assert_eq!(item.status, ResearchStatus::Draft);
-    assert!(item.topic.is_empty());
+    assert_eq!(item.topic, "");
 }
 
 #[test]

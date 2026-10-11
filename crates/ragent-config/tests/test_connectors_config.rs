@@ -191,6 +191,15 @@ fn connectors_serialise_roundtrip() {
                     url: Some("https://example.org/claude.json".to_string()),
                 },
             )]),
+            marketplaces: vec![ragent_config::ConnectorMarketplaceEntry {
+                store: "claude".to_string(),
+                name: "acme".to_string(),
+                url: Some(
+                    "https://raw.githubusercontent.com/acme/connectors/main/.claude-plugin/marketplace.json"
+                        .to_string(),
+                ),
+                source: "acme/connectors".to_string(),
+            }],
             timeout_ms: 5_000,
             max_index_bytes: 512_000,
             cache_ttl_secs: 60,
@@ -218,4 +227,59 @@ fn connectors_omitted_entirely_when_section_absent() {
         !json.contains("\"connectors\""),
         "absent connectors must not serialise: {json}"
     );
+}
+
+#[test]
+fn connectors_stores_marketplaces_parse_and_default_empty() {
+    let stores = ConnectorStoresConfig::default();
+    assert_eq!(
+        stores.marketplaces,
+        [] as [ragent_config::ConnectorMarketplaceEntry; 0]
+    );
+
+    let config: Config = serde_json::from_str(
+        r#"{
+        "connectors": {
+            "stores": {
+                "marketplaces": [
+                    { "store": "claude", "name": "acme",
+                      "url": "https://example.org/acme/marketplace.json",
+                      "source": "acme/connectors" },
+                    { "store": "claude", "name": "local-set", "source": "./local-mp" }
+                ]
+            }
+        }
+    }"#,
+    )
+    .expect("config should parse");
+
+    let connectors = config
+        .connectors
+        .expect("connectors block should be present");
+    let stores = connectors.stores_or_default();
+    assert_eq!(stores.marketplaces.len(), 2);
+    assert_eq!(stores.marketplaces[0].store, "claude");
+    assert_eq!(stores.marketplaces[0].name, "acme");
+    assert_eq!(
+        stores.marketplaces[0].url.as_deref(),
+        Some("https://example.org/acme/marketplace.json")
+    );
+    assert_eq!(stores.marketplaces[1].name, "local-set");
+    assert!(stores.marketplaces[1].url.is_none());
+}
+
+#[test]
+fn connectors_stores_mut_creates_block_when_absent() {
+    let mut connectors = ConnectorsConfig::default();
+    connectors
+        .stores_mut()
+        .marketplaces
+        .push(ragent_config::ConnectorMarketplaceEntry {
+            store: "claude".to_string(),
+            name: "acme".to_string(),
+            url: Some("https://example.org/acme/marketplace.json".to_string()),
+            source: "acme/connectors".to_string(),
+        });
+    let stores = connectors.stores.expect("stores block should be created");
+    assert_eq!(stores.marketplaces.len(), 1);
 }

@@ -43,13 +43,13 @@ fn parses_minimal_codex_manifest() {
     assert_eq!(d.version, "1.2.0");
     assert_eq!(d.dialect, PluginDialect::Codex);
     assert_eq!(d.entry, Some(root().join("index.js")));
-    assert!(d.requested_permissions.is_empty());
+    assert_eq!(d.requested_permissions, [] as [std::string::String; 0]);
     assert_eq!(d.api_version, HOST_API_VERSION);
-    assert!(d.unsupported_capabilities.is_empty());
+    assert_eq!(d.unsupported_capabilities, [] as [std::string::String; 0]);
     assert_eq!(d.manifest_path, root().join("codex-plugin.json"));
     assert_eq!(d.root, root());
-    assert!(parsed.tools.is_empty());
-    assert!(parsed.commands.is_empty());
+    assert_eq!(parsed.tools, [] as [ragent_plugins::PluginToolDecl; 0]);
+    assert_eq!(parsed.commands, [] as [ragent_plugins::PluginCommandDef; 0]);
 }
 
 #[test]
@@ -123,7 +123,10 @@ fn codex_fs_and_exec_permissions_are_recorded_unsupported() {
         parsed.descriptor.unsupported_capabilities,
         vec![UNSUP_FS.to_string(), UNSUP_EXEC.to_string()]
     );
-    assert!(parsed.descriptor.requested_permissions.is_empty());
+    assert_eq!(
+        parsed.descriptor.requested_permissions,
+        [] as [std::string::String; 0]
+    );
 }
 
 // -- ANTIPAT M11: version required-ness is the same for both dialects --------
@@ -235,7 +238,10 @@ fn codex_manifest_with_mcp_servers_section_is_bridged() {
         }"#,
     )
     .expect("should parse");
-    assert!(parsed.descriptor.unsupported_capabilities.is_empty());
+    assert_eq!(
+        parsed.descriptor.unsupported_capabilities,
+        [] as [std::string::String; 0]
+    );
     assert_eq!(parsed.mcp_servers.len(), 1);
     assert_eq!(parsed.mcp_servers[0].id, "fetch");
     assert_eq!(parsed.mcp_servers[0].command.as_deref(), Some("npx"));
@@ -307,7 +313,7 @@ fn parses_minimal_claude_manifest() {
     assert_eq!(d.dialect, PluginDialect::Claude);
     assert_eq!(d.entry, Some(root().join("index.js")));
     assert_eq!(d.api_version, HOST_API_VERSION);
-    assert!(d.unsupported_capabilities.is_empty());
+    assert_eq!(d.unsupported_capabilities, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -362,7 +368,10 @@ fn claude_mcp_section_is_bridged_never_dropped() {
         }"#,
     )
     .expect("should parse");
-    assert!(parsed.descriptor.unsupported_capabilities.is_empty());
+    assert_eq!(
+        parsed.descriptor.unsupported_capabilities,
+        [] as [std::string::String; 0]
+    );
     assert_eq!(parsed.mcp_servers.len(), 1);
     assert_eq!(parsed.mcp_servers[0].id, "weather");
     assert_eq!(parsed.mcp_servers[0].command.as_deref(), Some("node"));
@@ -384,8 +393,14 @@ fn claude_external_mcp_file_is_bridged() {
         }"#,
     )
     .expect("should parse");
-    assert!(parsed.descriptor.unsupported_capabilities.is_empty());
-    assert!(parsed.mcp_servers.is_empty());
+    assert_eq!(
+        parsed.descriptor.unsupported_capabilities,
+        [] as [std::string::String; 0]
+    );
+    assert_eq!(
+        parsed.mcp_servers,
+        [] as [ragent_plugins::PluginMcpServer; 0]
+    );
     assert_eq!(
         parsed.raw_mcp,
         Some(serde_json::Value::String("./mcp.json".to_string()))
@@ -448,7 +463,10 @@ fn claude_manifest_without_entry_is_a_non_js_plugin() {
     assert_eq!(parsed.descriptor.entry, None);
     assert_eq!(parsed.descriptor.id, "mongodb");
     // FR-028: the skills and MCP sections are bridged, so nothing is unsupported.
-    assert!(parsed.descriptor.unsupported_capabilities.is_empty());
+    assert_eq!(
+        parsed.descriptor.unsupported_capabilities,
+        [] as [std::string::String; 0]
+    );
     assert_eq!(parsed.skills, vec!["./skills/".to_string()]);
 }
 
@@ -747,7 +765,7 @@ fn manifest_agents_wrong_shape_is_unsupported() {
         br#"{ "name": "Weather", "version": "1.0.0", "agents": { "bad": true } }"#,
     )
     .expect("should parse");
-    assert!(parsed.agents.is_empty());
+    assert_eq!(parsed.agents, [] as [std::string::String; 0]);
     assert!(
         parsed
             .descriptor
@@ -1001,7 +1019,7 @@ fn manifest_hooks_wrong_shape_is_unsupported() {
         br#"{ "name": "Weather", "version": "1.0.0", "hooks": 7 }"#,
     )
     .expect("should parse");
-    assert!(parsed.hooks.is_empty());
+    assert_eq!(parsed.hooks, [] as [ragent_plugins::PluginHook; 0]);
     assert!(
         parsed
             .descriptor
@@ -1127,7 +1145,7 @@ fn manifest_without_any_skills_contributes_none() {
     let parsed = parse_plugin_dir(&dir.0)
         .expect("parses")
         .expect("recognised");
-    assert!(parsed.skills.is_empty());
+    assert_eq!(parsed.skills, [] as [std::string::String; 0]);
 }
 
 // -- SEC-ragent-plugins-002: a declared `id` becomes a store path ------------

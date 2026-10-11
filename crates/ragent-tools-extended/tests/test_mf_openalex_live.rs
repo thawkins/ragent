@@ -51,7 +51,10 @@ async fn test_openalex_live_search_with_mailto() {
 
     assert_eq!(report.engine, "openalex");
     assert!(report.is_success(), "engine should succeed with mailto");
-    assert!(!report.results.is_empty());
+    assert_ne!(
+        report.results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 /// Verify that an empty query returns an error report (not a panic).
@@ -63,6 +66,9 @@ async fn test_openalex_empty_query_returns_error_report() {
 
     assert_eq!(report.engine, "openalex");
     assert!(!report.is_success());
-    assert!(!report.error.is_empty());
-    assert!(report.results.is_empty());
+    assert_ne!(report.error, "");
+    assert_eq!(
+        report.results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }

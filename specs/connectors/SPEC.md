@@ -37,6 +37,7 @@ after the `/plugins` family (spec `plugins` FR-006):
 | `/connectors auth <id>`       | Manage a connector's credentials/token and report its auth state.  |
 | `/connectors test <id>`       | Connect in isolation, invoke one tool, and report per-step results.|
 | `/connectors stores`          | Report each catalogue endpoint and its source; `--check` probes it.|
+| `/connectors marketplace show` / `marketplace claude list\|add\|remove` | Manage the additional catalogues the browser fetches. |
 | `/connectors help`            | Show usage for all subcommands.                                    |
 
 ### Why this exists
@@ -154,9 +155,11 @@ and are subject to the normal permission engine (default action: `ask`).
 
 **FR-004** — The system shall provide the `/connectors` slash-command family with the
 subcommands `list`, `claude`, `add`, `remove`, `enable`, `disable`, `connect`,
-`disconnect`, `auth`, `test`, `stores`, and `help`, registered in the `SLASH_COMMANDS`
-registry, reachable through the slash-command dispatch arm, listed in the autocomplete
-menu, and documented in `/connectors help`. The catalogue-browsing role is served by the
+`disconnect`, `auth`, `test`, `stores`, `marketplace`, and `help`, registered in the
+`SLASH_COMMANDS` registry, reachable through the slash-command dispatch arm, listed in the
+autocomplete menu, and documented in `/connectors help`. The `marketplace` subcommand
+carries its own sub-subcommand family (`show` and `<store> list|add|remove`, FR-042,
+FR-043), so the family lists it as one token. The catalogue-browsing role is served by the
 interactive `claude` subcommand rather than a separate `search` subcommand, so there is one
 catalogue surface with one filter model.
 
@@ -318,6 +321,11 @@ The top-level `Config` struct gains an optional `connectors` object:
     "store_dir": null,                     // optional override of the connector store path
     "stores": {                            // catalogue endpoints
       "community": { "url": "https://example.org/connectors/index.json" },
+      "marketplaces": [                    // added catalogues (FR-043)
+        { "store": "claude", "name": "my-catalogue",
+          "url": "https://raw.githubusercontent.com/acme/connectors/main/.claude-plugin/marketplace.json",
+          "source": "acme/connectors" }
+      ],
       "timeout_ms": 10000,
       "max_index_bytes": 2097152,
       "cache_ttl_secs": 3600
@@ -463,8 +471,9 @@ commands, with an `ALL` category that resets the filter to every connector.
 `/connectors list`, the system shall restrict the displayed connectors to the single
 selected category, shall exclude connectors whose declared category differs, and shall
 report the active category together with the match count. In the browser the filter is set
-by `--category` at launch or cycled with the `c` key over the categories the fetched
-catalogue declares.
+by `--category` at launch, by clicking a row of the left-hand category navigator,
+or by moving the navigator's category cursor over the categories the fetched
+catalogue declares; the `c` key clears the filter back to `ALL`.
 
 **FR-040** — When the `ALL` category is selected, the system shall clear any active
 category filter and display every connector regardless of category, and `ALL` shall be the
@@ -477,6 +486,90 @@ category with no matching connectors as an empty result message rather than an e
 category the surface does not know is refused: `list` renders the family's `[err]` row and
 changes no state, and the browser reports the refusal in its footer while leaving every row
 visible.
+
+## Catalogue marketplaces
+
+This section gives the Claude connector catalogue the marketplace management
+surface the plugin stores already ship (spec `pluginstores` FR-047, FR-048,
+FR-049):
+additional named marketplaces that extend the catalogue the `/connectors claude`
+browser fetches, managed through a `/connectors marketplace` sub-subcommand
+family and each browsing row attributed to the marketplace it came from.
+
+**FR-042** — The system shall provide a `/connectors marketplace show`
+subcommand that lists the marketplaces configured for the Claude catalogue: one
+section containing a table with one row per marketplace endpoint showing its
+name (the catalogue token for the base endpoint, or the marketplace's recorded
+name), url (the effective endpoint), and description (the catalogue label with
+its `config`/`default`/`added` provenance). The report, and the
+`/connectors marketplace claude list` report, are pure configuration reads: no
+network request, no store scan, and a missing `connectors.stores` block still
+lists the compiled default marketplace. They are also dispatched **before** the
+`connectors.enabled` master switch, so a disabled subsystem still renders them
+rather than reporting the subsystem inert. A configured endpoint refused by the
+FR-037 scheme guard shall be rendered as an `[err]` row naming the refusal rather
+than being omitted.
+
+**FR-043** — The system shall provide `/connectors marketplace claude add
+<source> [--force]`, `/connectors marketplace claude remove <name>`, and
+`/connectors marketplace claude list` sub-subcommands that manage the set of
+additional marketplaces the catalogue browser fetches. Accepted `<source>` forms
+mirror the plugin marketplace add prompt: an `owner/repo` GitHub slug, a
+`git@github.com:owner/repo.git` SSH remote, an `https://` marketplace-index URL,
+or a local marketplace directory. An `owner/repo`, an SSH remote, and a GitHub
+repo URL are resolved syntactically to
+`https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/marketplace.json`;
+any other `https://` URL is used verbatim; a local directory is recorded with
+its manifest `name` and no fetch URL. `add` records the marketplace under
+`connectors.stores.marketplaces` in the **user-global** config
+(`~/.config/ragent/ragent.json`), refusing a duplicate name without `--force`;
+`remove` drops an entry by name; both render an `[ok]`/`[err]` report. The
+`/connectors claude` browse panel shall fetch the base endpoint first and then
+each added marketplace, merging their entries into the one panel and dropping an
+entry whose id was already seen (first occurrence wins), and every merged entry
+shall carry the display name of the marketplace it came from (the added
+marketplace's `name`, or the catalogue label for the base endpoint) in its
+`marketplace` field, so the browse row can name each row's source in a dedicated
+marketplace column. A refused base endpoint (non-`https` or malformed) is
+reported as the panel's inline error (FR-037); a refused added marketplace URL
+is skipped rather than blinding the whole catalogue, and the refusal shall be
+surfaced (a warning line in the message window) rather than silent. `list` and
+`show` render one row per configured marketplace, tagging each
+`default`/`config`/`added`.
+
+**FR-044** — When a catalogue has loaded into the browse panel, the system shall
+additionally resolve, off the event loop, each entry's description from a
+repository connector manifest when the entry's source is a `github.com` git
+source of the form `git+<https-url>#<ref>[:<subpath>]` (the shape an added
+marketplace's local directory or git-backed entry installs from), and shall fill
+the entry's blank description with the resolved value (never overwriting a value
+the catalogue already declared). The manifest URL shall be derived as
+`https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<subpath>/connector.json`
+with `.claude-plugin/connector.json` tried after it. The resolution shall be
+best-effort and never fatal (a missing manifest, a transport failure, non-JSON
+bytes, or an oversized body leaves the catalogue-declared fields), bounded in
+concurrency and per-fetch size, cached per manifest URL across opens, run
+through an injectable seam so it is testable offline (NFR-003), and shall show a
+`loading details...` hint in the panel title while it is still running. Entries
+whose source is the catalogue endpoint itself (the compiled default's directory
+feed) derive no manifest and are simply left alone.
+
+**FR-045** — The `/connectors claude` browse panel shall render a fixed
+column-heading row above the scrolling result list, naming each result column
+(`Id`, `Category`, `Marketplace`, `Description`) with the same column template as
+a result row so each label sits directly above the values in its column. The
+heading row shall be painted dark-on-light (dark foreground, light background) to
+distinguish it from the normal and installed row colours, shall be drawn outside
+the list's own scroll so it stays visible while the rows scroll beneath it, and
+shall never be reachable by the result cursor, a click, or a wheel.
+
+**FR-046** — The system shall render every connector list in ascending alphabetical
+order of connector id, case-insensitively with a byte-wise tiebreak, on every surface:
+the `/connectors claude` browse panel, the `/connectors list` report, and the
+`/connectors search` report. The order shall be derived from the id alone, not from the
+fetch, scan, or filter order, and shall hold while a category filter is active - a filter
+narrows the already-sorted set and the survivors keep their alphabetical order. One
+comparator shall be shared by all three surfaces so they cannot disagree about the order.
 
 ## Non-Functional Requirements
 

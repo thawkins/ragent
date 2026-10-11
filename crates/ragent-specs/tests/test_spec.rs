@@ -118,7 +118,7 @@ fn test_plan_new() {
     let id = SpecId::new("test").unwrap();
     let plan = Plan::new(id, "Test Plan");
     assert_eq!(plan.title, "Test Plan");
-    assert!(plan.tasks.is_empty());
+    assert_eq!(plan.tasks, [] as [ragent_specs::Task; 0]);
 }
 
 #[test]

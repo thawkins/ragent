@@ -178,7 +178,7 @@ fn test_budget_crawl_config_translates_values_and_robots() {
     assert!(config.respect_robots);
     // Unset crawl fields keep their engine defaults.
     assert!(config.focus.is_none());
-    assert!(config.crawl_urls.is_empty());
+    assert_eq!(config.crawl_urls, [] as [std::string::String; 0]);
 }
 
 // ===========================================================================
@@ -364,7 +364,7 @@ async fn test_acquire_empty_page_yields_empty_corpus() {
     .expect("acquisition should succeed even with no usable text");
 
     assert!(corpus.is_empty());
-    assert!(corpus.text.is_empty());
+    assert_eq!(corpus.text, "");
     assert_eq!(corpus.excluded.len(), 1);
     assert_eq!(corpus.excluded[0].reason, ExclusionReason::NoContent);
 }

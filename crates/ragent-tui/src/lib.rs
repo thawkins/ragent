@@ -875,6 +875,9 @@ pub async fn run_tui(
             // Apply a completed off-loop plugin-store index fetch (T-008/FR-016).
             app.poll_plugin_store_result();
 
+            // Apply streamed manifest-metadata enrichment updates (FR-048).
+            app.poll_store_enrichment();
+
             // Apply a completed off-loop plugin-store install (T-009/FR-011).
             app.poll_plugin_store_install_result();
 
@@ -883,6 +886,9 @@ pub async fn run_tui(
 
             // Apply a completed off-loop connector-catalogue fetch.
             app.poll_connector_catalogue_result();
+
+            // Apply streamed connector-catalogue enrichment updates (FR-044).
+            app.poll_connector_enrichment();
 
             // Apply a completed off-loop connector-catalogue install.
             app.poll_connector_catalogue_install_result();

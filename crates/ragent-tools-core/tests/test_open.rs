@@ -47,7 +47,7 @@ async fn test_open_accepts_https_url() {
         &ragent_tools_core::CanonicalPathCache::new(),
     )
     .expect("build_command");
-    assert!(!program.is_empty());
+    assert_ne!(program, "");
     assert!(args.iter().any(|a| a.contains("example.com")));
 }
 
@@ -68,7 +68,7 @@ async fn test_open_reveals_parent_directory() {
     )
     .expect("build_command");
 
-    assert!(!program.is_empty());
+    assert_ne!(program, "");
     assert!(args.iter().any(|a| a.contains("src")));
 }
 
@@ -88,6 +88,6 @@ async fn test_open_resolves_relative_path() {
     )
     .expect("build_command");
 
-    assert!(!program.is_empty());
+    assert_ne!(program, "");
     assert!(args.iter().any(|a| a.contains("readme.md")));
 }

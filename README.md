@@ -210,29 +210,56 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   `/plugins codex` and `/plugins claude`
   browse each store's official marketplace (`StoreProvider` normalises the Codex and
   Claude document shapes); each panel carries a left-hand category navigator listing
-  `ALL` plus the distinct categories and tags the fetched index declares, operated by
+  `ALL` plus the distinct categories the fetched index declares, operated by
   keyboard (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear) and mouse (click
   a row, wheel to scroll); a launch may pre-select a category with `--category
-  <name>`; `/plugins add` also accepts a
+  <name>`; each result row shows the plugin id, version, the **marketplace it came
+  from** (the added marketplace's name, or the store label for the base endpoint), and
+  its description, and the panel widens up to a 140-column ceiling so the marketplace
+  column has room; the result list is sorted alphabetically by plugin id
+  (case-insensitive) and a query or category filter narrows the already-sorted set;
+  `/plugins add` also accepts a
   `git+<https-url>#<ref>[:<subpath>]` git source; a freshly installed plugin is
   recorded enabled and loads at the next session start (no JavaScript runs during
   the install); managed through
-  `/plugins list|add|remove|enable|disable|test|stores|help` in the TUI and the
-  `ragent plugins <sub>` CLI; `plugins.enabled: false` makes the subsystem inert
+  `/plugins list|add|remove|enable|disable|test|stores|marketplace|help` in the TUI
+  and the `ragent plugins <sub>` CLI (`/plugins marketplace show` and `/plugins
+  marketplace <codex|claude> list` list the marketplaces configured for each store,
+  one section per store with a name/url/description table; `/plugins marketplace
+  <codex|claude> add <source>` registers an additional marketplace from an
+  `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory, in the
+  user-global `plugins.stores.marketplaces`, and the two browse panels fetch and
+  merge every configured marketplace into the one panel); a loaded index also has each
+  plugin's own version and description resolved from its manifest off the event loop
+  (the vendor listings omit them, Codex especially), with a `loading details...` title
+  hint and a `-` version marker while a value stays unknown; `plugins.enabled: false`
+  makes the subsystem inert
 - **Connector system** — a Claude-connector-equivalent catalogue of named
   integrations (Google Drive, Slack, GitHub, Git, Postgres, Puppeteer, and the
   wider community catalogue) that reach an external system through one or more
   MCP servers; a connector is a catalogue entry (display name, category, auth
   shape, and one or more servers) on top of the MCP transport ragent already
-  speaks. Managed through the twelve-subcommand `/connectors` family
+  speaks. Managed through the thirteen-subcommand `/connectors` family
   (`list [--verbose] [--category <name>]`,
   `claude [query] [--category <name>] [--refresh]`, `add <id|source> [--force]`,
   `remove <id>`, `enable <id>`, `disable <id>`, `connect <id>`,
-  `disconnect <id>`, `auth <id>`, `test <id>`, `stores [--check]`, `help`) in
-  the TUI and the `ragent connectors <sub>` CLI. `/connectors claude` opens an
-  interactive, off-the-event-loop catalogue browser (filter by query and
-  category, browse, install with one key; the `c` key cycles the category
-  filter), `/connectors test <id>` runs an isolated connect-and-invoke harness
+  `disconnect <id>`, `auth <id>`, `test <id>`, `stores [--check]`,
+  `marketplace show|claude list|add|remove`, `help`) in the TUI and the
+  `ragent connectors <sub>` CLI. `/connectors claude` opens an interactive,
+  off-the-event-loop catalogue browser (filter by query and category, browse,
+  install with one key; a fixed dark-on-light column-heading row (`Id`, `Category`,
+  `Marketplace`, `Description`) is pinned above the results and never scrolls; each
+  row shows the connector id, its category, the **marketplace it came from** (or `-`
+  for a local install) and its description; every connector list (`list`, `claude`,
+  `search`) is sorted alphabetically by connector id (case-insensitive) and a
+  category filter narrows the already-sorted rows; a left-hand category navigator lists
+  `ALL` plus the catalogue's distinct categories,
+  operated by keyboard (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear) and
+  mouse (click a row, wheel to scroll); the panel merges the base catalogue endpoint
+  and every marketplace added with `/connectors marketplace claude add`, resolves
+  each entry's blank description from its own repository manifest off-loop with a
+  `loading details...` title hint, and the two panels read the same way),
+  `/connectors test <id>` runs an isolated connect-and-invoke harness
   that never touches the live session, and `/connectors stores [--check]`
   reports each catalogue endpoint and its provenance. Connectors install
   enabled; `enable` connects their servers now in a running session.
@@ -657,6 +684,16 @@ under active development.
 
 Recent highlights:
 
+- **v1.0.132 — marketplace browsers and alphabetical catalogue ordering** — the
+  `/plugins codex|claude` and `/connectors claude` browse panels each merge their
+  store's base endpoint with every additional marketplace registered through the
+  `/plugins marketplace` / `/connectors marketplace` command families, record it in
+  the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces`
+  array, show a per-row **marketplace** column, and resolve each entry's version and
+  description from its own repository manifest off the event loop. Every connector
+  and plugin-store list is now sorted alphabetically by id (case-insensitive), the
+  connector panel pins a column-heading row above its results, and the plugin-store
+  category navigator no longer derives rows from entry tags/keywords.
 - **v1.0.131 — OpenHands-parity release** — the pluggable execution backends
   (`local`/`docker`/`podman`/`remote`, the `/backend` switcher, a health-visible
   registry, and sandbox secret injection resolved from the encrypted store at spawn
@@ -686,7 +723,7 @@ Recent highlights:
   `cargo check --workspace`) pass.
 - **v1.0.130 — plugin-store category navigator and `browser` tool removal** —
   `/plugins codex` and `/plugins claude` gain a left-hand category navigator
-  (`ALL` plus the distinct categories and tags the fetched index declares, driven
+  (`ALL` plus the distinct categories the fetched index declares, driven
   by keyboard and mouse, with a `--category <name>` launch argument). The
   `browser` CDP tool and its `browser` visibility switch are removed, so the
   registered tool count falls 152 -> 151 across 22 categories. `/mcp discover`

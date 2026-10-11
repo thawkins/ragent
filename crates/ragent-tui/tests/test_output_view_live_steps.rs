@@ -240,7 +240,10 @@ async fn test_output_view_empty_child_session_cache_is_stable() {
     assert_eq!(view.line_cache.source_generation, g0);
     assert_eq!(screen_text(&app), text);
     // Sanity: the placeholder occupied at least one cached row.
-    assert!(!view.line_cache.wrapped_lines.is_empty());
+    assert_ne!(
+        view.line_cache.wrapped_lines,
+        [] as [ratatui::prelude::Line<'_>; 0]
+    );
 }
 
 /// The `Arc<Message>` round-trip through storage keeps the tool-call part

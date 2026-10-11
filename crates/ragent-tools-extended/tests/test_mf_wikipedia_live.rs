@@ -71,7 +71,10 @@ async fn test_wikipedia_engine_live_empty_query() {
         !report.error.is_empty(),
         "empty query should produce an error"
     );
-    assert!(report.results.is_empty());
+    assert_eq!(
+        report.results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[tokio::test]

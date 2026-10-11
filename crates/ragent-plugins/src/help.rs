@@ -12,11 +12,19 @@
 //! function with no store access.
 
 /// The `/plugins` subcommand tokens, in display order: the five management
-/// subcommands, the `test` harness, the `stores` report, and `help` (FR-006,
-/// FR-031). Used to seed the autocomplete menu and asserted against the usage
-/// block.
-pub const PLUGIN_SUBCOMMANDS: [&str; 8] = [
-    "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+/// subcommands, the `test` harness, the `stores` report, the `marketplace`
+/// family, and `help` (FR-006, FR-031). Used to seed the autocomplete menu and
+/// asserted against the usage block.
+pub const PLUGIN_SUBCOMMANDS: [&str; 9] = [
+    "list",
+    "add",
+    "remove",
+    "enable",
+    "disable",
+    "test",
+    "stores",
+    "marketplace",
+    "help",
 ];
 
 /// The usage block body (everything after the `From:` attribution line).
@@ -39,6 +47,10 @@ JavaScript runtime.
 | `/plugins disable <pluginid>` | required `pluginid` | Unload a plugin and deregister its tools and commands without deleting files. |
 | `/plugins test <pluginid>` | required `pluginid` | Load a plugin in an isolated harness, invoke each contributed tool once, and report per-step results. |
 | `/plugins stores` | optional `--check` | Report each store's effective endpoint and its source; add `--check` to also contact each store and report availability and plugin count. |
+| `/plugins marketplace show` | none | List the marketplaces configured for both stores: one section per store (Codex, Claude) with a table of each marketplace's name, url, and description. |
+| `/plugins marketplace <store> list` | required `store` (`codex`/`claude`) | List one store's configured marketplaces (the base endpoint plus every added marketplace, tagged `default`/`config`/`added`). |
+| `/plugins marketplace <store> add <source> [--force]` | required `store` and `source`, optional `--force` | Add a marketplace to a store: `owner/repo`, `git@github.com:owner/repo.git`, an `https://` marketplace URL, or a local marketplace directory. Written to your user-global config; used by the next `/plugins <store>` browse. `--force` replaces an existing marketplace with the same name. |
+| `/plugins marketplace <store> remove <name>` | required `store` and `name` | Remove an added marketplace from a store. |
 | `/plugins codex [query] [--category <name>] [--refresh]` | optional | Open the interactive Codex plugin-marketplace browser, filtered by the optional `query`; `--category` pre-filters to that category and `--refresh` bypasses the store cache. |
 | `/plugins claude [query] [--category <name>] [--refresh]` | optional | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments. |
 | `/plugins help` | none | Show this usage block. |

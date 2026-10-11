@@ -144,15 +144,14 @@ gone and the result count is non-zero).
 - The remaining rows are exactly the distinct non-empty categories `Database`,
   `Language`, `Utility`, `Web`, sorted case-insensitively, with the two case-variant
   `Utility`/`utility` entries folded into a single row (FR-001, A5).
-- Because FR-021 is implemented, the distinct non-empty `tags` of every entry
-  that *also declares a category* follow the declared categories as extra rows -
-  here `weather` then `http` (from `codex-weather`). The tag-less `codex-uncat`
-  contributes nothing, so the navigator is `ALL`, the four declared categories,
-  then `weather`, `http`.
+- `codex-weather` declares `tags` (`weather`, `http`); because FR-021 is withdrawn,
+  those tags are **not** navigator rows, so no `weather` or `http` row appears
+  (FR-021 withdrawn).
 - The `codex-uncat` entry's absent category produces no navigator row (FR-003, FR-027).
 - `ALL` is the initially selected row and is drawn in the active-category colour (FR-002).
-- The Claude panel shows its own categories (`Database`, `Productivity`, plus the
-  `todo` tag row from `claude-todo`) from the same navigator implementation (FR-006).
+- The Claude panel shows its own categories (`Database`, `Productivity`) from the same
+  navigator implementation (FR-006); `claude-todo`'s `todo` tag is not a row (FR-021
+  withdrawn).
 - The panel keeps its title, search field, and footer key hints; only ASCII glyphs are
   used (FR-004).
 

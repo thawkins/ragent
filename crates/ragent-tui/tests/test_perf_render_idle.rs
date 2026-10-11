@@ -323,7 +323,7 @@ fn test_input_render_cache_updates_on_edit() {
 #[test]
 fn test_input_render_cache_default_is_empty() {
     let cache = InputRenderCache::default();
-    assert!(cache.lines.is_empty());
+    assert_eq!(cache.lines, [] as [ratatui::prelude::Line<'_>; 0]);
     assert_eq!(cache.height, 0);
 }
 
@@ -342,6 +342,6 @@ fn test_input_height_matches_wrapped_rows() {
             cache.lines.len() + 2,
             "height must be rows + 2 border rows for {input:?}"
         );
-        assert!(!cache.lines.is_empty());
+        assert_ne!(cache.lines, [] as [ratatui::prelude::Line<'_>; 0]);
     }
 }

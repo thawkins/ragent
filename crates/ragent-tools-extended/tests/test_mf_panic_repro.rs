@@ -19,6 +19,6 @@ fn test_panic_prone_page_extracts_without_crashing_process() {
             &opts,
         );
         let result = result.unwrap_or_else(|e| panic!("iteration {i} failed: {e}"));
-        assert!(!result.content.is_empty());
+        assert_ne!(result.content, "");
     }
 }

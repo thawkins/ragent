@@ -63,7 +63,7 @@ fn test_dag_blocks_inverse_edges() {
 
     // C blocks nothing.
     let c = dag.get("c").unwrap();
-    assert!(c.blocks.is_empty());
+    assert_eq!(c.blocks, [] as [std::string::String; 0]);
 }
 
 /// Verify that `blocks` is sorted for deterministic output.
@@ -303,7 +303,7 @@ fn test_dag_single_task_no_deps() {
     let tasks = vec![make_task("solo", "pending", &[])];
     let dag = compute_task_dag(&tasks);
     let solo = dag.get("solo").unwrap();
-    assert!(solo.blocks.is_empty());
+    assert_eq!(solo.blocks, [] as [std::string::String; 0]);
     assert!(!solo.is_blocked);
     assert!(solo.is_available);
 }
@@ -334,7 +334,7 @@ fn test_dag_chain_a_b_c() {
     let c = dag.get("c").unwrap();
     assert!(c.is_blocked);
     assert!(!c.is_available);
-    assert!(c.blocks.is_empty());
+    assert_eq!(c.blocks, [] as [std::string::String; 0]);
 }
 
 /// Diamond dependency: A->B, A->C, B->D, C->D.
@@ -411,7 +411,7 @@ fn test_get_task_view_with_derived_fields() {
     assert!(!view.derived.is_blocked);
     assert!(view.derived.is_available);
     // B blocks nothing.
-    assert!(view.derived.blocks.is_empty());
+    assert_eq!(view.derived.blocks, [] as [std::string::String; 0]);
 
     // Check A's view - A should block B.
     let view_a = storage
@@ -539,7 +539,7 @@ fn test_list_task_views_status_filter_dag_from_full_set() {
     assert!(!pending[0].derived.is_blocked);
     assert!(pending[0].derived.is_available);
     // B's blocks should be empty (no task lists B in blocked_by).
-    assert!(pending[0].derived.blocks.is_empty());
+    assert_eq!(pending[0].derived.blocks, [] as [std::string::String; 0]);
 }
 
 /// Verify `list_task_views` with "all" filter returns everything.

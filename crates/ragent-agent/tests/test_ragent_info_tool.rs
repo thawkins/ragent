@@ -158,6 +158,6 @@ async fn test_ragent_info_never_errors_without_model_or_network() {
     let ctx = base_ctx();
 
     let output = tool.execute(json!({}), &ctx).await.expect("execute ok");
-    assert!(!output.content.is_empty());
+    assert_ne!(output.content, "");
     assert!(output.metadata.is_some());
 }

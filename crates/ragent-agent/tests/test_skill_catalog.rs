@@ -5,7 +5,10 @@ use ragent_agent::skill::{SkillCatalogEntry, SkillInfo, SkillRegistry, SkillScop
 #[test]
 fn test_catalog_empty_registry() {
     let registry = SkillRegistry::new();
-    assert!(registry.catalog().is_empty());
+    assert_eq!(
+        registry.catalog(),
+        [] as [ragent_agent::skill::SkillCatalogEntry; 0]
+    );
 }
 
 #[test]

@@ -617,7 +617,7 @@ fn test_task_create_tool_name() {
 fn test_task_create_tool_description() {
     let tool = TaskCreateTool;
     let desc = tool.description();
-    assert!(!desc.is_empty());
+    assert_ne!(desc, "");
     assert!(desc.contains("Create"));
 }
 

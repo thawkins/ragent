@@ -158,7 +158,10 @@ fn test_parse_response_json_prefers_summary_over_snippet() {
 fn test_parse_response_json_returns_empty_on_missing_data() {
     let response = serde_json::json!({ "data": {} });
     let results = parse_response_json(&response);
-    assert!(results.is_empty());
+    assert_eq!(
+        results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 // ===========================================================================

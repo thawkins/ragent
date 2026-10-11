@@ -215,7 +215,10 @@ fn last_seq_none_for_empty_run() {
     let run = RunId::from("run-empty");
     assert_eq!(log.last_seq(&run).unwrap(), None);
     assert_eq!(log.count(&run).unwrap(), 0);
-    assert!(log.read_run(&run).unwrap().is_empty());
+    assert_eq!(
+        log.read_run(&run).unwrap(),
+        [] as [ragent_types::ActivityEvent; 0]
+    );
 }
 
 #[test]

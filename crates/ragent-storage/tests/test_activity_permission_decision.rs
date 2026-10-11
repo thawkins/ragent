@@ -202,5 +202,5 @@ fn recorded_permission_decision_has_nonempty_event_id() {
             true,
         )
         .expect("record");
-    assert!(!event.id.as_str().is_empty());
+    assert_ne!(event.id.as_str(), "");
 }

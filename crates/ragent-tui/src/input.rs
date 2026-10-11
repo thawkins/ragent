@@ -341,19 +341,43 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // While the connector-catalogue browse panel (`/connectors claude`) is open
-    // it owns the keyboard exactly as the plugin-store panel does: `Up`/`Down`
-    // move the block cursor, `ENTER` installs the highlighted result, `c`
-    // advances the category filter, `Backspace` and `Esc` edit the query (and
-    // `Esc` on an empty query dismisses the panel), and printable characters type
-    // into the panel's own search field. Every other key is swallowed and the
-    // input field stays locked.
+    // it owns the keyboard exactly as the plugin-store panel does. The panel has
+    // two focusable panes: the left category navigator and the result list.
+    // `Tab` transfers focus between them; `Up`/`Down` move the focused pane's
+    // cursor and, for the navigator, apply the highlighted category immediately;
+    // `ENTER` over the navigator applies the highlighted category and focuses the
+    // result list without installing anything, while `ENTER` over the result
+    // list keeps the existing install behaviour; `c` clears the active category
+    // to `ALL`; `Backspace` and `Esc` edit the query (and `Esc` on an empty
+    // query dismisses the panel), and printable characters type into the panel's
+    // own search field. Every other key is swallowed and the input field stays
+    // locked.
     if app.connector_store.is_some() {
         match key.code {
-            KeyCode::Up => app.connector_catalogue_move_up(),
-            KeyCode::Down => app.connector_catalogue_move_down(),
-            KeyCode::Enter => app.connector_catalogue_install_selected(),
+            KeyCode::Tab | KeyCode::BackTab => app.connector_catalogue_toggle_focus(),
+            KeyCode::Up => {
+                if app.connector_catalogue_nav_focused() {
+                    app.connector_catalogue_category_move_up();
+                } else {
+                    app.connector_catalogue_move_up();
+                }
+            }
+            KeyCode::Down => {
+                if app.connector_catalogue_nav_focused() {
+                    app.connector_catalogue_category_move_down();
+                } else {
+                    app.connector_catalogue_move_down();
+                }
+            }
+            KeyCode::Enter => {
+                if app.connector_catalogue_nav_focused() {
+                    app.connector_catalogue_category_confirm();
+                } else {
+                    app.connector_catalogue_install_selected();
+                }
+            }
             KeyCode::Char('c') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.connector_catalogue_next_category();
+                app.connector_catalogue_clear_category();
             }
             KeyCode::Backspace | KeyCode::Esc => {
                 app.connector_catalogue_edit_or_close();

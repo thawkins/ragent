@@ -639,7 +639,7 @@ async fn test_interrupt_without_loop_is_noop() -> Result<()> {
         .await
         .expect("plain chat turn unaffected");
     assert_eq!(captured.lock().expect("captured lock").len(), 1);
-    assert!(drain_terminated(&mut rx).is_empty());
+    assert_eq!(drain_terminated(&mut rx), [] as [ragent_agent::Event; 0]);
     assert!(
         reply
             .parts

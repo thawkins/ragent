@@ -46,7 +46,7 @@ fn audit_passes_well_formed_analysis() {
     let audit = audit_readability(&analysis);
     assert!(audit.passed);
     assert_eq!(audit.score, 100);
-    assert!(audit.issues.is_empty());
+    assert_eq!(audit.issues, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn audit_fails_empty_analysis() {
         "empty analysis should score below passing threshold: {}",
         audit.score
     );
-    assert!(!audit.issues.is_empty());
+    assert_ne!(audit.issues, [] as [std::string::String; 0]);
 }
 
 #[test]

@@ -152,8 +152,8 @@ fn triple_draft_candidates_reference_sources() {
     };
     let draft = build_triple_draft(&digest, "cloud costs");
     for c in &draft.candidates {
-        assert!(!c.body.is_empty());
-        assert!(!c.source_indices.is_empty());
+        assert_ne!(c.body, "");
+        assert_ne!(c.source_indices, [] as [usize; 0]);
     }
 }
 

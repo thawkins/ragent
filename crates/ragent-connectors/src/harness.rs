@@ -148,7 +148,7 @@ pub async fn test_connector(
     probe: &mut dyn McpProbe,
     connector_id: &str,
 ) -> HarnessReport {
-    let found = scan_dirs(dirs)
+    let found = scan_dirs(&dirs)
         .into_iter()
         .find(|connector| match &connector.outcome {
             Ok(descriptor) => descriptor.id.as_str() == connector_id,

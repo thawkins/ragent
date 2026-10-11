@@ -308,7 +308,7 @@ async fn test_orchestrator_recovers_transient_engine_via_retry() {
         "retry should recover the transient engine, blocked={:?}",
         out.merge.blocked_engines
     );
-    assert!(out.merge.blocked_engines.is_empty());
+    assert_eq!(out.merge.blocked_engines, [] as [std::string::String; 0]);
 }
 
 #[tokio::test]
@@ -339,7 +339,7 @@ async fn test_orchestrator_blocked_engines_carry_reason() {
 async fn test_orchestrator_empty_still_has_no_blocked_engines() {
     let orchestrator = SearchOrchestrator::with_engines(vec![Arc::new(EmptyOk)]);
     let out = orchestrator.search("q", &SearchOptions::new(5)).await;
-    assert!(out.merge.blocked_engines.is_empty());
+    assert_eq!(out.merge.blocked_engines, [] as [std::string::String; 0]);
 }
 
 // ---------------------------------------------------------------------------

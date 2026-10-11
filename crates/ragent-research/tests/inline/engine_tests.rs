@@ -77,7 +77,10 @@ async fn engine_plans_and_answers_pending_questions() {
         .run("Rust macros", Arc::new(NoopObserver))
         .await
         .unwrap();
-    assert!(!state.plan.sub_questions.is_empty());
+    assert_ne!(
+        state.plan.sub_questions,
+        [] as [crate::state::SubQuestion; 0]
+    );
     assert!(
         state
             .plan
@@ -100,7 +103,7 @@ async fn engine_captures_sources_and_emits_events() {
     }]];
     let engine = engine_with_fake(hits);
     let state = engine.run("Rust", Arc::new(NoopObserver)).await.unwrap();
-    assert!(!state.sources.is_empty());
+    assert_ne!(state.sources, [] as [crate::source::Source; 0]);
 }
 
 #[derive(Default)]
@@ -139,7 +142,7 @@ async fn engine_adds_gap_when_no_sources() {
         .run("obscure topic", Arc::new(NoopObserver))
         .await
         .unwrap();
-    assert!(!state.gaps.is_empty());
+    assert_ne!(state.gaps, [] as [crate::state::EvidenceGap; 0]);
     assert!(
         state
             .gaps

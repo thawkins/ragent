@@ -461,7 +461,7 @@ fn test_detailed_tool_reference_handles_empty_registry() {
     use ragent_agent::tool::ToolRegistry;
     let registry = ToolRegistry::new();
     let section = build_detailed_tool_reference_section(&registry);
-    assert!(section.is_empty());
+    assert_eq!(section, "");
 }
 
 #[test]

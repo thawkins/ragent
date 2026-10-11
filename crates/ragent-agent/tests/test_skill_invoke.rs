@@ -155,7 +155,7 @@ async fn test_invoke_skill_loads_body_on_demand() {
         .clone();
 
     // The registry should have discovered the skill metadata but deferred the body.
-    assert!(skill.body.is_empty());
+    assert_eq!(skill.body, "");
     assert_eq!(skill.description.as_deref(), Some("Deploy app"));
 
     let result =

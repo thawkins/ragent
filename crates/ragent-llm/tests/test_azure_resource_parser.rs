@@ -153,7 +153,7 @@ fn test_parse_entry_without_api_key_or_env() {
     }"#;
     let file = temp_file(json);
     let entries = parse_azure_resources(file.path()).unwrap();
-    assert!(entries.is_empty());
+    assert_eq!(entries, [] as [ragent_llm::AzureResourceEntry; 0]);
 }
 
 #[test]

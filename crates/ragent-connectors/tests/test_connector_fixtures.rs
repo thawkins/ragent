@@ -393,7 +393,7 @@ fn acceptance_8_an_unexpressible_entry_is_skipped_and_its_label_reported() {
         .expect("unsupported fixture readable");
     let error = descriptor.validate().expect_err("unexpressible");
     assert!(error.to_string().contains("transport"), "{error}");
-    assert!(!descriptor.unsupported.is_empty());
+    assert_ne!(descriptor.unsupported, [] as [std::string::String; 0]);
 }
 
 // -- acceptance criterion 9: refusals, with no partial write -----------------
@@ -527,7 +527,7 @@ fn acceptance_10_cli_list_wording_matches_the_tui_spelling_rule() {
     // fixture store's `data` category therefore resolves even though the
     // fixture catalogue holds no `data` connector.
     let installed_categories = ragent_connectors::build_categories(
-        scan_dirs(tree.dirs())
+        scan_dirs(&tree.dirs())
             .iter()
             .filter_map(|connector| connector.outcome.as_ref().ok()),
         std::iter::empty(),
@@ -733,7 +733,7 @@ fn tc_012_an_unexpressible_fixture_installed_raw_scans_with_its_label() {
     descriptor.unsupported = Vec::new();
     write_manifest(&tree.store().join("unsupported"), &descriptor).expect("manifest written");
 
-    let scanned = scan_dirs(tree.dirs());
+    let scanned = scan_dirs(&tree.dirs());
     assert_eq!(scanned.len(), 1, "the raw fixture is discovered");
     let mut descriptor = scanned[0].outcome.as_ref().expect("fixture parses").clone();
     // A manifest read back from disk carries no recorded labels; validation is

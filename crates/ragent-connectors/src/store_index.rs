@@ -118,11 +118,11 @@ impl CatalogueKind {
         self,
         connectors: &ConnectorsConfig,
     ) -> Result<(CatalogueEndpoint, EndpointSource), CatalogueEndpointError> {
+        // `configured_url` already filters a blank/whitespace override, so a
+        // `Some` here is always a real endpoint.
         let (raw, source) = match self.configured_url(connectors) {
-            Some(configured) if !configured.trim().is_empty() => {
-                (configured, EndpointSource::Config)
-            }
-            _ => (self.default_url(), EndpointSource::Default),
+            Some(configured) => (configured, EndpointSource::Config),
+            None => (self.default_url(), EndpointSource::Default),
         };
         Ok((CatalogueEndpoint::parse(raw)?, source))
     }
@@ -145,6 +145,53 @@ impl CatalogueKind {
         self.effective_endpoint_with_source(connectors)
             .map(|(endpoint, _)| endpoint)
     }
+
+    /// Every marketplace entry configured for this catalogue (spec
+    /// `connectors` FR-043): the base endpoint (the
+    /// `connectors.stores.<name>.url` override or the compiled default)
+    /// followed by each `connectors.stores.marketplaces` entry that names this
+    /// catalogue. Each endpoint is parsed through the [`CatalogueEndpoint`]
+    /// `https` guard, so a hand-edited non-`https` marketplace URL is dropped.
+    ///
+    /// Returns the accepted `(endpoint, provenance)` pairs together with the
+    /// first refusal encountered, when any. The caller keeps the accepted pairs
+    /// even when a later added endpoint is refused, matching the tolerant
+    /// per-entry discipline of the catalogue parser: one bad added URL does not
+    /// blind the whole catalogue. A refused *base* endpoint leaves the pair
+    /// list empty, and the caller reports the refusal as the panel's inline
+    /// error exactly as a single-endpoint resolution would (FR-037).
+    #[must_use]
+    pub fn effective_endpoints_with_source(
+        self,
+        connectors: &ConnectorsConfig,
+    ) -> (
+        Vec<(CatalogueEndpoint, EndpointSource)>,
+        Option<CatalogueEndpointError>,
+    ) {
+        let mut endpoints = Vec::new();
+        let mut first_err = None;
+        match self.effective_endpoint_with_source(connectors) {
+            Ok(pair) => endpoints.push(pair),
+            Err(err) => first_err = Some(err),
+        }
+        for entry in &connectors.stores_or_default().marketplaces {
+            if !entry.store.eq_ignore_ascii_case(self.token()) {
+                continue;
+            }
+            let Some(raw) = entry.url.as_deref() else {
+                continue;
+            };
+            match CatalogueEndpoint::parse(raw) {
+                Ok(endpoint) => endpoints.push((endpoint, EndpointSource::Added)),
+                Err(err) => {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
+                }
+            }
+        }
+        (endpoints, first_err)
+    }
 }
 
 impl std::fmt::Display for CatalogueKind {
@@ -164,6 +211,9 @@ pub enum EndpointSource {
     Config,
     /// The compiled default endpoint (FR-034).
     Default,
+    /// An additional named marketplace added through
+    /// `/connectors marketplace <store> add` (FR-043).
+    Added,
 }
 
 impl EndpointSource {
@@ -173,8 +223,35 @@ impl EndpointSource {
         match self {
             Self::Config => "config",
             Self::Default => "default",
+            Self::Added => "added",
         }
     }
+}
+
+/// The display name of the marketplace named by `endpoint` for `kind`
+/// (FR-043).
+///
+/// Matched against the configured `connectors.stores.marketplaces` entries by
+/// resolved URL: the first entry for `kind` whose `url` equals the endpoint is
+/// the matching added marketplace. When no added marketplace matches - the
+/// catalogue's base endpoint (a config override or the compiled default) - the
+/// catalogue's own label is returned, so a browse row always names a source.
+#[must_use]
+pub fn marketplace_name_for(
+    kind: CatalogueKind,
+    connectors: &ConnectorsConfig,
+    endpoint: &CatalogueEndpoint,
+) -> String {
+    connectors
+        .stores_or_default()
+        .marketplaces
+        .iter()
+        .find(|entry| {
+            entry.store.eq_ignore_ascii_case(kind.token())
+                && entry.url.as_deref() == Some(endpoint.as_str())
+        })
+        .map(|entry| entry.name.clone())
+        .unwrap_or_else(|| kind.label().to_string())
 }
 
 /// A validated connector catalogue endpoint: an absolute `https` URL with a

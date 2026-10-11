@@ -222,19 +222,28 @@ fn test_parse_response_json_extracts_results() {
 #[test]
 fn test_parse_response_json_missing_results_key() {
     let value = json!({"requestId": "abc"});
-    assert!(parse_response_json(&value).is_empty());
+    assert_eq!(
+        parse_response_json(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
 fn test_parse_response_json_results_not_array() {
     let value = json!({"results": "not an array"});
-    assert!(parse_response_json(&value).is_empty());
+    assert_eq!(
+        parse_response_json(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
 fn test_parse_response_json_empty_results() {
     let value = json!({"results": []});
-    assert!(parse_response_json(&value).is_empty());
+    assert_eq!(
+        parse_response_json(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
@@ -274,7 +283,10 @@ fn test_parse_response_json_fallback_title_untitled_when_no_url_or_title() {
     });
     let results = parse_response_json(&value);
     // No url -> filtered out entirely
-    assert!(results.is_empty());
+    assert_eq!(
+        results,
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]
@@ -371,7 +383,7 @@ fn test_parse_response_json_snippet_empty_when_no_metadata() {
     });
     let results = parse_response_json(&value);
     assert_eq!(results.len(), 1);
-    assert!(results[0].snippet.is_empty());
+    assert_eq!(results[0].snippet, "");
 }
 
 #[test]

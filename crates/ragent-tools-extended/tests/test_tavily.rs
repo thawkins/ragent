@@ -7,7 +7,7 @@ use ragent_tools_extended::masterfetch::search::{SearchEngine, tavily::*};
 #[test]
 fn test_default_engine_has_empty_key() {
     let engine = TavilyEngine::default();
-    assert!(engine.api_key().is_empty());
+    assert_eq!(engine.api_key(), "");
 }
 
 #[test]

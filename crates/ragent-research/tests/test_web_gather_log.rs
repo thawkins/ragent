@@ -146,7 +146,7 @@ async fn gather_logs_search_failure_and_zero_hits_summary() {
     let web = WebGatherer::new(Arc::new(FailSearch), Arc::new(FakeFetch))
         .with_gather_log(GatherLog::new(dir.path(), "zero-hits").unwrap());
     let result = web.gather("nothing", 5).await.unwrap();
-    assert!(result.is_empty());
+    assert_eq!(result, [] as [ragent_research::Source; 0]);
 
     let entries: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()

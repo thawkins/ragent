@@ -44,7 +44,7 @@ Details here.
     assert_eq!(tasks[0].id, "T-001");
     assert_eq!(tasks[0].effort, Effort::S);
     assert_eq!(tasks[0].priority, Priority::Critical);
-    assert!(tasks[0].dependencies.is_empty());
+    assert_eq!(tasks[0].dependencies, [] as [std::string::String; 0]);
 
     assert_eq!(tasks[1].id, "T-002");
     assert_eq!(tasks[1].dependencies, vec!["T-001"]);

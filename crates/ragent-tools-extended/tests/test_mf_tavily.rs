@@ -89,7 +89,10 @@ fn test_parse_response_json_extracts_results() {
 #[test]
 fn test_parse_response_json_missing_results() {
     let value = json!({"query": "rust"});
-    assert!(parse_response_json(&value).is_empty());
+    assert_eq!(
+        parse_response_json(&value),
+        [] as [ragent_tools_extended::masterfetch::search::RawResult; 0]
+    );
 }
 
 #[test]

@@ -2,8 +2,8 @@
 //!
 //! Mirrors the TUI `/plugins` slash family so the plugin store can be managed
 //! from a shell without launching the TUI: `ragent plugins <sub> [args...]` for
-//! the eight subcommands (`list`, `add`, `remove`, `enable`, `disable`, `test`,
-//! `stores`, `help`). The parse-and-run logic lives entirely in the
+//! the nine subcommands (`list`, `add`, `remove`, `enable`, `disable`, `test`,
+//! `stores`, `marketplace`, `help`). The parse-and-run logic lives entirely in the
 //! `ragent-plugins` crate ([`ragent_plugins::run_store_command`],
 //! [`ragent_plugins::run_control_command`], [`ragent_plugins::run_test_command`],
 //! [`ragent_plugins::render_stores_report`], [`render_help`]); this module
@@ -70,6 +70,13 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     let rest = text.strip_prefix(sub).map(str::trim_start).unwrap_or("");
 
     let known = PLUGIN_SUBCOMMANDS.contains(&sub);
+    // `/plugins marketplace` is only recognised with a valid sub-subcommand
+    // (`show`, or `<codex|claude> add|remove|list`); anything else renders the
+    // usage block.
+    if sub == "marketplace" && !ragent_plugins::marketplace_command_requested(rest) {
+        println!("{}", cli_usage());
+        return Ok(());
+    }
     // `help` and any unrecognised subcommand both render the usage block.
     if sub == "help" || !known {
         println!("{}", cli_usage());

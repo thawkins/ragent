@@ -60,7 +60,15 @@ fn plugins_registered_in_slash_commands() {
         .find(|cmd| cmd.trigger == "plugins")
         .expect("/plugins must be registered in SLASH_COMMANDS (FR-006)");
     for sub in [
-        "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+        "list",
+        "add",
+        "remove",
+        "enable",
+        "disable",
+        "test",
+        "stores",
+        "marketplace",
+        "help",
     ] {
         assert!(
             def.description.contains(sub),
@@ -88,7 +96,15 @@ fn plugins_suggestions_list_all_subcommands() {
         .find(|m| m.trigger == "plugins")
         .expect("menu must contain the plugins entry");
     for sub in [
-        "list", "add", "remove", "enable", "disable", "test", "stores", "help",
+        "list",
+        "add",
+        "remove",
+        "enable",
+        "disable",
+        "test",
+        "stores",
+        "marketplace",
+        "help",
     ] {
         assert!(
             entry.suggestions.iter().any(|s| s == sub),
@@ -206,6 +222,107 @@ async fn stores_tags_a_configured_endpoint_as_config() {
         text.contains("claude: [default] https://"),
         "the unconfigured store keeps its default: {text}"
     );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn marketplace_show_lists_both_marketplaces_in_separate_sections() {
+    // `/plugins marketplace show` renders one section per store with a
+    // name/url/description table row. With no `plugins.stores` block both
+    // stores resolve their compiled default endpoint, tagged `(default)`.
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+    app.execute_slash_command("/plugins marketplace show").await;
+    let raw = last_text(&app);
+    let text = flat_text(&app);
+
+    assert!(raw.contains("From: /plugins marketplace show"), "{raw}");
+    assert!(raw.contains("## Codex marketplace"), "{raw}");
+    assert!(raw.contains("## Claude marketplace"), "{raw}");
+    // The message window re-renders markdown tables at the terminal width and
+    // wraps long endpoint cells, so assert on fragments that survive wrapping.
+    for (endpoint, label) in [
+        (
+            "raw.githubusercontent.com/openai/plugins",
+            "Codex plugin marketplace",
+        ),
+        (
+            "raw.githubusercontent.com/anthropics/claude-plugins-official",
+            "Claude plugin marketplace",
+        ),
+    ] {
+        assert!(
+            text.contains(endpoint),
+            "window must show the endpoint {endpoint}: {text}"
+        );
+        assert!(text.contains(label), "window must show `{label}`: {text}");
+    }
+    assert!(text.contains("(default)"), "{text}");
+    assert!(raw.is_ascii(), "the report must be ASCII only: {raw}");
+    assert!(
+        !temp.path().join(".ragent").join("plugins").exists(),
+        "the report must create no plugin store"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn marketplace_show_names_a_configured_endpoint() {
+    // A `plugins.stores.codex.url` override swaps the default endpoint out of
+    // the Codex section and tags the row `(config)`; Claude keeps its default.
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, temp) = enter_temp_dir();
+    std::fs::write(
+        temp.path().join(".ragent").join("ragent.json"),
+        r#"{ "plugins": { "stores": { "codex": { "url": "https://cfg.example/codex.json" } } } }"#,
+    )
+    .expect("config writable");
+
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+    app.execute_slash_command("/plugins marketplace show").await;
+    let text = flat_text(&app);
+
+    assert!(
+        text.contains("codex | https://cfg.example/codex.json"),
+        "the configured marketplace must name its URL: {text}"
+    );
+    assert!(
+        text.contains("Codex plugin marketplace (config)"),
+        "the configured marketplace must be tagged config: {text}"
+    );
+    assert!(
+        text.contains("raw.githubusercontent.com/anthropics/claude-plugins-official"),
+        "the unconfigured store keeps its default: {text}"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn bare_marketplace_and_unknown_sub_subcommand_render_usage() {
+    // `/plugins marketplace` is only valid with an explicit `show`
+    // sub-subcommand; a bare `marketplace` or an unknown tail renders the
+    // usage block exactly like an unrecognised `/plugins` subcommand (FR-014).
+    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let (_guard, _temp) = enter_temp_dir();
+    let mut app = support::make_app();
+    app.session_id = Some("test-session".to_string());
+
+    for invocation in ["/plugins marketplace", "/plugins marketplace bogus"] {
+        app.execute_slash_command(invocation).await;
+        let text = last_text(&app);
+        assert!(
+            text.contains("command reference"),
+            "`{invocation}` must render the usage block: {text}"
+        );
+        assert!(
+            !text.contains("## Codex marketplace"),
+            "`{invocation}` must not render the show report: {text}"
+        );
+    }
 }
 
 #[tokio::test]

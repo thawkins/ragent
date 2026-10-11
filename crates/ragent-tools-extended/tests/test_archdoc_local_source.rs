@@ -147,7 +147,10 @@ fn test_acquire_single_supported_file() {
 
     assert!(!corpus.is_empty());
     assert_eq!(corpus.sources.len(), 1);
-    assert!(corpus.excluded.is_empty());
+    assert_eq!(
+        corpus.excluded,
+        [] as [ragent_tools_extended::archdoc::ExcludedSource; 0]
+    );
     assert!(corpus.text.contains("# Payments architecture"));
     assert!(corpus.text.contains("Components: gateway, ledger."));
     assert_eq!(corpus.stats.pages_fetched, 1);
@@ -172,7 +175,10 @@ fn test_acquire_directory_walks_nested_subdirectories() {
     let corpus = acquire_local(&root, &LocalAcquisitionBudget::default());
 
     assert_eq!(corpus.sources.len(), 3);
-    assert!(corpus.excluded.is_empty());
+    assert_eq!(
+        corpus.excluded,
+        [] as [ragent_tools_extended::archdoc::ExcludedSource; 0]
+    );
     let text = corpus.text.clone();
     assert!(text.contains("# Overview"));
     assert!(text.contains("# Gateway component"));

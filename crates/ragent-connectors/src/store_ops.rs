@@ -39,6 +39,7 @@ use crate::fetch::{
 };
 use crate::store_index::{
     CatalogueCatalog, CatalogueEndpoint, CatalogueEndpointError, CatalogueKind, EndpointSource,
+    marketplace_name_for,
 };
 
 /// One resolved catalogue endpoint as the `/connectors stores` handler reads it.
@@ -160,6 +161,111 @@ pub fn fetch_effective_catalogue(
 ) -> Result<FetchedCatalogue, ConnectorError> {
     let endpoint = effective_endpoint(kind, connectors)?;
     fetch_catalogue(fetcher, kind, &endpoint, limits, cache, now)
+}
+
+/// The merged result of fetching a catalogue's base endpoint plus every added
+/// marketplace (spec `connectors` FR-043).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MergedCatalogue {
+    /// The union of the merged entries, ordered by first fetch (base endpoint
+    /// first, then each added marketplace in config order), with a duplicate id
+    /// dropped keeping the first occurrence - so the base endpoint's metadata
+    /// always wins over an added marketplace's. This ordering contract is
+    /// load-bearing: `effective_endpoints_with_source` returns the base first.
+    pub connectors: Vec<crate::descriptor::ConnectorDescriptor>,
+    /// The total number of entries the merged providers skipped as malformed or
+    /// unexpressible (summed over every fetched endpoint).
+    pub skipped: usize,
+    /// Whether at least one endpoint answered from its cache rather than a live
+    /// fetch (informational; a mixed merge is neither wholly cached nor wholly
+    /// fresh).
+    pub from_cache: bool,
+    /// The first refusal a configured added marketplace produced, when any
+    /// (surfaced to the user as a warning; a refused added marketplace never
+    /// blinds the merge).
+    pub refused: Option<CatalogueEndpointError>,
+}
+
+/// Fetch the catalogue's base endpoint and every added marketplace and merge
+/// their entries into one set (spec `connectors` FR-043).
+///
+/// The base endpoint (config override or compiled default) is fetched first,
+/// then each added marketplace in config order; each descriptor's
+/// `marketplace` field is stamped with the marketplace's display name
+/// ([`marketplace_name_for`]) so the browse row can name its marketplace. A
+/// duplicate id is dropped keeping the first occurrence (the
+/// base endpoint's, because it is fetched first). Every endpoint is served
+/// through its own cache entry (the per-endpoint cache key), so the base fetch
+/// cannot poison an added marketplace's entry.
+///
+/// A refused base endpoint (non-`https` or malformed) fails the merge with the
+/// contained refusal, matching the single-endpoint discipline (FR-037); a
+/// refused *added* marketplace URL is skipped and recorded on the result. A
+/// failed fetch of one endpoint is logged and skipped the same way, so one
+/// unreachable marketplace never hides the rest.
+///
+/// # Errors
+///
+/// Returns the contained [`ConnectorError`] when no endpoint answered at all -
+/// the base refusal, or the first fetch failure when the merge produced no
+/// entries.
+pub fn fetch_all_catalogues(
+    fetcher: &dyn CatalogueFetcher,
+    kind: CatalogueKind,
+    connectors: &ConnectorsConfig,
+    limits: &CatalogueLimits,
+    cache: Option<&CatalogueCache>,
+    now: u64,
+) -> Result<MergedCatalogue, ConnectorError> {
+    let (endpoints, refused) = kind.effective_endpoints_with_source(connectors);
+    let mut merged = MergedCatalogue {
+        refused,
+        ..MergedCatalogue::default()
+    };
+    // Insertion order is irrelevant (the vector preserves first-occurrence
+    // order), so a `HashSet` is the right membership set: O(1) inserts and no
+    // ordering cost.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut first_failure: Option<ConnectorError> = None;
+    for (endpoint, _source) in endpoints {
+        match fetch_catalogue(fetcher, kind, &endpoint, limits, cache, now) {
+            Ok(fetched) => {
+                merged.from_cache |= fetched.from_cache;
+                merged.skipped += fetched.catalogue.skipped;
+                // Attribute every row to the marketplace it came from (the
+                // added marketplace's name, or the catalogue label for the base
+                // endpoint) so the browse row can name its source (FR-043).
+                // `source` keeps its own meaning (the entry's install origin).
+                // The name depends only on the loop-invariant `endpoint`, so it
+                // is resolved once per endpoint, not once per entry.
+                let marketplace = marketplace_name_for(kind, connectors, &endpoint);
+                for mut descriptor in fetched.catalogue.connectors {
+                    descriptor.marketplace = marketplace.clone();
+                    if seen.insert(descriptor.id.as_str().to_string()) {
+                        merged.connectors.push(descriptor);
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    catalogue = kind.token(),
+                    endpoint = endpoint.as_str(),
+                    error = %error,
+                    "connector catalogue marketplace fetch skipped"
+                );
+                first_failure.get_or_insert(error);
+            }
+        }
+    }
+    if merged.connectors.is_empty() {
+        if let Some(err) = merged.refused.take() {
+            return Err(err.into());
+        }
+        if let Some(failure) = first_failure {
+            return Err(failure);
+        }
+    }
+    Ok(merged)
 }
 
 /// The attribution prefix every `/connectors` report carries (FR-006).

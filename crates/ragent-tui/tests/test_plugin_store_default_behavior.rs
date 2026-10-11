@@ -399,9 +399,9 @@ async fn enter_installs_the_default_sourced_entry_for_both_stores() {
         app.session_id = Some("s1".to_string());
         drive_fetch(&mut app, kind, &PluginStoresConfig::default()).await;
 
-        // Move the block cursor onto the default-sourced local entry and install
-        // it with ENTER.
-        app.plugin_store_move_down();
+        // The result set is sorted alphabetically by id (FR-050), so the
+        // default-sourced local entry (`{token}-local`) sorts before the remote one
+        // (`{token}-remote`) and the cursor already rests on it. Install it with ENTER.
         assert_eq!(
             app.plugin_store
                 .as_ref()

@@ -979,8 +979,12 @@ Manage plugins from the TUI or the CLI:
 | `/plugins disable <pluginid>` | Unload and deregister without deleting files |
 | `/plugins test <pluginid>` | Load in an isolated harness and invoke each tool once |
 | `/plugins stores [--check]` | Report each store's effective endpoint and its source; `--check` also contacts each store and reports availability and plugin count |
-| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex plugin-marketplace browser; `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses the store cache |
-| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments |
+| `/plugins marketplace show` | List the marketplaces configured for both stores, one section per store (Codex, Claude) with a table of each marketplace's name, url, and description |
+| `/plugins marketplace <store> list` | List one store's configured marketplaces (`<store>` is `codex` or `claude`) |
+| `/plugins marketplace <store> add <source> [--force]` | Add a marketplace to a store from an `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory; written to the user-global `plugins.stores.marketplaces` and used by the next `/plugins <store>` browse (`--force` replaces an existing marketplace of the same name) |
+| `/plugins marketplace <store> remove <name>` | Remove an added marketplace from a store |
+| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex plugin-marketplace browser; `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses the store cache. Each row shows the plugin id, version, the marketplace it came from, and the description (rows are sorted alphabetically by plugin id); the panel widens up to 140 columns |
+| `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments (and the same per-row marketplace column) |
 | `/plugins help` | Show the usage block |
 
 The same operations are available from a shell as `ragent plugins <sub> …`.
@@ -1036,7 +1040,7 @@ Manage connectors from the TUI or the CLI:
 | Command | Description |
 |---|---|
 | `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts; `--category` filters the rows (`ALL` clears the filter) |
-| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser (`query` pre-fills the search field, `--category` pre-selects the filter, `--refresh` bypasses the cache; press `c` in the panel to cycle the category filter) |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser (`query` pre-fills the search field, `--category` pre-selects the filter, `--refresh` bypasses the cache; the left-hand category navigator: `Tab` moves focus to it, `Up`/`Down` apply a category row, `Enter` applies and returns, `c` clears; each row shows the id, category, marketplace it came from, and description; blank descriptions are filled from each entry's manifest off-loop; the base catalogue and every added marketplace are merged) |
 | `/connectors add <id\|source> [--force]` | Install a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL (recorded **enabled**) |
 | `/connectors remove <id>` | Uninstall a connector (refused while enabled) |
 | `/connectors enable <id>` | Enable a connector and connect its servers now |
@@ -1046,6 +1050,8 @@ Manage connectors from the TUI or the CLI:
 | `/connectors auth <id>` | Manage a connector's credential and report its auth state |
 | `/connectors test <id>` | Connect in isolation, invoke one tool, and report per-step results |
 | `/connectors stores [--check]` | Report each catalogue endpoint and its source; `--check` probes it |
+| `/connectors marketplace show` | List the marketplaces configured for the Claude catalogue (base endpoint plus each added marketplace, tagged `default`/`config`/`added`) |
+| `/connectors marketplace claude list\|add <source> [--force]\|remove <name>` | List, add, or remove an additional catalogue marketplace (an `owner/repo` slug, a GitHub SSH remote, an `https://` URL, or a local directory), written to the user-global `connectors.stores.marketplaces` |
 | `/connectors help` | Show the usage block |
 
 The same operations are available from a shell as `ragent connectors <sub> …`.
@@ -2113,6 +2119,23 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.132
+
+- **Merged marketplace browsers and store enrichment** — the `/connectors claude`
+  and `/plugins codex|claude` browse panels now merge the base catalogue endpoint
+  and every marketplace added with `/connectors marketplace claude add` /
+  `/plugins marketplace <codex|claude> add`, render a per-row marketplace column,
+  and resolve each entry's blank description (and the plugin store's version) from
+  its own repository manifest off the event loop.
+- **Alphabetical store listings and a pinned connector heading** — connector and
+  plugin-store lists sort alphabetically by id (`connectors` FR-046,
+  `pluginstores` FR-050) whether filtered or not, and the connector catalogue pins
+  a dark-on-light column-heading row above its scrolling results (`connectors`
+  FR-045).
+- **Plugin-store navigator tag-row withdrawal** — the `/plugins` category
+  navigator lists only the distinct declared `category` values (`catnav` FR-021
+  withdrawn), so a plugin's `keywords` no longer flood it with single-result rows.
+
 ## Version 1.0.131
 
 - **OpenHands-parity release** — the pluggable execution backends (`/backend`,
@@ -2150,10 +2173,15 @@ parsed into the required structure (FR-005/FR-006).
   `MAX_SSE_CONNECTIONS` is reached).
 - **Plugin-store category navigator (spec `catnav`)** — `/plugins codex` and
   `/plugins claude` gain a left-hand category navigator: `ALL` plus the distinct
-  categories and tags the fetched index declares, driven by keyboard (`Tab`
+  categories the fetched index declares, driven by keyboard (`Tab`
   focus, `Up`/`Down` move-and-apply, `Enter` apply, `c` clear) and mouse
   (click a row, wheel to scroll). A `--category <name>` launch argument
   pre-selects a row; the `StoreEntry` model gains an optional `category` field.
+- **Plugin-store marketplace column** — each `/plugins codex`/`/plugins claude`
+  result row now renders the **marketplace it came from** (the added
+  marketplace's configured name, or the store label for the base endpoint) as
+  its own column (`StoreEntry::marketplace`), and the browse panel widens from a
+  100- to a 140-column ceiling so the column has room.
 - **`browser` tool removed** — the `browser` CDP tool and the whole
   `ragent-tools-extended::browser` module are deleted, along with `BrowserConfig`
   and the `tool_visibility.browser` switch. The registered tool count falls

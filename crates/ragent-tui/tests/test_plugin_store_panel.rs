@@ -31,6 +31,7 @@ fn entry(id: &str, description: &str) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: None,
     }
 }
@@ -201,8 +202,9 @@ fn the_highlighted_row_carries_a_full_row_block_cursor() {
     let mut app = open(StoreKind::Codex, sample(), &[]);
     let terminal = render(&mut app, 100, 30);
 
-    // The cursor starts on the first result row.
-    let target = find_row(&terminal, &app, "codex-weather").expect("first row painted");
+    // The result set is sorted alphabetically (FR-050), so the cursor starts on
+    // the first row, `codex-shell`.
+    let target = find_row(&terminal, &app, "codex-shell").expect("first row painted");
     let area = app.plugin_store_area;
     // The result rows now sit in the right-hand column, to the right of the
     // category navigator (spec `catnav` T-004).
@@ -223,7 +225,7 @@ fn the_highlighted_row_carries_a_full_row_block_cursor() {
     );
 
     // A non-highlighted row does not carry the cursor background.
-    let other = find_row(&terminal, &app, "codex-time").expect("second row painted");
+    let other = find_row(&terminal, &app, "codex-weather").expect("non-cursor row painted");
     assert_ne!(
         first_glyph_bg(&terminal, &app, other),
         Color::Magenta,
@@ -301,10 +303,12 @@ fn the_focused_navigator_cursor_differs_from_the_unfocused_result_cursor() {
 
 #[test]
 fn an_installed_row_uses_the_installed_colour_and_marker() {
-    let mut app = open(StoreKind::Codex, sample(), &["codex-time"]);
+    // `codex-weather` is installed and sits away from the block cursor (which
+    // rests on the alphabetically first row, `codex-shell`).
+    let mut app = open(StoreKind::Codex, sample(), &["codex-weather"]);
     let terminal = render(&mut app, 100, 30);
 
-    let installed = find_row(&terminal, &app, "codex-time").expect("installed row painted");
+    let installed = find_row(&terminal, &app, "codex-weather").expect("installed row painted");
     let area = app.plugin_store_area;
     let x0 = area.x + 1;
     let x1 = area.x + area.width.saturating_sub(1);
@@ -321,11 +325,164 @@ fn an_installed_row_uses_the_installed_colour_and_marker() {
 
     // A not-installed row away from the block cursor is painted in the normal
     // colour and has no marker.
-    let plain = find_row(&terminal, &app, "codex-shell").expect("plain row painted");
+    let plain = find_row(&terminal, &app, "codex-time").expect("plain row painted");
     assert_eq!(first_glyph_fg(&terminal, &app, plain), Color::White);
     assert!(
         !row_text(&terminal, plain, x0, x1).contains("[installed]"),
         "a not-installed row omits the marker"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FR-048 - the row names the marketplace the plugin came from
+// ---------------------------------------------------------------------------
+
+#[test]
+fn each_row_shows_the_marketplace_it_came_from() {
+    // A row carries the display name of the marketplace it was fetched from, so a
+    // merged multi-marketplace panel names each source at a glance (FR-048).
+    let mut entries = sample();
+    entries[0].marketplace = "codex".to_string();
+    entries[1].marketplace = "community".to_string();
+    let mut app = open(StoreKind::Codex, entries, &[]);
+    let terminal = render(&mut app, 160, 30);
+
+    let first = find_row(&terminal, &app, "codex-weather").expect("first row painted");
+    let area = app.plugin_store_area;
+    let text = row_text(&terminal, first, area.x + 1, area.x + area.width - 1);
+    assert!(
+        text.contains("codex"),
+        "the row names its marketplace: {text:?}"
+    );
+    let second = find_row(&terminal, &app, "codex-time").expect("second row painted");
+    let text = row_text(&terminal, second, area.x + 1, area.x + area.width - 1);
+    assert!(
+        text.contains("community"),
+        "a different marketplace is named on its own row: {text:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FR-004 - the pinned column-heading row
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_column_headings_render_above_the_rows_and_do_not_scroll() {
+    // The headings sit one row above the first result row, aligned with their
+    // columns, and carry a dark-on-light style so they read as pinned labels
+    // rather than a result row.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 140, 30);
+
+    // The alphabetically first row (`codex-shell`) sits directly below the heading.
+    let first_row = find_row(&terminal, &app, "codex-shell").expect("result row painted");
+    let area = app.plugin_store_area;
+    let heading_y = first_row - 1;
+    let heading = row_text(&terminal, heading_y, area.x + 1, area.x + area.width - 1);
+    assert!(
+        heading.contains("Id")
+            && heading.contains("Marketplace")
+            && heading.contains("Description"),
+        "the heading row names every column: {heading:?}"
+    );
+
+    // Each heading label starts exactly where its column's values start.
+    let row = row_text(&terminal, first_row, area.x + 1, area.x + area.width - 1);
+    let heading_id = heading.find("Id").expect("Id label painted");
+    let row_id = row.find("codex-shell").expect("id value painted");
+    assert_eq!(
+        heading_id, row_id,
+        "the Id label aligns with its column: {heading:?} vs {row:?}"
+    );
+}
+
+#[test]
+fn the_column_headings_are_dark_on_light_and_not_a_result_row() {
+    // The heading cells are dark text on a light background so the pinned row is
+    // visibly distinct from the normal and installed row colours.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 140, 30);
+
+    let area = app.plugin_store_area;
+    let result_area = app.plugin_store_result_area;
+    assert_eq!(
+        result_area.y,
+        area.y + 2,
+        "the row list starts one row below the heading, inside the border"
+    );
+
+    let buffer = terminal.backend().buffer();
+    let id_x = (result_area.x..result_area.x + result_area.width)
+        .find(|&x| buffer[(x, result_area.y - 1)].symbol() == "I")
+        .expect("Id heading painted");
+    let heading_cell = &buffer[(id_x, result_area.y - 1)];
+    assert_eq!(
+        heading_cell.fg,
+        Color::Black,
+        "the heading text is dark (fg)"
+    );
+    assert_eq!(
+        heading_cell.bg,
+        Color::Gray,
+        "the heading background is light (bg)"
+    );
+
+    // The first data row (the alphabetically first id, `codex-shell`) is one row
+    // below the heading, so finding a row by id can never land on the heading itself.
+    let first = find_row(&terminal, &app, "codex-shell").expect("result row painted");
+    assert_eq!(first, result_area.y);
+}
+
+#[test]
+fn the_version_column_shows_the_entry_version() {
+    // The version column renders the entry's own version (FR-004); the sample
+    // entries declare `1.0.0`.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 120, 30);
+
+    let row = find_row(&terminal, &app, "codex-weather").expect("row painted");
+    let area = app.plugin_store_area;
+    let text = row_text(&terminal, row, area.x + 1, area.x + area.width - 1);
+    assert!(
+        text.contains("1.0.0"),
+        "the row carries the plugin version: {text:?}"
+    );
+}
+
+#[test]
+fn a_blank_version_renders_an_explicit_unknown_marker() {
+    // A vendor index that omits the version leaves the field blank; the panel shows
+    // a `-` so the unknown state is visible rather than an empty cell (FR-004).
+    let mut entries = sample();
+    entries[0].version = String::new();
+    let mut app = open(StoreKind::Codex, entries, &[]);
+    let terminal = render(&mut app, 120, 30);
+
+    let row = find_row(&terminal, &app, "codex-weather").expect("row painted");
+    let area = app.plugin_store_area;
+    let text = row_text(&terminal, row, area.x + 1, area.x + area.width - 1);
+    // The first non-space token after the id is the version column, which reads `-`.
+    let after = text.split("codex-weather").nth(1).unwrap_or_default();
+    assert_eq!(
+        after.trim_start().chars().next(),
+        Some('-'),
+        "a blank version reads as an unknown marker: {text:?}"
+    );
+}
+
+#[test]
+fn the_title_hints_while_manifest_enrichment_is_running() {
+    // While the off-loop manifest enrichment is still running, the title carries a
+    // `loading details...` hint so a still-blank description reads as pending
+    // (FR-048).
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    app.plugin_store.as_mut().expect("panel open").enriching = true;
+    let terminal = render(&mut app, 120, 30);
+    let area = app.plugin_store_area;
+    let title = full_row(&terminal, area.y);
+    assert!(
+        title.contains("loading details..."),
+        "the title hints while enrichment runs: {title:?}"
     );
 }
 

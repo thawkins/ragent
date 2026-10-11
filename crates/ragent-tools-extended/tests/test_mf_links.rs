@@ -229,14 +229,20 @@ fn test_no_rel_returns_none() {
 fn test_anchor_links_skipped() {
     let html = r##"<article><a href="#section">Jump to section</a></article>"##;
     let links = classify(html, "https://example.com");
-    assert!(links.citations.is_empty());
+    assert_eq!(
+        links.citations,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
 }
 
 #[test]
 fn test_javascript_links_skipped() {
     let html = r#"<article><a href="javascript:void(0)">Click</a></article>"#;
     let links = classify(html, "https://example.com");
-    assert!(links.citations.is_empty());
+    assert_eq!(
+        links.citations,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -356,9 +362,18 @@ fn test_primary_source_none_when_only_same_domain_citations() {
 #[test]
 fn test_empty_html_returns_empty_lists() {
     let links = classify("", "https://example.com");
-    assert!(links.citations.is_empty());
-    assert!(links.navigation.is_empty());
-    assert!(links.external.is_empty());
+    assert_eq!(
+        links.citations,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
+    assert_eq!(
+        links.navigation,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
+    assert_eq!(
+        links.external,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
     assert!(links.primary_source.is_none());
 }
 
@@ -366,9 +381,18 @@ fn test_empty_html_returns_empty_lists() {
 fn test_html_with_no_links_returns_empty_lists() {
     let html = r"<html><body><p>No links here</p></body></html>";
     let links = classify(html, "https://example.com");
-    assert!(links.citations.is_empty());
-    assert!(links.navigation.is_empty());
-    assert!(links.external.is_empty());
+    assert_eq!(
+        links.citations,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
+    assert_eq!(
+        links.navigation,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
+    assert_eq!(
+        links.external,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
 }
 
 #[test]
@@ -383,7 +407,10 @@ fn test_malformed_html_does_not_panic() {
 fn test_link_with_empty_href_skipped() {
     let html = r#"<article><a href="">Empty</a></article>"#;
     let links = classify(html, "https://example.com");
-    assert!(links.citations.is_empty());
+    assert_eq!(
+        links.citations,
+        [] as [ragent_tools_extended::masterfetch::links::LinkInfo; 0]
+    );
 }
 
 // ---------------------------------------------------------------------------

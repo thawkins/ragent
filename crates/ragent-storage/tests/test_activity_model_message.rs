@@ -117,7 +117,7 @@ fn recorded_model_message_has_nonempty_event_id() {
     let event = log
         .record_model_message(&run, "user", "hi", None)
         .expect("record");
-    assert!(!event.id.as_str().is_empty());
+    assert_ne!(event.id.as_str(), "");
 }
 
 #[test]

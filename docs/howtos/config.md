@@ -1551,10 +1551,11 @@ and the non-secret credential-name mapping.
 | `stores.timeout_ms` | `u64` | `10000` | Per-fetch wall-clock budget in milliseconds, shared by every catalogue. |
 | `stores.max_index_bytes` | `u64` | `2097152` | Maximum accepted catalogue-index size in bytes; a larger index aborts the fetch, shared by every catalogue. |
 | `stores.cache_ttl_secs` | `u64` | `3600` | Time-to-live for a cached catalogue in seconds; `0` disables the index cache. |
+| `stores.marketplaces` | `array` | `[]` | Additional catalogues the `/connectors claude` browser fetches and merges. Each entry has a `store` (the catalogue token), a display `name`, an optional `url`, and the `source` it was added from. Written to the **user-global** config by `/connectors marketplace claude add`; a non-`https` `url` is refused by the scheme guard. |
 | `credentials` | `map<string, object>` | `{}` | Non-secret credential-name mapping keyed by connector id. Each value holds the **name** of a credential in the encrypted credential store, never the secret value. |
 
 The section merges with overlay-wins precedence (project config overrides
-user-global). Manage connectors with `/connectors list|claude|add|remove|enable|disable|connect|disconnect|auth|test|stores|help`
+user-global). Manage connectors with `/connectors list|claude|add|remove|enable|disable|connect|disconnect|auth|test|stores|marketplace|help`
 in the TUI or `ragent connectors <sub>` from the CLI.
 
 ---
@@ -2070,7 +2071,15 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "max_entry_ms": 10000,
     "max_memory_mb": 64,
     "store_dir": null,
-    "permissions": {}
+    "permissions": {},
+    "stores": {
+      "codex":  { "url": null },
+      "claude": { "url": null },
+      "marketplaces": [],
+      "timeout_ms": 10000,
+      "max_index_bytes": 2097152,
+      "cache_ttl_secs": 3600
+    }
   },
 
   "connectors": {
@@ -2079,7 +2088,8 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "stores": {
       "timeout_ms": 10000,
       "max_index_bytes": 2097152,
-      "cache_ttl_secs": 3600
+      "cache_ttl_secs": 3600,
+      "marketplaces": []
     },
     "credentials": {}
   },

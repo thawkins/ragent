@@ -31,9 +31,12 @@ fn web_source(url: &str) -> Source {
 fn test_state_starts_empty() {
     let state = ResearchState::new("Rust async runtimes");
     assert_eq!(state.plan.topic, "Rust async runtimes");
-    assert!(state.plan.sub_questions.is_empty());
-    assert!(state.sources.is_empty());
-    assert!(state.gaps.is_empty());
+    assert_eq!(
+        state.plan.sub_questions,
+        [] as [crate::state::SubQuestion; 0]
+    );
+    assert_eq!(state.sources, [] as [crate::source::Source; 0]);
+    assert_eq!(state.gaps, [] as [crate::state::EvidenceGap; 0]);
     assert_eq!(state.iteration_count, 0);
     assert!(state.evaluation_score.is_none());
 }

@@ -46,8 +46,8 @@ fn entry(text: &str) -> QueuedInput {
 #[test]
 fn test_queued_input_default_is_empty() {
     let queued = QueuedInput::default();
-    assert!(queued.text.is_empty());
-    assert!(queued.image_paths.is_empty());
+    assert_eq!(queued.text, "");
+    assert_eq!(queued.image_paths, [] as [std::path::PathBuf; 0]);
 }
 
 #[test]

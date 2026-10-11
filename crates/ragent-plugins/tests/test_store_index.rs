@@ -2,10 +2,13 @@
 //! compiled default endpoints (spec `pluginstores` T-002, T-014; FR-001,
 //! FR-024, FR-027, FR-029, NFR-001).
 
+use std::cmp::Ordering;
+
 use ragent_config::{PluginStoreEndpoint, PluginStoresConfig};
 use ragent_plugins::{
     DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, StoreCatalog, StoreEndpoint,
-    StoreEndpointError, StoreEntry, StoreEntryError, StoreKind,
+    StoreEndpointError, StoreEntry, StoreEntryError, StoreKind, compare_store_ids,
+    sort_store_entries,
 };
 use serde_json::json;
 
@@ -331,11 +334,14 @@ fn store_entry_tolerates_absent_optional_fields() {
         "source": "https://example.org/codex-time.zip"
     });
     let entry = StoreEntry::from_value(&value).expect("valid entry");
-    assert!(entry.description.is_empty());
+    assert_eq!(entry.description, "");
     assert!(entry.dialect.is_none());
-    assert!(entry.tags.is_empty());
+    assert_eq!(entry.tags, [] as [std::string::String; 0]);
     assert!(entry.homepage.is_none());
     assert!(entry.category.is_none());
+    // The marketplace attribution is never carried by a document; it is set at
+    // fetch time (FR-048).
+    assert_eq!(entry.marketplace, "");
 }
 
 #[test]
@@ -349,6 +355,7 @@ fn store_entry_round_trips_through_serde() {
         dialect: Some("codex".to_string()),
         tags: vec!["t".to_string()],
         homepage: None,
+        marketplace: String::new(),
         category: Some("Productivity".to_string()),
     };
     let text = serde_json::to_string(&entry).expect("serialises");
@@ -487,8 +494,8 @@ fn store_entry_rejects_a_wrong_typed_category_through_the_skip_path() {
 
 #[test]
 fn default_endpoints_are_distinct_and_non_empty() {
-    assert!(!DEFAULT_CODEX_STORE_URL.is_empty());
-    assert!(!DEFAULT_CLAUDE_STORE_URL.is_empty());
+    assert_ne!(DEFAULT_CODEX_STORE_URL, "");
+    assert_ne!(DEFAULT_CLAUDE_STORE_URL, "");
     assert_ne!(DEFAULT_CODEX_STORE_URL, DEFAULT_CLAUDE_STORE_URL);
 }
 
@@ -509,4 +516,90 @@ fn default_endpoints_pass_the_endpoint_scheme_guard() {
         StoreEndpoint::parse(DEFAULT_CLAUDE_STORE_URL).expect("claude default passes guard");
     assert_eq!(codex.as_str(), DEFAULT_CODEX_STORE_URL);
     assert_eq!(claude.as_str(), DEFAULT_CLAUDE_STORE_URL);
+}
+
+// -- Marketplace attribution (FR-048) ----------------------------------------
+
+#[test]
+fn marketplace_name_for_resolves_added_marketplaces_and_falls_back_to_the_label() {
+    use ragent_plugins::marketplace_name_for;
+
+    let community = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/main/.claude-plugin/marketplace.json";
+    let stores = PluginStoresConfig {
+        codex: None,
+        claude: None,
+        marketplaces: vec![ragent_config::MarketplaceEntry {
+            store: "claude".to_string(),
+            name: "claude-plugins-community".to_string(),
+            url: Some(community.to_string()),
+            source: "anthropics/claude-plugins-community".to_string(),
+        }],
+        ..PluginStoresConfig::default()
+    };
+
+    // An added marketplace resolves to the name it was added under.
+    let endpoint = StoreEndpoint::parse(community).expect("valid endpoint");
+    assert_eq!(
+        marketplace_name_for(StoreKind::Claude, &stores, &endpoint),
+        "claude-plugins-community"
+    );
+
+    // The store's own base endpoint (no matching added marketplace) falls back to the
+    // store label, so a browse row always names a source.
+    let base = StoreEndpoint::parse(DEFAULT_CLAUDE_STORE_URL).expect("valid endpoint");
+    assert_eq!(
+        marketplace_name_for(StoreKind::Claude, &stores, &base),
+        "Claude"
+    );
+
+    // A Codex endpoint never matches a Claude-configured marketplace.
+    let codex_base = StoreEndpoint::parse(DEFAULT_CODEX_STORE_URL).expect("valid endpoint");
+    assert_eq!(
+        marketplace_name_for(StoreKind::Codex, &stores, &codex_base),
+        "Codex"
+    );
+}
+
+// -- Alphabetical result ordering (FR-050) -----------------------------------
+
+/// A minimal entry carrying only its id (the only field the comparator reads).
+fn id_entry(id: &str) -> StoreEntry {
+    StoreEntry {
+        id: id.to_string(),
+        name: id.to_string(),
+        version: "1.0.0".to_string(),
+        source: format!("https://example.org/{id}.zip"),
+        description: String::new(),
+        dialect: None,
+        tags: Vec::new(),
+        homepage: None,
+        marketplace: String::new(),
+        category: None,
+    }
+}
+
+#[test]
+fn sort_store_entries_orders_by_id_alphabetically() {
+    let mut entries = vec![id_entry("zeta"), id_entry("alpha"), id_entry("slack")];
+    sort_store_entries(&mut entries);
+    let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["alpha", "slack", "zeta"]);
+}
+
+#[test]
+fn sort_store_entries_is_case_insensitive_with_a_byte_tiebreak() {
+    let mut entries = vec![id_entry("Beta"), id_entry("alpha"), id_entry("beta")];
+    sort_store_entries(&mut entries);
+    let ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+    // Case-insensitive primary order, then a byte-wise tiebreak so `Beta` (byte
+    // `B` < `b`) precedes `beta` and the order is stable.
+    assert_eq!(ids, ["alpha", "Beta", "beta"]);
+}
+
+#[test]
+fn compare_store_ids_is_a_total_order() {
+    assert_eq!(compare_store_ids("github", "slack"), Ordering::Less);
+    assert_eq!(compare_store_ids("slack", "github"), Ordering::Greater);
+    assert_eq!(compare_store_ids("Codex", "codex"), Ordering::Less);
+    assert_eq!(compare_store_ids("codex", "codex"), Ordering::Equal);
 }

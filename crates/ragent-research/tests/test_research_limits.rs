@@ -146,8 +146,8 @@ fn helper_accepts_borrowed_entry_types() {
 fn unknown_indices_yield_no_rank() {
     let sources = vec![source("High")];
     let lookup = source_rank_lookup(&sources);
-    assert!(cited_source_ranks("[#9]", &lookup).is_empty());
-    assert!(cited_source_ranks("", &lookup).is_empty());
+    assert_eq!(cited_source_ranks("[#9]", &lookup), [] as [u8; 0]);
+    assert_eq!(cited_source_ranks("", &lookup), [] as [u8; 0]);
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn empty_input_returns_empty() {
     let sources: Vec<Source> = Vec::new();
     let lookup = source_rank_lookup(&sources);
     let ordered = rank_entries_by_reverse_relevance(Vec::<&str>::new(), |e| *e, lookup);
-    assert!(ordered.is_empty());
+    assert_eq!(ordered, [] as [&str; 0]);
 }
 
 // -- T-002: AnalysisConfig carries the two output limits -------------------
@@ -244,5 +244,8 @@ fn cap_findings_retains_at_least_one() {
 #[test]
 fn cap_findings_empty_stays_empty() {
     let sources: Vec<Source> = Vec::new();
-    assert!(cap_findings_to_limit(Vec::new(), 10, &sources).is_empty());
+    assert_eq!(
+        cap_findings_to_limit(Vec::new(), 10, &sources),
+        [] as [std::string::String; 0]
+    );
 }

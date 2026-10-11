@@ -686,7 +686,7 @@ async fn gather_preserves_search_ranking_order_with_prefilter_gap() {
 async fn gather_returns_empty_vec_when_search_returns_no_hits() {
     let (g, _, _) = gatherer_with(Vec::new(), std::collections::HashMap::new(), Vec::new());
     let sources = g.gather("rust async", 5).await.unwrap();
-    assert!(sources.is_empty());
+    assert_eq!(sources, [] as [crate::source::Source; 0]);
 }
 
 #[tokio::test]
@@ -811,8 +811,8 @@ async fn gather_creates_web_source_per_hit_with_sequential_body_paths() {
             body_path.as_path(),
             PathBuf::from(format!("sources/web-{:02}.md", i + 1)).as_path()
         );
-        assert!(!url.is_empty());
-        assert!(!title.is_empty());
+        assert_ne!(url, "");
+        assert_ne!(title, "");
     }
     // The third source had an empty page title, so it should have
     // fallen back to the search-hit title "C".
@@ -1046,7 +1046,7 @@ async fn gather_with_observer_emits_search_failed_on_search_error() {
         .gather_with_observer("topic", 5, Some(&obs))
         .await
         .unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [crate::source::Source; 0]);
     assert_eq!(result.queries, vec!["topic".to_string()]);
     let events = obs.0.lock().unwrap();
     assert_eq!(events.len(), 3);
@@ -1076,7 +1076,7 @@ async fn gather_with_observer_emits_no_hits_when_search_is_empty() {
         .gather_with_observer("rust async", 5, Some(&obs))
         .await
         .unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [crate::source::Source; 0]);
     assert_eq!(result.queries, vec!["rust async".to_string()]);
     let events = obs.0.lock().unwrap();
     assert_eq!(events.len(), 3);
@@ -1841,7 +1841,7 @@ async fn h002_search_retries_exhausted_emits_search_failed() {
         .gather_with_observer("topic", 5, Some(&obs))
         .await
         .unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [crate::source::Source; 0]);
     let events = obs.0.lock().unwrap();
     // Should have: QueriesDecomposed, SearchRetrying x2, SearchFailed.
     let retry_count = events
@@ -2035,7 +2035,7 @@ async fn gather_emits_fetch_failed_for_short_content() {
         .gather_with_observer("Rust async runtime", 5, Some(&obs))
         .await
         .unwrap();
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [crate::source::Source; 0]);
     assert_eq!(result.excluded_count, 1);
     let events = obs.0.lock().unwrap();
     assert!(
@@ -3296,7 +3296,7 @@ async fn gather_skips_pdf_web_sources_by_default() {
     let (g, _, _) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
     let result = g.gather_with_observer("topic", 5, None).await.unwrap();
     assert_eq!(result.pdf_count, 0);
-    assert!(result.sources.is_empty());
+    assert_eq!(result.sources, [] as [crate::source::Source; 0]);
 }
 
 /// On a capped run the volume cap is also the per-query search allowance

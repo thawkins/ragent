@@ -32,7 +32,10 @@ fn expire_run_records_lifecycle_event_before_deletion() {
 
     // After expiry, the run is gone.
     assert_eq!(log.count(&run).unwrap(), 0);
-    assert!(log.read_run(&run).unwrap().is_empty());
+    assert_eq!(
+        log.read_run(&run).unwrap(),
+        [] as [ragent_types::ActivityEvent; 0]
+    );
     assert!(!log.list_runs().unwrap().contains(&run));
 }
 
@@ -112,7 +115,10 @@ fn expire_run_with_custom_reason() {
         other => panic!("expected lifecycle kind, got {other:?}"),
     }
     // Run is now gone.
-    assert!(log.read_run(&run).unwrap().is_empty());
+    assert_eq!(
+        log.read_run(&run).unwrap(),
+        [] as [ragent_types::ActivityEvent; 0]
+    );
 }
 
 #[test]
@@ -136,7 +142,10 @@ fn archive_run_returns_jsonl_and_expires() {
         "archive includes original events + lifecycle event"
     );
     // Run is expired (gone from the store).
-    assert!(log.read_run(&run).unwrap().is_empty());
+    assert_eq!(
+        log.read_run(&run).unwrap(),
+        [] as [ragent_types::ActivityEvent; 0]
+    );
     assert!(!log.list_runs().unwrap().contains(&run));
 }
 
@@ -164,7 +173,10 @@ fn expire_run_on_empty_run_is_noop() {
     let log = ActivityLog::open_in_memory().expect("open");
     let run = RunId::from("run-empty");
     log.expire_run(&run, "retention").expect("expire");
-    assert!(log.read_run(&run).unwrap().is_empty());
+    assert_eq!(
+        log.read_run(&run).unwrap(),
+        [] as [ragent_types::ActivityEvent; 0]
+    );
     assert!(!log.list_runs().unwrap().contains(&run));
 }
 
@@ -220,7 +232,7 @@ fn expire_runs_older_than_expires_old_runs() {
         .expire_runs_older_than(chrono::Duration::seconds(0))
         .expect("expire");
     assert_eq!(expired.len(), 2, "both runs are older than 0 seconds");
-    assert!(log.list_runs().unwrap().is_empty());
+    assert_eq!(log.list_runs().unwrap(), [] as [ragent_types::RunId; 0]);
 }
 
 #[test]

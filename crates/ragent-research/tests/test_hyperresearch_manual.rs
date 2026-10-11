@@ -348,6 +348,6 @@ fn manual_case_6_open_access_recovery_is_disclosed() {
 
     // Ensure we exercise the assembled document fields (frontmatter/body come
     // from content), avoiding unused warnings for content.
-    assert!(!content.is_empty());
-    assert!(!body.is_empty());
+    assert_ne!(content, "");
+    assert_ne!(body, "");
 }

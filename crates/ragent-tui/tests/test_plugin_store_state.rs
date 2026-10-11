@@ -31,6 +31,7 @@ fn entry(id: &str, name: &str, description: &str, tags: &[&str]) -> StoreEntry {
         dialect: None,
         tags: tags.iter().map(|t| (*t).to_string()).collect(),
         homepage: None,
+        marketplace: String::new(),
         category: None,
     }
 }
@@ -71,8 +72,8 @@ fn one_query_term_can_match_different_fields_on_different_entries() {
         entry("beta", "Beta", "", &["alpha-tag"]),
     ]);
 
-    // "alpha" survives one entry via its id and another via a tag, so the union
-    // (in document order) is both entries.
+    // "alpha" survives one entry via its id and another via a tag, so the union is
+    // both entries, in alphabetical order (FR-050).
     browser.set_query("alpha".to_string());
 
     assert_eq!(filtered_ids(&browser), ["alpha", "beta"]);
@@ -83,7 +84,7 @@ fn clearing_a_no_match_query_restores_the_full_set_at_the_top() {
     let mut browser = loaded(vec![entry("a", "A", "", &[]), entry("b", "B", "", &[])]);
 
     browser.set_query("zzz".to_string());
-    assert!(browser.filtered.is_empty());
+    assert_eq!(browser.filtered, [] as [usize; 0]);
 
     browser.set_query(String::new());
 
@@ -148,6 +149,68 @@ fn moving_down_then_up_returns_to_the_original_row() {
     assert_eq!(browser.selected().expect("selected").id, "a");
 }
 
+// -- Background updates (pluginstores FR-048) --------------------------------
+
+#[test]
+fn a_manifest_enrichment_preserves_the_cursor_row() {
+    // Regression for the scroll-jump bug: every enrichment update used to call
+    // `apply_filter`, which resets cursor+scroll to 0, so the panel bounced to
+    // the top on each resolved manifest while the user was scrolling.
+    let mut browser = loaded(vec![
+        entry("a", "A", "", &[]),
+        entry("b", "B", "", &[]),
+        entry("c", "C", "", &[]),
+        entry("d", "D", "", &[]),
+        entry("e", "E", "", &[]),
+    ]);
+
+    // The user has scrolled down a few rows.
+    for _ in 0..3 {
+        browser.move_down();
+    }
+    browser.ensure_visible(2);
+    assert_eq!(browser.selected().expect("selected").id, "d");
+    assert!(browser.scroll > 0, "viewport has scrolled with the cursor");
+
+    browser.apply_manifest_update(ragent_plugins::ManifestUpdate {
+        id: "b".to_string(),
+        meta: ragent_plugins::ManifestMeta {
+            version: Some("9.9.9".to_string()),
+            description: Some("filled".to_string()),
+        },
+    });
+
+    assert_eq!(
+        browser.selected().expect("selected").id,
+        "d",
+        "an enrichment update does not move the cursor"
+    );
+    assert!(
+        browser.scroll > 0,
+        "an enrichment update does not reset the viewport to the top"
+    );
+}
+
+#[test]
+fn a_manifest_enrichment_with_no_field_changes_leaves_the_filter_alone() {
+    let mut browser = loaded(vec![entry("a", "A", "", &[]), entry("b", "B", "", &[])]);
+    browser.move_down();
+    browser.move_up();
+    let filtered_before: Vec<_> = browser.filtered.clone();
+
+    // An update whose fields are already set is a no-op (no refilter, cursor
+    // untouched).
+    browser.apply_manifest_update(ragent_plugins::ManifestUpdate {
+        id: "a".to_string(),
+        meta: ragent_plugins::ManifestMeta {
+            version: None,
+            description: None,
+        },
+    });
+    assert_eq!(browser.filtered, filtered_before);
+    assert_eq!(browser.cursor, 0);
+}
+
 // -- Query editing (FR-009) ---------------------------------------------------
 
 #[test]
@@ -181,9 +244,9 @@ fn backspace_reports_whether_a_character_was_removed() {
     assert!(browser.backspace(), "removing 'b' succeeds");
     assert_eq!(browser.query, "a");
     assert!(browser.backspace(), "removing 'a' succeeds");
-    assert!(browser.query.is_empty());
+    assert_eq!(browser.query, "");
     assert!(!browser.backspace(), "an empty query removes nothing");
-    assert!(browser.query.is_empty());
+    assert_eq!(browser.query, "");
 }
 
 #[test]
@@ -209,7 +272,7 @@ fn query_editing_removes_one_whole_unicode_character() {
     assert!(browser.backspace());
     assert_eq!(browser.query, "ß");
     assert!(browser.backspace());
-    assert!(browser.query.is_empty());
+    assert_eq!(browser.query, "");
 }
 
 #[tokio::test]
@@ -223,7 +286,7 @@ async fn edit_or_close_edits_a_non_empty_query_and_only_dismisses_on_empty() {
         "edits the non-empty query"
     );
     assert!(app.plugin_store.is_some(), "panel stays open (FR-009)");
-    assert!(app.plugin_store.as_ref().expect("panel").query.is_empty());
+    assert_eq!(app.plugin_store.as_ref().expect("panel").query, "");
 
     assert!(
         !app.plugin_store_edit_or_close(),

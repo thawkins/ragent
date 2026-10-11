@@ -15,9 +15,9 @@ use ragent_agent::{
 use ragent_connectors::{CatalogueBrowser, CategoryFilter};
 use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
 use ragent_plugins::{
-    FetchLimits, StoreDirs, StoreError, StoreIndex, StoreIndexFetcher, StoreKind, add,
-    add_error_report, add_report, installed_ids, probe_stores, render_stores_report_with_probes,
-    store_and_config,
+    FetchLimits, StoreDirs, StoreEndpoint, StoreError, StoreIndex, StoreIndexFetcher, StoreKind,
+    add, add_error_report, add_report, installed_ids, marketplace_name_for, probe_stores,
+    render_stores_report_with_probes, store_and_config,
 };
 use ragent_tools_core::{Tool, ToolContext};
 
@@ -25,12 +25,12 @@ use ragent_tools_core::{Tool, ToolContext};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ConnectorCatalogueInstallResult, ConnectorCatalogueResult, ContextAction,
-    ContextPartitionSnapshot, FileMenuEntry, FileMenuState, LlmRequestStat, LlmStatsSummary,
-    LogEntry, LogLevel, OutputViewState, OutputViewTarget, PluginStoreBrowser,
-    PluginStoreFetchResult, PluginStoreInstallResult, ProviderSetupStep, QueuedInput, ScreenMode,
-    ScrollbarDragPane, SelectionPane, TextSelection, atomic_config_update, is_image_path,
-    percent_decode_path, save_clipboard_image_to_temp,
+    App, ConnectorBrowseStatus, ConnectorCatalogueInstallResult, ConnectorCatalogueResult,
+    ConnectorEnrichResult, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState,
+    LlmRequestStat, LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget,
+    PluginStoreBrowser, PluginStoreFetchResult, PluginStoreInstallResult, ProviderSetupStep,
+    QueuedInput, ScreenMode, ScrollbarDragPane, SelectionPane, StoreEnrichResult, TextSelection,
+    atomic_config_update, is_image_path, percent_decode_path, save_clipboard_image_to_temp,
 };
 
 // Helpers
@@ -54,6 +54,38 @@ pub fn recover_poisoned<'a, T>(
             poisoned.into_inner()
         }
     }
+}
+
+/// Push one enrichment message onto the shared queue, recovering a poisoned lock
+/// (FR-025).
+///
+/// The off-loop enrichment worker calls this for each resolved update and once for
+/// the terminal [`StoreEnrichResult::Finished`]; the UI thread drains the queue in
+/// [`App::poll_store_enrichment`].
+fn push_enrich_result(slot: &std::sync::Mutex<Vec<StoreEnrichResult>>, message: StoreEnrichResult) {
+    push_enrich(slot, "store_enrich_result", message);
+}
+
+/// Push one catalogue-enrichment message onto the shared queue, recovering a
+/// poisoned lock (spec `connectors` FR-044).
+///
+/// The off-loop enrichment worker calls this for each resolved update and once for
+/// the terminal [`ConnectorEnrichResult::Finished`]; the UI thread drains the queue
+/// in [`App::poll_connector_enrichment`].
+fn push_connector_enrich_result(
+    slot: &std::sync::Mutex<Vec<ConnectorEnrichResult>>,
+    message: ConnectorEnrichResult,
+) {
+    push_enrich(slot, "connector_enrich_result", message);
+}
+
+/// Append one enrichment message to `slot`, recovering a poisoned lock.
+///
+/// The one shared body behind [`push_enrich_result`] and
+/// [`push_connector_enrich_result`], so the two panels' queues cannot diverge on
+/// the poisoned-lock discipline.
+fn push_enrich<T>(slot: &std::sync::Mutex<Vec<T>>, name: &str, message: T) {
+    recover_poisoned(slot.lock(), name).push(message);
 }
 
 /// Run one plugin-store install through the existing `add` entry point and map
@@ -1300,27 +1332,70 @@ impl App {
         kind: StoreKind,
         stores: &ragent_config::PluginStoresConfig,
     ) {
-        // A refused endpoint (non-https or malformed, FR-024) is reported as the
-        // panel's inline error with no fetch attempted.
-        let endpoint = match kind.effective_endpoint(stores) {
-            Ok(endpoint) => endpoint,
-            Err(err) => {
-                self.plugin_store_failed(kind, err.to_string());
-                return;
-            }
-        };
+        // The store's base endpoint (config override or compiled default) is the
+        // primary marketplace: a refused base (non-https or malformed, FR-024) is
+        // reported as the panel's inline error with no fetch attempted. Added
+        // marketplaces (FR-048) are then appended; a refused added URL is skipped
+        // (one bad added URL does not blind the whole store).
+        if let Err(err) = kind.effective_endpoint_with_source(stores) {
+            self.plugin_store_failed(kind, err.to_string());
+            return;
+        }
+        let (endpoints, _refused) = kind.effective_endpoints_with_source(stores);
+        if endpoints.is_empty() {
+            return;
+        }
         let limits = FetchLimits::from(stores);
+        // Resolve each endpoint's marketplace display name on the UI thread, so the
+        // browse row can name the marketplace a plugin came from (FR-048) and the
+        // off-loop fetch closure needs nothing from `stores`. The base endpoint (a
+        // config override or the compiled default) resolves to the store label; an
+        // added marketplace resolves to the name it was added under.
+        let endpoints: Vec<(StoreEndpoint, String)> = endpoints
+            .into_iter()
+            .map(|(endpoint, _source)| {
+                let marketplace = marketplace_name_for(kind, stores, &endpoint);
+                (endpoint, marketplace)
+            })
+            .collect();
         let slot = Arc::clone(&self.plugin_store_result);
-        // The seam the browser drives: the production HTTPS fetcher unless a test
-        // has replaced it with an offline fixture fetcher (FR-037).
         let fetcher = Arc::clone(&self.plugin_store_fetcher);
-        // The blocking download runs inside the spawned task: `reqwest::blocking`
-        // must not occupy a runtime worker thread, so it goes to the blocking
-        // pool and the UI thread returns immediately, keeping the event loop and
-        // any agent turn animating while the fetch is in flight (FR-016, FR-026).
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn_blocking(move || {
-                let outcome = fetcher.fetch_index(kind, &endpoint, &limits);
+                let mut merged = StoreIndex::default();
+                let mut first_error: Option<StoreError> = None;
+                for (endpoint, marketplace) in &endpoints {
+                    match fetcher.fetch_index(kind, endpoint, &limits) {
+                        Ok(mut index) => {
+                            // Attribute every row to the marketplace it came from,
+                            // so a merged multi-marketplace panel names each source
+                            // (FR-048).
+                            for entry in &mut index.entries {
+                                entry.marketplace = marketplace.clone();
+                            }
+                            merged.store = merged.store.or(index.store);
+                            merged.skipped += index.skipped;
+                            merged.entries.extend(index.entries);
+                        }
+                        Err(err) => {
+                            if first_error.is_none() {
+                                first_error = Some(err);
+                            }
+                        }
+                    }
+                }
+                // A single-marketplace store keeps the exact prior behaviour: a
+                // failure is the panel's inline error. When at least one marketplace
+                // answered, the merged result is delivered even if another failed.
+                let outcome = if merged.entries.is_empty()
+                    && merged.store.is_none()
+                    && let Some(err) = first_error
+                {
+                    Err(err)
+                } else {
+                    Self::dedup_store_entries(&mut merged.entries);
+                    Ok(merged)
+                };
                 Self::deposit_plugin_store_result(&slot, kind, outcome);
             });
         } else {
@@ -1344,6 +1419,18 @@ impl App {
     ) {
         *recover_poisoned(slot.lock(), "plugin_store_result") =
             Some(PluginStoreFetchResult { kind, outcome });
+    }
+
+    /// Drop entries whose id was already seen, keeping the first occurrence, so a
+    /// plugin listed by more than one marketplace (e.g. a plugin added from a
+    /// community marketplace that is also in the store default) appears once in
+    /// the merged result set (FR-048).
+    fn dedup_store_entries(entries: &mut Vec<ragent_plugins::StoreEntry>) {
+        // Ordering is irrelevant (`retain` already preserves first-occurrence
+        // order), so a `HashSet` gives O(1) membership where a `BTreeSet` paid
+        // O(log n) per insert.
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        entries.retain(|entry| seen.insert(entry.id.clone()));
     }
 
     /// Drain a completed off-loop store-index fetch and apply it to the open
@@ -1379,10 +1466,144 @@ impl App {
                     // silently empty (spec `catnav` FR-022).
                     browser.apply_pending_category();
                 }
+                // Now that the index is loaded, enrich each entry from its own
+                // manifest off-loop, since the marketplace index usually omits the
+                // version and (for Codex) the description entirely (FR-048).
+                self.start_store_enrichment(result.kind);
             }
             Err(err) => self.plugin_store_failed(result.kind, err.panel_detail(result.kind)),
         }
         self.needs_redraw = true;
+    }
+
+    /// Start the off-loop manifest-metadata enrichment of the index now loaded in
+    /// the open browser (spec `pluginstores` FR-048).
+    ///
+    /// Snapshots the loaded entries on the UI thread, bumps the enrichment
+    /// generation so any in-flight worker's messages are discarded, marks the panel
+    /// [`PluginStoreBrowser::enriching`], and hands the per-entry manifest lookups to
+    /// the TUI's background path ([`App::store_manifest_source`]) so the event loop
+    /// never stalls (FR-016, FR-026). Each resolved update is pushed onto
+    /// [`App::store_enrich_result`] and drained by [`App::poll_store_enrichment`].
+    ///
+    /// A no-op when no panel is open for `kind`, when the panel is loading or
+    /// failed, or when no async reactor is available (headless/unit-test contexts);
+    /// no path panics.
+    pub(crate) fn start_store_enrichment(&mut self, kind: StoreKind) {
+        let entries = match self.plugin_store.as_ref() {
+            Some(browser) if browser.kind == kind => {
+                if matches!(browser.status, crate::app::PluginStoreStatus::Ready) {
+                    browser.all.clone()
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        };
+        let generation = self
+            .store_enrich_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        if let Some(browser) = self.plugin_store.as_mut()
+            && browser.kind == kind
+        {
+            browser.enriching = true;
+        }
+        self.needs_redraw = true;
+
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            // Without an async reactor the enrichment cannot run off-loop; running
+            // it inline would block the caller (FR-016/FR-026), so it is skipped and
+            // the panel simply keeps whatever the index declared.
+            tracing::debug!(
+                store = kind.token(),
+                "store enrichment skipped: no async runtime available"
+            );
+            if let Some(browser) = self.plugin_store.as_mut()
+                && browser.kind == kind
+            {
+                browser.finish_enrichment();
+            }
+            self.needs_redraw = true;
+            return;
+        };
+
+        let source = Arc::clone(&self.store_manifest_source);
+        let slot = Arc::clone(&self.store_enrich_result);
+        handle.spawn_blocking(move || {
+            let sink = |update: ragent_plugins::ManifestUpdate| {
+                push_enrich_result(
+                    &slot,
+                    StoreEnrichResult::Update {
+                        generation,
+                        kind,
+                        update,
+                    },
+                );
+            };
+            ragent_plugins::enrich_into(&entries, kind, source.as_ref(), &sink);
+            push_enrich_result(&slot, StoreEnrichResult::Finished { generation, kind });
+        });
+    }
+
+    /// Install an injectable manifest-metadata source (spec `pluginstores` FR-048).
+    ///
+    /// Replaces the production HTTPS source with an alternative implementation, so
+    /// the enrichment path can be driven against in-memory metadata with no network
+    /// access (NFR-003). Mirrors [`App::set_plugin_store_fetcher`].
+    pub fn set_manifest_source(&mut self, source: Arc<dyn ragent_plugins::ManifestSource>) {
+        self.store_manifest_source = source;
+    }
+
+    /// Drain the completed manifest-enrichment messages and apply them to the open
+    /// panel (spec `pluginstores` FR-048).
+    ///
+    /// Called each housekeeping frame. An update whose generation or store no
+    /// longer matches the open browser (the panel was closed, switched stores, or
+    /// re-fetched) is discarded, so a late arrival can never fill the wrong panel. A
+    /// terminal [`StoreEnrichResult::Finished`] clears the title's loading hint. No
+    /// path panics.
+    pub fn poll_store_enrichment(&mut self) {
+        let drained = {
+            let mut guard =
+                recover_poisoned(self.store_enrich_result.lock(), "store_enrich_result");
+            std::mem::take(&mut *guard)
+        };
+        if drained.is_empty() {
+            return;
+        }
+        let current = self
+            .store_enrich_generation
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let open_kind = self.plugin_store.as_ref().map(|b| b.kind);
+        let mut changed = false;
+        for message in drained {
+            match message {
+                StoreEnrichResult::Update {
+                    generation,
+                    kind,
+                    update,
+                } => {
+                    if generation == current && open_kind == Some(kind) {
+                        if let Some(browser) = self.plugin_store.as_mut() {
+                            browser.apply_manifest_update(update);
+                        }
+                        changed = true;
+                    }
+                }
+                StoreEnrichResult::Finished { generation, kind } => {
+                    if generation == current && open_kind == Some(kind) {
+                        if let Some(browser) = self.plugin_store.as_mut() {
+                            browser.finish_enrichment();
+                        }
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.needs_redraw = true;
+        }
     }
 
     /// Apply an inline failure detail to the open browser for `kind` (FR-013).
@@ -1801,16 +2022,17 @@ impl App {
         }
         let slot = Arc::clone(&self.connector_catalogue_result);
         std::thread::spawn(move || {
-            let outcome =
-                ragent_connectors::search_installable_catalogue_with_skipped(&config, &dirs);
+            let outcome = ragent_connectors::search_installable_catalogue_full(&config, &dirs);
             let result = match outcome {
-                Ok((descriptors, skipped)) => ConnectorCatalogueResult {
-                    outcome: Ok(descriptors),
-                    skipped,
+                Ok(full) => ConnectorCatalogueResult {
+                    outcome: Ok(full.descriptors),
+                    skipped: full.skipped,
+                    refused_marketplace: full.refused_marketplace,
                 },
                 Err(cause) => ConnectorCatalogueResult {
                     outcome: Err(cause),
                     skipped: 0,
+                    refused_marketplace: None,
                 },
             };
             *recover_poisoned(slot.lock(), "connector_catalogue_result") = Some(result);
@@ -1827,6 +2049,10 @@ impl App {
     /// fetched catalogue, so a launch category the catalogue does not carry is
     /// refused here and reported in the panel footer rather than leaving the
     /// panel silently empty.
+    ///
+    /// A marketplace URL the `https` guard refused during the merge (FR-043)
+    /// never blinds the panel; it is surfaced here as a warning line in the
+    /// message window so the dropped marketplace is visible rather than silent.
     pub fn poll_connector_catalogue_result(&mut self) {
         let result = {
             let mut guard = recover_poisoned(
@@ -1838,6 +2064,12 @@ impl App {
         let Some(result) = result else {
             return;
         };
+        if let Some(refused) = result.refused_marketplace {
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!("a configured connector marketplace was skipped: {refused}"),
+            );
+        }
         if self.connector_store.is_none() {
             return;
         }
@@ -1847,10 +2079,133 @@ impl App {
                     browser.set_entries(entries, result.skipped);
                     browser.apply_pending_category();
                 }
+                // Now that the catalogue is loaded, enrich each entry's blank
+                // description from its repository manifest off-loop (FR-044).
+                self.start_catalogue_enrichment();
             }
             Err(cause) => self.connector_catalogue_failed(cause),
         }
         self.needs_redraw = true;
+    }
+
+    /// Start the off-loop manifest-description enrichment of the catalogue now
+    /// loaded in the open browser (spec `connectors` FR-044).
+    ///
+    /// Snapshots the loaded entries on the UI thread, bumps the enrichment
+    /// generation so any in-flight worker's messages are discarded, marks the panel
+    /// [`CatalogueBrowser::enriching`], and hands the per-entry manifest lookups to
+    /// the TUI's background path ([`App::catalogue_manifest_source`]) so the event
+    /// loop never stalls. Each resolved update is pushed onto
+    /// [`App::connector_enrich_result`] and drained by
+    /// [`App::poll_connector_enrichment`].
+    ///
+    /// A no-op when no panel is open, when the panel is loading or failed, or when
+    /// no async reactor is available (headless/unit-test contexts); no path panics.
+    pub(crate) fn start_catalogue_enrichment(&mut self) {
+        let entries = match self.connector_store.as_ref() {
+            Some(browser) if matches!(browser.status, ConnectorBrowseStatus::Ready) => {
+                browser.all.clone()
+            }
+            _ => return,
+        };
+        let generation = self
+            .connector_enrich_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.enriching = true;
+        }
+        self.needs_redraw = true;
+
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            // Without an async reactor the enrichment cannot run off-loop; running
+            // it inline would block the caller, so it is skipped and the panel keeps
+            // whatever the catalogue declared.
+            tracing::debug!("connector-catalogue enrichment skipped: no async runtime available");
+            if let Some(browser) = self.connector_store.as_mut() {
+                browser.finish_enrichment();
+            }
+            self.needs_redraw = true;
+            return;
+        };
+
+        let source = Arc::clone(&self.catalogue_manifest_source);
+        let slot = Arc::clone(&self.connector_enrich_result);
+        handle.spawn_blocking(move || {
+            let sink = |update: ragent_connectors::catalogue_enrich::ManifestUpdate| {
+                push_connector_enrich_result(
+                    &slot,
+                    ConnectorEnrichResult::Update { generation, update },
+                );
+            };
+            ragent_connectors::catalogue_enrich::enrich_catalogue_into(
+                &entries,
+                source.as_ref(),
+                &sink,
+            );
+            push_connector_enrich_result(&slot, ConnectorEnrichResult::Finished { generation });
+        });
+    }
+
+    /// Install an injectable catalogue manifest-metadata source (spec `connectors`
+    /// FR-044).
+    ///
+    /// Replaces the production HTTPS source with an alternative implementation, so
+    /// the enrichment path can be driven against in-memory metadata with no network
+    /// access (NFR-003). Mirrors [`App::set_manifest_source`].
+    pub fn set_catalogue_manifest_source(
+        &mut self,
+        source: Arc<dyn ragent_connectors::catalogue_enrich::ManifestSource>,
+    ) {
+        self.catalogue_manifest_source = source;
+    }
+
+    /// Drain the completed catalogue manifest-enrichment messages and apply them to
+    /// the open panel (spec `connectors` FR-044).
+    ///
+    /// Called each housekeeping frame. An update whose generation no longer matches
+    /// the open browser (the panel was closed, or re-fetched) is discarded, so a late
+    /// arrival can never fill the wrong panel. A terminal
+    /// [`ConnectorEnrichResult::Finished`] clears the title's loading hint. No path
+    /// panics.
+    pub fn poll_connector_enrichment(&mut self) {
+        let drained = {
+            let mut guard = recover_poisoned(
+                self.connector_enrich_result.lock(),
+                "connector_enrich_result",
+            );
+            std::mem::take(&mut *guard)
+        };
+        if drained.is_empty() {
+            return;
+        }
+        let current = self
+            .connector_enrich_generation
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let mut changed = false;
+        for message in drained {
+            match message {
+                ConnectorEnrichResult::Update { generation, update } => {
+                    if generation == current {
+                        if let Some(browser) = self.connector_store.as_mut() {
+                            browser.apply_manifest_update(update);
+                        }
+                        changed = true;
+                    }
+                }
+                ConnectorEnrichResult::Finished { generation } => {
+                    if generation == current {
+                        if let Some(browser) = self.connector_store.as_mut() {
+                            browser.finish_enrichment();
+                        }
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.needs_redraw = true;
+        }
     }
 
     /// Apply an inline failure detail to the open connector-catalogue browser.
@@ -1860,6 +2215,7 @@ impl App {
     fn connector_catalogue_failed(&mut self, detail: String) {
         if let Some(browser) = self.connector_store.as_mut() {
             browser.set_failed(detail);
+            browser.finish_enrichment();
             self.needs_redraw = true;
         }
     }
@@ -1869,7 +2225,7 @@ impl App {
     /// scans as empty.
     fn derive_installed_connector_set(&self) -> BTreeSet<String> {
         let (dirs, _config) = ragent_connectors::store_and_config(&self.cwd_path);
-        ragent_connectors::scan_dirs(dirs)
+        ragent_connectors::scan_dirs(&dirs)
             .into_iter()
             .filter_map(|connector| connector.outcome.ok())
             .map(|descriptor| descriptor.id.as_str().to_string())
@@ -2044,6 +2400,73 @@ impl App {
         }
     }
 
+    /// Whether the connector-catalogue panel's category navigator currently
+    /// holds keyboard focus.
+    ///
+    /// `false` when no panel is open or the result list holds focus.
+    #[must_use]
+    pub fn connector_catalogue_nav_focused(&self) -> bool {
+        self.connector_store
+            .as_ref()
+            .is_some_and(|browser| browser.nav_focused)
+    }
+
+    /// Transfer keyboard focus between the connector-catalogue panel's category
+    /// navigator and its result list.
+    ///
+    /// A no-op when no panel is open. The focused pane's cursor is rendered
+    /// distinctly and subsequent `Up`/`Down` route to the focused pane.
+    pub fn connector_catalogue_toggle_focus(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.nav_focused = !browser.nav_focused;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the connector-catalogue panel's category cursor up one navigator row
+    /// while the navigator holds focus, applying the newly highlighted category.
+    pub fn connector_catalogue_category_move_up(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.category_move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the connector-catalogue panel's category cursor down one navigator
+    /// row while the navigator holds focus, applying the newly highlighted
+    /// category.
+    pub fn connector_catalogue_category_move_down(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.category_move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Apply the highlighted category and move keyboard focus to the result
+    /// list.
+    ///
+    /// Installing is deliberately not reachable here: `ENTER` over the navigator
+    /// only applies the category and transfers focus, so nothing is written to
+    /// the store.
+    pub fn connector_catalogue_category_confirm(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.category_confirm();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the connector-catalogue panel's category filter to `ALL` and
+    /// re-derive the visible results.
+    ///
+    /// A no-op when no panel is open; issues no network request and installs
+    /// nothing.
+    pub fn connector_catalogue_clear_category(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.category_clear();
+            self.needs_redraw = true;
+        }
+    }
+
     /// Advance the connector-catalogue panel to the next category filter.
     ///
     /// The cycle runs over the categories the fetched catalogue actually
@@ -2054,6 +2477,11 @@ impl App {
     /// the filter can always be cleared. Every step re-derives the visible rows
     /// and repaints on the next frame; nothing is enabled, connected, or
     /// installed.
+    ///
+    /// This is the textual-report cycling helper kept for callers that want the
+    /// category stepping without the navigator's row semantics; the panel
+    /// itself applies a category through the category cursor
+    /// ([`Self::connector_catalogue_category_move_up`] and friends).
     pub fn connector_catalogue_next_category(&mut self) {
         let Some(browser) = self.connector_store.as_mut() else {
             return;
@@ -2073,6 +2501,7 @@ impl App {
             .position(|filter| filter.label().to_ascii_lowercase() == current)
             .map_or(0, |index| (index + 1) % order.len());
         browser.categories_mut().select(order[next].clone());
+        browser.sync_category_cursor_from_filter();
         browser.reapply_filter();
         self.needs_redraw = true;
     }

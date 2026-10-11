@@ -31,14 +31,12 @@
 //! | [`store`]      | T-003| connector store paths, discovery scan, `_state.json` ledger (FR-001) |
 //! | [`store_index`]| T-016| compiled default catalogue endpoint and config-over-default resolver (FR-034, FR-035, FR-037, FR-038) |
 //! | [`store_ops`]  | T-017/T-018 | wire endpoint resolution into the catalogue fetch (FR-035, FR-037, NFR-002) and the `/connectors stores` report: endpoint + provenance tag, `--check` probe (FR-036) |
-//!
-//! Later tasks add the shared `list`/`search` report wording (T-011) and the
-//! `/connectors test` harness (T-013).
 
 pub mod add;
 pub mod auth;
 pub mod bridge;
 pub mod browse;
+pub mod catalogue_enrich;
 pub mod commands;
 pub mod descriptor;
 pub mod entry;
@@ -49,6 +47,7 @@ pub mod help;
 pub mod lifecycle;
 pub mod management;
 pub mod manifest;
+pub mod marketplace_ops;
 pub mod provider;
 pub mod remove;
 pub mod report;
@@ -70,18 +69,22 @@ pub use browse::{
     browse_install_report, build_categories, entry_matches,
 };
 pub use commands::{
-    AuthOutcome, AuthOutcomeError, ConnectorArgError, ConnectorCommand, ConnectorCommandEnv,
-    auth_report, canonical_id, connect_report, disable_report, disconnect_report, enable_report,
-    fetch_catalogue_descriptors_network, fetch_catalogue_descriptors_with_skipped,
-    is_known_subcommand, lifecycle_error_report, parse_connector_command,
-    resolve_connector_reference, run_connector_subcommand, run_connector_subcommand_async,
-    run_connector_subcommand_env, run_connector_subcommand_stores_check,
-    search_installable_catalogue, search_installable_catalogue_with_skipped, store_and_config,
+    AuthOutcome, AuthOutcomeError, CatalogueDescriptors, ConnectorArgError, ConnectorCommand,
+    ConnectorCommandEnv, MarketplaceArgError, MarketplaceCommand, auth_report, canonical_id,
+    connect_report, disable_report, disconnect_report, enable_report,
+    fetch_catalogue_descriptors_full, fetch_catalogue_descriptors_network,
+    fetch_catalogue_descriptors_with_skipped, is_known_subcommand, lifecycle_error_report,
+    marketplace_bare, marketplace_command_requested, marketplace_show_requested,
+    parse_connector_command, parse_marketplace_command, render_marketplace_list_report,
+    render_marketplace_show_report, resolve_connector_reference, run_connector_subcommand,
+    run_connector_subcommand_async, run_connector_subcommand_env,
+    run_connector_subcommand_stores_check, run_marketplace_command, search_installable_catalogue,
+    search_installable_catalogue_full, search_installable_catalogue_with_skipped, store_and_config,
 };
 pub use descriptor::{
     ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorProvenance, ConnectorServer,
     UNSUP_COMMAND, UNSUP_SERVER_ID, UNSUP_TRANSPORT, UNSUP_URL, bridged_server_id,
-    connector_id_collides, server_id_collides,
+    compare_connector_ids, connector_id_collides, server_id_collides, sort_connectors,
 };
 pub use entry::{ConnectorEntry, ConnectorEntryError, normalise_transport};
 pub use error::ConnectorError;
@@ -111,6 +114,10 @@ pub use manifest::{
     MAX_EXTRACTED_BYTES, MAX_SOURCE_BYTES, StageError, StagedConnector, install_descriptor,
     read_manifest, stage, write_manifest,
 };
+pub use marketplace_ops::{
+    MARKETPLACE_DOC_PATH, MarketplaceSource, MarketplaceSourceError, add_marketplace,
+    remove_marketplace, resolve_source,
+};
 pub use provider::{
     CatalogueError, ClaudeConnectorProvider, ConnectorProvider, NativeConnectorProvider,
     NormalisedEntries, ParsedCatalogue, convert_entries, parse_catalogue, provider_for,
@@ -123,13 +130,13 @@ pub use store::{
     ConnectorCounters, ConnectorState, MANIFEST_FILE, STATE_FILE, ScanFailure, ScannedConnector,
     StoreDirs, StoreLedger, descriptor_by_id, scan, scan_dirs, store_dirs, store_dirs_at,
 };
-// `ConnectorError` is re-exported from `error` above; keep that one canonical.
 pub use store_index::{
     CatalogueCatalog, CatalogueEndpoint, CatalogueEndpointError, CatalogueKind,
-    DEFAULT_CLAUDE_CATALOGUE_URL, EndpointSource,
+    DEFAULT_CLAUDE_CATALOGUE_URL, EndpointSource, marketplace_name_for,
 };
 pub use store_ops::{
-    StoreEndpointRow, StoreProbe, effective_endpoint, fetch_effective_catalogue, probe_stores,
-    render_stores_report, render_stores_report_with_probes, resolve_catalog, stores_attribution,
-    stores_check_requested, stores_report, stores_report_with_check,
+    MergedCatalogue, StoreEndpointRow, StoreProbe, effective_endpoint, fetch_all_catalogues,
+    fetch_effective_catalogue, probe_stores, render_stores_report,
+    render_stores_report_with_probes, resolve_catalog, stores_attribution, stores_check_requested,
+    stores_report, stores_report_with_check,
 };

@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 
 use crate::auth::AuthRequirement;
 use crate::browse::{CategoryFilter, CategoryFilterState, build_categories};
-use crate::descriptor::ConnectorDescriptor;
+use crate::descriptor::{ConnectorDescriptor, compare_connector_ids};
 use crate::help::attribution;
 use crate::lifecycle::{ConnectorLifecycleState, ConnectorStatus, ServerState};
 use crate::store::{ScanFailure, StoreDirs, scan_dirs};
@@ -207,7 +207,7 @@ pub fn render_list(
 
     let mut rows: Vec<ListRow> = Vec::new();
     let mut failures: Vec<(String, String)> = Vec::new();
-    let scanned = scan_dirs(input.dirs.clone());
+    let scanned = scan_dirs(input.dirs);
     let total = scanned.len();
     let known: Vec<String> = build_categories(
         scanned
@@ -236,6 +236,10 @@ pub fn render_list(
             }
         }
     }
+    // Sort alphabetically by connector id (FR-046), so the display order is
+    // independent of the scan order and a category filter narrows an already-sorted
+    // set.
+    rows.sort_by(|a, b| compare_connector_ids(&a.id, &b.id));
 
     Ok(finish_list(rows, failures, &filter, total, verbose))
 }
@@ -271,28 +275,24 @@ fn finish_list(
         }
     }
 
-    let with_unsupported: Vec<&ListRow> = rows
-        .iter()
-        .filter(|row| !row.unsupported.is_empty())
-        .collect();
-    if !with_unsupported.is_empty() {
+    if rows.iter().any(|row| !row.unsupported.is_empty()) {
         lines.push(String::new());
         lines.push("Unsupported capabilities:".to_string());
-        for row in with_unsupported {
+        for row in rows.iter().filter(|row| !row.unsupported.is_empty()) {
             lines.push(format!("- {}: {}", row.id, row.unsupported.join("; ")));
         }
     }
 
-    let with_errors: Vec<&ListRow> = rows.iter().filter(|row| row.error.is_some()).collect();
-    if !with_errors.is_empty() {
+    if rows.iter().any(|row| row.error.is_some()) {
         lines.push(String::new());
         lines.push("Errors:".to_string());
-        for row in with_errors {
-            lines.push(format!(
-                "- {}: {}",
-                row.id,
-                row.error.as_deref().unwrap_or_default()
-            ));
+        for row in rows.iter().filter(|row| row.error.is_some()) {
+            // The filter above guarantees `error` is present; bind it rather
+            // than falling back to an empty string, which would mask a filter
+            // regression.
+            if let Some(error) = &row.error {
+                lines.push(format!("- {}: {}", row.id, error));
+            }
         }
     }
 
@@ -470,11 +470,15 @@ pub fn render_search(
         catalogue.len()
     ));
 
-    let matches: Vec<&ConnectorDescriptor> = catalogue
+    let mut matches: Vec<&ConnectorDescriptor> = catalogue
         .iter()
         .filter(|descriptor| filter.matches(descriptor))
         .filter(|descriptor| matches_query(descriptor, &needle))
         .collect();
+    // Sort alphabetically by connector id (FR-046), so the search result order is
+    // independent of the catalogue order and a category filter narrows an
+    // already-sorted set.
+    matches.sort_by(|a, b| compare_connector_ids(a.id.as_str(), b.id.as_str()));
 
     if matches.is_empty() {
         lines.push(String::new());

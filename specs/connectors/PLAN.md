@@ -104,6 +104,9 @@ default-endpoint regimes read the same way.
 | FR-039 Category filter restricts displayed connectors | T-020, T-021 |
 | FR-040 `ALL` category resets the filter (default) | T-020, T-021 |
 | FR-041 `--category` argument on list/claude | T-021, T-022 |
+| FR-042 `/connectors marketplace show` report | T-024 |
+| FR-043 Marketplace add/remove/list + merged multi-marketplace fetch + per-row attribution | T-023, T-024, T-025 |
+| FR-044 Catalogue description enrichment | T-026 |
 | NFR-001 Default endpoint declared exactly once | T-019 |
 | NFR-002 Endpoint resolved per launch, no rebuild | T-016, T-017 |
 | NFR-003 Resolution is pure and offline | T-016 |
@@ -136,6 +139,11 @@ default-endpoint regimes read the same way.
 | T-020 | Add category filter state and category enumeration to the connector browser | FR-039, FR-040 | M | High | completed | T-002, T-003 |
 | T-021 | Wire the category filter into the `list` report and the `--category` argument | FR-039, FR-040, FR-041 | M | High | completed | T-011, T-020 |
 | T-022 | Move catalogue browsing to `/connectors claude` and add its `--category` launch filter and `c` cycle | FR-004, FR-010, FR-039, FR-040, FR-041 | M | High | completed | T-010, T-020, T-021 |
+| T-023 | `connectors.stores.marketplaces` config + source resolution + atomic config splice | FR-042, FR-043 | M | High | completed | T-001, T-016 |
+| T-024 | `/connectors marketplace` subcommand family (`show`, `claude list|add|remove`) | FR-042, FR-043 | M | High | completed | T-010, T-023 |
+| T-025 | Merge every configured marketplace into the browse fetch with per-row attribution | FR-043 | M | High | completed | T-017, T-023 |
+| T-026 | Catalogue description enrichment (off-loop, cached, injectable) | FR-044 | M | Medium | completed | T-022, T-025 |
+| T-027 | Sort every connector list alphabetically by id (shared comparator) | FR-046 | S | Medium | completed | T-002, T-011, T-020 |
 ## Task Details
 
 ### T-001 - Add `connectors` configuration block to `ragent-config`
@@ -522,3 +530,104 @@ to the removal.
 and `--refresh` added to the CLI/TUI catalog flag lists; `render_search` de-registered from
 the crate re-exports but retained for the shared catalogue renderer; the `list`-style
 category resolution (`resolve_filter`/`CategoryError`) shared unchanged.
+
+### T-023 - `connectors.stores.marketplaces` config + source resolution + atomic config splice
+
+Add a `ConnectorMarketplaceEntry` model and a `marketplaces: Vec<ConnectorMarketplaceEntry>`
+field on `ConnectorStoresConfig` (FR-043), mirroring
+`ragent_config::PluginStoresConfig::marketplaces`. Add
+`crates/ragent-connectors/src/marketplace_ops.rs`, ported from
+`ragent_plugins::marketplace_ops`: `resolve_source` accepts `owner/repo`,
+`git@github.com:owner/repo.git`, an `https://` URL (used verbatim), or a local marketplace
+directory, resolving a GitHub slug or repo URL to
+`https://raw.githubusercontent.com/<owner>/<repo>/main/.claude-plugin/marketplace.json`
+(anchored to branch `main`); `add_marketplace`/`remove_marketplace` edit the
+**user-global** `connectors.stores.marketplaces` array in `~/.config/ragent/ragent.json`
+with an atomic temp-file-plus-rename splice, refusing a duplicate name without `--force`,
+and drop the config crate's load cache after a write. No network access happens here.
+The config-splice helpers avoid `expect` entirely: every `as_object_mut` after an ensured
+object goes through `ok_or_else`, so no path panics on a hand-edited config.
+
+**Verify:** owner/repo, SSH, https, and local sources resolve offline to the expected
+(name, url) pairs; add/remove round-trip only the user-global file; a duplicate add without
+`--force` is refused and a forced add replaces.
+
+### T-024 - `/connectors marketplace` subcommand family (`show`, `claude list|add|remove`)
+
+Add `marketplace` to the `/connectors` subcommand list, usage block, and autocomplete
+tokens (FR-004, FR-017), and to the shared parser (`parse_connector_command`): `show`
+renders one section for the Claude catalogue with a `| Name | Url | Description |` table
+over the base endpoint plus every configured marketplace, tagging each
+`default`/`config`/`added` and rendering a refused endpoint as an `[err]` row (FR-042);
+`claude list` renders the same table for the one catalogue; `claude add <source> [--force]`
+and `claude remove <name>` resolve and record through `marketplace_ops` and report
+`[ok]`/`[err]` (FR-043). `show` and `list` are pure config reads - no network, no store
+scan - and a missing `connectors.stores` block still lists the compiled default. They are
+dispatched *before* the `connectors.enabled` master switch in `run_connector_subcommand`, so
+a disabled subsystem still renders them rather than reporting the subsystem inert (FR-042).
+The CLI parity surface (`ragent connectors <sub>`) prints the same wording.
+
+**Verify:** `marketplace show` with no stores block lists the compiled default tagged
+`default`; `add` then `list` shows the entry tagged `added`; `remove` drops it; a malformed
+invocation renders an `[err]` usage report that changes no state; with
+`connectors.enabled: false`, `marketplace show`/`list` still render the compiled default
+(with no `disabled` report) - covered by `test_connector_commands.rs`. The source-form
+resolver's git-ref/scheme guards in `catalogue_enrich.rs` are covered by
+`test_catalogue_enrich.rs`.
+
+### T-025 - Merge every configured marketplace into the browse fetch with per-row attribution
+
+Add `CatalogueKind::effective_endpoints_with_source` returning the base endpoint followed by
+every `connectors.stores.marketplaces` `url` for the catalogue, each parsed through the
+`https` guard, with `EndpointSource::Added` (tag `added`) for the marketplace rows (FR-043).
+A refused added URL is skipped (the first refusal is returned so the caller can warn); a
+refused base endpoint still blinds the fetch as before (FR-037). Add
+`store_ops::fetch_all_catalogues`: fetch each accepted endpoint (per-endpoint cache, so the
+base fetch cannot poison an added marketplace's cache entry), stamp each returned
+descriptor's `marketplace` field with the marketplace display name (the added marketplace's
+name, or the catalogue label for the base endpoint) via `marketplace_name_for`, matching
+pluginstores' per-row attribution, and drop
+an entry whose id was already seen (first occurrence wins, base endpoint first - document
+the ordering contract). The browser fetch worker (`session_ops.rs`) and the descriptor-fetch
+glue (`commands.rs`) call it, and a skipped marketplace surfaces as a `LogLevel::Warn`
+message-window line. The browse panel gains a marketplace column rendered from the stamped
+descriptor (`layout.rs`), the same width the plugin panel gives it.
+
+**Verify:** a base endpoint plus two added marketplaces merge into one row set in fetch
+order with duplicate ids dropped once; each row names its marketplace; a refused added
+marketplace warns and leaves the rest of the set intact.
+
+### T-026 - Catalogue description enrichment (off-loop, cached, injectable)
+
+Add `crates/ragent-connectors/src/catalogue_enrich.rs`, ported from
+`ragent_plugins::store_enrich` (FR-044): for each loaded entry whose `source` is a
+`github.com` `git+` source, derive
+`https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<subpath>/connector.json` (with
+`.claude-plugin/connector.json` tried after it) and fill only a blank `description` with
+the manifest's `description` (never overwriting a catalogue-declared value). The production
+`NetworkManifestSource` is lazy (no blocking client until first lookup), `https`-only
+redirects, bounded by a 10-second timeout and a 256 KiB body cap; a per-URL process-global
+cache (positive and negative, FIFO-bounded at 1024) keeps a re-open from re-fetching;
+`enrich_into` runs across a bounded thread pool (8 workers, at most 500 entries) reporting
+each resolved `ManifestUpdate` through a `Sync` sink. The TUI wires it the way the plugin
+browser does: start enrichment after `set_entries`, poll a shared result slot each
+housekeeping frame with a generation counter discarding stale results, apply only blank
+fields via a cursor-preserving re-filter, and render `loading details...` in the panel title
+while running.
+
+**Verify:** an entry with a git source and a manifest fixture gains a description; an entry
+whose catalogue description was set keeps it; a missing or failing manifest leaves the row
+alone; the title hint clears when the worker finishes.
+
+### T-027 - Sort every connector list alphabetically by id (shared comparator)
+
+Add `compare_connector_ids` and `sort_connectors` to `descriptor.rs` (FR-046): one
+case-insensitive id comparator with a byte-wise tiebreak, shared by every connector surface.
+`CatalogueBrowser::set_entries` sorts `all` on load (so a category filter narrows the
+already-sorted set); `render_list` sorts its rows by id after applying the category filter;
+`render_search` sorts its matching rows by id. All three read the same `compare_connector_ids`
+so their order cannot drift.
+
+**Verify:** `sort_connectors`/`compare_connector_ids` order by id (case-insensitive, byte
+tiebreak); the browser and both text reports render alphabetically whether filtered or not;
+the existing browse/list/search tests updated for the sorted first row.

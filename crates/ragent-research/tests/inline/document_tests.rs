@@ -459,7 +459,7 @@ fn render_search_engine_summary_counts_pages_pdfs_videos() {
 fn render_search_engine_summary_empty_when_no_web_sources() {
     let sources: Vec<Source> = vec![];
     let table = render_search_engine_summary(&sources);
-    assert!(table.is_empty());
+    assert_eq!(table, "");
 }
 
 #[test]
@@ -467,7 +467,7 @@ fn render_search_engine_summary_empty_when_no_engine_field() {
     // Web sources with empty search_engine should produce no table.
     let sources = [web_source("", "page")];
     let table = render_search_engine_summary(&sources);
-    assert!(table.is_empty());
+    assert_eq!(table, "");
 }
 
 #[test]

@@ -83,6 +83,12 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
     }
 
     let known = PLUGIN_SUBCOMMANDS.contains(&sub);
+    // `/plugins marketplace` is only recognised with a valid sub-subcommand
+    // (`show`, or `<codex|claude> add|remove|list`); anything else renders the
+    // usage block, exactly like an unrecognised subcommand (FR-014, FR-048).
+    if sub == "marketplace" && !ragent_plugins::marketplace_command_requested(rest) {
+        return Some(render_help(sub));
+    }
     // `help` and any unrecognised subcommand both render the usage block
     // (FR-014); a bare `/plugins` is handled above.
     if sub == "help" || !known {

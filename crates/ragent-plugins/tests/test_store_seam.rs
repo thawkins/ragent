@@ -83,8 +83,8 @@ fn the_codex_fixture_matches_the_compiled_default_and_an_installed_fixture() {
         .iter()
         .find(|e| e.id == "codex-time")
         .expect("codex-time entry present");
-    assert!(time.description.is_empty());
-    assert!(time.tags.is_empty());
+    assert_eq!(time.description, "");
+    assert_eq!(time.tags, [] as [std::string::String; 0]);
     assert!(time.homepage.is_none());
 }
 
@@ -110,8 +110,8 @@ fn the_claude_fixture_matches_the_compiled_default_and_an_installed_fixture() {
         .iter()
         .find(|e| e.id == "claude-time")
         .expect("claude-time entry present");
-    assert!(time.description.is_empty());
-    assert!(time.tags.is_empty());
+    assert_eq!(time.description, "");
+    assert_eq!(time.tags, [] as [std::string::String; 0]);
 }
 
 // -- Unknown / oversized / malformed endpoints are contained (FR-025) ---------

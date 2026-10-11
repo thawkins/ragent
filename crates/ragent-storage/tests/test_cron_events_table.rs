@@ -78,7 +78,7 @@ fn test_insert_get_one_shot_round_trip() {
     assert_eq!(row.schedule_raw, "at 2025-07-01T09:00:00Z");
     assert!(row.enabled);
     assert_eq!(row.next_due, "2025-07-01T09:00:00+00:00");
-    assert!(!row.created_at.is_empty());
+    assert_ne!(row.created_at, "");
     assert_eq!(row.last_fired, None);
 }
 

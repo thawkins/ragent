@@ -46,6 +46,7 @@ fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
         category: String::new(),
         tags: Vec::new(),
         source: String::new(),
+        marketplace: String::new(),
         provenance: Default::default(),
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),
@@ -338,7 +339,10 @@ async fn disable_disconnects_and_deregisters_exactly_its_servers() {
     );
     let statuses = session.statuses();
     assert_eq!(statuses[0].state, ConnectorLifecycleState::Disabled);
-    assert!(statuses[0].servers.is_empty());
+    assert_eq!(
+        statuses[0].servers,
+        [] as [ragent_connectors::ServerReport; 0]
+    );
 }
 
 // -- FR-026, FR-016: per-server independence and containment ----------------
@@ -484,7 +488,7 @@ async fn connect_refuses_when_the_connector_is_disabled() {
         .await
         .expect_err("disabled connector refuses connect");
     assert!(matches!(err, LifecycleError::Disabled(id) if id == "echo"));
-    assert!(connect.connect_calls().is_empty());
+    assert_eq!(connect.connect_calls(), [] as [std::string::String; 0]);
 }
 
 #[tokio::test]
@@ -738,8 +742,11 @@ async fn disabled_subsystem_discovers_and_connects_nothing() {
         .await;
 
     assert!(report.reports.is_empty());
-    assert!(connect.connect_calls().is_empty());
-    assert!(session.statuses().is_empty());
+    assert_eq!(connect.connect_calls(), [] as [std::string::String; 0]);
+    assert_eq!(
+        session.statuses(),
+        [] as [ragent_connectors::ConnectorStatus; 0]
+    );
 }
 
 // -- shutdown: session end disconnects everything ---------------------------
@@ -926,7 +933,10 @@ fn statuses_from_client_state_reports_a_disabled_connector_as_disabled() {
 
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].state, ConnectorLifecycleState::Disabled);
-    assert!(statuses[0].servers.is_empty());
+    assert_eq!(
+        statuses[0].servers,
+        [] as [ragent_connectors::ServerReport; 0]
+    );
 }
 
 /// One connected server of a multi-server connector is enough for the

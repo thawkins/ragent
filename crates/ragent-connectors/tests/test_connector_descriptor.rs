@@ -5,7 +5,7 @@ use ragent_config::{McpTransport, trigger::McpNotificationMode};
 use ragent_connectors::{
     ConnectorAuthShape, ConnectorDescriptor, ConnectorError, ConnectorId, ConnectorProvenance,
     ConnectorServer, UNSUP_COMMAND, UNSUP_SERVER_ID, UNSUP_TRANSPORT, UNSUP_URL, bridged_server_id,
-    connector_id_collides, server_id_collides,
+    compare_connector_ids, connector_id_collides, server_id_collides, sort_connectors,
 };
 
 /// A minimal stdio server with a real command (expressible).
@@ -30,6 +30,7 @@ fn descriptor_with_id(id: &str) -> ConnectorDescriptor {
         category: "developer".to_string(),
         tags: vec!["test".to_string()],
         source: "catalogue:test".to_string(),
+        marketplace: String::new(),
         provenance: ConnectorProvenance::Catalogue,
         auth: ConnectorAuthShape::None,
         auth_scope: Vec::new(),
@@ -225,7 +226,7 @@ fn test_descriptor_with_one_bad_server_keeps_label_and_one_good() {
 fn test_valid_descriptor_has_no_unsupported_labels() {
     let mut descriptor = descriptor_with_id("echo");
     descriptor.validate().expect("valid descriptor");
-    assert!(descriptor.unsupported.is_empty());
+    assert_eq!(descriptor.unsupported, [] as [std::string::String; 0]);
 }
 
 // --- Bridged ids and collision predicates ---------------------------------
@@ -296,4 +297,45 @@ fn test_descriptor_deserialises_with_defaults() {
     assert_eq!(descriptor.auth, ConnectorAuthShape::None);
     assert_eq!(descriptor.provenance, ConnectorProvenance::Catalogue);
     assert_eq!(descriptor.servers[0].transport, "stdio");
+}
+
+// --- sort_connectors / compare_connector_ids (FR-046) ----------------------
+
+#[test]
+fn test_sort_connectors_orders_by_id_alphabetically() {
+    let mut entries = vec![
+        descriptor_with_id("slack"),
+        descriptor_with_id("github"),
+        descriptor_with_id("google-drive"),
+    ];
+    sort_connectors(&mut entries);
+    let ids: Vec<&str> = entries.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["github", "google-drive", "slack"],
+        "ids sort alphabetically regardless of input order"
+    );
+}
+
+#[test]
+fn test_sort_connectors_is_case_insensitive_with_a_byte_tiebreak() {
+    let mut entries = vec![
+        descriptor_with_id("Zebra"),
+        descriptor_with_id("apple"),
+        descriptor_with_id("Apple"),
+    ];
+    sort_connectors(&mut entries);
+    let ids: Vec<&str> = entries.iter().map(|d| d.id.as_str()).collect();
+    // Case-insensitive on the id; the byte-wise tiebreak places the uppercase
+    // spelling of an equal-in-lowercase pair before the lowercase one.
+    assert_eq!(ids, vec!["Apple", "apple", "Zebra"]);
+}
+
+#[test]
+fn test_compare_connector_ids_is_a_total_order() {
+    use std::cmp::Ordering;
+    assert_eq!(compare_connector_ids("github", "slack"), Ordering::Less);
+    assert_eq!(compare_connector_ids("slack", "github"), Ordering::Greater);
+    assert_eq!(compare_connector_ids("GitHub", "github"), Ordering::Less);
+    assert_eq!(compare_connector_ids("github", "github"), Ordering::Equal);
 }

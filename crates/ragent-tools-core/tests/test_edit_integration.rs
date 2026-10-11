@@ -674,7 +674,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
     let log_path = files.first().unwrap().path();
     let content = std::fs::read_to_string(&log_path).unwrap();
     let lines: Vec<&str> = content.lines().collect();
-    assert!(!lines.is_empty());
+    assert_ne!(lines, [] as [&str; 0]);
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(entry["tool"], "edit");
     assert_eq!(entry["outcome"], "success (dry-run preview)");
@@ -727,7 +727,7 @@ async fn test_edit_log_failure_writes_jsonl() {
     let log_path = files.first().unwrap().path();
     let content = std::fs::read_to_string(&log_path).unwrap();
     let lines: Vec<&str> = content.lines().collect();
-    assert!(!lines.is_empty());
+    assert_ne!(lines, [] as [&str; 0]);
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(entry["tool"], "edit");
     assert!(

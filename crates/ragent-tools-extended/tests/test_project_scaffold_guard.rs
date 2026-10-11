@@ -37,7 +37,10 @@ fn assert_directory_not_empty(err: ScaffoldError, expected: &[&str]) {
 fn test_guard_empty_directory_yields_no_entries() {
     let target = temp_target("guard-empty");
     let entries = read_target_entries(target.path()).expect("readable");
-    assert!(entries.is_empty());
+    assert_eq!(
+        entries,
+        [] as [ragent_tools_extended::project_scaffold::FilePathEntry; 0]
+    );
 }
 
 #[test]

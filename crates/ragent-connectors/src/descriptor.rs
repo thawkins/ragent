@@ -289,13 +289,22 @@ impl ConnectorServer {
     }
 
     /// The parsed transport, or `None` when ragent does not speak it.
+    ///
+    /// Allocation-free: the transport token is compared case-insensitively in
+    /// place rather than lowercased into a fresh `String`, because this method
+    /// is called from [`Self::is_supported`], [`Self::unsupported_label`], and
+    /// [`Self::to_mcp_config`] (several times per server per render).
     #[must_use]
     pub fn transport_kind(&self) -> Option<McpTransport> {
-        match self.transport.trim().to_ascii_lowercase().as_str() {
-            "" | "stdio" => Some(McpTransport::Stdio),
-            "sse" => Some(McpTransport::Sse),
-            "http" => Some(McpTransport::Http),
-            _ => None,
+        let transport = self.transport.trim();
+        if transport.is_empty() || transport.eq_ignore_ascii_case("stdio") {
+            Some(McpTransport::Stdio)
+        } else if transport.eq_ignore_ascii_case("sse") {
+            Some(McpTransport::Sse)
+        } else if transport.eq_ignore_ascii_case("http") {
+            Some(McpTransport::Http)
+        } else {
+            None
         }
     }
 
@@ -370,6 +379,16 @@ pub struct ConnectorDescriptor {
     /// Where the connector came from (catalogue origin or install source).
     #[serde(default)]
     pub source: String,
+    /// The display name of the marketplace this entry was fetched from
+    /// (FR-043).
+    ///
+    /// Set at fetch time (never carried by a catalogue document) so the browse
+    /// panel can name which configured marketplace contributed each row. A base
+    /// endpoint (a config override or the compiled default) resolves to the
+    /// catalogue label; an added marketplace resolves to the name it was added
+    /// under. Blank for a locally installed connector or a hand-built entry.
+    #[serde(default)]
+    pub marketplace: String,
     /// Install provenance (catalogue, local, url).
     #[serde(default)]
     pub provenance: ConnectorProvenance,
@@ -503,6 +522,28 @@ pub fn server_id_collides<'a>(
     existing_ids
         .into_iter()
         .any(|existing| existing == bridged_id)
+}
+
+/// The total order two connector ids sort by, alphabetically (FR-046).
+///
+/// Case-insensitive on the id, with a byte-wise tiebreak so two ids differing only
+/// in case keep a stable, input-order-independent position. One comparator is shared
+/// by every connector surface (the browse panel, `/connectors list`, and
+/// `/connectors search`) so they cannot disagree about the display order.
+#[must_use]
+pub fn compare_connector_ids(a: &str, b: &str) -> std::cmp::Ordering {
+    a.to_lowercase()
+        .cmp(&b.to_lowercase())
+        .then_with(|| a.cmp(b))
+}
+
+/// Sort connector descriptors alphabetically by connector id (FR-046).
+///
+/// Applied to every connector/catalogue list before it is rendered, so a category
+/// filter narrows an already-sorted set and the displayed order never depends on the
+/// fetch order.
+pub fn sort_connectors(descriptors: &mut [ConnectorDescriptor]) {
+    descriptors.sort_by(|a, b| compare_connector_ids(a.id.as_str(), b.id.as_str()));
 }
 
 /// The default transport label a server with no declared transport uses.

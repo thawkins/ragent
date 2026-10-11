@@ -188,12 +188,10 @@ impl CategoryFilterState {
     /// does not depend on the input order. The selection starts on `ALL`.
     #[must_use]
     pub fn from_categories<'a>(categories: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut state = Self::new();
-        for category in categories {
-            state.add_category(category);
+        Self {
+            selected: CategoryFilter::All,
+            available: dedup_sorted_categories(categories),
         }
-        state.sort_categories();
-        state
     }
 
     /// The distinct category set, sorted, with `ALL` implied rather than listed
@@ -336,9 +334,25 @@ pub fn build_categories<'a>(
     installed: impl IntoIterator<Item = &'a ConnectorDescriptor>,
     catalogue: impl IntoIterator<Item = &'a ConnectorDescriptor>,
 ) -> Vec<String> {
+    dedup_sorted_categories(
+        installed
+            .into_iter()
+            .chain(catalogue)
+            .map(|descriptor| descriptor.category.as_str()),
+    )
+}
+
+/// Deduplicate category names case-insensitively (the first spelling seen wins),
+/// drop blank ones, and sort by a case-insensitive key so the menu order does not
+/// depend on the input order.
+///
+/// The one shared implementation of the dedup-and-sort rule: [`build_categories`]
+/// and [`CategoryFilterState::from_categories`] both delegate here, so the browse
+/// panel's menu order cannot drift between the two construction paths.
+fn dedup_sorted_categories<'a>(categories: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut by_key: BTreeMap<String, String> = BTreeMap::new();
-    for descriptor in installed.into_iter().chain(catalogue) {
-        let category = descriptor.category.trim();
+    for category in categories {
+        let category = category.trim();
         if category.is_empty() {
             continue;
         }
@@ -411,6 +425,29 @@ pub struct CatalogueBrowser {
     pub refresh: bool,
     /// The most recent install result shown in the panel footer.
     pub last_install: Option<String>,
+    /// Block-cursor position within the navigator's rows. Row `0` is the `ALL`
+    /// sentinel; rows `1..=categories().len()` are the derived categories in
+    /// sorted order. Kept in sync with the active category by
+    /// [`Self::category_select_row`] and [`Self::apply_category_cursor`].
+    pub category_cursor: usize,
+    /// Index of the first navigator row shown in the navigator viewport.
+    ///
+    /// The wheel over the navigator moves this directly, so the viewport can
+    /// scroll away from the category cursor without changing the active
+    /// category; a keyboard move pulls it back so the cursor stays visible.
+    pub category_scroll: usize,
+    /// Height in rows of the navigator viewport, recorded by the renderer on
+    /// every frame. The key and mouse handlers read it back to keep the
+    /// category cursor visible after a move and to clamp the wheel scroll; a
+    /// `0` (before the first render) parks the scroll at the top.
+    pub category_viewport: usize,
+    /// Whether the category navigator holds keyboard focus.
+    ///
+    /// `false` - the result list focused - is the initial state; the focus key
+    /// (`Tab`) toggles it. `Up`/`Down` route to whichever pane holds focus and
+    /// the focused pane's cursor is rendered distinctly; the search query is
+    /// edited by printable characters in either state.
+    pub nav_focused: bool,
     /// A category filter requested when the panel was opened, held until the
     /// catalogue lands and its real category set is known (FR-041).
     ///
@@ -421,6 +458,15 @@ pub struct CatalogueBrowser {
     /// validated, and refuse an unknown name in the footer instead of leaving the
     /// panel silently empty.
     pending_category: Option<CategoryFilter>,
+    /// Whether the off-loop manifest-metadata enrichment (FR-044) has finished
+    /// for the current catalogue.
+    ///
+    /// The catalogue lands first, then each entry's own manifest is fetched
+    /// off-loop to fill the description the catalogue omitted; while this is
+    /// `false` the panel renders a small `loading details...` hint in its title so
+    /// a still-blank description reads as pending rather than missing. It is set
+    /// `true` once the enrichment for the currently loaded catalogue has drained.
+    pub enriching: bool,
 }
 
 impl Default for CatalogueBrowser {
@@ -449,7 +495,12 @@ impl CatalogueBrowser {
             status: CatalogueBrowseStatus::Loading,
             refresh,
             last_install: None,
+            category_cursor: 0,
+            category_scroll: 0,
+            category_viewport: 0,
+            nav_focused: false,
             pending_category: None,
+            enriching: false,
         };
         if !prefill.is_empty() {
             browser.set_query(prefill.to_string());
@@ -524,17 +575,228 @@ impl CatalogueBrowser {
     /// [`CatalogueBrowseStatus::Empty`] otherwise; the category set and the
     /// filter are re-derived so any prefilled query still constrains the result
     /// set.
+    ///
+    /// The entries are sorted alphabetically by connector id (FR-046) before the
+    /// filter is derived, so the displayed order is independent of the fetch order
+    /// and a category filter narrows the already-sorted set.
     pub fn set_entries(&mut self, entries: Vec<ConnectorDescriptor>, skipped: usize) {
         self.all = entries;
+        crate::descriptor::sort_connectors(&mut self.all);
         self.skipped = skipped;
         self.status = if self.all.is_empty() {
             CatalogueBrowseStatus::Empty
         } else {
             CatalogueBrowseStatus::Ready
         };
+        let previous = self.categories.filter().label().to_string();
         self.categories =
             CategoryFilterState::from_descriptors(std::iter::empty(), self.all.iter());
+        // Keep a still-declared category selected across the refresh; a category
+        // no entry declares falls back to `ALL` so the navigator never shows a
+        // row that selects nothing, and the cursor is placed on the surviving
+        // selection's row.
+        let _ = self.categories.select_when_known(&previous);
+        self.sync_category_cursor_from_filter();
         self.apply_filter();
+    }
+
+    /// Place the category cursor on the row of the currently selected filter,
+    /// resetting the navigator scroll to the top.
+    ///
+    /// Called after the filter is changed outside the navigator's own row
+    /// bookkeeping (a fresh catalogue landing, or the report-style category
+    /// cycling helper), so the navigator cursor and scroll always spell the
+    /// active category.
+    pub fn sync_category_cursor_from_filter(&mut self) {
+        self.category_cursor = self.category_row_of(self.categories.filter().label());
+        self.category_scroll = 0;
+    }
+
+    /// The active category label (`ALL` when unfiltered).
+    #[must_use]
+    pub fn active_category(&self) -> &str {
+        self.categories.filter().label()
+    }
+
+    /// The number of navigator rows: the `ALL` sentinel plus each derived
+    /// category.
+    #[must_use]
+    pub fn category_row_count(&self) -> usize {
+        1 + self.categories.categories().len()
+    }
+
+    /// The label of navigator row `row`: `ALL` for row `0`, else the sorted
+    /// category at that row; an out-of-range row reads as `ALL` so a renderer or
+    /// a mouse hit test can never index past the set.
+    #[must_use]
+    pub fn category_row_label(&self, row: usize) -> &str {
+        match row
+            .checked_sub(1)
+            .and_then(|index| self.categories.categories().get(index))
+        {
+            Some(label) => label.as_str(),
+            None => ALL_CATEGORY,
+        }
+    }
+
+    /// The navigator row currently under the category cursor, clamped to the row
+    /// count.
+    #[must_use]
+    pub fn category_cursor_row(&self) -> usize {
+        self.category_cursor
+            .min(self.category_row_count().saturating_sub(1))
+    }
+
+    /// Move the category cursor up one row and apply the newly highlighted
+    /// category on the same keypress. Returns whether the cursor moved.
+    pub fn category_move_up(&mut self) -> bool {
+        if self.category_cursor == 0 {
+            return false;
+        }
+        self.category_cursor -= 1;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Move the category cursor down one row and apply the newly highlighted
+    /// category on the same keypress. Returns whether the cursor moved.
+    pub fn category_move_down(&mut self) -> bool {
+        if self.category_cursor + 1 >= self.category_row_count() {
+            return false;
+        }
+        self.category_cursor += 1;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Select navigator row `row` and apply it. Returns `false` when `row` is
+    /// out of range, leaving the selection unchanged, so a stale mouse hit test
+    /// cannot select a row that does not exist.
+    pub fn category_select_row(&mut self, row: usize) -> bool {
+        if row >= self.category_row_count() {
+            return false;
+        }
+        self.category_cursor = row;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+        true
+    }
+
+    /// Move the navigator viewport by `delta` rows without touching the category
+    /// cursor or the active category.
+    ///
+    /// The wheel over the navigator calls this. `delta` is positive to reveal
+    /// rows further down and negative to scroll back up. It is deliberately
+    /// independent of [`Self::category_cursor`], so the active category (and the
+    /// result list) stays exactly as it was; the scroll is clamped to
+    /// `0..=rows - 1`, so it never points past the last row.
+    pub fn category_scroll_by(&mut self, delta: i16) {
+        let rows = self.category_row_count();
+        if rows == 0 {
+            self.category_scroll = 0;
+            return;
+        }
+        let max = rows - 1;
+        let next = if delta.is_negative() {
+            self.category_scroll
+                .saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.category_scroll.saturating_add(delta as usize)
+        };
+        self.category_scroll = next.min(max);
+    }
+
+    /// Scroll the result viewport by moving the result cursor `delta` rows
+    /// (mirroring the result list's wheel behaviour).
+    ///
+    /// The result list is cursor-driven: the renderer draws the block cursor and
+    /// lets the list keep that row visible, so moving the cursor by a small step
+    /// is exactly how the wheel scrolls the result column. The cursor is clamped
+    /// to the filtered set, and the active category is left untouched.
+    pub fn scroll_results_by(&mut self, delta: i16) {
+        let rows = self.filtered.len();
+        if rows == 0 {
+            return;
+        }
+        self.cursor = if delta.is_negative() {
+            self.cursor.saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.cursor.saturating_add(delta as usize).min(rows - 1)
+        };
+    }
+
+    /// Clear the category filter to `ALL` and re-derive the results.
+    pub fn category_clear(&mut self) {
+        self.category_cursor = 0;
+        self.apply_category_cursor();
+        self.ensure_category_visible(self.category_viewport);
+    }
+
+    /// Apply the category under the cursor and hand focus back to the result
+    /// list.
+    ///
+    /// This is the navigator's `ENTER`: it re-applies the highlighted category
+    /// (idempotent when the cursor did not move) and clears
+    /// [`Self::nav_focused`], so the next `Up`/`Down` routes to the result list.
+    /// It installs nothing, so `ENTER` over the navigator can never write to the
+    /// store.
+    pub fn category_confirm(&mut self) {
+        self.apply_category_cursor();
+        self.nav_focused = false;
+    }
+
+    /// Select a category by name without validating it against the known set.
+    ///
+    /// The navigator rows are the known categories (or `ALL`), so a selection
+    /// driven by them cannot name an unknown category; `CategoryFilter::of`
+    /// folds `ALL` (any case) and blank names to the unfiltered view.
+    fn select_row_name(&mut self, name: &str) {
+        self.categories.select_by_name(name);
+    }
+
+    /// Apply the category at the current cursor row to the result set.
+    ///
+    /// Selecting a category re-derives the visible results from [`Self::all`] in
+    /// memory and resets the result cursor; it issues no network request and
+    /// enables, connects, or installs nothing.
+    fn apply_category_cursor(&mut self) {
+        let row = self.category_cursor_row();
+        self.category_cursor = row;
+        let label = self.category_row_label(row).to_string();
+        self.select_row_name(&label);
+        self.apply_filter();
+    }
+
+    /// Adjust [`Self::category_scroll`] so the category cursor stays inside a
+    /// navigator viewport of `viewport` rows.
+    pub fn ensure_category_visible(&mut self, viewport: usize) {
+        let rows = self.category_row_count();
+        if viewport == 0 || rows == 0 {
+            self.category_scroll = 0;
+            return;
+        }
+        let cursor = self.category_cursor.min(rows - 1);
+        if cursor < self.category_scroll {
+            self.category_scroll = cursor;
+        } else if cursor >= self.category_scroll + viewport {
+            self.category_scroll = cursor + 1 - viewport;
+        }
+        self.category_scroll = self.category_scroll.min(rows.saturating_sub(viewport));
+    }
+
+    /// The navigator row carrying `label`: row `0` for the `ALL` sentinel, else
+    /// the sorted position plus one; an unknown label reads as `ALL`.
+    fn category_row_of(&self, label: &str) -> usize {
+        if label.eq_ignore_ascii_case(ALL_CATEGORY) {
+            return 0;
+        }
+        self.categories
+            .categories()
+            .iter()
+            .position(|category| category.eq_ignore_ascii_case(label))
+            .map_or(0, |index| index + 1)
     }
 
     /// Record a failed fetch for inline rendering.
@@ -634,6 +896,64 @@ impl CatalogueBrowser {
         if !self.select_category(category.label()) {
             self.last_install = Some(format!("unknown category `{}`", category.label()));
         }
+    }
+
+    /// Apply one enrichment update ([`crate::catalogue_enrich::ManifestUpdate`]) to
+    /// the entry it names, then re-apply the filter so a newly filled description
+    /// becomes searchable (FR-044).
+    ///
+    /// Fills only a description the catalogue left blank, so an entry that already
+    /// declared one keeps it. A no-op when no entry carries `id`.
+    ///
+    /// Unlike a user edit, a background enrichment must not disturb the browsing
+    /// position: matching uses entry id/name/description/category/tags, and an
+    /// enrichment can only *add* text, so the result set is unchanged; the cursor
+    /// and scroll are preserved across the re-filter. Without this, the per-entry
+    /// enrichment stream would bounce the cursor back to row 0 on every resolved
+    /// manifest, making scrolling impossible while the enrichment runs.
+    pub fn apply_manifest_update(&mut self, update: crate::catalogue_enrich::ManifestUpdate) {
+        let Some(position) = self
+            .all
+            .iter()
+            .position(|entry| entry.id.as_str() == update.id)
+        else {
+            return;
+        };
+        let entry = &mut self.all[position];
+        let mut changed = false;
+        if entry.description.trim().is_empty() {
+            if let Some(description) = update.meta.description {
+                entry.description = description;
+                changed = true;
+            }
+        }
+        if changed {
+            self.reapply_filter_preserving_cursor();
+        }
+    }
+
+    /// Mark the off-loop manifest enrichment finished (FR-044).
+    ///
+    /// Clears the title's `loading details...` hint; the accumulated updates have
+    /// already been applied through [`Self::apply_manifest_update`].
+    pub fn finish_enrichment(&mut self) {
+        self.enriching = false;
+    }
+
+    /// Re-derive [`Self::filtered`] like [`Self::apply_filter`], but keep the
+    /// user's browsing position: the cursor is placed on the same underlying entry
+    /// as before the re-filter (when that entry still matches).
+    ///
+    /// Used by background enrichment, which may refine a row's description but
+    /// never removes an entry from the result set. If the previously selected
+    /// entry is somehow gone, the cursor stays at its filtered-index position
+    /// clamped to the new set, so the panel never leaps to the top mid-scroll.
+    fn reapply_filter_preserving_cursor(&mut self) {
+        let selected_all_index = self.filtered.get(self.cursor).copied();
+        self.apply_filter();
+        self.cursor = selected_all_index
+            .and_then(|index| self.filtered.iter().position(|&i| i == index))
+            .unwrap_or(0);
     }
 
     /// Re-derive [`Self::filtered`] from [`Self::all`], the query, and the

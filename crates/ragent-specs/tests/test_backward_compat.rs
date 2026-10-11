@@ -205,7 +205,7 @@ async fn test_legacy_spec_read() {
     assert_eq!(spec.title, "Legacy Feature");
     assert_eq!(spec.status, SpecStatus::Draft);
     // feedback_md should default to empty (no FEEDBACK.md).
-    assert!(spec.feedback_md.is_empty());
+    assert_eq!(spec.feedback_md, "");
 }
 
 #[tokio::test]
@@ -342,5 +342,5 @@ async fn test_real_fixture_discover_and_read() {
         testspec.title
     );
     // No new artifacts should be loaded (feedback_md is empty).
-    assert!(testspec.feedback_md.is_empty());
+    assert_eq!(testspec.feedback_md, "");
 }

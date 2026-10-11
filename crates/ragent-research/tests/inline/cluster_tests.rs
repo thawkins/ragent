@@ -79,8 +79,8 @@ fn build_payload_is_empty_for_no_sources() {
     let (dir, name) = tmp_root();
     std::fs::create_dir_all(dir.path().join("cluster-test/sources")).expect("create sources");
     let payload = build_cluster_payload_sync(dir.path(), &name, None).expect("build");
-    assert!(payload.text.is_empty());
-    assert!(payload.files.is_empty());
+    assert_eq!(payload.text, "");
+    assert_eq!(payload.files, [] as [std::string::String; 0]);
     assert_eq!(
         payload.max_bytes,
         estimate_max_payload_bytes(DEFAULT_CONTEXT_WINDOW_TOKENS)

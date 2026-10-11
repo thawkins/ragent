@@ -149,7 +149,7 @@ async fn gather_emits_local_sources_with_zero_padded_body_paths() {
         .gather(&root(), "alpha content", None, &cfg)
         .await
         .unwrap();
-    assert!(!sources.is_empty());
+    assert_ne!(sources, [] as [crate::source::Source; 0]);
     for (i, src) in sources.iter().enumerate() {
         let Source::Local {
             body_path,

@@ -365,7 +365,7 @@ fn test_file_deps() {
     assert_eq!(dependents[0], file_id);
 
     let no_deps = store.get_dependents("nonexistent.rs").unwrap();
-    assert!(no_deps.is_empty());
+    assert_eq!(no_deps, [] as [i64; 0]);
 }
 
 #[test]

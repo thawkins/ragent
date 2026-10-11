@@ -437,7 +437,7 @@ async fn test_govcreate_runner_fr019_cancel_before_any_stage() {
         !run.target_folder.exists(),
         "no scaffold writes after cancel"
     );
-    assert!(stages.calls().is_empty());
+    assert_eq!(stages.calls(), [] as [&str; 0]);
 }
 
 #[tokio::test]
@@ -770,6 +770,6 @@ fn test_govcreate_progress_render_nfr005_shapes() {
 
     // Stage labels exist for every id the runner can emit.
     for id in ["guard", "scaffold", "acquire", "extract", "author", "write"] {
-        assert!(!stage_label(id).is_empty());
+        assert_ne!(stage_label(id), "");
     }
 }

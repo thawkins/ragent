@@ -8,6 +8,7 @@ description = "Shared surface helpers for the ragent plugin and connector comman
 
 [dependencies]
 ragent-config = { path = "../ragent-config" }
+reqwest = { workspace = true, features = ["blocking"] }
 serde_json = "1"
 tracing = { workspace = true }
 

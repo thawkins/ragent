@@ -175,7 +175,7 @@ fn stage_local_directory_installs_an_enabled_connector() {
     assert!(store.join("echo").join(MANIFEST_FILE).is_file());
 
     // Discovery finds the installed connector, enabled.
-    let found = ragent_connectors::scan_dirs(dirs(&tree));
+    let found = ragent_connectors::scan_dirs(&dirs(&tree));
     assert_eq!(found.len(), 1);
     assert!(found[0].enabled);
 }

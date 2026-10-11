@@ -15,7 +15,7 @@ fn record_round_trips_and_reports_running() {
     assert_eq!(record.pid, std::process::id());
     assert_eq!(record.status, "running");
     assert!(record.is_unclean());
-    assert!(!record.core_dump_hint.is_empty());
+    assert_ne!(record.core_dump_hint, "");
 }
 
 #[test]

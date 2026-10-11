@@ -224,10 +224,22 @@ fn test_parse_omitted_fields_default_to_empty() {
     let minimal = r#"{"components": [{"name": "Gateway", "responsibilities": []}]}"#;
     let structure = parse_architecture_response(minimal).expect("minimal JSON must parse");
     assert_eq!(structure.components.len(), 1);
-    assert!(structure.interfaces.is_empty());
-    assert!(structure.data_stores.is_empty());
-    assert!(structure.external_dependencies.is_empty());
-    assert!(structure.relationships.is_empty());
+    assert_eq!(
+        structure.interfaces,
+        [] as [ragent_tools_extended::archdoc::Interface; 0]
+    );
+    assert_eq!(
+        structure.data_stores,
+        [] as [ragent_tools_extended::archdoc::DataStore; 0]
+    );
+    assert_eq!(
+        structure.external_dependencies,
+        [] as [ragent_tools_extended::archdoc::ExternalDependency; 0]
+    );
+    assert_eq!(
+        structure.relationships,
+        [] as [ragent_tools_extended::archdoc::Relationship; 0]
+    );
 }
 
 // ===========================================================================
@@ -282,12 +294,27 @@ fn test_fallback_sanitises_and_empties() {
     // "My Design v2" sanitises to "My-Design-v2"; ".md" and "/" yield no name.
     assert_eq!(structure.components.len(), 1);
     assert_eq!(structure.components[0].name, "My-Design-v2");
-    assert!(structure.components[0].responsibilities.is_empty());
+    assert_eq!(
+        structure.components[0].responsibilities,
+        [] as [std::string::String; 0]
+    );
     // The fallback never fabricates interfaces/stores/relationships.
-    assert!(structure.interfaces.is_empty());
-    assert!(structure.data_stores.is_empty());
-    assert!(structure.external_dependencies.is_empty());
-    assert!(structure.relationships.is_empty());
+    assert_eq!(
+        structure.interfaces,
+        [] as [ragent_tools_extended::archdoc::Interface; 0]
+    );
+    assert_eq!(
+        structure.data_stores,
+        [] as [ragent_tools_extended::archdoc::DataStore; 0]
+    );
+    assert_eq!(
+        structure.external_dependencies,
+        [] as [ragent_tools_extended::archdoc::ExternalDependency; 0]
+    );
+    assert_eq!(
+        structure.relationships,
+        [] as [ragent_tools_extended::archdoc::Relationship; 0]
+    );
 }
 
 #[test]

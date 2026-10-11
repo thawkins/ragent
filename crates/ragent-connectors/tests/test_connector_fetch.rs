@@ -575,7 +575,10 @@ fn parses_recorded_claude_feed_when_present() {
     // No connector advertises more than one server from this feed, and every
     // server carries a usable id.
     for connector in &parsed.connectors {
-        assert!(!connector.servers.is_empty());
+        assert_ne!(
+            connector.servers,
+            [] as [ragent_connectors::ConnectorServer; 0]
+        );
         for server in &connector.servers {
             assert!(!server.id.trim().is_empty(), "every server has an id");
         }

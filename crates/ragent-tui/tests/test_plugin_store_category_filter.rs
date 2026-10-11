@@ -23,6 +23,7 @@ fn entry(id: &str, category: Option<&str>) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: category.map(str::to_string),
     }
 }
@@ -55,7 +56,8 @@ fn category_rows(browser: &PluginStoreBrowser) -> Vec<&str> {
 
 /// Four entries across two categories (`Web` and the two `Utility`/`utility`
 /// spellings) plus one uncategorised entry. The distinct rows fold the two
-/// `Utility` spellings into one and sort as `ALL`, `Utility`, `Web`.
+/// `Utility` spellings into one and sort as `ALL`, `Utility`, `Web`. The result
+/// set is sorted alphabetically by id on load (`alpha`, `beta`, `delta`, `gamma`).
 fn sample() -> Vec<StoreEntry> {
     vec![
         entry("alpha", Some("Web")),
@@ -91,12 +93,24 @@ fn the_category_set_is_distinct_case_insensitive_and_sorted_with_all_implied() {
     assert_eq!(browser.active_category(), "ALL");
 }
 
+#[test]
+fn tags_do_not_form_navigator_rows() {
+    // FR-021 (tag-derived rows) is withdrawn: only a declared `category` forms a
+    // navigator row, so a tag cannot add one and the set stays the two declared
+    // categories sorted case-insensitively.
+    let mut tagged = entry("alpha", Some("Web"));
+    tagged.tags = vec!["Analysis".to_string()];
+    let browser = loaded(vec![tagged, entry("beta", Some("Utility"))]);
+
+    assert_eq!(category_rows(&browser), ["Utility", "Web"]);
+}
+
 // -- Query and category compose (FR-003, A3) ----------------------------------
 
 #[test]
 fn the_query_and_the_category_compose() {
     let mut browser = loaded(sample());
-    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "gamma", "delta"]);
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
 
     assert!(browser.category_move_down(), "move onto `Utility`");
     assert_eq!(browser.active_category(), "Utility");
@@ -112,7 +126,7 @@ fn the_query_and_the_category_compose() {
 
     // Clearing the category restores the full index.
     browser.category_clear();
-    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "gamma", "delta"]);
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
 }
 
 #[test]
@@ -226,7 +240,7 @@ fn clear_sets_all_and_restores_the_full_set() {
 
     assert_eq!(browser.active_category(), "ALL");
     assert_eq!(browser.category_cursor_row(), 0);
-    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "gamma", "delta"]);
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
 }
 
 // -- Category change re-derives and resets the result cursor (FR-014) ------
@@ -268,14 +282,14 @@ fn clear_resets_the_result_cursor_to_the_first_survivor() {
 
 #[test]
 fn an_index_with_no_categories_yields_an_all_only_navigator() {
-    let mut browser = loaded(vec![entry("alpha", None), entry("beta", None)]);
+    let mut browser = loaded(vec![entry("beta", None), entry("alpha", None)]);
 
     assert_eq!(browser.category_row_count(), 1, "ALL only");
     assert_eq!(browser.category_row_label(0), "ALL");
     assert_eq!(category_rows(&browser).len(), 0);
     assert!(!browser.category_move_down(), "no row below ALL");
 
-    // Browsing still works normally (A7).
+    // Browsing still works normally (A7) and the set is sorted by id (FR-050).
     assert_eq!(filtered_ids(&browser), ["alpha", "beta"]);
 }
 

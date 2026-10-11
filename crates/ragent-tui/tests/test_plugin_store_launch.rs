@@ -39,6 +39,7 @@ fn entry(id: &str, category: Option<&str>) -> StoreEntry {
         dialect: None,
         tags: Vec::new(),
         homepage: None,
+        marketplace: String::new(),
         category: category.map(str::to_string),
     }
 }

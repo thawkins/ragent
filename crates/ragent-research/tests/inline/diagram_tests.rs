@@ -6,7 +6,10 @@ use super::*;
 
 #[test]
 fn extract_finding_edges_empty_and_single() {
-    assert!(extract_finding_edges(&[]).is_empty());
+    assert_eq!(
+        extract_finding_edges(&[]),
+        [] as [crate::diagram::FindingEdge; 0]
+    );
     let one = vec!["**Cross-reference / Dependencies:** Builds on Finding 1.".into()];
     assert!(
         extract_finding_edges(&one).is_empty(),

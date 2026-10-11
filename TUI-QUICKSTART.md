@@ -4,6 +4,18 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.132)
+
+- **Marketplace browsers and alphabetical catalogue ordering** — `/plugins codex`
+  and `/plugins claude`, and `/connectors claude`, each merge their base endpoint
+  with every marketplace added through the new `/plugins marketplace` /
+  `/connectors marketplace` commands, show a per-row **marketplace** column, resolve
+  a blank version/description from each entry's own repository manifest off the event
+  loop (with a `loading details...` title hint), and sort every list alphabetically by
+  id. The connector panel pins a dark-on-light column-heading row above its results,
+  and the plugin-store category navigator now lists only the categories the index
+  declares (entry tags/keywords no longer add rows).
+
 ## Highlights (v1.0.131)
 
 - **OpenHands-parity release** — pluggable execution backends (`/backend`,
@@ -24,8 +36,8 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 ## Highlights (v1.0.130)
 
 - **Plugin-store category navigator** — `/plugins codex` and `/plugins claude`
-  now open with a left-hand category navigator: `ALL` plus the distinct categories
-  and tags the fetched index declares. `Tab` moves focus between the navigator
+  now open with a left-hand category navigator: `ALL` plus the distinct
+  categories the fetched index declares. `Tab` moves focus between the navigator
   and the result list, `Up`/`Down` move-and-apply, `Enter` applies and returns
   focus to the results, `c` clears back to `ALL`, and the mouse can click a row or
   scroll the list. `/plugins codex <query> --category <name> --refresh` pre-selects
@@ -123,12 +135,20 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **`/connectors` slash family** — manage MCP-backed connectors (named
   integrations carrying a category, an auth shape, and one or more MCP servers)
   from the TUI: `list`, `claude`, `add`, `remove`, `enable`,
-  `disable`, `connect`, `disconnect`, `auth`, `test`, `stores`, and `help`.
+  `disable`, `connect`, `disconnect`, `auth`, `test`, `stores`, `marketplace`, and
+  `help`.
   `/connectors claude [query] [--category <name>] [--refresh]` opens a modal
   catalogue browser (query pre-fills the search field, `--category` pre-selects
-  the filter, `--refresh` bypasses the cache; press `c` in the panel to cycle the
-  category filter, and install with one key). `/connectors test <id>` runs an
-  isolated connect-and-invoke harness; `/connectors stores [--check]` reports
+  the filter, `--refresh` bypasses the cache; the panel carries the same left-hand
+  category navigator as the plugin-store panels (`Tab` focus, `Up`/`Down`
+  move, `Enter` apply, `c` clear), shows each row's id, category, the marketplace
+  it came from, and its description, merges the base catalogue and every
+  marketplace added with `/connectors marketplace claude add`, fills blank
+  descriptions from each entry's manifest off-loop, and installs with one key).
+  `/connectors marketplace show` lists the marketplaces configured for the
+  Claude catalogue; `/connectors marketplace claude list|add <source>|remove
+  <name>` manages them in your user-global config. `/connectors test <id>` runs
+  an isolated connect-and-invoke harness; `/connectors stores [--check]` reports
   each catalogue endpoint's provenance. The TUI drives the session-start
   connector session, so `enable`/`disable`/`connect`/`disconnect` take effect
   live and a connector is accepted by id, slug, or display name. A bare
@@ -302,8 +322,13 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   Claude `commands/*.md` prompt commands), skills, MCP servers, agents, and
   hooks. `/plugins codex` and `/plugins claude` browse each store's official
   marketplace and carry a left-hand category navigator (`ALL` plus the distinct
-  categories and tags the fetched index declares; `Tab` focus, `Up`/`Down` move,
-  `Enter` apply, `c` clear, or click/scroll with the mouse); `/plugins stores
+  categories the fetched index declares; `Tab` focus, `Up`/`Down` move,
+  `Enter` apply, `c` clear, or click/scroll with the mouse); `/plugins
+  marketplace <codex|claude> add <source>` registers extra marketplaces (an
+  `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory) and
+  the two panels fetch and merge every configured marketplace into the one panel
+  (`/plugins marketplace show` / `... list` list them; `... remove <name>` drops
+  one); `/plugins stores
   [--check]` reports each store's effective
   endpoint. Reports
   render in the message window with the `From: /plugins <sub>` header; a bare

@@ -1426,7 +1426,7 @@ fn test_build_envelope_summary_empty_by_default() {
     let html = r"<html><body><article><p>Text.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com", &metadata, true, 200);
-    assert!(envelope.summary.is_empty());
+    assert_eq!(envelope.summary, "");
 }
 
 // ===========================================================================
@@ -1506,7 +1506,7 @@ fn test_build_envelope_article_no_next_action_when_content_ok() {
     let envelope = build_envelope(html, "https://example.com/post", &metadata, true, 200);
     assert_eq!(envelope.page_type, PageType::Article);
     // Article with content_ok=true has no special next_action.
-    assert!(envelope.next_action.is_empty());
+    assert_eq!(envelope.next_action, "");
 }
 
 #[test]
@@ -1516,7 +1516,7 @@ fn test_build_envelope_article_next_action_when_content_not_ok() {
     let envelope = build_envelope(html, "https://example.com/post", &metadata, false, 200);
     assert_eq!(envelope.page_type, PageType::Article);
     // Article with content_ok=false -> generic failure message.
-    assert!(!envelope.next_action.is_empty());
+    assert_ne!(envelope.next_action, "");
     assert!(
         envelope.next_action.contains("try a different URL")
             || envelope.next_action.contains("try a different source")

@@ -162,7 +162,7 @@ fn test_new_agent_schema_requires_both_agent_and_task() {
 
 #[test]
 fn test_task_tool_family_guidance_constant_present() {
-    assert!(!TASK_TOOL_FAMILY_GUIDANCE.is_empty());
+    assert_ne!(TASK_TOOL_FAMILY_GUIDANCE, "");
     assert!(
         TASK_TOOL_FAMILY_GUIDANCE.contains("Task Tool Family"),
         "guidance must include the section header"
