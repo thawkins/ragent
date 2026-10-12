@@ -188,6 +188,9 @@ listed in the autocomplete menu, and documented in `/plugins help`.
 files into the plugin store, shall validate the manifest, shall record the plugin as
 **enabled** in the store ledger (so it loads at the next session start), and shall report
 the plugin id and dialect discovered; no plugin JavaScript executes during the install.
+When the source is a `git+<https-url>#<ref>[:<subpath>]` and `<ref>` names a branch,
+tag, or commit, the system shall check that ref out (not the remote's default branch)
+before selecting `<subpath>`, so the installed files are the ones that ref carries.
 
 ### Event-driven requirements
 

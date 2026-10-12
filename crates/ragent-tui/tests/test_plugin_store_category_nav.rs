@@ -1,12 +1,14 @@
 //! Keyboard-routing tests for the plugin-store category navigator (spec
-//! `catnav` T-005; FR-007, FR-008, FR-009, FR-010, FR-015, FR-017, FR-024).
+//! `catnav` T-005; FR-007, FR-008, FR-009, FR-010, FR-015, FR-017, FR-024; spec
+//! `pluginstores` FR-052).
 //!
 //! These drive the real `handle_key` path with an in-memory entry list, so they
-//! are deterministic and contact no store endpoint. They pin the two-pane focus
-//! model: `Tab` transfers focus, `Up`/`Down` route to the focused pane (applying
-//! the highlighted category over the navigator), `ENTER` over the navigator
-//! applies the category and focuses the result list without installing, and `c`
-//! clears the active category to `ALL`.
+//! are deterministic and contact no store endpoint. They pin the three-pane focus
+//! model (FR-052): `Tab`/`BackTab` cycle focus forward/backward through the result
+//! list, the category navigator, and the marketplace navigator, `Up`/`Down` route to
+//! the focused pane (applying the highlighted value over a navigator), `ENTER` over a
+//! navigator applies the value and focuses the result list without installing, and `c`
+//! clears the focused navigator's filter.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -92,24 +94,39 @@ async fn before_any_focus_change_up_and_down_move_the_result_cursor() {
 // -- Focus transfer routes Up/Down (FR-009, FR-017) ----------------------------
 
 #[tokio::test]
-async fn tab_transfers_focus_to_the_navigator_and_back() {
+async fn tab_cycles_focus_forward_through_the_three_panes() {
     let mut app = open();
     assert!(
-        !app.plugin_store_nav_focused(),
+        !app.plugin_store_nav_focused() && !app.plugin_store_marketplace_focused(),
         "the result list starts focused"
     );
 
     handle_key(&mut app, key(KeyCode::Tab)).await;
-    assert!(app.plugin_store_nav_focused(), "Tab focuses the navigator");
-
-    handle_key(&mut app, key(KeyCode::Tab)).await;
-    assert!(!app.plugin_store_nav_focused(), "Tab toggles back");
-
-    // BackTab is the reverse cycler and toggles the same two-pane focus.
-    handle_key(&mut app, key(KeyCode::BackTab)).await;
     assert!(
         app.plugin_store_nav_focused(),
-        "BackTab also transfers focus"
+        "Tab focuses the category pane"
+    );
+    assert!(!app.plugin_store_marketplace_focused());
+
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(
+        app.plugin_store_marketplace_focused(),
+        "Tab advances to the marketplace pane (FR-052)"
+    );
+    assert!(!app.plugin_store_nav_focused());
+
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(
+        !app.plugin_store_nav_focused() && !app.plugin_store_marketplace_focused(),
+        "Tab wraps back to the result list"
+    );
+
+    // BackTab is the reverse cycler: from the result list it lands on the
+    // marketplace pane (FR-052).
+    handle_key(&mut app, key(KeyCode::BackTab)).await;
+    assert!(
+        app.plugin_store_marketplace_focused(),
+        "BackTab cycles backwards to the marketplace pane"
     );
 }
 
@@ -269,16 +286,62 @@ async fn the_clear_key_sets_the_category_to_all_and_restores_the_full_set() {
 }
 
 #[tokio::test]
-async fn the_clear_key_also_works_while_the_result_list_is_focused() {
+async fn the_clear_key_clears_the_category_while_the_result_list_is_focused() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
     handle_key(&mut app, key(KeyCode::Down)).await;
-    handle_key(&mut app, key(KeyCode::Tab)).await; // focus back to the results
-    assert!(!app.plugin_store_nav_focused());
+    // Two more Tabs return focus to the result list (category -> marketplace ->
+    // results), so the clear key must fall back to clearing the category (FR-015).
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(
+        !app.plugin_store_nav_focused() && !app.plugin_store_marketplace_focused(),
+        "focus is on the result list"
+    );
 
     handle_key(&mut app, key(KeyCode::Char('c'))).await;
 
     assert_eq!(browser(&app).active_category(), "ALL");
+}
+
+#[tokio::test]
+async fn the_clear_key_clears_the_marketplace_when_that_pane_is_focused() {
+    let mut app = open();
+    // Give the entries marketplaces so the marketplace navigator has a real filter
+    // to clear (`open()` leaves them blank, an ALL-only navigator).
+    let mut entries = vec![
+        entry("codex-weather", Some("Web")),
+        entry("codex-time", Some("Utility")),
+    ];
+    entries[0].marketplace = "codex".to_string();
+    entries[1].marketplace = "community".to_string();
+    app.plugin_store
+        .as_mut()
+        .expect("panel open")
+        .set_entries(entries);
+
+    // Two Tabs move focus onto the marketplace pane (Results -> Categories ->
+    // Marketplaces) (FR-052).
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(app.plugin_store_marketplace_focused());
+
+    // Down applies the first marketplace row on the move.
+    handle_key(&mut app, key(KeyCode::Down)).await;
+    assert_eq!(browser(&app).active_marketplace(), "codex");
+    assert_eq!(filtered_ids(&app), ["codex-weather"]);
+
+    handle_key(&mut app, key(KeyCode::Char('c'))).await;
+
+    // `c` clears the focused navigator's filter, so the marketplace (not the
+    // category) goes back to `ALL` (FR-052).
+    assert_eq!(browser(&app).active_marketplace(), "ALL");
+    assert_eq!(browser(&app).marketplace_cursor_row(), 0);
+    assert_eq!(
+        browser(&app).active_category(),
+        "ALL",
+        "the category filter is untouched"
+    );
 }
 
 // -- Routing: printable keys still edit the query while navigator-focused (FR-017) --

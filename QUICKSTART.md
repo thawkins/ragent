@@ -983,7 +983,7 @@ Manage plugins from the TUI or the CLI:
 | `/plugins marketplace <store> list` | List one store's configured marketplaces (`<store>` is `codex` or `claude`) |
 | `/plugins marketplace <store> add <source> [--force]` | Add a marketplace to a store from an `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory; written to the user-global `plugins.stores.marketplaces` and used by the next `/plugins <store>` browse (`--force` replaces an existing marketplace of the same name) |
 | `/plugins marketplace <store> remove <name>` | Remove an added marketplace from a store |
-| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex plugin-marketplace browser; `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses the store cache. Each row shows the plugin id, version, the marketplace it came from, and the description (rows are sorted alphabetically by plugin id); the panel widens up to 140 columns |
+| `/plugins codex [query] [--category <name>] [--refresh]` | Open the interactive Codex plugin-marketplace browser; `query` pre-fills the search field, `--category` pre-selects a left-hand category row, and `--refresh` bypasses the store cache. Each row shows the plugin id, version, the marketplace it came from, and the description (rows are sorted alphabetically by plugin id); the panel widens up to 140 columns, and a search box on its bottom edge carries the live field plus an `[x] clear` button that wipes the query on click |
 | `/plugins claude [query] [--category <name>] [--refresh]` | Open the interactive Claude plugin-marketplace browser, with the same `query`, `--category`, and `--refresh` arguments (and the same per-row marketplace column) |
 | `/plugins help` | Show the usage block |
 
@@ -2119,8 +2119,29 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.133
+
+- **Reversed-video navigator titles on the `/plugins` browse panel (spec `pluginstores`
+  FR-004)** — each navigator now carries a one-row black-on-white header directly above
+  its `ALL` entry, `Categories` over the category navigator and `Marketplace` over the
+  marketplace navigator; the navigator's hit-test area is the row area below the header,
+  so a click or wheel on a header row is inert.
+- **Search box with a click-to-clear button on the `/plugins` browse panel (spec
+  `pluginstores` FR-051)** — the panel draws a `search:` field with a right-aligned
+  `[x] clear` button along its bottom edge; the field mirrors the live filter and the
+  button clears it in one click.
+- **`git+<url>#<ref>` installs check out the named ref (spec `plugins` FR-024)** — a
+  plugin installed from a `git+` source with an explicit non-default ref (for example the
+  `/plugins claude` store's `git+https://github.com/mongodb/agent-skills#main:plugins/mongodb`)
+  now checks that ref out instead of aborting with
+  `pathspec 'FETCH_HEAD' did not match any file(s) known to git`.
+
 ## Version 1.0.132
 
+- **Per-row plugin counts in the `/plugins` navigators (spec `pluginstores` FR-053)** —
+  each category and marketplace navigator row now shows the number of plugins under it as
+  `Name (N)`, counted over the full fetched index (the `ALL` row counts the whole index),
+  so the count is stable while a query or filter narrows the result list.
 - **Merged marketplace browsers and store enrichment** — the `/connectors claude`
   and `/plugins codex|claude` browse panels now merge the base catalogue endpoint
   and every marketplace added with `/connectors marketplace claude add` /
@@ -2182,6 +2203,16 @@ parsed into the required structure (FR-005/FR-006).
   marketplace's configured name, or the store label for the base endpoint) as
   its own column (`StoreEntry::marketplace`), and the browse panel widens from a
   100- to a 140-column ceiling so the column has room.
+- **Plugin-store marketplace filter (spec `pluginstores` FR-052)** — the browse
+  panel's left navigator column is split vertically into the category navigator
+  (top) and a new **marketplace navigator** (bottom), each listing `ALL` plus the
+  distinct values it declares. `Tab`/`BackTab` cycle focus through the result
+  list, the category navigator, and the marketplace navigator; `Up`/`Down` apply
+  the highlighted filter on the move, `Enter` applies and returns focus to the
+  results, and `c` clears the focused navigator's filter. The three filters
+  compose, so the result list shows only entries matching the query, the active
+  category, and the active marketplace together; click and wheel drive the
+  marketplace pane exactly as the category pane.
 - **`browser` tool removed** — the `browser` CDP tool and the whole
   `ragent-tools-extended::browser` module are deleted, along with `BrowserConfig`
   and the `tool_visibility.browser` switch. The registered tool count falls

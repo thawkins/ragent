@@ -47,6 +47,7 @@ turns that into: type the command, type a few letters, press `ENTER`.
 | Tools |    codex-shell    2.0.0  Codex      [installed] Shell wrappers    |
 |       |                                                                 |
 | Up/Down move  Enter install  Esc close                                  |
+| search: weather|                                         [x] clear      |
 +-------------------------------------------------------------------------+
 ```
 
@@ -150,8 +151,16 @@ rather than fabricated, and the browse panel fills it from the plugin's own mani
 (FR-049).
 
 **FR-004** - The system shall render the browse panel as a bordered, titled modal
-overlay containing a title line with the store name, a search-query field, a scrollable
-result list, and a footer listing the available keys, using only ASCII glyphs. The panel
+overlay containing a title line with the store name (and, once a filter is active, the
+active category and marketplace), a search-query field, a scrollable
+result list, a footer listing the available keys, a left-hand navigator column split into
+the category and marketplace navigators (FR-052), and a search box along the bottom
+edge of the inner area (FR-051), using only ASCII glyphs. Each navigator shall carry a
+one-row header directly above its `ALL` entry naming the navigation type (`Categories`
+over the category navigator and `Marketplace` over the marketplace navigator), painted in
+reversed video (black foreground on a white background) as a distinct header band, and the
+row area beneath that header shall be the navigator's hit-test area so a click or wheel on
+the header row is inert. The panel
 width shall clamp to at most 140 terminal columns (a third wider than the original 100)
 so the added marketplace column is comfortably visible, and each result row shall render
 the plugin id, version, the **marketplace the entry came from**, and the description,
@@ -213,8 +222,10 @@ installed.
 ### State-driven requirements
 
 **FR-015** - While the browse panel is open, the system shall route `Up` / `Down` /
-`ENTER` / `ESC` / `Backspace` and printable characters to the panel, shall swallow all
-other keys, and shall lock the message input field and the input queue.
+`ENTER` / `ESC` / `Backspace` / `Tab` / the clear key and printable characters to the
+panel, shall swallow all other keys, and shall lock the message input field and the input
+queue. `Tab`/`BackTab` cycle focus through the result list, the category navigator, and
+the marketplace navigator (FR-052).
 
 **FR-016** - While a store-index fetch is in flight, the system shall render a loading
 indicator in the panel and shall keep the event loop responsive so the agent turn and
@@ -352,6 +363,13 @@ guards.
 9. The panel never blocks the event loop: the agent turn and TUI animation continue
    during fetch and install.
 10. No non-ASCII glyphs are used anywhere in the panel.
+11. The left navigator column is split into a category navigator (top) and a marketplace
+    navigator (bottom), each listing `ALL` plus the distinct values the index declares
+    (FR-052).
+12. `Tab`/`BackTab` cycle focus through the result list, the category navigator, and the
+    marketplace navigator; `Up`/`Down`/`ENTER`/the clear key route to the focused pane and
+    the result list is filtered by the query, category, and marketplace together
+    (FR-052).
 
 ## Open Questions
 
@@ -510,6 +528,52 @@ sort (spec `catnav` FR-001), and the first-seen spelling a case-insensitive cate
 collision keeps is derived from the index's own order, never from the sorted result
 order.
 
+**FR-051** - The system shall render, on the bottom edge of the browse panel's inner
+area, a search box containing a leading `search:` label, the editable filter field, and
+a right-aligned clear button labelled `[x] clear`. The field shall mirror the live
+search query so the box and the result filter cannot drift; a query wider than the field
+shall be clipped from the left so the most recently typed characters stay visible. A
+left-click on the clear button shall clear the search filter, re-derive the full result
+set, and leave the active category unchanged; an already-empty query shall be a no-op.
+The clear button shall occupy the box's rightmost columns and its painted area shall be
+recorded for hit-testing, so a click is only acted on inside the button; on a row too
+narrow to hold both the label and the button the button is dropped rather than squeezing
+the field below a usable width. Only ASCII glyphs shall be drawn.
+
+**FR-052** - The browse panel's left-hand navigator column shall be split vertically into
+a category navigator in the upper half and a marketplace navigator in the lower half. The
+marketplace navigator shall list the `ALL` sentinel first, then the distinct, sorted,
+case-insensitive non-blank `marketplace` labels present in the loaded entries, and shall
+behave exactly like the category navigator: the row under its block cursor shows the
+active marketplace, moving the cursor up/down applies the highlighted marketplace on the
+same keypress, `ENTER` applies it and transfers focus to the result list, and a clear key
+resets it to `ALL`. The panel shall have three focusable panes - the result list, the
+category navigator, and the marketplace navigator - and `Tab`/`BackTab` shall cycle focus
+forward/backward through them (`Results` -> `Categories` -> `Marketplaces` -> `Results`);
+`Up`/`Down`, `ENTER`, and the clear key shall route to whichever pane holds focus, and the
+focused pane's cursor shall be rendered distinctly. A left-click on a marketplace row
+shall select, apply, and focus the marketplace pane, and a wheel over the marketplace
+navigator shall scroll its viewport without changing the active marketplace. An entry is
+shown only when it matches the search query, the active category, *and* the active
+marketplace; the marketplace filter composes with the query and category filters the same
+way they compose with each other, and an entry with a blank marketplace is visible only
+under `ALL`. A marketplace no loaded entry declares shall not be presented as a row, and
+a marketplace that survives a re-fetch shall be retained while one that vanishes shall
+fall back to `ALL`. The navigator shall issue no network request, install nothing, and
+execute no plugin JavaScript.
+
+**FR-053** - The system shall append the number of loaded entries a navigator row covers
+to that row's label as ` <name> (<N>)`, on both the category and the marketplace
+navigator. The count shall be derived from the full fetched index (the entries behind
+[`StoreEntry::category`] / [`StoreEntry::marketplace`], folding case-insensitively
+exactly like the row's own predicate), not from the currently filtered result list, so
+it stays stable while a search query, category, or marketplace filter narrows the
+results. The `ALL` row shall count every loaded entry; a category-less or
+marketplace-less index shall still render a counted `ALL (0)` row, and a still-loading
+index shall render `ALL (0)`. A blank marketplace is never a row, so its count is only
+ever subsumed by `ALL`. Counting shall issue no network request, install nothing, and
+execute no plugin JavaScript.
+
 ### Default store browser functional tests
 
 **FR-032** - The system shall provide automated tests that verify the store browser is
@@ -573,6 +637,7 @@ the suite performs no live network access and installs nothing from the real cat
 - `T-027` - Add `/plugins marketplace <store> add|remove|list`, the source-form resolver (`owner/repo`, `git@github.com:...`, `https://`, local directory), and the `plugins.stores.marketplaces` user-global ledger (FR-048).
 - `T-028` - Fetch and merge every marketplace configured for a store into the one browse panel, deduplicating by entry id (FR-048).
 - `T-029` - Attribute every fetched entry to the marketplace it came from and render that marketplace name as a per-row column, widening the browse panel to a 140-column ceiling (FR-004, FR-048).
+- `T-032` - Split the browse panel's left navigator column vertically into the category and marketplace navigators, add a marketplace filter that composes with the query and category filters, and cycle focus through the three panes with `Tab`/`BackTab` (FR-004, FR-015, FR-052).
 
 ### T-029 - Per-row marketplace attribution and a wider panel
 
@@ -587,6 +652,26 @@ columns and the trailing `[installed]` marker are never pushed off the row (FR-0
 FR-048). Covered by `crates/ragent-plugins/tests/test_store_index.rs`
 (`marketplace_name_for`), `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`
 (fetch attribution) and `crates/ragent-tui/tests/test_plugin_store_panel.rs` (render).
+
+### T-032 - Split left navigator and add marketplace filter
+
+Replace `PluginStoreBrowser::nav_focused` with a three-state `StorePane`
+(`Results`/`Categories`/`Marketplaces`) so `Tab`/`BackTab` cycle focus through the result
+list, the category navigator, and a new marketplace navigator, and add a second
+`CategoryFilterState` (`marketplaces`) mirroring the category navigator's
+cursor/scroll/viewport and move/select/clear/confirm methods (FR-052). A single
+`matching_indices` helper folds the query, category, and marketplace predicates into one
+result set so the three filters compose; `rebuild_marketplaces` derives the
+marketplace rows on load and drops a marketplace the new index no longer declares.
+`crates/ragent-tui/src/layout.rs` splits the left column vertically into
+`render_plugin_store_navigator` (top) and `render_plugin_store_marketplace_navigator`
+(bottom), caches `plugin_store_marketplace_area`, paints each pane's cursor with the
+focused colour independently, and appends `-- marketplace <label>` to the title;
+`handle_plugin_store_mouse` routes a click/wheel over the marketplace pane (FR-004,
+FR-015). Covered by `crates/ragent-tui/tests/test_plugin_store_category_filter.rs`
+(marketplace filter model), `test_plugin_store_category_nav.rs` (three-pane focus),
+`test_plugin_store_category_mouse.rs` (marketplace click + wheel), and
+`test_plugin_store_panel.rs` (focused cursor + footer).
 
 ### T-026 - `/plugins marketplace show` marketplace listing
 

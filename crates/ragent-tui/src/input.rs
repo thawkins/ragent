@@ -289,25 +289,30 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // While the plugin-store browse panel is open it owns the keyboard. The
-    // panel has two focusable panes (spec `catnav` FR-009): the left category
-    // navigator and the result list. `Tab` transfers focus between them; `Up`/
-    // `Down` move the focused pane's cursor and, for the navigator, apply the
-    // highlighted category immediately (FR-007, FR-008, FR-017); `ENTER` over the
-    // navigator applies the highlighted category and focuses the result list
-    // without installing anything, while `ENTER` over the result list keeps the
-    // existing install behaviour (FR-010, FR-024); `c` clears the active category
-    // to `ALL` (FR-015); `Backspace` and `Esc` edit the query (and `Esc` on an
-    // empty query dismisses the panel), and printable characters type into the
-    // panel's own search field. Every other key is swallowed, nothing here
-    // mutates the message input buffer or the input queue, and the field stays
-    // locked (FR-007, FR-009, FR-017, FR-024). Placed before the queue modals so
-    // the panel has priority while it is open.
+    // panel has three focusable panes (spec `pluginstores` FR-052): the left column
+    // is split vertically into the category navigator (top) and the marketplace
+    // navigator (bottom), with the result list to their right. `Tab`/`BackTab` cycle
+    // forward/backward through `Results` -> `Categories` -> `Marketplaces` -> `Results`;
+    // `Up`/`Down` move the focused pane's cursor and, for either navigator, apply the
+    // highlighted filter immediately (FR-007, FR-008, FR-017, FR-052); `ENTER` over a
+    // navigator applies the highlighted filter and focuses the result list without
+    // installing anything, while `ENTER` over the result list keeps the existing
+    // install behaviour (FR-010, FR-024); `c` clears the focused navigator's filter to
+    // `ALL` (FR-015, FR-052); `Backspace` and `Esc` edit the query (and `Esc` on an
+    // empty query dismisses the panel), and printable characters type into the panel's
+    // own search field. Every other key is swallowed, nothing here mutates the message
+    // input buffer or the input queue, and the field stays locked (FR-007, FR-009,
+    // FR-017, FR-024). Placed before the queue modals so the panel has priority while
+    // it is open.
     if app.plugin_store.is_some() {
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => app.plugin_store_toggle_focus(),
+            KeyCode::Tab => app.plugin_store_focus_next(),
+            KeyCode::BackTab => app.plugin_store_focus_prev(),
             KeyCode::Up => {
                 if app.plugin_store_nav_focused() {
                     app.plugin_store_category_move_up();
+                } else if app.plugin_store_marketplace_focused() {
+                    app.plugin_store_marketplace_move_up();
                 } else {
                     app.plugin_store_move_up();
                 }
@@ -315,6 +320,8 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Down => {
                 if app.plugin_store_nav_focused() {
                     app.plugin_store_category_move_down();
+                } else if app.plugin_store_marketplace_focused() {
+                    app.plugin_store_marketplace_move_down();
                 } else {
                     app.plugin_store_move_down();
                 }
@@ -322,12 +329,18 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Enter => {
                 if app.plugin_store_nav_focused() {
                     app.plugin_store_category_confirm();
+                } else if app.plugin_store_marketplace_focused() {
+                    app.plugin_store_marketplace_confirm();
                 } else {
                     app.plugin_store_install_selected();
                 }
             }
             KeyCode::Char('c') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.plugin_store_clear_category();
+                if app.plugin_store_marketplace_focused() {
+                    app.plugin_store_clear_marketplace();
+                } else {
+                    app.plugin_store_clear_category();
+                }
             }
             KeyCode::Backspace | KeyCode::Esc => {
                 app.plugin_store_edit_or_close();

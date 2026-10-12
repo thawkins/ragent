@@ -611,3 +611,34 @@ non-`command` types, `hooks/hooks.json` on disk),
 `/plugins list` reports `Hooks 12` for `security-guidance`, and running the
 plugin's own `PostToolUse` hook on a `yaml.load` edit emits the expected
 security warning.
+
+### T-027 — Check out a `git+` source's fetched ref, not a pathspec (FR-010)
+
+`git_clone_stage` selected the fetched commit with `git checkout -- FETCH_HEAD`. The
+`--` separator makes `git checkout` parse its argument as a **pathspec** (a file
+filter), not a commit-ish, so the command failed every time with
+`pathspec 'FETCH_HEAD' did not match any file(s) known to git`. Because the exit was
+non-zero, `git_run` returned `AddError::Io` and the install aborted after the fetch -
+so a `git+` source naming an explicit ref never installed, even for a ref that had
+just been fetched. The `/plugins claude` browser's
+`git+https://github.com/mongodb/agent-skills#main:plugins/mongodb` entry was the
+reported case.
+
+- The checkout is now `git checkout FETCH_HEAD`. `FETCH_HEAD` is a name ragent writes
+  itself and the ref that filled it already passed [`git_ref`] (no leading `-`,
+  `[A-Za-z0-9._/-]` charset only), so it cannot be read as an option. A
+  `-`-prefixed ref still falls back to the default branch at parse time, which is
+  what `add_refuses_an_option_like_ref_without_running_it` asserts.
+- The `git fetch --depth 1 -- origin <ref>` keeps its separator: both operands are
+  positionals and must not be mistaken for options, so the SEC-ragent-plugins-001
+  defence is unchanged there.
+
+Verify: new `add_checks_out_a_non_default_ref` in
+`crates/ragent-plugins/tests/test_store_git_source.rs` builds an offline `file://`
+remote whose `main` and `alt` branches carry different plugin ids and asserts the
+`#alt` install yields the `alt` id - a silently-dropped ref would install `main`'s
+id and fail. The existing `add_installs_a_plugin_from_a_git_subdirectory_source` /
+`add_installs_a_plugin_from_a_whole_repo_git_source` / TC-019 / TC-024 cases stay
+green; live
+`ragent plugins add 'git+https://github.com/mongodb/agent-skills#main:plugins/mongodb'`
+then `list`/`test`.

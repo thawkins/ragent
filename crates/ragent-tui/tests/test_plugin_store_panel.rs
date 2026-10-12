@@ -14,8 +14,11 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
 use ragent_plugins::{StoreEntry, StoreKind};
 use ragent_tui::App;
+use ragent_tui::app::StorePane;
 use ragent_tui::layout;
 
 #[path = "support/mod.rs"]
@@ -165,13 +168,18 @@ fn the_footer_lists_the_available_keys() {
     let mut app = open(StoreKind::Codex, sample(), &[]);
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app);
-    let footer = rows.last().expect("footer row");
+    // The bottom inner row is now the search box, so the footer key hints sit one
+    // row above it.
+    let footer = rows
+        .iter()
+        .find(|r| r.contains("Tab focus"))
+        .expect("footer row painted");
     assert!(footer.contains("Tab focus"), "footer: {footer:?}");
     assert!(
         footer.contains("Enter select/install"),
         "footer: {footer:?}"
     );
-    assert!(footer.contains("c clear category"), "footer: {footer:?}");
+    assert!(footer.contains("c clear filter"), "footer: {footer:?}");
     assert!(footer.contains("Esc close"), "footer: {footer:?}");
     assert!(footer.contains("Up/Down"), "footer: {footer:?}");
 }
@@ -282,9 +290,9 @@ fn the_focused_navigator_cursor_differs_from_the_unfocused_result_cursor() {
     );
     drop(terminal);
 
-    // Focusing the navigator fills its cursor cyan and dims the result cursor
-    // instead (FR-009).
-    app.plugin_store.as_mut().expect("panel open").nav_focused = true;
+    // Focusing the category navigator fills its cursor cyan and dims the result
+    // cursor instead (FR-009, FR-052).
+    app.plugin_store.as_mut().expect("panel open").focus = StorePane::Categories;
     let terminal = render(&mut app, 100, 30);
     let buffer = terminal.backend().buffer();
     assert_eq!(
@@ -298,6 +306,108 @@ fn the_focused_navigator_cursor_differs_from_the_unfocused_result_cursor() {
         buffer[(result.x, first)].bg,
         Color::Magenta,
         "the unfocused result cursor is not the filled focus colour"
+    );
+}
+
+#[test]
+fn the_navigator_rows_show_the_entry_count_beside_each_name() {
+    // Three uncategorised entries (`sample()`), so the category navigator has only
+    // the `ALL` row and it counts all three; each row renders the name with the
+    // count appended (FR-053).
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 100, 30);
+    let nav = app.plugin_store_nav_area;
+    let painted: String = (nav.y..nav.y + nav.height)
+        .map(|y| row_text(&terminal, y, nav.x, nav.x + nav.width))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        painted.contains("ALL (3)"),
+        "the ALL row carries its entry count: {painted:?}"
+    );
+
+    // Give the entries distinct categories so a named row also shows a count.
+    let categorised = |id: &str, description: &str, category: &str| StoreEntry {
+        category: Some(category.to_string()),
+        ..entry(id, description)
+    };
+    let mut app = open(
+        StoreKind::Codex,
+        vec![
+            categorised("codex-weather", "Weather lookups", "Web"),
+            categorised("codex-time", "Time helpers", "Web"),
+            categorised("codex-shell", "Shell wrappers", "Utility"),
+        ],
+        &[],
+    );
+    let terminal = render(&mut app, 100, 30);
+    let nav = app.plugin_store_nav_area;
+    let painted: String = (nav.y..nav.y + nav.height)
+        .map(|y| row_text(&terminal, y, nav.x, nav.x + nav.width))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        painted.contains("ALL (3)"),
+        "ALL counts every entry: {painted:?}"
+    );
+    assert!(
+        painted.contains("Utility (1)"),
+        "a named category shows its count: {painted:?}"
+    );
+    assert!(
+        painted.contains("Web (2)"),
+        "a folded category shows its count: {painted:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// FR-004 - a reversed-video title sits above each navigator's ALL entry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn each_navigator_has_a_reversed_video_title_above_its_all_row() {
+    // The category navigator's title names the navigation type one row above its
+    // `ALL` entry, painted black-on-white (reversed video); likewise the marketplace
+    // navigator (FR-004).
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 100, 30);
+    let nav = app.plugin_store_nav_area;
+    let mp = app.plugin_store_marketplace_area;
+
+    // Each navigator's row area sits directly below its one-row title.
+    let category_title = row_text(&terminal, nav.y - 1, nav.x, nav.x + nav.width);
+    assert!(
+        category_title.contains("Categories"),
+        "the category title names the navigation type: {category_title:?}"
+    );
+    let marketplace_title = row_text(&terminal, mp.y - 1, mp.x, mp.x + mp.width);
+    assert!(
+        marketplace_title.contains("Marketplace"),
+        "the marketplace title names the navigation type: {marketplace_title:?}"
+    );
+
+    // The title is reversed video: black foreground on a white background, so it
+    // reads as a header band above the `ALL` row.
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(nav.x, nav.y - 1)].fg,
+        Color::Black,
+        "the category title foreground is reversed"
+    );
+    assert_eq!(
+        buffer[(nav.x, nav.y - 1)].bg,
+        Color::White,
+        "the category title background is white"
+    );
+    assert_eq!(
+        buffer[(mp.x, mp.y - 1)].fg,
+        Color::Black,
+        "the marketplace title foreground is reversed"
+    );
+    assert_eq!(
+        buffer[(mp.x, mp.y - 1)].bg,
+        Color::White,
+        "the marketplace title background is white"
     );
 }
 
@@ -597,5 +707,116 @@ fn the_panel_area_is_cleared_when_the_panel_closes() {
         app.plugin_store_area,
         ratatui::layout::Rect::default(),
         "area cleared when the panel is closed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Search box - bottom-edge filter field with a click-to-clear button
+// ---------------------------------------------------------------------------
+
+/// A left-click mouse event at `(col, row)`.
+fn left_click(col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: KeyModifiers::empty(),
+    }
+}
+
+#[test]
+fn the_search_box_sits_on_the_bottom_edge_with_a_clear_button() {
+    // The panel's last inner row carries the live search box: the `search:` label,
+    // the editable field, and the right-aligned `[x] clear` button. The footer moves
+    // up one row to make space.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 120, 30);
+    let area = app.plugin_store_area;
+
+    let search = app.plugin_store_search_area;
+    assert!(search.width > 0, "the search-box area is recorded");
+    assert_eq!(
+        search.y,
+        area.y + area.height - 2,
+        "the search box is the last inner row, beneath the footer"
+    );
+
+    let row = row_text(&terminal, search.y, search.x, search.x + search.width);
+    assert!(
+        row.contains("search:"),
+        "the box carries the search label: {row:?}"
+    );
+    assert!(
+        row.contains("[x] clear"),
+        "the box carries the clear button: {row:?}"
+    );
+
+    // The clear button occupies the box's rightmost columns.
+    let clear = app.plugin_store_clear_area;
+    assert!(clear.width > 0, "the clear-button area is recorded");
+    assert_eq!(
+        clear.x + clear.width,
+        search.x + search.width,
+        "the clear button is right-aligned in the box"
+    );
+}
+
+#[test]
+fn the_search_box_field_reflects_the_live_query() {
+    // Filtering by typed text is reflected in the box: the field paints the same
+    // characters the result filter uses.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    app.plugin_store
+        .as_mut()
+        .expect("panel open")
+        .set_query("wea".to_string());
+    let terminal = render(&mut app, 120, 30);
+
+    let search = app.plugin_store_search_area;
+    let row = row_text(&terminal, search.y, search.x, search.x + search.width);
+    assert!(
+        row.contains("search: wea"),
+        "the box mirrors the query: {row:?}"
+    );
+    // The filter narrowed the list to the one matching row.
+    let title = full_row(&terminal, app.plugin_store_area.y);
+    assert!(title.contains("1 of 3"), "title: {title:?}");
+}
+
+#[test]
+fn the_search_box_clear_button_clears_the_filter_on_click() {
+    // A left-click inside the clear button wipes the live search filter and restores
+    // the full result set through the real mouse-routing path.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    app.plugin_store
+        .as_mut()
+        .expect("panel open")
+        .set_query("wea".to_string());
+    let _ = render(&mut app, 120, 30);
+    assert_eq!(
+        app.plugin_store
+            .as_ref()
+            .expect("panel open")
+            .filtered
+            .len(),
+        1,
+        "the query narrowed the list before the click"
+    );
+
+    let clear = app.plugin_store_clear_area;
+    app.handle_mouse_event(left_click(clear.x, clear.y));
+    assert_eq!(
+        app.plugin_store.as_ref().expect("panel open").query,
+        "",
+        "the click cleared the search query"
+    );
+    assert_eq!(
+        app.plugin_store
+            .as_ref()
+            .expect("panel open")
+            .filtered
+            .len(),
+        3,
+        "the full result set is restored after clearing"
     );
 }

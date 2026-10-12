@@ -2,6 +2,95 @@
 
 ## [Unreleased]
 
+## [1.0.133] - 2026-10-12
+
+### Added
+
+- **Reversed-video navigation titles on the `/plugins` browse-panel navigators (spec
+  `pluginstores` FR-004).** Each navigator in the browse panel now carries a one-row
+  header directly above its `ALL` entry naming the navigation type - `Categories` over
+  the category navigator and `Marketplace` over the marketplace navigator - painted in
+  reversed video (black foreground on a white background) so the header reads as a
+  distinct band. The navigator's hit-test area is now the row area *below* the header, so
+  a click or wheel on a header row is inert and never mis-mapped onto the `ALL` row.
+  Implemented in `render_plugin_store_panel` in `crates/ragent-tui/src/layout.rs`
+  (`PLUGIN_STORE_CATEGORY_TITLE` / `PLUGIN_STORE_MARKETPLACE_TITLE` constants); covered by
+  the new `each_navigator_has_a_reversed_video_title_above_its_all_row` case in
+  `test_plugin_store_panel.rs`.
+
+- **Per-row entry counts in the `/plugins` browse-panel navigators (spec `pluginstores`
+  FR-053).** Each category and marketplace navigator row now renders its name with the
+  number of loaded entries it covers appended as `Name (N)` (the `ALL` row counts the
+  whole index). The count is derived from the full fetched index via the shared
+  `CategoryFilter::matches_category` predicate, so it stays stable while a search query,
+  category, or marketplace filter narrows the result list and always agrees with the set
+  selecting that row would show; a category-less, marketplace-less, or still-loading index
+  renders a counted `ALL (0)` row. Implemented as
+  `PluginStoreBrowser::{category_entry_count, marketplace_entry_count, category_row_display,
+  marketplace_row_display}` in `crates/ragent-tui/src/app/state.rs`, painted by
+  `render_plugin_store_navigator` / `render_plugin_store_marketplace_navigator` in
+  `crates/ragent-tui/src/layout.rs`; covered by new cases in
+  `test_plugin_store_category_filter.rs`, `test_plugin_store_panel.rs`, and
+  `test_plugin_store_category_acceptance.rs`.
+
+- **Marketplace navigator and three-pane focus on the `/plugins` browse panel (spec
+  `pluginstores` FR-052).** The browse panel's left navigator column is now split
+  vertically into the category navigator (top half) and a new **marketplace navigator**
+  (bottom half), each listing `ALL` plus the distinct, sorted values the fetched index
+  declares. The panel has three focusable panes - the result list, the category
+  navigator, and the marketplace navigator - and `Tab`/`BackTab` cycle focus
+  forward/backward through them; `Up`/`Down` move the focused pane's cursor and apply the
+  highlighted value on the same keypress, `Enter` applies it and returns focus to the
+  result list, and `c` clears the focused navigator's filter to `ALL`. The search query,
+  category, and marketplace filters now compose, so the result list shows only entries
+  that match all three; a blank marketplace is visible only under `ALL`, and a
+  marketplace that survives a re-fetch is retained while one that vanishes falls back to
+  `ALL`. A left-click on a marketplace row selects, applies, and focuses that pane, and a
+  wheel over it scrolls its viewport without changing the filter. The title now names the
+  active marketplace, and the layout caches the marketplace pane's area on
+  `App::plugin_store_marketplace_area`. Implemented in
+  `crates/ragent-tui/src/app/state.rs` (a new `StorePane` enum replacing `nav_focused`,
+  the second `CategoryFilterState`, and a shared `matching_indices` filter),
+  `crates/ragent-tui/src/layout.rs`, `crates/ragent-tui/src/input.rs`, and
+  `crates/ragent-tui/src/app/{session_ops,input_handler}.rs`; covered by new cases in
+  `test_plugin_store_category_filter.rs`, `test_plugin_store_category_nav.rs`,
+  `test_plugin_store_category_mouse.rs`, and `test_plugin_store_panel.rs`.
+
+- **Search box on the `/plugins` browse panel's bottom edge with a click-to-clear
+  button (spec `pluginstores` FR-051).** The plugin-store browse panel now draws a
+  search box along the bottom row of its inner area: a leading `search:` label, the
+  live filter field, and a right-aligned `[x] clear` button. The field mirrors the
+  browser's search query byte-for-byte (clipped from the left when wider than the
+  field so the newest characters stay visible), so the box and the result filter
+  cannot drift. A left-click on the clear button - hit-tested against the button's
+  painted area through `App::plugin_store_clear_area`, checked before the navigator
+  and result-column mouse cases - clears the filter and restores the full result set
+  without touching the active category; the button is inert when the query is already
+  empty. A row too narrow to hold both the label and the button drops the button
+  rather than squeezing the field below a usable width, and the footer key hints move
+  up one row to make space. The search box is ASCII-only like the rest of the panel.
+  The layout caches the search-box and clear-button areas on `App`
+  (`plugin_store_search_area`, `plugin_store_clear_area`), re-derived every frame and
+  reset to `Rect::default()` when the panel closes.
+
+### Fixed
+
+- **`git+<url>#<ref>` plugin installs with a non-default ref now check that ref out
+  (spec `plugins` FR-024).** `git_clone_stage` ran `git checkout -- FETCH_HEAD`; the
+  `--` separator makes `git checkout` treat its argument as a *pathspec* file filter
+  rather than a commit-ish, so the command always failed with
+  `pathspec 'FETCH_HEAD' did not match any file(s) known to git`. Every install from a
+  `git+` source naming an explicit ref (for example the `/plugins claude` store's
+  `git+https://github.com/mongodb/agent-skills#main:plugins/mongodb`) aborted after the
+  fetch, even though the ref had been fetched successfully. The checkout is now
+  `git checkout FETCH_HEAD`; `FETCH_HEAD` is a name ragent supplies itself and the ref
+  that filled it is already validated to not begin with `-`, so no option can be
+  injected. The `fetch` keeps its `--` separator, where the operands are positionals.
+  Fixed in `crates/ragent-plugins/src/add.rs`; covered by the new
+  `add_checks_out_a_non_default_ref` case in `test_store_git_source.rs`, whose offline
+  remote carries a different manifest id on each of two branches so a silently-dropped
+  ref would install the wrong plugin.
+
 ## [1.0.132] - 2026-10-12
 
 *Patch release on the merged connector/plugin marketplace work. Promotes the

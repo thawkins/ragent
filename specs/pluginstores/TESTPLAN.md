@@ -634,6 +634,36 @@ restore the sorted survivor order, the `Utility` spelling survives), and
 alphabetically first row) - the store analogue of
 `crates/ragent-connectors/tests/test_connector_descriptor.rs` for FR-046.
 
+### TC-022 - Bottom search box filters and its clear button resets
+
+**Requirement:** FR-051
+
+**Preconditions:** `/plugins codex` panel open with the fixture index loaded.
+
+**Steps:**
+1. Read the panel's bottom inner row and confirm it carries the `search:` label and the
+   `[x] clear` button, with the button flush against the right edge.
+2. Type a query into the panel (or pre-fill it) and confirm the box's field paints the
+   same characters and the result list narrows.
+3. Left-click the `[x] clear` button and read the box and the result list.
+4. With the query already empty, left-click the clear button again.
+
+**Expected results:**
+- The bottom row carries `search: <query>` on the left and `[x] clear` at the right
+  edge; the footer key hints move up one row (FR-051).
+- The field mirrors the live query exactly, so the box and the result filter cannot
+  drift (step 2).
+- The click clears the query, restores the full result set, and leaves the active
+  category unchanged (step 3).
+- A click on an already-empty query is a no-op; every painted glyph in the panel stays
+  ASCII.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
+(`the_search_box_sits_on_the_bottom_edge_with_a_clear_button`,
+`the_search_box_field_reflects_the_live_query`,
+`the_search_box_clear_button_clears_the_filter_on_click`, and
+`every_painted_glyph_in_the_panel_is_ascii`).
+
 ## Cleanup
 
 1. Remove the scratch tree: `rm -rf ~/scratch/pluginstores-tests/`.
@@ -643,3 +673,118 @@ alphabetically first row) - the store analogue of
    testing.
 4. Stop any local HTTPS serving process started in Prerequisite 5.
 5. Confirm `~/scratch/pluginstores-tests/` (and its `.ragent/plugins/`) no longer exists.
+
+### TC-023 - Marketplace navigator filters by marketplace and composes with category + search
+
+**Requirement:** FR-052
+
+**Preconditions:** `/plugins codex` panel open with an index whose entries carry distinct
+`marketplace` labels (for example two entries from `codex` and one from a second added
+marketplace), or the offline fixture index.
+
+**Steps:**
+1. Read the left navigator column and confirm it is split vertically into the category
+   navigator on top and the marketplace navigator below, each listing `ALL` first.
+2. Press `Tab` twice to move focus from the result list to the marketplace navigator, and
+   confirm the marketplace cursor is painted in the focused colour.
+3. Press `Down` to highlight a marketplace row and confirm the result list narrows to that
+   marketplace while the category filter is untouched.
+4. With a category selected as well, confirm the result list shows only entries matching
+   the query, the category, and the marketplace together.
+5. Press `c` while the marketplace navigator is focused and confirm the marketplace filter
+   resets to `ALL` while the category filter is left as it was.
+6. Left-click a marketplace row and confirm it is selected, applied, and focused.
+7. Wheel over the marketplace navigator and confirm its viewport scrolls without changing
+   the active marketplace.
+
+**Expected results:**
+- The left column shows the category navigator above the marketplace navigator, each with
+  an `ALL` row and the distinct, sorted rows it declares (steps 1-2).
+- `Tab` cycles focus `Results` -> `Categories` -> `Marketplaces` -> `Results`; `Up`/`Down`
+  route to the focused pane and moving the marketplace cursor applies it on the same
+  keypress (steps 2-3).
+- The three filters compose: an entry is shown only when it matches the query, the active
+  category, and the active marketplace (step 4).
+- `c` clears the focused navigator's filter to `ALL` (step 5); a click selects, applies,
+  and focuses a marketplace row, and a wheel scrolls without changing the filter (steps
+  6-7).
+- The title names the active marketplace; an entry with a blank marketplace appears only
+  under `ALL`; no path installs anything or executes plugin JavaScript.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_category_filter.rs`
+(`the_marketplace_set_is_distinct_and_sorted_with_all_implied`,
+`the_category_marketplace_and_query_filters_compose`,
+`moving_the_marketplace_cursor_applies_on_the_same_call_and_clears_to_all`,
+`a_marketplace_the_new_index_no_longer_declares_is_dropped_to_all`),
+`crates/ragent-tui/tests/test_plugin_store_category_nav.rs`
+(`tab_cycles_focus_forward_through_the_three_panes`,
+`the_clear_key_clears_the_marketplace_when_that_pane_is_focused`), and
+`crates/ragent-tui/tests/test_plugin_store_category_mouse.rs`
+(`left_click_on_a_marketplace_row_selects_applies_and_focuses_it`,
+`wheel_over_the_marketplace_navigator_scrolls_it_without_changing_the_filter`).
+
+### TC-024 - Navigator rows show the entry count beside each name
+
+**Requirement:** FR-053
+
+**Preconditions:** `/plugins codex` panel open with an index whose entries carry distinct
+categories and marketplace labels, or the offline fixture index.
+
+**Steps:**
+1. Read the category navigator column and confirm every row (starting with `ALL`) renders
+   its name followed by a bracketed count, e.g. `ALL (6)`, `Utility (2)`.
+2. Confirm the `ALL` row counts every loaded entry, including the uncategorised one, and a
+   folded case-only category (`Utility`/`utility`) counts both its spellings.
+3. Type a search query that narrows the result list and confirm the navigator counts do
+   not change (they are derived from the full index, not the filtered set).
+4. Read the marketplace navigator column and confirm each row likewise renders
+   `Name (N)`, with `ALL` counting every entry (including a blank-marketplace entry).
+5. Open the panel over a category-less or still-loading index and confirm it renders a
+   counted `ALL (0)` row rather than a bare `ALL`.
+
+**Expected results:**
+- Every row of both navigators renders `<name> (<N>)` (steps 1, 4).
+- The `ALL` row counts the whole index; a named row counts only the entries its predicate
+  matches, folding case-insensitively (step 2).
+- The counts are stable across a narrowing query or filter (step 3).
+- A category-less or loading index still shows a counted `ALL (0)` row (step 5).
+- Counting issues no network request, installs nothing, and executes no plugin JavaScript.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_category_filter.rs`
+(`each_navigator_row_shows_the_count_of_entries_under_it`,
+`the_marketplace_row_shows_the_count_of_entries_under_it`),
+`crates/ragent-tui/tests/test_plugin_store_panel.rs`
+(`the_navigator_rows_show_the_entry_count_beside_each_name`), and
+`crates/ragent-tui/tests/test_plugin_store_category_acceptance.rs` (TC-001 count
+assertions).
+
+### TC-025 - Each navigator carries a reversed-video title above its ALL row
+
+**Requirement:** FR-004
+
+**Preconditions:** `/plugins codex` (or `/plugins claude`) panel open, loading or loaded.
+
+**Steps:**
+1. Read the row directly above the category navigator's `ALL` entry and confirm it names
+   the navigation type (`Categories`).
+2. Confirm that row is painted in reversed video (black foreground on a white background),
+   distinct from the normal and active row colours.
+3. Read the row directly above the marketplace navigator's `ALL` entry and confirm it names
+   the navigation type (`Marketplace`) with the same reversed-video treatment.
+4. Left-click and wheel on a title row and confirm the active filter, the focused pane, and
+   the navigator scroll are all unchanged (the header row is inert; only the rows beneath
+   it hit-test).
+
+**Expected results:**
+- Each navigator shows a one-row title above its `ALL` entry naming the navigation type
+  (steps 1, 3).
+- The title renders black-on-white (reversed video) as a distinct header band (step 2).
+- A click or wheel on the title row is inert and never mis-mapped onto the `ALL` row
+  (step 4).
+- The header uses ASCII glyphs only and issues no network request.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
+(`each_navigator_has_a_reversed_video_title_above_its_all_row`); the navigator hit-test
+areas (`App::plugin_store_nav_area` / `App::plugin_store_marketplace_area`) are pinned to
+the row area below the header by the existing mouse tests
+(`crates/ragent-tui/tests/test_plugin_store_category_mouse.rs`) and the acceptance walk.

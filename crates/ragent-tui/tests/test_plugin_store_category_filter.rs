@@ -93,6 +93,48 @@ fn the_category_set_is_distinct_case_insensitive_and_sorted_with_all_implied() {
     assert_eq!(browser.active_category(), "ALL");
 }
 
+// -- Row counts appended to the navigator labels (spec `pluginstores` FR-053) ---
+
+#[test]
+fn each_navigator_row_shows_the_count_of_entries_under_it() {
+    let browser = loaded(sample());
+
+    // The count is over the full loaded index, independent of the active query or
+    // filter: `ALL` counts every entry (four), `Utility` two (the folded spellings),
+    // and `Web` one.
+    assert_eq!(browser.category_entry_count("ALL"), 4);
+    assert_eq!(browser.category_entry_count("Utility"), 2);
+    assert_eq!(browser.category_entry_count("Web"), 1);
+    assert_eq!(
+        browser.category_entry_count("missing"),
+        0,
+        "unknown is zero"
+    );
+
+    // The rendered row display appends the count to the base label.
+    assert_eq!(browser.category_row_display(0), "ALL (4)");
+    assert_eq!(browser.category_row_display(1), "Utility (2)");
+    assert_eq!(browser.category_row_display(2), "Web (1)");
+}
+
+#[test]
+fn the_marketplace_row_shows_the_count_of_entries_under_it() {
+    let browser = loaded(marketplace_sample());
+
+    // `ALL` counts every entry (four, including the blank-marketplace `delta`);
+    // `codex` two, `community` one.
+    assert_eq!(browser.marketplace_entry_count("ALL"), 4);
+    assert_eq!(browser.marketplace_entry_count("codex"), 2);
+    assert_eq!(browser.marketplace_entry_count("community"), 1);
+    // A blank label degrades to the `ALL` sentinel (`CategoryFilter::of`), so it
+    // counts every entry; no blank marketplace is ever a navigator row (FR-052).
+    assert_eq!(browser.marketplace_entry_count(""), 4, "blank reads as ALL");
+
+    assert_eq!(browser.marketplace_row_display(0), "ALL (4)");
+    assert_eq!(browser.marketplace_row_display(1), "codex (2)");
+    assert_eq!(browser.marketplace_row_display(2), "community (1)");
+}
+
 #[test]
 fn tags_do_not_form_navigator_rows() {
     // FR-021 (tag-derived rows) is withdrawn: only a declared `category` forms a
@@ -338,4 +380,149 @@ fn a_category_the_new_index_still_declares_is_retained() {
         "a surviving category is retained"
     );
     assert_eq!(filtered_ids(&browser), ["gamma"]);
+}
+
+// -- Marketplace navigator (spec `pluginstores` FR-052) -----------------------
+
+/// The same as [`entry`], but attributed to `marketplace` (FR-052).
+fn mp_entry(id: &str, category: Option<&str>, marketplace: &str) -> StoreEntry {
+    let mut e = entry(id, category);
+    e.marketplace = marketplace.to_string();
+    e
+}
+
+/// The derived marketplace rows (without the implicit `ALL`), in navigator order.
+fn marketplace_rows(browser: &PluginStoreBrowser) -> Vec<&str> {
+    browser
+        .marketplaces
+        .categories()
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
+/// Three entries across two marketplaces (`codex` and `community`) plus one row
+/// with a blank marketplace (visible only under `ALL`). The rows sort as
+/// `ALL`, `codex`, `community`.
+fn marketplace_sample() -> Vec<StoreEntry> {
+    vec![
+        mp_entry("alpha", Some("Web"), "community"),
+        mp_entry("beta", Some("Utility"), "codex"),
+        mp_entry("gamma", Some("Web"), "codex"),
+        mp_entry("delta", None, ""),
+    ]
+}
+
+#[test]
+fn the_marketplace_set_is_distinct_and_sorted_with_all_implied() {
+    let browser = loaded(marketplace_sample());
+
+    // The blank marketplace of `delta` forms no row, so the rows are the two
+    // labelled marketplaces sorted case-insensitively with `ALL` implicit (FR-052).
+    assert_eq!(marketplace_rows(&browser), ["codex", "community"]);
+    assert_eq!(
+        browser.marketplace_row_count(),
+        3,
+        "ALL + codex + community"
+    );
+    assert_eq!(browser.marketplace_row_label(0), "ALL");
+    assert_eq!(browser.active_marketplace(), "ALL");
+}
+
+#[test]
+fn the_category_marketplace_and_query_filters_compose() {
+    let mut browser = loaded(marketplace_sample());
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
+
+    // Select `codex`: only its two entries survive (FR-052).
+    assert!(browser.marketplace_move_down());
+    assert_eq!(browser.active_marketplace(), "codex");
+    assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
+
+    // Narrow by `Web` within `codex`: only `gamma` is both `codex` and `Web`.
+    assert!(browser.category_select_row(2)); // `Web`
+    assert_eq!(browser.active_category(), "Web");
+    assert_eq!(filtered_ids(&browser), ["gamma"]);
+
+    // The query then narrows inside both filters; removing it restores the pair.
+    for c in "gam".chars() {
+        browser.push_char(c);
+    }
+    assert_eq!(filtered_ids(&browser), ["gamma"]);
+    for _ in 0..3 {
+        assert!(browser.backspace());
+    }
+    assert_eq!(filtered_ids(&browser), ["gamma"]);
+
+    // Clearing the marketplace restores every `Web` entry across marketplaces.
+    browser.marketplace_clear();
+    assert_eq!(browser.active_marketplace(), "ALL");
+    assert_eq!(filtered_ids(&browser), ["alpha", "gamma"]);
+}
+
+#[test]
+fn moving_the_marketplace_cursor_applies_on_the_same_call_and_clears_to_all() {
+    let mut browser = loaded(marketplace_sample());
+
+    assert!(browser.marketplace_move_down());
+    assert_eq!(browser.marketplace_cursor_row(), 1);
+    assert_eq!(browser.active_marketplace(), "codex");
+    assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
+
+    assert!(browser.marketplace_move_down());
+    assert_eq!(browser.active_marketplace(), "community");
+    assert_eq!(filtered_ids(&browser), ["alpha"]);
+
+    // Down past the last row is a no-op; Up steps back; clear restores `ALL`.
+    assert!(!browser.marketplace_move_down());
+    assert!(browser.marketplace_move_up());
+    assert_eq!(browser.active_marketplace(), "codex");
+    browser.marketplace_clear();
+    assert_eq!(browser.active_marketplace(), "ALL");
+    assert_eq!(browser.marketplace_cursor_row(), 0);
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
+}
+
+#[test]
+fn an_index_with_no_marketplace_yields_an_all_only_marketplace_navigator() {
+    // `sample()` leaves every marketplace blank, so only the `ALL` row exists but
+    // browsing still works (FR-052).
+    let browser = loaded(sample());
+    assert_eq!(browser.marketplace_row_count(), 1, "ALL only");
+    assert_eq!(browser.marketplace_row_label(0), "ALL");
+    assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
+}
+
+#[test]
+fn a_marketplace_the_new_index_no_longer_declares_is_dropped_to_all() {
+    let mut browser = loaded(marketplace_sample());
+    assert!(browser.marketplace_select_row(1)); // `codex`
+    assert_eq!(browser.active_marketplace(), "codex");
+
+    // Re-fetch with an index that only declares `community`.
+    browser.set_entries(vec![mp_entry("alpha", Some("Web"), "community")]);
+
+    assert_eq!(
+        browser.active_marketplace(),
+        "ALL",
+        "a vanished marketplace falls back to ALL"
+    );
+    assert_eq!(browser.marketplace_cursor_row(), 0);
+    assert_eq!(filtered_ids(&browser), ["alpha"]);
+}
+
+#[test]
+fn a_marketplace_the_new_index_still_declares_is_retained() {
+    let mut browser = loaded(marketplace_sample());
+    assert!(browser.marketplace_select_row(2)); // `community`
+    assert_eq!(browser.active_marketplace(), "community");
+
+    browser.set_entries(vec![mp_entry("alpha", Some("Web"), "community")]);
+
+    assert_eq!(
+        browser.active_marketplace(),
+        "community",
+        "a surviving marketplace is retained"
+    );
+    assert_eq!(filtered_ids(&browser), ["alpha"]);
 }

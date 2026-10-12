@@ -17,7 +17,7 @@ const SCROLL_STEP_LINES: u16 = 3;
 // State types from app/state.rs
 use crate::app::state::{
     App, ContextAction, ContextMenuState, LogLevel, ProviderSetupStep, ScrollbarDragPane,
-    SelectionPane, TextSelection,
+    SelectionPane, StorePane, TextSelection,
 };
 
 // Helpers
@@ -219,29 +219,43 @@ impl App {
     }
 
     /// Handle a mouse event while the plugin-store browse panel is open (spec
-    /// `catnav` FR-011, FR-012, FR-013, FR-023, FR-024, FR-028).
+    /// `catnav` FR-011, FR-012, FR-013, FR-023, FR-024, FR-028; `pluginstores`
+    /// FR-004, FR-052).
     ///
     /// The panel is drawn above every other surface and owns the keyboard, so it
-    /// also owns the mouse. A left-click in the navigator column hit-tests to a
-    /// category row, moves the category cursor to it, applies that category, and
-    /// focuses the navigator (FR-011). A wheel over the navigator scrolls its
-    /// viewport without changing the active category (FR-012). A left-click or wheel
-    /// over the result column moves the result cursor while leaving the active
-    /// category unchanged (FR-013). Every path is a convenience over the keyboard
-    /// path and installs, downloads, or executes nothing (FR-024); it is pure
-    /// in-memory bookkeeping, so it cannot block the event loop (FR-028).
+    /// also owns the mouse. A left-click on the bottom search box's `[x] clear`
+    /// button clears the live filter (FR-004). A left-click in the category
+    /// navigator hit-tests to a category row, moves the category cursor to it,
+    /// applies that category, and focuses the category pane (FR-011). A left-click in
+    /// the marketplace navigator does the same for a marketplace row and focuses the
+    /// marketplace pane (FR-052). A wheel over either navigator scrolls its viewport
+    /// without changing the active filter (FR-012). A left-click or wheel over the
+    /// result column moves the result cursor while leaving the active filters
+    /// unchanged (FR-013). Every path is a convenience over the keyboard path and
+    /// installs, downloads, or executes nothing (FR-024); it is pure in-memory
+    /// bookkeeping, so it cannot block the event loop (FR-028).
     ///
-    /// A click or wheel that lands on the modal but outside both columns is
+    /// A click or wheel that lands on the modal but outside every column is
     /// swallowed, so it can never start a message text selection or open a context
     /// menu on a surface hidden behind the panel.
     fn handle_plugin_store_mouse(&mut self, event: MouseEvent) {
         let nav_area = self.plugin_store_nav_area;
+        let marketplace_area = self.plugin_store_marketplace_area;
         let result_area = self.plugin_store_result_area;
+        let clear_area = self.plugin_store_clear_area;
         let pos = (event.column, event.row).into();
         let in_nav = nav_area.contains(pos);
+        let in_marketplace = marketplace_area.contains(pos);
         let in_results = result_area.contains(pos);
+        let in_clear = clear_area.contains(pos);
 
         match event.kind {
+            // A left-click on the search box's `[x] clear` button clears the live
+            // filter (FR-004). Checked before the generic result/navigator cases so
+            // the button, painted in the bottom row, is never mis-attributed.
+            MouseEventKind::Down(MouseButton::Left) if in_clear => {
+                self.plugin_store_clear_search();
+            }
             MouseEventKind::Down(MouseButton::Left) if in_nav => {
                 let row = event.row.saturating_sub(nav_area.y) as usize;
                 if let Some(browser) = self.plugin_store.as_mut() {
@@ -251,7 +265,18 @@ impl App {
                     // change (FR-011, FR-027).
                     let target = browser.category_scroll.saturating_add(row);
                     browser.category_select_row(target);
-                    browser.nav_focused = true;
+                    browser.focus = StorePane::Categories;
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_marketplace => {
+                let row = event.row.saturating_sub(marketplace_area.y) as usize;
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    // Same viewport-to-absolute mapping as the category navigator, with
+                    // the marketplace scroll offset (FR-052).
+                    let target = browser.marketplace_scroll.saturating_add(row);
+                    browser.marketplace_select_row(target);
+                    browser.focus = StorePane::Marketplaces;
                 }
                 self.needs_redraw = true;
             }
@@ -260,7 +285,7 @@ impl App {
                 if let Some(browser) = self.plugin_store.as_mut() {
                     // The result list scrolls as its cursor moves, so the row-to-index
                     // mapping accounts for the current scroll offset; an out-of-range
-                    // row is ignored. The active category is left unchanged (FR-013).
+                    // row is ignored. The active filters are left unchanged (FR-013).
                     let target = browser.scroll.saturating_add(row);
                     if target < browser.filtered.len() {
                         browser.cursor = target;
@@ -277,6 +302,18 @@ impl App {
             MouseEventKind::ScrollUp if in_nav => {
                 if let Some(browser) = self.plugin_store.as_mut() {
                     browser.category_scroll_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_marketplace => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.marketplace_scroll_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_marketplace => {
+                if let Some(browser) = self.plugin_store.as_mut() {
+                    browser.marketplace_scroll_by(-(SCROLL_STEP_LINES as i16));
                 }
                 self.needs_redraw = true;
             }

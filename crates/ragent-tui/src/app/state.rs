@@ -1586,6 +1586,47 @@ pub enum ConnectorEnrichResult {
     },
 }
 
+/// Which of the plugin-store panel's three panes holds keyboard focus
+/// (spec `pluginstores` FR-052).
+///
+/// The panel has a result list and a left column split vertically into the
+/// category navigator (top) and the marketplace navigator (bottom). `Tab`/`BackTab`
+/// cycle through the three panes in this order; `Up`/`Down`, `Enter`, and the
+/// clear key route to whichever pane is focused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StorePane {
+    /// The result list; the initial focus.
+    #[default]
+    Results,
+    /// The category navigator in the upper half of the left column.
+    Categories,
+    /// The marketplace navigator in the lower half of the left column.
+    Marketplaces,
+}
+
+impl StorePane {
+    /// The next pane in the `Tab` cycle (`Results` -> `Categories` ->
+    /// `Marketplaces` -> `Results`).
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Results => Self::Categories,
+            Self::Categories => Self::Marketplaces,
+            Self::Marketplaces => Self::Results,
+        }
+    }
+
+    /// The previous pane in the `BackTab` cycle (the reverse of [`Self::next`]).
+    #[must_use]
+    pub const fn previous(self) -> Self {
+        match self {
+            Self::Results => Self::Marketplaces,
+            Self::Categories => Self::Results,
+            Self::Marketplaces => Self::Categories,
+        }
+    }
+}
+
 /// The load state of a plugin-store browser (spec `pluginstores` T-004;
 /// FR-013, FR-016, FR-017).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1675,14 +1716,29 @@ pub struct PluginStoreBrowser {
     /// after a move and to clamp the wheel scroll; a `0` (before the first render)
     /// parks the scroll at the top.
     pub category_viewport: usize,
-    /// Whether the category navigator holds keyboard focus (spec `catnav` FR-009).
+    /// Which of the three panes holds keyboard focus (spec `pluginstores` FR-052).
     ///
-    /// `false` - the result list focused - is the initial state; the focus key
-    /// (`Tab`) toggles it (FR-009). `Up`/`Down` route to whichever pane holds
-    /// focus and the focused pane's cursor is rendered distinctly (FR-009,
-    /// FR-017); the search query is edited by printable characters in either
-    /// state (FR-017).
-    pub nav_focused: bool,
+    /// [`StorePane::Results`] - the result list focused - is the initial state;
+    /// `Tab`/`BackTab` cycle through the three panes (FR-052). `Up`/`Down` route to
+    /// whichever pane holds focus and the focused pane's cursor is rendered
+    /// distinctly (FR-009, FR-017); the search query is edited by printable
+    /// characters in any state (FR-017).
+    pub focus: StorePane,
+    /// The marketplace filter and its derived distinct-marketplace set (spec
+    /// `pluginstores` FR-052). Shares [`CategoryFilterState`] with the category
+    /// navigator - the `ALL` sentinel, a sorted case-insensitive distinct set, and
+    /// an exact case-insensitive predicate - so the two navigators behave
+    /// identically.
+    pub marketplaces: CategoryFilterState,
+    /// Block-cursor position within the marketplace navigator's rows (FR-052).
+    /// Row `0` is the `ALL` sentinel; rows `1..=marketplaces().len()` are the
+    /// derived marketplaces in sorted order.
+    pub marketplace_cursor: usize,
+    /// Index of the first marketplace row shown in its viewport (FR-052).
+    pub marketplace_scroll: usize,
+    /// Height in rows of the marketplace navigator viewport, recorded by the
+    /// renderer on every frame (FR-052).
+    pub marketplace_viewport: usize,
     /// A category filter requested by a `--category <name>` launch, held until
     /// the fetched index (and therefore the real category set) is known (spec
     /// `catnav` FR-022).
@@ -1729,7 +1785,11 @@ impl PluginStoreBrowser {
             category_cursor: 0,
             category_scroll: 0,
             category_viewport: 0,
-            nav_focused: false,
+            focus: StorePane::Results,
+            marketplaces: CategoryFilterState::new(),
+            marketplace_cursor: 0,
+            marketplace_scroll: 0,
+            marketplace_viewport: 0,
             pending_category: None,
             enriching: false,
         };
@@ -1782,20 +1842,34 @@ impl PluginStoreBrowser {
     /// description, and tags; an empty query matches every entry. The category
     /// predicate keeps an entry under the active category when its declared
     /// `category` matches (spec `catnav` FR-003); `ALL` keeps every entry, and an
-    /// entry's `tags` never select a category.
+    /// entry's `tags` never select a category. The marketplace predicate composes
+    /// with it the same way (spec `pluginstores` FR-052): an entry is shown only
+    /// when it matches the search query, the active category, *and* the active
+    /// marketplace.
     fn apply_filter(&mut self) {
+        self.filtered = self.matching_indices();
+        self.cursor = 0;
+        self.scroll = 0;
+    }
+
+    /// The indices into [`Self::all`] that match the search query, the active
+    /// category, and the active marketplace, in order (FR-008, FR-052).
+    ///
+    /// One predicate shared by [`Self::apply_filter`] and
+    /// [`Self::reapply_filter_preserving_cursor`], so a user re-filter and a
+    /// background re-filter can never disagree about what is visible.
+    fn matching_indices(&self) -> Vec<usize> {
         let needle = self.query.to_lowercase();
         let category = self.categories.filter().clone();
-        self.filtered = self
-            .all
+        let marketplace = self.marketplaces.filter().clone();
+        self.all
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry_matches(entry, &needle))
             .filter(|(_, entry)| category.matches_category(entry.category.as_deref()))
+            .filter(|(_, entry)| marketplace.matches_category(marketplace_of(entry)))
             .map(|(index, _)| index)
-            .collect();
-        self.cursor = 0;
-        self.scroll = 0;
+            .collect()
     }
 
     /// Move the block cursor up one result within the filtered set (FR-010).
@@ -1890,6 +1964,7 @@ impl PluginStoreBrowser {
             PluginStoreStatus::Ready
         };
         self.rebuild_categories();
+        self.rebuild_marketplaces();
         self.sort_entries();
         self.apply_filter();
     }
@@ -1943,16 +2018,7 @@ impl PluginStoreBrowser {
     /// new set, so the panel never leaps to the top mid-scroll.
     fn reapply_filter_preserving_cursor(&mut self) {
         let selected_all_index = self.filtered.get(self.cursor).copied();
-        let needle = self.query.to_lowercase();
-        let category = self.categories.filter().clone();
-        self.filtered = self
-            .all
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry_matches(entry, &needle))
-            .filter(|(_, entry)| category.matches_category(entry.category.as_deref()))
-            .map(|(index, _)| index)
-            .collect();
+        self.filtered = self.matching_indices();
         self.cursor = selected_all_index
             .and_then(|index| self.filtered.iter().position(|&i| i == index))
             .unwrap_or_else(|| self.cursor.min(self.filtered.len().saturating_sub(1)));
@@ -1998,6 +2064,31 @@ impl PluginStoreBrowser {
         let _ = self.categories.select_when_known(&previous);
         self.category_cursor = self.category_row_of(self.categories.filter().label());
         self.category_scroll = 0;
+    }
+
+    /// Re-derive the distinct marketplace set from [`Self::all`], keeping the
+    /// active marketplace only while the new index still declares it (spec
+    /// `pluginstores` FR-052).
+    ///
+    /// The set is the sorted, case-insensitive distinct non-blank marketplace
+    /// labels present in the loaded entries, with `ALL` implicit and always first,
+    /// mirroring [`Self::rebuild_categories`]. A marketplace no entry declares is
+    /// dropped and the selection falls back to `ALL`, so the navigator never shows
+    /// a row that selects nothing.
+    fn rebuild_marketplaces(&mut self) {
+        let previous = self.marketplaces.filter().label().to_string();
+        let marketplaces = CategoryFilterState::from_categories(
+            self.all
+                .iter()
+                .map(|e| e.marketplace.as_str())
+                .filter(|label| !label.trim().is_empty()),
+        );
+        self.marketplaces = marketplaces;
+        // INTENTIONAL: the boolean is informational; the side effect (falling back
+        // to `ALL` when the marketplace is no longer declared) is what matters.
+        let _ = self.marketplaces.select_when_known(&previous);
+        self.marketplace_cursor = self.marketplace_row_of(self.marketplaces.filter().label());
+        self.marketplace_scroll = 0;
     }
 
     /// Record a category filter requested by a `--category <name>` launch, held
@@ -2060,6 +2151,35 @@ impl PluginStoreBrowser {
             Some(label) => label.as_str(),
             None => ALL_CATEGORY,
         }
+    }
+
+    /// How many loaded entries the category named `label` holds (spec `pluginstores`
+    /// FR-053).
+    ///
+    /// The `ALL` sentinel counts every entry; a category with no entry (or an
+    /// unknown label) counts `0`. The count composes the shared
+    /// [`CategoryFilter::matches_category`] predicate, so it always agrees with the
+    /// result set selecting that row would show.
+    #[must_use]
+    pub fn category_entry_count(&self, label: &str) -> usize {
+        let filter = CategoryFilter::of(label);
+        self.all
+            .iter()
+            .filter(|entry| filter.matches_category(entry.category.as_deref()))
+            .count()
+    }
+
+    /// The string rendered for navigator row `row`: the base
+    /// [`Self::category_row_label`] with the row's entry count appended as ` (N)`
+    /// (spec `pluginstores` FR-053).
+    ///
+    /// A still-loading index, or one that declares no category, still renders the
+    /// `ALL (0)` row so the navigator shows a count in every state (FR-016,
+    /// FR-018).
+    #[must_use]
+    pub fn category_row_display(&self, row: usize) -> String {
+        let label = self.category_row_label(row);
+        format!("{label} ({})", self.category_entry_count(label))
     }
 
     /// The navigator row currently under the category cursor, clamped to the row
@@ -2165,12 +2285,12 @@ impl PluginStoreBrowser {
     /// (spec `catnav` FR-010).
     ///
     /// This is the navigator's `ENTER`: it re-applies the highlighted category
-    /// (idempotent when the cursor did not move) and clears [`Self::nav_focused`],
-    /// so the next `Up`/`Down` routes to the result list. It installs nothing, so
-    /// `ENTER` over the navigator can never write to the store (FR-024).
+    /// (idempotent when the cursor did not move) and moves focus back to the result
+    /// list, so the next `Up`/`Down` routes to the result list. It installs nothing,
+    /// so `ENTER` over the navigator can never write to the store (FR-024).
     pub fn category_confirm(&mut self) {
         self.apply_category_cursor();
-        self.nav_focused = false;
+        self.focus = StorePane::Results;
     }
 
     /// Apply the category at the current cursor row to the result set (spec
@@ -2219,6 +2339,176 @@ impl PluginStoreBrowser {
             .categories()
             .iter()
             .position(|category| category.eq_ignore_ascii_case(label))
+            .map_or(0, |index| index + 1)
+    }
+
+    // -- Marketplace navigator (spec `pluginstores` FR-052) --------------------
+
+    /// The active marketplace label (`ALL` when unfiltered) (FR-052).
+    #[must_use]
+    pub fn active_marketplace(&self) -> &str {
+        self.marketplaces.filter().label()
+    }
+
+    /// The number of marketplace navigator rows: the `ALL` sentinel plus each
+    /// derived marketplace (FR-052).
+    #[must_use]
+    pub fn marketplace_row_count(&self) -> usize {
+        1 + self.marketplaces.categories().len()
+    }
+
+    /// The label of marketplace row `row`: `ALL` for row `0`, else the sorted
+    /// marketplace at that row; an out-of-range row reads as `ALL` (FR-052).
+    #[must_use]
+    pub fn marketplace_row_label(&self, row: usize) -> &str {
+        match row
+            .checked_sub(1)
+            .and_then(|index| self.marketplaces.categories().get(index))
+        {
+            Some(label) => label.as_str(),
+            None => ALL_CATEGORY,
+        }
+    }
+
+    /// How many loaded entries the marketplace named `label` holds (spec
+    /// `pluginstores` FR-053).
+    ///
+    /// The `ALL` sentinel counts every entry. A blank label degrades to the `ALL`
+    /// sentinel through [`CategoryFilter::of`] (and no blank marketplace is ever a
+    /// row), so passing a row label always counts the entries that row would show.
+    #[must_use]
+    pub fn marketplace_entry_count(&self, label: &str) -> usize {
+        let filter = CategoryFilter::of(label);
+        self.all
+            .iter()
+            .filter(|entry| filter.matches_category(marketplace_of(entry)))
+            .count()
+    }
+
+    /// The string rendered for marketplace navigator row `row`: the base
+    /// [`Self::marketplace_row_label`] with the row's entry count appended as ` (N)`
+    /// (spec `pluginstores` FR-053).
+    #[must_use]
+    pub fn marketplace_row_display(&self, row: usize) -> String {
+        let label = self.marketplace_row_label(row);
+        format!("{label} ({})", self.marketplace_entry_count(label))
+    }
+
+    /// The marketplace row currently under the marketplace cursor, clamped to the
+    /// row count (FR-052).
+    #[must_use]
+    pub fn marketplace_cursor_row(&self) -> usize {
+        self.marketplace_cursor
+            .min(self.marketplace_row_count().saturating_sub(1))
+    }
+
+    /// Move the marketplace cursor up one row and apply the newly highlighted
+    /// marketplace on the same keypress (FR-052). Returns whether the cursor moved.
+    pub fn marketplace_move_up(&mut self) -> bool {
+        if self.marketplace_cursor == 0 {
+            return false;
+        }
+        self.marketplace_cursor -= 1;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Move the marketplace cursor down one row and apply the newly highlighted
+    /// marketplace on the same keypress (FR-052). Returns whether the cursor moved.
+    pub fn marketplace_move_down(&mut self) -> bool {
+        if self.marketplace_cursor + 1 >= self.marketplace_row_count() {
+            return false;
+        }
+        self.marketplace_cursor += 1;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Select marketplace row `row` and apply it (FR-052). Returns `false` when
+    /// `row` is out of range, leaving the selection unchanged.
+    pub fn marketplace_select_row(&mut self, row: usize) -> bool {
+        if row >= self.marketplace_row_count() {
+            return false;
+        }
+        self.marketplace_cursor = row;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Move the marketplace viewport by `delta` rows without touching the
+    /// marketplace cursor or the active marketplace (FR-052).
+    pub fn marketplace_scroll_by(&mut self, delta: i16) {
+        let rows = self.marketplace_row_count();
+        if rows == 0 {
+            self.marketplace_scroll = 0;
+            return;
+        }
+        let max = rows - 1;
+        let next = if delta.is_negative() {
+            self.marketplace_scroll
+                .saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.marketplace_scroll.saturating_add(delta as usize)
+        };
+        self.marketplace_scroll = next.min(max);
+    }
+
+    /// Clear the marketplace filter to `ALL` and re-derive the results (FR-052).
+    pub fn marketplace_clear(&mut self) {
+        self.marketplace_cursor = 0;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+    }
+
+    /// Apply the marketplace under the cursor and hand focus back to the result
+    /// list (FR-052).
+    ///
+    /// The marketplace navigator's `ENTER`: it re-applies the highlighted
+    /// marketplace and moves focus to the result list, installing nothing.
+    pub fn marketplace_confirm(&mut self) {
+        self.apply_marketplace_cursor();
+        self.focus = StorePane::Results;
+    }
+
+    /// Apply the marketplace at the current cursor row to the result set (FR-052).
+    fn apply_marketplace_cursor(&mut self) {
+        let row = self.marketplace_cursor_row();
+        self.marketplace_cursor = row;
+        let label = self.marketplace_row_label(row).to_string();
+        self.marketplaces.select_by_name(&label);
+        self.apply_filter();
+    }
+
+    /// Adjust [`Self::marketplace_scroll`] so the marketplace cursor stays inside a
+    /// viewport of `viewport` rows (FR-052).
+    pub fn ensure_marketplace_visible(&mut self, viewport: usize) {
+        let rows = self.marketplace_row_count();
+        if viewport == 0 || rows == 0 {
+            self.marketplace_scroll = 0;
+            return;
+        }
+        let cursor = self.marketplace_cursor.min(rows - 1);
+        if cursor < self.marketplace_scroll {
+            self.marketplace_scroll = cursor;
+        } else if cursor >= self.marketplace_scroll + viewport {
+            self.marketplace_scroll = cursor + 1 - viewport;
+        }
+        self.marketplace_scroll = self.marketplace_scroll.min(rows.saturating_sub(viewport));
+    }
+
+    /// The marketplace row carrying `label`: row `0` for the `ALL` sentinel, else
+    /// the sorted position plus one; an unknown label reads as `ALL` (FR-052).
+    fn marketplace_row_of(&self, label: &str) -> usize {
+        if label.eq_ignore_ascii_case(ALL_CATEGORY) {
+            return 0;
+        }
+        self.marketplaces
+            .categories()
+            .iter()
+            .position(|known| known.eq_ignore_ascii_case(label))
             .map_or(0, |index| index + 1)
     }
 
@@ -2274,6 +2564,17 @@ fn entry_matches(entry: &StoreEntry, needle_lower: &str) -> bool {
             .tags
             .iter()
             .any(|tag| tag.to_lowercase().contains(needle_lower))
+}
+
+/// The marketplace label an entry is attributed to for filtering (FR-052).
+///
+/// The `marketplace` field is set at fetch time to the display name of the
+/// marketplace the row came from; a `None` is returned for a blank label, so the
+/// shared [`CategoryFilter::matches_category`] predicate treats it as visible only
+/// under `ALL`, exactly as an uncategorised entry behaves for the category filter.
+fn marketplace_of(entry: &StoreEntry) -> Option<&str> {
+    let label = entry.marketplace.trim();
+    if label.is_empty() { None } else { Some(label) }
 }
 
 /// Core TUI application state.
@@ -2584,12 +2885,36 @@ pub struct App {
     /// it (FR-020); tests and mouse hit-testing read it back to locate the
     /// navigator. [`Rect::default`] while no plugin-store panel is open.
     pub plugin_store_nav_area: Rect,
+    /// Cached area of the plugin-store panel's marketplace-navigator pane (set
+    /// during render; spec `pluginstores` FR-052).
+    ///
+    /// The left column is split vertically: the category navigator occupies the top
+    /// half ([`Self::plugin_store_nav_area`]) and the marketplace navigator the bottom
+    /// half. Recomputed from the panel body every frame; [`Rect::default`] while no
+    /// plugin-store panel is open.
+    pub plugin_store_marketplace_area: Rect,
     /// Cached area of the plugin-store panel's result-list column (set during
     /// render; spec `catnav` FR-020).
     ///
     /// Recomputed from the panel body every frame alongside the navigator;
     /// [`Rect::default`] while no plugin-store panel is open.
     pub plugin_store_result_area: Rect,
+    /// Cached area of the plugin-store panel's bottom search box (set during
+    /// render; spec `pluginstores` FR-004).
+    ///
+    /// The search box spans the panel's inner width on the row below the footer;
+    /// the panel's own search filter is typed into it while any pane holds focus.
+    /// Recomputed from the current frame every draw so a terminal resize re-derives
+    /// it (FR-018); [`Rect::default`] while no plugin-store panel is open. The
+    /// clear button occupies its rightmost columns (see [`Self::plugin_store_clear_area`]).
+    pub plugin_store_search_area: Rect,
+    /// Cached area of the plugin-store panel's search-box clear button (set during
+    /// render; spec `pluginstores` FR-004).
+    ///
+    /// Recomputed from [`Self::plugin_store_search_area`] every frame and painted at
+    /// the search box's right edge; a left-click inside it clears the search filter.
+    /// [`Rect::default`] while no plugin-store panel is open.
+    pub plugin_store_clear_area: Rect,
     /// Active connector-catalogue browser, present while the `/connectors claude`
     /// browse panel is open. `None` when no panel is showing.
     ///

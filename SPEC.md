@@ -98,7 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.132). The core architecture, tool system,
+Ragent is in **beta** (v1.0.133). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -1940,35 +1940,47 @@ graph LR
 
 **Figure 7:** TUI Component Architecture — UI layout and event wiring
 
-### 6.5 Plugin-Store Category Navigator
+### 6.5 Plugin-Store Category and Marketplace Navigators
 
 The plugin-store browse panel opened by `/plugins codex` and `/plugins claude`
-(spec `catnav`) splits its inner area into a left-hand **category navigator** and
-the existing result column. The navigator lists the `ALL` sentinel first, then the
-distinct non-empty categories the fetched store index declares (sorted
-case-insensitively, folding case-only duplicates); an index that
-declares no category renders `ALL` only and still browses normally (FR-018). The
-active category is shown in the panel title (`-- category <name>`) and painted in a
-distinct colour; the row under the category cursor carries a block cursor
+(spec `catnav`, `pluginstores` FR-052) splits its inner area into a left-hand
+navigator column and the existing result column, and the navigator column is split
+**vertically** into a **category navigator** (upper half) and a **marketplace
+navigator** (lower half). Each navigator lists the `ALL` sentinel first, then the
+distinct non-empty values the fetched store index declares (sorted
+case-insensitively, folding case-only duplicates): the categories from each entry's
+`category`, and the marketplaces from each entry's `marketplace` label. An index that
+declares no category or no marketplace renders `ALL` only for the corresponding
+navigator and still browses normally (FR-018). Every navigator row appends the number
+of loaded entries under that value as `Name (N)`, counted over the full fetched index
+so the count is stable while a query or filter narrows the result list; the `ALL` row
+counts the whole index (FR-053). The active category and marketplace are
+shown in the panel title (`-- category <name> -- marketplace <name>`) and painted in a
+distinct colour; the row under each navigator's cursor carries a block cursor
 independent of the result-list cursor.
 
-The navigator is fully operable by keyboard: `Tab` transfers focus between the
-navigator and the result list, `Up`/`Down` move the focused pane's cursor (moving
-the category cursor applies the highlighted category on the same keypress and
-scrolls the navigator to keep the cursor visible), `Enter` over the navigator
-applies the category and hands focus back to the result list (never installing),
-and `c` clears the category to `ALL`. Mouse input is an additive convenience: a
-left-click on a category row selects and applies it and focuses the navigator, a
-wheel over the navigator scrolls its viewport without changing the active category,
+The panel has three focusable panes and is fully operable by keyboard: `Tab`/`BackTab`
+cycle focus forward/backward through the result list, the category navigator, and the
+marketplace navigator; `Up`/`Down` move the focused pane's cursor (moving a navigator
+cursor applies the highlighted value on the same keypress and scrolls that navigator to
+keep the cursor visible); `Enter` over a navigator
+applies the value and hands focus back to the result list (never installing),
+and `c` clears the focused navigator's filter to `ALL`. Mouse input is an additive
+convenience: a
+left-click on a navigator row selects and applies it and focuses that pane, a
+wheel over a navigator scrolls its viewport without changing the active filter,
 and a left-click on a result row moves the result cursor while keeping the active
-category. Every mouse path is a convenience over the keyboard path, so a terminal
-without mouse reporting still reaches every category (FR-023), and no navigator
+filters. Every mouse path is a convenience over the keyboard path, so a terminal
+without mouse reporting still reaches every value (FR-023), and no navigator
 path ever installs, downloads, or executes plugin JavaScript (FR-024, FR-025).
 
-Selecting a category re-derives the visible result set from the full fetched index
+Selecting a category or a marketplace re-derives the visible result set from the full
+fetched index
 in memory, resets the result cursor to the first survivor, and issues no network
-request (FR-014, FR-028); the category predicate composes with the free-text query
-(a result is visible only when it matches both). A category no fetched entry
+request (FR-014, FR-028); the category and marketplace predicates compose with each
+other and with the free-text query
+(a result is visible only when it matches all active filters). An entry with a blank
+marketplace is visible only under `ALL`. A value no fetched entry
 declares is never presented as a row and a selection that vanishes after a re-fetch
 falls back to `ALL` (FR-027). A `--category <name>` launch argument holds the
 requested filter until the index lands, then validates it against the derived rows
@@ -1984,6 +1996,16 @@ merged multi-marketplace panel shows each row's source (FR-048). The marketplace
 description columns share the flexible remainder, so a longer marketplace name is shown
 in full when the terminal has room and clipped without pushing the fixed id/version
 columns or the trailing `[installed]` marker off the row when it does not.
+
+The panel's bottom inner row carries a **search box** (FR-051): a leading `search:` label,
+the live filter field, and a right-aligned `[x] clear` button. The field mirrors the
+browser's query byte-for-byte, so the box and the result filter cannot drift; a query
+wider than the field is clipped from the left so the newest characters stay visible. A
+left-click on the clear button clears the search filter through the same in-memory path
+as the keyboard editor, restoring the full result set while leaving the active category
+untouched; the button is inert when the query is already empty. A row too narrow to hold
+both the label and the button drops the button rather than squeezing the field below a
+usable width. Only ASCII glyphs are drawn.
 
 A vendor marketplace is a *listing* rather than a native index: the Codex catalogue
 carries neither a version nor a description, and the Claude catalogue carries a
@@ -4300,6 +4322,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.133 | 2026-10-12 | Plugin-store browse-panel refinements and a `git+` install fix (spec `pluginstores` FR-004, FR-051; `plugins` FR-024). Each navigator on the `/plugins` browse panel now carries a one-row reversed-video header (`Categories` over the category navigator, `Marketplace` over the marketplace navigator) directly above its `ALL` row, and the navigator's cached hit-test area is now the row area below the header, so a click or wheel on a header row is inert and never mis-mapped onto `ALL`. A bottom-edge search box with a live filter field and a click-to-clear `[x] clear` button was already introduced with the three-pane navigator work. Separately, `git_clone_stage` in `ragent-plugins` ran `git checkout -- FETCH_HEAD`; the `--` separator made `git checkout` treat `FETCH_HEAD` as a *pathspec* file filter rather than a commit-ish, so every install from a `git+<url>#<ref>` source naming a non-default ref (for example the `/plugins claude` store's `git+https://github.com/mongodb/agent-skills#main:plugins/mongodb`) aborted after the fetch. The checkout is now `git checkout FETCH_HEAD`; `FETCH_HEAD` is a name ragent supplies itself and the ref that filled it is already validated to not begin with `-`, so no option can be injected. Covered by the new `add_checks_out_a_non_default_ref` case in `test_store_git_source.rs`. |
 | v1.0.132 | 2026-10-12 | Merged connector/plugin marketplace browsers and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050, `connectors` FR-042..FR-046). The `/plugins codex\|claude` and `/connectors claude` browse panels each merge their store's base endpoint with every additional marketplace registered through the new `/plugins marketplace` / `/connectors marketplace` sub-subcommand families (`show`, `<store> list\|add <source> [--force]\|remove <name>`), recorded in the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces` arrays by an atomic config splice. Each result row shows the plugin/connector id, its version (plugin store), the marketplace it came from, and its description; the connector panel pins a dark-on-light column-heading row above its scrolling list, and both panels resolve each entry's blank description (and, for the plugin store, its version) from the entry's own repository manifest off the event loop via a bounded thread pool with an injectable `ManifestSource` seam (`ragent_plugins::store_enrich`, `ragent_connectors::catalogue_enrich`). Every connector and plugin-store list is sorted in ascending alphabetical order of id, case-insensitively with a byte-wise tiebreak (`compare_connector_ids` / `compare_store_ids`), applied before any query or category filter. The plugin-store category navigator no longer derives rows from entry `tags`/`keywords` (`catnav` FR-021 withdrawn). Registry fixes: the `/events` SSE connection cap builds on stable Rust (`compare_exchange_weak` loop replacing `AtomicUsize::try_update`); connectors install enabled; `catnav` FR-021 withdrawn retaining its number. |
 | v1.0.131 | 2026-10-10 | OpenHands-parity release. The pluggable execution backends (`local`/`docker`/`podman`/`remote`, §19D) with a health-visible registry and TUI `/backend` switcher, sandbox secret injection resolved from the encrypted store at spawn time, the ACP client plus the feature-gated ACP server (§19E), the OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) with a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport, the automation service (webhook ingress `POST /auto/{id}`, scheduler, durable run history, backend confinement, §19F), AgentSkills (`.agents/skills/`) discovery, and the opt-in LLM security analyzer (`/security`) now ship as a tagged release. The 7-layer bash validation, path containment, and permission system are unchanged and gate every new surface. Registry fixes: the fast-path schema tests assert the crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table); `PluginStoreBrowser::set_index` keeps document order; the `mask_key` doctest expects `[REDACTED]`; `machine_output` routes tracing to stderr for the report subcommands so machine-readable stdout stays clean; and the unused `ragent-storage` dependency is dropped from `ragent-tools-extended`. |
 | v1.0.130 | 2026-10-09 | OpenHands parity delta (spec `openhands`, FR-001..FR-038 / T-001..T-019). Pluggable execution backends (`local`/`docker`/`podman`/`remote`) with a health-visible registry and TUI `/backend` switcher (§19D); sandbox secret injection resolved from the encrypted store at spawn time; an ACP client and a feature-gated ACP server (§19E); an OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) plus a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport; the automation service with webhook ingress (`POST /auto/{id}`), scheduler, durable run history, and backend confinement (§19F); AgentSkills (`.agents/skills/`) discovery; and an opt-in LLM security analyzer (`/security`, tightening-only over the static rules). Plugin-store category navigator (`catnav`) for `/plugins codex|claude` and removal of the `browser` CDP tool (registered count 152 -> 151 across 22 categories). The engine-gated `mf_screenshot` capability (FR-029) is registered only when a drivable headless browser is present, so the default build advertises 148 tools across 21 categories. Also fixes the stable-toolchain `/events` SSE connection cap (`AtomicUsize::try_update` -> `compare_exchange_weak` loop). |

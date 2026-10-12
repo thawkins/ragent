@@ -209,15 +209,25 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   a blocking Stop hook can feed findings back before the turn ends);
   `/plugins codex` and `/plugins claude`
   browse each store's official marketplace (`StoreProvider` normalises the Codex and
-  Claude document shapes); each panel carries a left-hand category navigator listing
-  `ALL` plus the distinct categories the fetched index declares, operated by
-  keyboard (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear) and mouse (click
-  a row, wheel to scroll); a launch may pre-select a category with `--category
-  <name>`; each result row shows the plugin id, version, the **marketplace it came
+  Claude document shapes); each panel carries a left-hand navigator column split into a
+  category navigator (top) and a marketplace navigator (bottom), each listing
+  `ALL` plus the distinct values the fetched index declares, operated by
+  keyboard (`Tab`/`BackTab` cycle focus, `Up`/`Down` move-and-apply, `Enter` apply,
+  `c` clear the focused navigator) and mouse (click
+  a row, wheel to scroll); every navigator row appends the number of plugins under that
+  value as `Name (N)` (the `ALL` row counts the whole index, derived from the full
+  fetched index so the count is stable as a query or filter narrows the list); the
+  search query, category, and marketplace filters compose
+  so the list shows only entries matching all three; a launch may pre-select a category
+  with `--category <name>`; each result row shows the plugin id, version, the
+  **marketplace it came
   from** (the added marketplace's name, or the store label for the base endpoint), and
   its description, and the panel widens up to a 140-column ceiling so the marketplace
   column has room; the result list is sorted alphabetically by plugin id
-  (case-insensitive) and a query or category filter narrows the already-sorted set;
+  (case-insensitive) and a query or category filter narrows the already-sorted set. A
+  search box sits along the panel's bottom edge with the live filter field on the left
+  and a click-to-clear `[x] clear` button on the right, so the active query can be wiped
+  with one click;
   `/plugins add` also accepts a
   `git+<https-url>#<ref>[:<subpath>]` git source; a freshly installed plugin is
   recorded enabled and loads at the next session start (no JavaScript runs during
@@ -684,6 +694,15 @@ under active development.
 
 Recent highlights:
 
+- **v1.0.133 — plugin-store navigator titles, per-row counts, and a `git+` install fix** —
+  each navigator on the `/plugins` browse panel now carries a reversed-video header
+  (`Categories` over the category navigator, `Marketplace` over the marketplace
+  navigator) directly above its `ALL` row, the navigator's hit-test area sits below that
+  header so a header click/wheel is inert, and every navigator row shows the number of
+  plugins under it as `Name (N)`. A `git+<url>#<ref>` install with a non-default ref now
+  checks that ref out correctly (the `git checkout` argument is no longer mistaken for a
+  pathspec); the browse panel also gains a bottom-edge search box with a click-to-clear
+  button.
 - **v1.0.132 — marketplace browsers and alphabetical catalogue ordering** — the
   `/plugins codex|claude` and `/connectors claude` browse panels each merge their
   store's base endpoint with every additional marketplace registered through the

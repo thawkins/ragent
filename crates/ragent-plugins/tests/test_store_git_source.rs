@@ -152,6 +152,55 @@ fn add_installs_a_plugin_from_a_whole_repo_git_source() {
     assert_eq!(outcome.parsed.descriptor.id, "git-root-plugin");
 }
 
+/// Regression: a `#<ref>` naming a real branch must be *checked out*, not
+/// silently dropped. The shallow clone lands on the remote's default branch, so
+/// a plugin whose manifest differs between branches only installs correctly when
+/// the fetched ref is actually selected. The offline remote puts one manifest id
+/// on its default branch and a different one on `alt`; installing from `#alt`
+/// must yield the `alt` id.
+#[test]
+fn add_checks_out_a_non_default_ref() {
+    let temp = temp_dir("git-alt-ref");
+    let remote = temp.join("remote");
+    let plugin = remote.join("plugins/weather");
+    std::fs::create_dir_all(&plugin).expect("remote subdir");
+
+    // The default branch carries `git-weather`.
+    std::fs::write(
+        plugin.join("codex-plugin.json"),
+        r#"{ "name": "git-weather", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("manifest");
+    std::fs::write(plugin.join("index.js"), "// entry").expect("entry");
+    git(&remote, &["init", "-q", "-b", "main"]);
+    git(&remote, &["config", "user.email", "t@example.org"]);
+    git(&remote, &["config", "user.name", "Test"]);
+    git(&remote, &["add", "-A"]);
+    git(&remote, &["commit", "-q", "-m", "main"]);
+
+    // The `alt` branch carries a different id, so the installed id proves which
+    // commit was checked out.
+    git(&remote, &["checkout", "-q", "-b", "alt"]);
+    std::fs::write(
+        plugin.join("codex-plugin.json"),
+        r#"{ "name": "git-weather-alt", "version": "1.0.0", "entry": "index.js" }"#,
+    )
+    .expect("manifest");
+    git(&remote, &["add", "-A"]);
+    git(&remote, &["commit", "-q", "-m", "alt"]);
+    git(&remote, &["checkout", "-q", "main"]);
+
+    let url = format!("file://{}", remote.display());
+    let dirs = store_dirs(&temp);
+
+    let source = format!("git+{url}#alt:plugins/weather");
+    let outcome = add(&dirs, &temp, &source, false).expect("the alt-branch plugin installs");
+    assert_eq!(
+        outcome.parsed.descriptor.id, "git-weather-alt",
+        "the `#alt` ref must be checked out, not the default branch"
+    );
+}
+
 #[test]
 fn add_refuses_a_non_https_git_source_without_cloning() {
     let temp = temp_dir("git-refuse");

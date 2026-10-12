@@ -315,3 +315,67 @@ async fn a_click_on_the_panel_outside_both_columns_is_swallowed() {
     assert!(app.text_selection.is_none());
     assert_eq!(browser(&app).active_category(), "ALL");
 }
+
+// -- Marketplace navigator mouse routing (spec `pluginstores` FR-052) ----------
+
+/// An app whose entries carry the given marketplaces, so the marketplace navigator
+/// has rows to click and scroll.
+fn open_marketplaces(entries: Vec<StoreEntry>) -> App {
+    let mut app = support::make_app();
+    app.open_plugin_store(StoreKind::Codex, "", false);
+    app.plugin_store
+        .as_mut()
+        .expect("panel open")
+        .set_entries(entries);
+    app
+}
+
+/// An entry attributed to `marketplace`.
+fn mp_entry(id: &str, marketplace: &str) -> StoreEntry {
+    let mut e = entry(id, Some("Web"));
+    e.marketplace = marketplace.to_string();
+    e
+}
+
+#[tokio::test]
+async fn left_click_on_a_marketplace_row_selects_applies_and_focuses_it() {
+    let mut app = open_marketplaces(vec![
+        mp_entry("codex-a", "codex"),
+        mp_entry("community-a", "community"),
+    ]);
+    render(&mut app, 100, 30);
+    let mp = app.plugin_store_marketplace_area;
+    assert!(
+        !app.plugin_store_nav_focused() && !app.plugin_store_marketplace_focused(),
+        "the result list starts focused"
+    );
+
+    // Row 1 in the marketplace pane is `codex` (row 0 is `ALL`).
+    app.handle_mouse_event(left_click(mp.x + 1, mp.y + 1));
+
+    assert_eq!(browser(&app).active_marketplace(), "codex");
+    assert!(
+        app.plugin_store_marketplace_focused(),
+        "the click focuses the marketplace pane (FR-052)"
+    );
+    assert_eq!(filtered_ids(&app), ["codex-a"]);
+}
+
+#[tokio::test]
+async fn wheel_over_the_marketplace_navigator_scrolls_it_without_changing_the_filter() {
+    let entries: Vec<StoreEntry> = (0..30)
+        .map(|i| mp_entry(&format!("codex-{i:02}"), &format!("Mkt{i:02}")))
+        .collect();
+    let mut app = open_marketplaces(entries);
+    render(&mut app, 100, 30);
+    let mp = app.plugin_store_marketplace_area;
+    assert_eq!(browser(&app).marketplace_scroll, 0);
+
+    app.handle_mouse_event(wheel_down(mp.x + 1, mp.y + 1));
+
+    // The wheel advances the marketplace viewport and leaves the active marketplace
+    // (and the result list) exactly as it was (FR-052).
+    assert_eq!(browser(&app).marketplace_scroll, 3);
+    assert_eq!(browser(&app).active_marketplace(), "ALL");
+    assert_eq!(browser(&app).category_scroll, 0);
+}

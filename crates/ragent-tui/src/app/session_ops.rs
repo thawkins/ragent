@@ -29,8 +29,9 @@ use crate::app::state::{
     ConnectorEnrichResult, ContextAction, ContextPartitionSnapshot, FileMenuEntry, FileMenuState,
     LlmRequestStat, LlmStatsSummary, LogEntry, LogLevel, OutputViewState, OutputViewTarget,
     PluginStoreBrowser, PluginStoreFetchResult, PluginStoreInstallResult, ProviderSetupStep,
-    QueuedInput, ScreenMode, ScrollbarDragPane, SelectionPane, StoreEnrichResult, TextSelection,
-    atomic_config_update, is_image_path, percent_decode_path, save_clipboard_image_to_temp,
+    QueuedInput, ScreenMode, ScrollbarDragPane, SelectionPane, StoreEnrichResult, StorePane,
+    TextSelection, atomic_config_update, is_image_path, percent_decode_path,
+    save_clipboard_image_to_temp,
 };
 
 // Helpers
@@ -1906,24 +1907,46 @@ impl App {
     }
 
     /// Whether the category navigator currently holds keyboard focus
-    /// (spec `catnav` FR-009).
+    /// (spec `catnav` FR-009; `pluginstores` FR-052).
     ///
-    /// `false` when no panel is open or the result list holds focus.
+    /// `false` when no panel is open or a pane other than the category navigator
+    /// holds focus.
     #[must_use]
     pub fn plugin_store_nav_focused(&self) -> bool {
         self.plugin_store
             .as_ref()
-            .is_some_and(|browser| browser.nav_focused)
+            .is_some_and(|browser| browser.focus == StorePane::Categories)
     }
 
-    /// Transfer keyboard focus between the category navigator and the result
-    /// list (spec `catnav` FR-009).
+    /// Whether the marketplace navigator currently holds keyboard focus
+    /// (spec `pluginstores` FR-052).
+    ///
+    /// `false` when no panel is open or a pane other than the marketplace
+    /// navigator holds focus.
+    #[must_use]
+    pub fn plugin_store_marketplace_focused(&self) -> bool {
+        self.plugin_store
+            .as_ref()
+            .is_some_and(|browser| browser.focus == StorePane::Marketplaces)
+    }
+
+    /// Cycle focus forward through the three panes, `Results` -> `Categories` ->
+    /// `Marketplaces` -> `Results` (spec `pluginstores` FR-052).
     ///
     /// A no-op when no panel is open. The focused pane's cursor is rendered
-    /// distinctly and subsequent `Up`/`Down` route to the focused pane (FR-009).
-    pub fn plugin_store_toggle_focus(&mut self) {
+    /// distinctly and subsequent `Up`/`Down` route to that pane.
+    pub fn plugin_store_focus_next(&mut self) {
         if let Some(browser) = self.plugin_store.as_mut() {
-            browser.nav_focused = !browser.nav_focused;
+            browser.focus = browser.focus.next();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Cycle focus backward through the three panes (`BackTab`), the reverse of
+    /// [`Self::plugin_store_focus_next`] (spec `pluginstores` FR-052).
+    pub fn plugin_store_focus_prev(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.focus = browser.focus.previous();
             self.needs_redraw = true;
         }
     }
@@ -1967,6 +1990,64 @@ impl App {
     pub fn plugin_store_clear_category(&mut self) {
         if let Some(browser) = self.plugin_store.as_mut() {
             browser.category_clear();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the marketplace cursor up one row while the marketplace navigator
+    /// holds focus, applying the newly highlighted marketplace (FR-052).
+    pub fn plugin_store_marketplace_move_up(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.marketplace_move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the marketplace cursor down one row while the marketplace navigator
+    /// holds focus, applying the newly highlighted marketplace (FR-052).
+    pub fn plugin_store_marketplace_move_down(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.marketplace_move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Apply the highlighted marketplace and move keyboard focus to the result
+    /// list (FR-052).
+    ///
+    /// Installing is deliberately not reachable here: `ENTER` over the marketplace
+    /// navigator only applies the marketplace and transfers focus.
+    pub fn plugin_store_marketplace_confirm(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.marketplace_confirm();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the marketplace filter to `ALL` and re-derive the visible results
+    /// (FR-052).
+    ///
+    /// A no-op when no panel is open; issues no network request and installs
+    /// nothing.
+    pub fn plugin_store_clear_marketplace(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut() {
+            browser.marketplace_clear();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the live search filter, re-deriving the visible result set (spec
+    /// `pluginstores` FR-004).
+    ///
+    /// Wired to the search box's `[x] clear` button and to the panel's own query
+    /// editor. An already-empty query is a no-op (so a stray click on the button
+    /// does not repaint); clearing a non-empty query re-applies the filter and
+    /// requests a redraw so the full result set returns immediately.
+    pub fn plugin_store_clear_search(&mut self) {
+        if let Some(browser) = self.plugin_store.as_mut()
+            && !browser.query.is_empty()
+        {
+            browser.set_query(String::new());
             self.needs_redraw = true;
         }
     }

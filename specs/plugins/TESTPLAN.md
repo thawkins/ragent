@@ -591,6 +591,29 @@ not run if offline).
   `ambiguous plugin manifest`; only the both-nested pairing resolves.
 - Cleanup: `ragent plugins disable mongodb` then `ragent plugins remove mongodb`.
 
+### TC-025 — A `git+` source naming a non-default ref is checked out
+
+**Requirement:** FR-010, FR-024
+
+**Preconditions:** the local `file://` mirror used by TC-019, or network access to
+`github.com/mongodb/agent-skills` (skip and record as not run if offline).
+
+**Steps:**
+1. `ragent plugins add 'git+https://github.com/mongodb/agent-skills#main:plugins/mongodb'`.
+2. Read the reported dialect/version and confirm the installed manifest is the one on
+   `main`.
+
+**Expected results:**
+- Step 1 completes with `Installed plugin 'mongodb' (dialect: claude, version: 1.2.1).`; the
+  install does not abort with `git checkout: error: pathspec 'FETCH_HEAD' did not match any
+  file(s) known to git`.
+- The fetched ref is the one that was checked out, not the remote's default branch: when the
+  ref names a branch other than the default, the installed manifest is the one that branch
+  carries. The offline regression `add_checks_out_a_non_default_ref` in
+  `crates/ragent-plugins/tests/test_store_git_source.rs` pins this by giving the default and
+  `alt` branches different plugin ids.
+- Cleanup: `ragent plugins remove mongodb`.
+
 ## Cleanup
 
 1. In the TUI, run `/plugins disable` for every enabled plugin, then

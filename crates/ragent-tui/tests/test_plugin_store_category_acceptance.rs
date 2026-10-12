@@ -230,6 +230,16 @@ async fn tc_001_navigator_lists_all_and_the_distinct_fixture_categories_sorted()
         "ALL is selected first"
     );
 
+    // Each navigator row shows the category name with its entry count appended
+    // (FR-053): `ALL (6)` counts every entry including the uncategorised one, while
+    // the folded `Utility`/`utility` row counts both its spellings. Read the count
+    // straight from the browser (the render assertion lives in the panel tests).
+    assert_eq!(browser(&app).category_row_display(0), "ALL (6)");
+    assert_eq!(browser(&app).category_entry_count("Utility"), 2);
+    assert_eq!(browser(&app).category_entry_count("Web"), 1);
+    assert_eq!(browser(&app).category_entry_count("Database"), 1);
+    assert_eq!(browser(&app).category_entry_count("Language"), 1);
+
     // The Claude panel shows its own categories from the same navigator (FR-006);
     // the `todo` tag of `claude-todo` is not a row (FR-021 withdrawn).
     let mut claude = new_app();

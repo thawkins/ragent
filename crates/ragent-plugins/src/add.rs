@@ -482,14 +482,20 @@ fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
         None,
     )?;
     if let Some(ref_name) = spec.ref_name.as_deref() {
-        // `--` terminates option parsing: even though `git_ref` already rejects
-        // a leading `-`, the separator keeps that invariant enforced by git
-        // itself if the validator is ever relaxed (SEC-ragent-plugins-001).
+        // `--` terminates option parsing for the fetch: `git_ref` already
+        // rejects a leading `-`, and the separator keeps that invariant enforced
+        // by git itself if the validator is ever relaxed (SEC-ragent-plugins-001).
+        // `origin`/`ref_name` are both positionals, so `--` is safe here.
         git_run(
             &["fetch", "--depth", "1", "--", "origin", ref_name],
             Some(&repo_dir),
         )?;
-        git_run(&["checkout", "--", "FETCH_HEAD"], Some(&repo_dir))?;
+        // No `--` here: for `git checkout` the separator turns the argument
+        // into a *pathspec* file filter, not a commit-ish, so it refuses with
+        // `pathspec 'FETCH_HEAD' did not match any file(s)`. `FETCH_HEAD` is a
+        // name we supply ourselves and the ref that filled it was already
+        // validated to not start with `-`, so option injection is impossible.
+        git_run(&["checkout", "FETCH_HEAD"], Some(&repo_dir))?;
     }
     if let Some(subpath) = spec.subpath.as_deref() {
         git_run(&["sparse-checkout", "set", "--", subpath], Some(&repo_dir))?;

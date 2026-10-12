@@ -452,3 +452,71 @@ fields, never ids. Tests: ordering cases added to
 `crates/ragent-tui/tests/test_plugin_store_filter.rs`, the category/nav/mouse/acceptance
 suites (sorted survivor order), and the panel tests (the block cursor now starts on the
 alphabetically first row).
+### T-032 - Split the left navigator and add the marketplace filter
+
+Split the browse panel's left navigator column vertically into the category navigator
+(upper half) and a marketplace navigator (lower half) and add a marketplace filter that
+composes with the existing query and category filters (spec `pluginstores` FR-052).
+
+Add `StorePane` (`Results` / `Categories` / `Marketplaces`) and replace the two-pane
+`nav_focused: bool` on `PluginStoreBrowser` with `focus: StorePane`, so `Tab`/`BackTab`
+cycle focus forward/backward through the three panes and `Up`/`Down`, `ENTER`, and the
+clear key route to the focused pane. Add a second `CategoryFilterState` (`marketplaces`)
+with its own cursor/scroll/viewport, plus the `marketplace_move_up` / `marketplace_move_down`
+/ `marketplace_select_row` / `marketplace_scroll_by` / `marketplace_clear` /
+`marketplace_confirm` methods mirroring the category navigator's, and the public
+`App::plugin_store_focus_next` / `plugin_store_focus_prev` /
+`plugin_store_marketplace_*` handlers. Derive the marketplace set in `rebuild_marketplaces`
+(called from `set_index` alongside `rebuild_categories`) and fold the marketplace
+predicate into a single `matching_indices` helper shared by `apply_filter` and
+`reapply_filter_preserving_cursor`, so query + category + marketplace all compose.
+
+Render the second navigator in `render_plugin_store_marketplace_navigator`, cache its
+area on `App::plugin_store_marketplace_area`, paint each pane's cursor with the focused
+colour independently, extend the title with `-- marketplace <label>`, and route a
+left-click / wheel over the marketplace pane in `handle_plugin_store_mouse`. Tests:
+new marketplace cases in `crates/ragent-tui/tests/test_plugin_store_category_filter.rs`,
+the three-pane focus and marketplace clear cases in
+`crates/ragent-tui/tests/test_plugin_store_category_nav.rs`, the two marketplace mouse
+cases in `crates/ragent-tui/tests/test_plugin_store_category_mouse.rs`, and the updated
+focus/footer cases in `crates/ragent-tui/tests/test_plugin_store_panel.rs`.
+
+### T-033 - Show per-row entry counts in the navigators
+
+Append the number of loaded entries each navigator row covers to its label, on both the
+category and the marketplace navigator (spec `pluginstores` FR-053).
+
+Add `PluginStoreBrowser::category_entry_count` / `marketplace_entry_count` (the count of
+[`StoreEntry`]s the row's value matches, composed from the shared
+[`CategoryFilter::matches_category`] predicate so it agrees with the result set selecting
+the row would show; the `ALL` row counts every entry) and `category_row_display` /
+`marketplace_row_display` (the base row label with ` (N)` appended). The counts are derived
+from the full `all` index, never the filtered set, so they stay stable while a query or
+filter narrows the results. `render_plugin_store_navigator` and
+`render_plugin_store_marketplace_navigator` paint the `_row_display` string instead of the
+bare label. Tests: new count cases in
+`crates/ragent-tui/tests/test_plugin_store_category_filter.rs`
+(`each_navigator_row_shows_the_count_of_entries_under_it`,
+`the_marketplace_row_shows_the_count_of_entries_under_it`), a render case in
+`crates/ragent-tui/tests/test_plugin_store_panel.rs`
+(`the_navigator_rows_show_the_entry_count_beside_each_name`), and the count assertions
+added to `crates/ragent-tui/tests/test_plugin_store_category_acceptance.rs` (TC-001).
+
+### T-034 - Reversed-video navigation titles on the navigators
+
+Paint a one-row header directly above each navigator's `ALL` entry naming the navigation
+type, in reversed video (spec `pluginstores` FR-004).
+
+In `render_plugin_store_panel` (`crates/ragent-tui/src/layout.rs`) split each navigator pane
+vertically into a fixed one-row title row and the scrolling row area beneath it, so the
+title sits directly above `ALL` and never scrolls with the rows. Paint
+`PLUGIN_STORE_CATEGORY_TITLE` ("Categories") over the category navigator and
+`PLUGIN_STORE_MARKETPLACE_TITLE` ("Marketplace") over the marketplace navigator, both in a
+black-on-white bold style so the header reads as a distinct band (matching the pinned
+result column-heading treatment). Cache `App::plugin_store_nav_area` /
+`App::plugin_store_marketplace_area` on the *row* area below the title (not the whole
+pane), so the existing click and wheel handlers hit-test only the navigator rows and a
+click or wheel on a header row is inert. Tests: new
+`each_navigator_has_a_reversed_video_title_above_its_all_row` case in
+`crates/ragent-tui/tests/test_plugin_store_panel.rs`, plus the existing mouse and
+acceptance cases that pin the row-area hit-testing.

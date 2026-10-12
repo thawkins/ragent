@@ -1,13 +1,13 @@
 # Project Statistics
 
-**Version:** 1.0.132
+**Version:** 1.0.133
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.132 tree (the merged
-> connector/plugin marketplace browsers, the alphabetical id sorts, the
-> connector-catalogue heading row, and the plugin-store navigator tag-row
-> withdrawal promoted from the v1.0.131 worktree set).
+> Metrics below are measured against the v1.0.133 tree (the `/plugins` browse-panel
+> reversed-video navigator titles, the per-row `Name (N)` navigator counts, and the
+> `git+<url>#<ref>` install checkout fix, on top of the v1.0.132 merged
+> connector/plugin marketplace browsers).
 
 
 ## Project-wide Metrics
@@ -26,7 +26,7 @@
 | Specs on disk | 57 directories in `specs/` |
 | Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 83 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.132 |
+| Version | 1.0.133 |
 
 ---
 
@@ -179,13 +179,16 @@ Notes:
 
 ---
 
-_Generated 2026-10-12 (v1.0.132 tree -
-the merged connector and plugin marketplace browsers (additional marketplaces, a
-per-row marketplace column, and off-loop description/version enrichment), the
-connector and plugin-store alphabetical id sorts (`connectors` FR-046,
-`pluginstores` FR-050), the connector-catalogue pinned heading row (`connectors`
-FR-045), and the plugin-store navigator tag-row withdrawal (`catnav` FR-021) - on
-top of the v1.0.130 release line. The v1.0.130 set adds the OpenHands parity
+_Generated 2026-10-12 (v1.0.133 tree -
+the `/plugins` browse-panel refinements (reversed-video navigator titles above each
+`ALL` row, hit-test areas moved below the header, and per-row `Name (N)` counts), the
+bottom-edge search box with a click-to-clear button, and the `git+<url>#<ref>` install
+checkout fix in `ragent-plugins` (`plugins` FR-024), on top of the v1.0.132 merged
+connector and plugin marketplace browsers (additional marketplaces, a per-row
+marketplace column, and off-loop description/version enrichment), the connector and
+plugin-store alphabetical id sorts (`connectors` FR-046, `pluginstores` FR-050), the
+connector-catalogue pinned heading row (`connectors` FR-045), and the plugin-store
+navigator tag-row withdrawal (`catnav` FR-021) - on top of the v1.0.130 release line. The v1.0.130 set adds the OpenHands parity
 delta on top of the release line: pluggable execution backends with a
 health-visible registry and a TUI `/backend` switcher, sandbox secret injection,
 an ACP client and a feature-gated ACP server, an OpenAI-compatible inbound surface
