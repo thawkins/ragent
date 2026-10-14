@@ -231,10 +231,12 @@ fn test_question_requested() {
         request_id: "q1".into(),
         question: "Pick one".into(),
         options: vec!["a".into(), "b".into()],
+        default_index: Some(1),
     });
     assert_eq!(name, "question_requested");
     assert_eq!(v["question"], "Pick one");
     assert_eq!(v["options"][0], "a");
+    assert_eq!(v["default_index"], 1);
 }
 
 #[test]
@@ -637,4 +639,46 @@ fn test_model_response_no_secrets_passes_through() {
         output_tokens: 6,
     });
     assert_eq!(v["text"], "Normal response text");
+}
+
+// ---------------------------------------------------------------------------
+// event_to_sse wrapper coverage (audit gap: only the inner event_to_parts was
+// exercised; the public wrapper that actually builds the `SseEvent` was not).
+// ---------------------------------------------------------------------------
+
+use ragent_server::sse::event_to_sse;
+
+#[test]
+fn test_event_to_sse_wrapper_names_event_and_carries_data() {
+    let event = Event::SessionCreated {
+        session_id: "abc-123".to_string(),
+    };
+    let sse = event_to_sse(&event);
+    // `SseEvent` derives `Debug`, so its rendering exposes the `event:` name and
+    // the `data:` payload the wrapper set.
+    let rendered = format!("{sse:?}");
+    assert!(
+        rendered.contains("session_created"),
+        "wrapper must set the event name: {rendered}"
+    );
+    assert!(
+        rendered.contains("abc-123"),
+        "wrapper must carry the JSON payload: {rendered}"
+    );
+}
+
+#[test]
+fn test_event_to_sse_wrapper_matches_parts() {
+    let event = Event::TextDelta {
+        session_id: "s1".into(),
+        text: "hi".into(),
+    };
+    let (name, data) = event_to_parts(&event);
+    let rendered = format!("{:?}", event_to_sse(&event));
+    // The wrapper sets `event: <name>` and `data: <json>`; the debug rendering
+    // escapes the payload's quotes, so assert on the unescaped field values.
+    assert!(rendered.contains(name), "name missing: {rendered}");
+    let value: serde_json::Value = serde_json::from_str(&data).expect("valid json");
+    assert!(rendered.contains(value["session_id"].as_str().unwrap()));
+    assert!(rendered.contains(value["text"].as_str().unwrap()));
 }

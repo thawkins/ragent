@@ -670,8 +670,12 @@ impl TeamManager {
             // Update the config to reflect the new lead.
             if let Ok(mut new_store) = TeamStore::load(&team_dir) {
                 new_store.config.lead_session_id = lead_sid.clone();
-                // INTENTIONAL: best-effort team-store persistence
-                let _ = new_store.save();
+                // Best-effort team-store persistence; log a failure so an
+                // unpersisted lead hand-off is visible.
+                if let Err(e) = new_store.save() {
+                    tracing::warn!(team = %name, error = %e,
+                        "failed to persist lead-session hand-off");
+                }
             }
         }
 
@@ -1082,8 +1086,12 @@ impl TeamManager {
                                 m.status = crate::team::config::MemberStatus::Idle;
                                 m.current_task_id = None;
                             }
-                            // INTENTIONAL: best-effort team-store persistence
-                            let _ = store.save();
+                            // Best-effort team-store persistence; log a failure
+                            // so an unpersisted idle transition is visible.
+                            if let Err(e) = store.save() {
+                                tracing::warn!(team = %team_name_clone, agent = %agent_id_clone,
+                                    error = %e, "failed to persist teammate-idle state");
+                            }
                         }
                         event_bus_clone.publish(Event::TeammateIdle {
                             session_id: lead_sid_clone,
@@ -1575,7 +1583,12 @@ impl TeamManager {
                             m.status = MemberStatus::Failed;
                             m.last_spawn_error = Some(error_msg.clone());
                         }
-                        let _ = store.save();
+                        // Best-effort failure-state persistence; log on error so
+                        // a failed teammate whose state did not persist is visible.
+                        if let Err(e) = store.save() {
+                            tracing::warn!(team = %manager.team_name, agent = %agent_id,
+                                error = %e, "failed to persist teammate-failed state");
+                        }
                     }
 
                     manager.event_bus.publish(Event::TeammateFailed {
@@ -1610,11 +1623,16 @@ impl TeamManager {
                     "reassigning orphaned InProgress task to Pending"
                 );
                 let tid = t.id.clone();
-                let _ = task_store.update_task(&tid, |task| {
+                // Best-effort reassignment; log on error so a task left
+                // InProgress under the departed lead is visible.
+                if let Err(e) = task_store.update_task(&tid, |task| {
                     task.status = TaskStatus::Pending;
                     task.assigned_to = None;
                     task.claimed_at = None;
-                });
+                }) {
+                    tracing::warn!(team_dir = %team_dir.display(), task_id = %tid, error = %e,
+                        "failed to reassign orphaned task to Pending");
+                }
             }
         }
         Ok(())

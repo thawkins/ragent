@@ -36,6 +36,9 @@ enum ScriptedReply {
     TextOnly(&'static str),
     /// A provider-reported stream error ending with `Finish { Error }`.
     ProviderError(&'static str),
+    /// Block inside `chat()` for the given duration before returning a
+    /// text-only stream - exercises the agent-side first-byte guard.
+    SlowChat(std::time::Duration),
 }
 
 #[derive(Clone)]
@@ -75,6 +78,16 @@ impl LlmClient for ScriptedClient {
                     .cloned()
                     .unwrap_or(ScriptedReply::TextOnly("done"))
             }
+        };
+        // `SlowChat` blocks inside `chat()` (not inside the returned stream),
+        // so it is bounded by the agent-side first-byte guard rather than the
+        // per-chunk stall guard. Normalise it to a plain text reply first.
+        let reply = match reply {
+            ScriptedReply::SlowChat(delay) => {
+                tokio::time::sleep(delay).await;
+                ScriptedReply::TextOnly("slow done")
+            }
+            other => other,
         };
         let events: Vec<StreamEvent> = match reply {
             ScriptedReply::TextOnly(text) => vec![
@@ -117,6 +130,8 @@ impl LlmClient for ScriptedClient {
                     reason: LlmFinishReason::Cancelled,
                 },
             ],
+            // Normalised to `TextOnly` above before this match is reached.
+            ScriptedReply::SlowChat(_) => unreachable!("SlowChat is normalised before matching"),
         };
         Ok(Box::pin(stream::iter(events)))
     }
@@ -705,4 +720,53 @@ fn test_storage_task_panic_classifies_unrecoverable_never_silent() {
 fn test_tool_panic_message_classifies_unrecoverable() {
     let panic_message = "tool task panicked: attempt to subtract with overflow";
     assert!(ragent_agent::error::classify_message(panic_message).is_unrecoverable());
+}
+
+/// The agent-side first-byte guard bounds the initial `chat()` await: when a
+/// provider blocks past `stream_config.initial_response_timeout_secs`, the loop
+/// synthesises a retryable "initial response timed out" error and re-attempts
+/// rather than hanging (the old behaviour ticked the H4 notice forever).
+#[tokio::test]
+async fn test_chat_first_byte_guard_retries_on_slow_provider() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(128));
+    let (mut processor, working_dir, captured, _dir_guard) = make_processor(
+        event_bus.clone(),
+        vec![ScriptedReply::SlowChat(std::time::Duration::from_secs(30))],
+    )?;
+    // 1s first-byte budget with a single retry: the first attempt times out,
+    // the retry (which re-runs the same slow reply) also times out, and the
+    // exhausted budget surfaces as a turn error. Each provider call is
+    // recorded, so a count above one proves the retry path ran.
+    processor.stream_config.initial_response_timeout_secs = 1;
+    processor.stream_config.max_retries = 1;
+    processor.stream_config.retry_backoff_secs = 0;
+    let session = processor
+        .session_manager
+        .create_session(working_dir)
+        .expect("session created");
+
+    let started = std::time::Instant::now();
+    let outcome = processor
+        .process_message(
+            &session.id,
+            "go",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        outcome.is_err(),
+        "a provider that never returns within the first-byte budget must fail the turn"
+    );
+    assert!(
+        captured.lock().expect("captured lock").len() >= 2,
+        "the guard must hand off to the retry path, so chat() is called again"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "the first-byte guard must abort well before the 30s provider delay (took {elapsed:?})"
+    );
+    Ok(())
 }

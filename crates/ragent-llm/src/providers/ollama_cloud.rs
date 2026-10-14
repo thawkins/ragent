@@ -89,13 +89,13 @@ impl OllamaCloudProvider {
         let response = match request.send().await {
             Ok(response) => response,
             Err(e) => {
-                tracing::debug!(url = %url, model = %model_name, error = %e, "/api/show request failed");
+                tracing::warn!(url = %url, model = %model_name, error = %e, "/api/show request failed");
                 return None;
             }
         };
 
         if !response.status().is_success() {
-            tracing::debug!(
+            tracing::warn!(
                 url = %url,
                 model = %model_name,
                 status = %response.status(),
@@ -107,7 +107,7 @@ impl OllamaCloudProvider {
         match response.json().await {
             Ok(v) => Some(v),
             Err(e) => {
-                tracing::debug!(url = %url, model = %model_name, error = %e, "/api/show response parse failed");
+                tracing::warn!(url = %url, model = %model_name, error = %e, "/api/show response parse failed");
                 None
             }
         }
@@ -651,7 +651,9 @@ impl LlmClient for OllamaCloudClient {
                     let parsed: Value = match serde_json::from_str(data) {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::warn!(provider = "ollama_cloud", model=%model_name, line=%data, error=%e, "failed to parse stream line");
+                            // SEC: the raw NDJSON frame carries streamed model
+                            // output; redact before logging (see ollama.rs).
+                            tracing::warn!(provider = "ollama_cloud", model=%model_name, line=%ragent_types::sanitize::redact_secrets(data), error=%e, "failed to parse stream line");
                             continue;
                         }
                     };                      // Log key stream lines for diagnostics (first 3 + any with tool_calls or done)

@@ -2,13 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
+use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::gradle::GradleParser;
-use ragent_codeindex::parser::{LanguageParser, ParsedFile};
 use ragent_codeindex::types::SymbolKind;
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_gradle(source: &str) -> ParsedFile {
-    let parser = GradleParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&GradleParser::new(), source)
 }
 
 #[test]

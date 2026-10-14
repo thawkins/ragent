@@ -614,6 +614,13 @@ pub fn is_token_overflow_error_message(error_msg: &str) -> bool {
         || msg.contains("input too large")
 }
 
+/// Return `true` when `error_msg` carries a 4xx (non-408/429) status code.
+fn error_has_permanent_status_code(error_msg: &str) -> bool {
+    extract_error_status_code(error_msg)
+        .map(|code| (400..500).contains(&code) && code != 408 && code != 429)
+        .unwrap_or(false)
+}
+
 fn extract_error_status_code(error_msg: &str) -> Option<u16> {
     for marker in ["HTTP ", "http ", "API error (", "api error (", "status "] {
         if let Some(rest) = error_msg.split(marker).nth(1) {
@@ -641,6 +648,15 @@ pub fn is_permanent_llm_api_error(error_msg: &str) -> bool {
     }
 
     let lower = error_msg.to_lowercase();
+
+    // A retryable stream failure is transient by definition.  The provider
+    // first-byte guard (and the per-chunk stall guard) synthesises messages
+    // such as "stream stalled - no data received for 120s"; the loop must
+    // retry those rather than abort with the original error.  Only a
+    // permanent 4xx status carried in the same message may override this.
+    if lower.contains("stall") || lower.contains("timed out") {
+        return error_has_permanent_status_code(error_msg);
+    }
     if lower.contains("invalid_request_error")
         || lower.contains("model_not_supported")
         || lower.contains("access denied for model")

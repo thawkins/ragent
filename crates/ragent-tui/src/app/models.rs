@@ -1931,19 +1931,7 @@ impl App {
                     .flatten()
             })
             .map(|session| chrono::Utc::now() - session.created_at)
-            .map(|duration| {
-                let seconds = duration.num_seconds().max(0);
-                let hours = seconds / 3600;
-                let minutes = (seconds % 3600) / 60;
-                let secs = seconds % 60;
-                if hours > 0 {
-                    format!("{hours}h {minutes}m {secs}s")
-                } else if minutes > 0 {
-                    format!("{minutes}m {secs}s")
-                } else {
-                    format!("{secs}s")
-                }
-            })
+            .map(|duration| ragent_types::strutil::format_duration_hms(duration.num_seconds()))
             .unwrap_or_else(|| "unknown".to_string());
 
         let mut providers: Vec<_> = by_provider.into_iter().collect();

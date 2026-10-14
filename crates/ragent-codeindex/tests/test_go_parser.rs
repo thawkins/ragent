@@ -2,14 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
-use ragent_codeindex::parser::LanguageParser;
 use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::go::GoParser;
 use ragent_codeindex::types::{SymbolKind, Visibility};
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_go(source: &str) -> ParsedFile {
-    let p = GoParser::new();
-    p.parse(source.as_bytes()).unwrap()
+    support::parse_with(&GoParser::new(), source)
 }
 
 #[test]

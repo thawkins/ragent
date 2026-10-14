@@ -750,7 +750,7 @@ User-defined directory/file path allowlist and denylist additions.
 | ----- | ---- | ------- | ----------- |
 | `allowlist` | `Vec<String>` | `[]` | Glob patterns for paths automatically allowed (no prompt). |
 | `denylist` | `Vec<String>` | `[]` | Glob patterns unconditionally rejected. |
-| `allowed_roots` | `Vec<String>` | `[]` | Extra directory roots permitted for path-escape checking (multi-root / sub-agent access); canonicalized at load. |
+| `allowed_roots` | `Vec<String>` | `[]` | *Additional* directory roots permitted for path-escape checking (multi-root / sub-agent access); the session's working directory is always allowed whether or not this list is set, and this list only extends it; canonicalized at load. |
 
 Both lists are unioned across config layers. **Denylist takes precedence over
 allowlist.** The `/dirs add` and `/dirs remove` slash commands mutate these

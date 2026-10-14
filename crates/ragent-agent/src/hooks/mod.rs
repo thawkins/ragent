@@ -626,11 +626,13 @@ pub fn run_pre_tool_use_hooks(
                     }
                 }
 
-                // Non-JSON output is treated as no decision
+                // Non-JSON output is treated as no decision.
+                // SEC: hook stdout is arbitrary user/hook content; cap and
+                // redact before logging (mirrors the stderr path).
                 tracing::trace!(
                     tool = %tool_name,
                     hook_command = %hook.command,
-                    stdout = %trimmed,
+                    stdout = %ragent_types::sanitize::redact_secrets(&cap_stderr(&trimmed, 500)),
                     "PreToolUse hook returned non-JSON output - treating as no decision"
                 );
             }
@@ -645,7 +647,7 @@ pub fn run_pre_tool_use_hooks(
                             tool = %tool_name,
                             hook_command = %hook.command,
                             exit_code = 2,
-                            stderr = %capped_stderr,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PreToolUse hook blocked tool via exit code 2"
                         );
                         return PreToolUseResult::Blocked {
@@ -828,7 +830,7 @@ pub async fn run_post_tool_use_hooks(
                             tool = %tool_name,
                             hook_command = %command,
                             exit_code = 2,
-                            stderr = %capped_stderr,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PostToolUse hook flagged tool result as policy-violated"
                         );
                         if let Some(bus) = event_bus {

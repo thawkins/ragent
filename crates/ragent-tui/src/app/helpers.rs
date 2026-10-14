@@ -310,17 +310,12 @@ pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
 }
 
 /// Truncate `s` to at most `max_chars` **characters**, appending a single
-/// ellipsis when truncation occurred. Uses a cheap byte-length fast path
-/// (`chars <= bytes`), so short ASCII strings never pay for a full scan.
+/// ellipsis when truncation occurred.
+///
+/// Delegates to [`ragent_types::strutil::truncate_chars`], the single shared
+/// char-boundary truncation helper.
 pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars {
-        return s.to_string();
-    }
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let out: String = s.chars().take(max_chars).collect();
-    format!("{out}...")
+    ragent_types::strutil::truncate_chars(s, max_chars)
 }
 
 /// Remove control characters (except newlines and tabs) and ANSI escape

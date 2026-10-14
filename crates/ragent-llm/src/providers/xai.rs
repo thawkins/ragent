@@ -240,9 +240,7 @@ impl Provider for XaiProvider {
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let api_key = ragent_config::credential_env::provider_credential_env("xai")
             .context("xAI model discovery requires XAI_API_KEY")?;
-        let base_url = std::env::var(XAI_API_BASE_ENV)
-            .ok()
-            .filter(|s| !s.trim().is_empty())
+        let base_url = ragent_config::credential_env::read_credential_env(XAI_API_BASE_ENV)
             .unwrap_or_else(|| XAI_API_BASE.to_string());
         let models = discover_openai_models(&api_key, &base_url, "xai")
             .await
@@ -269,9 +267,7 @@ impl Provider for XaiProvider {
         // ANTIPAT 3.6: register the credential with the shared redaction
         // registry so any text passed through `redact_secrets` masks it.
         ragent_types::sanitize::register_secret(api_key);
-        let env_endpoint = std::env::var(XAI_API_BASE_ENV)
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+        let env_endpoint = ragent_config::credential_env::read_credential_env(XAI_API_BASE_ENV);
         let resolved_base = base_url
             .or(env_endpoint.as_deref())
             .unwrap_or(XAI_API_BASE)

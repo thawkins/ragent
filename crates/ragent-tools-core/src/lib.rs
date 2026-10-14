@@ -379,30 +379,41 @@ pub fn check_path_within_root_cached(
     check_path_within_any_root_cached(path, &[root], cache)
 }
 
-/// Validate that `path` resolves within the configured allowed roots (FUNC-068).
+/// Validate that `path` resolves within `working_dir` or any configured
+/// additional allowed root (FUNC-068, FR-017).
 ///
-/// This is the single entry point every file-mutating tool must call: when
-/// `allowed_roots` is empty the check falls back to `working_dir` alone;
-/// otherwise the path may resolve to any configured root. Previously only
+/// This is the single entry point every file-mutating tool must call. The
+/// session's `working_dir` is **always** an allowed root; `allowed_roots`
+/// entries are *additional* roots (sibling project directories, shared
+/// workspaces, sub-agent targets) layered on top of it. Previously only
 /// `write` honoured `allowed_roots`, so a whitelisted destination was writable
 /// by `write` yet wrongly rejected by `create`, `append_to_file`, `copy_file`,
 /// `move_file`, `make_directory`, and `rm`.
 ///
 /// # Errors
 ///
-/// Returns an error if the path escapes every allowed root.
+/// Returns an error if the path escapes `working_dir` and every additional
+/// allowed root.
 pub fn check_path_within_allowed_roots_cached(
     path: &Path,
     working_dir: &Path,
     allowed_roots: &[PathBuf],
     cache: &CanonicalPathCache,
 ) -> anyhow::Result<()> {
+    // The working directory is always a valid root; configured `allowed_roots`
+    // are additive. Skipping `working_dir` when the list is non-empty would
+    // reject every path in the session's own project whenever the user has a
+    // persistent global `allowed_roots` entry (FR-017).
+    //
+    // Fast path: with no extra roots (the common case) skip the `Vec` the file
+    // tools would otherwise allocate on every call.
     if allowed_roots.is_empty() {
-        check_path_within_root_cached(path, working_dir, cache)
-    } else {
-        let root_refs: Vec<&Path> = allowed_roots.iter().map(PathBuf::as_path).collect();
-        check_path_within_any_root_cached(path, &root_refs, cache)
+        return check_path_within_any_root_cached(path, &[working_dir], cache);
     }
+    let mut root_refs: Vec<&Path> = Vec::with_capacity(allowed_roots.len() + 1);
+    root_refs.push(working_dir);
+    root_refs.extend(allowed_roots.iter().map(PathBuf::as_path));
+    check_path_within_any_root_cached(path, &root_refs, cache)
 }
 
 /// Returns true when `child` is `root` or a descendant of `root`, using path

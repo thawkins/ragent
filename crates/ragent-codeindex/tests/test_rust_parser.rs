@@ -1,12 +1,14 @@
 //! External integration tests for the Rust language parser.
 
+use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::rust::RustParser;
-use ragent_codeindex::parser::{LanguageParser, ParsedFile};
 use ragent_codeindex::types::{SymbolKind, Visibility};
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_rust(source: &str) -> ParsedFile {
-    let parser = RustParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&RustParser::new(), source)
 }
 
 #[test]

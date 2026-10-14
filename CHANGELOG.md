@@ -2,6 +2,196 @@
 
 ## [Unreleased]
 
+## [1.0.134] - 2026-10-14
+
+MCP discovery ergonomics (a `/mcp config` location report and a `/mcp discover`
+block-cursor enable toggle), an `ask_user` default/fallback option with an
+inactivity timeout, a security-hardening pass (value-level redaction across the
+remaining leak sites, canonical credential-env reads), and a `/simplify all`
+cleanup over the working tree.
+
+### Security
+
+- **Value-level redaction extended to remaining leak sites.** The server
+  `GET /config` redactor and the TUI `/config show` renderer already
+  value-scan nested `mcp.*.env`/`headers` subtrees via
+  `sanitize::redact_json_value`; the TUI top-level key-name allowlist now also
+  masks `*_token` / `*_secret` keys, and the tool-call argument parse-failure
+  log (`session/processor.rs`) redacts `args` before logging. `McpServerConfig`,
+  `ProviderConfig` and `ApiConfig` carry hand-written redacting `Debug` impls so
+  no `{:?}`/`tracing::debug!(?cfg)` can print a raw `Authorization` /
+  `PRIVATE-TOKEN` / env secret.
+- **Ad-hoc credential env reads routed through the canonical helper.** The
+  provider base-URL/email reads in `generic_openai`, `xai`, `ollama`, the
+  OpenAlex mailto resolver in `masterfetch`, and the `RAGENT_TOKEN` fallback in
+  `src/main.rs` now use `ragent_config::credential_env::read_credential_env`, so
+  blank/whitespace-only values are handled identically everywhere.
+
+### Fixed
+
+- **`Config::load` fast-path cache now keys on `XDG_CONFIG_HOME`.** A caller
+  that redirected `XDG_CONFIG_HOME` in-process could be served a config resolved
+  for the previous global-config directory; the M-025 cache guard now includes
+  the env value alongside the cwd and file mtimes.
+- **MCP enable ledger writes atomically.** `McpEnableLedger::save_to` writes to
+  a temp file and renames, so a crash mid-write cannot truncate the ledger.
+- **Best-effort persistence failures are logged, not swallowed.** The
+  teammate-idle / teammate-failed / orphaned-task writes in the team manager and
+  the hook-rejected task revert now emit `tracing::warn!` on error instead of
+  `let _ =`.
+
+### Changed
+
+- **Test hygiene.** The `test_discover_skills_extra_dirs` assertion no longer
+  assumes a clean developer machine (ambient personal skill roots are tolerated);
+  the `redact_json_value` doctest, the `Storage::open` / `CodeIndex::open`
+  doctests (now `?`-based), and the `split_bash_command` edge-case tests were
+  corrected; `run_tui`'s large future is boxed at both call sites in
+  `src/main.rs`.
+
+- **`/mcp discover` panel: block cursor and per-server enable toggle.** The
+  interactive discovery dialog no longer uses a type-a-number selection list. It
+  now lists every discovered server under a block cursor: `Up`/`Down` (or
+  `k`/`j`, `Home`/`End`) move the cursor, the list scrolls (with a scrollbar)
+  when there are more servers than fit, `Enter` toggles the highlighted server's
+  enabled state, and `Esc` closes the dialog. Each row carries an `[x]`/`[ ]`
+  enabled marker. Toggling a server on writes a `mcp.<id>` entry to the project
+  `.ragent/ragent.json` when one is missing (or lifts a `disabled: true`
+  override, preserving the user's own fields) and applies the choice to the
+  global enable ledger; toggling off disables it in the ledger. Both directions
+  connect/disconnect live when the MCP client is running. Implemented in
+  `crates/ragent-tui/src/{input.rs,layout.rs}` and
+  `crates/ragent-tui/src/app/{state.rs,session_ops.rs}`; covered by the new
+  `crates/ragent-tui/tests/test_mcp_discover_panel.rs`.
+
+### Added
+
+- **`/mcp config` discovery-location report.** A new `/mcp config` subcommand
+  shows a table of every place ragent looks for MCP server definitions (the
+  ragent-native `~/.config/ragent/servers/` directory first, then npm global
+  `node_modules`, `PATH`, and the Claude/Cline/legacy/XDG registry directories),
+  the number of server definitions found at each location, and a second table of
+  the individual servers discovered (id, origin location, and launch command).
+  The scan path is unchanged; it is now reported per location via the new
+  `McpDiscoveryLocation` type and `McpClient::discover_locations` (the existing
+  `discover` flattens and de-duplicates these results, so its output is
+  identical). Implemented in
+  `crates/ragent-agent/src/mcp/{discovery.rs,mod.rs}` and
+  `crates/ragent-tui/src/app/slash.rs`; covered by the new
+  `test_slash_mcp_config_lists_locations` and discovery location tests.
+
+- **`ask_user` default/fallback option with an inactivity timeout.** The
+  `ask_user` tool accepts a new optional `default` (string) parameter naming the
+  option pre-selected in the multiple-choice dialog and used automatically when
+  the user leaves the dialog untouched. The TUI now times a multiple-choice
+  question out after 120 seconds of inactivity and answers with that option
+  (the free-text `ask_user` dialog and the sudo askpass prompt - which owns its
+  own timeout - are never auto-answered). The default is resolved in the tool:
+  an explicit `default` that matches an option (trimmed, case-insensitive) wins;
+  otherwise the first option containing "recommended" is used; otherwise the
+  first option. The resolved zero-based index travels on
+  `Event::QuestionRequested` as `default_index`, is carried through the remote
+  backend and the SSE `question_requested` payload, pre-selects the dialog row,
+  is marked `(default)`, and shows a live `(m:ss to default)` countdown. The
+  auto-answer is published as a normal `QuestionAnswered`, so the waiting model
+  is unblocked exactly as if the user had chosen. Implemented across
+  `crates/ragent-agent/src/tool/aliases.rs` (`resolve_default_index`),
+  `crates/ragent-types/src/event/mod.rs`, `crates/ragent-agent/src/{tool/mod.rs,session/remote_dispatch.rs,backend/remote.rs}`,
+  `crates/ragent-server/src/sse.rs`, and
+  `crates/ragent-tui/src/{app/event_handler.rs,app/state.rs,layout.rs,lib.rs}`;
+  covered by the new `test_ask_user_default.rs` suite.
+
+### Fixed
+
+- **A session's working directory is always an allowed path root, even when
+  `dirs.allowed_roots` is populated (FR-017).**
+  `check_path_within_allowed_roots_cached` treated the configured
+  `dirs.allowed_roots` list as a *replacement* for the session's `working_dir`:
+  when the list was non-empty it checked only those additional roots and never
+  the working directory. The documented meaning is the opposite - `working_dir`
+  is always a valid root and `allowed_roots` entries are *additional* roots
+  layered on top. A user with any persistent global `dirs.allowed_roots` entry
+  (for example two unrelated project directories) therefore had every file tool
+  reject paths in the project they had actually opened: `read`, `write`, `edit`,
+  `list`, `grep`, and the rest all failed with
+  `Path escape rejected: '<path>' (canonical: '<path>') resolves outside all
+  allowed roots`. The single shared helper now always includes `working_dir`
+  ahead of the configured additional roots, so containment is unchanged (a path
+  outside both is still rejected) while the session's own project is reachable
+  again. Fixed in
+  `crates/ragent-tools-core/src/lib.rs` (`check_path_within_allowed_roots_cached`);
+  covered by the new `func068_working_dir_stays_allowed_when_extra_roots_configured`
+  case in `test_allowed_roots.rs`.
+
+- **A whole-repo plugin source whose only manifest is the nested
+  `.claude-plugin/plugin.json` now installs (`/plugins claude` -> `Enter`).**
+  The install pipeline cloned every `git+` source with `git clone --sparse`, and
+  a sparse clone with no subpath uses cone mode, which checks out only the
+  repository-root *files* - the nested `.claude-plugin/` directory is not
+  materialised. A Claude-dialect plugin keeps its only manifest at
+  `.claude-plugin/plugin.json`, so a marketplace entry that resolves to a
+  whole-repo source (the Claude catalogue's `{"source":"./"}`, used for a plugin
+  published at its repository root, e.g. `DietrichGebert/ponytail`) cloned a
+  tree with no recognisable manifest and `/plugins add` refused with
+  `plugin add: no plugin manifest found in <dir>`. A `:<subpath>` source still
+  clones sparse (a monorepo subdirectory installs without the whole tree); a
+  whole-repo source now clones the complete tree so the nested manifest is
+  present for the dialect probe. Fixed in
+  `crates/ragent-plugins/src/add.rs` (`git_clone_stage`); covered by the new
+  `add_installs_a_whole_repo_source_whose_claude_manifest_is_nested` case in
+  `test_store_git_source.rs`.
+
+### Changed
+
+- **`/simplify all` pass over the uncommitted working tree (code-audit
+  follow-on).** A quality pass across ~130 changed files, closing duplication,
+  dead-code, allocation and durability items the earlier audit deferred:
+  - **`ragent-surface` gains four shared modules.** `config_splice`
+    (`write_atomic_json` - temp file in the same directory, `File::create` +
+    `write_all` + `sync_all` + rename, so the write is durable before the rename
+    can expose it), `marketplace` (the one slug/name/source resolution shared by
+    the plugin and connector marketplace command families), `net` (the
+    redirect-policy helper), and `scan` (the `ScanFailure` result type). The
+    `ragent-plugins` and `ragent-connectors` `marketplace_ops` writers delegate to
+    `write_atomic_json` instead of hand-rolling a temp+rename each, and the
+    plugin `store_fetch` `https_only_redirects` wrapper is deleted in favour of
+    the shared call.
+  - **Redaction allocation and shape.** `sanitize::redact_json_value` now routes
+    through the borrow-or-own `redact_secrets_cow`, so a clean string is not
+    reallocated; the four hand-copied redacting `Debug` impls in
+    `ragent-config/src/config.rs` (`McpServerConfig`, `ProviderConfig`,
+    `ApiConfig`, and the config root) collapse into one
+    `macro_rules! redacted_debug_impl!`.
+  - **Dead parameters and unreachable branches removed.** `router_client`'s
+    `format_classification_summary` dropped an unused `_prompt` parameter and its
+    stale doc; `generic_openai::resolve_validated_env_base` dropped an
+    unreachable blank check; `ragent-surface/src/marketplace.rs` dropped a dead
+    `!slug.contains('/')` guard and replaces the `Vec`-and-`join` slug truncation
+    with a `split_once` chain; `scan.rs`'s doc no longer claims a field
+    `ScanFailure` does not carry.
+  - **Hot-path and correctness tightening.**
+    `check_path_within_allowed_roots_cached` takes a fast path when
+    `dirs.allowed_roots` is empty (no per-call vector build); `Config::load`'s
+    M-025 fast-path cache key reads `XDG_CONFIG_HOME` through `read_env`
+    (present-but-blank is treated as unset); the `masterfetch` `langsearch_key`
+    read uses the same env-reading `pick` closure as its siblings and the OpenAlex
+    mailto config fallback is trimmed.
+  - **TUI de-duplication.** New `utils::now_unix_ms()` and the shared
+    `QuestionRequest::resolved_default_index()` /
+    `state::resolve_default_index()` helpers now back the question-expiry poll,
+    the event-handler arrival path, and the layout's `(default)` marker; the
+    layout countdown reuses `strutil::format_mmss`; `slash.rs` hoists a duplicated
+    `cell` closure; and `session_ops::toggle_discovered_mcp_server` surfaces a
+    `Config::load` error rather than folding it to a default with
+    `unwrap_or_default()`.
+  - **Panic removed.** The `unreachable!()` in the TUI question-expiry poll
+    (`app/state.rs`) is gone - the fallback index is now computed, not asserted,
+    per the AGENTS.md no-panic-on-user-paths rule.
+  - **Test hygiene.** Unused `ConnectorAuthShape` / `ConnectorId` /
+    `ConnectorServer` imports dropped from three `ragent-connectors` suites, and
+    `.is_empty()`-style assertions in `test_bang_command.rs` and
+    `inline/discovery_tests.rs` bind concrete values.
+
 ## [1.0.133] - 2026-10-12
 
 ### Added

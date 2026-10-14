@@ -779,7 +779,7 @@ The AI agent can use these tools during a session:
 | `grep`     | Search file contents with regex                | `file:read`     |
 | `glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
-| `ask_user` | Ask the user a clarifying question              | `ask_user`      |
+| `ask_user` | Ask the user a clarifying question; accepts an optional `default` option used if the dialog times out | `ask_user`      |
 | `ragent_info`| Report ragent version, build time, and execution details | `none`          |
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
@@ -814,6 +814,14 @@ raw JSON. See SPEC.md section 5.6 for details.
 MCP servers can provide additional tools that are automatically discovered and
 made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP
 tools use the official `rmcp` SDK and support both stdio and HTTP transports.
+
+Use **`/mcp config`** to see where ragent looks for MCP server definitions — the
+ragent-native `~/.config/ragent/servers/` directory, npm global `node_modules`,
+`PATH`, and the Claude/Cline/legacy/XDG registry directories — with the number of
+definitions found at each location (and a `(missing)` marker for an absent
+directory) followed by the individual servers discovered. Use `/mcp discover` to
+scan and install interactively, and `/mcp connect <id>` / `/mcp disconnect <id>`
+to toggle a server live.
 
 UI internationalisation is opt-in and English by default. Install a locale
 message catalog at `<project>/.ragent/locales/<locale>.json` (or
@@ -2118,6 +2126,29 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Unreleased
+
+- **`/mcp config` discovery-location report** — a new `/mcp config` subcommand shows a
+  table of every place ragent looks for MCP server definitions (the ragent-native
+  `~/.config/ragent/servers/` directory first, then npm global `node_modules`, `PATH`,
+  and the Claude/Cline/legacy/XDG registry directories), the number of server definitions
+  found at each location (an absent directory is marked `(missing)`), and a second table
+  of the individual servers discovered (id, origin location, and launch command). The
+  underlying scan is unchanged; it is now reported per location.
+- **`ask_user` default option with an inactivity timeout** — the `ask_user` tool accepts
+  an optional `default` (string) parameter naming the option pre-selected in the
+  multiple-choice dialog and used automatically when the user leaves the dialog untouched.
+  The TUI times a multiple-choice question out after 120 seconds of inactivity, answers
+  with that option, marks the row `(default)`, and shows a live `(m:ss to default)`
+  countdown; the free-text dialog and the sudo askpass prompt are never auto-answered.
+- **`/simplify all` quality pass (uncommitted)** — the `ragent-surface` crate gains four
+  shared modules (`config_splice` for a durable atomic JSON write, `marketplace` for the
+  plugin/connector marketplace-source resolution, `net` for the redirect policy, and
+  `scan` for the store-scan failure type), the four redacting `Debug` impls collapse into
+  one `redacted_debug_impl!` macro, and the TUI shares `now_unix_ms` /
+  `resolve_default_index` / `format_mmss` across the question-expiry poll, the arrival
+  path, and the layout.
 
 ## Version 1.0.133
 

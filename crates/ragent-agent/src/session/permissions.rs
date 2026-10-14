@@ -380,6 +380,20 @@ pub fn is_destructive_tool_for_test(tool_name: &str, input: &Value) -> bool {
     is_destructive_tool(tool_name, input)
 }
 
+/// Test-only re-export of [`extract_resource_from_input`]: integration tests
+/// live in a separate crate and cannot reach the `pub(crate)` helper directly.
+#[doc(hidden)]
+pub fn extract_resource_from_input_for_test(input: &Value, tool_name: &str) -> String {
+    extract_resource_from_input(input, tool_name)
+}
+
+/// Test-only re-export of [`is_hardwired_auto_approved_tool`]: integration
+/// tests live in a separate crate and cannot reach the `pub(crate)` helper.
+#[doc(hidden)]
+pub fn is_hardwired_auto_approved_tool_for_test(tool_name: &str) -> bool {
+    is_hardwired_auto_approved_tool(tool_name)
+}
+
 /// Drive one interactive permission prompt: publish a
 /// `PermissionRequested` event and wait for the matching
 /// `PermissionReplied` event up to `timeout_secs`; a timeout counts as

@@ -407,6 +407,27 @@ fn test_is_permanent_llm_api_error_ignores_token_overflow() {
     ));
 }
 
+/// The agent-side first-byte guard and the per-chunk stall guard both
+/// synthesise retryable diagnostics; they must never be classified as
+/// permanent, or the loop would abort the turn instead of retrying.
+#[test]
+fn test_is_permanent_llm_api_error_ignores_stall_and_timeout() {
+    assert!(!is_permanent_llm_api_error(
+        "initial response timed out after 300s"
+    ));
+    assert!(!is_permanent_llm_api_error(
+        "stream stalled - no data received for 120s"
+    ));
+    assert!(!is_permanent_llm_api_error(
+        "Ollama Cloud: initial response timed out after 300s"
+    ));
+    // A real 4xx status carried in an otherwise transient message stays
+    // permanent.
+    assert!(is_permanent_llm_api_error(
+        "API error (400 Bad Request) while awaiting the first token"
+    ));
+}
+
 #[test]
 fn test_hidden_tool_families_are_excluded_from_prompt_and_request_tools() {
     let registry = create_default_registry();

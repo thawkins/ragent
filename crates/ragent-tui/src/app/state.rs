@@ -895,7 +895,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "mcp",
-        description: "MCP servers: /mcp [status] | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
+        description: "MCP servers: /mcp [status] | /mcp config | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
     },
     SlashCommandDef {
         trigger: "task",
@@ -1404,19 +1404,43 @@ impl OutputViewState {
 
 /// State for the interactive `/mcp discover` dialog.
 ///
-/// Shown as an overlay that lists discovered MCP servers with numbered
-/// rows. The user types a number and presses Enter to enable a server, or
-/// presses Esc to dismiss.
+/// Shown as an overlay that lists discovered MCP servers under a block cursor.
+/// `Up`/`Down` move the cursor (the list scrolls to keep it visible), `Enter`
+/// toggles the highlighted server's enabled state, and `Esc` dismisses the
+/// dialog.
 #[derive(Debug, Clone)]
 pub struct McpDiscoverState {
     /// Servers found during discovery.
     pub servers: Vec<DiscoveredMcpServer>,
-    /// Number being typed by the user (e.g. `"2"`).
-    pub number_input: String,
-    /// Cursor position (char index) inside `number_input`.
-    pub number_cursor: usize,
-    /// Feedback message shown after an enable action or on error.
+    /// Whether each server is currently enabled, parallel to `servers`.
+    /// Snapshotted when the dialog opens and refreshed for a row after a toggle
+    /// so the render pass never reads config or the ledger from disk.
+    pub enabled: Vec<bool>,
+    /// Currently highlighted row (0 = top of the list).
+    pub selected: usize,
+    /// Index of the first visible row. Re-clamped by the render pass so the
+    /// block cursor is always on screen.
+    pub scroll_offset: usize,
+    /// Feedback message shown after a toggle action or on error.
     pub feedback: Option<String>,
+}
+
+/// Whether a discovered MCP server is currently enabled, combining its
+/// `ragent.json` entry (if any) with the global enable ledger.
+///
+/// A server with no `ragent.json` entry is not enabled: discovery only proposes
+/// it, and it must be added (which the `/mcp discover` dialog does on toggle)
+/// before it can start. An entry with `disabled: true` is never enabled, however
+/// the ledger reads, matching `ragent_agent::mcp::is_server_enabled`.
+#[must_use]
+pub(crate) fn discovered_mcp_enabled(
+    server_id: &str,
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig>,
+    ledger: &ragent_agent::mcp::McpEnableLedger,
+) -> bool {
+    configured
+        .get(server_id)
+        .is_some_and(|cfg| !cfg.disabled && ledger.is_enabled(server_id))
 }
 
 /// Core TUI application state.
@@ -1431,6 +1455,39 @@ pub struct QuestionRequest {
     pub question: String,
     /// Optional multiple-choice options.
     pub options: Vec<String>,
+    /// Zero-based index of the option pre-selected in the dialog and used
+    /// automatically if the user does not answer before the timeout. `None`
+    /// for free-text questions (no options) or untimed askpass prompts.
+    pub default_index: Option<usize>,
+    /// Absolute wall-clock deadline (Unix milliseconds) after which the
+    /// question auto-answers with its default option. `None` disables the
+    /// timeout entirely (free-text questions and askpass prompts, which own
+    /// their own timeout).
+    pub expire_at_ms: Option<u64>,
+}
+
+impl QuestionRequest {
+    /// The option index the dialog should pre-select and the timeout should
+    /// answer with, clamped to the available options.
+    ///
+    /// The single source of truth for the resolved default: `default_index`
+    /// when in range, otherwise the first option. The dialog highlight, the
+    /// timeout answer, and the `(default)` marker all read this value so they
+    /// cannot disagree.
+    #[must_use]
+    pub fn resolved_default_index(&self) -> usize {
+        resolve_default_index(self.options.len(), self.default_index)
+    }
+}
+
+/// Resolve a default option index against `option_count`.
+///
+/// `default_index` when in range, otherwise `0`; `0` when there are no options.
+/// Shared by [`QuestionRequest::resolved_default_index`] and the request-arrival
+/// path, which computes the initial highlight before the request is queued.
+#[must_use]
+pub fn resolve_default_index(option_count: usize, default_index: Option<usize>) -> usize {
+    default_index.map_or(0, |i| i.min(option_count.saturating_sub(1)))
 }
 
 /// One queued user message: the text plus any image attachments staged when the
@@ -4593,6 +4650,56 @@ impl App {
                 self.needs_redraw = true;
             }
         }
+    }
+
+    /// Auto-answer a timed multiple-choice question whose deadline has passed.
+    ///
+    /// When the user leaves a question dialog untouched for
+    /// [`crate::app::event_handler::QUESTION_TIMEOUT_SECS`] the dialog answers
+    /// itself with its default option so the waiting agent is never blocked
+    /// indefinitely. Only questions carrying a deadline are timed; free-text
+    /// questions and askpass prompts (both `expire_at_ms == None`) are left
+    /// untouched. The answered entry is removed from the queue, and the reply
+    /// is published on the event bus exactly as a user selection would be.
+    ///
+    /// Called from the TUI main loop (~50 ms cadence).
+    pub fn poll_question_expiry(&mut self) {
+        let Some(req) = self.question_queue.front() else {
+            return;
+        };
+        let Some(deadline) = req.expire_at_ms else {
+            return;
+        };
+        let now_ms = crate::utils::now_unix_ms();
+        if now_ms < deadline {
+            return;
+        }
+
+        let Some(req) = self.question_queue.pop_front() else {
+            return;
+        };
+        // Fall back to the first option when the default index is absent or
+        // out of range, so a malformed request still cannot answer blank.
+        let index = req.resolved_default_index();
+        if let Some(response) = req.options.get(index).cloned() {
+            self.event_bus
+                .publish(ragent_agent::event::Event::QuestionAnswered {
+                    session_id: req.session_id.clone(),
+                    request_id: req.id.clone(),
+                    response: response.clone(),
+                });
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!("question timed out; defaulting to: {}", response),
+            );
+        }
+
+        self.pending_question_input.clear();
+        self.question_selected_index = 0;
+        if self.question_queue.is_empty() {
+            self.set_status_working("processing");
+        }
+        self.needs_redraw = true;
     }
 
     /// Clear spinner latches that have outlived their self-healing staleness

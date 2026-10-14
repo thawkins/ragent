@@ -184,22 +184,72 @@ const KNOWN_SERVERS: &[KnownMcpServer] = &[
     },
 ];
 
+/// A discovery location and the MCP server definitions found there.
+///
+/// Produced by [`discover_locations`] so a caller can present *where* ragent
+/// looked for MCP definitions and how many it found at each place, not just the
+/// flattened, de-duplicated list [`discover`] returns.
+#[derive(Debug, Clone)]
+pub struct McpDiscoveryLocation {
+    /// Human-readable label for the location (e.g. `PATH` or `ragent-native`).
+    pub label: String,
+    /// Filesystem path scanned, when the location is a directory. `None` for the
+    /// `PATH` and npm-global rows.
+    pub path: Option<PathBuf>,
+    /// Whether the location exists on disk. Always `true` for `PATH`; `false`
+    /// for an absent registry directory.
+    pub exists: bool,
+    /// Definitions found at this location, before de-duplication by id.
+    pub servers: Vec<DiscoveredMcpServer>,
+}
+
 /// Scan the system for installed MCP servers and return discovered entries.
 ///
-/// Checks `PATH` for each known executable. Also scans common npm global
-/// directories and MCP registry directories for installed servers.
+/// Checks `PATH` for each known executable, then scans npm global directories
+/// and the well-known MCP registry directories. Results are de-duplicated by id,
+/// with the first location to define an id winning (locations are ordered
+/// ragent-native first).
+///
+/// Use [`discover_locations`] when you also need per-location counts.
 ///
 /// # Errors
 ///
 /// This function never fails - missing servers are silently skipped.
 pub async fn discover() -> Vec<DiscoveredMcpServer> {
-    let mut found = Vec::new();
+    let mut found: Vec<DiscoveredMcpServer> = discover_locations()
+        .await
+        .into_iter()
+        .flat_map(|location| location.servers)
+        .collect();
 
-    // Check PATH for known executables
+    // Deduplicate by id (prefer earlier finds)
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|s| seen.insert(s.id.clone()));
+
+    found
+}
+
+/// Scan the system and return discovered MCP servers grouped by location.
+///
+/// Unlike [`discover`], the results are **not** de-duplicated, and every
+/// location that is scanned is returned even when it holds no definitions, so a
+/// caller can show a `/mcp config`-style table of where ragent looked and what it
+/// found. The scan order matches [`discover`]: `PATH`, npm global, then each
+/// registry directory.
+///
+/// # Errors
+///
+/// This function never fails - a missing location is reported with an empty
+/// `servers` list and `exists: false`.
+pub async fn discover_locations() -> Vec<McpDiscoveryLocation> {
+    let mut locations = Vec::new();
+
+    // 1. PATH, for known executables.
+    let mut path_servers = Vec::new();
     for server in KNOWN_SERVERS {
         for &exe in server.executables {
             if let Some(path) = which_async(exe).await {
-                found.push(DiscoveredMcpServer {
+                path_servers.push(DiscoveredMcpServer {
                     id: server.id.to_string(),
                     name: server.name.to_string(),
                     executable: path,
@@ -215,20 +265,36 @@ pub async fn discover() -> Vec<DiscoveredMcpServer> {
             }
         }
     }
+    locations.push(McpDiscoveryLocation {
+        label: "PATH (known executables)".to_string(),
+        path: None,
+        exists: true,
+        servers: path_servers,
+    });
 
-    // Scan npm global directories for MCP packages
-    found.extend(scan_npm_global().await);
+    // 2. npm global node_modules.
+    let (npm_dir, npm_servers) = scan_npm_global().await;
+    let npm_exists = npm_dir.as_ref().is_some_and(|d| d.exists());
+    locations.push(McpDiscoveryLocation {
+        label: "npm global".to_string(),
+        path: npm_dir,
+        exists: npm_exists,
+        servers: npm_servers,
+    });
 
-    // Scan well-known MCP registry directories
-    for registry_dir in mcp_registry_dirs() {
-        found.extend(scan_mcp_registry(&registry_dir).await);
+    // 3. Well-known MCP registry directories.
+    for (label, registry_dir) in mcp_registry_locations() {
+        let exists = registry_dir.is_dir();
+        let servers = scan_mcp_registry(&registry_dir).await;
+        locations.push(McpDiscoveryLocation {
+            label,
+            path: Some(registry_dir),
+            exists,
+            servers,
+        });
     }
 
-    // Deduplicate by id (prefer earlier finds)
-    let mut seen = std::collections::HashSet::new();
-    found.retain(|s| seen.insert(s.id.clone()));
-
-    found
+    locations
 }
 
 /// Resolve an executable on `PATH` asynchronously.
@@ -263,13 +329,17 @@ fn which_sync(exe: &str) -> Option<PathBuf> {
 }
 
 /// Scan npm global `node_modules` for MCP server packages.
-async fn scan_npm_global() -> Vec<DiscoveredMcpServer> {
+///
+/// Returns the resolved npm `node_modules` directory (when the npm prefix could
+/// be determined) alongside the discovered servers, so a caller can report the
+/// scanned location even when it yields nothing.
+async fn scan_npm_global() -> (Option<PathBuf>, Vec<DiscoveredMcpServer>) {
     let mut found = Vec::new();
 
     // Try to get npm prefix via `npm prefix -g`
     let prefix = match get_npm_prefix().await {
         Some(p) => p,
-        None => return found,
+        None => return (None, found),
     };
 
     // Check for common MCP package patterns in node_modules
@@ -280,7 +350,7 @@ async fn scan_npm_global() -> Vec<DiscoveredMcpServer> {
     };
 
     if !node_modules.exists() {
-        return found;
+        return (Some(node_modules), found);
     }
 
     // Look for @modelcontextprotocol scoped packages
@@ -308,7 +378,7 @@ async fn scan_npm_global() -> Vec<DiscoveredMcpServer> {
         }
     }
 
-    found
+    (Some(node_modules), found)
 }
 
 /// Get the npm global prefix directory.
@@ -410,28 +480,38 @@ async fn try_npm_mcp_package(
     })
 }
 
-/// Common locations of MCP registry directories.
+/// Common locations of MCP registry directories, each with a human-readable
+/// label naming the ecosystem it belongs to.
 ///
 /// The ragent-native location `~/.config/ragent/servers/` is checked first so
 /// its definitions win de-duplication; the remaining entries are third-party
 /// locations kept for backwards compatibility.
-fn mcp_registry_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
+fn mcp_registry_locations() -> Vec<(String, PathBuf)> {
+    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
     // ragent-native MCP server definitions
     if let Some(ragent_dir) = ragent_config::user_dirs::global_mcp_servers_dir() {
-        dirs.push(ragent_dir);
+        dirs.push(("ragent-native".to_string(), ragent_dir));
     }
     if let Some(home) = dirs::home_dir() {
         // Claude Desktop MCP servers
-        dirs.push(home.join(".claude").join("mcp-servers"));
+        dirs.push((
+            "claude".to_string(),
+            home.join(".claude").join("mcp-servers"),
+        ));
         // Cline MCP servers
-        dirs.push(home.join(".cline").join("mcp-servers"));
+        dirs.push(("cline".to_string(), home.join(".cline").join("mcp-servers")));
         // Generic MCP directory (legacy location for ragent)
-        dirs.push(home.join(".mcp").join("servers"));
+        dirs.push((
+            "mcp (legacy)".to_string(),
+            home.join(".mcp").join("servers"),
+        ));
         // XDG config
         if let Some(config) = dirs::config_dir() {
-            dirs.push(config.join("mcp").join("servers"));
-            dirs.push(config.join("claude").join("mcp-servers"));
+            dirs.push(("xdg mcp".to_string(), config.join("mcp").join("servers")));
+            dirs.push((
+                "xdg claude".to_string(),
+                config.join("claude").join("mcp-servers"),
+            ));
         }
     }
     dirs

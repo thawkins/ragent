@@ -53,3 +53,38 @@ fn test_split_ignores_separator_inside_quotes() {
     let parts = split_bash_command("echo 'a;b'");
     assert_eq!(parts, vec!["echo 'a;b'".to_string()]);
 }
+
+#[test]
+fn test_split_empty_command_yields_single_empty_part() {
+    // An empty input falls through to the "no delimiters" fallback, so it is
+    // returned verbatim (one part). Documented here so the edge case is
+    // pinned (audit: edge-case coverage gap).
+    assert_eq!(split_bash_command(""), vec![String::new()]);
+    assert_eq!(split_bash_command("   "), vec![String::new()]);
+}
+
+#[test]
+fn test_split_lone_separator_yields_no_subcommands() {
+    // A bare separator has nothing on either side, so no sub-command is
+    // emitted; the input falls through to the verbatim fallback.
+    assert_eq!(split_bash_command(";"), vec![";".to_string()]);
+    assert_eq!(split_bash_command("&&"), vec!["&&".to_string()]);
+}
+
+#[test]
+fn test_split_unterminated_substitution_stays_whole() {
+    // An unterminated `$(` leaves the substitution depth at 1, so a following
+    // `;` must not split: the whole string is one judged part.
+    let parts = split_bash_command("echo $(id; whoami");
+    assert_eq!(
+        parts,
+        vec!["echo $(id; whoami".to_string()],
+        "an unterminated substitution must not split on an inner `;`"
+    );
+}
+
+#[test]
+fn test_split_ignores_double_ampersand_inside_single_quotes() {
+    let parts = split_bash_command("echo 'a && b'");
+    assert_eq!(parts, vec!["echo 'a && b'".to_string()]);
+}

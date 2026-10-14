@@ -4,22 +4,24 @@
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.133 tree (the `/plugins` browse-panel
-> reversed-video navigator titles, the per-row `Name (N)` navigator counts, and the
-> `git+<url>#<ref>` install checkout fix, on top of the v1.0.132 merged
-> connector/plugin marketplace browsers).
+> Metrics below are measured against the v1.0.133 tree plus the uncommitted
+> working-tree `/simplify all` pass (the four new `ragent-surface` shared modules
+> - `config_splice`, `marketplace`, `net`, `scan` - the collapsed redacting
+> `Debug` impls, and the TUI `now_unix_ms` / `resolve_default_index` /
+> `format_mmss` de-duplication), on top of the v1.0.133 `/plugins` browse-panel
+> navigator titles and the `git+<url>#<ref>` install checkout fix.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 568,377 (562,101 in `crates/` + 6,276 in root `src/`/`tests/`) |
-| Total Rust files | 1,538 (1,521 workspace crates + 17 root `src/`/`tests/`) |
-| Tests defined | ~10,621 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
-| Test files | 866 external (858 workspace crates + 8 root `tests/`) + ~198 `#[cfg(test)]`-bearing sources |
-| Test binaries | ~885 (866 integration test files + 18 lib/bin targets + 1 root bin) |
-| Benchmark files | 18 (+1 in `vendor/html2text`) |
+| Total Rust lines | 571,877 (565,593 in `crates/` + 6,284 in root `src/`/`tests/`) |
+| Total Rust files | 1,549 (1,532 workspace crates + 17 root `src/`/`tests/`) |
+| Tests defined | ~10,689 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 877 external (869 workspace crates + 8 root `tests/`) + `#[cfg(test)]`-bearing sources |
+| Test binaries | ~896 (877 integration test files + 18 lib/bin targets + 1 root bin) |
+| Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 151 (`browser` removed in v1.0.130; `mf_screenshot` engine-gated) |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 18 |
@@ -38,48 +40,48 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 312 | 105,590 | 156 |
-| `ragent-bench` | 28 | 8,619 | 6 |
-| `ragent-codeindex` | 73 | 24,140 | 43 |
-| `ragent-config` | 59 | 14,963 | 36 |
-| `ragent-connectors` | 44 | 19,202 | 21 |
-| `ragent-llm` | 76 | 24,736 | 41 |
-| `ragent-plugins` | 63 | 22,826 | 36 |
-| `ragent-research` | 159 | 60,648 | 93 |
-| `ragent-server` | 22 | 9,847 | 13 |
-| `ragent-specs` | 37 | 20,362 | 24 |
-| `ragent-storage` | 40 | 15,559 | 35 |
-| `ragent-surface` | 7 | 826 | 2 |
+| `ragent-agent` | 316 | 106,471 | 160 |
+| `ragent-bench` | 28 | 8,620 | 6 |
+| `ragent-codeindex` | 74 | 24,185 | 44 |
+| `ragent-config` | 59 | 15,005 | 36 |
+| `ragent-connectors` | 44 | 19,028 | 21 |
+| `ragent-llm` | 76 | 24,725 | 41 |
+| `ragent-plugins` | 63 | 22,856 | 36 |
+| `ragent-research` | 159 | 60,681 | 93 |
+| `ragent-server` | 22 | 9,902 | 13 |
+| `ragent-specs` | 37 | 20,350 | 24 |
+| `ragent-storage` | 40 | 15,583 | 35 |
+| `ragent-surface` | 11 | 1,161 | 2 |
 | `ragent-telemetry` | 30 | 10,585 | 21 |
-| `ragent-tools-core` | 66 | 19,164 | 29 |
-| `ragent-tools-extended` | 159 | 60,168 | 82 |
-| `ragent-tools-vcs` | 66 | 15,970 | 25 |
-| `ragent-tui` | 229 | 118,337 | 171 |
-| `ragent-types` | 51 | 10,559 | 28 |
+| `ragent-tools-core` | 66 | 19,220 | 29 |
+| `ragent-tools-extended` | 159 | 60,258 | 82 |
+| `ragent-tools-vcs` | 67 | 15,954 | 26 |
+| `ragent-tui` | 230 | 120,248 | 172 |
+| `ragent-types` | 51 | 10,761 | 28 |
 
 ---
 
 ## Crate Size Distribution
 
 ```
-ragent-tui            ############# 118,337 lines (21.1%)
-ragent-agent          ########## 105,590 lines (18.8%)
-ragent-research       ####### 60,648 lines (10.8%)
-ragent-tools-extended ####### 60,168 lines (10.7%)
-ragent-llm            ### 24,736 lines (4.4%)
-ragent-codeindex      ### 24,140 lines (4.3%)
-ragent-plugins        ## 22,826 lines (4.1%)
-ragent-specs          ## 20,362 lines (3.6%)
-ragent-tools-core     ## 19,164 lines (3.4%)
-ragent-connectors     ## 19,202 lines (3.4%)
-ragent-tools-vcs      ## 15,970 lines (2.8%)
-ragent-storage        ## 15,559 lines (2.8%)
-ragent-config         # 14,963 lines (2.7%)
+ragent-tui            ############# 120,248 lines (21.3%)
+ragent-agent          ########## 106,471 lines (18.8%)
+ragent-research       ####### 60,681 lines (10.7%)
+ragent-tools-extended ####### 60,258 lines (10.7%)
+ragent-llm            ### 24,725 lines (4.4%)
+ragent-codeindex      ### 24,185 lines (4.3%)
+ragent-plugins        ## 22,856 lines (4.0%)
+ragent-specs          ## 20,350 lines (3.6%)
+ragent-tools-core     ## 19,220 lines (3.4%)
+ragent-connectors     ## 19,028 lines (3.4%)
+ragent-tools-vcs      ## 15,954 lines (2.8%)
+ragent-storage        ## 15,583 lines (2.8%)
+ragent-config         # 15,005 lines (2.7%)
+ragent-types          # 10,761 lines (1.9%)
 ragent-telemetry      # 10,585 lines (1.9%)
-ragent-types          # 10,559 lines (1.9%)
-ragent-server         # 9,847 lines (1.8%)
-ragent-bench          # 8,619 lines (1.5%)
-ragent-surface        # 826 lines (0.1%)
+ragent-server         # 9,902 lines (1.8%)
+ragent-bench          # 8,620 lines (1.5%)
+ragent-surface        # 1,161 lines (0.2%)
 ```
 
 ---
@@ -88,30 +90,30 @@ ragent-surface        # 826 lines (0.1%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tui` | 166 | ~1,856 |
+| `ragent-tui` | 172 | ~1,913 |
 | `ragent-tools-extended` | 82 | ~1,831 |
-| `ragent-agent` | 156 | ~1,296 |
+| `ragent-agent` | 160 | ~1,332 |
 | `ragent-research` | 93 | ~1,098 |
 | `ragent-specs` | 24 | ~683 |
-| `ragent-plugins` | 36 | ~494 |
-| `ragent-codeindex` | 43 | ~412 |
-| `ragent-tools-vcs` | 25 | ~408 |
+| `ragent-plugins` | 36 | ~482 |
+| `ragent-codeindex` | 44 | ~412 |
+| `ragent-tools-vcs` | 26 | ~408 |
 | `ragent-llm` | 41 | ~399 |
-| `ragent-connectors` | 21 | ~386 |
-| `ragent-config` | 36 | ~317 |
-| `ragent-tools-core` | 29 | ~316 |
+| `ragent-connectors` | 21 | ~360 |
+| `ragent-config` | 36 | ~319 |
+| `ragent-tools-core` | 29 | ~317 |
 | `ragent-types` | 28 | ~303 |
 | `ragent-storage` | 35 | ~295 |
 | `ragent-telemetry` | 21 | ~260 |
-| `ragent-server` | 13 | ~138 |
+| `ragent-server` | 13 | ~140 |
 | `ragent-bench` | 6 | ~63 |
 | `ragent-surface` | 2 | ~16 |
-| **Total (external)** | **858** | **~10,531** |
+| **Total (external)** | **869** | **~10,631** |
 
 Inline `#[cfg(test)]` modules in library sources contribute the remaining
 test attributes (a handful under root `src/`/`tests/`; the migration effort has
 moved the bulk of these into each crate's `tests/` tree), bringing the estimated
-total to ~10,621.
+total to ~10,689.
 
 ---
 
@@ -170,18 +172,25 @@ Notes:
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 54 lines (10,621 tests / 568,377 lines)
-- Largest crate: `ragent-tui` (118,337 lines, 21.1%)
-- Smallest crate: `ragent-surface` (826 lines, 0.1%)
-- Median crate size: 18,183 lines (`ragent-tools-core` / `ragent-connectors` midpoint)
+- Test-to-code ratio: ~1 test per 54 lines (10,689 tests / 571,877 lines)
+- Largest crate: `ragent-tui` (120,248 lines, 21.3%)
+- Smallest crate: `ragent-surface` (1,161 lines, 0.2%)
+- Median crate size: 19,124 lines (`ragent-tools-core` / `ragent-connectors` midpoint)
 - Crates over 10k lines: 15 of 18
 - Crates under 5k lines: 1 of 18
 
 ---
 
-_Generated 2026-10-12 (v1.0.133 tree -
-the `/plugins` browse-panel refinements (reversed-video navigator titles above each
-`ALL` row, hit-test areas moved below the header, and per-row `Name (N)` counts), the
+_Generated 2026-10-12 (v1.0.133 tree plus the uncommitted `/simplify all` working
+tree - the four new `ragent-surface` shared modules (`config_splice`, `marketplace`,
+`net`, `scan`) and the delegation of the plugin/connector marketplace writers to
+`write_atomic_json`, the collapse of the four redacting `Debug` impls into
+`macro_rules! redacted_debug_impl!`, the `redact_secrets_cow` allocation fix, the
+`check_path_within_allowed_roots_cached` empty-roots fast path, and the TUI
+`now_unix_ms` / `resolved_default_index` / `resolve_default_index` / `format_mmss`
+de-duplication (with the question-expiry `unreachable!()` removed) - on top of the
+v1.0.133 `/plugins` browse-panel refinements (reversed-video navigator titles above
+each `ALL` row, hit-test areas moved below the header, and per-row `Name (N)` counts), the
 bottom-edge search box with a click-to-clear button, and the `git+<url>#<ref>` install
 checkout fix in `ragent-plugins` (`plugins` FR-024), on top of the v1.0.132 merged
 connector and plugin marketplace browsers (additional marketplaces, a per-row

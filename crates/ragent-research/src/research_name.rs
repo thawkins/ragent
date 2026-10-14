@@ -195,9 +195,13 @@ impl ResearchName {
 
         let mut chars = name.chars();
 
-        // Rule 2: first character must be a lowercase letter.
-        // INVARIANT: emptiness was checked above; the call cannot fail at runtime.
-        let first = chars.next().expect("non-empty checked above");
+        // Rule 2: first character must be a lowercase letter. Emptiness was
+        // checked above; guard the (unreachable) `None` explicitly rather than
+        // panicking (no production `unwrap`/`expect`).
+        let first = match chars.next() {
+            Some(ch) => ch,
+            None => return Err(ResearchNameError::Empty),
+        };
         if !first.is_ascii_lowercase() {
             return Err(ResearchNameError::InvalidStart { ch: first });
         }

@@ -12,7 +12,7 @@
 //! |---------------------|----------------|------------------------------------|
 //! | `update_file`       | `write`        | `content` pass-through            |
 //! | `run_code`          | `bash`         | `code` -> `command`                |
-//! | `ask_user`          | (self)         | free-text or multiple-choice user prompt |
+//! | `ask_user`          | (self)         | free-text or multiple-choice user prompt, with a default/fallback option |
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -195,8 +195,12 @@ impl Tool for AskUserTool {
          clarification, prioritisation help, or confirmation before proceeding. \
          REQUIRED parameter: 'question' (string, the prompt shown to the user). Optional: \
          'options' (array of strings) to render a multiple-choice dialog instead of free \
-         text. Common gotcha: if 'options' is provided, the returned value will be one of \
-         the supplied strings; if omitted, the user may type any free-text answer."
+         text. Optional: 'default' (string) names the option pre-selected in the dialog and \
+         used automatically if the user lets the dialog time out. A 'default' value that \
+         matches no option is ignored, as is an option marked 'recommended'; with no usable \
+         default the first option is pre-selected and used on timeout. Common gotcha: if \
+         'options' is provided, the returned value will be one of the supplied strings; if \
+         omitted, the user may type any free-text answer."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -211,6 +215,10 @@ impl Tool for AskUserTool {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Optional multiple-choice options. When provided, the user selects one instead of typing free text."
+                },
+                "default": {
+                    "type": "string",
+                    "description": "Optional. The option pre-selected in the dialog and used automatically if the user does not answer before the question times out. Must match one of 'options'. When absent, an option marked 'recommended' is used; otherwise the first option is used."
                 }
             },
             "required": ["question"],
@@ -242,6 +250,8 @@ impl Tool for AskUserTool {
             })
             .unwrap_or_default();
 
+        let default_index = resolve_default_index(options.as_slice(), input["default"].as_str());
+
         let request_id = uuid::Uuid::new_v4().to_string();
 
         // Subscribe before publishing so we don't miss the reply.
@@ -252,6 +262,7 @@ impl Tool for AskUserTool {
             request_id: request_id.clone(),
             question: question.to_string(),
             options,
+            default_index,
         });
 
         // Wait for a matching QuestionAnswered event from the TUI.
@@ -285,4 +296,37 @@ impl Tool for AskUserTool {
             })),
         })
     }
+}
+
+/// Resolve which option index should be pre-selected (and used on timeout) for
+/// a multiple-choice `ask_user` request.
+///
+/// Resolution order:
+///
+/// 1. An explicit option name matching `explicit_default` (trimmed,
+///    case-insensitive).
+/// 2. The first option marked `recommended` (the word appearing anywhere in
+///    the option text, case-insensitive).
+/// 3. The first option.
+///
+/// Returns `None` when there are no options at all (a free-text question).
+fn resolve_default_index(options: &[String], explicit_default: Option<&str>) -> Option<usize> {
+    if options.is_empty() {
+        return None;
+    }
+    if let Some(name) = explicit_default {
+        let name = name.trim();
+        if !name.is_empty() {
+            if let Some(i) = options.iter().position(|o| o.eq_ignore_ascii_case(name)) {
+                return Some(i);
+            }
+        }
+    }
+    if let Some(i) = options
+        .iter()
+        .position(|o| o.to_ascii_lowercase().contains("recommended"))
+    {
+        return Some(i);
+    }
+    Some(0)
 }

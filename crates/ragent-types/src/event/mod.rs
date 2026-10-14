@@ -225,6 +225,11 @@ pub enum Event {
         /// Optional multiple-choice options for the user.
         #[serde(default)]
         options: Vec<String>,
+        /// Optional zero-based index of the option to pre-select and to fall
+        /// back to if the dialog times out unanswered. `None` means the first
+        /// option (`Some(0)` when `options` is non-empty).
+        #[serde(default)]
+        default_index: Option<usize>,
     },
     /// The user has answered a direct question request.
     QuestionAnswered {

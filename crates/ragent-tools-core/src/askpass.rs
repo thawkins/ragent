@@ -248,6 +248,9 @@ async fn publish_question_and_wait(
         request_id: request_id.clone(),
         question: prompt,
         options: Vec::new(),
+        // No options: a free-text password prompt has no default to fall back
+        // to on timeout, so the wait still cancels after `REQUEST_TIMEOUT`.
+        default_index: None,
     };
     event_bus.publish(request);
 

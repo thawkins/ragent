@@ -537,7 +537,15 @@ one set of handlers:
 - a local **directory** containing a plugin manifest;
 - a local **`.zip`** or **`.tar.gz`** package file;
 - an **`https://` URL** pointing at a `.zip`/`.tar.gz` package
-  (non-`https` URLs are refused).
+  (non-`https` URLs are refused);
+- a **`git+<https-url>#<ref>[:<subpath>]`** git source - the form the store browse
+  panels emit (see [section 9](#9-acquiring-plugins-from-the-claude-and-codex-stores)).
+  A `:<subpath>` source is a shallow **sparse** clone of that subdirectory, so a
+  plugin in a monorepo installs without downloading the whole tree; a
+  whole-repo source (no subpath, the shape a Claude marketplace
+  `{"source":"./"}` resolves to for a plugin published at its repository root)
+  is a shallow clone of the **complete** tree, so a manifest in the nested
+  `.claude-plugin/` directory is found.
 
 A single-root archive wrapper (e.g. GitHub's `<repo>-<ref>/`) is descended
 automatically. Archives are capped at **50 MiB** and extracted with
@@ -1151,6 +1159,7 @@ at an 800 ms budget).
 | `No plugins discovered.` | Store empty or wrong location | Check `.ragent/plugins/` and `~/.config/ragent/plugins/`; set `plugins.store_dir` if using a custom path |
 | Plugin row shows `dialect ?` and version `-` | Manifest failed to parse | Read the `Errors:` section for the JSON position; validate the manifest |
 | `ambiguous plugin manifest` | Directory matches both Codex and Claude recognition *and* is not the both-nested-manifest multi-target layout | Remove one of the two manifest forms (a plugin shipping both `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` is accepted as Claude and needs no change) |
+| `plugin add: no plugin manifest found in <dir>` | The installed tree carries no manifest ragent recognises | Check for `.claude-plugin/plugin.json`, `claude-plugin.json`, `.codex-plugin/plugin.json`, `codex-plugin.json`, or a `plugin.json` with a top-level `"codex"` marker. A Claude-dialect plugin's only manifest is the *nested* `.claude-plugin/plugin.json`, so a source that names a subdirectory without it fails: point the source at the directory that actually holds the manifest |
 | `plugin requires host API vN` | Declared `api_version` newer than 1 | Lower the declaration to `1` |
 | Enable reports cause `entry` | Entry point threw or timed out | Run `/plugins test <id>` for the exception/timeout detail |
 | Enable reports cause `name-collision` | A command name collides with a built-in trigger, or a tool/command is declared twice by the same plugin | Rename the contribution |

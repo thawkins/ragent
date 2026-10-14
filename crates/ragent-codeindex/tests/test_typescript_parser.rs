@@ -2,19 +2,19 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
-use ragent_codeindex::parser::LanguageParser;
 use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::typescript::{TsVariant, TypeScriptParser};
 use ragent_codeindex::types::{SymbolKind, Visibility};
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_ts(source: &str) -> ParsedFile {
-    let p = TypeScriptParser::new(TsVariant::TypeScript);
-    p.parse(source.as_bytes()).unwrap()
+    support::parse_with(&TypeScriptParser::new(TsVariant::TypeScript), source)
 }
 
 fn parse_js(source: &str) -> ParsedFile {
-    let p = TypeScriptParser::new(TsVariant::JavaScript);
-    p.parse(source.as_bytes()).unwrap()
+    support::parse_with(&TypeScriptParser::new(TsVariant::JavaScript), source)
 }
 
 #[test]

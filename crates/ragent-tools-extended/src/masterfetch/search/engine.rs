@@ -881,15 +881,12 @@ pub fn truncate_query_to(query: &str, max: usize) -> String {
 
 /// Truncate a snippet to [`SNIPPET_MAX_CHARS`] characters, appending an
 /// ellipsis when the input was longer.
+///
+/// Delegates to [`ragent_types::strutil::truncate_chars`], the single shared
+/// char-boundary truncation helper.
 #[must_use]
 pub fn truncate_snippet(snippet: &str) -> String {
-    if snippet.chars().count() <= SNIPPET_MAX_CHARS {
-        return snippet.to_string();
-    }
-    // Keep the result within `SNIPPET_MAX_CHARS` including the 3-char ellipsis.
-    let head = SNIPPET_MAX_CHARS.saturating_sub(3);
-    let truncated: String = snippet.chars().take(head).collect();
-    format!("{truncated}...")
+    ragent_types::strutil::truncate_chars(snippet, SNIPPET_MAX_CHARS)
 }
 
 /// Truncate a snippet to at most `max` bytes (rounded down to a char
@@ -897,34 +894,21 @@ pub fn truncate_snippet(snippet: &str) -> String {
 ///
 /// Some engines (OpenAlex, Wikipedia) budget snippets in bytes rather than
 /// characters; they share this one implementation instead of forking it
-/// (see `ANTIPAT.md` M3.8).
+/// (see `ANTIPAT.md` M3.8). Delegates to
+/// [`ragent_types::strutil::truncate_bytes`].
 #[must_use]
 pub fn truncate_snippet_bytes(snippet: &str, max: usize) -> String {
-    if snippet.len() <= max {
-        return snippet.to_string();
-    }
-    let end = snippet
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= max)
-        .last()
-        .unwrap_or(0);
-    format!("{}...", &snippet[..end])
+    ragent_types::strutil::truncate_bytes(snippet, max)
 }
 
 /// Mask a sensitive API key for display.
 ///
 /// Keeps the first two and last two characters; everything in between is
 /// replaced with `*`. Strings of six characters or fewer are fully masked.
+/// Delegates to [`ragent_types::sanitize::mask_edges`].
 #[must_use]
 pub fn mask_api_key(key: &str) -> String {
-    let len = key.chars().count();
-    if len <= 6 {
-        return "*".repeat(len);
-    }
-    let first: String = key.chars().take(2).collect();
-    let last: String = key.chars().skip(len - 2).collect();
-    format!("{first}*{}*{last}", "*".repeat(len.saturating_sub(6)))
+    ragent_types::sanitize::mask_edges(key, 2, 6)
 }
 
 /// Common pre-flight guard shared by the API-key-backed engines.

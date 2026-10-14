@@ -26,23 +26,39 @@ async fn shutdown_kills_the_stdio_child_process_group() {
 
     // Directly exercise the group-kill primitives: this is the same pair
     // `kill_stdio_child` issues for the pid the stdio spawn records.
-    kill_stdio_child(leader_pid);
+    //
+    // Under parallel load the launcher's `&` fork can land *after* the first
+    // `killpg`, leaving one group member alive; that is the exact window the
+    // production sweep re-enumerates for, so bound-poll until the group is
+    // empty rather than asserting on a single racy sample. The child has to be
+    // reaped each pass: an unreaped zombie still answers both signal-0 probes
+    // as a live member of its group.
+    let mut leader_alive = true;
+    let mut group_alive = true;
+    for _ in 0..200 {
+        kill_stdio_child(leader_pid);
+        let _ = child.try_wait();
+        // Probing the leader pid (kill with signal 0) and the process group
+        // (killpg with signal 0) must both return ESRCH once teardown settles.
+        #[allow(unsafe_code)]
+        // approved: kill/killpg signal-0 probes are harmless; no safe std alternative
+        unsafe {
+            leader_alive = libc::kill(leader_pid as libc::pid_t, 0) == 0;
+            group_alive = libc::killpg(leader_pid as libc::pid_t, 0) == 0;
+        }
+        if !leader_alive && !group_alive {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let _ = child.wait().await;
 
-    // The group must be gone: probing the leader pid (kill with signal 0)
-    // and the process group (killpg with signal 0) must both return ESRCH.
-    #[allow(unsafe_code)]
-    // approved: kill/killpg signal-0 probes are harmless; no safe std alternative
-    unsafe {
-        assert_eq!(
-            libc::kill(leader_pid as libc::pid_t, 0),
-            -1,
-            "leader pid {leader_pid} must be killed by shutdown"
-        );
-        assert_eq!(
-            libc::killpg(leader_pid as libc::pid_t, 0),
-            -1,
-            "process group {leader_pid} must be empty after shutdown"
-        );
-    }
+    assert!(
+        !leader_alive,
+        "leader pid {leader_pid} must be killed by shutdown"
+    );
+    assert!(
+        !group_alive,
+        "process group {leader_pid} must be empty after shutdown"
+    );
 }

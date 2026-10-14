@@ -30,6 +30,9 @@ struct CachedConfigFile {
     mtimes: Vec<(PathBuf, std::time::SystemTime, u64)>,
     /// The cwd the cache was built for (the project config path is relative).
     cwd: PathBuf,
+    /// The `XDG_CONFIG_HOME` value the cache was built for (it selects the
+    /// global config directory, and has no mtime to track).
+    xdg: Option<std::ffi::OsString>,
 }
 
 /// Top-level ragent configuration.
@@ -411,11 +414,22 @@ impl Default for Config {
 /// The rendering is produced by [`render_redacted`], which serialises to JSON
 /// and then routes the text through [`ragent_types::sanitize::redact_secrets`],
 /// so a secret is masked even if a new secret-bearing field is added later.
-impl std::fmt::Debug for Config {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&render_redacted(self))
-    }
+///
+/// Implemented once for every secret-bearing config struct via
+/// [`redacted_debug_impl`], so a new type opts in with a single invocation
+/// rather than a hand-copied `Debug` body.
+macro_rules! redacted_debug_impl {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl std::fmt::Debug for $ty {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str(&render_redacted(self))
+                }
+            }
+        )+
+    };
 }
+redacted_debug_impl!(Config);
 
 /// Render a config value as redacted JSON for [`Config`]'s `Debug` impl.
 ///
@@ -1225,7 +1239,11 @@ fn default_agent_name() -> String {
 }
 
 /// Configuration for a single LLM provider.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// `Debug` is hand-written (not derived) so the `api.headers` map — which can
+/// hold `Authorization` / `PRIVATE-TOKEN` values — is redacted before it is
+/// printed by any `{:?}`/`tracing::debug!(?cfg)`.
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfig {
     /// Environment variable names required by this provider (e.g. API keys).
     #[serde(default)]
@@ -1246,7 +1264,10 @@ pub struct ProviderConfig {
 }
 
 /// API endpoint configuration for a provider.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// `Debug` is hand-written (not derived) so `Authorization` / `PRIVATE-TOKEN`
+/// header values are redacted before they are printed.
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct ApiConfig {
     /// Base URL for API requests (overrides the provider default).
     pub base_url: Option<String>,
@@ -1254,6 +1275,8 @@ pub struct ApiConfig {
     #[serde(default)]
     pub headers: HashMap<String, String>,
 }
+
+redacted_debug_impl!(ApiConfig, ProviderConfig);
 
 /// Metadata and pricing for a single model within a provider.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1434,7 +1457,11 @@ pub struct CommandDef {
 }
 
 /// Configuration for an MCP (Model Context Protocol) server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Debug` is hand-written (not derived) so the `env` and `headers` maps —
+/// which routinely hold API tokens and `Authorization`/`PRIVATE-TOKEN` values
+/// for HTTP/SSE transports — are redacted before they are printed.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Transport mechanism used to communicate with the server.
     #[serde(rename = "type")]
@@ -1463,6 +1490,8 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub notification: crate::trigger::McpNotificationMode,
 }
+
+redacted_debug_impl!(McpServerConfig);
 
 impl Default for McpServerConfig {
     fn default() -> Self {
@@ -1922,6 +1951,14 @@ impl Config {
         let env_overrides =
             read_env("RAGENT_CONFIG").is_some() || read_env("RAGENT_CONFIG_CONTENT").is_some();
 
+        // The `XDG_CONFIG_HOME` environment variable selects the global config
+        // directory; include it in the fast-path guard (below) so a caller that
+        // redirects it in-process is never served a config resolved for the
+        // previous location. Normalise a present-but-blank value to `None`
+        // (L-9) so it matches `dirs`/XDG handling, which treats an empty
+        // override as unset.
+        let xdg = read_env("XDG_CONFIG_HOME").map(std::ffi::OsString::from);
+
         if env_overrides {
             return Self::load_uncached();
         }
@@ -1962,6 +1999,7 @@ impl Config {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(cached) = guard.as_ref()
                 && cached.cwd == cwd
+                && cached.xdg == xdg
                 && cached.mtimes.iter().all(|(path, mt, size)| {
                     std::fs::metadata(path).is_ok_and(|m| {
                         m.modified().is_ok_and(|current| current == *mt) && m.len() == *size
@@ -1991,6 +2029,7 @@ impl Config {
                 config: cfg.clone(),
                 mtimes,
                 cwd,
+                xdg,
             });
         }
         cfg

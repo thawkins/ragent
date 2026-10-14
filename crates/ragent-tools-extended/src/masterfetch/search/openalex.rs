@@ -690,21 +690,9 @@ fn truncate_snippet(snippet: &str) -> String {
 /// Mask an email address for display.
 ///
 /// Keeps the first two and last two characters; everything in between is
-/// replaced with `*`. Strings shorter than six characters are fully masked.
+/// replaced with `*`. Strings of six characters or fewer are fully masked.
+/// Delegates to [`ragent_types::sanitize::mask_edges`].
 #[must_use]
 pub fn mask_email(email: &str) -> String {
-    let len = email.chars().count();
-    if len <= 6 {
-        return "*".repeat(len);
-    }
-    let first: String = email.chars().take(2).collect();
-    let last: String = email
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("{first}*{}*{last}", "*".repeat(len.saturating_sub(6)))
+    ragent_types::sanitize::mask_edges(email, 2, 6)
 }

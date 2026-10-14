@@ -503,18 +503,20 @@ fn test_discover_skills_extra_dirs() {
 
     let extra = vec![extra_dir.to_string_lossy().to_string()];
     let skills = discover_skills(&work_dir, &extra);
+    // The ambient user's personal skill roots (~/.agents/skills,
+    // ~/.config/ragent/skills) are also Personal scope on a real developer
+    // machine, so assert on the extra dir's contribution rather than a global
+    // count (the previous `len() == 1` only held on a clean CI runner).
     let personal_skills: Vec<_> = skills
         .into_iter()
         .filter(|s| s.scope == SkillScope::Personal)
         .collect();
-
-    assert_eq!(personal_skills.len(), 1);
-    assert_eq!(personal_skills[0].name, "custom-lint");
-    assert_eq!(
-        personal_skills[0].description.as_deref(),
-        Some("Custom linter")
-    );
-    assert_eq!(personal_skills[0].scope, SkillScope::Personal);
+    let custom = personal_skills
+        .iter()
+        .find(|s| s.name == "custom-lint")
+        .expect("the extra skill dir must be discovered as Personal scope");
+    assert_eq!(custom.description.as_deref(), Some("Custom linter"));
+    assert_eq!(custom.scope, SkillScope::Personal);
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

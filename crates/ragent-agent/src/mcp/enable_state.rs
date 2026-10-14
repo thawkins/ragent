@@ -91,7 +91,11 @@ impl McpEnableLedger {
             std::fs::create_dir_all(parent)?;
         }
         let bytes = serde_json::to_vec_pretty(self)?;
-        std::fs::write(path, bytes)?;
+        // Temp-file + rename so a crash mid-write cannot truncate the ledger
+        // (the same atomic-write shape the other on-disk state uses).
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 

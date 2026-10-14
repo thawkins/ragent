@@ -1,14 +1,15 @@
 # /mcp
-> MCP servers: /mcp [status] | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help
+> MCP servers: /mcp [status] | /mcp config | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help
 
 ## Overview
 
 `/mcp` reports the state of Model Context Protocol servers, launches discovery,
 and switches servers on or off. The bare form (the `status` token lands in the
 same arm) prints a server table from the current config and runtime state;
-`/mcp discover` scans for available servers and opens an interactive selection
-dialog; `/mcp connect <id>` and `/mcp disconnect <id>` enable or disable a named
-server live.
+`/mcp config` reports *where* ragent looks for MCP server definitions and what
+it finds at each place; `/mcp discover` scans for available servers and opens an
+interactive selection dialog; `/mcp connect <id>` and `/mcp disconnect <id>`
+enable or disable a named server live.
 
 Whether a server is actually started is durable, user-owned state - it is not
 just a side effect of being listed in `ragent.json`. The choice is persisted in
@@ -20,8 +21,8 @@ has no entry in `ragent.json` at all) can still be turned off. A server id
 with no extra step. A `mcp.<id>.disabled: true` entry in `ragent.json` always
 disables the server, whatever the ledger says.
 
-Only `discover`, `connect <id>`, `disconnect <id>`, and `help` are real
-subcommands. There is no `/mcp call` subcommand - tool calls to MCP servers go
+Only `config`, `discover`, `connect <id>`, `disconnect <id>`, and `help` are
+real subcommands. There is no `/mcp call` subcommand - tool calls to MCP servers go
 through the `mcp_tool` tool in chat. The individual tool names are the
 model-facing surface and are not enumerated by `/mcp`; the full per-server
 inventory with the registry name each tool is callable under
@@ -32,6 +33,7 @@ inventory with the registry name each tool is callable under
 ```
 /mcp                      # server status table (status token behaves the same)
 /mcp status               # same table
+/mcp config               # show where MCP definitions are looked for
 /mcp discover             # scan for MCP servers, open selection dialog
 /mcp connect <id>         # enable and connect a server now, persisting the choice
 /mcp disconnect <id>      # disable and disconnect a server now, persisting the choice
@@ -44,6 +46,7 @@ inventory with the registry name each tool is callable under
 | --- | --- |
 | `/mcp` | Print the MCP server table |
 | `/mcp status` | Same as the bare form |
+| `/mcp config` | Report every location ragent scans for MCP definitions, the count found at each, and the servers discovered |
 | `/mcp discover` | Run `McpClient::discover()` and open the interactive dialog |
 | `/mcp connect <id>` | Enable `<id>`, connect it live, and register its tools now |
 | `/mcp disconnect <id>` | Disable `<id>`, disconnect it live; the choice persists globally |
@@ -103,7 +106,18 @@ Bare form (`From: /mcp`, `MCP Servers:`):
   advertises, also printed for a server with none).
 - A summary line: `<connected>/<total> server(s) connected`.
 - A footer listing the subcommands:
-  `/mcp discover`, `/mcp connect <id>`, `/mcp disconnect <id>`.
+  `/mcp config`, `/mcp discover`, `/mcp connect <id>`, `/mcp disconnect <id>`.
+
+`/mcp config` produces a discovery-location report: a table of every place ragent
+looks for MCP server definitions - the ragent-native
+`~/.config/ragent/servers/` directory first (so its definitions win
+de-duplication), then npm global `node_modules`, `PATH`, and the
+Claude/Cline/legacy/XDG registry directories - showing the path (an absent
+directory is marked `(missing)`) and the number of definitions found at each,
+followed by a table of the individual servers discovered (id, origin location,
+and launch command). The scan is the same one `/mcp discover` uses; it is merely
+reported per location. Backed by `McpClient::discover_locations`, which returns
+the per-location results before the flat list `/mcp discover` de-duplicates.
 
 The display list is built from the same merged server set the connect path uses
 (`ragent_agent::plugin::plugin_mcp_servers`), so plugin-contributed servers
@@ -111,8 +125,15 @@ appear here alongside the ones in `ragent.json`, and the live status is read
 from the session's MCP client.
 
 `/mcp discover` produces no transcript output; it opens an interactive
-dialog (numbered selection list with a feedback line) fed by
-`McpClient::discover()`.
+dialog fed by `McpClient::discover()`. The dialog lists every discovered server
+under a block cursor: `Up`/`Down` (or `k`/`j`, `Home`/`End`) move the cursor and
+the list scrolls (with a scrollbar) to keep it visible, `Enter` toggles the
+highlighted server's enabled state, and `Esc` closes the dialog. Each row carries
+an `[x]`/`[ ]` enabled marker. Toggling a server on adds a `mcp.<id>` entry to
+the project `.ragent/ragent.json` when one is missing (or lifts a
+`disabled: true` override), applies the choice to the global ledger, and connects
+it live when the MCP client is running; toggling it off disables it in the ledger
+and disconnects it. A feedback line reports each toggle.
 
 `/mcp connect <id>`:
 

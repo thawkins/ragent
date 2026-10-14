@@ -1949,7 +1949,7 @@ impl SessionProcessor {
                     // Best-effort persist: a failure silently breaks the
                     // `--include-cost` export, so at least log it.
                     if let Err(e) = storage_for_persist.create_run_cost_summary(&row) {
-                        tracing::debug!(error = %e, "run cost summary persist failed");
+                        tracing::warn!(error = %e, "run cost summary persist failed");
                     }
                 });
                 bus.publish(Event::RunCostSummary {
@@ -3030,7 +3030,10 @@ impl SessionProcessor {
                         Err(e) => {
                             warn!(
                                 error = %e,
-                                args = %tc.args_json,
+                                // SEC: arguments can carry credentials; redact
+                                // before logging (verification gate: no raw
+                                // `args = %`).
+                                args = %ragent_types::sanitize::redact_secrets(&tc.args_json),
                                 "Failed to parse tool call arguments"
                             );
                             // B3: even a parse failure is validated against
@@ -3522,9 +3525,11 @@ impl SessionProcessor {
                                 None
                             }
                             crate::hooks::PostToolUseResult::Warn { message } => {
+                                // SEC: hook-supplied text can echo user/tool
+                                // data; redact before logging.
                                 tracing::info!(
                                     tool = %tc_clone.name,
-                                    message = %message,
+                                    message = %ragent_types::sanitize::redact_secrets(&message),
                                     "PostToolUse hook emitted warning"
                                 );
                                 None
@@ -4054,7 +4059,7 @@ impl SessionProcessor {
                                 let mut text = format!(
                                     "[Background Task {status_label}: {} - {}]\n\n{body}",
                                     task.agent_name,
-                                    task.id.chars().take(8).collect::<String>()
+                                    ragent_types::strutil::short_prefix(&task.id, 8)
                                 );
                                 // The injected body may later be cut by the
                                 // generic 12k tool-result truncation; point at
@@ -4097,7 +4102,7 @@ impl SessionProcessor {
                                     "[Background Shell Task {}: {} - {} ({})]\n\n{}",
                                     task.status,
                                     task.command,
-                                    task.task_id.chars().take(8).collect::<String>(),
+                                    ragent_types::strutil::short_prefix(&task.task_id, 8),
                                     exit_str,
                                     if task.tail.is_empty() {
                                         "(no output)"
@@ -4146,10 +4151,14 @@ impl SessionProcessor {
                     // re-synced wholesale on the final save. Rewriting the FTS
                     // index on every stream event (DELETE + re-INSERT) was the
                     // dominant cost of `storage.assistant_interim.update`.
-                    // INTENTIONAL: interim FTS write; the final save re-syncs wholesale
-                    let _ = self
+                    // Best-effort interim FTS write; the final save re-syncs
+                    // wholesale. Log a failure rather than swallowing it.
+                    if let Err(e) = self
                         .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(error = %e, "interim message-parts save failed");
+                    }
                     last_interim_parts_count = Some(interim_parts_count);
                 }
             }
@@ -4198,10 +4207,14 @@ impl SessionProcessor {
             let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
             assistant_msg.id = assistant_msg_id;
             let msg_id = assistant_msg.id.clone();
-            // INTENTIONAL: cancelled-turn persistence is best-effort
-            let _ = self
+            // Best-effort cancelled-turn persistence; log a failure rather
+            // than swallowing it so a broken write is visible.
+            if let Err(e) = self
                 .storage_op(move |s| s.update_message(&assistant_msg))
-                .await;
+                .await
+            {
+                tracing::warn!(error = %e, "cancelled-turn message persistence failed");
+            }
             self.event_bus.publish(Event::MessageEnd {
                 session_id: session_id.to_string(),
                 message_id: msg_id,
@@ -4527,14 +4540,18 @@ impl SessionProcessor {
                 Role::Assistant,
                 vec![MessagePart::Text { text: ack_text }],
             );
-            // INTENTIONAL: ack persistence is best-effort
-            let _ = self
+            // Best-effort ack persistence; log a failure rather than
+            // swallowing it so a broken write is visible.
+            if let Err(e) = self
                 .storage_op(move |s| {
                     s.create_message(&user_msg)?;
                     s.create_message(&ack_msg)?;
                     Ok(())
                 })
-                .await;
+                .await
+            {
+                tracing::warn!(error = %e, "init-ack message persistence failed");
+            }
         }
 
         self.event_bus.publish(Event::MessageEnd {
@@ -4713,17 +4730,10 @@ impl SessionProcessor {
 /// M-007: shared tool-result display preview - trim, truncate to `max_chars`
 /// characters on a char boundary, and append `...` when truncated.
 ///
-/// The `len() <= max` fast path exploits the fact that a string's byte length
-/// is an upper bound on its character count, so short ASCII strings (the
-/// common case) skip the full char scan entirely.
+/// Delegates to [`ragent_types::strutil::truncate_chars`] after trimming, so the
+/// char-boundary logic lives in one place.
 fn truncate_preview(s: &str, max_chars: usize) -> String {
-    let trimmed = s.trim();
-    if trimmed.len() <= max_chars {
-        return trimmed.to_string();
-    }
-    let mut out: String = trimmed.chars().take(max_chars).collect();
-    out.push_str("...");
-    out
+    ragent_types::strutil::truncate_chars(s.trim(), max_chars)
 }
 
 /// Publish `ToolCallEnd` for a denied tool call and return the standard

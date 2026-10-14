@@ -114,62 +114,52 @@ impl SddFlags {
 
 // -- EARS regex patterns ---------------------------------------------------
 
-static RE_UBIQUITOUS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^the\s+.+\s+shall\s+.+$").expect("ubiquitous regex should compile")
-});
+/// Compile a compile-time-constant validation regex.
+///
+/// Every pattern below is a literal that cannot fail for a correct build; a
+/// failure is a programmer error surfaced by the module's unit tests. Funnelling
+/// each static regex through this one helper keeps a single audited `expect`
+/// site (mirroring `ragent_types::sanitize::SECRET_PATTERN`) instead of
+/// scattering it across the module.
+#[allow(clippy::expect_used)]
+fn static_regex(pattern: &str) -> Regex {
+    Regex::new(pattern).expect("static validation regex should compile")
+}
 
-static RE_EVENT_DRIVEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^when\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$")
-        .expect("event-driven regex should compile")
-});
+static RE_UBIQUITOUS: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)^the\s+.+\s+shall\s+.+$"));
 
-static RE_STATE_DRIVEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^while\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$")
-        .expect("state-driven regex should compile")
-});
+static RE_EVENT_DRIVEN: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)^when\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$"));
 
-static RE_OPTIONAL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^where\s+.+,?\s*the\s+.+\s+shall\s+.+$")
-        .expect("optional regex should compile")
-});
+static RE_STATE_DRIVEN: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)^while\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$"));
 
-static RE_UNWANTED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^if\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$")
-        .expect("unwanted regex should compile")
-});
+static RE_OPTIONAL: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)^where\s+.+,?\s*the\s+.+\s+shall\s+.+$"));
 
-static RE_SECTION_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(#{2,4})\s+(.+)$").expect("section header regex should compile")
-});
+static RE_UNWANTED: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)^if\s+.+\s*,?\s*the\s+.+\s+shall\s+.+$"));
 
-static RE_INLINE_REQUIREMENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(FR|NFR)-(\d+)\.\s+(.*)$").expect("inline requirement regex should compile")
-});
+static RE_SECTION_HEADER: LazyLock<Regex> = LazyLock::new(|| static_regex(r"^(#{2,4})\s+(.+)$"));
 
-static RE_REQUIREMENT_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(#{2,3})\s+(FR|NFR)-(\d+)\s*[---]\s*(.*)$")
-        .expect("requirement header regex should compile")
-});
+static RE_INLINE_REQUIREMENT: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"^(FR|NFR)-(\d+)\.\s+(.*)$"));
 
-static RE_STATUS_FRONTMATTER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^status:\s*(\S+)$").expect("status frontmatter regex should compile")
-});
+static RE_REQUIREMENT_HEADER: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"^(#{2,3})\s+(FR|NFR)-(\d+)\s*[---]\s*(.*)$"));
 
-static RE_TASK_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\|\s*(T-\d+)\s*\|").expect("task ID regex should compile"));
+static RE_STATUS_FRONTMATTER: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"^status:\s*(\S+)$"));
 
-static RE_NEEDS_CLARIFICATION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\[NEEDS CLARIFICATION:\s*(.+?)\]")
-        .expect("needs-clarification regex should compile")
-});
+static RE_TASK_ID: LazyLock<Regex> = LazyLock::new(|| static_regex(r"^\|\s*(T-\d+)\s*\|"));
 
-static RE_REQUIREMENT_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\D+)-(\d+)$").expect("requirement number regex should compile")
-});
+static RE_NEEDS_CLARIFICATION: LazyLock<Regex> =
+    LazyLock::new(|| static_regex(r"(?i)\[NEEDS CLARIFICATION:\s*(.+?)\]"));
 
-static RE_REQ_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(FR-\d+|NFR-\d+)").expect("requirement reference regex should compile")
-});
+static RE_REQUIREMENT_NUMBER: LazyLock<Regex> = LazyLock::new(|| static_regex(r"^(\D+)-(\d+)$"));
+
+static RE_REQ_REFERENCE: LazyLock<Regex> = LazyLock::new(|| static_regex(r"(FR-\d+|NFR-\d+)"));
 
 /// Maximum length of an inline requirement's derived title before it is
 /// truncated (ANTIPAT L-3).
@@ -570,20 +560,19 @@ pub fn detect_clarification_markers(content: &str) -> Vec<ClarificationMarker> {
 /// Regex matching common vague/ambiguous terms in requirement text.
 /// Matches whole words only (case-insensitive).
 static RE_VAGUE_TERMS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(fast|efficient|scalable|robust|flexible|user-friendly|intuitive|simple|easy|appropriate|reasonable|adequate|sufficient|several|various|some|many|few|minimal|significant|substantial|high.?performance|low.?latency|high.?quality|as\s+needed|as\s+appropriate|etc\.?)\b")
-        .expect("vague-terms regex should compile")
+    static_regex(
+        r"(?i)\b(fast|efficient|scalable|robust|flexible|user-friendly|intuitive|simple|easy|appropriate|reasonable|adequate|sufficient|several|various|some|many|few|minimal|significant|substantial|high.?performance|low.?latency|high.?quality|as\s+needed|as\s+appropriate|etc\.?)\b",
+    )
 });
 
 /// Regex matching potential acronyms: 2-6 consecutive uppercase ASCII letters.
-static RE_ACRONYM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b([A-Z]{2,6})\b").expect("acronym regex should compile"));
+static RE_ACRONYM: LazyLock<Regex> = LazyLock::new(|| static_regex(r"\b([A-Z]{2,6})\b"));
 
 /// Regex matching acronym *definitions* - patterns like
 /// "Full Name (ACRONYM)", "ACRONYM (Full Name)",
 /// "ACRONYM - Full Name", or "ACRONYM: Full Name".
 static RE_ACRONYM_DEFINED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:\(([A-Z]{2,6})\)|\b([A-Z]{2,6})\b\s*(?:\(|\u2014\u2014?|:))")
-        .expect("acronym-definition regex should compile")
+    static_regex(r"(?:\(([A-Z]{2,6})\)|\b([A-Z]{2,6})\b\s*(?:\(|\u2014\u2014?|:))")
 });
 
 /// Kind of ambiguity detected (FR-015).
@@ -1041,8 +1030,7 @@ pub struct GapIssue {
 }
 
 /// Regex matching a digit (0-9) anywhere in the text.
-static RE_DIGIT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\d").expect("digit regex should compile"));
+static RE_DIGIT: LazyLock<Regex> = LazyLock::new(|| static_regex(r"\d"));
 
 /// Verbs that produce directly testable, observable outcomes.
 const TESTABLE_VERBS: &[&str] = &[

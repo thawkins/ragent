@@ -244,7 +244,13 @@ impl Tool for TeamSpawnTool {
             });
         }
 
-        let manager = ctx.team_manager.as_ref().expect("checked above");
+        let Some(manager) = ctx.team_manager.as_ref() else {
+            // The `is_none()` early return above handles this; guard again so
+            // this path can never panic on a race (no production `expect`).
+            return Err(anyhow::anyhow!(
+                "TeamManager unavailable while spawning teammate '{teammate_name}'"
+            ));
+        };
         let agent_id = manager
             .spawn_teammate(
                 team_name,

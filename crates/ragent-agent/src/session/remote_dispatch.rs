@@ -132,12 +132,14 @@ fn publish_update(bus: &EventBus, session_id: &str, update: RemoteUpdate) {
             request_id,
             question,
             options,
+            default_index,
         } => {
             bus.publish(Event::QuestionRequested {
                 session_id: session_id.to_string(),
                 request_id,
                 question,
                 options,
+                default_index,
             });
         }
         RemoteUpdate::MessageEnd { .. } => {}

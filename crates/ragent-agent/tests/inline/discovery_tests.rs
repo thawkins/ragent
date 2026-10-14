@@ -28,3 +28,38 @@ fn test_which_sync_not_found() {
     let result = which_sync("definitely_not_a_real_command_12345");
     assert!(result.is_none());
 }
+
+#[tokio::test]
+async fn test_discover_locations_reports_every_registry_dir() {
+    let locations = discover_locations().await;
+    // PATH and npm global always come first, then each registry directory.
+    assert!(locations.len() >= 2, "PATH + npm rows are always present");
+    assert_eq!(locations[0].label, "PATH (known executables)");
+    assert_eq!(locations[1].label, "npm global");
+    // Every registry location is labelled and carries a path.
+    for location in &locations[2..] {
+        assert_ne!(location.label, "");
+        assert!(location.path.is_some(), "registry rows carry a path");
+    }
+    // The ragent-native registry directory is always probed.
+    assert!(
+        locations.iter().any(|l| l.label == "ragent-native"),
+        "ragent-native registry location missing"
+    );
+}
+
+#[tokio::test]
+async fn test_discover_dedups_but_locations_do_not() {
+    // `discover` collapses to unique ids; `discover_locations` preserves the
+    // per-location split so `/mcp config` can count each place separately.
+    let flat = discover().await;
+    let ids: std::collections::HashSet<&str> = flat.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids.len(), flat.len(), "discover must return unique ids");
+
+    let grouped = discover_locations().await;
+    let grouped_total: usize = grouped.iter().map(|l| l.servers.len()).sum();
+    assert!(
+        grouped_total >= flat.len(),
+        "grouped total must be at least the de-duplicated total"
+    );
+}

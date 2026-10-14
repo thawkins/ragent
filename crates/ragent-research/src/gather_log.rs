@@ -292,6 +292,10 @@ impl Serialize for Rfc3339Now {
 
 /// Restrict a research name to filesystem-safe characters (alphanumeric,
 /// `-` and `_`); everything else becomes `-`. Truncated to 64 characters.
+///
+/// Display sanitisation of scraped text is handled by
+/// [`ragent_types::sanitize_terminal::sanitize_terminal`]; this helper is the
+/// distinct filesystem-name-slug role and is intentionally not that function.
 fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| {

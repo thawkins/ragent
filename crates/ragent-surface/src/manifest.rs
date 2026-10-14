@@ -107,7 +107,7 @@ impl NetworkManifestSource {
         self.client
             .get_or_init(|| {
                 reqwest::blocking::Client::builder()
-                    .redirect(https_only_redirects())
+                    .redirect(crate::net::https_only_redirects())
                     .timeout(MANIFEST_TIMEOUT)
                     .user_agent(concat!("ragent/", env!("CARGO_PKG_VERSION")))
                     .build()
@@ -209,19 +209,6 @@ fn nonblank(value: Option<&Value>) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
-}
-
-/// A redirect policy that follows only `https` targets, up to five hops.
-fn https_only_redirects() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.url().scheme() != "https" {
-            attempt.stop()
-        } else if attempt.previous().len() >= 5 {
-            attempt.error("too many redirects")
-        } else {
-            attempt.follow()
-        }
-    })
 }
 
 /// The process-global manifest cache, keyed by raw manifest URL.

@@ -29,30 +29,10 @@ use serde_json::Value;
 
 use crate::store_index::StoreKind;
 
-/// A resolved marketplace source: a display name and, when it is fetchable over
-/// `https`, the marketplace-index URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MarketplaceSource {
-    /// The marketplace display name (the repo slug, or a local directory name).
-    pub name: String,
-    /// The `https` marketplace-index URL, or `None` for a local (non-fetchable)
-    /// marketplace.
-    pub url: Option<String>,
-}
-
-/// Why a marketplace source could not be resolved.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum MarketplaceSourceError {
-    /// The source string was empty or whitespace-only.
-    #[error("no marketplace source given")]
-    Empty,
-    /// The source carried no recognisable owner/repo or URL.
-    #[error(
-        "unrecognised marketplace source `{0}`: expected owner/repo, an https:// \
-             URL, or a local marketplace directory"
-    )]
-    Unsupported(String),
-}
+// `MarketplaceSource` and `MarketplaceSourceError` are shared with the
+// `/connectors` marketplace family (byte-identical copies before this);
+// re-export the single definition.
+pub use ragent_surface::marketplace::{MarketplaceSource, MarketplaceSourceError};
 
 /// The store-specific marketplace document path (relative to a repository root).
 #[must_use]
@@ -75,135 +55,7 @@ pub fn resolve_source(
     source: &str,
     cwd: &Path,
 ) -> Result<MarketplaceSource, MarketplaceSourceError> {
-    let source = source.trim();
-    if source.is_empty() {
-        return Err(MarketplaceSourceError::Empty);
-    }
-
-    // SSH git remote: git@github.com:owner/repo.git
-    if let Some(rest) = source.strip_prefix("git@github.com:") {
-        let slug = rest.trim_end_matches(".git").trim_end_matches('/');
-        return owner_repo_slug(store, slug)
-            .ok_or_else(|| MarketplaceSourceError::Unsupported(source.to_string()));
-    }
-
-    // GitHub repo URL: https://github.com/owner/repo (optionally .git).
-    if let Some(rest) = source
-        .strip_prefix("https://github.com/")
-        .or_else(|| source.strip_prefix("http://github.com/"))
-    {
-        let slug = rest
-            .trim_end_matches(".git")
-            .trim_end_matches('/')
-            .split('/')
-            .take(2)
-            .collect::<Vec<_>>()
-            .join("/");
-        if !slug.contains('/') {
-            return Err(MarketplaceSourceError::Unsupported(source.to_string()));
-        }
-        return owner_repo_slug(store, &slug)
-            .ok_or_else(|| MarketplaceSourceError::Unsupported(source.to_string()));
-    }
-
-    // Any other https URL: a marketplace index document (or a raw repo file).
-    if source.starts_with("https://") {
-        let name = name_from_url(source);
-        return Ok(MarketplaceSource {
-            name,
-            url: Some(source.to_string()),
-        });
-    }
-
-    // Explicit local directory: ./path or /abs/path or a bare path that exists.
-    let looks_local = source.starts_with("./")
-        || source.starts_with("../")
-        || source.starts_with('/')
-        || cwd.join(source).is_dir();
-    if looks_local {
-        let path = if source.starts_with('/') {
-            std::path::PathBuf::from(source)
-        } else {
-            cwd.join(source)
-        };
-        let name = local_marketplace_name(&path, store)
-            .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "local".to_string());
-        return Ok(MarketplaceSource { name, url: None });
-    }
-
-    // Bare `owner/repo` GitHub shorthand.
-    if let Some(resolved) = owner_repo_slug(store, source) {
-        return Ok(resolved);
-    }
-
-    Err(MarketplaceSourceError::Unsupported(source.to_string()))
-}
-
-/// Build the resolved source for an `owner/repo` slug, or `None` when the slug is
-/// not a two-segment pair.
-fn owner_repo_slug(store: StoreKind, slug: &str) -> Option<MarketplaceSource> {
-    let slug = slug.trim_matches('/');
-    let (owner, repo) = slug.split_once('/')?;
-    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
-        return None;
-    }
-    let url = format!(
-        "https://raw.githubusercontent.com/{owner}/{repo}/main/{doc}",
-        doc = marketplace_doc_path(store)
-    );
-    Some(MarketplaceSource {
-        name: repo.to_string(),
-        url: Some(url),
-    })
-}
-
-/// Derive a display name from a marketplace-index URL.
-///
-/// A `raw.githubusercontent.com/<owner>/<repo>/...` URL names the repo; any other
-/// URL falls back to its final path segment before the file name, then the host.
-fn name_from_url(url: &str) -> String {
-    if let Some(rest) = url.strip_prefix("https://raw.githubusercontent.com/") {
-        let mut segments = rest.split('/');
-        if segments.next().is_some()
-            && let Some(repo) = segments.next()
-            && !repo.is_empty()
-        {
-            return repo.to_string();
-        }
-    }
-    let trimmed = url.trim_end_matches('/');
-    let without_file = trimmed
-        .rsplit_once('/')
-        .map(|(head, _)| head)
-        .unwrap_or(trimmed);
-    if let Some(last) = without_file.rsplit('/').next()
-        && !last.is_empty()
-        && !last.starts_with("https:")
-    {
-        return last.to_string();
-    }
-    "marketplace".to_string()
-}
-
-/// Read the `name` field from a local marketplace manifest for `store`, if it is
-/// present and readable.
-fn local_marketplace_name(path: &Path, store: StoreKind) -> Option<String> {
-    let candidate = path.join(marketplace_doc_path(store));
-    let root = if candidate.is_file() {
-        candidate
-    } else {
-        path.join("marketplace.json")
-    };
-    let bytes = std::fs::read(root).ok()?;
-    let value: Value = serde_json::from_slice(&bytes).ok()?;
-    value
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    ragent_surface::marketplace::resolve_source(source, cwd, marketplace_doc_path(store))
 }
 
 /// Add (or replace) a marketplace entry in the user-global
@@ -328,14 +180,18 @@ fn marketplaces_array_mut(value: &mut Value) -> Result<&mut Vec<Value>, String> 
     if !plugins.is_object() {
         *plugins = Value::Object(Default::default());
     }
-    let plugins = plugins.as_object_mut().expect("just ensured an object");
+    let plugins = plugins
+        .as_object_mut()
+        .ok_or_else(|| "plugins config value is not an object".to_string())?;
     let stores = plugins
         .entry("stores")
         .or_insert_with(|| Value::Object(Default::default()));
     if !stores.is_object() {
         *stores = Value::Object(Default::default());
     }
-    let stores = stores.as_object_mut().expect("just ensured an object");
+    let stores = stores
+        .as_object_mut()
+        .ok_or_else(|| "plugins.stores config value is not an object".to_string())?;
     let marketplaces = stores
         .entry("marketplaces")
         .or_insert_with(|| Value::Array(Vec::new()));
@@ -347,23 +203,9 @@ fn marketplaces_array_mut(value: &mut Value) -> Result<&mut Vec<Value>, String> 
         .ok_or_else(|| "plugins.stores.marketplaces is not an array".to_string())
 }
 
-/// Write `value` back to `path` atomically (temp file in the same directory, then
-/// rename), creating the parent directory when needed, and drop the config
-/// crate's on-disk load cache so the next `Config::load` sees the edit.
-fn write_config(path: &Path, value: &Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-    }
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|e| format!("cannot serialise global config: {e}"))?;
-    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))?;
-    // The write bypasses `Config::save`, so invalidate the M-025 load cache
-    // explicitly; otherwise a `Config::load` earlier in this process (which
-    // seeded the cache before the edit) would hide the new marketplace from the
-    // `/plugins marketplace list` report and the browse fetch.
-    ragent_config::Config::invalidate_load_cache();
-    Ok(())
-}
+/// Write `value` back to `path` atomically and drop the config crate's on-disk
+/// load cache so the next `Config::load` sees the edit.
+///
+/// Aliases [`ragent_surface::config_splice::write_atomic_json`], the single
+/// shared implementation (also used by the `/connectors` marketplace family).
+use ragent_surface::config_splice::write_atomic_json as write_config;

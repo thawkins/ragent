@@ -1054,7 +1054,7 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
     }
 
     if is_safe_command(command) {
-        tracing::info!("Safe bash command auto-approved");
+        tracing::debug!("Safe bash command auto-approved");
     }
 
     // SEC-ragent-tools-core-002 (SECTASKS T-021): banned-command check runs

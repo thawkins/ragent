@@ -60,8 +60,8 @@ impl OllamaProvider {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        let base_url = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| DEFAULT_OLLAMA_HOST.to_string())
+        let base_url = ragent_config::credential_env::read_credential_env("OLLAMA_HOST")
+            .unwrap_or_else(|| DEFAULT_OLLAMA_HOST.to_string())
             .trim_end_matches('/')
             .to_string();
         Self { base_url }

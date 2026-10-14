@@ -55,7 +55,7 @@ curl -X POST https://api.corvue.ai/v1/provision \
 {
   "instance_url": "orchid.cust.hermes.corvue.ai",
   "ssh_host":     "bastion.hermes.corvue.ai",
-  "ssh_key":      "-----BEGIN OPENSSH PRIVATE KEY-----...",
+  "ssh_key":      "-----BEGIN OPENSSH PRIVATE KEY----- REDACTED (placeholder) -----...",
   "agent_token":  "hermes_live_xxxxxxxxxxxxx",
   "agent_email":  "orchid@hermes.agent.corvue.ai",
   "dashboard":    "orchid.cust.hermes.corvue.ai/dashboard",

@@ -440,11 +440,13 @@ fn convert_extracted_event(event: ragent_tools_core::event::Event) -> Option<Eve
             request_id,
             question,
             options,
+            default_index,
         } => Some(Event::QuestionRequested {
             session_id,
             request_id,
             question,
             options,
+            default_index,
         }),
         _ => None,
     }

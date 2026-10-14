@@ -101,8 +101,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   conventions
 - **MCP client** — Model Context Protocol support with auto-discovery of 9 known
   server types, stdio client, and tool bridging; TUI commands (`/mcp` /
-  `/mcp status`, `/mcp discover`, `/mcp connect <id>`, `/mcp disconnect <id>`) with
-  durable global enable/disable state (`mcp_state.json`) and live connect/disconnect
+  `/mcp status`, `/mcp config`, `/mcp discover`, `/mcp connect <id>`,
+  `/mcp disconnect <id>`) with durable global enable/disable state
+  (`mcp_state.json`) and live connect/disconnect. `/mcp config` reports where
+  ragent looks for MCP definitions (ragent-native, npm global, `PATH`, and the
+  Claude/Cline/XDG registry directories), the count found at each location, and
+  the servers discovered
 - **ACP integration** — Agent Client Protocol support in both directions: an ACP
   **client** that drives Claude Code, Codex, or Gemini CLI as an external
   subprocess over JSON-RPC on stdio, and a **feature-gated, off-by-default ACP
@@ -694,6 +698,16 @@ under active development.
 
 Recent highlights:
 
+- **Unreleased — `/simplify all` pass and MCP discovery-location report** — a quality pass
+  over the changed working tree adds four shared `ragent-surface` modules
+  (`config_splice` durable atomic JSON write, `marketplace` source resolution, `net`
+  redirect policy, `scan` store-scan failure), collapses the four redacting `Debug`
+  impls into one `redacted_debug_impl!` macro, takes a fast path in
+  `check_path_within_allowed_roots_cached` when no extra roots are configured, and
+  de-duplicates the TUI question-expiry helpers (`now_unix_ms`,
+  `resolve_default_index`, `format_mmss`) - removing one `unreachable!()` panic on the
+  way. The new `/mcp config` subcommand reports where ragent looks for MCP server
+  definitions and how many it finds at each place.
 - **v1.0.133 — plugin-store navigator titles, per-row counts, and a `git+` install fix** —
   each navigator on the `/plugins` browse panel now carries a reversed-video header
   (`Categories` over the category navigator, `Marketplace` over the marketplace
@@ -938,9 +952,11 @@ Recent highlights:
   the store kind is threaded through the fetch seam so every fetch parses with the right
   provider. A repo-relative source resolves against the origin's GitHub repository as an
   installable `git+<repo>#<ref>:<path>` source, and the install pipeline accepts a
-  `git+<https-url>#<ref>[:<subpath>]` source via a shallow, sparse `git clone`, so a plugin
-  hosted in a subdirectory of a large repository installs without downloading the whole
-  tree.
+  `git+<https-url>#<ref>[:<subpath>]` source via a shallow `git clone`: a `:<subpath>`
+  source is cloned sparse so a plugin hosted in a subdirectory of a large repository
+  installs without downloading the whole tree, while a whole-repo source (a marketplace
+  `{"source":"./"}` for a plugin published at its repository root) clones the complete
+  tree so its nested `.claude-plugin/plugin.json` manifest is found.
 
 - **Message input queue (v1.0.113)** — the TUI input field
   stays editable while the primary agent executes: each `Enter` queues the

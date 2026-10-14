@@ -326,3 +326,45 @@ fn add_refuses_an_option_like_ref_without_running_it() {
         "the injected --upload-pack command must never execute: {marker:?}"
     );
 }
+
+/// Regression: a whole-repo source whose only Claude manifest lives in the
+/// nested `.claude-plugin/plugin.json` must still install.
+///
+/// A sparse clone with no subpath checks out only the repository-root *files*
+/// (cone mode), so the nested `.claude-plugin/` directory was absent and the
+/// install refused with `no plugin manifest found`. That is exactly the failure
+/// a Claude-marketplace `{"source":"./"}` entry hit: a plugin published at its
+/// repository root whose only manifest is `.claude-plugin/plugin.json`.
+#[test]
+fn add_installs_a_whole_repo_source_whose_claude_manifest_is_nested() {
+    let temp = temp_dir("git-nested-claude");
+    let remote = temp.join("remote");
+    std::fs::create_dir_all(remote.join(".claude-plugin")).expect("nested manifest dir");
+    std::fs::write(
+        remote.join(".claude-plugin/plugin.json"),
+        r#"{ "name": "nested-root-plugin", "version": "1.0.0" }"#,
+    )
+    .expect("claude manifest");
+    // A root `plugin.json` with no `codex` marker is not itself a manifest, so
+    // the nested Claude manifest is the repository's only recognisable plugin.
+    std::fs::write(
+        remote.join("plugin.json"),
+        r#"{ "name": "nested-root-plugin" }"#,
+    )
+    .expect("root json");
+    std::fs::write(remote.join("README.md"), "docs").expect("readme");
+    git(&remote, &["init", "-q", "-b", "main"]);
+    git(&remote, &["config", "user.email", "t@example.org"]);
+    git(&remote, &["config", "user.name", "Test"]);
+    git(&remote, &["add", "-A"]);
+    git(&remote, &["commit", "-q", "-m", "plugin"]);
+
+    let url = format!("file://{}", remote.display());
+    let dirs = store_dirs(&temp);
+
+    // A whole-repo source (no `:<subpath>`): the shape a `{"source":"./"}`
+    // marketplace entry resolves to.
+    let source = format!("git+{url}#main");
+    let outcome = add(&dirs, &temp, &source, false).expect("the nested-manifest plugin installs");
+    assert_eq!(outcome.parsed.descriptor.id, "nested-root-plugin");
+}

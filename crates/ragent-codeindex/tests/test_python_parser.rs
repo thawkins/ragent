@@ -2,13 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
+use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::python::PythonParser;
-use ragent_codeindex::parser::{LanguageParser, ParsedFile};
 use ragent_codeindex::types::{SymbolKind, Visibility};
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_py(source: &str) -> ParsedFile {
-    let parser = PythonParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&PythonParser::new(), source)
 }
 
 #[test]

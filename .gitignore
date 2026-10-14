@@ -46,12 +46,18 @@ EOF
 
 # Database files
 *.db
+*.sqlite
+*.sqlite3
 # SQLite WAL/SHM sidecars can hold plaintext credential-store and session pages
 *.db-wal
 *.db-shm
 
 # Key files
 *.key
+id_rsa
+id_ed25519
+*.jks
+*.keystore
 
 # Certificates and credential files
 *.pem
@@ -59,6 +65,9 @@ EOF
 *.pfx
 service-account.json
 credentials.json
+*.netrc
+.npmrc
+.envrc
 
 # Code index data
 .ragent/
@@ -66,4 +75,8 @@ credentials.json
 !.ragent/blueprints/
 !.ragent/templates/
 !.ragent/agents/
+# Defense-in-depth: the research vault holds scraped pages that can embed
+# credential-shaped strings and per-vault `vault.db` files. Keep it ignored even
+# if the broad `.ragent/` rule above is ever narrowed.
+.ragent/research_vault/
 

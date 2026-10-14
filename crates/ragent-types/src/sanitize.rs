@@ -254,6 +254,92 @@ pub fn mask_key(key: &str) -> String {
     format!("...{}", &key[start..])
 }
 
+/// Recursively redact credential-shaped strings inside a JSON value.
+///
+/// Walks every object and array and applies [`redact_secrets`] to each string
+/// value. This masks a credential that sits under a key whose *name* does not
+/// look secret - for example an MCP server's `env` variable value or a
+/// `headers` `Authorization` / `PRIVATE-TOKEN` entry - which a key-name-only
+/// redactor would miss.
+///
+/// `max_depth` bounds the walk so a deeply nested (potentially
+/// attacker-controlled) value cannot make redaction expensive; nodes below the
+/// limit are left untouched.
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_types::sanitize::redact_json_value;
+///
+/// let mut value = serde_json::json!({ "headers": { "Authorization": "Bearer abcdefghijklmnopqrstuvwxyz" } });
+/// redact_json_value(&mut value, 8);
+/// assert_eq!(value["headers"]["Authorization"], "[REDACTED]");
+/// ```
+pub fn redact_json_value(value: &mut serde_json::Value, max_depth: usize) {
+    redact_json_value_inner(value, 0, max_depth);
+}
+
+fn redact_json_value_inner(value: &mut serde_json::Value, depth: usize, max_depth: usize) {
+    if depth > max_depth {
+        return;
+    }
+    match value {
+        serde_json::Value::String(s) => {
+            // `redact_secrets_cow` borrows when nothing matches, so the common
+            // clean-string path allocates nothing (audit T-111).
+            if let Cow::Owned(redacted) = redact_secrets_cow(s) {
+                *s = redacted;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                redact_json_value_inner(item, depth + 1, max_depth);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for entry in map.values_mut() {
+                redact_json_value_inner(entry, depth + 1, max_depth);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Mask a credential for display, keeping the first and last `keep`
+/// characters and star-filling the middle.
+///
+/// A value whose length is at most `threshold` characters is fully masked; an
+/// empty value renders as an empty string. This is the single shared
+/// edge-preserving masking helper - the masterfetch API-key/email masks and the
+/// TUI secret mask all delegate here with their own `keep`/`threshold`.
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_types::sanitize::mask_edges;
+///
+/// // keep 2, threshold 6 (API-key/email shape)
+/// assert_eq!(mask_edges("ab", 2, 6), "**");
+/// assert_eq!(mask_edges("user@example.com", 2, 6), "us************om");
+/// // keep 4, threshold 12 (TUI secret shape)
+/// assert_eq!(mask_edges("abc", 4, 12), "***");
+/// assert_eq!(mask_edges("", 4, 12), "");
+/// ```
+#[must_use]
+pub fn mask_edges(text: &str, keep: usize, threshold: usize) -> String {
+    let len = text.chars().count();
+    if len == 0 {
+        return String::new();
+    }
+    if len <= threshold {
+        return "*".repeat(len);
+    }
+    let first: String = text.chars().take(keep).collect();
+    let last: String = text.chars().skip(len.saturating_sub(keep)).collect();
+    let middle = len.saturating_sub(2 * keep);
+    format!("{first}{}{last}", "*".repeat(middle))
+}
+
 /// Cow-returning variant of [`redact_secrets`] (PERF-055).
 ///
 /// Returns [`Cow::Borrowed`] without allocating when the message contains no

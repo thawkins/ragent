@@ -360,7 +360,7 @@ pub(crate) fn tool_arguments_json(function: &serde_json::Value) -> Option<String
         Some(obj @ serde_json::Value::Object(_)) => match serde_json::to_string(obj) {
             Ok(s) => Some(s),
             Err(e) => {
-                tracing::debug!("tool-call arguments serialisation failed: {e}");
+                tracing::warn!("tool-call arguments serialisation failed: {e}");
                 None
             }
         },

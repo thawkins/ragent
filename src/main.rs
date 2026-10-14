@@ -463,7 +463,8 @@ async fn async_main() -> Result<()> {
         )
     );
     let tui_log_rx = if tui_will_run {
-        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use tracing_subscriber::util::SubscriberInitExt as _;
         let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
         tracing_subscriber::registry()
             .with(filter)
@@ -1054,7 +1055,10 @@ async fn async_main() -> Result<()> {
             } else {
                 // Print startup banner before entering TUI alternate screen
                 print_banner();
-                ragent_tui::run_tui(
+                // `run_tui`'s future is large; box it so it is heap-allocated
+                // rather than inlined into this caller's future
+                // (clippy::large_futures).
+                Box::pin(ragent_tui::run_tui(
                     event_bus,
                     storage,
                     provider_registry,
@@ -1067,7 +1071,7 @@ async fn async_main() -> Result<()> {
                     config.read().await.config_paths.clone(),
                     startup,
                     stderr_spool.clone(),
-                )
+                ))
                 .await?;
             }
         }
@@ -1153,9 +1157,10 @@ async fn async_main() -> Result<()> {
                 let guard = config.read().await;
                 let enabled = guard.openai_surface_enabled();
                 let token = guard.openai_surface_token().or_else(|| {
-                    std::env::var("RAGENT_TOKEN")
-                        .ok()
-                        .filter(|token| !token.trim().is_empty())
+                    // Route the ambient fallback through the canonical
+                    // credential reader so blank/whitespace handling matches
+                    // the rest of the workspace (audit T-111).
+                    ragent_config::credential_env::read_credential_env("RAGENT_TOKEN")
                 });
                 (enabled, token)
             };
@@ -1237,7 +1242,8 @@ async fn async_main() -> Result<()> {
                 }
                 tracing::info!(session_id = %id, "Resuming session");
                 print_banner();
-                ragent_tui::run_tui(
+                // See the `run_tui` call above: box the large future.
+                Box::pin(ragent_tui::run_tui(
                     event_bus,
                     storage,
                     provider_registry,
@@ -1250,7 +1256,7 @@ async fn async_main() -> Result<()> {
                     config.read().await.config_paths.clone(),
                     startup,
                     stderr_spool.clone(),
-                )
+                ))
                 .await?;
             }
             SessionCommands::ExportArchive {

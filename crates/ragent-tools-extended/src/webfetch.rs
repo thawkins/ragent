@@ -15,11 +15,6 @@ use crate::masterfetch::security::validate_url;
 pub struct WebFetchTool;
 
 const DEFAULT_MAX_LENGTH: usize = 50_000;
-const MAX_REDIRECTS: usize = 5;
-// reason: kept as documentation of the max-redirect limit; redirects are
-// handled implicitly by reqwest, so this constant is not read at runtime.
-#[allow(dead_code)]
-const _UNUSED_REDIRECTS: usize = MAX_REDIRECTS;
 const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 /// Extract the article text from HTML using the `readability-rs` crate, which

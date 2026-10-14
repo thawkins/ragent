@@ -393,3 +393,46 @@ fn repo_relative_sources_are_skipped_without_a_github_origin() {
     assert!(index.entries.is_empty(), "no installable entry survives");
     assert_eq!(index.skipped, 1);
 }
+
+#[test]
+fn a_repo_root_source_resolves_to_a_whole_repo_git_source() {
+    // The Claude marketplace uses `{"source":"./"}` for a plugin published at the
+    // repository root (e.g. `DietrichGebert/ponytail`). That names the repository
+    // root, so it resolves to a whole-repo `git+<repo>#<ref>` source with no
+    // subpath, rather than being skipped as an empty path.
+    let doc = br#"{"plugins":[{"name":"ponytail","source":"./"}]}"#;
+    let ponytail = reqwest::Url::parse(
+        "https://raw.githubusercontent.com/DietrichGebert/ponytail/main/.claude-plugin/marketplace.json",
+    )
+    .expect("a valid github url");
+    let index = provider_for(StoreKind::Claude)
+        .parse_index(doc, &ponytail)
+        .expect("the document parses");
+    assert_eq!(index.entries.len(), 1, "the repo-root entry survives");
+    assert_eq!(index.entries[0].id, "ponytail");
+    assert_eq!(
+        index.entries[0].source,
+        "git+https://github.com/DietrichGebert/ponytail#main"
+    );
+    assert_eq!(index.skipped, 0);
+}
+
+#[test]
+fn repo_root_source_variants_all_name_the_repository_root() {
+    // `.`, `./`, and `/` all denote the repository root; each must produce the
+    // same whole-repo source (no `:<path>` suffix), and a bare `.` is no longer
+    // misread as a directory named `.`.
+    let origin = reqwest::Url::parse("https://github.com/earthtojake/text-to-cad")
+        .expect("a valid github url");
+    for raw in [".", "./", "/"] {
+        let doc = format!(r#"{{"plugins":[{{"name":"text-to-cad","source":"{raw}"}}]}}"#);
+        let index = provider_for(StoreKind::Claude)
+            .parse_index(doc.as_bytes(), &origin)
+            .expect("the document parses");
+        assert_eq!(index.entries.len(), 1, "`{raw}` resolves");
+        assert_eq!(
+            index.entries[0].source, "git+https://github.com/earthtojake/text-to-cad#HEAD",
+            "`{raw}` names the repository root"
+        );
+    }
+}

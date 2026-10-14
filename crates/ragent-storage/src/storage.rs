@@ -683,7 +683,10 @@ impl Storage {
     /// use ragent_storage::storage::Storage;
     /// use std::path::Path;
     ///
-    /// let storage = Storage::open(Path::new("/tmp/ragent-test.db")).unwrap();
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let storage = Storage::open(Path::new("/tmp/ragent-test.db"))?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {

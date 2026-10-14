@@ -9,10 +9,12 @@
 //! - an **`https://` URL** ending in `.zip` / `.tar.gz`, downloaded into the
 //!   store's staging directory and then extracted;
 //! - a **`git+<https-url>#<ref>[:<subpath>]`** git source, shallow-cloned into
-//!   staging (a sparse checkout of `<subpath>` when present) so a plugin hosted
+//!   staging (a sparse checkout of `<subpath>` when present, so a plugin hosted
 //!   in a subdirectory of a larger repository installs without downloading the
-//!   whole tree. This is the form the store providers emit for vendor
-//!   marketplace entries.
+//!   whole tree; a whole-repo source clones the complete tree because a
+//!   Claude-dialect plugin's manifest lives in the nested directory
+//!   `.claude-plugin/plugin.json`). This is the form the store providers emit
+//!   for vendor marketplace entries.
 //!
 //! Guards (all refuse with a structured error and leave the store untouched):
 //!
@@ -464,11 +466,13 @@ fn materialize_marketplace_manifest(staged_root: PathBuf, source: &str) -> PathB
 
 /// Clone a `git+<https-url>#<ref>[:<subpath>]` source into `staging`.
 ///
-/// Installs a whole repository, or a single subdirectory when a `:<subpath>`
-/// suffix is present, via a shallow sparse `git clone`, so a large marketplace
-/// repository is not downloaded in full. Git must be on `PATH`; a clone/fetch
-/// failure is a contained [`AddError::Io`] and git is never allowed to prompt
-/// interactively (credentials for a private repo are refused, not requested).
+/// A `:<subpath>` source is installed via a shallow *sparse* `git clone` of that
+/// subdirectory, so a large marketplace repository is not downloaded in full; a
+/// whole-repo source (no subpath) is a shallow clone of the complete tree, so a
+/// manifest in a nested directory (`.claude-plugin/plugin.json`) is present for
+/// the probe. Git must be on `PATH`; a clone/fetch failure is a contained
+/// [`AddError::Io`] and git is never allowed to prompt interactively (credentials
+/// for a private repo are refused, not requested).
 fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
     let Some(spec) = parse_git_source(source) else {
         return Err(AddError::UnknownSource(source.to_string()));
@@ -477,10 +481,21 @@ fn git_clone_stage(source: &str, staging: &Path) -> Result<PathBuf, AddError> {
     let repo_dir = staging.join("repo");
     let repo = repo_dir.to_string_lossy().into_owned();
 
-    git_run(
-        &["clone", "--depth", "1", "--sparse", &spec.url, &repo],
-        None,
-    )?;
+    // A subdirectory install only needs that subdirectory, so the clone is
+    // sparse. A whole-repo source must materialise the whole tree: a
+    // Claude-dialect plugin's only manifest is `.claude-plugin/plugin.json` in a
+    // nested directory, and a sparse clone's cone mode checks out root files
+    // only, so the manifest was absent and the install refused with `no plugin
+    // manifest found` (e.g. a marketplace entry of `{"source":"./"}` for a repo
+    // published at its root). Omitting `--sparse` there keeps the checkout
+    // complete for the manifest probe.
+    let mut clone_args: Vec<&str> = vec!["clone", "--depth", "1"];
+    if spec.subpath.is_some() {
+        clone_args.push("--sparse");
+    }
+    clone_args.push(spec.url.as_str());
+    clone_args.push(repo.as_str());
+    git_run(&clone_args, None)?;
     if let Some(ref_name) = spec.ref_name.as_deref() {
         // `--` terminates option parsing for the fetch: `git_ref` already
         // rejects a leading `-`, and the separator keeps that invariant enforced
@@ -574,7 +589,7 @@ fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, AddError> 
         // SEC-ragent-plugins-005 (SECTASKS T-062): `Policy::limited` follows an
         // https -> http downgrade. Reuse the store-fetch policy that stops any
         // non-https redirect, so a plaintext mirror cannot substitute the archive.
-        .redirect(crate::store_fetch::https_only_redirects())
+        .redirect(ragent_surface::net::https_only_redirects())
         .timeout(DOWNLOAD_TIMEOUT)
         .build()
         .map_err(|e| AddError::Io(IoError::message(format!("http client: {e}"))))?;

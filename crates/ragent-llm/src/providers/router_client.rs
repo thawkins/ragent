@@ -299,8 +299,7 @@ impl LlmClient for RouterClient {
         };
 
         let selected_model = format!("{}:{}", entry.provider, entry.model);
-        let classification_summary =
-            format_classification_summary(&prompt, &result, &selected_model);
+        let classification_summary = format_classification_summary(&result, &selected_model);
         tracing::info!(
             message = %classification_summary,
             tier = %selected_tier,
@@ -478,8 +477,10 @@ fn last_user_message_is_tool_results(messages: &[crate::llm::ChatMessage]) -> bo
 }
 
 /// Build a concise, TUI-log-friendly summary of a router classification.
+///
+/// SEC: the raw prompt is deliberately NOT accepted here — it is user-supplied
+/// and may carry secrets; only the derived classification is logged.
 fn format_classification_summary(
-    prompt: &str,
     result: &super::router_classifier::ClassificationResult,
     selected_model: &str,
 ) -> String {
@@ -492,18 +493,7 @@ fn format_classification_summary(
         .map(|(i, s)| format!("{}={:.2}", super::router_classifier::dimension_name(i), s))
         .collect();
 
-    let display_prompt = if prompt.chars().count() > 80 {
-        let mut end = 80;
-        while end > 0 && !prompt.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &prompt[..end])
-    } else {
-        prompt.to_string()
-    };
-
     let mut parts = vec![
-        format!("prompt=\"{}\"", display_prompt),
         format!("bucket={}", result.tier),
         format!("model={}", selected_model),
         format!("composite={:.4}", result.composite_score),

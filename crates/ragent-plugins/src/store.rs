@@ -146,8 +146,7 @@ impl StoreLedger {
     /// Returns [`PluginError::Io`] when the file cannot be written.
     pub fn save(&self, store_dir: &Path) -> Result<(), PluginError> {
         std::fs::create_dir_all(store_dir).map_err(PluginError::io)?;
-        let bytes =
-            serde_json::to_vec_pretty(self).expect("BUG: ledger serialisation is infallible");
+        let bytes = serde_json::to_vec_pretty(self).map_err(PluginError::io)?;
         std::fs::write(store_dir.join(STATE_FILE), bytes).map_err(PluginError::io)
     }
 
@@ -205,11 +204,10 @@ pub struct ScannedPlugin {
 
 /// A discovery-time failure with the plugin directory (FR-025 reporting needs
 /// a row per problematic directory even when no descriptor exists).
-#[derive(Debug)]
-pub struct ScanFailure {
-    /// The failure that prevented descriptor construction.
-    pub error: PluginError,
-}
+///
+/// Structurally identical to the connectors store's copy; both alias the shared
+/// [`ragent_surface::scan::ScanFailure`] so the shape cannot drift.
+pub type ScanFailure = ragent_surface::scan::ScanFailure<PluginError>;
 
 /// Walk both store directories (project wins on id collision) and return one
 /// [`ScannedPlugin`] per recognised plugin directory; unrecognised entries

@@ -132,3 +132,114 @@ pub fn floor_char_boundary(s: &str, index: usize) -> usize {
     }
     end
 }
+
+/// The first `max` characters of `s` (the whole string when it is shorter).
+///
+/// This is the shared "short id prefix" helper: display sites that want the
+/// leading 8 characters of a task/session id use it instead of hand-rolling
+/// `id.chars().take(8).collect()`.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::short_prefix;
+///
+/// assert_eq!(short_prefix("abcdefghij", 8), "abcdefgh");
+/// assert_eq!(short_prefix("abc", 8), "abc");
+/// ```
+#[must_use]
+pub fn short_prefix(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
+/// The last `max` characters of `s` (the whole string when it is shorter).
+///
+/// This is the shared "short id suffix" helper: the TUI renders a session/task
+/// id by its unique trailing suffix. Falls back to the whole string when the
+/// cut would land mid-UTF-8-codepoint, so it never panics.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::short_suffix;
+///
+/// assert_eq!(short_suffix("abcdefghij", 8), "cdefghij");
+/// assert_eq!(short_suffix("abc", 8), "abc");
+/// ```
+#[must_use]
+pub fn short_suffix(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
+        return s.to_string();
+    }
+    s.chars().skip(count - max).collect()
+}
+
+/// Format a duration in seconds as a compact `"2m34s"` / `"1h5m"` string.
+///
+/// Under a minute renders as `"<n>s"`, under an hour as `"<m>m<s>s"`, and above
+/// an hour as `"<h>h<m>m"` (seconds dropped). Shared by the TUI status surfaces
+/// that previously each had their own copy.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::format_duration_compact;
+///
+/// assert_eq!(format_duration_compact(34), "34s");
+/// assert_eq!(format_duration_compact(154), "2m34s");
+/// assert_eq!(format_duration_compact(3900), "1h5m");
+/// ```
+#[must_use]
+pub fn format_duration_compact(secs: i64) -> String {
+    let secs = secs.max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+/// Format a duration in seconds as `"1h 2m 3s"` (units with spaces, zero-value
+/// leading units dropped).
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::format_duration_hms;
+///
+/// assert_eq!(format_duration_hms(5), "5s");
+/// assert_eq!(format_duration_hms(154), "2m 34s");
+/// assert_eq!(format_duration_hms(3900), "1h 5m 0s");
+/// ```
+#[must_use]
+pub fn format_duration_hms(secs: i64) -> String {
+    let secs = secs.max(0);
+    let hours = secs / 3600;
+    let minutes = (secs % 3600) / 60;
+    let seconds = secs % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m {seconds}s")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+/// Format a duration in seconds as `"M:SS"`.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::format_mmss;
+///
+/// assert_eq!(format_mmss(5), "0:05");
+/// assert_eq!(format_mmss(154), "2:34");
+/// ```
+#[must_use]
+pub fn format_mmss(secs: u64) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}

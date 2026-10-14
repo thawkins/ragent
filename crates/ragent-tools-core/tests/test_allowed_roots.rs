@@ -10,6 +10,7 @@ use ragent_tools_core::copy_file::CopyFileTool;
 use ragent_tools_core::create::CreateTool;
 use ragent_tools_core::mkdir::MakeDirTool;
 use ragent_tools_core::move_file::MoveFileTool;
+use ragent_tools_core::read::ReadTool;
 use ragent_tools_core::rm::RmTool;
 use ragent_tools_core::write::WriteTool;
 use ragent_tools_core::{Tool, ToolContext};
@@ -172,4 +173,45 @@ async fn func068_rm_still_rejects_escape_outside_all_roots() {
         .execute(json!({"path": "../../etc/passwd"}), &ctx)
         .await;
     assert!(out.is_err(), "rm must still reject an out-of-root escape");
+}
+
+#[tokio::test]
+async fn func068_working_dir_stays_allowed_when_extra_roots_configured() {
+    // FR-017 regression: `allowed_roots` are *additional* roots, not a
+    // replacement for `working_dir`. A session whose config carries a
+    // persistent global `allowed_roots` entry (a sibling project, say) must
+    // still reach files in its own working directory.
+    let dir = tmp_dir();
+    let extra = dir.join("extra");
+    std::fs::create_dir_all(&extra).unwrap();
+    let mut ctx = ctx(&dir);
+    ctx.allowed_roots = vec![extra.clone()];
+    // The file lives inside working_dir (dir/cwd), and allowed_roots does NOT
+    // include it - so the old replacement semantics rejected this read.
+    std::fs::write(dir.join("cwd/inside.txt"), "payload").unwrap();
+    let out = ReadTool.execute(json!({"path": "inside.txt"}), &ctx).await;
+    assert!(
+        out.is_ok(),
+        "working_dir must stay allowed alongside extra allowed_roots: {out:?}"
+    );
+    // The extra root must also still be reachable.
+    std::fs::write(dir.join("extra/side.txt"), "payload").unwrap();
+    let out = ReadTool
+        .execute(
+            json!({"path": extra.join("side.txt").to_str().unwrap()}),
+            &ctx,
+        )
+        .await;
+    assert!(
+        out.is_ok(),
+        "an additional allowed root must be reachable: {out:?}"
+    );
+    // A path outside both is still rejected.
+    let out = RmTool
+        .execute(json!({"path": "../../etc/passwd"}), &ctx)
+        .await;
+    assert!(
+        out.is_err(),
+        "containment must still reject an out-of-root escape"
+    );
 }

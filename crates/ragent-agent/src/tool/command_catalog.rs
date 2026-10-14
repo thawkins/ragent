@@ -374,7 +374,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "mcp",
-        description: "MCP servers: /mcp [status] | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
+        description: "MCP servers: /mcp [status] | /mcp config | /mcp discover | /mcp connect <id> | /mcp disconnect <id> | /mcp help",
         subcommands: EMPTY,
         flags: EMPTY,
     },

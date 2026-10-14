@@ -972,6 +972,8 @@ pub async fn resolve_copilot_auth(
                     .await
                     .unwrap_or_else(|| DEFAULT_COPILOT_API_BASE.to_string())
             };
+            // SEC: this path sits next to token handling; log only the endpoint,
+            // never any token material.
             tracing::info!(base_url = %base_url, "Copilot auth resolved");
             Ok(CopilotAuth {
                 token: exchange.token,
@@ -1269,7 +1271,7 @@ pub async fn discover_copilot_api_base(github_token: &str) -> Option<String> {
         .endpoints
         .and_then(|e| e.api)
         .map(|u| u.trim_end_matches('/').to_string());
-    tracing::debug!(api_base = ?result, "copilot API base discovery result");
+    tracing::trace!(api_base = ?result, "copilot API base discovery result");
     result
 }
 

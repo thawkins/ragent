@@ -692,6 +692,67 @@ where
     servers
 }
 
+/// Render the `/mcp config` report from the per-location discovery results.
+///
+/// Prints a markdown table of every location ragent scans for MCP server
+/// definitions (`PATH`, npm global, and each registry directory) with a count
+/// and whether the location exists, followed by the individual servers found at
+/// each location. The table is markdown so each row lands on its own rendered
+/// line (TUI-019), matching the `/mcp` display convention.
+pub(crate) fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLocation]) -> String {
+    // Escape a markdown table cell (a raw `|` would split the row).
+    let cell = |value: &str| value.replace('|', "\\|");
+    let mut out = String::from("From: /mcp config\nWhere ragent looks for MCP servers:\n\n");
+    out.push_str("| Location | Path | Servers |\n|---|---|---|\n");
+    let total: usize = locations.iter().map(|l| l.servers.len()).sum();
+    for location in locations {
+        let path = match &location.path {
+            Some(p) => p.display().to_string(),
+            None => "(from $PATH)".to_string(),
+        };
+        let marker = if location.exists { "" } else { " (missing)" };
+        out.push_str(&format!(
+            "| {} | {}{} | {} |\n",
+            cell(&location.label),
+            cell(&path),
+            marker,
+            location.servers.len()
+        ));
+    }
+    out.push_str(&format!("\n{total} server definition(s) found\n"));
+
+    let any = locations.iter().any(|l| !l.servers.is_empty());
+    if !any {
+        out.push_str(
+            "\nNo MCP server definitions found in any location.\n\
+             Add them to 'mcp' in ragent.json, drop a JSON config into\n\
+             ~/.config/ragent/servers/, or run /mcp discover.\n",
+        );
+        return out;
+    }
+
+    out.push_str("\nMCP servers discovered:\n\n");
+    out.push_str("| Server | Found in | Command |\n|---|---|---|\n");
+    for location in locations {
+        for server in &location.servers {
+            let mut command = server.executable.to_string_lossy().into_owned();
+            for arg in &server.args {
+                if !arg.is_empty() {
+                    command.push(' ');
+                    command.push_str(arg);
+                }
+            }
+            out.push_str(&format!(
+                "| {} | {} | {} |\n",
+                cell(&server.id),
+                cell(&location.label),
+                cell(&command)
+            ));
+        }
+    }
+    out
+}
+
 /// Whether an MCP server is enabled, for display purposes.
 ///
 /// `enabled` (the persisted global enable-state map) is the authoritative
@@ -3858,12 +3919,17 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                 ));
                                 output.push_str("|---|---|---|\n");
                                 for key in keys {
-                                    let value = map.get(key).cloned().unwrap_or_default();
-                                    // Mask known secret-bearing keys (API keys,
-                                    // tokens, emails) that live in nested JSON
-                                    // objects where the generic regex misses them.
+                                    let mut value = map.get(key).cloned().unwrap_or_default();
+                                    // SEC: value-scan the whole subtree so a
+                                    // credential under an innocuous key (nested
+                                    // `mcp.*.env`/`headers`, `provider.*.api.headers`,
+                                    // URL-userinfo secrets) is masked too, then fully
+                                    // mask a top-level key whose *name* is credential-like.
+                                    ragent_types::sanitize::redact_json_value(&mut value, 8);
                                     let is_secret_key = key.ends_with("_api_key")
                                         || key.ends_with("_key")
+                                        || key.ends_with("_token")
+                                        || key.ends_with("_secret")
                                         || key == "openalex_email"
                                         || key == "gitlab";
                                     let rendered = if is_secret_key {
@@ -5510,18 +5576,41 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 match sub {
                     "help" => {
                         self.append_assistant_text(
-                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers, their enabled state and their tools |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Enable a server and connect it now (no restart needed) |\n| `/mcp disconnect <id>` | Disable a server and disconnect it now; the choice persists globally |\n| `/mcp help` | Show this help |\n\nEnabled state is stored globally in `<state dir>/mcp_state.json`, so a server\ndisabled here stays disabled in every project. A newly added server is enabled\nby default.",
+                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers, their enabled state and their tools |\n| `/mcp config` | Show where ragent looks for MCP definitions, counts per location, and servers found |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Enable a server and connect it now (no restart needed) |\n| `/mcp disconnect <id>` | Disable a server and disconnect it now; the choice persists globally |\n| `/mcp help` | Show this help |\n\nEnabled state is stored globally in `<state dir>/mcp_state.json`, so a server\ndisabled here stays disabled in every project. A newly added server is enabled\nby default.",
                         );
                         self.status = "mcp: help".to_string();
                         return;
                     }
+                    "config" => {
+                        let locations = McpClient::discover_locations().await;
+                        self.append_assistant_text(&render_mcp_config(&locations));
+                        self.status = "mcp: config".to_string();
+                        return;
+                    }
                     "discover" => {
                         let found = McpClient::discover().await;
+                        // Snapshot each server's enabled state once so the
+                        // dialog's render pass reads no config or ledger.
+                        let configured = ragent_agent::Config::load()
+                            .map(|c| c.mcp)
+                            .unwrap_or_default();
+                        let ledger = ragent_agent::mcp::McpEnableLedger::load();
+                        let enabled = found
+                            .iter()
+                            .map(|srv| {
+                                crate::app::state::discovered_mcp_enabled(
+                                    &srv.id,
+                                    &configured,
+                                    &ledger,
+                                )
+                            })
+                            .collect();
                         // Show interactive discover dialog.
                         self.mcp_discover = Some(McpDiscoverState {
                             servers: found,
-                            number_input: String::new(),
-                            number_cursor: 0,
+                            enabled,
+                            selected: 0,
+                            scroll_offset: 0,
                             feedback: None,
                         });
 

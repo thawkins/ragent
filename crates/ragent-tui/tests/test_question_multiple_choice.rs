@@ -115,6 +115,7 @@ async fn test_multiple_choice_question_renders_options() {
             "openai".to_string(),
             "ollama".to_string(),
         ],
+        default_index: Some(0),
     })
     .await;
 
@@ -142,6 +143,7 @@ async fn test_multiple_choice_question_shows_selected_option() {
         request_id: "r1".to_string(),
         question: "Pick one".to_string(),
         options: vec!["A".to_string(), "B".to_string()],
+        default_index: Some(0),
     })
     .await;
 
@@ -161,6 +163,7 @@ async fn test_multiple_choice_selection_navigates_down() {
         request_id: "r1".to_string(),
         question: "Pick".to_string(),
         options: vec!["first".to_string(), "second".to_string()],
+        default_index: Some(0),
     })
     .await;
 
@@ -187,6 +190,7 @@ async fn test_free_text_question_does_not_show_options() {
         request_id: "r1".to_string(),
         question: "Type your answer".to_string(),
         options: vec![],
+        default_index: None,
     })
     .await;
 

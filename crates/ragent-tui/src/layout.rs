@@ -4020,19 +4020,10 @@ fn input_cursor_display_pos(
 /// provider-setup dialog, which is visible during screen sharing or a terminal
 /// recording. A short value is masked entirely; a longer one keeps its first 4
 /// and last 4 characters so the operator can still confirm which key is
-/// entered.
+/// entered. Delegates to [`ragent_types::sanitize::mask_edges`].
 #[must_use]
 pub fn mask_secret(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.is_empty() {
-        return String::new();
-    }
-    if chars.len() <= 12 {
-        return "*".repeat(chars.len());
-    }
-    let head: String = chars[..4].iter().collect();
-    let tail: String = chars[chars.len() - 4..].iter().collect();
-    format!("{head}{}{tail}", "*".repeat(chars.len() - 8))
+    ragent_types::sanitize::mask_edges(text, 4, 12)
 }
 
 fn with_cursor_marker(text: &str, cursor: usize) -> String {
@@ -5795,9 +5786,7 @@ fn render_model_download_popup(frame: &mut Frame, app: &App) {
 
 /// Format seconds as "M:SS" for the download popup.
 fn format_elapsed(secs: u64) -> String {
-    let m = secs / 60;
-    let s = secs % 60;
-    format!("{}:{:02}", m, s)
+    ragent_types::strutil::format_mmss(secs)
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -7881,6 +7870,7 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
     };
 
     if !req.options.is_empty() {
+        let now = crate::utils::now_unix_ms();
         let question_lines = req.question.lines().count().max(1);
         let option_count = req.options.len();
         let total_lines = question_lines + option_count + 7;
@@ -7889,6 +7879,8 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
             .max(20) as u16;
         let area = centered_rect(70, height_percent, frame.area());
         frame.render_widget(Clear, area);
+
+        let countdown_text = question_countdown_text(req, now);
 
         let mut text: Vec<Line> = vec![
             Line::from(Span::styled(
@@ -7916,12 +7908,20 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
                 Style::default().fg(Color::White)
             };
             let prefix = if is_selected { "> " } else { "  " };
-            text.push(Line::from(Span::styled(format!("{prefix}{option}"), style)));
+            let marker = if i == req.resolved_default_index() {
+                " (default)"
+            } else {
+                ""
+            };
+            text.push(Line::from(Span::styled(
+                format!("{prefix}{option}{marker}"),
+                style,
+            )));
         }
 
         text.push(Line::from(""));
         text.push(Line::from(Span::styled(
-            "^/v or j/k to navigate  Enter to select  Esc to dismiss",
+            format!("^/v or j/k to navigate  Enter to select  Esc to dismiss{countdown_text}"),
             Style::default().fg(Color::DarkGray),
         )));
 
@@ -7978,6 +7978,23 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+}
+
+/// Render the countdown suffix for a timed multiple-choice question, or an
+/// empty string when the question carries no deadline (free-text / askpass).
+fn question_countdown_text(req: &crate::app::QuestionRequest, now_ms: u64) -> String {
+    let Some(deadline) = req.expire_at_ms else {
+        return String::new();
+    };
+    let remaining = deadline.saturating_sub(now_ms) / 1000;
+    if remaining == 0 {
+        "  (auto-answering default...)".to_string()
+    } else {
+        format!(
+            "  ({} to default)",
+            ragent_types::strutil::format_mmss(remaining)
+        )
+    }
 }
 fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
@@ -8171,14 +8188,24 @@ fn render_loop_setup_dialog(frame: &mut Frame, app: &App) {
 }
 
 /// Render the interactive MCP discovery dialog overlay.
-fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
-    let Some(state) = app.mcp_discover.as_ref() else {
-        return;
+///
+/// A bordered modal listing every discovered MCP server under a block cursor.
+/// `Up`/`Down` move the cursor (the list scrolls, with a scrollbar, to keep it
+/// on screen), `Enter` toggles the highlighted server's enabled state, and `Esc`
+/// closes the dialog. Each row carries an `[x]`/`[ ]` enabled marker. Only ASCII
+/// glyphs are used in the body.
+fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let (total, selected, prev_offset) = match app.mcp_discover.as_ref() {
+        Some(s) => (s.servers.len(), s.selected, s.scroll_offset),
+        None => return,
     };
 
-    // Size the dialog: taller when there are more servers.
-    let server_rows = state.servers.len().max(1) as u16;
-    let dialog_height = (server_rows + 10).min(40); // header + rows + prompt + padding
+    // Size the dialog: taller when there are more servers. title(2) + heading(1)
+    // + rows + feedback(1) + hints(1) + borders(2).
+    let body_rows = total.max(1) as u16;
+    let dialog_height = (body_rows + 8).clamp(9, 40);
     let area = {
         let full = frame.area();
         let h = dialog_height.min(full.height.saturating_sub(4));
@@ -8192,132 +8219,176 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
     };
     frame.render_widget(Clear, area);
 
-    let mut lines: Vec<Line<'_>> = vec![
-        Line::from(Span::styled(
-            "MCP Server Discovery",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-
-    if state.servers.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  No MCP servers detected.",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  Install MCP servers via npm (e.g. @modelcontextprotocol/server-filesystem)",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  or place configs in ~/.config/ragent/servers/ and retry.",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        // Load current config once so we can flag already-enabled servers.
-        let enabled_ids: std::collections::HashSet<String> = ragent_agent::Config::load()
-            .map(|c| c.mcp.into_keys().collect())
-            .unwrap_or_default();
-
-        // Column header
-        lines.push(Line::from(vec![Span::styled(
-            format!("  {:<3}  {:<20}  {:<40}  {}", "#", "ID", "Name", "Source"),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", "─".repeat(80)),
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        for (i, srv) in state.servers.iter().enumerate() {
-            let already_enabled = enabled_ids.contains(&srv.id);
-            let num = format!("{}", i + 1);
-            let name = ragent_types::truncate_bytes(&srv.name, 37);
-            let source = match &srv.source {
-                ragent_agent::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
-                ragent_agent::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),
-                ragent_agent::mcp::McpDiscoverySource::McpRegistry { .. } => {
-                    "MCP registry".to_string()
-                }
-            };
-            let (num_color, id_color, name_color, source_color) = if already_enabled {
-                // Yellow tones for already-configured servers
-                (Color::Yellow, Color::Yellow, Color::Yellow, Color::Yellow)
-            } else {
-                (Color::Magenta, Color::White, Color::Green, Color::DarkGray)
-            };
-            let enabled_tag = if already_enabled { " [ok]" } else { "" };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<3}", num),
-                    Style::default().fg(num_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  {:<20}", format!("{}{}", srv.id, enabled_tag)),
-                    Style::default().fg(id_color),
-                ),
-                Span::styled(format!("  {:<40}", name), Style::default().fg(name_color)),
-                Span::styled(format!("  {}", source), Style::default().fg(source_color)),
-            ]));
-        }
-
-        lines.push(Line::from(Span::styled(
-            "  (yellow = already enabled in ragent.json)",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    lines.push(Line::from(""));
-
-    // Feedback line (error or success)
-    if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with("[ok]") {
-            Color::Green
-        } else {
-            Color::Red
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  {msg}"),
-            Style::default().fg(color),
-        )));
-        lines.push(Line::from(""));
-    }
-
-    // Input prompt
-    if state.servers.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  Press Esc to close",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
-            Span::styled(
-                with_cursor_marker(state.number_input.as_str(), state.number_cursor),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(Span::styled(
-            "  Enter to enable  Esc to cancel",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" /mcp discover ")
         .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .alignment(Alignment::Left);
-    frame.render_widget(paragraph, area);
+    // Empty state: advisory text only.
+    if total == 0 {
+        let lines = vec![
+            Line::from(Span::styled(
+                "MCP Server Discovery",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No MCP servers detected.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  Install MCP servers via npm (e.g. @modelcontextprotocol/server-filesystem)",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "  or place configs in ~/.config/ragent/servers/ and retry.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press Esc to close",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    // Vertical split: title, pinned column heading, list, feedback, key hints.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    let title_area = chunks[0];
+    let heading_area = chunks[1];
+    let list_area = chunks[2];
+    let feedback_area = chunks[3];
+    let hint_area = chunks[4];
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "MCP Server Discovery",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        title_area,
+    );
+
+    // Clamp the scroll window so the cursor is always on screen, and persist it
+    // so the next frame keeps the same position.
+    let visible_height = list_area.height as usize;
+    let scroll_offset = if visible_height == 0 {
+        0
+    } else if selected < prev_offset {
+        selected
+    } else if selected >= prev_offset + visible_height {
+        selected + 1 - visible_height
+    } else {
+        prev_offset
+    };
+    if let Some(s) = app.mcp_discover.as_mut() {
+        s.scroll_offset = scroll_offset;
+    }
+
+    let Some(state) = app.mcp_discover.as_ref() else {
+        return;
+    };
+
+    // Pinned column heading (dark on light), matching the other list panels.
+    let heading_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Gray)
+        .add_modifier(Modifier::BOLD);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("     {:<20}  {:<38}  {}", "ID", "Name", "Source"),
+            heading_style,
+        ))),
+        heading_area,
+    );
+
+    // The block cursor: a full-row background on the highlighted row.
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let enabled_style = Style::default().fg(Color::Yellow);
+    let normal_style = Style::default().fg(Color::White);
+
+    let items: Vec<ListItem> = state
+        .servers
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+        .map(|(i, srv)| {
+            let is_enabled = state.enabled.get(i).copied().unwrap_or(false);
+            let marker = if is_enabled { "[x]" } else { "[ ]" };
+            let name = truncate_bytes_no_ellipsis(&srv.name, 38);
+            let source = match &srv.source {
+                ragent_agent::mcp::McpDiscoverySource::SystemPath => "PATH",
+                ragent_agent::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global",
+                ragent_agent::mcp::McpDiscoverySource::McpRegistry { .. } => "MCP registry",
+            };
+            let row = format!(
+                " {marker} {:<20}  {:<38}  {}",
+                truncate_bytes_no_ellipsis(&srv.id, 20),
+                name,
+                source,
+            );
+            let style = if is_enabled {
+                enabled_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(row, style)))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(cursor_style);
+    let mut list_state = ListState::default();
+    list_state.select(Some(selected.saturating_sub(scroll_offset)));
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Scrollbar when the list overflows its panel.
+    if total > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut sb_state = ScrollbarState::new(total).position(scroll_offset);
+        frame.render_stateful_widget(scrollbar, list_area, &mut sb_state);
+    }
+
+    // Feedback line (error or success).
+    let (feedback_text, feedback_color) = match state.feedback.as_deref() {
+        Some(msg) if msg.starts_with("[ok]") => (msg.to_string(), Color::Green),
+        Some(msg) => (msg.to_string(), Color::Red),
+        None => (String::new(), Color::DarkGray),
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("  {feedback_text}"),
+            Style::default().fg(feedback_color),
+        ))),
+        feedback_area,
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "  Up/Down move  Enter toggle  Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        hint_area,
+    );
 }
 
 /// Render the `/history` picker overlay.

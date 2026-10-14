@@ -318,7 +318,7 @@ impl Tool for WaitAgentsTool {
                 waiting_for.len(),
                 waiting_for
                     .iter()
-                    .map(|id| id.chars().take(8).collect::<String>())
+                    .map(|id| ragent_types::strutil::short_prefix(id, 8))
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -334,7 +334,7 @@ impl Tool for WaitAgentsTool {
             let agent_name = task.map_or("unknown", |t| t.agent_name.as_str());
 
             let icon = if *success { "[ok]" } else { "[x]" };
-            let short_id: String = task_id.chars().take(8).collect();
+            let short_id: String = ragent_types::strutil::short_prefix(task_id, 8);
 
             // Report integrity: sub-agent tasks track whether the final
             // reply was fully generated, salvaged via the continuation

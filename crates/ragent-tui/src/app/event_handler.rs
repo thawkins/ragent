@@ -31,6 +31,11 @@ use crate::widgets::message_widget::truncate_str;
 /// message window (used by the `TeammateFailed` event handler).
 const ERROR_PREVIEW_CHARS: usize = 200;
 
+/// Seconds a multiple-choice question dialog waits for a user answer before
+/// auto-answering with its default option. Only applies to timed questions
+/// (those with options); free-text and askpass prompts are never auto-timed.
+pub(crate) const QUESTION_TIMEOUT_SECS: u64 = 120;
+
 impl App {
     /// Render a swarm failure uniformly: status line, chat panel message,
     /// and a warn-level log entry.
@@ -666,6 +671,7 @@ impl App {
                 ref request_id,
                 ref question,
                 ref options,
+                default_index,
             } => {
                 // Allow questions from any session (including sub-agents) to be displayed
                 // since they require user interaction to proceed.
@@ -680,14 +686,22 @@ impl App {
                         request_id = %request_id,
                         "TUI received QuestionRequested, showing dialog"
                     );
+                    // Default/fallback selection: the tool's resolved index, or
+                    // the first option, or 0. Clamp so a stale/out-of-range
+                    // index can never pre-select a non-existent row.
+                    let selected =
+                        crate::app::state::resolve_default_index(options.len(), default_index);
+                    let expire_at_ms = crate::utils::now_unix_ms() + QUESTION_TIMEOUT_SECS * 1000;
                     self.question_queue.push_back(QuestionRequest {
                         id: request_id.clone(),
                         session_id: session_id.clone(),
                         question: question.clone(),
                         options: options.clone(),
+                        default_index,
+                        expire_at_ms: Some(expire_at_ms),
                     });
                     self.pending_question_input.clear();
-                    self.question_selected_index = 0;
+                    self.question_selected_index = selected;
                     self.status = "awaiting question".to_string();
                     self.needs_redraw = true;
                     self.push_log_no_agent(

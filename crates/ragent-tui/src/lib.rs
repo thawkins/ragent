@@ -931,6 +931,10 @@ pub async fn run_tui(
             // Auto-dismiss the run-cost banner after 15 seconds.
             app.poll_run_cost_banner_expiry();
 
+            // Auto-answer a timed question with its default option once the
+            // inactivity deadline passes.
+            app.poll_question_expiry();
+
             // Unblock swarm tasks whose dependencies are satisfied.
             app.poll_swarm_unblock();
 
@@ -1135,6 +1139,16 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
 
     // Permission countdown updates every second.
     if !app.permission_queue.is_empty() {
+        deadline = deadline.min(now + Duration::from_secs(1));
+    }
+
+    // A timed question dialog counts down and auto-answers on expiry, so wake
+    // every second until it is answered.
+    if app
+        .question_queue
+        .front()
+        .is_some_and(|q| q.expire_at_ms.is_some())
+    {
         deadline = deadline.min(now + Duration::from_secs(1));
     }
 

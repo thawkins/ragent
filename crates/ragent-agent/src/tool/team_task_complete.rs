@@ -146,11 +146,15 @@ impl Tool for TeamTaskCompleteTool {
         let outcome = run_team_hook(&team_dir, HookEvent::TaskCompleted, Some(&hook_stdin)).await;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected completion - revert task to InProgress.
-            let _ = store.update_task(task_id, |t| {
+            // Hook rejected completion - revert task to InProgress. A failed
+            // revert leaves the task falsely Completed, so log it.
+            if let Err(e) = store.update_task(task_id, |t| {
                 t.status = TaskStatus::InProgress;
                 t.completed_at = None;
-            });
+            }) {
+                tracing::warn!(team = %team_name, task_id = %task_id, error = %e,
+                    "failed to revert hook-rejected task to in-progress");
+            }
             return Ok(ToolOutput {
                 content: format!(
                     "TaskCompleted hook rejected completion of task '{task_id}'. \
@@ -200,7 +204,10 @@ impl Tool for TeamTaskCompleteTool {
             if let Some(m) = store.config.member_by_id_mut(&agent_id) {
                 m.current_task_id = None;
             }
-            let _ = store.save();
+            if let Err(e) = store.save() {
+                tracing::warn!(team = %team_name, agent = %agent_id, error = %e,
+                    "failed to persist cleared current_task_id");
+            }
         }
         Ok(ToolOutput {
             content: format!(

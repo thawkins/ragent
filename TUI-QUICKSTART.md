@@ -4,6 +4,16 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (unreleased)
+
+- **`/mcp config` discovery-location report** — a new `/mcp config` subcommand
+  shows a table of every place ragent looks for MCP server definitions (the
+  ragent-native `~/.config/ragent/servers/` directory first, then npm global
+  `node_modules`, `PATH`, and the Claude/Cline/legacy/XDG registry directories)
+  with the number of definitions found at each location (an absent directory is
+  marked `(missing)`), followed by a table of the individual servers discovered.
+  The underlying scan is unchanged; it is now reported per location.
+
 ## Highlights (v1.0.132)
 
 - **Marketplace browsers and alphabetical catalogue ordering** — `/plugins codex`

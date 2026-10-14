@@ -44,7 +44,10 @@ async fn menu_open(queue_len: usize) -> App {
     for i in 0..queue_len {
         app.input_queue.push_back(entry(&format!("entry-{i}")));
     }
-    app.handle_key_event(alt(KeyCode::Char('q'))).await;
+    // `handle_key_event` builds a large future; box it so this helper's own
+    // future stays small and does not trip `clippy::large_futures` at each of
+    // its many call sites.
+    Box::pin(app.handle_key_event(alt(KeyCode::Char('q')))).await;
     assert!(app.queue_menu_open, "precondition: ALT-Q opened the menu");
     app
 }

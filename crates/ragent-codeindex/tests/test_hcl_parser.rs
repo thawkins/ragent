@@ -2,14 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
-use ragent_codeindex::parser::LanguageParser;
 use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::hcl::HclParser;
 use ragent_codeindex::types::SymbolKind;
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_hcl(source: &str) -> ParsedFile {
-    let parser = HclParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&HclParser::new(), source)
 }
 
 #[test]

@@ -484,6 +484,9 @@ Repo-relative sources shall be resolved against the marketplace document's
 repository root **as an installable git source** (`git+<https-repo>#<ref>:<path>`)
 when that root is a GitHub repository (`raw.githubusercontent.com` or
 `github.com`), since the install pipeline accepts no bare `https` directory URL;
+a repo-relative source naming the repository root itself (`.` / `./` / `/`) shall
+resolve to a whole-repo git source (`git+<https-repo>#<ref>`, no subpath), so a
+plugin published at the repository root is installable;
 a repo-relative source with no GitHub repository behind its origin, or any other
 source that cannot be made installable, shall be counted as a skipped entry
 rather than failing the whole index (FR-013, FR-025).

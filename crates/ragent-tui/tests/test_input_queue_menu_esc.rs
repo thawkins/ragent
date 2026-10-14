@@ -38,7 +38,10 @@ fn entry(text: &str) -> QueuedInput {
 /// Open the menu the way the user would, then return the app.
 async fn app_with_menu_open() -> App {
     let mut app = support::make_app();
-    app.handle_key_event(alt(KeyCode::Char('q'))).await;
+    // `handle_key_event` builds a large future; box it so this helper's own
+    // future stays small and does not trip `clippy::large_futures` at each of
+    // its call sites.
+    Box::pin(app.handle_key_event(alt(KeyCode::Char('q')))).await;
     assert!(app.queue_menu_open, "precondition: ALT-Q opened the menu");
     app
 }

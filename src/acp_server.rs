@@ -51,13 +51,15 @@ pub async fn run(
         // `acp-server` feature must be compiled in *and* `acp.server_enabled`
         // must be true (FR-028). The default build fails both, so it names the
         // feature; a feature build with the key unset names the config key.
+        // Post-init diagnostics use `tracing` (the subscriber is installed
+        // before this command is dispatched), not `eprintln!`.
         if cfg!(feature = "acp-server") {
-            eprintln!(
+            tracing::error!(
                 "ragent acp-server: the ACP server endpoint is disabled; enable it with \
                  `acp.server_enabled: true` in the configuration"
             );
         } else {
-            eprintln!("ragent acp-server: {ACP_FEATURE_HELP}");
+            tracing::error!("ragent acp-server: {ACP_FEATURE_HELP}");
         }
         return Err(crate::cli::CliExit::usage().into());
     }
@@ -82,7 +84,7 @@ pub async fn run(
         // Reached only when `acp.server_enabled` is true in a build with no
         // `acp-server` feature; the `if` above already handles the disabled case.
         let _ = (processor, event_bus, working_dir);
-        eprintln!("ragent acp-server: {ACP_FEATURE_HELP}");
+        tracing::error!("ragent acp-server: {ACP_FEATURE_HELP}");
         Err(crate::cli::CliExit::usage().into())
     }
 }

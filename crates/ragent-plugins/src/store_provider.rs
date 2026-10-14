@@ -35,12 +35,13 @@
 //! A vendor source is normalised into a string the existing install pipeline can
 //! consume. Repo-relative paths are resolved against the marketplace document's
 //! **repository root** (derived from a GitHub endpoint URL), producing an
-//! installable `git+<repo>#<ref>:<path>` source; git sources are likewise
-//! rendered as `git+<https-url>#<ref>:<path>`. The install pipeline accepts no
-//! bare `https` directory URL, so a repo-relative entry is only installable when
-//! the endpoint names a GitHub repository (`raw.githubusercontent.com` or
-//! `github.com`). Sources that cannot be made installable (unknown scheme, empty
-//! path, SSH remote, a non-GitHub origin) are reported as
+//! installable `git+<repo>#<ref>:<path>` source; a path naming the repository
+//! root itself (`.` / `./` / `/`) is a whole-repo source (`git+<repo>#<ref>`, no
+//! subpath). Git sources are likewise rendered as `git+<https-url>#<ref>:<path>`.
+//! The install pipeline accepts no bare `https` directory URL, so a repo-relative
+//! entry is only installable when the endpoint names a GitHub repository
+//! (`raw.githubusercontent.com` or `github.com`). Sources that cannot be made
+//! installable (unknown scheme, SSH remote, a non-GitHub origin) are reported as
 //! [`StoreEntryError::Unsupported`] and the entry is skipped.
 
 use reqwest::Url;
@@ -413,11 +414,12 @@ fn resolve_relative(raw: &str, origin: &Url) -> ResolvedSource {
     if trimmed.contains("://") || trimmed.starts_with("git@") {
         return ResolvedSource::Unsupported(format!("non-https source {trimmed}"));
     }
-    // A repo-relative path ("./plugins/x"); resolve it against the repo root.
+    // A repo-relative path ("./plugins/x") resolves against the repo root. A path
+    // naming the repository root itself (`.` / `./` / `/`) is a whole-repo source,
+    // the shape the Claude marketplace uses for a plugin published at the
+    // repository root (for example `{"source":"./"}`).
     let path = trimmed.trim_start_matches("./").trim_start_matches('/');
-    if path.is_empty() {
-        return ResolvedSource::Unsupported(format!("empty repo-relative source {trimmed}"));
-    }
+    let path = if path == "." { "" } else { path };
     match repo_git_source(origin, path) {
         Some(source) => ResolvedSource::Ready(source),
         None => ResolvedSource::Unsupported(format!(
@@ -426,14 +428,16 @@ fn resolve_relative(raw: &str, origin: &Url) -> ResolvedSource {
     }
 }
 
-/// Build a `git+<github-repo>#<ref>:<path>` source for a repo-relative entry.
+/// Build a `git+<github-repo>#<ref>[:<path>]` source for a repo-relative entry.
 ///
 /// Returns `None` when `origin` is not a GitHub repository URL: only
 /// `raw.githubusercontent.com` (`/<owner>/<repo>/<ref>/<path>`) and
 /// `github.com/<owner>/<repo>/...` addresses name an installable repository.
 /// GitHub's HTML `tree`/`blob`/`raw` view segments are not part of the repo path
 /// and are discarded, so a `github.com/.../tree/<ref>/<dir>` origin still anchors
-/// the entry at the repository root with `<ref>` and `<dir>` applied.
+/// the entry at the repository root with `<ref>` and `<dir>` applied. An empty
+/// `path` names the repository root, so the source installs the whole repository
+/// (`git+<repo>#<ref>`, no `:<path>` suffix).
 fn repo_git_source(origin: &Url, path: &str) -> Option<String> {
     let host = origin.host_str()?;
     let segments: Vec<&str> = origin.path().split('/').filter(|s| !s.is_empty()).collect();
@@ -462,8 +466,13 @@ fn repo_git_source(origin: &Url, path: &str) -> Option<String> {
     } else {
         ref_name
     };
+    let suffix = if path.is_empty() {
+        String::new()
+    } else {
+        format!(":{path}")
+    };
     Some(format!(
-        "git+https://github.com/{owner}/{repo}#{ref_name}:{path}"
+        "git+https://github.com/{owner}/{repo}#{ref_name}{suffix}"
     ))
 }
 

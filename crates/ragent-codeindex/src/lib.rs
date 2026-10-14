@@ -15,15 +15,18 @@
 //! use ragent_codeindex::CodeIndex;
 //! use ragent_codeindex::types::{CodeIndexConfig, SearchQuery};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = CodeIndexConfig::default();
-//! let idx = CodeIndex::open(&config).unwrap();
-//! let result = idx.full_reindex().unwrap();
+//! let idx = CodeIndex::open(&config)?;
+//! let result = idx.full_reindex()?;
 //! println!("{result}");
 //!
-//! let hits = idx.search(&SearchQuery::new("parse_config")).unwrap();
+//! let hits = idx.search(&SearchQuery::new("parse_config"))?;
 //! for hit in &hits {
 //!     println!("{hit}");
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Modules

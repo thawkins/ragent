@@ -203,11 +203,10 @@ pub struct ScannedConnector {
 
 /// A discovery-time failure with the connector directory (reporting needs a row
 /// per problematic directory even when no descriptor exists).
-#[derive(Debug)]
-pub struct ScanFailure {
-    /// The failure that prevented descriptor construction.
-    pub error: ConnectorError,
-}
+///
+/// Structurally identical to the plugins store's copy; both alias the shared
+/// [`ragent_surface::scan::ScanFailure`] so the shape cannot drift.
+pub type ScanFailure = ragent_surface::scan::ScanFailure<ConnectorError>;
 
 /// Walk both store directories (project wins on connector-id collision) and
 /// return one [`ScannedConnector`] per connector directory; unrecognised entries

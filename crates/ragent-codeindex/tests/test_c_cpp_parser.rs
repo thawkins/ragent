@@ -2,18 +2,19 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
+use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::c_cpp::{CParser, CppParser};
-use ragent_codeindex::parser::{LanguageParser, ParsedFile};
 use ragent_codeindex::types::SymbolKind;
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_c(source: &str) -> ParsedFile {
-    let p = CParser::new();
-    p.parse(source.as_bytes()).unwrap()
+    support::parse_with(&CParser::new(), source)
 }
 
 fn parse_cpp(source: &str) -> ParsedFile {
-    let p = CppParser::new();
-    p.parse(source.as_bytes()).unwrap()
+    support::parse_with(&CppParser::new(), source)
 }
 
 #[test]

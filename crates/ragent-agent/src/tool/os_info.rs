@@ -350,7 +350,11 @@ impl Tool for OsInfoTool {
         };
 
         let probe = input.get("probe").and_then(Value::as_bool).unwrap_or(true);
-        let info = OsInfo::collect_with_probe(probe);
+        // Collection spawns and poll-waits on vendor diagnostics, so run it on
+        // the blocking pool rather than stalling the async executor.
+        let info = tokio::task::spawn_blocking(move || OsInfo::collect_with_probe(probe))
+            .await
+            .map_err(|e| anyhow::anyhow!("os_info collection join error: {e}"))?;
         let value = render_json(&info);
 
         match format {

@@ -6,29 +6,37 @@ use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Returns true for providers that use Ollama's boolean `think` parameter.
+///
+/// Covers both the local (`ollama`) and cloud (`ollama_cloud`) variants so a
+/// call site never re-spells the two-id check inline.
 pub fn is_ollama_family(provider_id: &str) -> bool {
     provider_id == "ollama" || provider_id == "ollama_cloud"
 }
 
+/// Current wall-clock time as Unix milliseconds.
+///
+/// Returns `0` if the system clock is set before the Unix epoch (which cannot
+/// happen in practice); callers use this for relative deadlines, where a `0`
+/// base simply expires immediately rather than panicking.
+#[must_use]
+pub fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Format a UTC timestamp as elapsed duration from now (e.g. "2m34s").
 pub fn format_elapsed(created_at: DateTime<Utc>) -> String {
-    let secs = (Utc::now() - created_at).num_seconds().max(0);
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
+    ragent_types::strutil::format_duration_compact((Utc::now() - created_at).num_seconds())
 }
 
 /// Shorten a session/task id to the last 8 chars (the unique suffix).
 ///
-/// Falls back to the whole id when the cut would land mid-UTF-8-codepoint
-/// (non-ASCII ids), so this never panics.
+/// Delegates to [`ragent_types::strutil::short_suffix`], which falls back to the
+/// whole id when the cut would land mid-UTF-8-codepoint.
 pub fn short_id(id: &str) -> String {
-    let start = id.len().saturating_sub(8);
-    id.get(start..).unwrap_or(id).to_string()
+    ragent_types::strutil::short_suffix(id, 8)
 }
 
 /// Shorten a string by keeping the start and end, inserting an ellipsis in the middle.

@@ -256,6 +256,8 @@ pub enum RemoteUpdate {
         question: String,
         /// Optional pick-list.
         options: Vec<String>,
+        /// Optional zero-based default/fallback option index.
+        default_index: Option<usize>,
     },
     /// Any other remote event, carrying its event name.
     Other {
@@ -882,6 +884,7 @@ fn decode_update(name: &str, data: &str) -> RemoteUpdate {
             request_id: string("request_id"),
             question: string("question"),
             options: parse_options(&value),
+            default_index: parse_default_index(&value),
         },
         other => RemoteUpdate::Other {
             kind: other.to_string(),
@@ -902,6 +905,17 @@ fn parse_options(value: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Extract a `question_requested` payload's optional default option index.
+///
+/// The remote server sends `default_index` as a JSON number; anything missing
+/// or of the wrong shape yields `None`.
+fn parse_default_index(value: &Value) -> Option<usize> {
+    value
+        .get("default_index")
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
 }
 
 /// Process-wide map of `(backend id, local session id)` -> remote session

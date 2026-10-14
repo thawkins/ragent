@@ -33,7 +33,10 @@ use tokio::sync::{RwLock, Semaphore};
 
 use ragent_config::{McpServerConfig, McpTransport};
 
-pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
+pub use discovery::{
+    DiscoveredMcpServer, McpDiscoveryLocation, McpDiscoverySource, discover as discover_servers,
+    discover_locations as discover_server_locations,
+};
 pub use enable_state::{McpEnableLedger, global_state_path, is_server_enabled};
 
 // -- MCP config validation ----------------------------------------------------
@@ -1342,6 +1345,16 @@ impl McpClient {
     /// ```
     pub async fn discover() -> Vec<DiscoveredMcpServer> {
         discovery::discover().await
+    }
+
+    /// Scan the system for MCP servers, grouped by the location they were found
+    /// in, without de-duplicating and including empty locations.
+    ///
+    /// Backs the `/mcp config` command, which shows every place ragent looks for
+    /// MCP server definitions, how many it found at each place, and the
+    /// definitions themselves. See [`McpDiscoveryLocation`].
+    pub async fn discover_locations() -> Vec<McpDiscoveryLocation> {
+        discovery::discover_locations().await
     }
 }
 

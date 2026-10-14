@@ -43,9 +43,14 @@ fn normalise(text: &str) -> BTreeSet<String> {
 
 /// True for report lines whose value legitimately drifts between two
 /// `os_info` collections in the same process (TC-015: uptime and available
-/// memory; CPU frequency is also re-sampled).
+/// memory; CPU frequency is also re-sampled). Free swap is included for the
+/// same reason: the kernel reclaims swap pages between the slash command's
+/// collection and the test's own, so the byte count is not stable either.
 fn is_volatile(line: &str) -> bool {
-    line.contains("Uptime") || line.contains("Available Memory") || line.contains("Frequency")
+    line.contains("Uptime")
+        || line.contains("Available Memory")
+        || line.contains("Free Swap")
+        || line.contains("Frequency")
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,6 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
-rusqlite = { workspace = true }
 globset = { workspace = true }
 html2text = { workspace = true }
 similar = { workspace = true }

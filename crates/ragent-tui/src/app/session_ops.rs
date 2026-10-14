@@ -3848,26 +3848,62 @@ impl App {
         }
     }
 
-    /// Persist a discovered MCP server into `ragent.json`. Returns an error
-    /// message when the server is already configured.
-    pub(crate) fn enable_discovered_mcp_server(
-        &self,
+    /// Toggle a discovered MCP server's enabled state from the `/mcp discover`
+    /// dialog: disable it when it is currently enabled, otherwise add it to
+    /// `ragent.json` (if an entry is missing) and enable it.
+    ///
+    /// The change is persisted (the project `ragent.json` entry and the global
+    /// enable ledger) and applied live through [`Self::set_mcp_server_enabled`]
+    /// when the MCP client is already running.
+    ///
+    /// Returns `(feedback, enabled)` where `enabled` is the server's new state,
+    /// so the dialog can refresh the toggled row without re-reading config or
+    /// the ledger from disk.
+    pub(crate) async fn toggle_discovered_mcp_server(
+        &mut self,
         server: &DiscoveredMcpServer,
-    ) -> Result<String, String> {
+    ) -> (String, bool) {
         use ragent_agent::Config;
 
-        // Load the current config, surfacing a parse error so a malformed
-        // ragent.json is not silently replaced by an empty default (which
-        // could clobber the user's real settings on save).
-        let config = Config::load().map_err(|e| format!("failed to load config: {e}"))?;
+        // Surface a malformed config rather than defaulting to "no servers
+        // configured": defaulting would read as "currently disabled" and flip
+        // an enabled server off on a parse error.
+        let configured = match Config::load() {
+            Ok(c) => c.mcp,
+            Err(e) => return (format!("[x] failed to load config: {e}"), false),
+        };
+        let ledger = ragent_agent::mcp::McpEnableLedger::load();
+        let currently_enabled =
+            crate::app::state::discovered_mcp_enabled(&server.id, &configured, &ledger);
 
-        if config.mcp.contains_key(&server.id) {
-            return Err(format!(
-                "'{}' is already in ragent.json. Edit it manually to change settings.",
-                server.id
-            ));
+        if currently_enabled {
+            let report = self.set_mcp_server_enabled(&server.id, false).await;
+            if report.contains("[err]") {
+                return (format!("[x] could not disable '{}'", server.id), true);
+            }
+            return (format!("[ok] '{}' disabled", server.id), false);
         }
 
+        // Enabling: discovery only proposes a server, so a `ragent.json` entry
+        // must exist before it can start. Add one when absent; lift a
+        // `disabled: true` override when present so the entry is not shadowed.
+        if let Err(e) = self.ensure_discovered_mcp_config(server) {
+            return (format!("[x] {e}"), false);
+        }
+        let report = self.set_mcp_server_enabled(&server.id, true).await;
+        if report.contains("[err]") {
+            return (format!("[x] could not enable '{}'", server.id), false);
+        }
+        (format!("[ok] '{}' enabled", server.id), true)
+    }
+
+    /// Write or update the `mcp.<id>` entry for a discovered server in the
+    /// project `.ragent/ragent.json`.
+    ///
+    /// An existing entry is preserved: only its `disabled` flag is cleared so a
+    /// hand-edited `args`/`env` is never clobbered by the discovered defaults.
+    /// A missing entry is added from the discovered definition.
+    fn ensure_discovered_mcp_config(&self, server: &DiscoveredMcpServer) -> Result<(), String> {
         // Persist back to ragent.json in the working directory.
         let config_path = std::env::current_dir()
             .unwrap_or_default()
@@ -3883,15 +3919,30 @@ impl App {
             "disabled": false,
         });
 
-        atomic_config_update(&config_path, |json| {
+        let result = atomic_config_update(&config_path, |json| {
+            if let Some(existing) = json
+                .get_mut("mcp")
+                .and_then(serde_json::Value::as_object_mut)
+                .and_then(|mcp| mcp.get_mut(&server_id))
+                && let Some(obj) = existing.as_object_mut()
+            {
+                // A configured entry already exists: only lift a hard
+                // `disabled` override, leaving the user's fields intact.
+                obj.insert("disabled".to_string(), serde_json::Value::Bool(false));
+                return Ok(());
+            }
             json["mcp"][&server_id] = mcp_entry;
             Ok(())
-        })?;
-
-        Ok(format!(
-            "[ok] '{}' added to ragent.json. Restart ragent to activate the MCP server.",
-            server.id
-        ))
+        });
+        if result.is_ok() {
+            // `atomic_config_update` writes the file directly, so the M-025
+            // on-disk load cache must be dropped before the enable path re-reads
+            // it; otherwise the just-written entry stays invisible and the
+            // enable would be rejected as an unknown server.
+            ragent_config::Config::invalidate_load_cache();
+            self.session_processor.invalidate_config_cache();
+        }
+        result
     }
 
     pub(crate) fn ensure_session(&mut self) -> bool {
@@ -4176,7 +4227,7 @@ impl App {
             let plan = ragent_agent::provider::copilot::cached_copilot_plan()
                 .unwrap_or_else(|| "Copilot".to_string());
             (ctx_label(&plan), false)
-        } else if provider_id == "ollama" || provider_id == "ollama_cloud" {
+        } else if crate::utils::is_ollama_family(provider_id) {
             let label = ctx_label("");
             if label.is_empty() {
                 (

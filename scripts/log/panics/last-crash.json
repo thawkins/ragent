@@ -1,0 +1,12 @@
+{
+  "pid": 264467,
+  "exe": "/home/thawkins/Projects/ragent/target/debug/ragent",
+  "args": [
+    "/home/thawkins/Projects/ragent/target/debug/ragent"
+  ],
+  "cwd": "/home/thawkins/Projects/ragent/scripts",
+  "status": "clean exit",
+  "thread": "main",
+  "updated_at": "2026-10-14T02:19:33.994689894+00:00",
+  "core_dump_hint": "Linux: coredumpctl list / coredumpctl info <pid> / coredumpctl debug <pid> (core_pattern pipes to /usr/lib/systemd/systemd-coredump)"
+}

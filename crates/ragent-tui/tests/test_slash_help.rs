@@ -69,6 +69,27 @@ async fn test_slash_mcp_help() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_slash_mcp_config_lists_locations() {
+    let mut app = make_app();
+    app.session_id = Some("s".to_string());
+    let text = last_output_after(&mut app, "/mcp config").await;
+    assert!(
+        text.contains("From: /mcp config"),
+        "/mcp config should emit a 'From: /mcp config' header, got: {text}"
+    );
+    // The location table always renders every place ragent scans.
+    assert!(
+        text.contains("Where ragent looks for MCP servers"),
+        "/mcp config should describe the scanned locations, got: {text}"
+    );
+    assert!(
+        text.contains("ragent-native"),
+        "/mcp config should include the ragent-native registry location, got: {text}"
+    );
+    assert_eq!(app.status, "mcp: config", "/mcp config status");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_slash_profile_help() {
     let mut app = make_app();
     app.session_id = Some("s".to_string());

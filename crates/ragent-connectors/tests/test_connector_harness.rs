@@ -10,7 +10,7 @@
 
 mod support;
 
-use support::TempTree;
+use support::{TempTree, descriptor, stdio};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -19,44 +19,11 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use ragent_config::ConnectorsConfig;
 use ragent_connectors::{
-    ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer, HarnessError,
-    InMemoryCredentialStore, MANIFEST_FILE, MapEnv, McpProbe, ProbeTool, StepOutcome, StoreLedger,
-    render_report, run_connector_subcommand_async, run_harness, sample_for_schema, store_secret,
-    test_connector,
+    ConnectorAuthShape, ConnectorDescriptor, HarnessError, InMemoryCredentialStore, MANIFEST_FILE,
+    MapEnv, McpProbe, ProbeTool, StepOutcome, StoreLedger, render_report,
+    run_connector_subcommand_async, run_harness, sample_for_schema, store_secret, test_connector,
 };
 use serde_json::{Value as JsonValue, json};
-
-/// A descriptor with the given id and servers.
-fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
-    ConnectorDescriptor {
-        id: ConnectorId::new(id).expect("valid id"),
-        name: id.to_string(),
-        description: String::new(),
-        category: String::new(),
-        tags: Vec::new(),
-        source: String::new(),
-        marketplace: String::new(),
-        provenance: Default::default(),
-        auth: ConnectorAuthShape::None,
-        auth_scope: Vec::new(),
-        credential: None,
-        servers,
-        unsupported: Vec::new(),
-    }
-}
-
-/// A stdio server with the given id and command.
-fn stdio(id: &str, command: &str) -> ConnectorServer {
-    ConnectorServer {
-        id: id.to_string(),
-        transport: "stdio".to_string(),
-        command: Some(command.to_string()),
-        args: Vec::new(),
-        env: Default::default(),
-        url: None,
-        headers: Default::default(),
-    }
-}
 
 /// Write a descriptor as a connector manifest in `store/<id>/connector.json`.
 fn write_connector(store: &Path, descriptor: &ConnectorDescriptor) {

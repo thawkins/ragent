@@ -2,14 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
-use ragent_codeindex::parser::LanguageParser;
 use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::gradle_kts::GradleKtsParser;
 use ragent_codeindex::types::SymbolKind;
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_kts(source: &str) -> ParsedFile {
-    let parser = GradleKtsParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&GradleKtsParser::new(), source)
 }
 
 #[test]

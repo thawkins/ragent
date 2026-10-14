@@ -21,7 +21,10 @@ impl TreeCache {
     /// Create a new tree cache with the given capacity.
     #[must_use]
     pub fn new(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity.max(1)).unwrap();
+        // `capacity.max(1)` is always non-zero, so the `None` arm is
+        // unreachable; handle it explicitly rather than panicking (no
+        // production `unwrap`).
+        let cap = NonZeroUsize::new(capacity.max(1)).unwrap_or(NonZeroUsize::MIN);
         Self {
             cache: LruCache::new(cap),
         }

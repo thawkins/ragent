@@ -7,34 +7,13 @@
 
 use std::path::Path;
 
+#[path = "support/mod.rs"]
+mod support;
+
 use ragent_tools_vcs::git::*;
 use ragent_tools_vcs::{Tool, ToolContext};
 use serde_json::json;
-
-/// Run a shell command in `cwd`, panicking on a non-zero exit.
-fn run_shell(cmd: &str, cwd: &Path) {
-    let output = std::process::Command::new("sh")
-        .args(["-c", cmd])
-        .current_dir(cwd)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run '{cmd}': {e}"));
-    assert!(
-        output.status.success(),
-        "command '{cmd}' failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-/// Create a temporary git repository with one commit.
-fn setup_git_repo(dir: &Path) {
-    run_shell("git init", dir);
-    run_shell("git config user.email 'test@example.com'", dir);
-    run_shell("git config user.name 'Test User'", dir);
-    run_shell("git checkout -b main", dir);
-    std::fs::write(dir.join("README.md"), "# Hello").unwrap();
-    run_shell("git add README.md", dir);
-    run_shell("git commit -m 'Initial commit'", dir);
-}
+use support::setup_git_repo;
 
 fn make_ctx(dir: &Path) -> ToolContext {
     ToolContext {

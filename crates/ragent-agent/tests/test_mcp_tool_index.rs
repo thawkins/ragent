@@ -495,3 +495,34 @@ fn corrupt_enable_ledger_is_renamed_aside_and_defaults_to_empty() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(path.with_extension("json.corrupt"));
 }
+
+/// `set_enabled` + `save_to` round-trips every explicit choice, and `to_map`
+/// snapshots the identical id -> enabled map (audit gap: this round-trip was
+/// only covered incidentally).
+#[test]
+fn enable_ledger_set_enabled_save_to_round_trip_and_to_map() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/temp/mcp-enable-state-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join(format!("roundtrip-{}.json", std::process::id()));
+
+    let mut ledger = ragent_agent::mcp::McpEnableLedger::default();
+    ledger.set_enabled("keep-off", false);
+    ledger.set_enabled("keep-on", true);
+    ledger.save_to(&path).expect("save ledger");
+
+    let reloaded = ragent_agent::mcp::McpEnableLedger::load_from(&path);
+    assert!(!reloaded.is_enabled("keep-off"));
+    assert!(reloaded.is_enabled("keep-on"));
+    assert!(
+        reloaded.is_enabled("never-mentioned"),
+        "absent stays enabled"
+    );
+
+    let map = reloaded.to_map();
+    assert_eq!(map.get("keep-off"), Some(&false));
+    assert_eq!(map.get("keep-on"), Some(&true));
+    assert_eq!(map.get("never-mentioned"), None);
+
+    let _ = std::fs::remove_file(&path);
+}

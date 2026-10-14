@@ -4,40 +4,13 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[path = "support/mod.rs"]
+mod support;
+
 use ragent_tools_vcs::git::*;
 use ragent_tools_vcs::{Tool, ToolContext};
 use serde_json::json;
-
-/// Create a temporary git repository with an initial commit on branch 'main'.
-fn setup_git_repo(dir: &Path) {
-    let _ = fs::remove_dir_all(dir.join(".git"));
-    run_shell("git init", dir);
-    run_shell("git config user.email 'test@example.com'", dir);
-    run_shell("git config user.name 'Test User'", dir);
-    run_shell("git checkout -b main", dir);
-    fs::write(dir.join("README.md"), "# Hello").unwrap();
-    run_shell("git add README.md", dir);
-    run_shell("git commit -m 'Initial commit'", dir);
-}
-
-fn run_shell(cmd: &str, cwd: &Path) {
-    let output = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", cmd])
-            .current_dir(cwd)
-            .output()
-    } else {
-        Command::new("sh")
-            .args(["-c", cmd])
-            .current_dir(cwd)
-            .output()
-    }
-    .unwrap_or_else(|e| panic!("failed to run '{cmd}': {e}"));
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        panic!("command '{cmd}' failed: {stderr}");
-    }
-}
+use support::{run_shell, setup_git_repo};
 
 fn make_ctx(dir: &Path) -> ToolContext {
     ToolContext {

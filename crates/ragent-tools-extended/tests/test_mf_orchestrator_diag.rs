@@ -47,6 +47,12 @@ async fn test_replicate_websearch_search_agentic_loop() {
     let ctx = tui_ctx();
     let orchestrator = MfSearchTool::build_orchestrator(&ctx);
     eprintln!("engines wired: {:?}", orchestrator.engine_names());
+    // At least one keyless backend is always wired, so the orchestrator can
+    // never come up empty (audit T-006: this diagnostic carried no asserts).
+    assert!(
+        !orchestrator.engine_names().is_empty(),
+        "orchestrator must wire at least one search engine"
+    );
 
     let query = "agentic loop architecture components LLM agents";
     let opts = SearchOptions::new(100).with_per_engine_results(25);

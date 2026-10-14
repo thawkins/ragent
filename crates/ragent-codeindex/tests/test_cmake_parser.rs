@@ -2,14 +2,15 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module.
 
-use ragent_codeindex::parser::LanguageParser;
 use ragent_codeindex::parser::ParsedFile;
 use ragent_codeindex::parser::cmake::CmakeParser;
 use ragent_codeindex::types::SymbolKind;
 
+#[path = "support/mod.rs"]
+mod support;
+
 fn parse_cmake(source: &str) -> ParsedFile {
-    let parser = CmakeParser::new();
-    parser.parse(source.as_bytes()).unwrap()
+    support::parse_with(&CmakeParser::new(), source)
 }
 
 #[test]

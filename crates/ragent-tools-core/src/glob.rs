@@ -7,7 +7,7 @@
 //! reducing latency on big codebases.
 
 use anyhow::{Context, Result};
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

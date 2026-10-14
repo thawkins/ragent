@@ -17,10 +17,9 @@ use crate::{ModelInfo, Provider};
 /// variable is unset, empty, or not an `http(s)` URL with a host, so a poisoned
 /// environment cannot redirect requests to another scheme or hostless target.
 fn resolve_validated_env_base(env_key: &str) -> Option<String> {
-    let raw = std::env::var(env_key).ok()?;
-    if raw.trim().is_empty() {
-        return None;
-    }
+    // Canonical trimmed env read: unset, blank, or whitespace-only all resolve
+    // to `None` (audit T-111).
+    let raw = ragent_config::credential_env::read_credential_env(env_key)?;
     match super::base_url::validate_base_url("generic_openai", &raw) {
         Ok(valid) => Some(valid),
         Err(e) => {

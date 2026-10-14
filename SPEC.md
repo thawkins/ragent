@@ -931,7 +931,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-| `ask_user` | Ask the user a question (text or multiple-choice) |
+| `ask_user` | Ask the user a question (text or multiple-choice, with an optional default used on timeout) |
 | `think` | Record a reasoning note |
 
 #### Task Management Tools (4)
@@ -1280,7 +1280,7 @@ Built-in default rules include:
   explicitly allows escaping.
 - Path normalization resolves `..` and symlinks before permission checks.
 - The `dirs` config block can whitelist additional writable roots via `allowlist`/`denylist` glob patterns.
-- `dirs.allowed_roots` declares additional directory roots that are valid for path escape checking; files under any listed root are reachable by read/write/list/grep tools (FR-017).
+- `dirs.allowed_roots` declares *additional* directory roots that are valid for path escape checking; the session's `working_dir` is always a valid root, and files under it or under any listed root are reachable by read/write/list/grep tools (FR-017). The `allowed_roots` list extends the working directory; it never replaces it.
 
 ### 4.6 Secret Redaction
 
@@ -1921,7 +1921,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
-| `/mcp [status]\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery, and enable/disable |
+| `/mcp [status]\|config\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery location report, and enable/disable |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture
@@ -3612,6 +3612,25 @@ wrappers for the model to call. The registered name itself comes from one
 place, `McpToolWrapper::ragent_name_for`, which the wrapper constructor and the
 TUI both use.
 
+#### 19.4.3 Discovery-location report (`/mcp config`)
+
+`/mcp config` reports **where** ragent looks for MCP server definitions, how many
+it finds at each place, and the individual servers discovered. It is backed by
+`McpClient::discover_locations`, which returns a `Vec<McpDiscoveryLocation>`
+instead of the flat, de-duplicated server list `discover` yields. Each location
+carries a label, the scanned path (absent for the `PATH` and npm-global rows),
+whether the path exists, and the definitions found there, before de-duplication.
+
+The scanned locations, in order, are: `PATH` (the known server executables),
+npm global `node_modules`, and each registry directory — the ragent-native
+`~/.config/ragent/servers/` first so its definitions win de-duplication, then
+`~/.claude/mcp-servers/`, `~/.cline/mcp-servers/`, `~/.mcp/servers/`,
+`<config>/mcp/servers/`, and `<config>/claude/mcp-servers/`. The command renders
+a markdown table of every location (label, path with a `(missing)` marker for an
+absent directory, and a count), a total, and a second table of the discovered
+servers (id, the location it came from, and its launch command). `discover` is
+unchanged: it flattens the location results and de-duplicates by id.
+
 ---
 
 ## 19B. Durable Initiatives & Skill Management
@@ -4322,6 +4341,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| Unreleased | 2026-10-12 | `/simplify all` quality pass over the changed working tree, on top of the v1.0.133 delta. The 18th crate `ragent-surface` gains four shared modules: `config_splice` (`write_atomic_json`, a temp-file + `File::create` + `write_all` + `sync_all` + rename write so the payload is durable before the rename can expose it), `marketplace` (the one marketplace-source resolution shared by the `/plugins marketplace` and `/connectors marketplace` command families), `net` (the `https`-only redirect policy and endpoint validator), and `scan` (the generic store-scan failure type). The plugin/connector `marketplace_ops` writers delegate to `write_atomic_json` and the plugin `store_fetch::https_only_redirects` wrapper is deleted. The four hand-copied redacting `Debug` impls in `ragent-config` collapse into one `macro_rules! redacted_debug_impl!`; `sanitize::redact_json_value` routes through the borrow-or-own `redact_secrets_cow`; `check_path_within_allowed_roots_cached` takes a fast path when `dirs.allowed_roots` is empty; `Config::load`'s M-025 cache key reads `XDG_CONFIG_HOME` through `read_env`; the `masterfetch` `langsearch_key` read shares the env-reading `pick` closure; and the TUI de-duplicates the question-expiry helpers (`utils::now_unix_ms`, `QuestionRequest::resolved_default_index`, `state::resolve_default_index`, `strutil::format_mmss`) and removes the `unreachable!()` panic from the expiry poll. Also lands the `/mcp config` discovery-location report (§19.4.3, `McpClient::discover_locations`) and the `ask_user` `default`/fallback option with the 120-second inactivity timeout (FR-045). |
 | v1.0.133 | 2026-10-12 | Plugin-store browse-panel refinements and a `git+` install fix (spec `pluginstores` FR-004, FR-051; `plugins` FR-024). Each navigator on the `/plugins` browse panel now carries a one-row reversed-video header (`Categories` over the category navigator, `Marketplace` over the marketplace navigator) directly above its `ALL` row, and the navigator's cached hit-test area is now the row area below the header, so a click or wheel on a header row is inert and never mis-mapped onto `ALL`. A bottom-edge search box with a live filter field and a click-to-clear `[x] clear` button was already introduced with the three-pane navigator work. Separately, `git_clone_stage` in `ragent-plugins` ran `git checkout -- FETCH_HEAD`; the `--` separator made `git checkout` treat `FETCH_HEAD` as a *pathspec* file filter rather than a commit-ish, so every install from a `git+<url>#<ref>` source naming a non-default ref (for example the `/plugins claude` store's `git+https://github.com/mongodb/agent-skills#main:plugins/mongodb`) aborted after the fetch. The checkout is now `git checkout FETCH_HEAD`; `FETCH_HEAD` is a name ragent supplies itself and the ref that filled it is already validated to not begin with `-`, so no option can be injected. Covered by the new `add_checks_out_a_non_default_ref` case in `test_store_git_source.rs`. |
 | v1.0.132 | 2026-10-12 | Merged connector/plugin marketplace browsers and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050, `connectors` FR-042..FR-046). The `/plugins codex\|claude` and `/connectors claude` browse panels each merge their store's base endpoint with every additional marketplace registered through the new `/plugins marketplace` / `/connectors marketplace` sub-subcommand families (`show`, `<store> list\|add <source> [--force]\|remove <name>`), recorded in the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces` arrays by an atomic config splice. Each result row shows the plugin/connector id, its version (plugin store), the marketplace it came from, and its description; the connector panel pins a dark-on-light column-heading row above its scrolling list, and both panels resolve each entry's blank description (and, for the plugin store, its version) from the entry's own repository manifest off the event loop via a bounded thread pool with an injectable `ManifestSource` seam (`ragent_plugins::store_enrich`, `ragent_connectors::catalogue_enrich`). Every connector and plugin-store list is sorted in ascending alphabetical order of id, case-insensitively with a byte-wise tiebreak (`compare_connector_ids` / `compare_store_ids`), applied before any query or category filter. The plugin-store category navigator no longer derives rows from entry `tags`/`keywords` (`catnav` FR-021 withdrawn). Registry fixes: the `/events` SSE connection cap builds on stable Rust (`compare_exchange_weak` loop replacing `AtomicUsize::try_update`); connectors install enabled; `catnav` FR-021 withdrawn retaining its number. |
 | v1.0.131 | 2026-10-10 | OpenHands-parity release. The pluggable execution backends (`local`/`docker`/`podman`/`remote`, §19D) with a health-visible registry and TUI `/backend` switcher, sandbox secret injection resolved from the encrypted store at spawn time, the ACP client plus the feature-gated ACP server (§19E), the OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) with a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport, the automation service (webhook ingress `POST /auto/{id}`, scheduler, durable run history, backend confinement, §19F), AgentSkills (`.agents/skills/`) discovery, and the opt-in LLM security analyzer (`/security`) now ship as a tagged release. The 7-layer bash validation, path containment, and permission system are unchanged and gate every new surface. Registry fixes: the fast-path schema tests assert the crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table); `PluginStoreBrowser::set_index` keeps document order; the `mask_key` doctest expects `[REDACTED]`; `machine_output` routes tracing to stderr for the report subcommands so machine-readable stdout stays clean; and the unused `ragent-storage` dependency is dropped from `ragent-tools-extended`. |
@@ -4938,7 +4958,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
-| `/mcp [status]\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery, and enable/disable |
+| `/mcp [status]\|config\|discover\|connect <id>\|disconnect <id>` | MCP server status, discovery location report, and enable/disable |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
 ### 6.3 TUI Component Architecture

@@ -888,13 +888,17 @@ pub fn suggest_closest_from(candidates: &[String], target: &str) -> String {
 fn replace_frontmatter_status_line(content: &str, status: ResearchStatus) -> String {
     let (fm_block, body) = ResearchIo::split_frontmatter(content);
     if fm_block.is_empty() {
-        let mut placeholder = ResearchItem::new(
-            ResearchName::new("unknown").unwrap_or(ResearchName::new("x").unwrap()),
-            "",
-            "",
-        );
-        placeholder.set_status(status);
-        return format!("{}{}", placeholder.render_frontmatter(), body);
+        // "unknown" is always a valid `ResearchName`; handle the (unreachable)
+        // failure explicitly instead of panicking via `unwrap` (no production
+        // `unwrap`).
+        return match ResearchName::new("unknown") {
+            Some(name) => {
+                let mut placeholder = ResearchItem::new(name, "", "");
+                placeholder.set_status(status);
+                format!("{}{}", placeholder.render_frontmatter(), body)
+            }
+            None => format!("status: {status}\n{body}"),
+        };
     }
 
     let status_line = format!("status: {}", status.as_str());

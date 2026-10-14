@@ -44,9 +44,6 @@ use crate::store_index::{CatalogueEndpoint, CatalogueKind};
 /// Read/write chunk size for streaming a catalogue body into memory.
 const STREAM_CHUNK_BYTES: usize = 65_536;
 
-/// Maximum `https`-only redirect hops followed before a fetch is refused.
-const MAX_REDIRECT_HOPS: usize = 5;
-
 /// Name of the on-disk catalogue cache directory.
 pub const CACHE_DIR: &str = "catalogues";
 
@@ -280,7 +277,7 @@ pub fn fetch_bytes(
     limits: &CatalogueLimits,
 ) -> Result<Vec<u8>, ConnectorError> {
     let client = reqwest::blocking::Client::builder()
-        .redirect(https_only_redirects())
+        .redirect(ragent_surface::net::https_only_redirects())
         .timeout(limits.timeout)
         .build()
         .map_err(|e| ConnectorError::CatalogueFetch {
@@ -350,20 +347,6 @@ pub fn read_capped(
         bytes.extend_from_slice(&chunk[..read]);
     }
     Ok(bytes)
-}
-
-/// A redirect policy that follows only `https` targets, up to five hops
-/// (FR-024).
-fn https_only_redirects() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.url().scheme() != "https" {
-            attempt.stop()
-        } else if attempt.previous().len() >= MAX_REDIRECT_HOPS {
-            attempt.error("too many redirects")
-        } else {
-            attempt.follow()
-        }
-    })
 }
 
 /// An on-disk catalogue cache keyed by endpoint URL and catalogue (FR-031).

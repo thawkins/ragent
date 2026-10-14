@@ -174,12 +174,7 @@ fn truncate_one_line(s: &str, max: usize) -> String {
         .chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
         .collect();
-    let flat = flat.trim();
-    if flat.chars().count() <= max {
-        return flat.to_string();
-    }
-    let cut: String = flat.chars().take(max).collect();
-    format!("{cut}...")
+    ragent_types::strutil::truncate_chars(flat.trim(), max)
 }
 
 /// Apply the FR-013 output size cap, appending an explicit truncation marker.

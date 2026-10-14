@@ -106,3 +106,52 @@ impl Drop for TempTree {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+// -- descriptor / server builders (shared, code-audit T-601) ----------------
+//
+// The `descriptor` and `stdio` builders were copy-pasted (with minor field
+// variations) into many connector test files. These canonical versions cover
+// the common shape; tests that need a specific category/auth keep their local
+// builder.
+
+use ragent_connectors::{ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer};
+
+/// A minimal stdio server with the given id and command.
+#[must_use]
+pub fn stdio(id: &str, command: &str) -> ConnectorServer {
+    ConnectorServer {
+        id: id.to_string(),
+        transport: "stdio".to_string(),
+        command: Some(command.to_string()),
+        args: Vec::new(),
+        env: Default::default(),
+        url: None,
+        headers: Default::default(),
+    }
+}
+
+/// A minimal `echo` stdio server with id `main`.
+#[must_use]
+pub fn server() -> ConnectorServer {
+    stdio("main", "echo")
+}
+
+/// A connector descriptor with the given id and servers, no category/tags.
+#[must_use]
+pub fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
+    ConnectorDescriptor {
+        id: ConnectorId::new(id).expect("valid id"),
+        name: id.to_string(),
+        description: String::new(),
+        category: String::new(),
+        tags: Vec::new(),
+        source: String::new(),
+        marketplace: String::new(),
+        provenance: Default::default(),
+        auth: ConnectorAuthShape::None,
+        auth_scope: Vec::new(),
+        credential: None,
+        servers,
+        unsupported: Vec::new(),
+    }
+}

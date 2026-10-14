@@ -283,20 +283,11 @@ impl StoreEndpoint {
     /// whitespace-only string yields [`StoreEndpointError::Empty`]; any other
     /// failure names the offending scheme or the malformed input.
     pub fn parse(raw: &str) -> Result<Self, StoreEndpointError> {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err(StoreEndpointError::Empty);
-        }
-        let url = Url::parse(trimmed).map_err(|e| StoreEndpointError::Malformed(e.to_string()))?;
-        if url.scheme() != "https" {
-            return Err(StoreEndpointError::NotHttps {
-                scheme: url.scheme().to_string(),
-            });
-        }
-        if url.host_str().is_none() {
-            return Err(StoreEndpointError::MissingHost);
-        }
-        Ok(Self(url))
+        // One shared `https` guard (ragent-surface) so the plugins and
+        // connectors endpoint rules cannot drift.
+        ragent_surface::net::endpoint::parse_https_endpoint(raw)
+            .map(Self)
+            .map_err(Into::into)
     }
 
     /// The parsed URL.
@@ -347,6 +338,18 @@ pub enum StoreEndpointError {
     /// The endpoint parsed but carried no host.
     #[error("store endpoint has no host")]
     MissingHost,
+}
+
+impl From<ragent_surface::net::endpoint::EndpointError> for StoreEndpointError {
+    fn from(error: ragent_surface::net::endpoint::EndpointError) -> Self {
+        use ragent_surface::net::endpoint::EndpointError;
+        match error {
+            EndpointError::Empty => Self::Empty,
+            EndpointError::Malformed(detail) => Self::Malformed(detail),
+            EndpointError::NotHttps { scheme } => Self::NotHttps { scheme },
+            EndpointError::MissingHost => Self::MissingHost,
+        }
+    }
 }
 
 /// The registry of plugin stores and their resolved endpoints (FR-001).

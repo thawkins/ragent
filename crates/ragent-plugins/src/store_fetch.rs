@@ -33,10 +33,6 @@ use crate::store_provider::provider_for;
 /// Read/write chunk size for streaming a store index into memory (ANTIPAT L9).
 const STREAM_CHUNK_BYTES: usize = 65_536;
 
-/// Maximum `https`-only redirect hops followed before a fetch is refused
-/// (ANTIPAT L13; FR-024).
-const MAX_REDIRECT_HOPS: usize = 5;
-
 /// Wall-clock timeout and body-size ceiling for one store-index fetch.
 ///
 /// Populated from `plugins.stores` configuration (`timeout_ms`,
@@ -198,7 +194,7 @@ pub fn fetch_index(
 /// network failure. No plugin code is executed.
 pub fn fetch_bytes(endpoint: &StoreEndpoint, limits: &FetchLimits) -> Result<Vec<u8>, StoreError> {
     let client = reqwest::blocking::Client::builder()
-        .redirect(https_only_redirects())
+        .redirect(ragent_surface::net::https_only_redirects())
         .timeout(limits.timeout)
         .build()
         .map_err(|e| StoreError::Network {
@@ -261,27 +257,6 @@ pub fn read_capped(mut reader: impl std::io::Read, max_bytes: u64) -> Result<Vec
         bytes.extend_from_slice(&chunk[..read]);
     }
     Ok(bytes)
-}
-
-/// A redirect policy that follows only `https` targets, up to five hops
-/// (FR-024).
-///
-/// A plaintext downgrade (or any non-`https` location) is stopped, so the
-/// endpoint cannot be bypassed by a redirect chain. The stopped response is a
-/// 3xx, surfaced as [`StoreError::Redirect`].
-///
-/// Shared with the package-download path in [`crate::add`] so an archive fetch
-/// cannot be redirected to a plaintext mirror either (SEC-ragent-plugins-005).
-pub(crate) fn https_only_redirects() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.url().scheme() != "https" {
-            attempt.stop()
-        } else if attempt.previous().len() >= MAX_REDIRECT_HOPS {
-            attempt.error("too many redirects")
-        } else {
-            attempt.follow()
-        }
-    })
 }
 
 /// The label for a store, used in error text and reporting (FR-013).

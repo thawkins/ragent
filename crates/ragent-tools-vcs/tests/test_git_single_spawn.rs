@@ -18,9 +18,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
+#[path = "support/mod.rs"]
+mod support;
+
 use ragent_tools_vcs::git::*;
 use ragent_tools_vcs::{Tool, ToolContext};
 use serde_json::json;
+use support::setup_git_repo;
 
 /// The `PATH` swap is process-global, so the two tests in this file must not
 /// run concurrently: one test's guard dropping would restore `PATH` mid-run of
@@ -113,30 +117,6 @@ fn spawns_for(log_file: &Path, repo: &Path) -> usize {
     };
     let want = repo.to_string_lossy();
     contents.lines().filter(|line| *line == want).count()
-}
-
-fn setup_git_repo(dir: &Path) {
-    let _ = fs::remove_dir_all(dir.join(".git"));
-    run_shell("git init -q", dir);
-    run_shell("git config user.email 'test@example.com'", dir);
-    run_shell("git config user.name 'Test User'", dir);
-    run_shell("git checkout -q -b main", dir);
-    fs::write(dir.join("README.md"), "# Hello").unwrap();
-    run_shell("git add README.md", dir);
-    run_shell("git commit -q -m 'Initial commit'", dir);
-}
-
-fn run_shell(cmd: &str, cwd: &Path) {
-    let output = Command::new("sh")
-        .args(["-c", cmd])
-        .current_dir(cwd)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run '{cmd}': {e}"));
-    assert!(
-        output.status.success(),
-        "command '{cmd}' failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn make_ctx(dir: &Path) -> ToolContext {

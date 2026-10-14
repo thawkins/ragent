@@ -7,47 +7,15 @@
 
 mod support;
 
-use support::TempTree;
+use support::{TempTree, descriptor, stdio};
 
 use std::path::Path;
 
 use ragent_config::{McpServerConfig, McpTransport};
 use ragent_connectors::{
-    BridgeRefusal, ConnectorAuthShape, ConnectorDescriptor, ConnectorId, ConnectorServer,
-    MANIFEST_FILE, StoreDirs, StoreLedger, resolve_servers, scanned_bridge,
+    BridgeRefusal, ConnectorDescriptor, ConnectorServer, MANIFEST_FILE, StoreDirs, StoreLedger,
+    resolve_servers, scanned_bridge,
 };
-
-/// A stdio server with the given id and command.
-fn stdio(id: &str, command: &str) -> ConnectorServer {
-    ConnectorServer {
-        id: id.to_string(),
-        transport: "stdio".to_string(),
-        command: Some(command.to_string()),
-        args: Vec::new(),
-        env: Default::default(),
-        url: None,
-        headers: Default::default(),
-    }
-}
-
-/// A descriptor with the given id and servers.
-fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
-    ConnectorDescriptor {
-        id: ConnectorId::new(id).expect("valid id"),
-        name: id.to_string(),
-        description: String::new(),
-        category: String::new(),
-        tags: Vec::new(),
-        source: String::new(),
-        marketplace: String::new(),
-        provenance: Default::default(),
-        auth: ConnectorAuthShape::None,
-        auth_scope: Vec::new(),
-        credential: None,
-        servers,
-        unsupported: Vec::new(),
-    }
-}
 
 /// Write a descriptor as a connector manifest in `store/<id>/connector.json`.
 fn write_connector(store: &Path, descriptor: &ConnectorDescriptor) {

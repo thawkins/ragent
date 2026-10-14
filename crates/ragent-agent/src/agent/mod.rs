@@ -3207,6 +3207,11 @@ fn build_system_prompt_with_storage_inner(
          - `ask_user` required parameter: `question` (string). Optional: `options` (array of \
            strings). When `options` is provided the user picks one; otherwise they type free text.\
            \n\
+         - Optional `default` (string) names the option pre-selected in the dialog and used \
+           automatically if the user lets the dialog time out. Must match one of `options`; \
+           otherwise the first option is used (an option containing \"recommended\" is preferred \
+           when present).\
+           \n\
          - Use `ask_user` for clarification, prioritisation, or confirmation before proceeding.\
            \n\n",
     );

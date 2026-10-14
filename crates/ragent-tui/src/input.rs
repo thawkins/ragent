@@ -13,20 +13,6 @@ use crate::app::{
 use crate::utils::is_ollama_family;
 use ragent_llm::providers::router_config::Tier;
 
-fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    let len_chars = s.chars().count();
-    if char_index >= len_chars {
-        return s.len();
-    }
-    s.char_indices()
-        .nth(char_index)
-        .map(|(byte, _)| byte)
-        .unwrap_or(s.len())
-}
-
 /// Returns `true` when `key` is one of the always-on global quit keys:
 /// `Ctrl+C` (arm quit, or copy when a keyboard selection is active) or
 /// `Ctrl+D` (confirm quit).
@@ -480,7 +466,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
     // If MCP discover dialog is active, route all keys there
     if app.mcp_discover.is_some() {
-        handle_mcp_discover_key(app, key);
+        handle_mcp_discover_key(app, key).await;
         return None;
     }
 
@@ -2680,120 +2666,61 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
 }
 
 /// Handle key events when the MCP discover dialog is active.
-fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
+///
+/// `Up`/`Down` (or `k`/`j`) move the block cursor, `Enter` toggles the
+/// highlighted server's enabled state, and `Esc` dismisses the dialog. The list
+/// scroll is re-clamped to keep the cursor visible at the next render.
+async fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
     match key.code {
         // Dismiss on Escape
         KeyCode::Esc => {
             app.mcp_discover = None;
         }
 
-        // Confirm selection on Enter
-        KeyCode::Enter => {
-            let Some(state) = app.mcp_discover.as_mut() else {
-                return;
-            };
-            let input = state.number_input.trim().to_string();
-            if input.is_empty() {
-                // Empty input = close dialog
-                app.mcp_discover = None;
-                return;
+        // Move the block cursor up.
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(state) = app.mcp_discover.as_mut() {
+                state.selected = state.selected.saturating_sub(1);
             }
-            match input.parse::<usize>() {
-                Ok(n) if n >= 1 => {
-                    // Take the server (avoids borrow issues)
-                    let server = app
-                        .mcp_discover
-                        .as_ref()
-                        .and_then(|s| s.servers.get(n - 1).cloned());
-                    match server {
-                        Some(srv) => {
-                            let result = app.enable_discovered_mcp_server(&srv);
-                            if let Some(state) = app.mcp_discover.as_mut() {
-                                match result {
-                                    Ok(msg) => {
-                                        state.feedback = Some(msg);
-                                    }
-                                    Err(e) => {
-                                        state.feedback = Some(format!("[x] {e}"));
-                                    }
-                                }
-                                state.number_input.clear();
-                                state.number_cursor = 0;
-                            }
-                        }
-                        None => {
-                            if let Some(state) = app.mcp_discover.as_mut() {
-                                let count = state.servers.len();
-                                state.feedback =
-                                    Some(format!("[x] Invalid number - enter 1..{count}"));
-                                state.number_input.clear();
-                                state.number_cursor = 0;
-                            }
-                        }
-                    }
+        }
+
+        // Move the block cursor down.
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(state) = app.mcp_discover.as_mut() {
+                let last = state.servers.len().saturating_sub(1);
+                if state.selected < last {
+                    state.selected += 1;
                 }
-                _ => {
-                    if let Some(state) = app.mcp_discover.as_mut() {
-                        let count = state.servers.len();
-                        state.feedback = Some(format!("[x] Invalid number - enter 1..{count}"));
-                        state.number_input.clear();
-                        state.number_cursor = 0;
-                    }
-                }
-            }
-        }
-
-        // Backspace in number input
-        KeyCode::Backspace => {
-            if let Some(ref mut state) = app.mcp_discover {
-                if state.number_cursor > 0 {
-                    let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor - 1);
-                    state.number_input.remove(remove_pos);
-                    state.number_cursor -= 1;
-                }
-            }
-        }
-
-        KeyCode::Delete => {
-            if let Some(ref mut state) = app.mcp_discover
-                && state.number_cursor < state.number_input.chars().count()
-            {
-                let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
-                state.number_input.remove(remove_pos);
-            }
-        }
-
-        KeyCode::Left => {
-            if let Some(ref mut state) = app.mcp_discover {
-                state.number_cursor = state.number_cursor.saturating_sub(1);
-            }
-        }
-
-        KeyCode::Right => {
-            if let Some(ref mut state) = app.mcp_discover {
-                state.number_cursor =
-                    (state.number_cursor + 1).min(state.number_input.chars().count());
             }
         }
 
         KeyCode::Home => {
-            if let Some(ref mut state) = app.mcp_discover {
-                state.number_cursor = 0;
+            if let Some(state) = app.mcp_discover.as_mut() {
+                state.selected = 0;
             }
         }
 
         KeyCode::End => {
-            if let Some(ref mut state) = app.mcp_discover {
-                state.number_cursor = state.number_input.chars().count();
+            if let Some(state) = app.mcp_discover.as_mut() {
+                state.selected = state.servers.len().saturating_sub(1);
             }
         }
 
-        // Digit character for number input
-        KeyCode::Char(c) if c.is_ascii_digit() => {
-            if let Some(ref mut state) = app.mcp_discover {
-                let insert_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
-                state.number_input.insert(insert_pos, c);
-                state.number_cursor += 1;
+        // Toggle the highlighted server's enabled state.
+        KeyCode::Enter => {
+            let Some(srv) = app
+                .mcp_discover
+                .as_ref()
+                .and_then(|s| s.servers.get(s.selected).cloned())
+            else {
+                return;
+            };
+            let (feedback, enabled) = app.toggle_discovered_mcp_server(&srv).await;
+            if let Some(state) = app.mcp_discover.as_mut() {
+                state.feedback = Some(feedback);
+                if let Some(row) = state.enabled.get_mut(state.selected) {
+                    *row = enabled;
+                }
             }
         }
 

@@ -129,9 +129,10 @@ pub async fn invoke_skill(
     session_id: &str,
     working_dir: &Path,
 ) -> anyhow::Result<SkillInvocation> {
+    // SEC: `args` is user-supplied and may carry secrets; redact before logging.
     tracing::info!(
         skill = %skill.name,
-        args = %args,
+        args = %ragent_types::sanitize::redact_secrets(args),
         forked = skill.is_forked(),
         "Invoking skill"
     );

@@ -34,6 +34,8 @@ async fn ask_user_clarification(
         request_id: request_id.clone(),
         question: question.to_string(),
         options: Vec::new(),
+        // Free-text clarification: no options, so no default to fall back to.
+        default_index: None,
     });
     loop {
         match rx.recv().await {

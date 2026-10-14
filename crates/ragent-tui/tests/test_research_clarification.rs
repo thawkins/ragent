@@ -111,6 +111,7 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
         question: "Could you narrow this down? Which aspect of 'rust' should the research cover?"
             .to_string(),
         options: Vec::new(),
+        default_index: None,
     })
     .await;
     assert_eq!(app.question_queue.len(), 1, "dialog should be queued");
@@ -160,6 +161,7 @@ async fn test_research_clarification_dismissed_marker_rejected() {
         question: "This topic is a bit broad. What specific angle should the research focus on?"
             .to_string(),
         options: Vec::new(),
+        default_index: None,
     })
     .await;
 

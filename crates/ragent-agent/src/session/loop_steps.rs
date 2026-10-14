@@ -1091,9 +1091,29 @@ impl SessionProcessor {
                     }
                 }))
             };
+            // First-byte guard: bound the initial `chat()` await so a provider
+            // that accepts the connection then goes silent cannot hang the loop
+            // forever (the H4 progress notices would tick indefinitely). Only
+            // ollama/ollama_cloud/copilot/openrouter wrap their own `.send()`;
+            // every other provider (openai, anthropic, gemini, bedrock,
+            // huggingface, azure, router, ...) has an unguarded send, and
+            // `create_streaming_http_client` sets no request timeout. Owning the
+            // budget here makes the retry path reachable for every provider.
+            let initial_secs = self.stream_config.initial_response_timeout_secs;
             let mut stream = {
                 let _scope = profiler.scope("loop.llm.create_stream");
-                match turn.client.chat(attempt_request).await {
+                let chat_result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(initial_secs),
+                    turn.client.chat(attempt_request),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(anyhow::anyhow!(
+                        "initial response timed out after {initial_secs}s"
+                    )),
+                };
+                match chat_result {
                     Ok(s) => s,
                     Err(e) => {
                         let error_message = e.to_string();

@@ -132,9 +132,7 @@ impl MfSearchTool {
             Arc::new(OpenAlexEngine::with_mailto(mailto)),
             Arc::new(WikipediaEngine::new()),
         ];
-        if let Some(key) = langsearch_key
-            && !key.is_empty()
-        {
+        if let Some(key) = langsearch_key {
             engines.push(Arc::new(LangSearchEngine::new(key)));
         }
         if let Some(key) = tavily_key {
@@ -155,18 +153,13 @@ impl MfSearchTool {
     /// Resolve configured API keys for optional search backends.
     ///
     /// Returns `(langsearch_key, tavily_key, perplexity_key, exa_key,
-    /// serper_key)` where `langsearch_key` is taken from
-    /// `ctx.config.langsearch_api_key`, `tavily_key` is taken from the
-    /// `TAVILY_API_KEY` environment variable or `ctx.config.tavily_api_key`,
-    /// `perplexity_key` is taken from the `PERPLEXITY_API_KEY` environment
-    /// variable or `ctx.config.perplexity_api_key`, `exa_key` is taken from
-    /// the `EXA_API_KEY` environment variable or `ctx.config.exa_api_key`,
-    /// and `serper_key` is taken from the `SERPER_API_KEY` environment
-    /// variable or `ctx.config.serper_api_key`.
+    /// serper_key)` where each key is taken from its environment variable (via
+    /// the canonical trimmed credential read, so blank/whitespace counts as
+    /// unset) or, failing that, the matching `ctx.config` field.
     fn resolve_search_keys(
         ctx: &ToolContext,
     ) -> (
-        Option<&str>,
+        Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
@@ -174,14 +167,17 @@ impl MfSearchTool {
     ) {
         let cfg = ctx.config.as_ref();
         // Env var wins; fall back to the config field; an empty value counts as
-        // unset.
+        // unset. Route the env read through the canonical credential helper so
+        // blank/whitespace handling matches the rest of the workspace.
         let pick = |env_var: &str, cfg_key: Option<&String>| {
-            std::env::var(env_var)
-                .ok()
+            ragent_config::credential_env::read_credential_env(env_var)
                 .or_else(|| cfg_key.cloned())
                 .filter(|k| !k.is_empty())
         };
-        let langsearch_key = cfg.and_then(|cfg| cfg.langsearch_api_key.as_deref());
+        let langsearch_key = pick(
+            "LANGSEARCH_API_KEY",
+            cfg.and_then(|c| c.langsearch_api_key.as_ref()),
+        );
         let tavily_key = pick(
             "TAVILY_API_KEY",
             cfg.and_then(|c| c.tavily_api_key.as_ref()),
@@ -210,15 +206,20 @@ impl MfSearchTool {
     /// back to the `openalex_email` config field. Returns an empty string when
     /// neither is set (OpenAlex remains usable without a polite-pool email).
     fn resolve_openalex_mailto(ctx: &ToolContext) -> String {
-        if let Ok(env_email) = std::env::var("OPENALEX_EMAIL")
-            && !env_email.trim().is_empty()
+        // Canonical trimmed env read (audit T-111): unset/blank falls back to
+        // the config field.
+        if let Some(env_email) =
+            ragent_config::credential_env::read_credential_env("OPENALEX_EMAIL")
         {
             return env_email;
         }
         ctx.config
             .as_ref()
-            .and_then(|cfg| cfg.openalex_email.clone())
+            .and_then(|cfg| cfg.openalex_email.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
             .unwrap_or_default()
+            .to_string()
     }
 
     /// Return availability status for all possible search backends.

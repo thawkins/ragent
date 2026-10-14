@@ -172,6 +172,12 @@ interactive selection dialog. The scan checks, in order:
 
 Results are de-duplicated by id, first find wins.
 
+To see the scan reported per location - the label, the path (with a `(missing)`
+marker for an absent directory), and the number of definitions found at each,
+followed by the discovered servers and their launch commands - run **`/mcp
+config`**. It uses the same scan (`McpClient::discover_locations`) and is the
+quickest way to confirm which directory a definition is actually coming from.
+
 ### The ragent-native server directory
 
 Drop a server definition into `~/.config/ragent/servers/` (the canonical
@@ -217,17 +223,21 @@ with no `ragent.json` edit. Two file shapes are accepted, both requiring a
 `command` is skipped. The legacy `~/.mcp/servers/` directory still works and is
 scanned after the ragent-native location.
 
-In the dialog, type the 1-based number of the server you want and press `Enter`;
-`Esc` dismisses it. Selecting a server **writes a new `mcp.<id>` entry into
+In the dialog, move the block cursor with `Up`/`Down` (or `k`/`j`; `Home`/`End`
+jump to the ends) and press `Enter` to toggle the highlighted server's enabled
+state; `Esc` dismisses it and the list scrolls with a scrollbar when there are
+more servers than fit. Enabling a server **writes a new `mcp.<id>` entry into
 `.ragent/ragent.json`** (in the current project) with the discovered command,
-args, env, and `"disabled": false`. ragent reports:
+args, env, and `"disabled": false`, and records the choice in the global ledger;
+disabling it records the choice disabled and disconnects it. ragent reports:
 
 ```
-[ok] '<id>' added to ragent.json. Restart ragent to activate the MCP server.
+[ok] '<id>' enabled
 ```
 
-If a server id is already present in `ragent.json`, discovery refuses to
-overwrite it. A discovered server is written enabled, but the durable ledger
+If a server id is already present in `ragent.json`, its own fields are kept (only
+a `disabled: true` override is lifted). Discovery never overwrites a hand-edited
+entry. A discovered server is written enabled, but the durable ledger
 (section 5) can still switch it off afterwards.
 
 > Discovery is one way to get an entry into `ragent.json`. Editing the file by

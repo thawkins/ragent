@@ -76,6 +76,8 @@ struct QuestionReqP<'a> {
     request_id: &'a str,
     question: &'a str,
     options: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_index: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -490,11 +492,13 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             request_id,
             question,
             options,
+            default_index,
         } => to_data(&QuestionReqP {
             session_id,
             request_id,
             question,
             options,
+            default_index: *default_index,
         }),
         Event::QuestionAnswered {
             session_id,

@@ -9,7 +9,7 @@
 
 mod support;
 
-use support::TempTree;
+use support::{TempTree, descriptor, stdio};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -19,42 +19,10 @@ use async_trait::async_trait;
 use ragent_config::{ConnectorsConfig, McpServerConfig};
 use ragent_connectors::{
     AlwaysEnabled, ConnectReport, ConnectorAuthShape, ConnectorDescriptor, ConnectorEnv,
-    ConnectorId, ConnectorLifecycleState, ConnectorServer, ConnectorSession,
-    InMemoryCredentialStore, LifecycleError, MANIFEST_FILE, MapEnv, MapServerLedger, McpConnect,
-    ServerState, StoreDirs, StoreLedger, store_secret,
+    ConnectorLifecycleState, ConnectorSession, InMemoryCredentialStore, LifecycleError,
+    MANIFEST_FILE, MapEnv, MapServerLedger, McpConnect, ServerState, StoreDirs, StoreLedger,
+    store_secret,
 };
-
-/// A stdio server with the given id and command.
-fn stdio(id: &str, command: &str) -> ConnectorServer {
-    ConnectorServer {
-        id: id.to_string(),
-        transport: "stdio".to_string(),
-        command: Some(command.to_string()),
-        args: Vec::new(),
-        env: Default::default(),
-        url: None,
-        headers: Default::default(),
-    }
-}
-
-/// A descriptor with the given id, servers, and auth shape.
-fn descriptor(id: &str, servers: Vec<ConnectorServer>) -> ConnectorDescriptor {
-    ConnectorDescriptor {
-        id: ConnectorId::new(id).expect("valid id"),
-        name: id.to_string(),
-        description: String::new(),
-        category: String::new(),
-        tags: Vec::new(),
-        source: String::new(),
-        marketplace: String::new(),
-        provenance: Default::default(),
-        auth: ConnectorAuthShape::None,
-        auth_scope: Vec::new(),
-        credential: None,
-        servers,
-        unsupported: Vec::new(),
-    }
-}
 
 /// Write a descriptor as a connector manifest in `store/<id>/connector.json`.
 fn write_connector(store: &Path, descriptor: &ConnectorDescriptor) {

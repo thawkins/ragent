@@ -390,6 +390,12 @@ fn redact_secret_values(value: &mut serde_json::Value, depth: usize) {
 /// masked, regardless of where it sits in the tree.
 pub fn redact_config_secrets(value: &mut serde_json::Value) {
     redact_secret_values(value, 0);
+    // SEC-ragent-server-001: the key-name pass above misses a credential that
+    // sits under an innocuous key - an MCP `env` var value, a `headers`
+    // `Authorization`/`PRIVATE-TOKEN` entry, a string embedding a
+    // `Bearer`/`sk-` token. Value-scan every string so a credential-shaped
+    // value is masked regardless of its key name.
+    ragent_types::sanitize::redact_json_value(value, MAX_REDACT_DEPTH);
 }
 
 async fn get_providers(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {

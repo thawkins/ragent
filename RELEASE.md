@@ -1,5 +1,50 @@
 # Release Notes
 
+## v1.0.134 — MCP discovery ergonomics, ask_user timeout, security hardening
+
+### Added
+
+- **`/mcp config` discovery-location report.** Shows every place ragent looks for
+  MCP server definitions (the ragent-native `~/.config/ragent/servers/` directory
+  first, then npm global `node_modules`, `PATH`, and the Claude/Cline/legacy/XDG
+  registry directories), the number of server definitions found at each location,
+  and a table of the individual servers discovered (id, origin, launch command).
+  Backed by the new `McpDiscoveryLocation` type and `McpClient::discover_locations`.
+- **`ask_user` default/fallback option with an inactivity timeout.** The
+  interactive question tool can now carry a pre-selected default that is used
+  automatically if the dialog times out.
+- **`/mcp discover` block-cursor panel with per-server enable toggle.** The
+  discovery dialog lists every server under a block cursor (`Up`/`Down`, `k`/`j`,
+  `Home`/`End`), scrolls with a scrollbar, and toggles a server's enabled state on
+  `Enter` (writing a `mcp.<id>` entry to the project `.ragent/ragent.json` and the
+  global enable ledger, connecting/disconnecting live).
+
+### Security
+
+- **Value-level redaction extended to remaining leak sites.** The server `GET
+  /config` redactor and the TUI `/config show` renderer value-scan nested
+  `mcp.*.env`/`headers` subtrees; the TUI key-name allowlist also masks `*_token`
+  / `*_secret` keys; tool-call argument parse-failure logs redact `args`.
+  `McpServerConfig`, `ProviderConfig` and `ApiConfig` carry hand-written redacting
+  `Debug` impls.
+- **Ad-hoc credential env reads routed through the canonical helper.** Provider
+  base-URL/email reads, the OpenAlex mailto resolver, and the `RAGENT_TOKEN`
+  fallback now use `ragent_config::credential_env::read_credential_env`.
+
+### Fixed
+
+- **`Config::load` fast-path cache now keys on `XDG_CONFIG_HOME`.**
+- **MCP enable ledger writes atomically** (temp file + rename).
+- **Best-effort persistence failures are logged, not swallowed.**
+- **A session's working directory is always an allowed path root.**
+- **A whole-repo plugin source whose only manifest is nested is now discovered.**
+
+### Changed
+
+- **`/simplify all` pass over the uncommitted working tree** (code-audit
+  cleanups: dead parameters/branches removed, hot-path tightening, TUI
+  de-duplication, and a panic removed from the question-expiry poll).
+
 ## v0.1.0-beta.25 — disable rpm packages
 
 ### Changed — CI package builds

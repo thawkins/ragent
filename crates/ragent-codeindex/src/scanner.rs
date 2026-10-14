@@ -7,7 +7,7 @@
 use crate::types::{ScanConfig, ScannedFile};
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::fs;
 use std::path::Path;
 use tracing::{debug, trace, warn};

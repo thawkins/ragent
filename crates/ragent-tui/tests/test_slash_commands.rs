@@ -3759,9 +3759,15 @@ fn test_config_save_picker_key_navigation_and_restore() {
     // T-006 / T-008: the config-save picker intercepts keys, supports
     // navigation, and restores the selected backup atomically over the global
     // ragent.json.
+    //
+    // The Enter path calls `Config::load()` + `sync_runtime_flags()`, which
+    // mutate the process-wide `edit_log`/`yolo` runtime flags. Serialise on the
+    // shared cwd lock so this cannot race the toggle tests that assert those
+    // flags (the restore reloads the *ambient* global config, not this tempdir).
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ragent_config::Config;
 
+    let _lock = cwd_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
 
@@ -3857,9 +3863,14 @@ fn test_config_save_picker_key_navigation_and_restore() {
 fn test_config_restore_invalidates_config_cache() {
     // T-008: restoring a backup must invalidate the cached config so the next
     // turn re-reads ragent.json from disk.
+    //
+    // Like the navigation test, the Enter path reloads the ambient global
+    // config and re-syncs the process-wide runtime flags, so it must hold the
+    // shared cwd lock to avoid racing the flag-toggle tests.
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ragent_config::Config;
 
+    let _lock = cwd_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
     fs::write(dir.join("ragent.json"), r#"{"defaultAgent":"coder"}"#).expect("write");
