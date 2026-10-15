@@ -47,6 +47,12 @@ const CACHE_FILE_NAME: &str = "masterfetch_cache.db";
 /// Maximum number of URLs fetched concurrently in a bulk request.
 const BULK_CONCURRENCY: usize = 8;
 
+/// Maximum number of URLs a single bulk `mf_fetch` call may request (SEC-040).
+///
+/// Without a cap, `buffer_unordered` retained every per-URL output (up to 16 MiB
+/// each), so a long `urls` array was an LLM-driven memory growth vector.
+const MAX_BULK_URLS: usize = 64;
+
 /// Common parameters for a single `mf_fetch` invocation, shared across every
 /// URL in a bulk request.
 struct FetchParams {
@@ -161,6 +167,13 @@ impl Tool for MfFetchTool {
         if urls.is_empty() {
             anyhow::bail!("Missing required 'url' parameter");
         }
+        // SEC-040: cap the bulk array so memory growth is bounded.
+        if urls.len() > MAX_BULK_URLS {
+            anyhow::bail!(
+                "'urls' carries {} entries, over the {MAX_BULK_URLS}-URL bulk limit",
+                urls.len()
+            );
+        }
 
         let params = FetchParams {
             format: OutputFormat::parse_format(input["format"].as_str().unwrap_or("markdown")),
@@ -173,7 +186,23 @@ impl Tool for MfFetchTool {
             cache_ttl: input["cache_ttl"].as_u64().unwrap_or(3600),
         };
 
-        let cache = open_cache(ctx).await;
+        let cache = match open_cache(ctx).await {
+            Ok(cache) => cache,
+            Err(e) => {
+                if urls.len() == 1 {
+                    return Ok(fetch_error_output(
+                        &urls[0],
+                        0,
+                        &format!("failed to open content cache: {e}"),
+                    ));
+                }
+                return Ok(fetch_error_output(
+                    &urls.join(", "),
+                    0,
+                    &format!("failed to open content cache: {e}"),
+                ));
+            }
+        };
 
         let client = match crate::masterfetch::http::shared_client() {
             Ok(c) => c,
@@ -759,24 +788,32 @@ fn bulk_client_error_output(urls: &[String], error: &str) -> ToolOutput {
 /// Tries to use a persistent `SQLite` cache under `.ragent/` in the working
 /// directory. If that fails (e.g. in tests or ephemeral contexts), falls back
 /// to an in-memory cache.
-async fn open_cache(ctx: &ToolContext) -> ContentCache {
+async fn open_cache(ctx: &ToolContext) -> Result<ContentCache> {
     let working_dir = &ctx.working_dir;
     let cache_path: PathBuf = working_dir.join(".ragent").join(CACHE_FILE_NAME);
 
-    if let Err(e) =
-        tokio::fs::create_dir_all(cache_path.parent().expect("cache path has parent")).await
-    {
-        tracing::warn!(error = %e, "mf_fetch: failed to create cache directory; using in-memory cache");
-        return ContentCache::open_in_memory().expect("in-memory content cache should always open");
+    if let Some(parent) = cache_path.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            tracing::warn!(error = %e, "mf_fetch: failed to create cache directory; using in-memory cache");
+            return in_memory_cache();
+        }
     }
 
     match ContentCache::open(&cache_path) {
-        Ok(cache) => cache,
+        Ok(cache) => Ok(cache),
         Err(e) => {
             tracing::warn!(error = %e, path = %cache_path.display(), "mf_fetch: failed to open persistent cache; using in-memory cache");
-            ContentCache::open_in_memory().expect("in-memory content cache should always open")
+            in_memory_cache()
         }
     }
+}
+
+/// Build the in-memory fallback cache. A failure to open even an in-memory
+/// SQLite database is propagated rather than panicked, so a broken environment
+/// surfaces as a tool error.
+fn in_memory_cache() -> Result<ContentCache> {
+    ContentCache::open_in_memory()
+        .map_err(|e| anyhow::anyhow!("opening in-memory content cache: {e}"))
 }
 
 /// Look up a cached entry in a blocking-safe way.

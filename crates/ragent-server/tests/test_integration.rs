@@ -341,12 +341,20 @@ async fn test_create_session_not_a_directory() {
 #[tokio::test]
 async fn test_create_session_success() {
     let app = router(test_state("tok"));
+    // SEC-062: a directory must be inside the configured project root, so use a
+    // subdirectory of the server's working directory rather than `/tmp`.
+    let dir = std::env::current_dir()
+        .expect("cwd")
+        .join("target")
+        .join("temp");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let body = format!(r#"{{"directory":"{}"}}"#, dir.display());
     let req = Request::builder()
         .method("POST")
         .uri("/sessions")
         .header("Authorization", "Bearer tok")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"directory":"/tmp"}"#))
+        .body(Body::from(body))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);

@@ -457,8 +457,20 @@ impl BackgroundCommand {
                 // is O(overflow) and shifts the remainder once, whereas
                 // `replace_range` was O(buffer.len()) per call (O(n^2) overall
                 // when trimming repeatedly under a high-output command).
-                new_dropped = new_dropped.saturating_add(overflow);
-                buffer.drain(..overflow);
+                //
+                // SEC-026: `overflow` is derived from byte lengths and can land
+                // inside a multi-byte UTF-8 character; `String::drain` panics on
+                // a non-char-boundary index (poisoning the task mutex). Snap the
+                // cut down to the nearest boundary first.
+                let mut cut = overflow.min(buffer.len());
+                while cut < buffer.len() && !buffer.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                while cut > 0 && !buffer.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                new_dropped = new_dropped.saturating_add(cut);
+                buffer.drain(..cut);
             }
         }
         buffer.push_str(line);

@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::time::sleep;
@@ -43,6 +44,21 @@ const RETRY_BACKOFFS: &[Duration] = &[
 /// envelope used for servers ragent owns.
 const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 
+/// Whole-request timeout for a non-streaming MCP HTTP call (connect + send +
+/// read body). Bounds a server that accepts the connection then stalls.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Connection-establishment timeout for the shared MCP HTTP client.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum redirects the shared MCP HTTP client will follow.
+const MAX_REDIRECTS: usize = 5;
+
+/// Maximum bytes of an MCP HTTP response body that will be buffered. A
+/// JSON-RPC reply is small; a server that streams more than this is treated as
+/// hostile (SEC-042) rather than allowed to exhaust memory.
+const MAX_RESPONSE_BODY: usize = 8 * 1024 * 1024;
+
 /// The process-wide MCP HTTP client.
 ///
 /// `reqwest::Client::new()` must be called from inside a Tokio runtime context:
@@ -52,9 +68,44 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 /// path (which always runs on the runtime), never from `app::init`/`Config`
 /// construction. Sharing one client also lets the connection pool be reused
 /// across every MCP HTTP server instead of one pool per server.
+///
+/// The client is bounded (SEC-042): a whole-request timeout and a connect
+/// timeout stop a hung or unreachable server from stalling the agent forever,
+/// and the redirect policy is capped so a server cannot bounce a request around
+/// an unbounded chain of hosts.
 fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+/// Read an HTTP response body into a string, refusing to buffer more than
+/// [`MAX_RESPONSE_BODY`] bytes (SEC-042).
+///
+/// `response.text()` would read an unbounded body into memory; this accumulates
+/// chunks from the stream and bails the moment the running total would exceed
+/// the cap, so a hostile or misbehaving server cannot exhaust the agent's
+/// memory. The body is decoded as UTF-8 lossily, matching `text()` for the
+/// JSON-RPC payloads this client expects.
+async fn read_bounded_body(response: reqwest::Response) -> Result<String> {
+    let mut stream = Box::pin(response.bytes_stream());
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("failed to read HTTP MCP response body")?;
+        if body.len() + chunk.len() > MAX_RESPONSE_BODY {
+            anyhow::bail!(
+                "HTTP MCP response body exceeded the {MAX_RESPONSE_BODY} byte limit (SEC-042)"
+            );
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 /// Parse a JSON-RPC reply body into its `result`, unwrapping a Streamable-HTTP
@@ -157,7 +208,7 @@ pub struct LiveEndpoint {
 /// A bare TCP-listening socket is *not* enough: `initialize` must round-trip, so
 /// an unrelated process squatting the port is rejected.
 pub async fn probe(url: &str) -> Option<LiveEndpoint> {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
+    if !ragent_types::strutil::is_http_url(url) {
         return None;
     }
     let mut client = HttpMcpClient::new(url, HashMap::new());
@@ -369,8 +420,7 @@ impl HttpMcpClient {
             .get("mcp-session-id")
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let text = response
-            .text()
+        let text = read_bounded_body(response)
             .await
             .context("failed to read HTTP MCP response body")?;
 

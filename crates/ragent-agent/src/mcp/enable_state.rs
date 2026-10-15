@@ -51,19 +51,17 @@ impl McpEnableLedger {
     /// Load a ledger from an explicit path (test seam for [`Self::load`]).
     #[must_use]
     pub fn load_from(path: &Path) -> Self {
-        let Ok(bytes) = std::fs::read(path) else {
+        let Some(bytes) = ragent_surface::store::read_ledger_bytes(path) else {
             return Self::default();
         };
         match serde_json::from_slice(&bytes) {
             Ok(ledger) => ledger,
             Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %error,
-                    "MCP enable-state ledger is corrupt; renaming aside and starting fresh"
+                ragent_surface::store::quarantine_corrupt_ledger(
+                    path,
+                    "MCP enable-state",
+                    &error.to_string(),
                 );
-                // INTENTIONAL: best-effort quarantine of a corrupt state file
-                let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
                 Self::default()
             }
         }

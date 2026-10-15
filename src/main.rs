@@ -41,8 +41,16 @@ mod acp_server;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
-#[command(name = "ragent", about = "A Rust AI coding agent for the terminal")]
+#[command(
+    name = "ragent",
+    about = "A Rust AI coding agent for the terminal",
+    disable_version_flag = true
+)]
 struct Cli {
+    /// Print the ragent version and exit
+    #[arg(long, short = 'V')]
+    version: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -375,10 +383,20 @@ async fn run_dry_run_and_exit(
 ///
 /// Returns an error on configuration, storage, network, or I/O failures.
 async fn async_main() -> Result<()> {
+    let working_dir = crate::working_dir();
+
+    // `--version` / `-V` is answered before any side effect: no panic hook, no
+    // crash marker, no previous-crash warning, no TUI. Running `ragent -V` on a
+    // fresh checkout must print the version and exit cleanly, not stamp a
+    // session marker the next start would report as an unclean exit.
+    let cli = Cli::parse();
+    if cli.version {
+        println!("ragent {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Install the panic hook first so panics during startup are also captured.
     panic_hook::install();
-
-    let working_dir = crate::working_dir();
 
     // Read the PREVIOUS marker FIRST. `write_record` truncates and replaces the
     // marker with this process's pid, so checking afterwards could never see the
@@ -405,9 +423,7 @@ async fn async_main() -> Result<()> {
     }
 
     let mut startup = StartupTimings::new();
-
     let t0 = Instant::now();
-    let cli = Cli::parse();
     startup.record("CLI parse", t0.elapsed());
 
     if cli.no_git_context {
@@ -429,9 +445,11 @@ async fn async_main() -> Result<()> {
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| {
         // Surface the fallback: a typo'd --log-level would otherwise be
         // silently downgraded to `warn` with no hint to the user.
+        // SEC-078: `--log-level` is untrusted argv; neutralise control chars
+        // and escape sequences before echoing it to the terminal.
         eprintln!(
             "warning: invalid log level '{}' - falling back to 'warn'",
-            cli.log_level
+            ragent_types::sanitize_terminal::sanitize_terminal(&cli.log_level)
         );
         EnvFilter::new("warn")
     });
@@ -503,9 +521,12 @@ async fn async_main() -> Result<()> {
     let config = if let Some(ref path_str) = cli.config {
         let path = PathBuf::from(path_str);
         tracing::info!(config_path = %path.display(), "Loading config from file");
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            anyhow::anyhow!("Failed to read config file '{}': {}", path.display(), e)
-        })?;
+        // SEC-078: `--config <path>` is untrusted argv; neutralise control
+        // characters before the path is echoed to the terminal.
+        let raw_path = path.display().to_string();
+        let safe_path = ragent_types::sanitize_terminal::sanitize_terminal(&raw_path);
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to read config file '{safe_path}': {e}"))?;
 
         serde_json::from_str(&content).map_err(|e| {
             let line = e.line();
@@ -517,16 +538,19 @@ async fn async_main() -> Result<()> {
             // SEC-ragent-config-007 (SECTASKS T-061): the echoed source line can
             // contain a credential; redact it before it reaches the terminal/log.
             let problematic_line = ragent_types::sanitize::redact_secrets(problematic_line);
+            // SEC-078: the echoed source line is untrusted file content; strip
+            // control characters and escape sequences before printing.
+            let problematic_line =
+                ragent_types::sanitize_terminal::sanitize_terminal(&problematic_line);
 
             anyhow::anyhow!(
-                "Failed to parse config file '{}':\n\
+                "Failed to parse config file '{safe_path}':\n\
                            Error at line {}, column {}:\n\
                            {}\n\
                            Problematic line:\n\
                            {}\n\
                            {}^\n\
                            Parse error: {}",
-                path.display(),
                 line,
                 column,
                 "─".repeat(80),
@@ -1093,7 +1117,7 @@ async fn async_main() -> Result<()> {
                 provider_registry.as_ref(),
             );
             let dir = std::fs::canonicalize(".")?;
-            let session = session_manager.create_session(dir)?;
+            let session = session_manager.create_session(dir.clone())?;
 
             // If the prompt starts with `!`, run it as a shell command first
             // and ask the model to review the output.
@@ -1102,6 +1126,15 @@ async fn async_main() -> Result<()> {
                 if cmd.is_empty() {
                     prompt.clone()
                 } else {
+                    // SEC-077: the bang command must pass the same 7-layer bash
+                    // validation the `bash` tool applies; otherwise
+                    // `ragent run "!<cmd>"` bypassed every guard (banned tools,
+                    // directory escape, denied patterns, obfuscation).
+                    if let Err(e) = ragent_tools_core::bash::validate_shell_command(cmd, &dir).await
+                    {
+                        eprintln!("command rejected: {e}");
+                        std::process::exit(2);
+                    }
                     // Async context: spawn_blocking keeps a slow/hanging shell
                     // command from stalling the tokio worker thread (the bash
                     // tool applies the same principle via kill_on_drop).

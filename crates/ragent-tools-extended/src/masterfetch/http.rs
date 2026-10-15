@@ -48,6 +48,12 @@ pub enum HttpError {
     /// The reqwest client builder returned an error.
     #[error("failed to build masterfetch HTTP client: {0}")]
     Build(#[from] reqwest::Error),
+    /// The lazily-initialised shared client slot was unexpectedly empty.
+    ///
+    /// Unreachable in practice (the slot is populated immediately before the
+    /// read), but reported as an error rather than panicking.
+    #[error("shared masterfetch HTTP client slot was not populated")]
+    SlotEmpty,
 }
 
 /// Build a new [`reqwest::Client`] with the masterfetch configuration.
@@ -81,7 +87,18 @@ pub fn build_client(timeout: std::time::Duration) -> Result<reqwest::Client, Htt
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(timeout)
-        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        // SEC-014: re-run the SSRF guard on every redirect hop, not just the
+        // initial URL, so an attacker page cannot 302 the fetch to a loopback or
+        // metadata address after the single entry check passed.
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= MAX_REDIRECTS {
+                return attempt.error("too many redirects");
+            }
+            if crate::masterfetch::security::validate_url(attempt.url().as_str()).is_err() {
+                return attempt.error("redirect target failed the SSRF guard");
+            }
+            attempt.follow()
+        }))
         .gzip(true)
         .deflate(true)
         .build()?;
@@ -142,9 +159,10 @@ pub fn shared_client() -> Result<&'static reqwest::Client, HttpError> {
     // others are dropped. This is acceptable: the extra build is cheap and
     // happens at most once per concurrent first-call race.
     let _ = CLIENT.set(client); // INTENTIONAL: OnceLock set race is benign
-    Ok(CLIENT
-        .get()
-        .expect("client was just set or is present from a racing caller"))
+    // A racing caller may have won the `set`; either way the slot is now
+    // populated, so `get` always yields the shared client. Surface the
+    // impossible-empty case as an error rather than panicking.
+    CLIENT.get().ok_or(HttpError::SlotEmpty)
 }
 
 /// Maximum bytes buffered from an upstream response body (ANTIPAT 4.1).
@@ -172,11 +190,27 @@ pub const MAX_SMALL_BODY_BYTES: usize = 512 * 1024;
 ///
 /// Returns the underlying [`reqwest::Error`] when the body cannot be read.
 pub async fn read_body_capped(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
     limit: usize,
 ) -> Result<String, reqwest::Error> {
-    let body = response.text().await?;
-    Ok(truncate_body(&body, limit))
+    // SEC-036: stream and stop at `limit` rather than buffering the whole body
+    // first; `truncate_body` alone still materialised the full response.
+    let mut buf: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    while let Some(chunk) = response.chunk().await? {
+        if buf.len() + chunk.len() > limit {
+            let room = limit.saturating_sub(buf.len());
+            buf.extend_from_slice(&chunk[..room]);
+            truncated = true;
+            break;
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    let mut body = String::from_utf8_lossy(&buf).into_owned();
+    if truncated {
+        body.push_str("\n[... response body truncated ...]");
+    }
+    Ok(body)
 }
 
 /// Truncate `body` to at most `limit` bytes on a UTF-8 character boundary.

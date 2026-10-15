@@ -20,7 +20,11 @@ telemetry = [
 
 [dependencies]
 ragent-config = { path = "../ragent-config" }
+ragent-types = { path = "../ragent-types" }
 
+# SEC-053/SEC-055: parse the OTLP endpoint once so the loopback decision is made
+# on the validated host (not a string split) and report userinfo safely.
+url = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

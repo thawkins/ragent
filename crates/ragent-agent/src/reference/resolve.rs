@@ -182,7 +182,9 @@ async fn resolve_url(client: &reqwest::Client, url: &str, raw: &str) -> Result<R
         let html = body.clone();
         match std::thread::Builder::new()
             .name("ref-html2text".to_string())
-            .spawn(move || html2text::from_read(html.as_bytes(), 120))
+            .spawn(move || {
+                html2text::from_read(html.as_bytes(), ragent_types::strutil::HTML2TEXT_WIDTH)
+            })
             .map_err(|e| e.to_string())
             .and_then(|h| h.join().map_err(|_| "html2text panicked".to_string()))
         {

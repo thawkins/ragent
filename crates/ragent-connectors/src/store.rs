@@ -127,31 +127,21 @@ impl StoreLedger {
     #[must_use]
     pub fn load(store_dir: &Path) -> Self {
         let path = store_dir.join(STATE_FILE);
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Self::default(),
-            Err(error) => {
-                // A present-but-unreadable ledger (e.g. a permission fault) must
-                // not be treated as absent: the next save would silently discard
-                // the previous enable/disable state. Warn instead.
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %error,
-                    "connector store ledger unreadable; starting fresh"
-                );
-                return Self::default();
-            }
+        // A present-but-unreadable ledger (e.g. a permission fault) must not be
+        // treated as absent: `read_ledger_bytes` warns and returns `None`, and
+        // the fresh ledger below would otherwise silently discard the previous
+        // enable/disable state.
+        let Some(bytes) = ragent_surface::store::read_ledger_bytes(&path) else {
+            return Self::default();
         };
         match serde_json::from_slice(&bytes) {
             Ok(ledger) => ledger,
             Err(e) => {
-                let aside = store_dir.join(format!("{STATE_FILE}.corrupt"));
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "connector store ledger is corrupt; renaming aside and starting fresh"
+                ragent_surface::store::quarantine_corrupt_ledger(
+                    &path,
+                    "connector store",
+                    &e.to_string(),
                 );
-                let _ = std::fs::rename(&path, aside); // INTENTIONAL: corrupt-ledger quarantine rename; failure leaves the file untouched
                 Self::default()
             }
         }
@@ -249,9 +239,11 @@ pub fn scan_dirs(dirs: &StoreDirs) -> Vec<ScannedConnector> {
             if name == STATE_FILE || name.starts_with('.') {
                 continue;
             }
-            if !ragent_surface::store::store_entry_is_dir(store, &dir, "connector") {
+            // SEC-025: open the verified canonical path (not the raw entry) so a
+            // symlinked entry cannot be repointed between the check and the use.
+            let Some(dir) = ragent_surface::store::store_entry_dir(store, &dir, "connector") else {
                 continue;
-            }
+            };
             if !dir.join(MANIFEST_FILE).is_file() {
                 continue; // not a connector directory
             }

@@ -218,10 +218,18 @@ fn validate_host(host: HostKind) -> SecurityResult {
             check_ip_range(&ip)
         }
         HostKind::Domain(domain) => {
+            // SEC-037: a FQDN may carry a single trailing dot (`localhost.`),
+            // which resolvers still map to loopback; strip it before the name
+            // comparisons so the localhost guard cannot be bypassed.
             let host_lower = domain.to_ascii_lowercase();
+            let host_norm = host_lower.strip_suffix('.').unwrap_or(&host_lower);
 
             // 8. Reject localhost hostnames.
-            if !ssrf_test_skip() && (host_lower == "localhost" || host_lower == "local") {
+            if !ssrf_test_skip()
+                && (host_norm == "localhost"
+                    || host_norm == "local"
+                    || host_norm == "localhost.localdomain")
+            {
                 return Err(SecurityError::Localhost(domain));
             }
 

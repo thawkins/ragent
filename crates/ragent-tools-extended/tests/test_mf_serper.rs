@@ -4,9 +4,11 @@
 //! without making any network requests.
 
 use ragent_tools_extended::masterfetch::search::engine::{Freshness, SearchOptions};
+// The key-masking helper now lives in `engine`; import it under the historical
+// test-local name so the masking assertions below stay unchanged.
+use ragent_tools_extended::masterfetch::search::engine::mask_api_key as mask_key;
 use ragent_tools_extended::masterfetch::search::serper::{
-    ENGINE_NAME, MAX_COUNT, MIN_COUNT, build_request_body, freshness_to_tbs, mask_key,
-    parse_response_json,
+    ENGINE_NAME, MAX_COUNT, MIN_COUNT, build_request_body, freshness_to_tbs, parse_response_json,
 };
 use serde_json::json;
 

@@ -66,7 +66,7 @@ async fn test_sensitive_name_is_fully_redacted() {
     set_var("RAGENT_TEST_MY_API_KEY", "short");
     let content = read("RAGENT_TEST_MY_API_KEY").await;
     assert!(
-        content.contains("***REDACTED***"),
+        content.contains("[REDACTED]"),
         "sensitive-named variable must be fully redacted: {content}"
     );
 }

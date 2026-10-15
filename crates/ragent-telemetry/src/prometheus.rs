@@ -57,6 +57,14 @@ use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, Temporality};
 /// from any other path, so a 1 KiB buffer is sufficient for the request head.
 const HTTP_READ_BUF: usize = 1024;
 
+/// Maximum time to wait for a scrape client to send its request line
+/// (SEC-054).
+///
+/// A client that connects but never writes would otherwise hold a worker until
+/// the socket is closed; bounding the read keeps an idle connection from
+/// stalling the endpoint.
+const SCRAPE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 // -- SharedManualReader ---------------------------------------------------
 
 /// A newtype wrapper around `Arc<ManualReader>` that implements
@@ -357,7 +365,6 @@ pub async fn serve(
     reader: Arc<ManualReader>,
     port: u16,
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     let addr = format!("127.0.0.1:{port}");
@@ -365,7 +372,7 @@ pub async fn serve(
 
     let handle = tokio::spawn(async move {
         loop {
-            let (mut sock, _peer) = match listener.accept().await {
+            let (sock, _peer) = match listener.accept().await {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::warn!(error = %e, "prometheus: accept failed");
@@ -373,47 +380,70 @@ pub async fn serve(
                 }
             };
 
-            let mut buf = [0u8; HTTP_READ_BUF];
-            let n = match sock.read(&mut buf).await {
-                Ok(n) => n,
-                Err(e) => {
-                    tracing::debug!(error = %e, "prometheus: scrape request read failed");
-                    continue;
-                }
-            };
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let is_metrics = req
-                .lines()
-                .next()
-                .is_some_and(|line| line.starts_with("GET /metrics") || line.starts_with("GET / "));
-
-            let body = if is_metrics {
-                render_prometheus_text(&reader)
-            } else {
-                String::new()
-            };
-            let status = if is_metrics && !body.is_empty() {
-                "200 OK"
-            } else if is_metrics {
-                "503 Service Unavailable"
-            } else {
-                "404 Not Found"
-            };
-
-            let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{body}",
-                body.len()
-            );
-            if let Err(e) = sock.write_all(response.as_bytes()).await {
-                tracing::debug!(error = %e, "prometheus scrape response write failed");
-            }
-            if let Err(e) = sock.flush().await {
-                tracing::debug!(error = %e, "prometheus scrape response flush failed");
-            }
+            // SEC-054: handle each connection on its own task so one idle or
+            // slow client cannot block later scrapes, and bound the request
+            // read so a client that connects and never sends a request is not
+            // held open indefinitely.
+            let reader = Arc::clone(&reader);
+            tokio::spawn(async move {
+                handle_scrape(&reader, sock).await;
+            });
         }
     });
 
     Ok(handle)
+}
+
+/// Handle one accepted scrape connection (SEC-054).
+///
+/// Reads the request line under a bounded timeout so a client that connects but
+/// never writes cannot occupy the handler forever, then renders and writes the
+/// Prometheus text response. A read error or timeout is logged at `debug` and
+/// the connection is dropped.
+async fn handle_scrape(reader: &Arc<ManualReader>, mut sock: tokio::net::TcpStream) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut buf = [0u8; HTTP_READ_BUF];
+    let n = match tokio::time::timeout(SCRAPE_READ_TIMEOUT, sock.read(&mut buf)).await {
+        Ok(Ok(n)) => n,
+        Ok(Err(e)) => {
+            tracing::debug!(error = %e, "prometheus: scrape request read failed");
+            return;
+        }
+        Err(_) => {
+            tracing::debug!("prometheus: scrape request read timed out");
+            return;
+        }
+    };
+    let req = String::from_utf8_lossy(&buf[..n]);
+    let is_metrics = req
+        .lines()
+        .next()
+        .is_some_and(|line| line.starts_with("GET /metrics") || line.starts_with("GET / "));
+
+    let body = if is_metrics {
+        render_prometheus_text(reader)
+    } else {
+        String::new()
+    };
+    let status = if is_metrics && !body.is_empty() {
+        "200 OK"
+    } else if is_metrics {
+        "503 Service Unavailable"
+    } else {
+        "404 Not Found"
+    };
+
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    if let Err(e) = sock.write_all(response.as_bytes()).await {
+        tracing::debug!(error = %e, "prometheus scrape response write failed");
+    }
+    if let Err(e) = sock.flush().await {
+        tracing::debug!(error = %e, "prometheus scrape response flush failed");
+    }
 }
 
 // -- Tests -----------------------------------------------------------------

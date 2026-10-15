@@ -492,7 +492,10 @@ impl LlmClient for HuggingFaceClient {
         let mut req = self
             .http
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&self.api_key),
+            )
             .header("content-type", "application/json");
 
         // HuggingFace-specific headers
@@ -642,9 +645,11 @@ impl LlmClient for HuggingFaceClient {
                         Ok(v) => v,
                         Err(e) => {
                             // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                            // SEC-ragent-llm-020: redact secrets and cap the raw
+                            // frame before logging.
                             tracing::warn!(
                                 error = %e,
-                                frame = %data,
+                                frame = %crate::provider::http_client::redact_frame(data),
                                 "HuggingFace: dropping malformed SSE data frame"
                             );
                             continue;
@@ -814,7 +819,10 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
 
     let mut request = client.get(&url).timeout(std::time::Duration::from_secs(15));
     if !api_key.is_empty() {
-        request = request.header("Authorization", format!("Bearer {api_key}"));
+        request = request.header(
+            "Authorization",
+            ragent_types::strutil::bearer_auth_header(&api_key),
+        );
     }
 
     let response = request
@@ -1045,4 +1053,4 @@ fn estimate_context_from_id(model_id: &str) -> usize {
 
 #[cfg(test)]
 #[path = "../../tests/inline/huggingface.rs"]
-mod tests_tests;
+mod tests;

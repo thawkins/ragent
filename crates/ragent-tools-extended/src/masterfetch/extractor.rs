@@ -47,7 +47,9 @@ pub const DEFAULT_MAX_CONTENT_CHARS: usize = 40_000;
 pub const MIN_MAX_CONTENT_CHARS: usize = 500;
 
 /// Text width for `html2text` rendering (columns).
-const TEXT_WIDTH: usize = 120;
+///
+/// Shares the single workspace width ([`ragent_types::strutil::HTML2TEXT_WIDTH`]).
+const TEXT_WIDTH: usize = ragent_types::strutil::HTML2TEXT_WIDTH;
 
 // ---------------------------------------------------------------------------
 // Output format

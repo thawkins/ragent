@@ -368,7 +368,7 @@ fn format_link_list(
 /// Returns the original `href` unchanged if resolution fails.
 fn resolve_url(href: &str, base: Option<&Url>) -> String {
     // Already absolute - return as-is.
-    if href.starts_with("http://") || href.starts_with("https://") {
+    if ragent_types::strutil::is_http_url(href) {
         return href.to_string();
     }
 

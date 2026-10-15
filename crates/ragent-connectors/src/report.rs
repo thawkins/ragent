@@ -44,11 +44,30 @@ pub fn add_report(outcome: &StagedConnector) -> String {
             }
         ),
         format!("Installed to `{}`.", outcome.installed_dir.display()),
-        "The connector is recorded **enabled**; run `/connectors enable \
-         <id>` after installing while a session is already running to connect \
-         its servers now."
-            .to_string(),
     ];
+    // SEC-009: an untrusted command is recorded disabled and surfaced so the
+    // operator confirms it before it can spawn.
+    if d.all_commands_allowlisted() {
+        lines.push(
+            "The connector is recorded **enabled**; run `/connectors enable \
+             <id>` after installing while a session is already running to connect \
+             its servers now."
+                .to_string(),
+        );
+    } else {
+        let commands: Vec<&str> = d
+            .servers
+            .iter()
+            .filter_map(|s| s.command.as_deref())
+            .collect();
+        lines.push(format!(
+            "[warn] The connector is recorded **disabled**: its server command \
+             (`{}`) is not on the allowlist. Review it, then run \
+             `/connectors enable {}` to accept it.",
+            commands.join("`, `"),
+            d.id
+        ));
+    }
     if requirement.requires_credential() {
         lines.push(format!(
             "Credential requirement: {}",

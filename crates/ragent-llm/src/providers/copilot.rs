@@ -346,7 +346,10 @@ impl LlmClient for CopilotClient {
             std::time::Duration::from_secs(timeout_secs),
             self.http
                 .post(&url)
-                .header("Authorization", format!("Bearer {}", self.token))
+                .header(
+                    "Authorization",
+                    ragent_types::strutil::bearer_auth_header(&self.token),
+                )
                 .header("content-type", "application/json")
                 .header("editor-version", "vscode/1.96.0")
                 .header("editor-plugin-version", "copilot-chat/0.24.0")
@@ -472,9 +475,11 @@ impl LlmClient for CopilotClient {
                         Ok(v) => v,
                         Err(e) => {
                             // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                            // SEC-ragent-llm-020: redact secrets and cap the raw
+                            // frame before logging.
                             tracing::warn!(
                                 error = %e,
-                                frame = %data,
+                                frame = %crate::provider::http_client::redact_frame(data),
                                 "Copilot: dropping malformed SSE data frame"
                             );
                             continue;
@@ -1055,7 +1060,10 @@ pub async fn check_copilot_health(github_token: &str) -> bool {
         let url = format!("{api_base}/models");
         if let Ok(resp) = http
             .get(&url)
-            .header("Authorization", format!("Bearer {github_token}"))
+            .header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&github_token),
+            )
             .header("editor-version", "ragent/0.1.0")
             .timeout(std::time::Duration::from_secs(10))
             .send()
@@ -1069,7 +1077,10 @@ pub async fn check_copilot_health(github_token: &str) -> bool {
     // Fall back to GitHub Models API
     let url = format!("{GITHUB_MODELS_API_BASE}/models");
     http.get(&url)
-        .header("Authorization", format!("Bearer {github_token}"))
+        .header(
+            "Authorization",
+            ragent_types::strutil::bearer_auth_header(&github_token),
+        )
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -1348,7 +1359,10 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
     let http = crate::provider::http_client::create_http_client();
     let resp = http
         .get(&url)
-        .header("Authorization", format!("Bearer {github_token}"))
+        .header(
+            "Authorization",
+            ragent_types::strutil::bearer_auth_header(&github_token),
+        )
         .header("editor-version", "ragent/0.1.0")
         .header("editor-plugin-version", "ragent/0.1.0")
         .header("user-agent", "ragent/0.1.0")

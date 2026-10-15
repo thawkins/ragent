@@ -2324,10 +2324,19 @@ Use the `write` tool to create all three files. Ensure the spec is clear, testab
 
 /// Wrap a scalar in double quotes for a YAML frontmatter value.
 ///
-/// Backslashes and double quotes are escaped so a content reference or target
-/// folder containing them cannot break the generated block.
-fn yaml_double_quote(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+/// Backslashes, double quotes, and CR/LF are escaped so a content reference,
+/// target folder, actor, or reviewer name containing them cannot break the
+/// generated block.
+///
+/// SEC-060: any value interpolated into persisted frontmatter must go through
+/// this so a `"` or newline in an actor/reviewer name cannot break out of the
+/// scalar and inject extra frontmatter lines. Shared with `manager.rs`.
+pub(crate) fn yaml_double_quote(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
     format!("\"{escaped}\"")
 }
 

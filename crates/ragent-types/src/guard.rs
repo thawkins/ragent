@@ -12,8 +12,9 @@
 //! only - authorisation, permissions, and rate limits stay with their own
 //! subsystems.
 //!
-//! Guards here never panic and never touch the filesystem for validation
-//! (except [`contained_join`], which canonicalises to detect a symlink escape).
+//! Guards here never panic, and only [`contained_join`], [`reject_symlink_escape`]
+//! and [`reject_symlink_components`] touch the filesystem (to detect a symlink
+//! escape or refuse to operate on a symlinked path).
 
 use std::path::{Component, Path, PathBuf};
 
@@ -257,9 +258,14 @@ pub fn contained_join(root: &Path, relative: &str, label: &str) -> Result<PathBu
         }
     }
 
-    // Only an *existing* path can be canonicalised; a not-yet-created file is
-    // already known to be inside the root by construction.
-    if let (Ok(real), Ok(real_root)) = (joined.canonicalize(), root.canonicalize())
+    // SEC-058: canonicalise the *deepest existing ancestor* of the joined path,
+    // not just the leaf. A not-yet-created leaf fails `canonicalize` (ENOENT),
+    // so the old leaf-only check returned the raw path unchecked and a symlinked
+    // intermediate component (`link/shadow`) escaped the root. When the root
+    // itself cannot be canonicalised (e.g. it does not exist yet) the check is
+    // skipped, matching the prior lenient behaviour for a not-yet-created root.
+    let existing = deepest_existing_ancestor(&joined);
+    if let (Ok(real), Ok(real_root)) = (existing.canonicalize(), root.canonicalize())
         && !real.starts_with(&real_root)
     {
         return Err(format!(
@@ -268,6 +274,174 @@ pub fn contained_join(root: &Path, relative: &str, label: &str) -> Result<PathBu
     }
 
     Ok(joined)
+}
+
+/// Return `path` itself when it exists, else its deepest existing ancestor.
+///
+/// Used by [`contained_join`] to canonicalise a path whose leaf may not exist
+/// yet without giving up the symlink check on an intermediate component.
+fn deepest_existing_ancestor(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    loop {
+        if current.symlink_metadata().is_ok() {
+            return current;
+        }
+        match current.parent() {
+            Some(parent) if parent.as_os_str().is_empty() => return current,
+            Some(parent) if parent == current => return current,
+            Some(parent) => current = parent.to_path_buf(),
+            None => return current,
+        }
+    }
+}
+
+/// Reject `path` when any of its components is a symlink.
+///
+/// SEC-006/SEC-059/SEC-030: a repository can commit a symlinked directory (or a
+/// pre-placed temp-file symlink) that redirects a write outside the sandbox;
+/// `canonicalize`-based checks that run only after the fact miss a symlink whose
+/// target does not yet exist. This guard inspects each component with
+/// `symlink_metadata` (which never follows the link) and walks upward from
+/// `path` to the filesystem root. A component that does not exist yet is skipped
+/// (its parent is still checked, so `link/new-file` is refused); the walk stops
+/// at the first component that exists and is *not* a symlink, because everything
+/// below a real directory is genuinely contained by it.
+///
+/// # Errors
+///
+/// Returns a message naming the first symlinked component found.
+pub fn reject_symlink_components(path: &Path, label: &str) -> Result<(), String> {
+    let mut current = path.to_path_buf();
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "`{label}` path '{}' is a symlink; refusing to follow it",
+                    current.display()
+                ));
+            }
+            // A real (non-symlink) component: everything below it is contained.
+            Ok(_) => return Ok(()),
+            // Not present (ENOENT) or unreadable: this component cannot be a
+            // symlink, but its *parent* still can, so keep walking upward.
+            Err(_) => {}
+        }
+        match current.parent() {
+            Some(parent) if parent.as_os_str().is_empty() => return Ok(()),
+            Some(parent) if parent == current => return Ok(()),
+            Some(parent) => current = parent.to_path_buf(),
+            None => return Ok(()),
+        }
+    }
+}
+
+/// Reject a `path` whose deepest existing form canonicalises outside `root`.
+///
+/// SEC-016/SEC-006: unlike [`contained_join`], this works for a path that does
+/// **not** yet exist. It walks `path` upward to the deepest ancestor that
+/// exists, canonicalises both that ancestor and `root`, and requires the
+/// ancestor to be inside `root`. A symlinked intermediate directory (the exact
+/// SEC-016 case: a symlinked `index_dir` whose deeper `.../fts` leaf is a real
+/// directory on the other side of the link) is therefore caught even though the
+/// leaf itself is not a symlink.
+///
+/// # Errors
+///
+/// Returns a message when the deepest existing ancestor escapes `root`, or when
+/// `root` cannot be canonicalised.
+pub fn reject_symlink_escape(path: &Path, root: &Path, label: &str) -> Result<(), String> {
+    let Ok(canonical_root) = root.canonicalize() else {
+        return Err(format!(
+            "`{label}` root '{}' cannot be resolved",
+            root.display()
+        ));
+    };
+    let mut current = path;
+    loop {
+        if let Ok(real) = current.canonicalize() {
+            if real.starts_with(&canonical_root) {
+                return Ok(());
+            }
+            return Err(format!(
+                "`{label}` path '{}' resolves outside '{}' (via a symlink)",
+                path.display(),
+                root.display()
+            ));
+        }
+        match current.parent() {
+            Some(parent) if parent.as_os_str().is_empty() => break,
+            Some(parent) if parent == current => break,
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    // Nothing along the path exists yet, so there is no symlink to escape
+    // through; the lexical components are the caller's responsibility.
+    Ok(())
+}
+
+/// Create (or truncate) `path` owner-only (mode `0o600` on Unix).
+///
+/// SEC-022/SEC-024: config files routinely hold plaintext credentials, and a
+/// plain `File::create`/`std::fs::write` uses the process umask (typically
+/// `0644`), so any local user could read stored keys. Every config writer must
+/// create its temp file through this helper. The mode is re-asserted for a
+/// pre-existing file because `mode()` only applies at creation.
+///
+/// # Errors
+///
+/// Returns the underlying [`std::io::Error`] when the file cannot be created.
+pub fn open_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        // `mode(0o600)` only applies at creation; tighten a pre-existing file.
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600)); // INTENTIONAL: best-effort permission tighten (mode set at create)
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+    }
+}
+
+/// Like [`open_owner_only`] but refuses an existing path (`create_new`).
+///
+/// SEC-072: a predictable temp path (e.g. `<name>.json.tmp.<pid>`) can be
+/// pre-created as a symlink by an attacker with write access to the config
+/// directory; `create_new` gives `O_EXCL` semantics so the write fails instead
+/// of following the link, and the `0o600` mode keeps the file owner-only.
+///
+/// # Errors
+///
+/// Returns [`std::io::ErrorKind::AlreadyExists`] when `path` already exists.
+pub fn open_new_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+    }
 }
 
 /// Clamp a server-supplied delay hint to [`MAX_RETRY_AFTER`].

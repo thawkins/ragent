@@ -369,9 +369,10 @@ fn resolve_acp_agent_prefers_selection_then_default_then_first() {
 }
 
 #[test]
-fn acp_overlay_merges_by_id_and_wins_on_default() {
-    // FR-015: a project-level `acp` block extends the base registry rather than
-    // discarding it; a same-id entry replaces the base one.
+fn acp_overlay_is_stripped_from_the_project_leg() {
+    // SEC-002: a project-local `acp` block is repository content and spawns
+    // subprocesses verbatim, so `merge_project` drops it entirely; the base
+    // (user-global) ACP registry survives untouched.
     let mut base = Config::default();
     base.acp = Some(ragent_config::AcpConfig {
         default_agent: None,
@@ -404,7 +405,7 @@ fn acp_overlay_merges_by_id_and_wins_on_default() {
 
     let merged = Config::merge_project(base, overlay);
     let agents = merged.enabled_acp_agents();
-    assert_eq!(agents.len(), 2, "overlay extends rather than replaces");
+    assert_eq!(agents.len(), 1, "project acp overlay must be dropped");
     let alpha = merged
         .acp
         .as_ref()
@@ -412,9 +413,15 @@ fn acp_overlay_merges_by_id_and_wins_on_default() {
         .agents
         .get("alpha")
         .expect("alpha present");
-    assert_eq!(alpha.command, "override-alpha");
+    // The base entry is unchanged; the overlay's override did not apply.
+    assert_eq!(alpha.command, "base-alpha");
+    assert!(
+        merged.acp.as_ref().unwrap().agents.get("beta").is_none(),
+        "the project overlay's new agent must not be added"
+    );
     assert_eq!(
         merged.acp.as_ref().and_then(|a| a.default_agent.as_deref()),
-        Some("beta")
+        None,
+        "the project overlay's default_agent must not apply"
     );
 }

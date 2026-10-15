@@ -76,12 +76,22 @@ pub const MIN_COUNT: usize = 1;
 ///   backends can still return results.
 /// - The API key is never logged in plain text; `masked_key` exposes only
 ///   the first two and last two characters.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SerperEngine {
     /// Serper API key (`X-API-KEY` header).
     api_key: String,
     /// Optional injectable HTTP client (for testing).
     client: Option<reqwest::Client>,
+}
+
+impl std::fmt::Debug for SerperEngine {
+    /// SEC-039: hand-written so the `api_key` never leaks through `{:?}`; the
+    /// masked form is rendered instead of the raw key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SerperEngine")
+            .field("api_key", &super::engine::mask_api_key(&self.api_key))
+            .finish_non_exhaustive()
+    }
 }
 
 impl SerperEngine {

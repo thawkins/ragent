@@ -307,7 +307,11 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// Placeholder written in place of every credential in a config payload.
-pub const REDACTED: &str = "<redacted>";
+///
+/// Re-exported from [`ragent_types::sanitize::REDACTION_PLACEHOLDER`] so the
+/// whole workspace writes one sentinel rather than one per subsystem (audit
+/// Quick Win 5).
+pub const REDACTED: &str = ragent_types::sanitize::REDACTION_PLACEHOLDER;
 
 /// Maximum object/array nesting walked when redacting secrets.
 ///
@@ -315,42 +319,13 @@ pub const REDACTED: &str = "<redacted>";
 /// cannot make redaction expensive. The real config tree is far shallower.
 const MAX_REDACT_DEPTH: usize = 8;
 
-/// Returns `true` when a JSON object key names a credential.
+/// The shared credential-key predicate.
 ///
-/// SEC-ragent-server-001 (SECTASKS T-015). Matches by key-name *shape* rather
-/// than a hardcoded path list, so a newly-added `*_api_key` / `*_token` /
-/// `*_secret` config field is redacted automatically without editing the
-/// redactor. The suffix form deliberately ends in `_key` / `_token` / ... so
-/// non-secret keys such as `keywords` or `token_budget` are not caught.
+/// Delegates to [`ragent_types::sanitize::is_secret_json_key`] so the server
+/// scrubber and the TUI `/config show` renderer cannot drift apart (audit
+/// Medium 8).
 fn looks_like_secret_key(key: &str) -> bool {
-    const EXACT: &[&str] = &[
-        "token",
-        "secret",
-        "password",
-        "api_key",
-        "apikey",
-        "webhook_url",
-        "client_id",
-        "client_secret",
-        "access_token",
-        "refresh_token",
-        "bot_token",
-        "private_key",
-        "credentials",
-    ];
-    if EXACT
-        .iter()
-        .any(|candidate| key.eq_ignore_ascii_case(candidate))
-    {
-        return true;
-    }
-    const SUFFIXES: &[&str] = &["_key", "_token", "_secret", "_password"];
-    let bytes = key.as_bytes();
-    SUFFIXES.iter().any(|suffix| {
-        let suffix = suffix.as_bytes();
-        bytes.len() >= suffix.len()
-            && bytes[bytes.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
-    })
+    ragent_types::sanitize::is_secret_json_key(key)
 }
 
 /// Recursively mask credential-named values in a JSON subtree.
@@ -474,6 +449,30 @@ async fn create_session(
         .await
         .is_ok_and(|m| m.is_dir());
     if !is_dir {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "invalid directory" })),
+        )
+            .into_response();
+    }
+    // SEC-062: a session directory must resolve inside a permitted root, never
+    // an arbitrary host path. The permitted roots are the server's working
+    // directory (serve runs from the project root) plus any configured
+    // `dirs.allowed_roots` (mirroring the file-tool containment rule).
+    let roots: Vec<std::path::PathBuf> = {
+        let cfg = state.config.read().await;
+        let mut roots = Vec::with_capacity(cfg.dirs.allowed_roots.len() + 1);
+        if let Ok(cwd) = std::env::current_dir() {
+            roots.push(cwd.canonicalize().unwrap_or(cwd));
+        }
+        for raw in &cfg.dirs.allowed_roots {
+            let p = std::path::Path::new(raw);
+            roots.push(p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
+        }
+        roots
+    };
+    if !roots.iter().any(|root| canonical.starts_with(root)) {
+        tracing::warn!(directory = %canonical.display(), "session directory outside permitted roots");
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "invalid directory" })),
@@ -708,16 +707,18 @@ async fn reply_permission(
 #[derive(Debug, Default, Deserialize)]
 struct EventsStreamQuery {
     /// Optional session id. When present, only events belonging to that
-    /// session are forwarded (F-M9); when absent the stream is admin-wide and
-    /// forwards every process-wide [`Event`].
+    /// session are forwarded; when absent the stream forwards nothing
+    /// (SEC-063 fail-closed default).
     session: Option<String>,
 }
 
-/// `GET /events` - process-wide server-sent event stream.
+/// `GET /events` - server-sent event stream.
 ///
-/// Scope (F-M9): by default this endpoint is **admin-wide** and forwards every
-/// process-wide [`Event`] to the authenticated client, regardless of session.
-/// Pass `?session=<id>` to receive only that session's events (filtered with
+/// Scope (F-M9, SEC-063): `?session=<id>` is required to receive events. When
+/// `?session=` is absent the stream forwards nothing - the previous
+/// admin-wide default was changed to denial so an unauthenticated-by-session
+/// caller cannot observe every process-wide [`Event`]. A present session id
+/// forwards only that session's events (filtered with
 /// [`event_matches_session`], matching the per-message stream). Concurrent
 /// connections are capped at [`MAX_SSE_CONNECTIONS`]; beyond the cap the
 /// request is rejected with `503 Service Unavailable`.
@@ -761,14 +762,18 @@ async fn events_stream(
 
     let rx = state.event_bus.subscribe();
     let lagged = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // SEC-063: fail closed. With no `?session=` the stream forwards nothing;
+    // only an explicit session id selects that session's events.
     let session_filter = query.session;
     let stream = BroadcastStream::new(rx).filter_map({
         let lagged = Arc::clone(&lagged);
         move |result| {
             let mapped = match result {
                 Ok(event) => match session_filter.as_deref() {
-                    Some(sid) if !event_matches_session(&event, sid) => None,
-                    _ => Some(Ok::<_, std::convert::Infallible>(event_to_sse(&event))),
+                    Some(sid) if event_matches_session(&event, sid) => {
+                        Some(Ok::<_, std::convert::Infallible>(event_to_sse(&event)))
+                    }
+                    _ => None,
                 },
                 Err(err) => {
                     let dropped = lagged.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -1087,7 +1092,7 @@ pub(crate) fn error_response(
 /// `spawn_task`, `orch_start`), so they all share one budget. Returns `Some`
 /// response when the caller is over the limit, `None` when the request may
 /// proceed.
-async fn check_rate_limit(
+pub(crate) async fn check_rate_limit(
     state: &AppState,
     key: &str,
 ) -> Option<(StatusCode, Json<serde_json::Value>)> {

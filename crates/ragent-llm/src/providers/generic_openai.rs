@@ -87,12 +87,14 @@ impl Provider for GenericOpenAiProvider {
             .get(Self::ENDPOINT_OPTION_KEY)
             .and_then(Value::as_str)
             .filter(|s| !s.trim().is_empty());
-        let resolved_base = configured_endpoint
-            .or(base_url)
-            .or(env_endpoint.as_deref())
-            .unwrap_or(OPENAI_API_BASE)
-            .trim_end_matches('/')
-            .to_string();
+        // SEC-ragent-llm-005: config-sourced `configured_endpoint`/`base_url`
+        // are validated with the same scheme/host check as the env value.
+        let candidate = configured_endpoint.or(base_url).or(env_endpoint.as_deref());
+        let resolved_base = super::base_url::resolve_validated_base_url(
+            "generic_openai",
+            candidate,
+            OPENAI_API_BASE,
+        );
         let client = OpenAiClient::new(api_key, &resolved_base);
         tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", resolved_base), models_endpoint = %format!("{}/v1/models", resolved_base), "Generic OpenAI provider connected");
         Ok(Box::new(client))

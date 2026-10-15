@@ -162,6 +162,7 @@ pub use manager::{
 pub use open_access::{
     DEFAULT_OA_MIN_FULL_TEXT_CHARS, OpenAccessClient, OpenAccessError, RecoveredOpenAccess,
     RecoverySource, ReqwestOpenAccessClient, query_europepmc, query_unpaywall, recover_open_access,
+    validate_oa_url,
 };
 pub use page_summarizer::{LlmPageSummarizer, PageSummarizer, PageSummary};
 pub use patcher::{PatchResult, SurgicalPatch, build_surgical_patches};

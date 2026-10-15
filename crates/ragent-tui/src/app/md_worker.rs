@@ -299,9 +299,12 @@ impl MdWorker {
                     let parser = pulldown_cmark::Parser::new_ext(&md, opts);
                     let mut html_buf = String::new();
                     pulldown_cmark::html::push_html(&mut html_buf, parser);
-                    let result = html2text::from_read(html_buf.as_bytes(), 120)
-                        .map(|rendered| restore_red_markers(&rendered))
-                        .map_err(|e| format!("{e:?}"));
+                    let result = html2text::from_read(
+                        html_buf.as_bytes(),
+                        ragent_types::strutil::HTML2TEXT_WIDTH,
+                    )
+                    .map(|rendered| restore_red_markers(&rendered))
+                    .map_err(|e| format!("{e:?}"));
                     // If the response channel is closed (caller dropped), just
                     // continue to the next request.
                     let _ = req.response_tx.send(result); // INTENTIONAL: channel send on a closed receiver is benign

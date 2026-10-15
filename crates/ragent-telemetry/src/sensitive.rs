@@ -39,10 +39,13 @@
 
 /// Sentinel value substituted in place of a sensitive attribute value (FR-034).
 ///
-/// Distinct from [`crate::cardinality::UNKNOWN_BUCKET`] (`"unknown"`) so that
-/// logs and exported metrics can distinguish "cardinality overflow" from
-/// "sensitive data was redacted".
-pub const REDACTED: &str = "redacted";
+/// Re-exported from [`ragent_types::sanitize::REDACTION_PLACEHOLDER`] so the
+/// telemetry guard writes the same sentinel as every other redactor (audit
+/// Quick Win 5).
+///
+/// The distinct [`crate::cardinality::UNKNOWN_BUCKET`] (`"unknown"`) still
+/// separates "cardinality overflow" from "sensitive data was redacted".
+pub const REDACTED: &str = ragent_types::sanitize::REDACTION_PLACEHOLDER;
 
 /// Maximum number of characters in a legitimate attribute value before the
 /// guard treats it as suspicious (FR-034).
@@ -63,6 +66,17 @@ pub const MIN_CRED_PART_LEN: usize = 4;
 /// Minimum length of a base64-like run following `=` before the guard treats it
 /// as an inline token (LOW-2).
 pub const MIN_B64_RUN_LEN: usize = 20;
+
+/// Maximum length of a `tool.name` attribute value accepted by the allow-list
+/// (SEC-052).
+///
+/// Registered tool names are short identifiers (`bash`, `codeindex_search`,
+/// `plugin_<id>_<tool>`); anything longer is rejected rather than exported.
+pub const MAX_TOOL_NAME_LEN: usize = 64;
+
+/// Sentinel substituted for a `tool.name` value that fails the allow-list
+/// (SEC-052).
+pub const UNKNOWN_TOOL_NAME: &str = "unknown";
 
 /// Returns `true` when `value` matches a known sensitive pattern (FR-034).
 ///
@@ -214,5 +228,68 @@ pub fn sanitize_attr_value(value: &str) -> String {
         REDACTED.to_string()
     } else {
         value.to_string()
+    }
+}
+
+/// Returns `true` when `name` conforms to the conservative `tool.name`
+/// allow-list pattern (SEC-052).
+///
+/// The telemetry crate cannot see the tool registry, so the allow-list is a
+/// shape check rather than a membership check: a conforming name is a short
+/// run of ASCII alphanumerics, `_`, `-`, or `.` (which covers every registered
+/// tool name, `plugin_<id>_<tool>` bridge names, and namespaced MCP tool ids)
+/// and is at most [`MAX_TOOL_NAME_LEN`] characters. Anything else - an empty
+/// string, whitespace, slashes, `@`, `:`, quotes, newlines, or a pasted blob -
+/// is rejected.
+///
+/// # Arguments
+///
+/// * `name` - The candidate `tool.name` attribute value.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_telemetry::sensitive::is_allowed_tool_name;
+///
+/// assert!(is_allowed_tool_name("bash"));
+/// assert!(is_allowed_tool_name("codeindex_search"));
+/// assert!(is_allowed_tool_name("plugin_my-plugin_do_thing"));
+/// assert!(!is_allowed_tool_name(""));
+/// assert!(!is_allowed_tool_name("../../etc/passwd"));
+/// assert!(!is_allowed_tool_name("user:secretpassword"));
+/// ```
+#[must_use]
+pub fn is_allowed_tool_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_TOOL_NAME_LEN
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+/// Sanitize a model-controlled `tool.name` attribute value against the
+/// allow-list, replacing a non-conforming value with [`UNKNOWN_TOOL_NAME`]
+/// (SEC-052).
+///
+/// Unlike [`sanitize_attr_value`] (a deny-list keyed on sensitive *shapes*),
+/// this is an allow-list: only a value that matches the conservative tool-name
+/// pattern is exported verbatim, so a model can never smuggle an arbitrary
+/// string (a URL, a credential, prompt text) into the `tool.name` label. A
+/// conforming value still passes through [`sanitize_attr_value`] as defence in
+/// depth.
+///
+/// # Arguments
+///
+/// * `name` - The candidate `tool.name` attribute value.
+///
+/// # Returns
+///
+/// `name` when it conforms to the allow-list, otherwise [`UNKNOWN_TOOL_NAME`].
+#[must_use]
+pub fn sanitize_tool_name(name: &str) -> String {
+    if is_allowed_tool_name(name) {
+        sanitize_attr_value(name)
+    } else {
+        UNKNOWN_TOOL_NAME.to_string()
     }
 }

@@ -88,14 +88,14 @@ impl ShutdownGuard {
     /// Use this to obtain instruments and record metrics while the guard is
     /// alive.
     ///
-    /// # Panics
-    /// Panics if the subsystem was already moved out via
-    /// [`Self::into_inner`].
+    /// After [`Self::into_inner`] has released the subsystem the slot is empty;
+    /// rather than panicking, a static disabled subsystem is returned so metric
+    /// calls remain inert no-ops.
     #[must_use]
     pub fn subsystem(&self) -> &TelemetrySubsystem {
-        self.subsystem
-            .as_deref()
-            .expect("subsystem taken by into_inner")
+        static DISABLED: std::sync::LazyLock<TelemetrySubsystem> =
+            std::sync::LazyLock::new(TelemetrySubsystem::disabled);
+        self.subsystem.as_deref().unwrap_or(&DISABLED)
     }
 
     /// Manually trigger a flush without dropping the guard (FR-006).

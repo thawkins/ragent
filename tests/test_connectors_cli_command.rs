@@ -73,7 +73,7 @@ impl Fixture {
             dir.join("connector.json"),
             format!(
                 r#"{{ "id": "{id}", "name": "{id}", "category": "{category}",
-                     "servers": [ {{ "id": "main", "transport": "stdio", "command": "/bin/true" }} ] }}"#
+                     "servers": [ {{ "id": "main", "transport": "stdio", "command": "npx" }} ] }}"#
             ),
         )
         .expect("manifest");

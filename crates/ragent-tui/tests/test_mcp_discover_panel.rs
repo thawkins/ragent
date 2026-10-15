@@ -91,6 +91,11 @@ fn enter_project(
     let ragent_dir = temp.path().join(".ragent");
     std::fs::create_dir_all(&ragent_dir).expect("create .ragent");
     std::fs::write(ragent_dir.join("ragent.json"), config).expect("write project config");
+    // SEC-001: `mcp` entries are read from the user-global config, so the same
+    // config is mirrored there for the tests that exercise the MCP toggle.
+    let global_dir = temp.path().join(".config").join("ragent");
+    std::fs::create_dir_all(&global_dir).expect("create global config dir");
+    std::fs::write(global_dir.join("ragent.json"), config).expect("write global config");
     (guard, env_guard, temp)
 }
 
@@ -99,7 +104,9 @@ fn discovered(id: &str) -> DiscoveredMcpServer {
     DiscoveredMcpServer {
         id: id.to_string(),
         name: format!("{id} MCP Server"),
-        executable: std::path::PathBuf::from(id),
+        // SEC-082: the toggle now validates the executable, so use a real,
+        // executable file rather than a bare name.
+        executable: std::env::current_exe().expect("current exe"),
         args: Vec::new(),
         env: std::collections::HashMap::new(),
         source: McpDiscoverySource::SystemPath,
@@ -210,8 +217,11 @@ async fn mcp_discover_enter_enables_then_disables_the_highlighted_server() {
         state.feedback
     );
 
+    // The MCP client reads the user-global config, so the toggled entry lands
+    // there (XDG_CONFIG_HOME is `<temp>/.config`).
     let config: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(temp.path().join(".ragent/ragent.json")).expect("read config"),
+        &std::fs::read_to_string(temp.path().join(".config/ragent/ragent.json"))
+            .expect("read global config"),
     )
     .expect("parse config");
     assert_eq!(
@@ -252,7 +262,8 @@ async fn mcp_discover_enter_lifts_a_hard_disabled_override() {
     assert!(state.enabled[0]);
 
     let config: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(temp.path().join(".ragent/ragent.json")).expect("read config"),
+        &std::fs::read_to_string(temp.path().join(".config/ragent/ragent.json"))
+            .expect("read global config"),
     )
     .expect("parse config");
     assert_eq!(config["mcp"]["filesystem"]["disabled"], false);

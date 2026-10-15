@@ -70,7 +70,7 @@ impl GitLabClient {
     /// Returns an error on a non-2xx response (after exhausting retries) or a
     /// body-read/parse failure.
     pub async fn get_paged(&self, path: &str) -> Result<(Value, Option<u32>)> {
-        let url = if path.starts_with("https://") || path.starts_with("http://") {
+        let url = if ragent_types::strutil::is_http_url(path) {
             path.to_string()
         } else {
             format!("{}/api/v4{path}", self.base_url)
@@ -517,16 +517,17 @@ impl GitLabClient {
     /// could redirect the request (and the `PRIVATE-TOKEN` header) to an
     /// attacker-controlled host - SSRF plus token exfiltration (FUNC-009).
     async fn fetch_raw_text(&self, url: &str) -> Result<String> {
-        let mut request = self.client.get(url).header("User-Agent", "ragent/0.1");
-        if self.url_targets_instance(url) {
-            request = request.header("PRIVATE-TOKEN", &self.token);
-        } else {
-            tracing::warn!(
-                url = %url,
-                instance = %self.base_url,
-                "refusing to attach GitLab token to a host outside the configured instance"
-            );
+        // SEC-033: an API-supplied `readme_url` that is not under the configured
+        // instance is refused entirely (not merely fetched token-less), so the
+        // agent cannot be steered into an SSRF request to an internal host.
+        if !self.url_targets_instance(url) {
+            bail!("GitLab: refusing to fetch a URL outside the configured instance: {url}");
         }
+        let request = self
+            .client
+            .get(url)
+            .header("User-Agent", "ragent/0.1")
+            .header("PRIVATE-TOKEN", &self.token);
 
         let resp = request
             .send()

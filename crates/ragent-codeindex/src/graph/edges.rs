@@ -266,6 +266,13 @@ fn derive_impl_edges(file_symbols: &[Symbol], nr: &NameResolution) -> Vec<GraphE
                 } else {
                     Confidence::Inferred
                 };
+                if edges.len() >= MAX_EDGES_PER_PASS {
+                    debug!(
+                        budget = MAX_EDGES_PER_PASS,
+                        "edge budget reached during impl derivation; truncating pass"
+                    );
+                    return edges;
+                }
                 edges.push(GraphEdge {
                     source_sym: sym.id,
                     target_sym: target_id,
@@ -290,6 +297,13 @@ fn derive_impl_edges(file_symbols: &[Symbol], nr: &NameResolution) -> Vec<GraphE
                         } else {
                             Confidence::Inferred
                         };
+                        if edges.len() >= MAX_EDGES_PER_PASS {
+                            debug!(
+                                budget = MAX_EDGES_PER_PASS,
+                                "edge budget reached during impl derivation; truncating pass"
+                            );
+                            return edges;
+                        }
                         edges.push(GraphEdge {
                             source_sym: sym.id,
                             target_sym: target_id,

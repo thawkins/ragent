@@ -1,6 +1,133 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.135] - 2026-10-15
+
+A security-hardening pass that closes the critical/high findings of the
+`docs/reports/security-audit.md` run (4 critical, 15 high, 34 medium, 29 low),
+plus the trailing code-audit Quick Wins and Medium shared-helper items, a
+`ragent --version` flag, and the shared-helper de-duplication that the audit
+called out. `cargo check --workspace` clean; `cargo audit` reports no new
+advisories.
+
+### Security
+
+- **Project-local config can no longer inject executable sinks (SEC-001,
+  SEC-002, SEC-005).** `Config::merge_project` now drops a project overlay's
+  `mcp` servers (spawned as subprocesses with no permission prompt), its `acp`
+  section (agents spawned verbatim with attacker-chosen `command`/`env`/`cwd`,
+  plus the editor-facing ACP server), and every provider's `api` block (which
+  redirects the credential and prompt stream). Rejected keys are logged at
+  `warn!`, matching the existing `hooks`/`openai` handling.
+- **Benchmark fixture commands validate the whole argv (SEC-003).** The
+  interpreter allowlist kept `python3`/`node`/`php`/`ruby`/`java` but validated
+  only `command_parts.first()`, so `["python3", "-c", "<payload>"]` passed and
+  was spawned; the argv tail is now checked against a deny-list of eval/stdin
+  entry points (`-c`, `-e`, `-r`, `--eval[=…]`, `-m`, `-`, `/dev/stdin`,
+  `go run`) while the real harness shapes (`node <file>`, `java <class>`,
+  `go test .`, the compilers) still pass.
+- **Connector `stdio` command is allowlisted (SEC-009).** A catalogue/
+  marketplace document is untrusted input; a crafted `command` of
+  `bash -c "…"` (or a repo-committed binary) is now refused - only a bare,
+  non-shell MCP runtime name or an absolute path whose stem is an allowlisted
+  runtime is accepted.
+- **Connector `env` credentials must be namespaced (SEC-071).** The `env` auth
+  shape could name any ambient secret (`AWS_SECRET_ACCESS_KEY`); only a variable
+  prefixed with the connector's own id is read, otherwise the user-stored
+  credential is used.
+- **Symlink defeats are blocked across the write/read paths (SEC-006, SEC-018,
+  SEC-027, SEC-028, SEC-030, SEC-059).** `ragent-types::guard` gains
+  `reject_symlink_components` and `reject_symlink_escape`, and `contained_join`
+  canonicalises the deepest *existing* ancestor (a not-yet-created leaf no longer
+  escaped the check via an intermediate symlink); applied to the specs writer,
+  the credential/config temp files, the updater, and the TUI image source;
+  `list`/`glob` no longer descend a symlinked directory; and the crash marker /
+  panic report / stderr spool are opened `O_NOFOLLOW` and replaced atomically.
+- **Bounded HTTP I/O (SEC-014, SEC-032, SEC-033, SEC-036, SEC-042, SEC-065,
+  SEC-066).** The MCP HTTP client, the masterfetch fetcher, the GitHub client,
+  and the open-access lookup gain explicit connect/whole-request timeouts,
+  capped redirect chains, and streaming read caps (8 MiB); the masterfetch SSRF
+  guard re-runs on every redirect hop; and the GitHub client refuses a
+  cross-origin URL (response-content SSRF) and streams byte-capped downloads.
+- **Binary update requires a verified digest (SEC-043).** `download_and_replace`
+  resolves a SHA-256 from `RAGENT_UPDATE_SHA256` (or the new
+  `ReleaseInfo::sha256` parsed from the release `digest`) and **refuses** an
+  unverified download rather than replacing the running binary.
+- **`http_request` header allowlist (SEC-035).** Replaced the deny-list (which
+  missed `x-api-key`, `Private-Token`, `x-goog-api-key`, …) with
+  `ALLOWED_REQUEST_HEADERS` = `accept`, `accept-language`, `content-type`,
+  `user-agent`; every other header is refused, so a cross-host redirect cannot
+  carry a credential.
+- **Plugin host-call sinks bounded (SEC-031).** Each `ragent.*` host-call sink
+  keeps at most `MAX_HOST_CALL_ENTRIES` (1000) entries and truncates each entry
+  to `MAX_HOST_CALL_ENTRY_LEN` (16 KiB), so a plugin loop cannot grow the host
+  RSS without bound.
+- **Telemetry `tool.name` allowlisted (SEC-052).** Attribute values are
+  shape-checked (`MAX_TOOL_NAME_LEN` 64, `[A-Za-z0-9_.-]`) and a non-conforming
+  value is exported as `UNKNOWN_TOOL_NAME`; the OTLP endpoint is parsed once
+  (`url`) so the loopback decision is made on the validated host and userinfo is
+  reported safely (SEC-053, SEC-055).
+- **Owner-only secret writes (SEC-022, SEC-027, SEC-076).** The config/credential
+  temp files and the askpass response are created `0o600`; the crash marker read
+  is capped (`MAX_MARKER_BYTES` 64 KiB).
+
+### Added
+
+- **`ragent --version` / `ragent -V`.** A top-level flag prints `ragent
+  <version>` and exits `0` without starting the TUI. It is answered before any
+  side effect (no panic hook, no crash marker, no previous-crash warning), so a
+  bare version probe on a fresh checkout cannot leave a marker the next start
+  reports as an unclean exit. Implemented in `src/main.rs` (the `Cli::version`
+  field with clap's auto-generated `--version` disabled, and the early return at
+  the top of `async_main`); covered by `tests/test_version_flag.rs`.
+
+### Changed
+
+- **Code-audit remediation (`docs/reports/code-audit.md`).** Applied the Quick
+  Wins and Medium shared-helper items:
+  - Renamed the eight `mod tests_tests;` hooks to `mod tests;`.
+  - Unified the snippet-length constant (`SNIPPET_MAX_CHARS`) and fixed the
+    `MAX_SNIPPETTE_CHARS` typo; the mask/truncate one-line wrappers were removed
+    in favour of the shared `engine` helpers (`mask_key` call sites now use
+    `engine::mask_api_key`).
+  - Standardised every redaction sentinel on
+    `ragent_types::sanitize::REDACTION_PLACEHOLDER` (`[REDACTED]`), replacing
+    the `"<redacted>"` / `"redacted"` / `"***REDACTED***"` variants in the
+    server, TUI, telemetry, and `get_env` paths.
+  - Removed the two production `.unwrap()` sites and replaced the audited
+    `.expect()` sites in masterfetch, telemetry, and the research parser with
+    error propagation or inert fallbacks.
+  - Added the redacting `Debug` impl to `GitLabIntegrationConfig`,
+    `BackendConfig`, and `OpenAiConfig` (previously printed tokens verbatim).
+  - Added shared helpers and routed the call sites through them:
+    `sanitize::is_secret_json_key`, `strutil::{is_http_url,
+    bearer_auth_header, path_file_name, HTML2TEXT_WIDTH}`,
+    `credential_env::read_config_env` and the provider base-URL resolver,
+    and `ragent_surface::store::{read_ledger_bytes,
+    quarantine_corrupt_ledger}`.
+  - Redacted the TUI tracing layer and mirrored-stderr log panel output.
+  - Dependency hygiene: `cargo update`/targeted bumps (gcf, rmcp, sha2,
+    opentelemetry, proptest), removed the two stale `deny.toml` license
+    entries (`cargo deny check` is now warning-free), and moved
+    `crates/ragent-tui/security_findings.md` to
+    `docs/reports/ragent-tui-security-findings.md`.
+- **New security-audit report (`docs/reports/security-audit.md`).** A fresh,
+  independent read-only pass over the whole workspace (one auditor per crate plus
+  focused `explore` agents for `ragent-connectors`, `ragent-surface`,
+  `ragent-tui`, `ragent-research`, and the root `src/`), consolidated and
+  re-verified against source by the coordinator. It records 82 findings (4
+  critical, 15 high, 34 medium, 29 low) with locations, evidence, and
+  remediation, and tracks which prior findings stayed fixed. The Security
+  section above is the fix set that closes that report's critical/high band.
+- **Shared security helpers applied broadly.** `ragent_types::strutil` gains
+  `is_http_url`, `bearer_auth_header`, `path_file_name`, and the
+  `HTML2TEXT_WIDTH` constant; `ragent_types::sanitize` gains
+  `is_secret_json_key`; `ragent_types::guard` gains
+  `reject_symlink_components`/`reject_symlink_escape`/`open_owner_only`;
+  `credential_env::read_config_env` joins the provider base-URL resolver; and
+  `ragent_surface::store::{read_ledger_bytes, quarantine_corrupt_ledger}`
+  collapses the corrupt-ledger load/quarantine pattern. Call sites in the LLM
+  providers, masterfetch engines, GitHub client, and the store/ledger paths now
+  route through them (`ragent-types`, `ragent-surface`).
 
 ## [1.0.134] - 2026-10-14
 

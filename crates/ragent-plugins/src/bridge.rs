@@ -165,7 +165,20 @@ pub fn plugin_mcp_servers(
     // own `mcpServers` object supplies the entries (Claude marketplace).
     let resolved: Vec<PluginMcpServer> = match raw {
         Some(serde_json::Value::String(rel)) => {
-            read_external_mcp_servers(root, rel).unwrap_or_default()
+            // SEC-075: an external `mcpServers` file that fails to resolve (wrong
+            // path, escapes the root, no `mcpServers` object) is logged rather
+            // than silently contributing nothing.
+            match read_external_mcp_servers(root, rel) {
+                Some(external) => external,
+                None => {
+                    tracing::warn!(
+                        plugin = plugin_id,
+                        file = %rel,
+                        "plugin mcpServers external file could not be resolved; no servers bridged"
+                    );
+                    Vec::new()
+                }
+            }
         }
         _ => servers.to_vec(),
     };

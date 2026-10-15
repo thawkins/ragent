@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::OtelConfig;
+use crate::sensitive::REDACTED;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use std::time::Duration;
@@ -122,9 +123,10 @@ fn test_up_down_counter_can_add() {
 
 #[test]
 fn test_attrs_are_sanitised() {
-    // FR-034: sensitive tool names should be redacted.
+    // FR-034: sensitive tool names should be redacted to the shared sentinel.
     let tool_attr = InstrumentRegistry::attr_tool("sk-secret-key");
-    assert_eq!(tool_attr.value.to_string(), "redacted");
+    assert_eq!(tool_attr.value.to_string(), REDACTED);
+    assert_eq!(tool_attr.value.to_string(), "[REDACTED]");
 }
 
 #[test]

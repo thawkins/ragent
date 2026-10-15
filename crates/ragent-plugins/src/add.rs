@@ -162,6 +162,14 @@ pub fn add(
         .ok_or_else(|| AddError::Io(IoError::message("no plugin store directory resolvable")))?;
     std::fs::create_dir_all(&dest_store).map_err(io_err)?;
 
+    // SEC-007: the *enable* flag of a freshly installed plugin is written to the
+    // trusted (user-global) ledger, so a plugin installed into the project store
+    // can still be enabled at the next session start. Without this the install
+    // into the untrusted project leg would be recorded enabled but immediately
+    // treated as disabled by the scan, which now reads only the global ledger.
+    let enable_store = dirs.global.clone().unwrap_or_else(|| dest_store.clone());
+    std::fs::create_dir_all(&enable_store).map_err(io_err)?;
+
     let staging_root = dest_store.join(".add-staging");
     std::fs::create_dir_all(&staging_root).map_err(io_err)?;
     // Unique staging dir per call; process id plus a nanosecond timestamp.
@@ -263,10 +271,9 @@ pub fn add(
         .map_err(AddError::Manifest)?
         .ok_or_else(|| AddError::NotAPlugin(dest_dir.display().to_string()))?;
 
-    // Record the plugin enabled in its store ledger so it loads at the next
-    // session start. No JavaScript runs here (FR-023); enablement only sets the
-    // persisted flag. The ledger lives in `dest_store` (the leg the install
-    // targeted), matching where `/plugins enable` would write it.
+    // Record the plugin enabled in its (destination) store ledger so the install
+    // telemetry (content digest) is co-located with the plugin. No JavaScript
+    // runs here (FR-023); enablement only sets the persisted flag.
     let mut ledger = StoreLedger::load(&dest_store);
     let state = ledger.state_mut(&id);
     state.enabled = true;
@@ -278,6 +285,21 @@ pub fn add(
             "plugin installed but the enable flag could not be persisted: {e}"
         )))
     })?;
+    // SEC-007: the *trusted* enable flag lives in the user-global ledger (the
+    // scan ignores a project-local `_state.json`). Mirror the enable there so a
+    // plugin installed into the project store still loads at the next session
+    // start, matching where `/plugins enable` writes it.
+    if enable_store != dest_store {
+        let mut trusted = StoreLedger::load(&enable_store);
+        trusted.state_mut(&id).enabled = true;
+        if let Err(e) = trusted.save(&enable_store) {
+            tracing::warn!(
+                plugin = %id,
+                error = %e,
+                "plugin installed but the trusted enable flag could not be persisted"
+            );
+        }
+    }
     tracing::info!(
         plugin = %id,
         digest = %staged_digest,
@@ -874,12 +896,37 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), AddError> {
 }
 
 /// Try rename (same filesystem fast path); fall back to copy + remove.
+///
+/// SEC-030: a `rename` preserves symlinks inside the tree, and the git-source
+/// extraction path uses this fast path, so a git-sourced plugin could smuggle a
+/// symlink (e.g. `link -> /etc/passwd`) into the store where `read_within`'s
+/// lexical containment would follow it. The tree is walked and any symlink is
+/// refused before the rename, so a plugin in the store never contains one.
 fn move_or_copy(from: &Path, to: &Path) -> Result<(), AddError> {
+    reject_symlinks_in_tree(from)?;
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
     copy_dir_recursive(from, to)?;
     std::fs::remove_dir_all(from).map_err(io_err)
+}
+
+/// Walk `root` and refuse when any entry is a symlink (SEC-030).
+fn reject_symlinks_in_tree(root: &Path) -> Result<(), AddError> {
+    for entry in std::fs::read_dir(root).map_err(io_err)?.flatten() {
+        let path = entry.path();
+        let ft = entry.file_type().map_err(io_err)?;
+        if ft.is_symlink() {
+            return Err(AddError::Io(IoError::message(format!(
+                "plugin install: refusing symlink {} (symlinks are not stored)",
+                path.display()
+            ))));
+        }
+        if ft.is_dir() {
+            reject_symlinks_in_tree(&path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Remove the per-call staging directory entirely and prune the `.add-staging`

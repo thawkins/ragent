@@ -104,7 +104,7 @@ impl Tool for WebFetchTool {
         validate_url(url).with_context(|| format!("URL failed security validation: {url}"))?;
 
         // Validate URL scheme
-        if !url.starts_with("http://") && !url.starts_with("https://") {
+        if !ragent_types::strutil::is_http_url(url) {
             bail!(
                 "Only http:// and https:// URLs are supported. The provided URL '{url}' uses an unsupported scheme."
             );

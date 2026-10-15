@@ -182,11 +182,7 @@ fn resolve_base_url(
                     .and_then(|p| p.api.as_ref())
                     .and_then(|api| api.base_url.clone())
             })
-            .or_else(|| {
-                std::env::var("GENERIC_OPENAI_API_BASE")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-            }),
+            .or_else(|| ragent_llm::provider::env_key::provider_env_base_url("generic_openai")),
         "azure_foundry" => storage
             .and_then(|s| s.get_setting("azure_foundry_api_base").ok().flatten())
             .filter(|s| !s.trim().is_empty())
@@ -196,11 +192,7 @@ fn resolve_base_url(
                     .and_then(|p| p.api.as_ref())
                     .and_then(|api| api.base_url.clone())
             })
-            .or_else(|| {
-                std::env::var("AZURE_AI_FOUNDRY_BASE")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-            }),
+            .or_else(|| ragent_llm::provider::env_key::provider_env_base_url("azure_foundry")),
         _ => None,
     }
 }
@@ -546,6 +538,20 @@ const HEAD_METADATA_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/
 
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
+    /// SEC-067: fetch and cap the body at `max_bytes`.
+    ///
+    /// The underlying `mf_fetch` tool already enforces its own response cap, so
+    /// this truncates the extracted body to the research boundary budget. It is
+    /// an explicit implementation (the trait no longer has an unbounded default).
+    async fn fetch_with_limit(&self, url: &str, max_bytes: usize) -> Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = ragent_research::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = Arc::from(truncated);
+        }
+        Ok(page)
+    }
+
     async fn fetch(&self, url: &str) -> Result<WebFetchedPage> {
         // Rewrite `github.com` file-view URLs to their raw counterparts.
         // The blob page is heavy GitHub chrome (nav, file tree, buttons)
@@ -1202,7 +1208,7 @@ struct HeadMetadata {
 /// are mapped to `Ok(HeadMetadata::default())` so callers can treat the
 /// extraction as best-effort.
 async fn extract_head_metadata_for_url(url: &str, want_author: bool) -> Result<HeadMetadata> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !ragent_types::strutil::is_http_url(url) {
         return Ok(HeadMetadata::default());
     }
     let client = reqwest::Client::builder()
@@ -1357,7 +1363,7 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
         }
 
         let t = line.trim();
-        if t.starts_with("http://") || t.starts_with("https://") {
+        if ragent_types::strutil::is_http_url(t) {
             current_url = Some(t.to_string());
         } else if current_title.is_some() && current_url.is_some() && !t.is_empty() {
             if !current_snippet.is_empty() {

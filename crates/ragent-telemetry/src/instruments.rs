@@ -634,10 +634,14 @@ impl InstrumentRegistry {
     /// Returns the [`KeyValue`] attribute for a tool name, suitable for
     /// tagging instrument calls.
     ///
-    /// Sanitised via [`Self::sanitized_attr`] (FR-034).
+    /// SEC-052: `tool.name` is model-controlled, so it is validated against the
+    /// conservative allow-list in [`crate::sensitive::sanitize_tool_name`]
+    /// rather than the deny-list [`Self::sanitized_attr`] uses. A value that is
+    /// not a plausible tool-name shape is replaced with `"unknown"` before it
+    /// reaches the exporter.
     #[must_use]
     pub fn attr_tool(name: &str) -> KeyValue {
-        Self::sanitized_attr("tool.name", name)
+        KeyValue::new("tool.name", crate::sensitive::sanitize_tool_name(name))
     }
 
     /// Returns the [`KeyValue`] attribute for a model name.

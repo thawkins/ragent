@@ -94,7 +94,7 @@ pub const SUMMARY_FETCH_STAGGER: std::time::Duration = std::time::Duration::from
 pub const MIN_SEARCH_LIMIT: usize = 1;
 
 /// Maximum snippet length in characters (FR-009).
-pub const MAX_SNIPPETTE_CHARS: usize = 300;
+pub const MAX_SNIPPET_CHARS: usize = 300;
 
 /// Maximum query length in characters (defensive cap to avoid long URLs).
 pub const MAX_QUERY_CHARS: usize = 1_000;
@@ -569,11 +569,11 @@ fn build_snippet(value: &serde_json::Value, extract: &str) -> String {
     truncate_snippet(&joined)
 }
 
-/// Truncate a snippet to approximately [`MAX_SNIPPETTE_CHARS`] characters,
+/// Truncate a snippet to approximately [`MAX_SNIPPET_CHARS`] characters,
 /// respecting UTF-8 character boundaries and appending an ellipsis when
 /// truncated.
 fn truncate_snippet(snippet: &str) -> String {
-    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPETTE_CHARS)
+    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPET_CHARS)
 }
 
 /// Truncate a search query to [`MAX_QUERY_CHARS`] characters, respecting

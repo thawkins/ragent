@@ -4,6 +4,49 @@
 //! falls inside a multi-byte UTF-8 character (e.g. an em dash `-` or en dash
 //! `-`). This module provides safe, char-boundary-aware truncation helpers.
 
+/// Returns `true` when `s` starts with an `http://` or `https://` scheme.
+///
+/// The single shared HTTP-scheme predicate; the config, telemetry, tool, and
+/// UI layers all route their URL validation through it so a scheme check is
+/// never re-spelled by hand (audit Medium 7). The check is case-sensitive to
+/// match the way these URLs are actually built and persisted.
+#[must_use]
+pub fn is_http_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://")
+}
+
+/// Text width (columns) used when rendering HTML to plain text via the
+/// `html2text` crate.
+///
+/// The single shared value for the masterfetch extractor, the TUI markdown
+/// worker, and the agent reference resolver, so the rendered width cannot
+/// drift between them (audit Low, html2text width magic number).
+pub const HTML2TEXT_WIDTH: usize = 120;
+
+/// The final path component of `path` as a `&str`, or `""` when it has no file
+/// name or that name is not valid UTF-8.
+///
+/// The single shared form of the `path.file_name().and_then(|n| n.to_str())`
+/// idiom (audit Complex 7); callers that need an owned value can `.to_owned()`
+/// the result.
+#[must_use]
+pub fn path_file_name(path: &std::path::Path) -> &str {
+    path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+}
+
+/// Build an HTTP `Authorization: Bearer <key>` header value.
+///
+/// The single shared builder for the bearer header the LLM providers, the
+/// masterfetch search backends, and the GitHub client all send, so the exact
+/// header shape is defined once (audit Medium 6). Returns a [`String`] rather
+/// than a `reqwest::header::HeaderValue` so this leaf crate need not depend on
+/// `reqwest`; every call site feeds it to `.header("Authorization", ...)`,
+/// which accepts a `String`.
+#[must_use]
+pub fn bearer_auth_header(key: &str) -> String {
+    format!("Bearer {key}")
+}
+
 /// Truncate a string to at most `max_chars` Unicode scalar values, appending
 /// an ellipsis (`...`) when the string was shortened.
 ///

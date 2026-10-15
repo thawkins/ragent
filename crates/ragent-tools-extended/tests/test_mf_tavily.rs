@@ -4,8 +4,11 @@
 //! without making any network requests (FR-003, FR-004, NFR-003).
 
 use ragent_tools_extended::masterfetch::search::engine::SearchOptions;
+// The key-masking helper now lives in `engine`; import it under the historical
+// test-local name so the masking assertions below stay unchanged.
+use ragent_tools_extended::masterfetch::search::engine::mask_api_key as mask_key;
 use ragent_tools_extended::masterfetch::search::tavily::{
-    ENGINE_NAME, MAX_QUERY_CHARS, build_request_body, mask_key, parse_response_json, truncate_query,
+    ENGINE_NAME, MAX_QUERY_CHARS, build_request_body, parse_response_json, truncate_query,
 };
 use serde_json::json;
 

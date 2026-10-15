@@ -84,7 +84,7 @@ const MAX_TOKEN_BUDGET: usize = 4000;
 /// - The API key is never logged in plain text.
 /// - Failures are reported as `engine_blocked` so the other `mf_search`
 ///   backends can still return results.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PerplexityEngine {
     /// Perplexity API key (`Authorization: Bearer {api_key}`).
     api_key: String,
@@ -92,6 +92,17 @@ pub struct PerplexityEngine {
     client: Option<reqwest::Client>,
     /// Sonar model name (defaults to [`DEFAULT_MODEL`]).
     model: String,
+}
+
+impl std::fmt::Debug for PerplexityEngine {
+    /// SEC-039: hand-written so the `api_key` never leaks through `{:?}`; the
+    /// masked form is rendered instead of the raw key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PerplexityEngine")
+            .field("api_key", &super::engine::mask_api_key(&self.api_key))
+            .field("model", &self.model)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PerplexityEngine {

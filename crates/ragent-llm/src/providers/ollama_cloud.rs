@@ -84,7 +84,10 @@ impl OllamaCloudProvider {
             .json(&json!({ "model": model_name }))
             .timeout(std::time::Duration::from_secs(5));
         if !api_key.is_empty() {
-            request = request.header("Authorization", format!("Bearer {api_key}"));
+            request = request.header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&api_key),
+            );
         }
         let response = match request.send().await {
             Ok(response) => response,
@@ -532,7 +535,7 @@ impl LlmClient for OllamaCloudClient {
             self.http
                 .post(&url)
                 .header("content-type", "application/json")
-                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Authorization", ragent_types::strutil::bearer_auth_header(&self.api_key))
                 .body(body_bytes)
                 .send(),
         )

@@ -170,6 +170,7 @@ fn run_mbpp_python_assertions(sample: &str, test_code: &str) -> Result<(), Strin
     // `signal.alarm` is defeated by untrusted fixture code, so the subprocess
     // gets the same hard `timeout` wrapper as the native harness.
     let output = Command::new("timeout")
+        .arg("--kill-after=5s")
         .arg(format!(
             "{}s",
             crate::exec_guard::FIXTURE_SUBPROCESS_TIMEOUT_SECS
@@ -211,7 +212,12 @@ fn run_mbpp_native_harness(
     let result = (|| -> Result<(), String> {
         let extension = case.source_extension.as_deref().unwrap_or("txt");
         let source_name = format!("candidate.{extension}");
-        let source_path = run_root.join(&source_name);
+        // SEC-004: `source_extension` is untrusted; even though the loader
+        // validates its shape, defend the sink with a containment join so a
+        // crafted extension can never resolve outside the per-run temp dir.
+        let source_path =
+            ragent_types::guard::contained_join(&run_root, &source_name, "MBPP source file")
+                .map_err(|error| format!("native MBPP source path rejected: {error}"))?;
         let rendered = render_mbpp_native_test(case, sample, test_code);
         std::fs::write(&source_path, rendered).map_err(|error| {
             format!(

@@ -28,8 +28,10 @@ fn stage_codex_plugin(root: &Path, dir_name: &str) -> PathBuf {
 
 /// Install a plugin into the project store, returning its installed directory.
 ///
-/// `add` records the plugin enabled (FR-007); these tests exercise removing a
-/// *disabled* plugin, so the helper turns the enable flag back off.
+/// `add` records the plugin enabled (FR-007) in both the destination ledger and
+/// the trusted (user-global) ledger these tests use; these tests exercise
+/// removing a *disabled* plugin, so the helper turns the trusted enable flag
+/// back off (SEC-007: the scan reads the enable bit from the global ledger).
 fn install(tree: &TempTree, dir_name: &str) -> PathBuf {
     let source = stage_codex_plugin(&tree.0.join("src"), dir_name);
     let outcome = add(&dirs(tree), &tree.0, source.to_str().unwrap(), false).expect("add");
@@ -37,6 +39,10 @@ fn install(tree: &TempTree, dir_name: &str) -> PathBuf {
     let mut ledger = StoreLedger::load(store);
     ledger.state_mut("codex-weather").enabled = false;
     ledger.save(store).expect("ledger saved");
+    let trusted = tree.0.join("global/plugins");
+    let mut global = StoreLedger::load(&trusted);
+    global.state_mut("codex-weather").enabled = false;
+    global.save(&trusted).expect("global ledger saved");
     outcome.installed_dir
 }
 
@@ -85,19 +91,19 @@ fn remove_enabled_plugin_is_refused_with_disable_hint() {
     let tree = TempTree::new("enabled");
     let installed = install(&tree, "codex-weather");
 
-    // Mark the plugin enabled in its store ledger (as `/plugins enable` would).
-    let mut ledger = StoreLedger::load(installed.parent().unwrap());
+    // Mark the plugin enabled in the trusted (global) ledger (as
+    // `/plugins enable` would). SEC-007: that is the enable bit the scan reads.
+    let trusted_store = tree.0.join("global/plugins");
+    let mut ledger = StoreLedger::load(&trusted_store);
     ledger.state_mut("codex-weather").enabled = true;
-    ledger
-        .save(installed.parent().unwrap())
-        .expect("ledger saved");
+    ledger.save(&trusted_store).expect("ledger saved");
 
     let err = remove(&dirs(&tree), "codex-weather").expect_err("enabled refused");
     assert!(matches!(err, RemoveError::Enabled(id) if id == "codex-weather"));
     // Directory and ledger row both preserved.
     assert!(installed.exists());
     assert!(
-        StoreLedger::load(installed.parent().unwrap())
+        StoreLedger::load(&trusted_store)
             .state("codex-weather")
             .is_some_and(|s| s.enabled)
     );
@@ -139,11 +145,16 @@ fn remove_resolves_plugin_from_project_over_global() {
     std::fs::write(global_dir.join("index.js"), "// entry").unwrap();
 
     // `add` enabled the project copy; remove refuses an enabled plugin, so turn
-    // the project leg's flag off first (as `/plugins disable` would).
+    // the flag off first (as `/plugins disable` would). SEC-007: the trusted
+    // enable bit lives in the global ledger.
     let project_store = tree.0.join("proj/.ragent/plugins");
     let mut ledger = StoreLedger::load(&project_store);
     ledger.state_mut("codex-weather").enabled = false;
     ledger.save(&project_store).expect("ledger saved");
+    let global_store = tree.0.join("global/plugins");
+    let mut global = StoreLedger::load(&global_store);
+    global.state_mut("codex-weather").enabled = false;
+    global.save(&global_store).expect("global ledger saved");
 
     remove(&dirs(&tree), "codex-weather").expect("remove succeeds");
     // Project copy (higher priority) is removed; global copy remains.

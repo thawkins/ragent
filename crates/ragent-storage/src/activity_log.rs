@@ -38,7 +38,6 @@
 //! match on, so `anyhow` is sufficient. Callers should not expect the two
 //! stores to present errors uniformly.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -60,13 +59,6 @@ use ragent_types::id::{EventId, RunId};
 /// [`Storage::write_async`](crate::storage::Storage::write_async)).
 pub struct ActivityLog {
     conn: Mutex<Connection>,
-    /// Runs currently being rebuilt (rollback/resume); concurrent append,
-    /// rollback, resume on these are blocked (FR-014).
-    // Reason: used by rollback_to_seq/rollback_to_checkpoint/resume_run to
-    // block concurrent operations; the in-memory test API does not exercise
-    // the concurrent path so the field appears unused under `cargo check`.
-    #[allow(dead_code)]
-    rebuilding: Mutex<HashSet<String>>,
 }
 
 /// The canonical `INSERT INTO activity_events` statement.
@@ -93,9 +85,12 @@ const SQL_SELECT_RUN_UPTO: &str = "SELECT run_id, seq, id, schema_version, times
 const SQL_SELECT_RUN: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
      FROM activity_events WHERE run_id = ?1 ORDER BY seq ASC";
 
-/// Select the most recent event of a kind for a run.
+/// Select the most recent event of a kind for a run. SEC-050: the `LIKE`
+/// pattern is built from caller-supplied data (`kind_tag`/`lookup`), so the
+/// comparison declares `\` as its escape character and the pattern escapes the
+/// `%`/`_`/`\` metacharacters (see [`escape_like`]).
 const SQL_SELECT_KIND_LATEST: &str = "SELECT run_id, seq, id, schema_version, timestamp, kind \
-     FROM activity_events WHERE run_id = ?1 AND kind LIKE ?2 ORDER BY seq DESC LIMIT 1";
+     FROM activity_events WHERE run_id = ?1 AND kind LIKE ?2 ESCAPE '\\' ORDER BY seq DESC LIMIT 1";
 
 /// SQLite `busy_timeout` in milliseconds for the activity-log connection
 /// (ANTIPAT D-8).
@@ -161,13 +156,6 @@ pub enum AppendError {
         /// Description of the attempted mutation.
         attempted: String,
     },
-    /// The run is being rebuilt (rollback or resume in progress) and concurrent
-    /// append, rollback, or resume operations are blocked (FR-014).
-    #[error("run {run_id} is rebuilding; concurrent operations blocked")]
-    RunRebuilding {
-        /// The run that is rebuilding.
-        run_id: RunId,
-    },
     /// The run is interrupted and not accepting new events until a resume
     /// operation is initiated (FR-006).
     #[error("run {run_id} is interrupted; resume before appending")]
@@ -225,7 +213,6 @@ impl ActivityLog {
         conn.pragma_update(None, "busy_timeout", ACTIVITY_BUSY_TIMEOUT_MS)?;
         let log = Self {
             conn: Mutex::new(conn),
-            rebuilding: Mutex::new(HashSet::new()),
         };
         log.migrate()?;
         // SEC-ragent-storage-003 (SECTASKS T-041): the WAL sidecars are created
@@ -245,7 +232,6 @@ impl ActivityLog {
         let conn = Connection::open_in_memory()?;
         let log = Self {
             conn: Mutex::new(conn),
-            rebuilding: Mutex::new(HashSet::new()),
         };
         log.migrate()?;
         Ok(log)
@@ -1730,6 +1716,21 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivityEvent> {
     })
 }
 
+/// SEC-050: escape the SQL LIKE metacharacters (`%`, `_`, and the escape
+/// character `\` itself) in a caller-supplied substring so it is matched
+/// literally. The companion `LIKE ... ESCAPE '\'` clause makes `\` the escape
+/// character, so each metacharacter is prefixed with a backslash.
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// M-003: load a single event of a given kind within `run_id` using a
 /// targeted `kind LIKE` query (events store the serialised `EventKind` JSON),
 /// ordered newest-first and limited to one. The discriminator prefix uniquely
@@ -1744,11 +1745,17 @@ fn find_event_locked(
     // serialised `EventKind` JSON opens with `{"kind":"tool_call",...}`.
     // An empty `lookup` matches any event of that kind (used for the status
     // query which only needs the kind, not a specific payload value).
+    //
+    // SEC-050: both `kind_tag` and `lookup` can carry attacker-controlled
+    // values. `kind_tag` is a fixed discriminator built by the caller, but
+    // `lookup` (a tool-call id, checkpoint name, lifecycle marker, ...) is
+    // caller data, so escape LIKE metacharacters in both before interpolation
+    // and match with `ESCAPE '\'`.
     let mut stmt = conn.prepare_cached(SQL_SELECT_KIND_LATEST)?;
     let like = if lookup.is_empty() {
-        format!("%{kind_tag}%")
+        format!("%{}%", escape_like(kind_tag))
     } else {
-        format!("%{kind_tag}%\"{lookup}\"%")
+        format!("%{}%\"{}\"%", escape_like(kind_tag), escape_like(lookup))
     };
     let mut rows = stmt
         .query_map(params![run_id.as_str(), like], row_to_event)

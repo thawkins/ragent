@@ -132,15 +132,16 @@ fn list_recursive(
         .filter_map(std::result::Result::ok)
         .collect();
 
+    // SEC-028: classify via the directory entry's own file type so a symlinked
+    // directory is NOT followed by the recursive descent (matching `glob`). A
+    // symlink is neither descended into nor reported as a directory.
+    let is_dir_entry = |e: &std::fs::DirEntry| e.file_type().is_ok_and(|ft| ft.is_dir());
+
     // Sort entries: directories first, then by name
-    entries.sort_by(|a, b| {
-        let a_is_dir = a.path().is_dir();
-        let b_is_dir = b.path().is_dir();
-        match (a_is_dir, b_is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.file_name().cmp(&b.file_name()),
-        }
+    entries.sort_by(|a, b| match (is_dir_entry(a), is_dir_entry(b)) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.file_name().cmp(&b.file_name()),
     });
 
     // Filter hidden files
@@ -154,7 +155,13 @@ fn list_recursive(
         let name_str = name.to_string_lossy();
         let path = entry.path();
 
-        if path.is_dir() {
+        // SEC-028: a symlinked directory is skipped, not descended into.
+        if entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
+            lines.push(format!("{prefix}{connector}{name_str}  (symlink, skipped)"));
+            continue;
+        }
+
+        if is_dir_entry(entry) {
             // Skip large/generated directories
             if matches!(
                 name_str.as_ref(),

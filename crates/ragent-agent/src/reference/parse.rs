@@ -111,7 +111,7 @@ pub fn parse_refs(input: &str) -> Vec<ParsedRef> {
 /// Classify a raw reference string into a [`FileRef`] variant.
 fn classify_ref(raw: &str) -> FileRef {
     // URLs
-    if raw.starts_with("http://") || raw.starts_with("https://") {
+    if ragent_types::strutil::is_http_url(raw) {
         return FileRef::Url(raw.to_string());
     }
 
@@ -140,4 +140,4 @@ fn classify_ref(raw: &str) -> FileRef {
 
 #[cfg(test)]
 #[path = "../../tests/inline/reference_parse.rs"]
-mod tests_tests;
+mod tests;

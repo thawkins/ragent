@@ -116,6 +116,16 @@ pub struct IndexStore {
 impl IndexStore {
     /// Open (or create) an index database at the given path.
     pub fn open(path: &Path) -> Result<Self> {
+        // SEC-ragent-codeindex-048 (SECTASKS T-060): mirror the FTS symlink guard
+        // in `search.rs` - `Connection::open` follows a symlinked database path,
+        // so a repository that plants the index db as a symlink to another file
+        // would have that target opened (and WAL/schema written) through the
+        // link. Refuse to operate on a symlink.
+        if let Ok(meta) = std::fs::symlink_metadata(path)
+            && meta.file_type().is_symlink()
+        {
+            anyhow::bail!("refusing to open a symlinked index db: {}", path.display());
+        }
         // Ensure parent directory exists.
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -1193,15 +1203,18 @@ impl IndexStore {
 
     /// PERF-074: find up to `limit` references to a symbol by name, with the
     /// `LIMIT` pushed into SQL so the store never materialises and then
-    /// truncates the full reference set.  `limit == 0` means no limit.
+    /// truncates the full reference set.
+    ///
+    /// SEC-ragent-codeindex-047: `limit == 0` must not be treated as "no limit"
+    /// (that routed into the unbounded [`Self::find_references`] full scan). The
+    /// value is clamped into `1..=MAX_GRAPH_LOAD_ROWS` so a caller-supplied zero
+    /// still returns at least one row and the result set can never be unbounded.
     pub fn find_references_limited(
         &self,
         symbol_name: &str,
         limit: usize,
     ) -> Result<Vec<SymbolRef>> {
-        if limit == 0 {
-            return self.find_references(symbol_name);
-        }
+        let limit = limit.clamp(1, MAX_GRAPH_LOAD_ROWS);
         let mut stmt = self.conn.prepare_cached(
             "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
                     COALESCE(f.path, '') as file_path

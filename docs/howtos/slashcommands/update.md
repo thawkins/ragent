@@ -10,6 +10,12 @@ updates..." line appears first, and the result arrives as an event-bus message
 afterwards. `install` downloads the release binary and replaces the current
 executable in place; a restart picks it up.
 
+`install` verifies the downloaded artifact before replacing anything (SEC-043):
+it reads a SHA-256 digest from the release metadata (`digest: sha256:<hex>`, or
+the `RAGENT_UPDATE_SHA256` environment variable) and **refuses the download**
+when no digest is available, rather than replacing the running binary with an
+unverified artifact.
+
 ## Syntax
 
 ```

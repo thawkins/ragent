@@ -136,6 +136,19 @@ impl WebFetchTool for FakeFetch {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no page"))
     }
+
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 struct FakeLocal {
@@ -318,6 +331,19 @@ async fn session_forwards_web_search_errors_to_observer() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<crate::web_gatherer::WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -420,6 +446,19 @@ async fn session_persists_decomposed_queries_in_research_md() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -515,6 +554,19 @@ async fn from_url_fetches_page_and_derives_topic_when_topic_is_empty() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -636,6 +688,19 @@ async fn from_url_derives_topic_from_body_not_title_when_body_has_boilerplate() 
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -725,6 +790,19 @@ async fn from_url_falls_back_to_title_when_body_is_pure_boilerplate() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -784,6 +862,19 @@ async fn from_url_keeps_explicit_topic_when_both_are_supplied() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -845,6 +936,19 @@ async fn from_url_records_web_fetch_failed_when_fetch_errors() {
     impl WebFetchTool for FailFetch {
         async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
             anyhow::bail!("network down")
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -1805,6 +1909,19 @@ async fn from_url_seed_appears_as_first_source() {
                 })
             }
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let tmp = TempDir::new().unwrap();
@@ -1926,6 +2043,19 @@ async fn multiple_from_urls_all_captured_as_sources() {
                 })
             }
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -2011,6 +2141,19 @@ async fn from_file_extracts_text_and_captures_as_other_source() {
         async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
             anyhow::bail!("not used")
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -2090,6 +2233,19 @@ async fn multiple_from_files_all_captured_as_sources() {
         async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
             anyhow::bail!("not used")
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let manager = ResearchManager::new(&research_root);
@@ -2161,6 +2317,19 @@ async fn from_file_pdf_auto_enables_pdf_web_sources() {
     impl WebFetchTool for NoFetch {
         async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
             anyhow::bail!("not used")
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -2354,6 +2523,19 @@ async fn h001_web_phase_timeout_keeps_partial_sources_and_proceeds() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
     struct FastSearch;
@@ -2557,6 +2739,19 @@ async fn h002_session_wires_search_retry_config() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     let web = WebGatherer::new(Arc::new(OkSearch), Arc::new(OkFetch));
     let tmp = TempDir::new().unwrap();
@@ -2632,6 +2827,19 @@ async fn competitive_mode_delegates_one_researcher_per_entity() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -2798,6 +3006,19 @@ async fn competitive_mode_caps_researchers_at_max_concurrent_units() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 

@@ -370,8 +370,20 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
     // Clamping to [0, 1] happens after sorting, in the ConsensusResult.
     let score = best_entry_score + consensus_boost;
 
-    // Use the first entry's title, URL, and snippet.
-    let first = entries.first().expect("group must have at least one entry");
+    // Use the first entry's title, URL, and snippet. `group_by_url` only ever
+    // emits non-empty groups, so `first()` is always `Some`; a group that
+    // somehow arrived empty yields an empty placeholder rather than panicking.
+    let Some(first) = entries.first() else {
+        return ScoredResult {
+            title: String::new(),
+            url: norm_url.to_string(),
+            snippet: String::new(),
+            source: String::new(),
+            score,
+            engine_count,
+            author: None,
+        };
+    };
 
     // Build source string: comma-separated engine names (sorted for
     // deterministic output - HashSet iteration order is random).

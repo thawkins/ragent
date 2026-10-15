@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+use sha2::Digest;
 
 /// The GitHub repo to check for releases.
 const GITHUB_REPO: &str = "thawkins/ragent";
@@ -23,6 +24,10 @@ pub struct ReleaseInfo {
     pub body: String,
     /// Download URL for the platform-appropriate binary (if found).
     pub download_url: Option<String>,
+    /// SHA-256 of the selected asset, when the release metadata published one
+    /// (GitHub release assets expose a `digest` field of the form
+    /// `sha256:<hex>`). `None` when the release carries no digest.
+    pub sha256: Option<String>,
 }
 
 /// Check GitHub releases for a version newer than the running binary.
@@ -68,21 +73,27 @@ async fn fetch_latest_release() -> Result<ReleaseInfo> {
 
     // Find the appropriate binary asset for the current platform
     let target = current_platform_target();
-    let download_url = json["assets"]
-        .as_array()
-        .and_then(|assets| {
-            assets
-                .iter()
-                .find(|a| a["name"].as_str().is_some_and(|n| n.contains(&target)))
-        })
+    let asset = json["assets"].as_array().and_then(|assets| {
+        assets
+            .iter()
+            .find(|a| a["name"].as_str().is_some_and(|n| n.contains(&target)))
+    });
+    let download_url = asset
         .and_then(|a| a["browser_download_url"].as_str())
         .map(std::string::ToString::to_string);
+    // GitHub exposes the asset digest as `sha256:<hex>` (SEC-043). Normalise to
+    // the bare hex digest; `None` when the release published none.
+    let sha256 = asset
+        .and_then(|a| a["digest"].as_str())
+        .and_then(|d| d.strip_prefix("sha256:"))
+        .map(|hex| hex.to_ascii_lowercase());
 
     Ok(ReleaseInfo {
         tag_name,
         version,
         body,
         download_url,
+        sha256,
     })
 }
 
@@ -122,7 +133,31 @@ fn current_platform_target() -> String {
 }
 
 /// Download and replace the current binary with the latest release.
+///
+/// # Integrity (SEC-043)
+///
+/// The downloaded bytes must be verified against a SHA-256 digest before
+/// anything is written or replaced. This entry point resolves that digest from
+/// the `RAGENT_UPDATE_SHA256` environment variable (see
+/// [`download_and_replace_verified`] to pass one explicitly, e.g. the
+/// [`ReleaseInfo::sha256`] the release metadata published). If no digest is
+/// available the download is **refused**: replacing the running binary with an
+/// unverified artifact fetched over the network is not permitted.
 pub async fn download_and_replace(download_url: &str) -> Result<()> {
+    download_and_replace_verified(download_url, None).await
+}
+
+/// As [`download_and_replace`], but with the expected SHA-256 digest passed in.
+///
+/// `expected_sha256` takes precedence over `RAGENT_UPDATE_SHA256`; when neither
+/// is available the download is refused (SEC-043). The digest may be a bare hex
+/// string or carry a `sha256:` prefix, and the comparison is case-insensitive.
+pub async fn download_and_replace_verified(
+    download_url: &str,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
+    let expected = resolve_expected_sha256(expected_sha256)?;
+
     let current_exe = std::env::current_exe().context("Cannot determine current binary path")?;
 
     let client = reqwest::Client::builder()
@@ -136,6 +171,20 @@ pub async fn download_and_replace(download_url: &str) -> Result<()> {
     }
 
     let bytes = resp.bytes().await?;
+
+    // Verify the artifact before touching the filesystem (SEC-043).
+    let actual = hex::encode(sha2::Sha256::digest(&bytes));
+    if actual != expected {
+        bail!(
+            "Downloaded update failed SHA-256 verification (expected {expected}, got {actual}); \
+             refusing to replace the binary"
+        );
+    }
+    tracing::info!(
+        download_url = %crate::sanitize::redact_secrets(download_url),
+        sha256 = %actual,
+        "Update artifact verified; replacing binary"
+    );
 
     // Write to a temp file alongside the current binary
     let tmp_path = current_exe.with_extension("tmp_update");
@@ -153,4 +202,33 @@ pub async fn download_and_replace(download_url: &str) -> Result<()> {
         .context("Failed to replace binary - may need elevated permissions")?;
 
     Ok(())
+}
+
+/// Resolve the SHA-256 digest an update download must match.
+///
+/// Prefers the caller-supplied `expected_sha256` (e.g. the release asset's
+/// published `digest`), falling back to the `RAGENT_UPDATE_SHA256` environment
+/// variable. Returns an error - refusing the update - when neither is present
+/// or the supplied value is not valid hex (SEC-043). A `sha256:` prefix is
+/// stripped and the result lowercased for a case-insensitive comparison.
+fn resolve_expected_sha256(expected: Option<&str>) -> Result<String> {
+    let raw = expected
+        .map(str::to_string)
+        .or_else(|| std::env::var("RAGENT_UPDATE_SHA256").ok())
+        .filter(|s| !s.trim().is_empty())
+        .context(
+            "no expected SHA-256 digest available for the update; refusing to replace the binary \
+             (pass one from the release metadata or set RAGENT_UPDATE_SHA256)",
+        )?;
+
+    let digest = raw
+        .trim()
+        .strip_prefix("sha256:")
+        .unwrap_or(raw.trim())
+        .to_ascii_lowercase();
+
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!("expected SHA-256 digest '{digest}' is not a valid 64-character hex digest");
+    }
+    Ok(digest)
 }

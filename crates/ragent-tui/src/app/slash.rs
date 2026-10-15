@@ -3926,14 +3926,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                     // URL-userinfo secrets) is masked too, then fully
                                     // mask a top-level key whose *name* is credential-like.
                                     ragent_types::sanitize::redact_json_value(&mut value, 8);
-                                    let is_secret_key = key.ends_with("_api_key")
-                                        || key.ends_with("_key")
-                                        || key.ends_with("_token")
-                                        || key.ends_with("_secret")
-                                        || key == "openalex_email"
-                                        || key == "gitlab";
+                                    let is_secret_key =
+                                        ragent_types::sanitize::is_secret_json_key(key);
                                     let rendered = if is_secret_key {
-                                        "<redacted>".to_string()
+                                        ragent_types::sanitize::REDACTION_PLACEHOLDER.to_string()
                                     } else {
                                         ragent_types::sanitize::redact_secrets(&value.to_string())
                                     };
@@ -10235,6 +10231,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             .take(40)
                             .map(char::from)
                             .collect();
+                        // SEC-081: register the bearer token before it is
+                        // interpolated into the chat transcript (and thus the log
+                        // spool), so every render path masks it as `[REDACTED]`.
+                        ragent_types::sanitize::register_secret(&token);
                         self.webapi_token = Some(token.clone());
                         let addr = self.webapi_addr.clone();
 
@@ -10283,7 +10283,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 "disable" | "stop" => {
                     if let Some(handle) = self.webapi_server.take() {
                         handle.abort();
-                        self.webapi_token = None;
+                        // SEC-081: drop the now-dead token from the redaction
+                        // registry so it does not linger process-wide.
+                        if let Some(token) = self.webapi_token.take() {
+                            ragent_types::sanitize::unregister_secret(&token);
+                        }
                         self.append_assistant_text("[stop] **Web API disabled.**");
                     } else {
                         self.append_assistant_text(

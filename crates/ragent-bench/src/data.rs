@@ -909,7 +909,20 @@ struct BcMbppFullRecord {
 fn download_url_bytes(url: &str) -> Result<Vec<u8>> {
     let url = url.to_string();
     std::thread::spawn(move || -> Result<Vec<u8>> {
-        let response = reqwest::blocking::Client::new()
+        // SEC-069: bound the total request/read time and the redirect chain so a
+        // slow-loris dataset endpoint cannot hang `/bench init --full` forever.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 || attempt.url().scheme() != "https" {
+                    attempt.error("benchmark download refused a redirect (too many hops or non-https)")
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .with_context(|| "build benchmark download client")?;
+        let response = client
             .get(&url)
             .send()
             .with_context(|| format!("download benchmark data from {url}"))?
@@ -1402,6 +1415,27 @@ fn validate_case_fixtures(
         };
         bail!(
             "Benchmark data for 'mbpp' is stale and missing bundled tests. Rebuild it with `{rebuild_hint}`."
+        );
+    }
+    // SEC-004: `source_extension` is copied verbatim from the untrusted dataset
+    // record and later joined into a per-run temp path, so it must be a plain
+    // identifier before any harness runs. Reject the whole load rather than
+    // letting a crafted extension reach a write.
+    if let Some(case) = cases.iter().find(|case| {
+        case.source_extension
+            .as_deref()
+            .is_some_and(|ext| !crate::exec_guard::is_safe_source_extension(ext))
+    }) {
+        let extension = case
+            .source_extension
+            .as_deref()
+            .unwrap_or_default()
+            .to_string();
+        bail!(
+            "Benchmark case '{}' declares an unsafe source extension '{extension}': an \
+             extension must be 1-{} alphanumeric/underscore characters",
+            case.case_id,
+            crate::exec_guard::MAX_SOURCE_EXTENSION_LEN
         );
     }
     Ok(())

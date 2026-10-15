@@ -71,6 +71,19 @@ impl WebFetchTool for FakeFetch {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no fake page registered for {url}"))
     }
+
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 #[test]
@@ -572,6 +585,19 @@ async fn gather_times_out_slow_fetch() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     let hits = vec![WebSearchHit {
         url: "https://slow.example".into(),
@@ -712,6 +738,19 @@ async fn gather_returns_empty_vec_when_search_tool_errors() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
     let g = WebGatherer::new(Arc::new(AlwaysFailSearch), Arc::new(OkFetch));
@@ -1032,6 +1071,19 @@ async fn gather_with_observer_emits_search_failed_on_search_error() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     #[derive(Default)]
     struct CollectEvents(Mutex<Vec<GatherEvent>>);
@@ -1178,6 +1230,19 @@ async fn gather_with_decomposer_runs_parallel_sub_queries_and_dedupes() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -1436,6 +1501,19 @@ impl WebFetchTool for ConcurrencyTrackingFetch {
             author: None,
         })
     }
+
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 /// `with_fetch_concurrency(0)` is clamped up to `1` so the stream always
@@ -1549,6 +1627,19 @@ async fn fetch_url_as_source_classifies_pdf_and_youtube_media_types() {
                 .get(url)
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("no fake page for {url}"))
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -1825,6 +1916,19 @@ async fn h002_search_retries_exhausted_emits_search_failed() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     #[derive(Default)]
     struct CollectEvents(Mutex<Vec<GatherEvent>>);
@@ -2088,6 +2192,19 @@ async fn gather_uses_vault_sources_when_available() {
         async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
             panic!("fetch should not be called when vault has matches")
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
 
     let g =
@@ -2210,6 +2327,19 @@ async fn gather_skips_search_when_vault_has_sufficient_sources() {
     impl WebFetchTool for PanicFetch {
         async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
             panic!("fetch should not be called when vault has sufficient sources")
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -2340,6 +2470,19 @@ async fn gather_emits_vault_sufficient_event() {
     impl WebFetchTool for PanicFetch {
         async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
             panic!("fetch should not be called when vault is sufficient")
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
 
@@ -3344,6 +3487,19 @@ async fn volume_cap_sets_per_query_search_allowance() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     // Capped run: the search tool sees the cap (2), not the caller's
     // `max_results` (10). 4 hits with a per-query allowance of 2 and a
@@ -3415,6 +3571,19 @@ async fn fetch_budget_scales_with_sub_query_count() {
                 author: None,
             })
         }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
+        }
     }
     struct ThreeQueries;
     #[async_trait]
@@ -3473,6 +3642,19 @@ async fn volume_cap_scales_fetch_budget_with_sub_query_count() {
                 language: None,
                 author: None,
             })
+        }
+
+        async fn fetch_with_limit(
+            &self,
+            url: &str,
+            max_bytes: usize,
+        ) -> anyhow::Result<WebFetchedPage> {
+            let mut page = self.fetch(url).await?;
+            if page.body.len() > max_bytes {
+                let truncated = crate::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+                page.body = std::sync::Arc::from(truncated);
+            }
+            Ok(page)
         }
     }
     struct ThreeQueries;

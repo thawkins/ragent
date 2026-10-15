@@ -41,7 +41,7 @@ use ragent_tools_extended::masterfetch::search::{
     ACADEMIC_ENGINES, ENGINE_WIKIPEDIA, is_academic_engine,
 };
 
-use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
+use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body};
 use crate::gather_log::GatherLog;
 use crate::open_access::{
     DEFAULT_OA_MIN_FULL_TEXT_CHARS, OpenAccessClient, RecoveredOpenAccess, ReqwestOpenAccessClient,
@@ -831,22 +831,15 @@ pub trait WebFetchTool: Send + Sync {
 
     /// Fetch `url` and cap the returned body at `max_bytes`.
     ///
-    /// The default implementation delegates to [`Self::fetch`] and then
-    /// truncates the body, so implementations that already stream or cap data
-    /// can override this for better memory behaviour. The research gatherer
-    /// always calls this method to enforce [`MAX_SOURCE_BODY_BYTES`] at the
-    /// boundary (Milestone B-002).
-    async fn fetch_with_limit(
-        &self,
-        url: &str,
-        max_bytes: usize,
-    ) -> anyhow::Result<WebFetchedPage> {
-        let mut page = self.fetch(url).await?;
-        if page.body.len() > max_bytes {
-            page.body = Arc::from(truncate_body_to_bytes(&page.body, max_bytes));
-        }
-        Ok(page)
-    }
+    /// SEC-067: this is a **required** method (no default). The previous default
+    /// delegated to [`Self::fetch`] and truncated *after* the whole body had been
+    /// buffered, so an implementor that did not override it could not bound
+    /// memory. Every implementation must now pass `max_bytes` into the underlying
+    /// fetch so the cap is enforced while streaming. The research gatherer always
+    /// calls this method to enforce [`MAX_SOURCE_BODY_BYTES`] at the boundary
+    /// (Milestone B-002).
+    async fn fetch_with_limit(&self, url: &str, max_bytes: usize)
+    -> anyhow::Result<WebFetchedPage>;
 }
 
 /// Errors emitted by [`WebGatherer`].

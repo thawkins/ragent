@@ -84,12 +84,22 @@ pub const MAX_QUERY_CHARS: usize = 400;
 /// - **FR-005** - failures are reported as `engine_blocked` so the other
 ///   `mf_search` backends can still return results.
 /// - **FR-012** - the API key is never logged in plain text.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TavilyEngine {
     /// Tavily API key (`Authorization: Bearer {api_key}`).
     api_key: String,
     /// Optional injectable HTTP client (for testing).
     client: Option<reqwest::Client>,
+}
+
+impl std::fmt::Debug for TavilyEngine {
+    /// SEC-039: hand-written so the `api_key` never leaks through `{:?}`; the
+    /// masked form is rendered instead of the raw key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TavilyEngine")
+            .field("api_key", &super::engine::mask_api_key(&self.api_key))
+            .finish_non_exhaustive()
+    }
 }
 
 impl TavilyEngine {

@@ -304,6 +304,8 @@ impl ContainerBackend {
 
         // Remove a stale stopped container with the same name (best effort - a
         // missing container is expected and not an error).
+        // A missing container is expected and not an error.
+        // INTENTIONAL: best-effort removal of a stale stopped container.
         let _ = Self::run(
             &bin,
             &["rm", "-f", &self.container],
@@ -760,16 +762,27 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
 /// Map an absolute or relative path to its container-side location, confined to
 /// `workspace`.
 ///
-/// Absolute paths must already sit inside the workspace mount, and `..` components
-/// are rejected outright. The check is purely lexical: it runs on the host without
-/// touching the container filesystem, so it can never be defeated by a symlink the
-/// sandbox creates later (the sandbox itself is disposable).
+/// Absolute paths must already sit inside the workspace mount, and `..`
+/// components are rejected outright - on absolute *and* relative paths alike.
+/// The check is purely lexical: it runs on the host without touching the
+/// container filesystem, so it can never be defeated by a symlink the sandbox
+/// creates later (the sandbox itself is disposable). Rejecting `..` before the
+/// absolute-path prefix test is what stops `/workspace/../../etc/passwd` from
+/// passing a naive `starts_with(workspace)` check (SEC-041).
 fn container_path(workspace: &str, raw: &str) -> anyhow::Result<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         anyhow::bail!("path must not be empty");
     }
     let path = Path::new(trimmed);
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        anyhow::bail!(
+            "path '{trimmed}' escapes the container workspace '{workspace}' via '..' (FR-035)"
+        );
+    }
     if path.is_absolute() {
         let workspace_prefix = format!("{workspace}/");
         if trimmed == workspace || trimmed.starts_with(&workspace_prefix) {
@@ -778,14 +791,6 @@ fn container_path(workspace: &str, raw: &str) -> anyhow::Result<String> {
         anyhow::bail!(
             "path '{trimmed}' is outside the container workspace '{workspace}'; container file \
              tools are confined to the mounted workspace (FR-035)"
-        );
-    }
-    if path
-        .components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        anyhow::bail!(
-            "path '{trimmed}' escapes the container workspace '{workspace}' via '..' (FR-035)"
         );
     }
     let normalised = path.to_string_lossy().trim_start_matches("./").to_string();

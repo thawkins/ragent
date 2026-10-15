@@ -234,7 +234,7 @@ fn test_api_key_in_resource_attributes_is_redacted() {
     let token = resource_attr(&metrics, "deployment.token");
     assert_eq!(
         token,
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "API key in resource_attributes must be redacted (FR-034)"
     );
 }
@@ -252,7 +252,7 @@ fn test_bearer_token_in_resource_attributes_is_redacted() {
     let metrics = export_with_resource_from_config(&config);
     assert_eq!(
         resource_attr(&metrics, "auth.header"),
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "Bearer token must be redacted (FR-034)"
     );
 }
@@ -270,7 +270,7 @@ fn test_github_pat_in_resource_attributes_is_redacted() {
     let metrics = export_with_resource_from_config(&config);
     assert_eq!(
         resource_attr(&metrics, "ci.token"),
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "GitHub PAT must be redacted (FR-034)"
     );
 }
@@ -288,7 +288,7 @@ fn test_file_content_in_resource_attributes_is_redacted() {
     let metrics = export_with_resource_from_config(&config);
     assert_eq!(
         resource_attr(&metrics, "config.snippet"),
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "multi-line content must be redacted (FR-034)"
     );
 }
@@ -304,7 +304,7 @@ fn test_credential_in_resource_attributes_is_redacted() {
     let metrics = export_with_resource_from_config(&config);
     assert_eq!(
         resource_attr(&metrics, "db.url"),
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "user:password credential must be redacted (FR-034)"
     );
 }
@@ -362,7 +362,7 @@ fn test_mixed_safe_and_sensitive_resource_attributes() {
     );
     assert_eq!(
         resource_attr(&metrics, "secret.token"),
-        Some("redacted".to_string()),
+        Some("[REDACTED]".to_string()),
         "sensitive attribute is redacted"
     );
 }

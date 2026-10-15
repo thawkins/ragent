@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.134"
+version = "1.0.135"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -280,6 +280,7 @@ gcf = "3.0.1"
 ragent-specs = { path = "crates/ragent-specs" }
 ragent-research = { path = "crates/ragent-research" }
 ragent-types = { path = "crates/ragent-types" }
+ragent-tools-core = { path = "crates/ragent-tools-core" }
 ragent-tools-extended = { path = "crates/ragent-tools-extended" }
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
@@ -338,6 +339,7 @@ ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }
 ragent-research = { workspace = true }
 ragent-types = { workspace = true }
+ragent-tools-core = { workspace = true }
 ragent-tools-extended = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }

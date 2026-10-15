@@ -121,7 +121,7 @@ impl OtelConfig {
                 "telemetry.otel.endpoint must not be empty when telemetry is enabled".to_string(),
             );
         }
-        if !self.endpoint.starts_with("http://") && !self.endpoint.starts_with("https://") {
+        if !ragent_types::strutil::is_http_url(&self.endpoint) {
             problems.push(format!(
                 "telemetry.otel.endpoint must be a valid HTTP or HTTPS URL (got \"{}\")",
                 self.endpoint

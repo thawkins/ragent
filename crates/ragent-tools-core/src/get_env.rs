@@ -56,7 +56,7 @@ fn contains_ignore_ascii_case_needle(haystack: &str, needle: &str) -> bool {
 /// variable is not returned verbatim.
 fn redact_value(name: &str, value: &str) -> String {
     if is_sensitive(name) {
-        return "***REDACTED***".to_string();
+        return ragent_types::sanitize::REDACTION_PLACEHOLDER.to_string();
     }
     let redacted = ragent_types::sanitize::redact_secrets(value);
     if redacted != value {

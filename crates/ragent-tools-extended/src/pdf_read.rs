@@ -71,6 +71,10 @@ impl Tool for PdfReadTool {
             .as_str()
             .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
+        // SEC-038: enforce workspace containment, as every other file tool does
+        // (`resolve_path` returns an absolute input unchanged, so without this a
+        // caller could read any readable PDF outside the workspace).
+        ctx.check_path_within_workspace(&path)?;
 
         let format = input["format"].as_str().unwrap_or("text");
         let start_page = input["start_page"].as_u64().map(|n| n as usize);

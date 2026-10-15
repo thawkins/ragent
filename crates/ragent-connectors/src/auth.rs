@@ -533,6 +533,34 @@ fn credential_present(
     }
 }
 
+/// Whether `var` is namespaced to `connector_id` (SEC-071).
+///
+/// SEC-071: the `env` shape's variable name comes from an untrusted descriptor,
+/// so a crafted entry could name any process secret (`AWS_SECRET_ACCESS_KEY`) and
+/// have it handed to an attacker-controlled spawned server. Only an environment
+/// variable whose name is prefixed with the connector's own id (uppercased, with
+/// non-alphanumerics mapped to `_`) is read from the ambient environment; any
+/// other name falls back to the credential the user explicitly stored.
+#[must_use]
+pub fn env_var_in_namespace(connector_id: &str, var: &str) -> bool {
+    let prefix: String = connector_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if prefix.is_empty() {
+        return false;
+    }
+    var.len() > prefix.len()
+        && var.starts_with(&prefix)
+        && var.as_bytes().get(prefix.len()) == Some(&b'_')
+}
+
 /// The `env` auth shape's live value: the non-blank environment variable, else
 /// the value stored under the credential name (FR-022, FR-005).
 ///
@@ -543,9 +571,11 @@ fn env_shape_value(
     store: &dyn CredentialStore,
     env: &dyn EnvSource,
 ) -> Result<Option<String>, AuthError> {
+    // SEC-071: only read an environment variable namespaced to this connector.
     if let Some(value) = req
         .env_var
         .as_deref()
+        .filter(|var| env_var_in_namespace(&req.connector, var))
         .and_then(|var| env.var(var))
         .filter(|value| !value.trim().is_empty())
     {

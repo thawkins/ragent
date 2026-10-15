@@ -129,6 +129,20 @@ impl CodeIndex {
         let db_path = config.index_dir.join("index.db");
         let fts_path = config.index_dir.join("fts");
 
+        // SEC-016/SEC-048: `index_dir` lives in `.ragent/codeindex` inside the
+        // untrusted project tree. A committed symlink there redirects both the
+        // SQLite db and the tantivy FTS dir (whose recovery branch deletes every
+        // entry) outside the sandbox. Refuse a symlinked dir or any `index_dir`
+        // whose existing prefix resolves outside the project root.
+        ragent_types::guard::reject_symlink_components(&config.index_dir, "index_dir")
+            .map_err(anyhow::Error::msg)?;
+        ragent_types::guard::reject_symlink_escape(
+            &config.index_dir,
+            &config.project_root,
+            "index_dir",
+        )
+        .map_err(anyhow::Error::msg)?;
+
         let store = IndexStore::open(&db_path)
             .with_context(|| format!("cannot open index store: {}", db_path.display()))?;
         let fts = FtsIndex::open(&fts_path)
@@ -1590,11 +1604,35 @@ const fn leak_kind_str(kind: types::SymbolKind) -> &'static str {
     }
 }
 
+/// Maximum recursion depth for [`dir_size`].
+///
+/// SEC-ragent-codeindex-044: `dir_size` walks an untrusted project tree, so a
+/// deep (or cyclically symlinked) directory could otherwise recurse without
+/// bound and exhaust the stack. The walk also refuses to follow symlinks.
+const MAX_DIR_SIZE_DEPTH: usize = 128;
+
 /// Recursively compute the size of a directory in bytes.
+///
+/// SEC-ragent-codeindex-044: symlink entries are skipped (both files and
+/// directories) so a link inside the tree cannot pull in an out-of-tree target,
+/// and recursion is bounded by [`MAX_DIR_SIZE_DEPTH`].
 fn dir_size(path: &Path) -> u64 {
+    dir_size_inner(path, 0)
+}
+
+/// Recursion body for [`dir_size`], carrying the current depth.
+fn dir_size_inner(path: &Path, depth: usize) -> u64 {
+    if depth >= MAX_DIR_SIZE_DEPTH {
+        return 0;
+    }
     let mut size = 0u64;
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
+            // Use the entry's own type so a symlink is neither followed nor
+            // recursed into.
+            if entry.file_type().is_ok_and(|ft| ft.is_symlink()) {
+                continue;
+            }
             let meta = match entry.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,
@@ -1602,7 +1640,7 @@ fn dir_size(path: &Path) -> u64 {
             if meta.is_file() {
                 size += meta.len();
             } else if meta.is_dir() {
-                size += dir_size(&entry.path());
+                size += dir_size_inner(&entry.path(), depth + 1);
             }
         }
     }

@@ -240,8 +240,12 @@ impl Provider for XaiProvider {
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let api_key = ragent_config::credential_env::provider_credential_env("xai")
             .context("xAI model discovery requires XAI_API_KEY")?;
-        let base_url = ragent_config::credential_env::read_credential_env(XAI_API_BASE_ENV)
-            .unwrap_or_else(|| XAI_API_BASE.to_string());
+        // SEC-ragent-llm-021: validate the env-supplied base URL before dialling.
+        let base_url = super::base_url::resolve_validated_base_url(
+            "xai",
+            ragent_config::credential_env::read_credential_env(XAI_API_BASE_ENV).as_deref(),
+            XAI_API_BASE,
+        );
         let models = discover_openai_models(&api_key, &base_url, "xai")
             .await
             .with_context(|| "xAI model discovery failed")?;
@@ -267,12 +271,15 @@ impl Provider for XaiProvider {
         // ANTIPAT 3.6: register the credential with the shared redaction
         // registry so any text passed through `redact_secrets` masks it.
         ragent_types::sanitize::register_secret(api_key);
+        // SEC-ragent-llm-021 / SEC-ragent-llm-005: both the config-sourced
+        // `base_url` and the `XAI_API_BASE` environment value are validated with
+        // the same scheme/host check before use.
         let env_endpoint = ragent_config::credential_env::read_credential_env(XAI_API_BASE_ENV);
-        let resolved_base = base_url
-            .or(env_endpoint.as_deref())
-            .unwrap_or(XAI_API_BASE)
-            .trim_end_matches('/')
-            .to_string();
+        let resolved_base = super::base_url::resolve_validated_base_url(
+            "xai",
+            base_url.or(env_endpoint.as_deref()),
+            XAI_API_BASE,
+        );
         let client = OpenAiClient::new(api_key, &resolved_base);
         tracing::info!(
             chat_endpoint = %format!("{}/v1/chat/completions", resolved_base),
@@ -285,4 +292,4 @@ impl Provider for XaiProvider {
 
 #[cfg(test)]
 #[path = "../../tests/inline/xai.rs"]
-mod tests_tests;
+mod tests;

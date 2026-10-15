@@ -422,10 +422,15 @@ pub(crate) fn collapse_whitespace(s: &str) -> String {
 
 /// Remove markdown reference and inline links, leaving only the surrounding text.
 fn remove_markdown_links(s: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?s)\[[^\]]+\](?:\[[^\]]*\]|\([^)]+\))").unwrap()
+    static RE: std::sync::LazyLock<Option<regex::Regex>> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?s)\[[^\]]+\](?:\[[^\]]*\]|\([^)]+\))").ok()
     });
-    RE.replace_all(s, "").into_owned()
+    match RE.as_ref() {
+        Some(re) => re.replace_all(s, "").into_owned(),
+        // The pattern is a compile-time literal; if it ever failed to compile
+        // there is nothing to strip, so return the input unchanged.
+        None => s.to_owned(),
+    }
 }
 
 /// Truncate `s` to at most `max_chars` characters on a UTF-8 char boundary.

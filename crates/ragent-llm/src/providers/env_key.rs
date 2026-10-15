@@ -33,3 +33,28 @@ pub fn provider_env_key_vars(provider_id: &str) -> &'static [&'static str] {
 pub fn provider_env_key(provider_id: &str) -> Option<String> {
     first_credential_env(provider_env_key_vars(provider_id))
 }
+
+/// The environment variable a provider reads a *non-secret* base-URL setting
+/// from, when it has one.
+///
+/// Returns the variable name only; the caller resolves it with
+/// [`ragent_config::credential_env::read_config_env`] (blank-aware, trimmed).
+/// Providers without an environment base URL return `None`.
+#[must_use]
+pub fn provider_env_base_url_var(provider_id: &str) -> Option<&'static str> {
+    match provider_id {
+        "generic_openai" => Some("GENERIC_OPENAI_API_BASE"),
+        "azure_foundry" => Some("AZURE_AI_FOUNDRY_BASE"),
+        "ollama" => Some("OLLAMA_HOST"),
+        "xai" => Some("XAI_API_BASE"),
+        _ => None,
+    }
+}
+
+/// Resolve a provider's non-secret base-URL override from the environment.
+///
+/// A blank value is treated as unset (audit Medium 11).
+#[must_use]
+pub fn provider_env_base_url(provider_id: &str) -> Option<String> {
+    provider_env_base_url_var(provider_id).and_then(ragent_config::credential_env::read_config_env)
+}

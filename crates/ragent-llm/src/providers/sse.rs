@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use crate::llm::StreamEvent;
+use crate::provider::http_client::redact_frame;
 use ragent_types::event::FinishReason;
 
 /// Per-provider switches for [`parse_openai_sse_stream`].
@@ -214,9 +215,11 @@ pub(crate) fn parse_openai_sse_stream(
                     Err(e) => {
                         // FUNC-032: a corrupt frame must be logged, not silently
                         // dropped - it can carry tool-call deltas.
+                        // SEC-ragent-llm-020: redact secrets and cap the raw frame
+                        // before logging.
                         tracing::warn!(
                             provider = %provider_name,
-                            frame = %data,
+                            frame = %redact_frame(data),
                             error = %e,
                             "dropping malformed SSE data frame"
                         );
@@ -292,7 +295,7 @@ pub(crate) fn parse_openai_sse_stream(
                             let Some(index) = tc["index"].as_u64() else {
                                 tracing::warn!(
                                     provider = %provider_name,
-                                    frame = %parsed,
+                                    frame = %redact_frame(&parsed.to_string()),
                                     "tool_call delta without an index; skipping frame"
                                 );
                                 continue;

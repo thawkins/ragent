@@ -32,6 +32,15 @@ const SECS_PER_WEEK: i64 = 604_800;
 /// Seconds per month, approximated as 30 days (per spec NFR).
 const SECS_PER_MONTH: i64 = 2_592_000;
 
+/// Maximum duration a schedule may declare, in seconds (100 years).
+///
+/// SEC-057: `parse_duration` previously guarded only against `i64` overflow, so
+/// a value such as `3558000000000mo` passed and then panicked inside
+/// `chrono::Duration::seconds`. Every duration is now rejected above this ceiling
+/// (well under the chrono `TimeDelta` bound), so no downstream `Duration` sink
+/// can panic on schedule input.
+pub const MAX_DURATION_SECONDS: i64 = 3_153_600_000;
+
 /// Returns a map of duration-unit alias -> seconds-per-unit.
 ///
 /// Built once on first access and cached for the process lifetime.
@@ -128,6 +137,9 @@ pub enum DurationParseError {
     /// The unit was not recognised (FR-019).
     #[error("unknown duration unit {0:?}; supported units: {1}")]
     UnknownUnit(String, String),
+    /// The duration exceeded [`MAX_DURATION_SECONDS`] (SEC-057).
+    #[error("duration {0} seconds exceeds the maximum of {1} seconds")]
+    OutOfRange(i64, i64),
 }
 
 /// Parse a duration expression into seconds.
@@ -216,8 +228,14 @@ pub fn parse_duration(s: &str) -> Result<i64, DurationParseError> {
     // the workspace release profile does not enable `overflow-checks`, so the
     // multiplication wrapped silently in release and panicked in debug. Surface
     // the overflow as a parse error instead.
-    num.checked_mul(secs)
-        .ok_or_else(|| DurationParseError::InvalidNumber(num_str.to_string()))
+    let total = num
+        .checked_mul(secs)
+        .ok_or_else(|| DurationParseError::InvalidNumber(num_str.to_string()))?;
+    // SEC-057: reject a value that would panic `chrono::Duration::seconds`.
+    if total > MAX_DURATION_SECONDS {
+        return Err(DurationParseError::OutOfRange(total, MAX_DURATION_SECONDS));
+    }
+    Ok(total)
 }
 
 /// The scheduling form of a [`CronEvent`].
@@ -379,7 +397,11 @@ impl CronSchedule {
     /// which callers now handle instead of panicking.
     #[must_use]
     pub fn positive_duration_secs(&self) -> Option<i64> {
-        self.duration_secs.filter(|d| *d > 0)
+        // SEC-057: bound the value too, so a tampered/imported `duration_secs`
+        // (which bypasses `parse_duration`) cannot reach `chrono::Duration::seconds`
+        // and panic the scheduler.
+        self.duration_secs
+            .filter(|d| *d > 0 && *d <= MAX_DURATION_SECONDS)
     }
 
     /// Compute the next-due timestamp after a fire (FR-004, FR-005).
@@ -670,8 +692,12 @@ fn parse_at(rest: &str) -> Result<ParsedSchedule, ScheduleParseError> {
 
 /// Parse the `from <ISO-8601> every <duration>` form.
 fn parse_from(rest: &str, now: DateTime<Utc>) -> Result<ParsedSchedule, ScheduleParseError> {
-    // Split on "every" keyword.
-    let lower = rest.to_lowercase();
+    // Split on "every" keyword. SEC-056: search the ASCII-lowercased form, not
+    // the Unicode `to_lowercase()` - the latter can change byte length (e.g.
+    // `İ` -> `i̇`), so an offset measured in the mapped string panicked when
+    // applied to the original `rest`. `to_ascii_lowercase` is length-preserving,
+    // and the keyword `every` is ASCII, so the match is equivalent.
+    let lower = rest.to_ascii_lowercase();
     let every_pos = lower
         .find("every")
         .ok_or_else(|| ScheduleParseError::MissingEvery(rest.to_string()))?;

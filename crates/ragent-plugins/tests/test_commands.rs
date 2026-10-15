@@ -210,8 +210,9 @@ fn run_remove_deletes_disabled_plugin() {
     .expect("ok");
 
     // add enables the plugin; remove refuses an enabled plugin, so turn it off
-    // first (as `/plugins disable` would).
-    let store = tree.0.join("proj/.ragent/plugins");
+    // first (as `/plugins disable` would). SEC-007: the trusted enable flag is
+    // read from the user-global ledger, so the disable must clear it there.
+    let store = tree.0.join("global/plugins");
     let mut ledger = ragent_plugins::StoreLedger::load(&store);
     ledger.state_mut("codex-weather").enabled = false;
     ledger.save(&store).expect("ledger saved");

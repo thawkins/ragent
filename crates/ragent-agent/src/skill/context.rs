@@ -6,10 +6,12 @@
 //!
 //! # Security
 //!
-//! Commands are validated against an allowlist of known-safe executables.
-//! Only executables on the allowlist can be run. Pipes and shell operators
-//! are supported for allowlisted commands by falling through to `sh -c`,
-//! but the first command in any pipeline must still be on the allowlist.
+//! Commands are validated against an allowlist of known-safe, read-only
+//! executables. Only executables on the allowlist can be run, and they are
+//! always executed directly - never through a shell (`sh -c`) - so a skill
+//! body cannot smuggle a second command or a shell expansion. Any command
+//! that contains a shell metacharacter (`|`, `;`, `&`, redirects, `$(...)`,
+//! globs, ...) is rejected outright.
 //!
 //! # Example
 //!
@@ -30,22 +32,22 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// Allowlist of executables permitted in dynamic context `` !`command` ``
 /// patterns. Only the base executable name is checked (not the full path).
 ///
-/// This list covers common development tools used in skill bodies for
-/// gathering project context (VCS info, file listings, etc.).
+/// The list is deliberately restricted to genuinely read-only, local
+/// inspection tools. Network clients (`curl`, `wget`, `gh`, `dig`, ...),
+/// interpreters (`python`, `node`, `awk`, `sed`), process launchers
+/// (`xargs`, `env`, `docker`, ...), and build/package tools that execute
+/// arbitrary code through scripts (`cargo`, `make`, `npm`, ...) are
+/// intentionally excluded: allowing them would turn a skill body into an
+/// arbitrary-code-execution or data-exfiltration primitive.
 const ALLOWED_EXECUTABLES: &[&str] = &[
-    // Version control
-    "git", "gh", "svn", "hg", // File inspection (read-only)
-    "cat", "head", "tail", "less", "wc", "ls", "find", "tree", "file", "stat", "du", "df",
-    "readlink", "realpath", "basename", "dirname", // Text processing (read-only)
-    "grep", "rg", "awk", "sed", "cut", "sort", "uniq", "tr", "diff", "comm", "paste", "column",
-    "fmt", "fold", "jq", "yq", "xargs", // Shell builtins / utilities
-    "echo", "printf", "date", "env", "printenv", "whoami", "hostname", "uname", "id", "pwd",
-    "which", "test", "[", "true", "false", // Build tool queries (read-only)
-    "cargo", "rustc", "npm", "node", "python", "python3", "pip", "make", "cmake", "go", "java",
-    "javac", "dotnet", // Package / project info
-    "dpkg", "rpm", "brew", "apt", // Networking (read-only queries)
-    "curl", "wget", "dig", "nslookup", "ping", // Docker / container inspection
-    "docker", "podman", "kubectl",
+    // Version control (local inspection only)
+    "git", "svn", "hg", // File inspection (read-only)
+    "cat", "head", "tail", "wc", "ls", "find", "tree", "file", "stat", "du", "df", "readlink",
+    "realpath", "basename", "dirname", // Text processing (read-only, non-interpreter)
+    "grep", "rg", "cut", "sort", "uniq", "tr", "diff", "comm", "paste", "column", "fmt", "fold",
+    "jq", "yq", // Shell info utilities
+    "echo", "printf", "date", "whoami", "hostname", "uname", "id", "pwd", "which", "test", "true",
+    "false",
 ];
 
 /// Execute all `` !`command` `` placeholders in the skill body and replace
@@ -172,26 +174,40 @@ fn find_closing_backtick(text: &str, start: usize) -> Option<usize> {
     None
 }
 
-/// Shell metacharacters that indicate the command needs `sh -c` wrapping
-/// rather than direct execution.
-const SHELL_OPERATORS: &[&str] = &["|", "&&", "||", ";", ">", "<", ">>", "$(", "`"];
+/// Shell metacharacters that must never appear in a dynamic context command.
+///
+/// The command is always executed directly (never via `sh -c`), so there is no
+/// shell to interpret these. Permitting them would let a skill body smuggle a
+/// second command (`|`, `;`, `&`), a redirect (`<`, `>`), a subshell or command
+/// substitution (`(`, `)`, `$`, `` ` ``), a glob/path expansion (`*`, `?`, `~`,
+/// `[`, `]`), a brace expansion, or a newline. Any occurrence rejects the whole
+/// command.
+const SHELL_METACHARACTERS: &[char] = &[
+    '|', '&', ';', '<', '>', '$', '`', '(', ')', '{', '}', '*', '?', '~', '[', ']', '!', '\n', '\r',
+];
 
 /// Validate a command string against the allowlist.
 ///
-/// Returns `Ok(())` if the first executable in the command is on the
-/// allowlist, or an error message explaining the rejection.
+/// Returns `Ok(())` if the command contains no shell metacharacter and its
+/// first executable is on the allowlist, or an error message explaining the
+/// rejection.
 fn validate_command(command: &str) -> Result<(), String> {
     let trimmed = command.trim();
     if trimmed.is_empty() {
         return Err("empty command".to_string());
     }
 
+    // Reject any shell metacharacter outright. Commands run without a shell, so
+    // there is no legitimate interpretation for these, and allowing them would
+    // let a skill body chain a second (unvalidated) command or expand state.
+    if let Some(metacharacter) = trimmed.chars().find(|c| SHELL_METACHARACTERS.contains(c)) {
+        return Err(format!(
+            "command contains a shell metacharacter '{metacharacter}' and is not permitted"
+        ));
+    }
+
     // Extract the first token (executable name) from the command.
-    // For pipelines like `git diff | grep foo`, validate the first command.
-    let first_token = trimmed
-        .split(|c: char| c.is_whitespace() || c == '|' || c == ';' || c == '&')
-        .next()
-        .unwrap_or("");
+    let first_token = trimmed.split_whitespace().next().unwrap_or("");
 
     // Strip any path prefix to get the base executable name.
     let exe_name = std::path::Path::new(first_token)
@@ -210,9 +226,9 @@ fn validate_command(command: &str) -> Result<(), String> {
 
 /// Execute a validated command and return its stdout, or an error message.
 ///
-/// If the command contains shell operators (pipes, redirects, etc.), it
-/// is executed via `sh -c` for proper interpretation. Simple commands are
-/// executed directly without a shell intermediary.
+/// The command is always executed directly (no shell intermediary); the
+/// allowlist and metacharacter rejection in [`validate_command`] guarantee the
+/// input is a single, shell-free invocation of an allowlisted executable.
 async fn execute_command(command: &str, working_dir: &Path) -> String {
     use crate::sanitize::redact_secrets;
     let safe_cmd = redact_secrets(command);
@@ -237,34 +253,21 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
         Err(e) => return format!("[command error: {e}]"),
     };
 
-    let needs_shell = SHELL_OPERATORS.iter().any(|op| command.contains(op));
-
-    let result = if needs_shell {
-        // Pipeline / redirect - must use shell, but first command is allowlisted.
-        tokio::time::timeout(
-            COMMAND_TIMEOUT,
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .current_dir(working_dir)
-                .output(),
-        )
-        .await
-    } else {
-        // Simple command - execute directly without shell.
-        let tokens = tokenize_command(command);
-        if tokens.is_empty() {
-            return "[command error: empty command]".to_string();
-        }
-        tokio::time::timeout(
-            COMMAND_TIMEOUT,
-            tokio::process::Command::new(&tokens[0])
-                .args(&tokens[1..])
-                .current_dir(working_dir)
-                .output(),
-        )
-        .await
-    };
+    // Execute directly - never through a shell. [`validate_command`] has
+    // already rejected any shell metacharacter, so there is no shell to
+    // interpret here and no way to chain a second command.
+    let tokens = tokenize_command(command);
+    if tokens.is_empty() {
+        return "[command error: empty command]".to_string();
+    }
+    let result = tokio::time::timeout(
+        COMMAND_TIMEOUT,
+        tokio::process::Command::new(&tokens[0])
+            .args(&tokens[1..])
+            .current_dir(working_dir)
+            .output(),
+    )
+    .await;
 
     match result {
         Ok(Ok(output)) => {
@@ -295,8 +298,8 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
 
 /// Simple tokenizer that splits a command string into executable + arguments.
 ///
-/// Handles single and double-quoted strings. Does not handle shell
-/// expansions (those go through `sh -c` via the `needs_shell` path).
+/// Handles single and double-quoted strings. Shell expansions are not handled
+/// (and never occur: metacharacter-bearing commands are rejected upstream).
 fn tokenize_command(command: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -335,4 +338,4 @@ fn tokenize_command(command: &str) -> Vec<String> {
 
 #[cfg(test)]
 #[path = "../../tests/inline/skill_context.rs"]
-mod tests_tests;
+mod tests;

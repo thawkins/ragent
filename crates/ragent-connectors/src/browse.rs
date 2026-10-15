@@ -595,6 +595,7 @@ impl CatalogueBrowser {
         // no entry declares falls back to `ALL` so the navigator never shows a
         // row that selects nothing, and the cursor is placed on the surviving
         // selection's row.
+        // INTENTIONAL: a category that no entry declares falls back to `ALL`; the miss is benign.
         let _ = self.categories.select_when_known(&previous);
         self.sync_category_cursor_from_filter();
         self.apply_filter();

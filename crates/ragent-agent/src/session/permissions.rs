@@ -127,16 +127,15 @@ pub fn split_bash_command(command: &str) -> Vec<String> {
                 current.push(c);
             }
             '&' | '|' | ';' if !in_single_quote && !in_double_quote && substitution_depth == 0 => {
-                // Check for && or ||
+                // SEC-011: split on a *single* `&`/`|` too, not only the doubled
+                // forms. Previously `ls & rm -rf docs/` stayed one sub-command
+                // whose first token (`ls`) was judged safe, so the whole line ran
+                // unapproved. `&&`/`||`/`;` consume their second char (when
+                // present) and split the same way.
                 if (c == '&' || c == '|') && chars.peek() == Some(&c) {
                     chars.next(); // consume the second character
-                    flush(&mut current);
-                } else if c == ';' {
-                    flush(&mut current);
-                } else {
-                    // Single & or | - add to current command
-                    current.push(c);
                 }
+                flush(&mut current);
             }
             _ => current.push(c),
         }

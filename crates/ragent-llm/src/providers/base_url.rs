@@ -56,6 +56,40 @@ pub(crate) fn validate_base_url(provider: &str, raw: &str) -> Result<String> {
     Ok(trimmed.trim_end_matches('/').to_string())
 }
 
+/// Resolve a provider base URL from an optional config/env candidate, validating
+/// it and falling back to `default` when it is absent or invalid.
+///
+/// SEC-ragent-llm-005 (SECTASKS T-028): a provider `api.base_url` sourced from
+/// `ragent.json` is attacker-influenceable exactly like an environment variable,
+/// so it must pass the same scheme/host check before it is dialled. When the
+/// candidate is empty or fails validation the provider's known-good `default`
+/// is used instead, so a bad config degrades to the stock endpoint rather than
+/// redirecting an authenticated request.
+///
+/// The returned URL has any trailing `/` stripped, matching how the providers
+/// normalise endpoints.
+#[must_use]
+pub(crate) fn resolve_validated_base_url(
+    provider: &str,
+    candidate: Option<&str>,
+    default: &str,
+) -> String {
+    match candidate {
+        Some(raw) if !raw.trim().is_empty() => match validate_base_url(provider, raw) {
+            Ok(valid) => valid,
+            Err(e) => {
+                tracing::warn!(
+                    provider = %provider,
+                    error = %e,
+                    "ignoring invalid configured base URL; using default"
+                );
+                default.to_string()
+            }
+        },
+        _ => default.to_string(),
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/inline/base_url_tests.rs"]
 mod base_url_tests;

@@ -6,8 +6,11 @@
 //! real API key and is tested with `#[ignore]`-gated integration tests.
 
 use ragent_tools_extended::masterfetch::search::engine::{Freshness, RawResult, SearchOptions};
+// The key-masking helper now lives in `engine`; import it under the historical
+// test-local name so the masking assertions below stay unchanged.
+use ragent_tools_extended::masterfetch::search::engine::mask_api_key as mask_key;
 use ragent_tools_extended::masterfetch::search::langsearch::{
-    ENGINE_NAME, build_request_body, mask_key, parse_response_json,
+    ENGINE_NAME, build_request_body, parse_response_json,
 };
 
 // ===========================================================================

@@ -2143,6 +2143,7 @@ impl PluginStoreBrowser {
         self.marketplaces = marketplaces;
         // INTENTIONAL: the boolean is informational; the side effect (falling back
         // to `ALL` when the marketplace is no longer declared) is what matters.
+        // INTENTIONAL: a marketplace that no longer resolves falls back to `ALL`; the miss is benign.
         let _ = self.marketplaces.select_when_known(&previous);
         self.marketplace_cursor = self.marketplace_row_of(self.marketplaces.filter().label());
         self.marketplace_scroll = 0;

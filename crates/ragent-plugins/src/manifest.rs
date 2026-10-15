@@ -700,11 +700,24 @@ fn prompt_command_for_file(
     {
         file = format!("{file}.md");
     }
-    let path = if std::path::Path::new(&file).is_absolute() {
-        std::path::PathBuf::from(&file)
-    } else {
-        root.join(COMMANDS_DIR).join(&file)
-    };
+    // SEC-008: `file` comes from an untrusted manifest, and the resolved path is
+    // read and injected into the model. A manifest must not be able to name an
+    // absolute path or escape the plugin root with `..`; resolve it exactly like
+    // the entry point (relative, plain components only) and stay inside the
+    // plugin's `commands/` directory.
+    if !is_contained_relative_path(&file) {
+        tracing::warn!(
+            plugin_file = %file,
+            "plugin command file is not a contained relative path; skipping"
+        );
+        return None;
+    }
+    let path = ragent_tools_core::guard::contained_join(
+        &root.join(COMMANDS_DIR),
+        &file,
+        "plugin command file",
+    )
+    .ok()?;
     prompt_command_from_path(&path, name, meta)
 }
 
@@ -1185,11 +1198,12 @@ pub fn map_mcp_server_entry(key: &str, value: &serde_json::Value) -> Option<Plug
 /// entries whose shape could not be bridged (FR-030 MCP bridge).
 ///
 /// Only a JSON object of server entries yields bridged servers. A top-level
-/// string (the external-file shape) yields no inline servers and no unbridged
-/// count - the bridge resolves it through [`ParsedManifest::raw_mcp`]. Any
-/// other top-level shape (array, number, bool) is counted as one unbridged
-/// section so the caller keeps an FR-025 unsupported label, and an object entry
-/// that is not a server object is counted individually.
+/// string (the external-file shape) is resolved by the bridge through
+/// [`ParsedManifest::raw_mcp`], so it contributes no inline servers here; it is
+/// reported as one unbridged entry (SEC-075) so an external file that fails to
+/// resolve is visible in `/plugins list` rather than silently dropped. Any other
+/// top-level shape (array, number, bool) is counted as one unbridged section,
+/// and an object entry that is not a server object is counted individually.
 #[must_use]
 pub fn extract_mcp_servers(raw: Option<&serde_json::Value>) -> (Vec<PluginMcpServer>, usize) {
     match raw {
@@ -1204,6 +1218,10 @@ pub fn extract_mcp_servers(raw: Option<&serde_json::Value>) -> (Vec<PluginMcpSer
             }
             (servers, unbridged)
         }
+        // The string form names an external file the bridge resolves later
+        // (`bridge::plugin_mcp_servers` -> `read_external_mcp_servers`), so it
+        // contributes no inline servers here and is not "unsupported"; a failure
+        // to resolve is visible in the bridge, not at parse time (SEC-075).
         Some(serde_json::Value::String(_)) | None => (Vec::new(), 0),
         Some(_) => (Vec::new(), 1),
     }

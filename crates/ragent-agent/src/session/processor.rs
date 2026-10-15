@@ -330,10 +330,11 @@ async fn dispatch_tool_with_permissions(
     if tc.name == "bash" {
         let sub_commands = split_bash_command(&resource);
         use ragent_tools_core::bash::is_safe_command;
-        let all_safe = sub_commands.iter().all(|cmd| {
-            let cmd_name = extract_command_name(cmd);
-            is_safe_command(&cmd_name)
-        });
+        // SEC-011: judge the *full* sub-command, not its first token. Passing
+        // only `extract_command_name(cmd)` let `ls & rm -rf docs/` through on the
+        // `ls` prefix; `is_safe_command` inspects the whole string for a
+        // separator, so the compound statement is correctly held for a prompt.
+        let all_safe = sub_commands.iter().all(|cmd| is_safe_command(cmd));
         if all_safe {
             return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
         }

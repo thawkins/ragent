@@ -41,6 +41,11 @@ pub enum SpecError {
     #[error("invalid spec structure: {0}")]
     InvalidStructure(String),
 
+    /// A spec path resolves outside the specs root (symlinked directory) or a
+    /// path component is a symlink (SEC-006, SEC-059).
+    #[error("unsafe spec path: {0}")]
+    UnsafePath(String),
+
     /// A task ID or requirement ID is unknown.
     #[error("unknown id: {0}")]
     UnknownId(String),

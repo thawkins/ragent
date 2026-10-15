@@ -19,33 +19,20 @@ const MAX_BODY_BYTES: usize = 1024 * 1024; // 1 MiB response cap
 /// Perform an HTTP request with configurable method, headers, and body.
 pub struct HttpRequestTool;
 
-/// Headers a caller may not set on an `http_request`.
+/// The only request headers a caller may set on an `http_request`.
 ///
-/// SEC-tools-extended-004 (SECTASKS T-056): routing and credential headers.
-const DENIED_REQUEST_HEADERS: &[&str] = &[
-    "host",
-    "cookie",
-    "cookie2",
-    "authorization",
-    "proxy-authorization",
-    "proxy-authenticate",
-    "proxy-connection",
-    "connection",
-    "transfer-encoding",
-    "upgrade",
-    "te",
-    "trailer",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-proto",
-    "x-real-ip",
-];
+/// SEC-035: this was previously a deny-list, so any credential header not named
+/// (`x-api-key`, `Private-Token`, `x-goog-api-key`, ...) was forwarded - and a
+/// cross-host redirect could carry it to a third party. An allowlist is the only
+/// safe shape: everything else (routing, hop-by-hop, and credential headers) is
+/// refused.
+const ALLOWED_REQUEST_HEADERS: &[&str] =
+    &["accept", "accept-language", "content-type", "user-agent"];
 
-/// Whether `name` is a routing/credential header the caller may not set.
+/// Whether `name` is a request header the caller may set.
 #[must_use]
-fn is_denied_request_header(name: &str) -> bool {
-    let lower = name.trim().to_ascii_lowercase();
-    DENIED_REQUEST_HEADERS.contains(&lower.as_str()) || lower.starts_with("proxy-")
+fn is_allowed_request_header(name: &str) -> bool {
+    ALLOWED_REQUEST_HEADERS.contains(&name.trim().to_ascii_lowercase().as_str())
 }
 
 #[async_trait::async_trait]
@@ -117,8 +104,15 @@ impl Tool for HttpRequestTool {
         // means requests inherit the shared client's behaviour: a 5-redirect
         // limit, transparent gzip/deflate decompression, and the versioned
         // masterfetch `User-Agent` header.
-        let client =
-            crate::masterfetch::http::shared_client().context("Failed to build HTTP client")?;
+        // SEC-035: use a no-redirect client so a caller-supplied header (or the
+        // request body on a 307/308) cannot be replayed against a second host the
+        // URL redirects to.
+        let client = reqwest::Client::builder()
+            .user_agent(crate::masterfetch::http::USER_AGENT)
+            .timeout(Duration::from_secs(timeout_secs))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .context("Failed to build HTTP client")?;
 
         let mut request = client
             .request(method, url)
@@ -136,10 +130,10 @@ impl Tool for HttpRequestTool {
             let mut header_map = HeaderMap::new();
             for (k, v) in headers_obj {
                 if let Some(val_str) = v.as_str() {
-                    if is_denied_request_header(k) {
+                    if !is_allowed_request_header(k) {
                         anyhow::bail!(
-                            "header '{k}' is not permitted: it controls request routing or \
-                             carries credentials"
+                            "header '{k}' is not permitted (allowed: {})",
+                            ALLOWED_REQUEST_HEADERS.join(", ")
                         );
                     }
                     let name = HeaderName::from_str(k)
@@ -178,14 +172,25 @@ impl Tool for HttpRequestTool {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok());
 
-        let bytes = response
-            .bytes()
+        // SEC-036: stream the body, stopping at the cap, instead of buffering the
+        // whole (possibly transparently-decompressed) response first.
+        let mut response = response;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut truncated = false;
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .with_context(|| "Failed to read response body")?;
-
-        let truncated = bytes.len() > MAX_BODY_BYTES;
-        let body_slice = &bytes[..bytes.len().min(MAX_BODY_BYTES)];
-        let body = String::from_utf8_lossy(body_slice).to_string();
+            .with_context(|| "Failed to read response body")?
+        {
+            if buf.len() + chunk.len() > MAX_BODY_BYTES {
+                let room = MAX_BODY_BYTES.saturating_sub(buf.len());
+                buf.extend_from_slice(&chunk[..room]);
+                truncated = true;
+                break;
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8_lossy(&buf).to_string();
 
         let mut content = format!(
             "HTTP {status_code} {}\n",
@@ -208,7 +213,7 @@ impl Tool for HttpRequestTool {
             metadata: Some(json!({
                 "http_status": status_code,
                 "content_type": content_type,
-                "byte_count": bytes.len(),
+                "byte_count": buf.len(),
                 "truncated": truncated,
                 "line_count": line_count,
             })),

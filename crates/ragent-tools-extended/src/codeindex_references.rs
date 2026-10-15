@@ -61,7 +61,9 @@ impl Tool for CodeIndexReferencesTool {
             .as_str()
             .context("Missing required 'symbol' parameter")?;
 
-        let limit = input["limit"].as_u64().map_or(50, |n| n.min(200) as usize);
+        let limit = input["limit"]
+            .as_u64()
+            .map_or(50, |n| n.clamp(1, 200) as usize);
 
         let refs = match with_retry(|| idx.try_references(symbol, limit)).await? {
             Some(r) => r,

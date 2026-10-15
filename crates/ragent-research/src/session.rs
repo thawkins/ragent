@@ -3044,10 +3044,7 @@ impl ResearchSession {
     /// predicate so the two seed helpers stay consistent; the file path is a
     /// subset of the URL checks (`path_str` can never start with a scheme).
     fn is_placeholder_title(title: &str, seed: &str) -> bool {
-        title.is_empty()
-            || title == seed
-            || title.starts_with("http://")
-            || title.starts_with("https://")
+        title.is_empty() || title == seed || ragent_types::strutil::is_http_url(title)
     }
 
     /// Strip fenced code blocks and take the first [`BODY_PREVIEW_CHARS`]
@@ -3860,6 +3857,27 @@ fn project_root_for(research_root: &Path) -> &Path {
     research_root.parent().unwrap_or(research_root)
 }
 
+/// Canonicalise the longest existing prefix of `resolved` and report whether it
+/// still resolves inside `canonical_root` (SEC-064).
+///
+/// The previous fallback compared `resolved.starts_with(&canonical_root)` where
+/// `resolved` was built as `canonical_root.join(candidate)`, a tautology for a
+/// relative candidate. Walking to the longest existing prefix and canonicalising
+/// *that* catches a symlinked intermediate directory that would otherwise let a
+/// not-yet-existing target escape the root.
+fn longest_existing_prefix_within(resolved: &Path, canonical_root: &Path) -> bool {
+    let mut prefix = resolved;
+    loop {
+        match prefix.canonicalize() {
+            Ok(real) => return real.starts_with(canonical_root),
+            Err(_) => match prefix.parent() {
+                Some(parent) => prefix = parent,
+                None => return false,
+            },
+        }
+    }
+}
+
 /// Return the resolved path when `candidate` escapes `root`, else `None`.
 ///
 /// SEC-ragent-research-005 (SECTASKS T-016): shared by the `from_files` seed
@@ -3880,6 +3898,7 @@ fn out_of_root_from_file(candidate: &Path, root: &Path) -> Option<std::path::Pat
                 .components()
                 .any(|c| c == std::path::Component::ParentDir)
                 && resolved.starts_with(&canonical_root)
+                && longest_existing_prefix_within(&resolved, &canonical_root)
         }
     };
     if contained { None } else { Some(resolved) }

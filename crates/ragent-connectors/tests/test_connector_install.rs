@@ -28,7 +28,7 @@ fn manifest_for(id: &str, name: &str) -> String {
             "id": "{id}",
             "name": "{name}",
             "category": "developer",
-            "servers": [ {{ "id": "main", "transport": "stdio", "command": "/bin/true" }} ]
+            "servers": [ {{ "id": "main", "transport": "stdio", "command": "npx" }} ]
         }}"#
     )
 }

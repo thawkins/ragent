@@ -58,9 +58,7 @@ impl Provider for AzureFoundryProvider {
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let api_key = ragent_config::credential_env::provider_credential_env("azure_foundry")
             .context("Azure AI Foundry model discovery requires AZURE_AI_FOUNDRY_API_KEY")?;
-        let base_url = std::env::var("AZURE_AI_FOUNDRY_BASE")
-            .ok()
-            .filter(|s| !s.is_empty())
+        let base_url = super::env_key::provider_env_base_url("azure_foundry")
             .unwrap_or_else(|| DEFAULT_AZURE_FOUNDRY_HOST.to_string());
         let models = discover_azure_foundry_models(&api_key, &base_url)
             .await
@@ -77,19 +75,20 @@ impl Provider for AzureFoundryProvider {
         // ANTIPAT 3.6: register the credential with the shared redaction
         // registry so any text passed through `redact_secrets` masks it.
         ragent_types::sanitize::register_secret(api_key);
-        let env_endpoint = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
-            .ok()
-            .filter(|s| !s.trim().is_empty());
+        let env_endpoint =
+            ragent_config::credential_env::read_config_env(Self::DEFAULT_ENV_ENDPOINT_KEY);
         let configured_endpoint = options
             .get(Self::ENDPOINT_OPTION_KEY)
             .and_then(Value::as_str)
             .filter(|s| !s.trim().is_empty());
-        let resolved_base = configured_endpoint
-            .or(base_url)
-            .or(env_endpoint.as_deref())
-            .unwrap_or(DEFAULT_AZURE_FOUNDRY_HOST)
-            .trim_end_matches('/')
-            .to_string();
+        // SEC-ragent-llm-005: config-sourced `configured_endpoint`/`base_url`
+        // are validated with the same scheme/host check as the env value.
+        let candidate = configured_endpoint.or(base_url).or(env_endpoint.as_deref());
+        let resolved_base = super::base_url::resolve_validated_base_url(
+            "azure_foundry",
+            candidate,
+            DEFAULT_AZURE_FOUNDRY_HOST,
+        );
 
         let client = AzureFoundryClient::new(api_key, &resolved_base);
         tracing::info!(chat_endpoint = %format!("{}/openai/v1/chat/completions", resolved_base), models_endpoint = %format!("{}/openai/v1/models", resolved_base), "Azure AI Foundry provider connected");

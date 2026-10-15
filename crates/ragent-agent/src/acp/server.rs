@@ -183,6 +183,7 @@ where
                     .to_string();
                 let Some(entry) = sessions.get(&acp_id) else {
                     if let Some(id) = id {
+                        // INTENTIONAL: ACP writer task owns the outbound channel; a send failure only means the client is gone.
                         let _ =
                             tx.send(error_reply(&id, -32602, "unknown ACP session id").to_string());
                     }
@@ -193,6 +194,7 @@ where
                 // rather than interleaving two agent loops on one server.
                 if let Some(handle) = active_turn.take() {
                     if handle.is_finished() {
+                        // INTENTIONAL: reap a finished turn task; its result is not needed.
                         let _ = handle.await;
                     } else {
                         active_turn = Some(handle);
@@ -248,6 +250,7 @@ where
             other => {
                 debug!(method = other, "unhandled ACP server request");
                 if let Some(id) = id {
+                    // INTENTIONAL: ACP writer task owns the outbound channel; a send failure only means the client is gone.
                     let _ = tx
                         .send(error_reply(&id, -32601, "server method not supported").to_string());
                 }
@@ -258,9 +261,11 @@ where
     // stdin closed: let an in-flight turn finish so its updates and reply are
     // flushed before the endpoint returns.
     if let Some(handle) = active_turn {
+        // INTENTIONAL: wait for the in-flight turn so its reply is flushed; its result is not needed.
         let _ = handle.await;
     }
     drop(tx);
+    // INTENTIONAL: join the writer task as the endpoint returns; the channel close is the signal.
     let _ = writer_task.await;
     Ok(())
 }

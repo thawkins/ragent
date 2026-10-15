@@ -1,9 +1,14 @@
 //! Tests for `test_slash_commands.rs`
 
-/// Tests for TUI slash command parsing and dispatch (TASK-006).
-///
-/// Verifies each slash command updates app state correctly, handles arguments,
-/// and provides user feedback via status bar and log entries.
+//! Tests for TUI slash command parsing and dispatch (TASK-006).
+//!
+//! Verifies each slash command updates app state correctly, handles arguments,
+//! and provides user feedback via status bar and log entries.
+//!
+//! Some tests redirect `XDG_CONFIG_HOME` into a tempdir. Env mutation is
+//! `unsafe` in edition 2024 and the workspace denies `unsafe_code`, so this
+//! target opts back in explicitly (env mutation is contained to the test).
+#![allow(unsafe_code)]
 use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -120,6 +125,28 @@ impl CwdGuard {
 impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.prev);
+    }
+}
+
+/// Set `XDG_CONFIG_HOME` for the duration of a test and restore it on drop.
+struct XdgGuard {
+    prev: Option<std::ffi::OsString>,
+}
+
+impl XdgGuard {
+    fn set(dir: &std::path::Path) -> Self {
+        let prev = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir) };
+        Self { prev }
+    }
+}
+
+impl Drop for XdgGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+        }
     }
 }
 
@@ -4911,8 +4938,10 @@ async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
     let root = dir.path();
 
     // Minimal enabled plugin with an external `mcp.json` (the Claude shape).
-    // A plugin is inert until the store ledger records it enabled.
-    let store = root.join(".ragent").join("plugins");
+    // SEC-007: the trusted enable flag is read from the *user-global* store, so
+    // the plugin and its enable ledger live under XDG_CONFIG_HOME.
+    let global_root = root.join(".config");
+    let store = global_root.join("ragent").join("plugins");
     let plugin = store.join("mongodb");
     std::fs::create_dir_all(plugin.join(".claude-plugin")).expect("manifest dir");
     std::fs::write(
@@ -4931,6 +4960,9 @@ async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
     )
     .expect("write state ledger");
 
+    // Point the config resolver at the temp XDG root so the global plugin store
+    // above is the one discovery reads.
+    let _xdg = XdgGuard::set(&global_root);
     let _guard = with_cwd(root);
     let mut app = make_app();
     app.session_id = Some("s1".to_string());

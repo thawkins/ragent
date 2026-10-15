@@ -271,6 +271,90 @@ impl fmt::Debug for ConnectorServer {
     }
 }
 
+/// Program names a connector's `stdio` `command` may name (SEC-009).
+///
+/// A catalogue/marketplace document is untrusted input: a crafted `command` of
+/// `bash -c "curl … | sh"` (or a path to a repository-committed binary) would
+/// otherwise be recorded and executed as an MCP server with no prompt. These are
+/// the well-known MCP server runtimes a real connector declares (a bare server
+/// binary such as `mcp-server-filesystem` is also accepted; see
+/// [`is_allowed_connector_command`]).
+pub const ALLOWED_CONNECTOR_COMMANDS: &[&str] = &[
+    "npx", "uvx", "uv", "python", "python3", "node", "deno", "bun", "docker", "podman", "go",
+    "cargo", "ruby", "php", "pipx", "pip3",
+];
+
+/// Program names never accepted as a connector `stdio` `command` (SEC-009).
+///
+/// A shell or launcher turns the `args` array into arbitrary command execution
+/// (`bash -c "<script>"`), which is exactly the attack the connector boundary
+/// must refuse.
+pub const DENIED_CONNECTOR_COMMANDS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "fish",
+    "cmd",
+    "powershell",
+    "pwsh",
+    "env",
+    "xargs",
+    "perl",
+    "osascript",
+];
+
+/// Whether `command` names an acceptable MCP server runtime (SEC-009).
+///
+/// Accepts a bare program name that is not a shell/launcher (a real connector
+/// declares the server binary directly, e.g. `mcp-server-filesystem`), or an
+/// absolute path whose file stem is an allowlisted runtime
+/// (`/usr/local/bin/npx`). A command carrying a shell metacharacter is rejected,
+/// and a path-separated command must name an allowlisted runtime.
+#[must_use]
+pub fn is_allowed_connector_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // A bare name, or an absolute path to one. Reject anything with a shell
+    // metacharacter (defence against `bash; curl …`-style tricks, though those
+    // would not resolve on PATH anyway).
+    if trimmed.contains([';', '&', '|', '$', '`']) {
+        return false;
+    }
+    let base = std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(trimmed);
+    // Windows executables carry a `.exe`/`.cmd`/`.bat` suffix.
+    let base = base
+        .strip_suffix(".exe")
+        .or_else(|| base.strip_suffix(".cmd"))
+        .or_else(|| base.strip_suffix(".bat"))
+        .unwrap_or(base);
+    // A shell/launcher is never acceptable, whatever its path.
+    if DENIED_CONNECTOR_COMMANDS
+        .iter()
+        .any(|denied| denied.eq_ignore_ascii_case(base))
+    {
+        return false;
+    }
+    // A path-separated command must name an allowlisted runtime, so `./payload`
+    // or `/tmp/evil` cannot smuggle in a repository-committed binary.
+    let has_separator = trimmed.contains('/') || trimmed.contains('\\');
+    if has_separator {
+        return ALLOWED_CONNECTOR_COMMANDS
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(base));
+    }
+    // A bare program name (resolved on PATH) is accepted.
+    true
+}
+
 impl ConnectorServer {
     /// Whether ragent can express this server as an [`McpServerConfig`] (FR-025).
     ///
@@ -285,6 +369,31 @@ impl ConnectorServer {
                 self.url.as_deref().is_some_and(non_empty)
             }
             None => false,
+        }
+    }
+
+    /// Whether this server's `stdio` `command` is on the allowlist (SEC-009).
+    ///
+    /// A non-`stdio` server (which never spawns a local process) is considered
+    /// safe. A `stdio` server with a non-allowlisted `command` is a risk: the
+    /// install path refuses to auto-enable it.
+    #[must_use]
+    pub fn command_is_allowlisted(&self) -> bool {
+        match self.transport_kind() {
+            Some(McpTransport::Stdio) => {
+                let command_ok = self
+                    .command
+                    .as_deref()
+                    .is_some_and(is_allowed_connector_command);
+                // Even an allowlisted runtime can be turned into an evaluator
+                // (`npx -c <cmd>`, `python -c <code>`); reject those argv shapes.
+                let args_ok = !self
+                    .args
+                    .iter()
+                    .any(|a| matches!(a.as_str(), "-c" | "--call" | "-e" | "--eval"));
+                command_ok && args_ok
+            }
+            _ => true,
         }
     }
 
@@ -473,6 +582,18 @@ impl ConnectorDescriptor {
     #[must_use]
     pub fn has_supported_server(&self) -> bool {
         self.servers.iter().any(ConnectorServer::is_supported)
+    }
+
+    /// Whether every `stdio` server's `command` is on the allowlist (SEC-009).
+    ///
+    /// An untrusted catalogue entry whose command is not allowlisted must not be
+    /// auto-enabled: the install path records it disabled and reports the exact
+    /// command so the operator can confirm it explicitly.
+    #[must_use]
+    pub fn all_commands_allowlisted(&self) -> bool {
+        self.servers
+            .iter()
+            .all(ConnectorServer::command_is_allowlisted)
     }
 
     /// The bridged server id for one of this connector's servers

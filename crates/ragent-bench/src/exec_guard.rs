@@ -15,13 +15,32 @@
 //!   absolute), so it is resolved on `PATH` and cannot name an arbitrary
 //!   binary inside the fixture directory;
 //! - shell interpreters (`sh`, `bash`, `env`, ...) are never allowed, so a
-//!   one-token payload cannot be smuggled through a wrapper.
+//!   one-token payload cannot be smuggled through a wrapper;
+//! - **the whole argv is validated**, not just the program: any argv token that
+//!   is an eval/`-c`/stdin entry point is rejected, so an allowlisted compiler or
+//!   interpreter cannot be turned into an evaluator of inline fixture text
+//!   (SEC-003).
+//!
+//! SEC-003 (incomplete SEC-ragent-bench-001/T-009 fix): the first attempt kept
+//! the language interpreters (`python3`, `python`, `node`, `php`, `ruby`,
+//! `java`) on the allowlist and validated only `command_parts.first()`. Every one
+//! of those is a full interpreter with an eval flag, so a fixture entry such as
+//! `["python3", "-c", "<payload>"]` passed and was spawned verbatim. The argv
+//! tail is now validated against [`DENIED_FIXTURE_PROGRAM_ARGS`], so the inline
+//! eval route (`-c`, `-e`, `-r`, `--eval`, `--eval=…`, `-m`), the stdin route
+//! (`-`, `/dev/stdin`) and `go run` are rejected while the shipped harness
+//! commands (`node <file>`, `java <class>`, `go test .`, the compilers) still
+//! pass. The interpreters are retained deliberately: a benchmark must run the
+//! candidate artefact, and `node candidate.js` is the intended shape - the
+//! forbidden shape is evaluating an argv-supplied string.
 
 /// Programs a benchmark fixture is allowed to invoke.
 ///
 /// This is the intended toolchain set the native harnesses target, plus the
 /// interpreters used to *run* an already-compiled artefact (`java`, `python3`,
-/// `node`) and the `timeout` wrapper the harness prepends itself.
+/// `node`) and the `timeout` wrapper the harness prepends itself. The argv
+/// deny-list ([`DENIED_FIXTURE_PROGRAM_ARGS`]) is what stops an interpreter being
+/// used as an inline evaluator.
 pub const ALLOWED_FIXTURE_PROGRAMS: &[&str] = &[
     // C / C++
     "gcc", "g++", "cc", "clang", "clang++", // Rust
@@ -32,6 +51,17 @@ pub const ALLOWED_FIXTURE_PROGRAMS: &[&str] = &[
     "php", "ruby", // Python (running a compiled/checked artefact, not a shell)
     "python3", "python",
 ];
+
+/// argv tokens a fixture command may never carry (SEC-003).
+///
+/// These are the inline-eval and stdin entry points an allowlisted program could
+/// use to evaluate a string supplied by the fixture (which is untrusted corpus
+/// content) instead of the file the harness wrote. Matching is on the whole
+/// trimmed token, or on the token's `--flag=value` left-hand side, so `-o`-style
+/// output flags (`-o`, `-O2`, `--test`) are unaffected; only an exact eval flag
+/// is rejected.
+pub const DENIED_FIXTURE_PROGRAM_ARGS: &[&str] =
+    &["-c", "-e", "-r", "--eval", "-m", "run", "-", "/dev/stdin"];
 
 /// Base names of the artefacts the native harnesses themselves produce.
 ///
@@ -107,10 +137,17 @@ fn is_harness_artefact(relative: &str) -> bool {
 
 /// Validate a fixture-supplied command list before it is spawned.
 ///
+/// SEC-003: both the program *and* the argv tail are checked. The program must
+/// be an allowlisted toolchain name, and no argument may be an inline-eval or
+/// stdin token ([`DENIED_FIXTURE_PROGRAM_ARGS`]), which is what makes
+/// `["python3", "-c", "<payload>"]` and `["go", "run", "x.go"]` fail validation
+/// before any process is spawned.
+///
 /// # Errors
 ///
-/// Returns a message naming the offending program when the list is empty or
-/// its first element is not an allowed fixture program.
+/// Returns a message naming the offending program or argument when the list is
+/// empty, its first element is not an allowed fixture program, or any argument
+/// is a denied eval/stdin token.
 pub fn validate_fixture_command(command_parts: &[String]) -> Result<(), String> {
     let Some(program) = command_parts.first() else {
         return Err("fixture command list was empty".to_string());
@@ -122,7 +159,48 @@ pub fn validate_fixture_command(command_parts: &[String]) -> Result<(), String> 
             ALLOWED_FIXTURE_PROGRAMS.join(", ")
         ));
     }
+    for arg in command_parts.iter().skip(1) {
+        if is_denied_fixture_arg(arg) {
+            return Err(format!(
+                "fixture command argument '{arg}' is an inline-eval/stdin token, \
+                 which is not permitted (denied: {})",
+                DENIED_FIXTURE_PROGRAM_ARGS.join(", ")
+            ));
+        }
+    }
     Ok(())
+}
+
+/// Whether `arg` is a denied inline-eval/stdin token.
+///
+/// A bare token (`-c`) and the `--flag=value` form (`--eval=1+1`) are both
+/// rejected; other tokens (paths, `-o`, `--test`, a class name) pass.
+#[must_use]
+fn is_denied_fixture_arg(arg: &str) -> bool {
+    let trimmed = arg.trim();
+    let flag = trimmed.split_once('=').map_or(trimmed, |(head, _)| head);
+    DENIED_FIXTURE_PROGRAM_ARGS.contains(&flag)
+}
+
+/// Maximum length of a fixture-supplied source extension.
+pub const MAX_SOURCE_EXTENSION_LEN: usize = 8;
+
+/// Whether `extension` is safe to interpolate into a generated file name.
+///
+/// SEC-004: `source_extension` is copied verbatim from the untrusted dataset
+/// record (`BcMbppFullRecord.extension`) and joined into a per-run temp path
+/// (`run_root.join(format!("candidate.{extension}"))`). `Path::join` honours
+/// `..` and embedded separators, so `extension = "../../../../home/<user>/.bashrc"`
+/// escapes the temp dir and the attacker-chosen bytes written there are the
+/// fixture's `test_code`. A real extension is a short alphanumeric identifier
+/// (`py`, `cpp`, `js`), so the guard is exactly that shape.
+#[must_use]
+pub fn is_safe_source_extension(extension: &str) -> bool {
+    !extension.is_empty()
+        && extension.len() <= MAX_SOURCE_EXTENSION_LEN
+        && extension
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Hard wall-clock timeout applied to a `python3` hidden-test subprocess.
@@ -143,3 +221,20 @@ pub const FIXTURE_SUBPROCESS_TIMEOUT_SECS: u64 = 30;
 /// [`FIXTURE_SUBPROCESS_TIMEOUT_SECS`], which only bounds how long the outer
 /// `timeout` wrapper may run before the whole process group is killed.
 pub const FIXTURE_DEFAULT_TIMEOUT_SECS: u64 = 10;
+
+/// Maximum per-command timeout a fixture may declare (seconds).
+///
+/// SEC-068: `execution_timeouts_secs` is fixture-supplied and was unbounded, so a
+/// hostile fixture could set an enormous budget and hang the benchmark run
+/// indefinitely. Every declared timeout is clamped to this ceiling.
+pub const FIXTURE_MAX_TIMEOUT_SECS: u64 = 120;
+
+/// Clamp a fixture-declared timeout to `[1, FIXTURE_MAX_TIMEOUT_SECS]`.
+///
+/// A declared `0` (or any value) is floored to `1` so `timeout 0s` never
+/// disables the bound, and clamped to the ceiling so an attacker cannot park a
+/// command forever.
+#[must_use]
+pub fn clamp_fixture_timeout(timeout_secs: u64) -> u64 {
+    timeout_secs.clamp(1, FIXTURE_MAX_TIMEOUT_SECS)
+}

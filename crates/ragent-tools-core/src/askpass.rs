@@ -274,7 +274,7 @@ async fn publish_question_and_wait(
                         if r.is_empty() || r == DISMISS_MARKER {
                             write_cancel(&response_path);
                         } else {
-                            let _ = std::fs::write(&response_path, r.as_bytes()); // INTENTIONAL: best-effort response write
+                            write_response(&response_path, r.as_bytes());
                         }
                         return;
                     }
@@ -294,21 +294,78 @@ async fn publish_question_and_wait(
 /// Write an empty response file so the helper prints nothing and exits
 /// non-zero (sudo then reports a clean authentication failure).
 fn write_cancel(response_path: &Path) {
+    // Refuse a planted symlink so the empty write cannot truncate a victim file.
+    if std::fs::symlink_metadata(response_path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return;
+    }
     let _ = std::fs::write(response_path, b""); // INTENTIONAL: best-effort temp cleanup
+}
+
+/// Write the password response owner-only, refusing a pre-placed symlink.
+///
+/// SEC-027: `create_new` gives `O_EXCL` semantics (so a symlink planted at the
+/// predictable response path is refused rather than followed) and the Unix
+/// `0o600` mode keeps the password unreadable by other local users.
+fn write_response(response_path: &Path, bytes: &[u8]) {
+    use std::io::Write as _;
+    // Refuse a symlink planted at the predictable response path.
+    if std::fs::symlink_metadata(response_path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return;
+    }
+    #[cfg(unix)]
+    let opened = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(response_path)
+    };
+    #[cfg(not(unix))]
+    let opened = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(response_path);
+    if let Ok(mut file) = opened {
+        let _ = file.write_all(bytes); // INTENTIONAL: best-effort response write
+    }
 }
 
 // -- Temp directory helpers --------------------------------------------------
 
 /// Resolve the base directory for askpass temp files for the given session.
 ///
-/// Uses `/tmp` on Unix. Returns `None` if `/tmp` is not writable.
+/// SEC-027: the password response file must not live in a world-readable shared
+/// `/tmp` directory. This reuses the bash tool's owner-only (`0700`) scratch
+/// directory, which already lives under the workspace's `target/temp`. Refuses a
+/// pre-existing path that is a symlink.
 fn temp_base_dir(session_id: &str) -> Option<PathBuf> {
-    let safe = crate::bash::safe_session_id(session_id);
-    let dir = PathBuf::from("/tmp").join(format!("ragent_{safe}"));
-    if std::fs::create_dir_all(&dir).is_err() {
+    let dir = crate::bash::bash_scratch_dir()
+        .join("askpass")
+        .join(crate::bash::safe_session_id(session_id));
+    if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink()) {
         return None;
     }
+    create_private_dir(&dir).ok()?;
     Some(dir)
+}
+
+/// Create `dir` (and its parents) with owner-only permissions (SEC-027).
+#[cfg(unix)]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
+/// Create `dir` (and its parents) (SEC-027).
+#[cfg(not(unix))]
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)
 }
 
 /// A monotonic-ish unique stamp for file names.

@@ -143,7 +143,7 @@ impl GitHubClient {
         // Accept either absolute-http(s) URL so mock/test servers and
         // http-only GitHub Enterprise installs are honored as-is instead
         // of being concatenated to the default base URL.
-        if path.starts_with("https://") || path.starts_with("http://") {
+        if ragent_types::strutil::is_http_url(path) {
             path.to_string()
         } else {
             format!("{}{path}", self.base_url)
@@ -158,7 +158,10 @@ impl GitHubClient {
     fn request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
         self.client
             .request(method, url)
-            .header("Authorization", format!("Bearer {}", self.token))
+            .header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&self.token),
+            )
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "ragent/0.1")
     }
@@ -279,16 +282,16 @@ impl GitHubClient {
         // this check a compromised or hostile GitHub Enterprise instance could
         // direct the user's PAT to an attacker-controlled host.
         let same_origin = same_origin_as(&url, &self.base_url);
-        let request = if same_origin {
-            self.request(reqwest::Method::GET, &url)
-        } else {
-            tracing::warn!(
-                url = %url,
-                base = %self.base_url,
-                "GitHub: refusing to attach the token to a cross-origin URL"
+        // SEC-033: a cross-origin URL here comes from response *content* (an
+        // API-supplied `download_url`), so even a token-less fetch is SSRF.
+        // Refuse it entirely rather than issuing an unauthenticated request.
+        if !same_origin {
+            bail!(
+                "GitHub: refusing to fetch a cross-origin URL {url} (not under {})",
+                self.base_url
             );
-            self.client.request(reqwest::Method::GET, &url)
-        };
+        }
+        let request = self.request(reqwest::Method::GET, &url);
         let resp = request
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "ragent/0.1")
@@ -307,6 +310,50 @@ impl GitHubClient {
             .await
             .with_context(|| format!("Failed to read GitHub bytes for {path}"))?;
         Ok(bytes.to_vec())
+    }
+
+    /// GET request returning raw bytes, capped at `limit` during the download.
+    ///
+    /// SEC-032: unlike [`Self::get_bytes`], the body is streamed and the read
+    /// stops once `limit` bytes have arrived, so a hostile endpoint cannot force
+    /// an unbounded buffer. Refuses a cross-origin URL like `get_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a cross-origin URL, a non-success status, or a body
+    /// that exceeds `limit`.
+    pub async fn get_bytes_limited(&self, path: &str, limit: usize) -> Result<Vec<u8>> {
+        let url = self.resolve_url(path);
+        if !same_origin_as(&url, &self.base_url) {
+            bail!(
+                "GitHub: refusing to fetch a cross-origin URL {url} (not under {})",
+                self.base_url
+            );
+        }
+        let resp = self
+            .request(reqwest::Method::GET, &url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "ragent/0.1")
+            .send()
+            .await
+            .with_context(|| format!("GitHub GET (limited) {path} failed"))?;
+        let status = resp.status();
+        self.check_status(status, resp.headers(), path)?;
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GitHub API error {status} for {path}: {body}");
+        }
+        let mut stream = resp.bytes_stream();
+        use futures::StreamExt as _;
+        let mut out: Vec<u8> = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.with_context(|| format!("Failed to read GitHub bytes for {path}"))?;
+            if out.len() + chunk.len() > limit {
+                bail!("GitHub response for {path} exceeded the {limit}-byte cap");
+            }
+            out.extend_from_slice(&chunk);
+        }
+        Ok(out)
     }
 
     /// Get the authenticated user's profile.

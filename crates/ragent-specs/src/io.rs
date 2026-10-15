@@ -1,17 +1,92 @@
 //! File I/O operations for spec management.
 //!
 //! Provides atomic writes, spec discovery, and safe directory creation.
+//!
+//! Repository content is untrusted, so the spec tree is treated as hostile
+//! input: a spec directory or a temp file that is a symlink out of `specs_root`
+//! is refused before any write (SEC-006, SEC-059).
 
 use crate::error::SpecError;
 use crate::spec::{Requirement, Spec, SpecId, SpecStatus};
 use crate::validate::{detect_ears_template, parse_requirements};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 
 /// Monotonic counter making concurrent atomic-write temp paths unique
 /// (two writers racing on the same target file get distinct temp names).
 static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Reject `path` when it, or any of its components, is a symlink.
+///
+/// SEC-006/SEC-059: the `specs/` tree is repository content. A committed
+/// symlinked spec directory (`specs/evil -> ~/.config`) or a pre-placed
+/// `.SPEC.md.0.tmp` symlink would otherwise redirect a write outside the
+/// sandbox. Only the existing prefix is inspected, so a not-yet-created path is
+/// accepted (there is no symlink to follow), and the check walks from `path`
+/// upward to the filesystem root.
+fn reject_symlink_components(path: &Path) -> Result<(), SpecError> {
+    let mut current = path.to_path_buf();
+    loop {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(SpecError::UnsafePath(format!(
+                    "'{}' is a symlink; refusing to write through it",
+                    current.display()
+                )));
+            }
+            Ok(_) => {}
+            // Not present (ENOENT) or otherwise unreadable: this component
+            // cannot be a symlink, and neither can the ones below it (a
+            // symlink's target must exist for the component to be traversed).
+            Err(_) => return Ok(()),
+        }
+        match current.parent() {
+            Some(parent) if parent.as_os_str().is_empty() => return Ok(()),
+            Some(parent) if parent == current => return Ok(()),
+            Some(parent) => current = parent.to_path_buf(),
+            None => return Ok(()),
+        }
+    }
+}
+
+/// Resolve a spec directory under `specs_root`, refusing a symlinked directory
+/// and any spec directory that canonicalises outside the root.
+///
+/// SEC-006: replaces the "exists() then create_dir_all" pattern, whose `exists()`
+/// follows a committed symlink and skips the create, so the write lands in the
+/// link target.
+fn resolve_spec_dir(specs_root: &Path, dir_name: &str) -> Result<PathBuf, SpecError> {
+    if dir_name.is_empty() {
+        return Err(SpecError::UnsafePath("spec directory name is empty".into()));
+    }
+    // `dir_name` is already `..`-free by construction (`SpecId::dir_name`), but
+    // defend the invariant here so this helper is safe to reuse.
+    let candidate = Path::new(dir_name);
+    if candidate.is_absolute()
+        || candidate.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(SpecError::UnsafePath(format!(
+            "spec directory '{dir_name}' is not a plain relative name"
+        )));
+    }
+    let dir = specs_root.join(dir_name);
+    reject_symlink_components(&dir)?;
+    if let (Ok(real), Ok(real_root)) = (dir.canonicalize(), specs_root.canonicalize())
+        && !real.starts_with(&real_root)
+    {
+        return Err(SpecError::UnsafePath(format!(
+            "spec directory '{}' resolves outside the specs root via a symlink",
+            dir.display()
+        )));
+    }
+    Ok(dir)
+}
 
 /// I/O helper for spec management.
 pub struct SpecIo;
@@ -26,7 +101,7 @@ impl SpecIo {
         spec_md: &str,
         plan_md: &str,
     ) -> Result<PathBuf, SpecError> {
-        let dir = specs_root.join(id.dir_name());
+        let dir = resolve_spec_dir(specs_root, id.dir_name())?;
         // create_dir (not create_dir_all) avoids the TOCTOU race of an
         // exists() check followed by a recursive create: an existing dir is
         // reported by the AlreadyExists error instead.
@@ -47,6 +122,9 @@ impl SpecIo {
     /// This ensures readers never see a partially-written file.
     pub async fn atomic_write(path: impl AsRef<Path>, content: &str) -> Result<(), SpecError> {
         let path = path.as_ref();
+        // SEC-059: refuse to write through a symlinked path component (the
+        // target file or a pre-placed temp symlink) before touching the disk.
+        reject_symlink_components(path)?;
         // Unique temp name so concurrent writers to the same target never
         // race on the same temp path (a deterministic `.tmp` suffix made two
         // writers rename over each other's temp file).
@@ -55,12 +133,30 @@ impl SpecIo {
             .file_name()
             .map_or_else(|| "tmp".to_string(), |n| n.to_string_lossy().into_owned());
         let temp_path = path.with_file_name(format!(".{file_name}.{seq}.tmp"));
-        fs::write(&temp_path, content).await?;
+        // SEC-059: create the temp with `create_new` so a pre-placed symlink at
+        // the predictable temp path is refused (O_EXCL|O_NOFOLLOW semantics)
+        // rather than followed by a plain `fs::write`.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .await?;
+        use tokio::io::AsyncWriteExt;
+        if let Err(e) = file.write_all(content.as_bytes()).await {
+            drop(file);
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(e.into());
+        }
         // Sync the temp file before the rename so a crash cannot leave a
         // renamed-but-unflushed file behind. The sync failure is propagated:
         // swallowing it would silently void the crash-durability guarantee
         // while still performing the rename (FUNC-025).
-        fs::File::open(&temp_path).await?.sync_all().await?;
+        if let Err(e) = file.sync_all().await {
+            drop(file);
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(e.into());
+        }
+        drop(file);
         fs::rename(&temp_path, path).await?;
         Ok(())
     }
@@ -164,7 +260,7 @@ impl SpecIo {
     /// Write a `Spec` back to disk (SPEC.md, PLAN.md, and optionally
     /// REVIEW.md and FEEDBACK.md).
     pub async fn write_spec(specs_root: &Path, spec: &Spec) -> Result<(), SpecError> {
-        let dir = spec.dir_path(specs_root);
+        let dir = resolve_spec_dir(specs_root, &spec.id.dir_name())?;
         if !dir.exists() {
             fs::create_dir_all(&dir).await?;
         }
@@ -202,7 +298,7 @@ impl SpecIo {
         review_md: &str,
         feedback_md: &str,
     ) -> Result<(), SpecError> {
-        let dir = specs_root.join(spec_id.dir_name());
+        let dir = resolve_spec_dir(specs_root, spec_id.dir_name())?;
         if !dir.exists() {
             fs::create_dir_all(&dir).await?;
         }

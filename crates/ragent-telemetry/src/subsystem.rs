@@ -476,10 +476,64 @@ impl std::fmt::Debug for TelemetrySubsystem {
         let guard = self.runtime.lock();
         f.debug_struct("TelemetrySubsystem")
             .field("state", &guard.state)
-            .field("endpoint", &guard.config.endpoint)
+            // SEC-055: the endpoint may embed credentials in its userinfo
+            // (`https://user:secret@collector:4318`); never echo them into
+            // Debug output.
+            .field("endpoint", &mask_endpoint_userinfo(&guard.config.endpoint))
             .field("protocol", &guard.config.protocol)
             .finish()
     }
+}
+
+/// Mask the userinfo portion of an endpoint URL for safe logging (SEC-055).
+///
+/// An OTLP endpoint may embed credentials in its authority
+/// (`https://user:secret@collector:4318`). This replaces everything before the
+/// `@` with `***` so the value can be placed into `Debug`, error, or tracing
+/// output without leaking the credentials. A URL without userinfo (or an
+/// unparseable value with no `://`) is returned unchanged.
+///
+/// # Arguments
+///
+/// * `endpoint` - The raw endpoint string to be logged.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_telemetry::subsystem::mask_endpoint_userinfo;
+///
+/// assert_eq!(
+///     mask_endpoint_userinfo("https://user:secret@collector:4318"),
+///     "https://***@collector:4318"
+/// );
+/// assert_eq!(
+///     mask_endpoint_userinfo("http://localhost:4317"),
+///     "http://localhost:4317"
+/// );
+/// ```
+#[must_use]
+pub fn mask_endpoint_userinfo(endpoint: &str) -> String {
+    // Locate the authority start (after "scheme://"); the authority runs until
+    // the first '/', '?', or '#'.
+    let Some(scheme_end) = endpoint.find("://") else {
+        return endpoint.to_string();
+    };
+    let auth_start = scheme_end + 3;
+    let rest = &endpoint[auth_start..];
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..auth_end];
+    // Use the LAST '@' so a malformed userinfo containing '@' cannot mislead
+    // the host boundary.
+    let Some(at) = authority.rfind('@') else {
+        return endpoint.to_string();
+    };
+    let mut masked = String::with_capacity(endpoint.len());
+    masked.push_str(&endpoint[..auth_start]);
+    masked.push_str("***@");
+    // Keep the host[:port] and everything after the authority verbatim.
+    masked.push_str(&authority[at + 1..]);
+    masked.push_str(&rest[auth_end..]);
+    masked
 }
 
 // -- Provider construction (feature-gated) ------------------------------
@@ -503,10 +557,11 @@ fn validate_endpoint(config: &OtelConfig) -> Result<()> {
             "endpoint is empty".to_string(),
         ));
     }
-    if !config.endpoint.starts_with("http://") && !config.endpoint.starts_with("https://") {
+    if !ragent_types::strutil::is_http_url(&config.endpoint) {
+        // SEC-055: never echo the raw endpoint - it may embed userinfo.
         return Err(crate::TelemetryError::InvalidEndpoint(format!(
             "endpoint must be HTTP or HTTPS URL: {}",
-            config.endpoint
+            mask_endpoint_userinfo(&config.endpoint)
         )));
     }
     Ok(())
@@ -652,29 +707,45 @@ fn build_metric_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::Metr
 fn ensure_grpc_endpoint_is_encrypted(
     endpoint: &str,
 ) -> std::result::Result<(), crate::TelemetryError> {
-    let lowered = endpoint.trim().to_ascii_lowercase();
-    if lowered.starts_with("https://") {
-        return Ok(());
-    }
-    if lowered.starts_with("http://") {
-        let host = lowered
-            .trim_start_matches("http://")
-            .split(['/', ':'])
-            .next()
-            .unwrap_or("")
-            .to_string();
-        let is_loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]" | "::1");
-        if is_loopback {
-            return Ok(());
-        }
+    // SEC-053: parse the URL once and decide on the *parsed* host. A naive
+    // string split would accept `http://localhost:4317@evil.example` as
+    // loopback (reading only the text before the first `:`), when the real
+    // authority is `localhost:4317@evil.example` -> host `evil.example`.
+    let safe = mask_endpoint_userinfo(endpoint);
+    let uri = url::Url::parse(endpoint.trim()).map_err(|e| {
+        crate::TelemetryError::ExporterInit(format!(
+            "unsupported OTLP/gRPC endpoint '{safe}': not a valid URL ({e})"
+        ))
+    })?;
+
+    // Reject any userinfo outright: an embedded credential means the operator
+    // intended to authenticate, which is only meaningful over TLS, and it also
+    // muddies the loopback decision (`http://user@127.0.0.1:4317`).
+    if !uri.username().is_empty() || uri.password().is_some() {
         return Err(crate::TelemetryError::ExporterInit(format!(
-            "refusing to export OTLP/gRPC over cleartext to '{endpoint}'; use \
-             an https:// endpoint (TLS is compiled in)"
+            "refusing OTLP/gRPC endpoint '{safe}': userinfo in the endpoint URL \
+             is not supported; use an https:// endpoint (TLS is compiled in)"
         )));
     }
-    Err(crate::TelemetryError::ExporterInit(format!(
-        "unsupported OTLP/gRPC endpoint '{endpoint}': expected an http(s) URL"
-    )))
+
+    match uri.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let is_loopback = uri
+                .host_str()
+                .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1"));
+            if is_loopback {
+                return Ok(());
+            }
+            Err(crate::TelemetryError::ExporterInit(format!(
+                "refusing to export OTLP/gRPC over cleartext to '{safe}'; use \
+                 an https:// endpoint (TLS is compiled in)"
+            )))
+        }
+        _ => Err(crate::TelemetryError::ExporterInit(format!(
+            "unsupported OTLP/gRPC endpoint '{safe}': expected an http(s) URL"
+        ))),
+    }
 }
 
 /// Build the OTEL [`Resource`] with standard and custom attributes (FR-004).

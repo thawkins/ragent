@@ -9,6 +9,58 @@ use std::sync::{LazyLock, RwLock};
 
 use regex::Regex;
 
+/// The single redaction placeholder substituted for every masked secret.
+///
+/// Every redactor across the workspace (this crate's [`redact_secrets`], the
+/// server's `/config` scrubber, the TUI's `/config` renderer, the telemetry
+/// attribute guard, and the `get_env` tool) writes this exact string, so a
+/// secret can never be identified by which subsystem leaked a different
+/// sentinel (audit Quick Win 5).
+pub const REDACTION_PLACEHOLDER: &str = "[REDACTED]";
+
+/// Returns `true` when a JSON object key names a credential.
+///
+/// Matches by key-name *shape* rather than a hardcoded path list, so a
+/// newly-added `*_api_key` / `*_token` / `*_secret` config field is redacted
+/// automatically without editing the redactor. The suffix form deliberately
+/// ends in `_key` / `_token` / ... so non-secret keys such as `keywords` or
+/// `token_budget` are not caught.
+///
+/// The server's `/config` scrubber and the TUI's `/config show` renderer share
+/// this single predicate so their secret-key sets cannot drift apart (audit
+/// Medium 8).
+#[must_use]
+pub fn is_secret_json_key(key: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "token",
+        "secret",
+        "password",
+        "api_key",
+        "apikey",
+        "webhook_url",
+        "client_id",
+        "client_secret",
+        "access_token",
+        "refresh_token",
+        "bot_token",
+        "private_key",
+        "credentials",
+        "openalex_email",
+        "gitlab",
+    ];
+    if EXACT
+        .iter()
+        .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    {
+        return true;
+    }
+    const SUFFIXES: &[&str] = &["_key", "_token", "_secret", "_password"];
+    SUFFIXES.iter().any(|suffix| {
+        key.len() >= suffix.len()
+            && key.as_bytes()[key.len() - suffix.len()..].eq_ignore_ascii_case(suffix.as_bytes())
+    })
+}
+
 /// Matches common secret patterns:
 ///
 /// - `sk-` / `sk_live_` / `sk_test_` prefixed keys (`OpenAI`, Stripe, etc.)
@@ -379,8 +431,8 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
         for secret in registry.iter() {
             if result.contains(secret.as_str()) {
                 let replaced = match result {
-                    Cow::Borrowed(text) => text.replace(secret.as_str(), "[REDACTED]"),
-                    Cow::Owned(text) => text.replace(secret.as_str(), "[REDACTED]"),
+                    Cow::Borrowed(text) => text.replace(secret.as_str(), REDACTION_PLACEHOLDER),
+                    Cow::Owned(text) => text.replace(secret.as_str(), REDACTION_PLACEHOLDER),
                 };
                 result = Cow::Owned(replaced);
             }

@@ -136,8 +136,11 @@ impl Provider for OpenAiProvider {
         // ANTIPAT 3.6: register the credential with the shared redaction
         // registry so any text passed through `redact_secrets` masks it.
         ragent_types::sanitize::register_secret(api_key);
-        let resolved = base_url.unwrap_or(OPENAI_API_BASE);
-        let client = OpenAiClient::new(api_key, resolved);
+        // SEC-ragent-llm-005: a base URL sourced from config is validated with
+        // the same scheme/host check as an environment-supplied one.
+        let resolved =
+            super::base_url::resolve_validated_base_url("openai", base_url, OPENAI_API_BASE);
+        let client = OpenAiClient::new(api_key, &resolved);
         tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", resolved.trim_end_matches('/')), "OpenAI provider connected");
         Ok(Box::new(client))
     }
@@ -230,7 +233,7 @@ impl LlmClient for OpenAiClient {
         let response = self
             .http
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", ragent_types::strutil::bearer_auth_header(&self.api_key))
             .header("content-type", "application/json")
             .body(body_bytes)
             .send()
@@ -335,7 +338,10 @@ pub async fn discover_openai_models(
     let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
     let response = crate::provider::http_client::create_http_client()
         .get(&url)
-        .header("Authorization", format!("Bearer {api_key}"))
+        .header(
+            "Authorization",
+            ragent_types::strutil::bearer_auth_header(&api_key),
+        )
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await

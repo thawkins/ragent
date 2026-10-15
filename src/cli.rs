@@ -1679,6 +1679,8 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
                 def.backend_label().to_string(),
             );
             storage.insert_automation_run(&run)?;
+            // A failure leaves the row pending, which the message below explains.
+            // INTENTIONAL: best-effort closure of the just-inserted run row.
             let _ = storage.finish_automation_run(&run.id, ragent_types::RunOutcome::Error, None);
             println!(
                 "Recorded manual run `{}` for `{id}` on backend `{}`. Run the live `ragent \

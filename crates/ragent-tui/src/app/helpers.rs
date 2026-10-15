@@ -381,15 +381,21 @@ pub fn hard_break_lines(text: &str) -> String {
 /// cannot render bitmaps directly, so this placeholder keeps the layout useful.
 #[must_use]
 pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::path::Path) -> String {
-    let is_url = src.starts_with("http://") || src.starts_with("https://");
+    let is_url = ragent_types::strutil::is_http_url(src);
+    // SEC-079: a non-URL `src` is attacker-influenced (an image reference in a
+    // document or a model-authored part). An absolute path or one containing a
+    // `..` component would escape `base_dir` and let the read inspect any file
+    // the process can open, so such a source is rejected before any filesystem
+    // access. It is only ever displayed as a placeholder.
+    let safe_local = !is_url && is_contained_relative(src);
     let resolved = if is_url {
         src.to_string()
     } else {
         base_dir.join(src).to_string_lossy().to_string()
     };
-    // `image_dimensions` reads the file and returns `None` for missing or
-    // unreadable paths, so no separate `metadata()` stat is needed.
-    let dims = (!is_url)
+    // `image_dimensions` reads only a bounded header prefix and returns `None`
+    // for missing, unreadable, or rejected paths, so no separate stat is needed.
+    let dims = safe_local
         .then(|| image_dimensions(std::path::Path::new(&resolved)))
         .flatten();
     match dims {
@@ -398,9 +404,39 @@ pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::pat
     }
 }
 
+/// Returns `true` when `src` is a relative path that does not escape its base
+/// directory (no root, no `..` component).
+///
+/// SEC-079: guards [`image_dimensions_or_placeholder`] against reading a file
+/// outside the document root via an absolute path or a `../` traversal.
+fn is_contained_relative(src: &str) -> bool {
+    let path = std::path::Path::new(src);
+    if path.is_absolute() {
+        return false;
+    }
+    !path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+/// Read at most `IMAGE_HEADER_LIMIT` bytes from `path`.
+///
+/// SEC-079: capped so a huge (or unbounded-stream) file cannot exhaust memory
+/// during dimension parsing; PNG/JPEG headers always fit well within the cap.
+fn read_image_header(path: &std::path::Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut data = Vec::new();
+    file.take(IMAGE_HEADER_LIMIT).read_to_end(&mut data).ok()?;
+    Some(data)
+}
+
+/// Upper bound on the bytes read while parsing an image header (64 KiB).
+const IMAGE_HEADER_LIMIT: u64 = 64 * 1024;
+
 fn image_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
     // Lightweight dimension parsing for PNG/JPEG headers without decoding pixels.
-    let data = std::fs::read(path).ok()?;
+    let data = read_image_header(path)?;
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         // PNG IHDR width/height at offsets 16-23 (big-endian).
         if data.len() >= 24 {

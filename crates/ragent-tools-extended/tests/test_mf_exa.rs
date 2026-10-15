@@ -474,7 +474,10 @@ fn test_parse_response_json_highlights_non_string_ignored() {
 // mask_key & masked_key tests (T-007, FR-006, NFR-002)
 // ---------------------------------------------------------------------------
 
-use ragent_tools_extended::masterfetch::search::exa::{ExaEngine, mask_key};
+use ragent_tools_extended::masterfetch::search::exa::ExaEngine;
+// The key-masking helper now lives in `engine`; import it under the historical
+// test-local name so the masking assertions below stay unchanged.
+use ragent_tools_extended::masterfetch::search::engine::mask_api_key as mask_key;
 
 #[test]
 fn test_mask_key_short_fully_masked() {

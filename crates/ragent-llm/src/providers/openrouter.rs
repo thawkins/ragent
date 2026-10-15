@@ -23,25 +23,6 @@ use ragent_config::{Capabilities, Cost};
 
 const DEFAULT_OPENROUTER_HOST: &str = "https://openrouter.ai";
 
-/// Returns a masked fingerprint of an API key for diagnostics.
-///
-/// Mirrors FR-005: only the final four characters are shown behind an
-/// ellipsis (e.g. `...abcd`); empty keys render as `(none)` so callers can
-/// distinguish "no key" from "key present".
-///
-/// # Examples
-///
-/// ```
-/// use ragent_llm::provider::openrouter::mask_key;
-///
-/// assert_eq!(mask_key("sk-or-v1-0123456789abcd"), "...abcd");
-/// assert_eq!(mask_key(""), "(none)");
-/// ```
-#[must_use]
-pub fn mask_key(key: &str) -> String {
-    ragent_types::sanitize::mask_key(key)
-}
-
 /// Provider implementation for OpenRouter.
 pub struct OpenRouterProvider {
     base_url: String,
@@ -130,7 +111,10 @@ impl OpenRouterProvider {
         let client = http_client::create_http_client();
         let mut request = client.get(&url).timeout(std::time::Duration::from_secs(10));
         if !api_key.is_empty() {
-            request = request.header("Authorization", format!("Bearer {api_key}"));
+            request = request.header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&api_key),
+            );
         }
 
         let response = request
@@ -237,7 +221,7 @@ impl Provider for OpenRouterProvider {
         tracing::info!(
             chat_endpoint = %format!("{base}/api/v1/chat/completions"),
             models_endpoint = %format!("{base}/api/v1/models"),
-            key_fingerprint = %mask_key(&resolved),
+            key_fingerprint = %ragent_types::sanitize::mask_key(&resolved),
             "OpenRouter provider client created"
         );
 
@@ -501,7 +485,7 @@ impl LlmClient for OpenRouterClient {
             std::time::Duration::from_secs(first_byte_timeout),
             self.http
                 .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Authorization", ragent_types::strutil::bearer_auth_header(&self.api_key))
                 .header("content-type", "application/json")
                 .body(body_bytes)
                 .send(),

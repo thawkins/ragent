@@ -83,12 +83,22 @@ pub const MAX_SNIPPET_CHARS: usize = 200;
 /// - **FR-001** - Exa backend that plugs into the `SearchEngine` trait.
 /// - **FR-006** - the API key is never logged in plain text; `masked_key`
 ///   exposes only the first two and last two characters.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ExaEngine {
     /// Exa API key (`x-api-key` header).
     api_key: String,
     /// Optional injectable HTTP client (for testing).
     client: Option<reqwest::Client>,
+}
+
+impl std::fmt::Debug for ExaEngine {
+    /// SEC-039: hand-written so the `api_key` never leaks through `{:?}`; the
+    /// masked form is rendered instead of the raw key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExaEngine")
+            .field("api_key", &super::engine::mask_api_key(&self.api_key))
+            .finish_non_exhaustive()
+    }
 }
 
 impl ExaEngine {

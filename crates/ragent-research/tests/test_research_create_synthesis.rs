@@ -159,6 +159,19 @@ impl WebFetchTool for FakeFetch {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no fake page for {url}"))
     }
+
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = ragent_research::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 /// Collect every [`SessionEvent::SynthesizeResult`] so the test can assert on

@@ -29,6 +29,19 @@ impl ragent_research::web_gatherer::WebFetchTool for NoFetch {
     async fn fetch(&self, url: &str) -> anyhow::Result<ragent_research::WebFetchedPage> {
         anyhow::bail!("fetch should not be called in this test (url={url})")
     }
+
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<ragent_research::WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = ragent_research::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 fn hit(author: Option<&str>) -> WebSearchHit {

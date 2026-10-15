@@ -187,4 +187,4 @@ fn substitute_positional_shorthand(body: &str, args: &[String]) -> String {
 
 #[cfg(test)]
 #[path = "../../tests/inline/skill_args.rs"]
-mod tests_tests;
+mod tests;

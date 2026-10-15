@@ -250,3 +250,12 @@ fn is_youtube_url_recognises_watch_and_short_urls() {
     assert!(is_youtube_url("https://youtu.be/abc"));
     assert!(!is_youtube_url("https://example.com/watch?v=abc"));
 }
+
+#[test]
+fn is_youtube_url_rejects_lookalike_hosts() {
+    // SEC-015: a host merely *ending* with `youtube.com` must not match.
+    assert!(!is_youtube_url("https://notyoutube.com/watch?v=abc"));
+    assert!(!is_youtube_url("https://evilyoutube.com/watch?v=abc"));
+    assert!(is_youtube_url("https://m.youtube.com/watch?v=abc"));
+    assert!(is_youtube_url("https://www.youtube-nocookie.com/embed/abc"));
+}

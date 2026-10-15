@@ -6,12 +6,12 @@
 //! These tests verify three layers of the guard:
 //!
 //! 1. **Attribute helpers sanitize values** - the `attr_*` helpers in
-//!    `InstrumentRegistry` replace sensitive values with `"redacted"`
+//!    `InstrumentRegistry` replace sensitive values with `"[REDACTED]"`
 //!    before building `KeyValue` pairs.
 //! 2. **Recorders never leak sensitive data** - recording metrics through
 //!    `LlmRecorder`, `ToolRecorder`, `SessionRecorder`, and
 //!    `PermissionRecorder` with a sensitive model/provider/tool name
-//!    produces exported attributes whose value is `"redacted"`, not the
+//!    produces exported attributes whose value is `"[REDACTED]"`, not the
 //!    original secret.
 //! 3. **Resource attributes are sanitised** - custom
 //!    `telemetry.otel.resource()_attributes` that contain an API key or
@@ -31,7 +31,9 @@ use ragent_telemetry::recorder::{
     CompressionRecorder, CoordinatorRecorder, LlmRecorder, PermissionRecorder, SessionRecorder,
     ToolRecorder,
 };
-use ragent_telemetry::sensitive::{REDACTED, looks_sensitive, sanitize_attr_value};
+use ragent_telemetry::sensitive::{
+    REDACTED, UNKNOWN_TOOL_NAME, looks_sensitive, sanitize_attr_value,
+};
 use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsystem};
 
 // -- Helpers ---------------------------------------------------------------
@@ -181,12 +183,21 @@ fn test_attr_provider_passes_safe_name() {
     assert_eq!(kv.value.as_str(), "anthropic");
 }
 
-/// `attr_tool` redacts file content passed as a tool name (FR-034).
+/// `attr_tool` replaces file content passed as a tool name with the allow-list
+/// placeholder, never exporting the content (SEC-052, FR-034).
 #[test]
 fn test_attr_tool_redacts_file_content() {
     let content = "use std::io::Read;\nfn main() { let mut f = File::open(\"x\")?; }";
     let kv = InstrumentRegistry::attr_tool(content);
-    assert_eq!(kv.value.as_str(), REDACTED);
+    assert_eq!(kv.value.as_str(), UNKNOWN_TOOL_NAME);
+}
+
+/// `attr_tool` replaces a URL-shaped tool name with the allow-list placeholder
+/// (SEC-052): a model cannot smuggle an arbitrary string into `tool.name`.
+#[test]
+fn test_attr_tool_rejects_non_conforming_name() {
+    let kv = InstrumentRegistry::attr_tool("https://evil.example/exfil");
+    assert_eq!(kv.value.as_str(), UNKNOWN_TOOL_NAME);
 }
 
 /// `attr_tool` passes through a safe tool name.
@@ -229,7 +240,7 @@ fn test_ollama_model_with_colons_not_redacted() {
 // -- 2. Recorders never leak sensitive data into exports ------------------
 
 /// Recording an LLM request with an API-key-shaped model name exports
-/// `"redacted"` as the `model` attribute, never the original key (FR-034).
+/// `"[REDACTED]"` as the `model` attribute, never the original key (FR-034).
 #[test]
 fn test_llm_recorder_redacts_sensitive_model_in_export() {
     let (provider, exporter, rt) = build_in_memory_provider();
@@ -264,8 +275,8 @@ fn test_llm_recorder_redacts_sensitive_model_in_export() {
     );
 }
 
-/// Recording a tool invocation with file content as the tool name exports
-/// `"redacted"`, never the file content (FR-034).
+/// Recording a tool invocation with file content as the tool name exports the
+/// allow-list placeholder, never the file content (SEC-052, FR-034).
 #[test]
 fn test_tool_recorder_redacts_sensitive_tool_name_in_export() {
     let (provider, exporter, rt) = build_in_memory_provider();
@@ -286,13 +297,13 @@ fn test_tool_recorder_redacts_sensitive_tool_name_in_export() {
         "file content leaked into exported metric attributes: {values:?}"
     );
     assert!(
-        values.iter().any(|v| v == REDACTED),
-        "expected {REDACTED:?}, got {values:?}"
+        values.iter().any(|v| v == UNKNOWN_TOOL_NAME),
+        "expected {UNKNOWN_TOOL_NAME:?}, got {values:?}"
     );
 }
 
 /// Recording a permission decision with a credential as the tool name
-/// exports `"redacted"` (FR-034).
+/// exports `"[REDACTED]"` (FR-034).
 #[test]
 fn test_permission_recorder_redacts_sensitive_tool_name_in_export() {
     let (provider, exporter, rt) = build_in_memory_provider();
@@ -318,7 +329,7 @@ fn test_permission_recorder_redacts_sensitive_tool_name_in_export() {
 }
 
 /// Recording a coordinator error with a `user:password` component name
-/// exports `"redacted"` (FR-034).
+/// exports `"[REDACTED]"` (FR-034).
 #[test]
 fn test_coordinator_recorder_redacts_credential_component_in_export() {
     let (provider, exporter, rt) = build_in_memory_provider();
@@ -420,7 +431,7 @@ fn test_custom_resource_attribute_with_api_key_is_redacted() {
 #[test]
 fn test_service_name_with_credential_is_redacted() {
     // The guard is applied inside build_resource, so a sensitive
-    // service_name becomes "redacted" on the resource even though the
+    // service_name becomes "[REDACTED]" on the resource even though the
     // config still holds the raw value.
     let raw = "Bearer abc123def456ghi789";
     assert_eq!(sanitize_attr_value(raw), REDACTED);

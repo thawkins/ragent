@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct OpenAiConfig {
     /// Whether the OpenAI-compatible surface is an explicitly enabled capability.
     ///

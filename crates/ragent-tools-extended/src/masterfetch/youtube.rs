@@ -56,6 +56,12 @@ pub async fn extract_transcript_from_watch_page(html: &str) -> Result<(String, S
         .unwrap_or("YouTube video")
         .to_string();
 
+    // SEC-015: the caption `baseUrl` is parsed out of page JSON (attacker HTML
+    // when `is_youtube_url` was fooled), so validate it before fetching: an https
+    // YouTube host only.
+    if !is_youtube_caption_url(&caption_url) {
+        bail!("refusing YouTube caption URL that is not an https YouTube host: {caption_url}");
+    }
     let client =
         http::shared_client().context("failed to build HTTP client for YouTube captions")?;
     // ANTIPAT 4.1: cap the caption body; a timedtext response is small.
@@ -267,7 +273,29 @@ pub fn parse_caption_xml(xml: &str) -> Result<String> {
 pub fn is_youtube_url(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|u| {
         let host = u.host_str().unwrap_or("").to_ascii_lowercase();
-        host.ends_with("youtube.com") || host == "youtu.be"
+        // SEC-015: require an exact host or a real subdomain; a bare
+        // `ends_with("youtube.com")` accepted `notyoutube.com`/`evilyoutube.com`,
+        // which then let attacker HTML drive the caption fetch.
+        host == "youtube.com"
+            || host.ends_with(".youtube.com")
+            || host == "youtu.be"
+            || host == "youtube-nocookie.com"
+            || host.ends_with(".youtube-nocookie.com")
+    })
+}
+
+/// Whether `url` is an `https` caption URL on a genuine YouTube host (SEC-015).
+#[must_use]
+fn is_youtube_caption_url(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|u| {
+        u.scheme() == "https"
+            && u.host_str().is_some_and(|host| {
+                let host = host.to_ascii_lowercase();
+                host == "youtube.com"
+                    || host.ends_with(".youtube.com")
+                    || host == "youtube-nocookie.com"
+                    || host.ends_with(".youtube-nocookie.com")
+            })
     })
 }
 

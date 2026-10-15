@@ -1728,4 +1728,4 @@ pub fn validate_phase_minus_one_gates(spec: &Spec, report: &mut Report) {
 
 #[cfg(test)]
 #[path = "../tests/inline/validate.rs"]
-mod tests_tests;
+mod tests;

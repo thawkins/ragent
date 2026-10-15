@@ -83,6 +83,7 @@ pub async fn run(
     {
         // Reached only when `acp.server_enabled` is true in a build with no
         // `acp-server` feature; the `if` above already handles the disabled case.
+        // INTENTIONAL: parameters retained for the enabled-feature signature; unused here.
         let _ = (processor, event_bus, working_dir);
         tracing::error!("ragent acp-server: {ACP_FEATURE_HELP}");
         Err(crate::cli::CliExit::usage().into())

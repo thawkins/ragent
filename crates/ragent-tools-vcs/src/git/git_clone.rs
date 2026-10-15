@@ -73,6 +73,9 @@ impl Tool for GitCloneTool {
         // executes a shell command and `directory="../../esc"` writes outside
         // the workspace.
         crate::git::reject_option_like(url, "url")?;
+        // SEC-012: refuse a transport-helper URL (`ext::sh -c ...`), which git
+        // would run through the shell.
+        crate::git::validate_git_remote_url(url)?;
         if let Some(b) = branch {
             crate::git::reject_option_like(b, "branch")?;
         }

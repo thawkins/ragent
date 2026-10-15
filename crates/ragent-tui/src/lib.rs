@@ -831,7 +831,12 @@ pub async fn run_tui(
                 _ => app::LogLevel::Info,
             };
             if !record.message.is_empty() {
-                app.push_log(level, record.message, None);
+                // Redact before display: the tracing layer forwards every log
+                // record verbatim, and a provider that logs an endpoint or a
+                // token-shaped fragment would otherwise surface it on screen
+                // (audit Medium 14).
+                let message = ragent_types::sanitize::redact_secrets(&record.message);
+                app.push_log(level, message, None);
                 got_log_record = true;
             }
             log_records_this_frame += 1;
@@ -849,6 +854,9 @@ pub async fn run_tui(
             let mut stderr_records_this_frame = 0u32;
             while let Ok(chunk) = stderr_rx.try_recv() {
                 for line in chunk.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+                    // Redact before display: mirrored child stderr can carry a
+                    // credential a subprocess echoed (audit Medium 15).
+                    let line = ragent_types::sanitize::redact_secrets(line);
                     app.push_log(app::LogLevel::Warn, format!("stderr: {line}"), None);
                     app.needs_redraw = true;
                 }

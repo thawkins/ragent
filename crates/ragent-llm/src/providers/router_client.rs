@@ -580,14 +580,7 @@ impl RouterClient {
 /// a hostless value is rejected (logged and treated as unset) rather than
 /// dialled, so a poisoned environment cannot redirect the request.
 fn resolve_env_base_url(provider_id: &str) -> Option<String> {
-    let raw = match provider_id {
-        "generic_openai" => std::env::var("GENERIC_OPENAI_API_BASE").ok(),
-        "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_BASE").ok(),
-        _ => None,
-    }?;
-    if raw.trim().is_empty() {
-        return None;
-    }
+    let raw = super::env_key::provider_env_base_url(provider_id)?;
     match super::base_url::validate_base_url(provider_id, &raw) {
         Ok(valid) => Some(valid),
         Err(e) => {

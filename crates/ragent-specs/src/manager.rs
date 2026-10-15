@@ -440,14 +440,22 @@ fn update_frontmatter(
     if !audit_trail.is_empty() {
         fm_lines.push("audit:".to_string());
         for (ts, old, new, actor) in audit_trail {
+            // SEC-060: escape every interpolated value so a `"`/newline in an
+            // actor or reference cannot inject extra frontmatter lines.
             fm_lines.push(format!(
-                "  - {{ time: {ts}, from: \"{old}\", to: \"{new}\", actor: \"{actor}\" }}"
+                "  - {{ time: {ts}, from: {}, to: {}, actor: {} }}",
+                crate::commands::yaml_double_quote(old),
+                crate::commands::yaml_double_quote(new),
+                crate::commands::yaml_double_quote(actor),
             ));
         }
     }
 
     if !reviewers.is_empty() {
-        let names: Vec<String> = reviewers.iter().map(|r| format!("\"{r}\"")).collect();
+        let names: Vec<String> = reviewers
+            .iter()
+            .map(|r| crate::commands::yaml_double_quote(r))
+            .collect();
         fm_lines.push(format!("reviewers: [{}]", names.join(", ")));
     }
 

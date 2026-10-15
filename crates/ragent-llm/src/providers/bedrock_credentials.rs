@@ -86,11 +86,7 @@ pub fn resolve_aws_credentials(
         .and_then(|v| v.as_str())
         .filter(|s| !s.trim().is_empty())
         .map(String::from)
-        .or_else(|| {
-            std::env::var("AWS_PROFILE")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-        });
+        .or_else(|| ragent_config::credential_env::read_config_env("AWS_PROFILE"));
 
     if let Some(profile) = profile_name
         && let Some(creds) = creds_from_profile(&profile, &region)?
@@ -109,7 +105,9 @@ pub fn resolve_aws_credentials(
 
     // Build an actionable error message (FR-002)
     let mut sources_tried = vec!["AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY env vars"];
-    if std::env::var("AWS_PROFILE").is_ok() || options.get("profile").is_some() {
+    if ragent_config::credential_env::read_config_env("AWS_PROFILE").is_some()
+        || options.get("profile").is_some()
+    {
         sources_tried.push("AWS profile in ~/.aws/credentials");
     }
     sources_tried.push("IAM instance metadata (not available)");
@@ -132,17 +130,13 @@ pub fn resolve_aws_credentials(
 #[allow(clippy::implicit_hasher)] // called with the same plain std HashMap as resolve_aws_credentials
 pub fn resolve_region(options: &std::collections::HashMap<String, serde_json::Value>) -> String {
     // FR-006: Bedrock-specific region override
-    if let Ok(region) = std::env::var("AWS_BEDROCK_REGION")
-        && !region.trim().is_empty()
-    {
-        return region.trim().to_string();
+    if let Some(region) = ragent_config::credential_env::read_config_env("AWS_BEDROCK_REGION") {
+        return region;
     }
 
     // FR-005: General AWS region
-    if let Ok(region) = std::env::var("AWS_REGION")
-        && !region.trim().is_empty()
-    {
-        return region.trim().to_string();
+    if let Some(region) = ragent_config::credential_env::read_config_env("AWS_REGION") {
+        return region;
     }
 
     // FR-004: Config option
@@ -231,8 +225,8 @@ fn creds_from_profile(profile: &str, default_region: &str) -> Result<Option<AwsC
 /// Returns the path to `~/.aws/credentials`.
 fn aws_credentials_path() -> PathBuf {
     // Respect AWS_SHARED_CREDENTIALS_FILE env var
-    if let Ok(path) = std::env::var("AWS_SHARED_CREDENTIALS_FILE")
-        && !path.trim().is_empty()
+    if let Some(path) =
+        ragent_config::credential_env::read_config_env("AWS_SHARED_CREDENTIALS_FILE")
     {
         return PathBuf::from(path);
     }

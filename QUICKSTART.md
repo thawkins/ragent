@@ -23,6 +23,9 @@ cargo build --release
 # The binary is at target/release/ragent
 # Optionally copy it to your PATH:
 cp target/release/ragent ~/.local/bin/
+
+# Check the installed version:
+ragent --version    # or: ragent -V
 ```
 
 ---
@@ -301,6 +304,12 @@ Ragent loads configuration from multiple sources (last wins):
 3. `./ragent.json` (project-local)
 4. `$RAGENT_CONFIG` (path to a config file)
 5. `$RAGENT_CONFIG_CONTENT` (inline JSON)
+
+A project-local file is untrusted, so the privileged keys it may not set are
+stripped before the merge: `yolo`, allow-rules, bash/dirs lists, `telemetry`,
+`hooks`, `openai`, `mcp`, `acp`, and every provider's `api` block. Put those in
+the user-global `~/.config/ragent/ragent.json`. Rejected keys are logged at
+`warn!`.
 
 ### Example `ragent.json`
 
@@ -2127,7 +2136,25 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Unreleased
+## Version 1.0.135
+
+- **Security-hardening pass (SEC-001..SEC-076)** — an untrusted project-local config
+  can no longer inject executable sinks: `Config::merge_project` drops a project
+  overlay's `mcp` servers, its `acp` section, and every provider `api` block. New
+  `ragent_types::guard` helpers (`reject_symlink_components`, `reject_symlink_escape`,
+  `open_owner_only`) close the symlink escapes across the specs writer, config/credential
+  temp files, the updater, the crash marker, askpass, and the TUI image source; the MCP
+  HTTP client, masterfetch fetcher, GitHub client, and open-access lookup gain
+  connect/whole-request timeouts, capped redirect chains, and 8 MiB streaming read caps;
+  the binary updater requires a verified SHA-256 digest; `http_request` accepts only the
+  `accept`/`accept-language`/`content-type`/`user-agent` headers; and plugin host-call
+  sinks are bounded (1000 entries, 16 KiB each).
+- **`ragent --version` / `-V`** — a top-level flag prints `ragent <version>` and exits
+  `0` before any side effect (no panic hook, no crash marker, no previous-crash warning).
+- **Shared-helper de-duplication** — `ragent-types`/`ragent-surface` gain the shared
+  `strutil`/`sanitize`/`store` helpers, routed through every call site.
+
+## Version 1.0.134
 
 - **`/mcp config` discovery-location report** — a new `/mcp config` subcommand shows a
   table of every place ragent looks for MCP server definitions (the ragent-native

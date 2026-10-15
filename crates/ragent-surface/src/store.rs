@@ -74,20 +74,46 @@ pub fn store_dirs(workdir: &Path, store_dir_override: Option<&Path>, leaf: &str)
     )
 }
 
+/// Maximum size of a store ledger read into memory (1 MiB).
+///
+/// SEC-073: a store ledger is small JSON, but a corrupt/hostile file could be
+/// arbitrarily large; the size is checked from `metadata()` before the read so a
+/// huge file cannot exhaust memory.
+pub const MAX_LEDGER_BYTES: u64 = 1024 * 1024;
+
 /// A store entry is a candidate directory when it is a real directory, or a
 /// symlink whose canonical target is a directory inside the store.
 ///
 /// `label` names the family (`plugin`/`connector`) for the skip warning.
+///
+/// SEC-025: this returns only a `bool` and discards the canonical target, so the
+/// caller re-opens the raw (possibly symlinked) path - a check-then-use race.
+/// Prefer [`store_entry_dir`], which returns the verified canonical path, and
+/// open that instead.
 #[must_use]
 pub fn store_entry_is_dir(store: &Path, dir: &Path, label: &str) -> bool {
+    store_entry_dir(store, dir, label).is_some()
+}
+
+/// Resolve a store entry to the directory a caller should open.
+///
+/// Returns `dir` unchanged for a real (non-symlink) directory, or the verified
+/// canonical target for a symlink whose target stays inside the store. Returns
+/// `None` when the entry is missing, not a directory, or a symlink that escapes
+/// the store.
+///
+/// SEC-025: callers must open the returned path (not the original `dir`) so a
+/// symlink cannot be repointed between the check and the use.
+#[must_use]
+pub fn store_entry_dir(store: &Path, dir: &Path, label: &str) -> Option<PathBuf> {
     let Ok(file_type) = dir.symlink_metadata() else {
-        return false;
+        return None;
     };
     if file_type.is_dir() {
-        return true;
+        return Some(dir.to_path_buf());
     }
     if !file_type.file_type().is_symlink() {
-        return false;
+        return None;
     }
     // Symlink: follow only when the resolved path stays inside the store.
     let (Ok(target), Ok(store_root)) = (dir.canonicalize(), store.canonicalize()) else {
@@ -95,16 +121,77 @@ pub fn store_entry_is_dir(store: &Path, dir: &Path, label: &str) -> bool {
             link = %dir.display(),
             "{label} store symlink cannot be resolved; skipping"
         );
-        return false;
+        return None;
     };
-    if target.starts_with(&store_root) {
-        target.is_dir()
+    if target.starts_with(&store_root) && target.is_dir() {
+        Some(target)
     } else {
         tracing::warn!(
             link = %dir.display(),
             target = %target.display(),
             "{label} store symlink escapes the store directory; skipping"
         );
-        false
+        None
+    }
+}
+
+/// Load a JSON store ledger at `path`, returning `None` when the file is
+/// absent or unreadable.
+///
+/// A **present-but-corrupt** ledger is renamed aside to `<STATE_FILE>.corrupt`
+/// (best-effort) and `Ok(None)` is returned, so a bad ledger never bricks the
+/// store. The quarantine rename is logged; a failure to rename leaves the file
+/// untouched. `label` names the family (`connector`/`plugin`) in the log line.
+///
+/// # Errors
+///
+/// A corrupt ledger (present but unparseable) is handled by the caller, which
+/// calls [`quarantine_corrupt_ledger`].
+pub fn read_ledger_bytes(path: &Path) -> Option<Vec<u8>> {
+    // SEC-073: reject an oversized ledger *before* reading it, so a huge (or
+    // sparse) file cannot exhaust memory on a corrupt/hostile store.
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() > MAX_LEDGER_BYTES => {
+            tracing::warn!(
+                path = %path.display(),
+                len = meta.len(),
+                "store ledger too large; starting fresh"
+            );
+            return None;
+        }
+        Ok(_) | Err(_) => {}
+    }
+    match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "store ledger unreadable; starting fresh"
+            );
+            None
+        }
+    }
+}
+
+/// Quarantine a corrupt ledger by renaming it aside to `<path>.corrupt`.
+///
+/// Best-effort: a rename failure leaves the original file in place and is
+/// logged, so a corrupt ledger is never silently deleted. `label` names the
+/// family in the log line.
+pub fn quarantine_corrupt_ledger(path: &Path, label: &str, error: &str) {
+    let aside = path.with_extension("json.corrupt");
+    tracing::warn!(
+        path = %path.display(),
+        error = %error,
+        "{label} ledger is corrupt; renaming aside and starting fresh"
+    );
+    if let Err(e) = std::fs::rename(path, &aside) {
+        tracing::warn!(
+            path = %path.display(),
+            error = %e,
+            "failed to rename corrupt store ledger aside; leaving it in place"
+        );
     }
 }

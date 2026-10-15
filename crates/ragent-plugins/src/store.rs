@@ -120,20 +120,17 @@ impl StoreLedger {
     #[must_use]
     pub fn load(store_dir: &Path) -> Self {
         let path = store_dir.join(STATE_FILE);
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(_) => return Self::default(),
+        let Some(bytes) = ragent_surface::store::read_ledger_bytes(&path) else {
+            return Self::default();
         };
         match serde_json::from_slice(&bytes) {
             Ok(ledger) => ledger,
             Err(e) => {
-                let aside = store_dir.join(format!("{STATE_FILE}.corrupt"));
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "plugin store ledger is corrupt; renaming aside and starting fresh"
+                ragent_surface::store::quarantine_corrupt_ledger(
+                    &path,
+                    "plugin store",
+                    &e.to_string(),
                 );
-                let _ = std::fs::rename(&path, aside); // INTENTIONAL: corrupt-ledger quarantine rename; failure leaves the file untouched
                 Self::default()
             }
         }
@@ -252,10 +249,20 @@ pub fn installed_ids(dirs: StoreDirs) -> BTreeSet<String> {
 #[must_use]
 pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedPlugin> {
     let mut by_id: BTreeMap<String, ScannedPlugin> = BTreeMap::new();
+    // SEC-007: the *enable* flag must come from the trusted user-global ledger,
+    // never the repository-committed project `_state.json` (which a hostile repo
+    // could author to auto-load a plugin that bridges `mcpServers`/`hooks` into
+    // host commands). The project ledger is still consulted for telemetry
+    // counters by `load`/`record_tool_outcome`, but it cannot enable anything.
+    // When no user-global store resolves there is no trusted location, so the
+    // project leg is the fallback (isolated/test environments).
+    let trusted_enable_dir = dirs.global.as_deref().or(dirs.project.as_deref());
+    let trusted_enable_ledger = trusted_enable_dir
+        .map(StoreLedger::load)
+        .unwrap_or_default();
     // Global first, project last: later entries overwrite earlier on id
     // collision ("closest wins", FR-001).
     for store in [dirs.global, dirs.project].into_iter().flatten() {
-        let ledger = StoreLedger::load(&store);
         let read_dir = match std::fs::read_dir(&store) {
             Ok(rd) => rd,
             Err(_) => continue, // store absent or unreadable: nothing to scan
@@ -266,9 +273,11 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedPlugin> {
             if name == STATE_FILE || name.starts_with('.') {
                 continue;
             }
-            if !ragent_surface::store::store_entry_is_dir(&store, &dir, "plugin") {
+            // SEC-025: open the verified canonical path (not the raw entry) so a
+            // symlinked entry cannot be repointed between the check and the use.
+            let Some(dir) = ragent_surface::store::store_entry_dir(&store, &dir, "plugin") else {
                 continue;
-            }
+            };
             let outcome = match detect_dialect(&dir) {
                 Ok(Some(_)) => match parse_plugin_dir(&dir) {
                     Ok(Some(parsed)) => Ok(parsed),
@@ -282,7 +291,8 @@ pub fn scan_dirs(dirs: StoreDirs) -> Vec<ScannedPlugin> {
                 Ok(parsed) => parsed.descriptor.id.clone(),
                 Err(_) => name.clone(),
             };
-            let enabled = ledger.state(&id).is_some_and(|s| s.enabled);
+            // SEC-007: enabled iff the trusted user-global ledger says so.
+            let enabled = trusted_enable_ledger.state(&id).is_some_and(|s| s.enabled);
             by_id.insert(
                 id,
                 ScannedPlugin {

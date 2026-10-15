@@ -110,6 +110,11 @@ pub fn build_command(
     allowed_roots: &[std::path::PathBuf],
     cache: &super::CanonicalPathCache,
 ) -> Result<(String, Vec<String>)> {
+    // SEC-010: on Windows the target is appended to a `cmd.exe` command line,
+    // which re-parses it, so `&`/`|`/`^` would inject extra commands the
+    // permission layer never sees. Reject such targets before building the
+    // command.
+    reject_windows_shell_metacharacters(target)?;
     match action {
         "url" => {
             validate_url_scheme(target)?;
@@ -150,6 +155,19 @@ fn resolve_target_path(
     let path = super::path_util::resolve_path(working_dir, target);
     super::check_path_within_allowed_roots_cached(&path, working_dir, allowed_roots, cache)?;
     Ok(path)
+}
+
+/// Reject a target carrying a Windows `cmd.exe` metacharacter (SEC-010).
+///
+/// `cmd.exe` re-parses the argument, so `&`, `|`, `<`, `>`, `^`, `%`, and the
+/// quoting characters would let a target inject extra commands. The check runs
+/// on every platform so the behaviour is identical and testable on Linux.
+fn reject_windows_shell_metacharacters(target: &str) -> Result<()> {
+    const FORBIDDEN: &[char] = &['&', '|', '<', '>', '^', '"', '%', '(', ')', '\n', '\r'];
+    if target.contains(FORBIDDEN) {
+        bail!("target contains a shell metacharacter that is not permitted for the open tool");
+    }
+    Ok(())
 }
 
 /// Validate that a URL uses an allowed scheme.

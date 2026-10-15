@@ -138,13 +138,16 @@ async fn test_inject_working_dir() {
 }
 
 #[tokio::test]
-async fn test_inject_command_with_pipes() {
+async fn test_inject_command_with_pipes_is_rejected() {
+    // SEC-017: shell metacharacters (here a pipe) are rejected outright rather
+    // than falling through to `sh -c`.
     let result = inject_dynamic_context("Count: !`echo -e 'a\\nb\\nc' | wc -l`", Path::new("/tmp"))
         .await
         .expect("should succeed");
-    // wc -l output may have leading spaces on some systems
-    let count: String = result.replace("Count: ", "").trim().to_string();
-    assert_eq!(count, "3");
+    assert!(
+        result.contains("[command rejected:"),
+        "Expected rejection placeholder, got: {result}"
+    );
 }
 
 #[tokio::test]
@@ -180,7 +183,30 @@ fn test_validate_allowed_command() {
     assert!(validate_command("git status").is_ok());
     assert!(validate_command("cat file.txt").is_ok());
     assert!(validate_command("grep -r pattern .").is_ok());
-    assert!(validate_command("curl https://example.com").is_ok());
+}
+
+/// SEC-017: network-capable and interpreter executables were removed from the
+/// allowlist, and shell metacharacters are rejected outright.
+#[test]
+fn test_validate_rejects_removed_and_metacharacter_commands() {
+    // Removed network / interpreter / launcher entries.
+    assert!(validate_command("curl https://example.com").is_err());
+    assert!(validate_command("wget https://example.com").is_err());
+    assert!(validate_command("python -c 'x'").is_err());
+    assert!(validate_command("node -e 'x'").is_err());
+    assert!(validate_command("docker ps").is_err());
+    assert!(validate_command("env FOO=bar ls").is_err());
+    assert!(validate_command("xargs rm").is_err());
+    assert!(validate_command("sed -i s/a/b/ file").is_err());
+    assert!(validate_command("awk '{print}' file").is_err());
+    // Shell metacharacters are rejected even on an allowlisted executable so
+    // `sh -c` can never be reached with attacker-controlled input.
+    assert!(validate_command("echo hello | wc -l").is_err());
+    assert!(validate_command("cat file > out").is_err());
+    assert!(validate_command("echo $(whoami)").is_err());
+    assert!(validate_command("echo `whoami`").is_err());
+    assert!(validate_command("ls *.rs").is_err());
+    assert!(validate_command("cat a; cat b").is_err());
 }
 
 #[test]
@@ -206,9 +232,9 @@ fn test_validate_empty_command() {
 }
 
 #[test]
-fn test_validate_pipeline_first_cmd() {
-    // First command in a pipeline must be allowed.
-    assert!(validate_command("echo hello | wc -l").is_ok());
+fn test_validate_pipeline_rejected() {
+    // SEC-017: pipelines are rejected outright - no `sh -c` fall-through.
+    assert!(validate_command("echo hello | wc -l").is_err());
     assert!(validate_command("ncat foo | grep bar").is_err());
 }
 

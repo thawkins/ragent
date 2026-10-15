@@ -70,11 +70,16 @@ fn remove_report_names_id_and_store() {
     );
     add(&dirs(&tree), &tree.0, source.to_str().unwrap(), false).expect("add");
     // add enables the plugin; remove refuses an enabled plugin, so turn it off
-    // first (as `/plugins disable` would).
+    // first (as `/plugins disable` would). SEC-007: the enable bit is read from
+    // the trusted (global) ledger.
     let store = tree.0.join("proj/.ragent/plugins");
     let mut ledger = ragent_plugins::StoreLedger::load(&store);
     ledger.state_mut("codex-weather").enabled = false;
     ledger.save(&store).expect("ledger saved");
+    let trusted = tree.0.join("global/plugins");
+    let mut global = ragent_plugins::StoreLedger::load(&trusted);
+    global.state_mut("codex-weather").enabled = false;
+    global.save(&trusted).expect("global ledger saved");
     let outcome = remove(&dirs(&tree), "codex-weather").expect("remove");
 
     let report = remove_report(&outcome);

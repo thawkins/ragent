@@ -91,7 +91,10 @@ pub const MIN_PER_PAGE: usize = 1;
 pub const BASIC_PAGINATION_LIMIT: usize = 10_000;
 
 /// Maximum snippet length in characters.
-pub const MAX_SNIPPETTE_CHARS: usize = 200;
+///
+/// Shares the single snippet budget defined by
+/// [`super::engine::SNIPPET_MAX_CHARS`].
+pub const MAX_SNIPPET_CHARS: usize = super::engine::SNIPPET_MAX_CHARS;
 
 /// Maximum query length in characters (OpenAlex has no documented hard limit,
 /// but we cap defensively to avoid excessively long URLs).
@@ -676,11 +679,11 @@ fn build_metadata_suffix(work: &serde_json::Value) -> String {
     }
 }
 
-/// Truncate a snippet to approximately [`MAX_SNIPPETTE_CHARS`] characters,
+/// Truncate a snippet to approximately [`MAX_SNIPPET_CHARS`] characters,
 /// respecting UTF-8 character boundaries and appending an ellipsis when
 /// truncated.
 fn truncate_snippet(snippet: &str) -> String {
-    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPETTE_CHARS)
+    super::engine::truncate_snippet_bytes(snippet, MAX_SNIPPET_CHARS)
 }
 
 // ---------------------------------------------------------------------------

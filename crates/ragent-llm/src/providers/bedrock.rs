@@ -664,9 +664,11 @@ impl LlmClient for BedrockAnthropicClient {
                             Ok(v) => v,
                             Err(e) => {
                                 // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                                // SEC-ragent-llm-020: redact secrets and cap the
+                                // raw frame before logging.
                                 tracing::warn!(
                                     error = %e,
-                                    frame = %data,
+                                    frame = %crate::provider::http_client::redact_frame(data),
                                     "Bedrock: dropping malformed SSE data frame"
                                 );
                                 continue;
@@ -1052,9 +1054,11 @@ impl LlmClient for BedrockConverseClient {
                               Ok(v) => v,
                               Err(e) => {
                                   // FUNC-032 (ANTIPAT 3.3): log the dropped frame.
+                                  // SEC-ragent-llm-020: redact secrets and cap the raw
+                                  // frame before logging.
                                   tracing::warn!(
                                       error = %e,
-                                      frame = %data,
+                                      frame = %crate::provider::http_client::redact_frame(data),
                                       "Bedrock: dropping malformed SSE data frame"
                                   );
                                   continue;

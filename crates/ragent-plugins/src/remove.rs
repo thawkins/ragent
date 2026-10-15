@@ -68,6 +68,16 @@ pub fn remove(dirs: &StoreDirs, plugin_id: &str) -> Result<RemoveOutcome, Remove
         return Err(RemoveError::Enabled(plugin_id.to_string()));
     }
 
+    // SEC-007: never recursively delete through a symlinked directory. The scan
+    // already resolves entries to their canonical contained path, but
+    // `remove_dir_all` on a re-pointed symlink would escape the store, so refuse
+    // a symlinked entry outright.
+    if std::fs::symlink_metadata(&found.dir).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(RemoveError::Io(IoError::message(
+            "refusing to remove a symlinked plugin directory",
+        )));
+    }
+
     std::fs::remove_dir_all(&found.dir).map_err(IoError::new)?;
 
     // Drop the ledger row so a re-add starts clean; only rewrite the ledger

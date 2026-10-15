@@ -67,7 +67,7 @@ Returns the status code, selected headers, and the body (truncated at 1 MiB).
 |----------|------|----------|-------------|---------------|
 | `url` | string | yes | Full URL including scheme | `"https://api.github.com/repos/rust-lang/rust"` |
 | `method` | enum | no | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS` | `"GET"` |
-| `headers` | object | no | Request headers as key/value map | `{"Authorization":"Bearer ..."}` |
+| `headers` | object | no | Request headers as key/value map. Only a small allow-list is accepted: `accept`, `accept-language`, `content-type`, `user-agent`. Every other header (credentials, routing, hop-by-hop) is refused, so a redirect cannot carry a secret off-origin (SEC-035). | `{"Accept":"application/json"}` |
 | `body` | string | no | Request body (for `POST`/`PUT`/`PATCH`) | `"{\"name\":\"x\"}"` |
 | `timeout` | integer | no | Timeout in seconds | `30` |
 

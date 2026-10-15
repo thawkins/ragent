@@ -391,8 +391,10 @@ fn with_secret(
         }
         None => {
             if out.headers.is_empty() {
-                out.headers
-                    .insert("Authorization".to_string(), format!("Bearer {secret}"));
+                out.headers.insert(
+                    "Authorization".to_string(),
+                    ragent_types::strutil::bearer_auth_header(&secret),
+                );
             }
         }
     }

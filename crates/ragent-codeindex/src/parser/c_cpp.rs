@@ -496,6 +496,10 @@ fn extract_namespace(ctx: &mut Ctx, node: Node, _parent: Option<i64>, scope: &[S
 // -- Helpers -----------------------------------------------------------------
 
 fn find_identifier(ctx: &Ctx, node: Node) -> Option<String> {
+    // SEC-ragent-codeindex-046: bound the recursion mirroring `walk` so a deeply
+    // nested declarator cannot exhaust the stack.
+    let _depth_guard = super::util::TreeDepthGuard::enter(node)?;
+
     if node.kind() == "identifier"
         || node.kind() == "field_identifier"
         || node.kind() == "type_identifier"

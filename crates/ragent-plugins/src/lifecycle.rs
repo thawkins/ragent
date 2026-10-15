@@ -227,7 +227,15 @@ impl PluginManager {
             .find(|p| scan_id(p) == plugin_id)
             .ok_or_else(|| PluginError::UnknownPlugin(plugin_id.to_string()))?;
 
-        set_enabled(&plugin.store, plugin_id, true)?;
+        // SEC-007: enable writes to the trusted store so a project-store enable
+        // cannot be forged (and so the runtime enable state matches what the
+        // trusted ledger reports). `load` still uses the plugin's own store for
+        // manifest and telemetry purposes.
+        set_enabled(
+            self.trusted_enable_store().unwrap_or(&plugin.store),
+            plugin_id,
+            true,
+        )?;
         let report = match plugin.outcome {
             Ok(parsed) => self.load(parsed, &plugin.store),
             Err(failure) => self.mark_errored(
@@ -260,7 +268,12 @@ impl PluginManager {
             .find(|p| scan_id(p) == plugin_id)
             .ok_or_else(|| PluginError::UnknownPlugin(plugin_id.to_string()))?;
 
-        set_enabled(&plugin.store, plugin_id, false)?;
+        // SEC-007: disable clears the trusted enable flag, matching `enable`.
+        set_enabled(
+            self.trusted_enable_store().unwrap_or(&plugin.store),
+            plugin_id,
+            false,
+        )?;
 
         let (tools, commands) = match self.tracked.remove(plugin_id) {
             Some(loaded) => (loaded.tools.len(), loaded.commands.len()),
@@ -583,16 +596,22 @@ impl PluginManager {
         }
     }
 
-    /// Whether the ledger in either store marks the plugin enabled.
+    /// The store whose ledger holds the trusted enable flag.
+    ///
+    /// SEC-007: the project-local `_state.json` is repository content, so it must
+    /// not be able to enable a plugin (which would auto-load its bridged
+    /// `mcpServers`/`hooks`). The trusted location is the user-global store; when
+    /// no global store resolves (isolated/test environments) the project leg is
+    /// the only available store and is used.
+    fn trusted_enable_store(&self) -> Option<&std::path::Path> {
+        self.dirs.global.as_deref().or(self.dirs.project.as_deref())
+    }
+
+    /// Whether the plugin is marked enabled in the trusted enable ledger.
     fn enabled_in_ledger(&self, plugin_id: &str) -> bool {
-        [&self.dirs.global, &self.dirs.project]
-            .into_iter()
-            .flatten()
-            .any(|store| {
-                StoreLedger::load(store)
-                    .state(plugin_id)
-                    .is_some_and(|s| s.enabled)
-            })
+        self.trusted_enable_store()
+            .map(StoreLedger::load)
+            .is_some_and(|ledger| ledger.state(plugin_id).is_some_and(|s| s.enabled))
     }
 }
 

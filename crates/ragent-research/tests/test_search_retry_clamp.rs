@@ -32,6 +32,19 @@ impl WebFetchTool for NoopFetch {
     async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
         anyhow::bail!("noop fetch must not be called")
     }
+
+    async fn fetch_with_limit(
+        &self,
+        _url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(_url).await?;
+        if page.body.len() > max_bytes {
+            let truncated = ragent_research::truncate_body_to_bytes(page.body.as_ref(), max_bytes);
+            page.body = std::sync::Arc::from(truncated);
+        }
+        Ok(page)
+    }
 }
 
 fn gatherer_with_retries(n: u32) -> WebGatherer {

@@ -69,6 +69,10 @@ credentials.json
 .npmrc
 .envrc
 
+# Python bytecode caches left by the check scripts
+__pycache__/
+*.pyc
+
 # Code index data
 .ragent/
 !.ragent/skills/

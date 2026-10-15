@@ -207,11 +207,14 @@ pub(crate) fn run_fixture_commands(
     let mut last_stdout = String::new();
     let mut last_stderr = String::new();
     for (index, command_parts) in case.execution_commands.iter().enumerate() {
-        let timeout_secs = case
-            .execution_timeouts_secs
-            .get(index)
-            .copied()
-            .unwrap_or(crate::exec_guard::FIXTURE_DEFAULT_TIMEOUT_SECS);
+        // SEC-068: the timeout is fixture-supplied, so clamp it to a small
+        // ceiling (and floor it at 1s) so a hostile fixture cannot park the run.
+        let timeout_secs = crate::exec_guard::clamp_fixture_timeout(
+            case.execution_timeouts_secs
+                .get(index)
+                .copied()
+                .unwrap_or(crate::exec_guard::FIXTURE_DEFAULT_TIMEOUT_SECS),
+        );
         let rendered_parts = command_parts
             .iter()
             .map(|part| part.replace("__FILENAME__", file_name))
@@ -222,7 +225,11 @@ pub(crate) fn run_fixture_commands(
         let Some(program) = rendered_parts.first() else {
             return Err(format!("{label} command list was empty"));
         };
+        // SEC-068: `--kill-after` escalates to SIGKILL so a command that ignores
+        // SIGTERM is still reaped; the process group is killed so no child can
+        // outlive the wrapper.
         let output = std::process::Command::new("timeout")
+            .arg("--kill-after=5s")
             .arg(format!("{timeout_secs}s"))
             .arg(program)
             .args(rendered_parts.iter().skip(1))

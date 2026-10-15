@@ -26,6 +26,12 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
 use serde::{Deserialize, Serialize};
 
+/// Upper bound on the bytes read back from the crash marker (SEC-076).
+///
+/// A crash record is a few hundred bytes; 64 KiB leaves ample headroom while
+/// refusing to pull an unbounded file into memory.
+const MAX_MARKER_BYTES: u64 = 64 * 1024;
+
 /// Create (or truncate) `path` owner-only (mode `0o600` on Unix).
 ///
 /// ANTIPAT A-02/A-03: the crash marker, panic reports, and the stderr spool
@@ -37,7 +43,22 @@ use serde::{Deserialize, Serialize};
 /// # Errors
 ///
 /// Returns the underlying [`std::io::Error`] when the file cannot be created.
+///
+/// SEC-018: the crash marker, panic reports, and stderr spool are opened with
+/// `truncate(true)`, so a symlink planted at one of these paths would truncate
+/// its target. Reject a symlinked path outright, and additionally open with
+/// `O_NOFOLLOW` on Unix so the check and the open cannot be raced.
 pub fn create_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
+    // Reject a symlinked path: `truncate(true)` would otherwise follow the
+    // link and destroy the target file (SEC-018).
+    if let Ok(meta) = std::fs::symlink_metadata(path)
+        && meta.file_type().is_symlink()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to open symlinked path '{}'", path.display()),
+        ));
+    }
     #[cfg(unix)]
     {
         let file = std::fs::OpenOptions::new()
@@ -45,6 +66,9 @@ pub fn create_owner_only(path: &Path) -> std::io::Result<std::fs::File> {
             .create(true)
             .truncate(true)
             .mode(0o600)
+            // SEC-018: refuse to follow a symlink even if one is planted
+            // between the check above and this open (TOCTOU).
+            .custom_flags(libc::O_NOFOLLOW)
             .open(path)?;
         // `mode(0o600)` only applies at creation; tighten a pre-existing file.
         let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600)); // INTENTIONAL: best-effort permission tighten (mode set at create)
@@ -160,9 +184,32 @@ pub fn write_record(working_dir: &Path, status: &str) -> std::io::Result<PathBuf
     };
     let json = serde_json::to_string_pretty(&record)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let mut file = create_owner_only(&path)?;
-    file.write_all(json.as_bytes())?;
-    file.write_all(b"\n")?;
+    // SEC-018: never write the marker in place. A symlink planted at the
+    // marker path would be followed by an in-place open (truncating its
+    // target); an atomic temp-file-then-rename replace sidesteps that and
+    // also means a concurrent reader sees either the old or the new record,
+    // never a half-written one.
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp_path = dir.join(format!(
+        ".last-crash.{}.{}.tmp",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
+    let write_result = (|| -> std::io::Result<()> {
+        let mut file = create_owner_only(&tmp_path)?;
+        file.write_all(json.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.flush()?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, &path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
     Ok(path)
 }
 
@@ -177,9 +224,19 @@ pub fn write_record(working_dir: &Path, status: &str) -> std::io::Result<PathBuf
 /// Returns an error when the marker exists but cannot be read or parsed.
 pub fn previous_unclean_exit(working_dir: &Path) -> std::io::Result<Option<CrashRecord>> {
     let path = record_path(working_dir);
-    let Ok(content) = std::fs::read_to_string(&path) else {
+    // SEC-076: treat a symlinked marker as absent (do not follow the link),
+    // and refuse to slurp an arbitrarily large file.
+    let Ok(meta) = std::fs::symlink_metadata(&path) else {
         return Ok(None);
     };
+    if meta.file_type().is_symlink() || meta.len() > MAX_MARKER_BYTES {
+        return Ok(None);
+    }
+    use std::io::Read as _;
+    let file = std::fs::File::open(&path)?;
+    let mut content = String::new();
+    let mut reader = file.take(MAX_MARKER_BYTES);
+    reader.read_to_string(&mut content)?;
     let record: CrashRecord = serde_json::from_str(&content)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     if record.is_unclean() && !process_alive(record.pid) {

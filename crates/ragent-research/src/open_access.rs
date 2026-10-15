@@ -12,9 +12,11 @@
 //! the gatherer can reuse any configured timeout/user-agent behaviour.
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
+use std::net::IpAddr;
 use std::time::Duration;
 use url::form_urlencoded;
 
@@ -29,6 +31,22 @@ pub const DEFAULT_OA_MIN_FULL_TEXT_CHARS: usize = 1000;
 /// configured so the requests satisfy Unpaywall's terms and participate in
 /// Europe PMC's polite pool.
 const OA_USER_AGENT: &str = "ragent/1.0 (https://github.com/thawkins/ragent)";
+
+/// Maximum number of response-body bytes buffered from an OA service before the
+/// request is rejected (SEC-065).
+///
+/// An OA lookup is driven by a DOI scraped from an untrusted page, so a
+/// malicious or compromised endpoint could return a multi-gigabyte body that
+/// `.text()`/`.json()` would buffer and parse in one shot. 8 MiB is comfortably
+/// above any legitimate Unpaywall / Europe PMC JSON payload while bounding the
+/// allocation.
+const OA_MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Maximum number of redirects the OA HTTP client follows (SEC-066).
+///
+/// Bounding the chain explicitly prevents a hostile OA endpoint from looping
+/// the client through an unbounded redirect sequence.
+const OA_MAX_REDIRECTS: usize = 5;
 
 /// Errors emitted by the open-access recovery layer.
 #[derive(Debug, thiserror::Error)]
@@ -128,36 +146,62 @@ impl ReqwestOpenAccessClient {
             // non-responsive host can burn the full request timeout before
             // the transport reports an error.
             .connect_timeout(Duration::from_secs(10))
+            // SEC-066: bound the redirect chain explicitly rather than relying
+            // on reqwest's default so a hostile/compromised OA endpoint cannot
+            // bounce the client through an unbounded redirect loop.
+            .redirect(reqwest::redirect::Policy::limited(OA_MAX_REDIRECTS))
             .user_agent(self.user_agent())
             .build()
             .map_err(OpenAccessError::Http)
     }
 }
 
+/// Read an OA response body into memory, rejecting anything over
+/// [`OA_MAX_BODY_BYTES`] (SEC-065).
+///
+/// The streamed read stops as soon as the cap is exceeded and returns a
+/// [`OpenAccessError::Unexpected`] rather than buffering an unbounded body, so
+/// a malicious endpoint cannot exhaust memory.
+async fn read_body_capped(resp: reqwest::Response) -> Result<Vec<u8>> {
+    // Reject up-front when the declared length already exceeds the cap - this
+    // avoids even opening the body stream for an obviously oversized response.
+    if let Some(len) = resp.content_length()
+        && len > OA_MAX_BODY_BYTES as u64
+    {
+        return Err(OpenAccessError::Unexpected(format!(
+            "OA response declared {len} bytes, exceeding the {OA_MAX_BODY_BYTES}-byte cap"
+        )));
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if body.len().saturating_add(chunk.len()) > OA_MAX_BODY_BYTES {
+            return Err(OpenAccessError::Unexpected(format!(
+                "OA response exceeded the {OA_MAX_BODY_BYTES}-byte cap"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 #[async_trait]
 impl OpenAccessClient for ReqwestOpenAccessClient {
     async fn fetch_text(&self, url: &str) -> Result<String> {
         let client = self.client()?;
-        let text = client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
-        Ok(text)
+        let resp = client.get(url).send().await?.error_for_status()?;
+        let body = read_body_capped(resp).await?;
+        String::from_utf8(body)
+            .map_err(|e| OpenAccessError::Unexpected(format!("OA body was not valid UTF-8: {e}")))
     }
 
     async fn fetch_json(&self, url: &str) -> Result<Value> {
         let client = self.client()?;
-        let json = client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        Ok(json)
+        let resp = client.get(url).send().await?.error_for_status()?;
+        let body = read_body_capped(resp).await?;
+        serde_json::from_slice(&body).map_err(|e| OpenAccessError::Json(e.to_string()))
     }
 }
 
@@ -204,6 +248,90 @@ pub fn extract_doi(url: &str) -> Option<String> {
     }
 }
 
+/// Validate a recovered OA full-text URL before it is returned to the caller
+/// and later fetched (SEC-066).
+///
+/// OA URLs come straight from remote Unpaywall / Europe PMC JSON, so they must
+/// not be trusted. This requires an `http`/`https` scheme and rejects hosts that
+/// are `localhost` or that are IP literals in a loopback, private, link-local,
+/// unique-local, unspecified, or otherwise non-global range - the SSRF targets a
+/// hostile OA endpoint would point the gatherer at.
+///
+/// # Errors
+///
+/// Returns a human-readable reason string when the URL is missing, unparseable,
+/// uses a non-HTTP scheme, or targets a disallowed host.
+pub fn validate_oa_url(url: &str) -> std::result::Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("unparseable OA URL: {e}"))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("OA URL uses disallowed scheme '{other}'")),
+    }
+
+    match parsed.host() {
+        Some(url::Host::Domain(domain)) => {
+            let lower = domain.to_ascii_lowercase();
+            if lower == "localhost" || lower.ends_with(".localhost") {
+                return Err("OA URL targets localhost".to_string());
+            }
+            Ok(())
+        }
+        Some(url::Host::Ipv4(addr)) => {
+            if is_disallowed_ip(IpAddr::V4(addr)) {
+                Err(format!("OA URL targets a non-global IPv4 address {addr}"))
+            } else {
+                Ok(())
+            }
+        }
+        Some(url::Host::Ipv6(addr)) => {
+            if is_disallowed_ip(IpAddr::V6(addr)) {
+                Err(format!("OA URL targets a non-global IPv6 address {addr}"))
+            } else {
+                Ok(())
+            }
+        }
+        None => Err("OA URL has no host".to_string()),
+    }
+}
+
+/// Returns `true` when `ip` is a loopback, private, link-local, unique-local,
+/// unspecified, or otherwise non-global address that an OA-recovered URL must
+/// never target.
+fn is_disallowed_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                // 100.64.0.0/10 carrier-grade NAT.
+                || (v4.octets()[0] == 100 && (64..=127).contains(&v4.octets()[1]))
+                // 192.0.0.0/24 IETF protocol assignments.
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0)
+                // 198.18.0.0/15 benchmarking.
+                || (v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19))
+                // 240.0.0.0/4 reserved.
+                || v4.octets()[0] >= 240
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // Unique-local fc00::/7.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // Link-local fe80::/10.
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // IPv4-mapped ::ffff:0:0/96 - unwrap and re-check the v4 rules
+                // so ::ffff:127.0.0.1 and friends are rejected too.
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_disallowed_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
 /// Query Unpaywall for an OA copy of `doi`.
 ///
 /// Unpaywall requires a contact email in the query string; if `email` is
@@ -241,6 +369,15 @@ pub async fn query_unpaywall(
             .map(str::to_string);
         let resolved_url = pdf_url.or(landing_url);
         if let Some(url) = resolved_url {
+            // SEC-066: never return an OA URL that would not be safe to fetch.
+            if let Err(reason) = validate_oa_url(&url) {
+                tracing::warn!(
+                    url = %url,
+                    reason = %reason,
+                    "open_access: rejecting recovered Unpaywall URL"
+                );
+                return Ok(None);
+            }
             let license = location
                 .get("license")
                 .and_then(|v| v.as_str())
@@ -312,6 +449,17 @@ pub async fn query_europepmc(
                 .unwrap_or("");
             let url = entry.get("url").and_then(|v| v.as_str());
             if let Some(url) = url {
+                // SEC-066: a hostile OA endpoint could point this at an
+                // internal service; skip any URL that is not a global http(s)
+                // address rather than scoring it.
+                if let Err(reason) = validate_oa_url(url) {
+                    tracing::warn!(
+                        url = %url,
+                        reason = %reason,
+                        "open_access: ignoring Europe PMC full-text URL"
+                    );
+                    continue;
+                }
                 let score = match (doc_style, availability) {
                     ("pdf", "Open Access") => 3,
                     ("pdf", _) => 2,

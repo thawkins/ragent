@@ -181,7 +181,7 @@ fn collect_matches(
 
     for entry in &entries {
         let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let name = ragent_types::strutil::path_file_name(&path);
         if name.starts_with('.') {
             continue;
         }

@@ -4218,8 +4218,10 @@ fn cells_to_line(cells: Vec<(String, ratatui::style::Style)>) -> Line<'static> {
     let mut text = String::new();
     let mut cur_style: Option<ratatui::style::Style> = None;
     for (g, st) in cells {
-        if cur_style.is_some_and(|s| s != st) && !text.is_empty() {
-            spans.push(Span::styled(std::mem::take(&mut text), cur_style.unwrap()));
+        if let Some(style) = cur_style.filter(|s| *s != st) {
+            if !text.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut text), style));
+            }
         }
         cur_style = Some(st);
         text.push_str(&g);
@@ -6948,6 +6950,14 @@ fn messages_to_lines(
                         continue;
                     }
 
+                    // SEC-080: this is the LIVE transcript renderer, which
+                    // previously emitted model/tool text via `Span::raw` with no
+                    // neutralisation (only the log panel sanitised). Assistant
+                    // text can carry an escape sequence copied from a tool result
+                    // or fetched page, so neutralise it here as well.
+                    let text = sanitize_terminal(text);
+                    let text: &str = &text;
+
                     let (dot, dot_style, indent) = match msg.role {
                         Role::User => (
                             "You: ",
@@ -7112,7 +7122,10 @@ fn messages_to_lines(
                                         .and_then(|v| v.as_str())
                                 })
                             {
-                                for line in thought.lines() {
+                                // SEC-080: `thought` is tool output; neutralise
+                                // any embedded terminal escapes before rendering.
+                                let thought = sanitize_terminal(thought);
+                                for line in thought.as_ref().lines() {
                                     lines.push(Line::from(Span::styled(
                                         format!("  {}", line),
                                         theme::think(),
@@ -7162,6 +7175,9 @@ fn messages_to_lines(
                             } else if let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, cwd)
                             {
+                                // SEC-080: tool output is untrusted; neutralise
+                                // any terminal escapes before rendering.
+                                let result = sanitize_terminal(&result);
                                 lines.push(Line::from(Span::styled(
                                     format!("  └ {}", result),
                                     Style::default().fg(Color::DarkGray),
@@ -7179,6 +7195,9 @@ fn messages_to_lines(
                                 .and_then(|out| out.get("summary"))
                                 .and_then(|v| v.as_str())
                                 .unwrap_or_default();
+                            // SEC-080: summary is tool output; neutralise escapes.
+                            let summary = sanitize_terminal(summary);
+                            let summary: &str = &summary;
                             if summary.is_empty() {
                                 lines.push(Line::from(Span::styled(
                                     "  \\- Task complete",
@@ -7196,6 +7215,8 @@ fn messages_to_lines(
                             && let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, cwd)
                         {
+                            // SEC-080: tool output is untrusted; neutralise escapes.
+                            let result = sanitize_terminal(&result);
                             lines.push(Line::from(Span::styled(
                                 format!("  └ {}", result),
                                 Style::default().fg(Color::DarkGray),
@@ -7204,6 +7225,8 @@ fn messages_to_lines(
                     }
                     if state.status == ToolCallStatus::Error {
                         if let Some(ref err) = state.error {
+                            // SEC-080: tool error text is untrusted; neutralise.
+                            let err = sanitize_terminal(err);
                             lines.push(Line::from(Span::styled(
                                 format!("  └ {}", err),
                                 Style::default().fg(Color::Red),
@@ -7212,7 +7235,10 @@ fn messages_to_lines(
                     }
                 }
                 MessagePart::Reasoning { text } => {
-                    for line in text.lines() {
+                    // SEC-080: reasoning text is model output and may embed an
+                    // escape sequence; neutralise before rendering.
+                    let text = sanitize_terminal(text);
+                    for line in text.as_ref().lines() {
                         lines.push(Line::from(Span::styled(
                             format!("  {}", line),
                             theme::think(),

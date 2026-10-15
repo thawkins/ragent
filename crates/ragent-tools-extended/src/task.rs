@@ -26,6 +26,21 @@ use serde_json::{Value, json};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::storage::TaskRow;
 
+/// Collect a JSON array of strings into a `Vec<String>`, ignoring non-string
+/// elements. An `is_array()` guard precedes every call, but the shape degrades
+/// to an empty vec rather than panicking if the value is not an array.
+fn collect_str_array(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // -- DAG derivation (T-006, FR-003, FR-005) --------------------------
 
 /// Derived DAG fields for a single task, computed at read time from the
@@ -248,11 +263,7 @@ impl Tool for TaskCreateTool {
                     "Invalid 'blocked_by' parameter: expected an array of task ID strings."
                 );
             }
-            arr.as_array()
-                .expect("checked is_array above")
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
+            collect_str_array(arr)
         } else {
             Vec::new()
         };
@@ -632,11 +643,7 @@ impl Tool for TaskUpdateTool {
                     "Invalid 'add_blocked_by' parameter: expected an array of task ID strings."
                 );
             }
-            arr.as_array()
-                .expect("checked is_array above")
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
+            collect_str_array(arr)
         } else {
             Vec::new()
         };
@@ -648,11 +655,7 @@ impl Tool for TaskUpdateTool {
                     "Invalid 'add_blocks' parameter: expected an array of task ID strings."
                 );
             }
-            arr.as_array()
-                .expect("checked is_array above")
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
+            collect_str_array(arr)
         } else {
             Vec::new()
         };

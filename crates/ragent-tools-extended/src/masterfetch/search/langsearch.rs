@@ -74,12 +74,22 @@ pub const MIN_COUNT: usize = 1;
 /// - **FR-001** - LangSearch backend that plugs into the `SearchEngine` trait.
 /// - **FR-003** - translate `SearchOptions` into the LangSearch JSON body.
 /// - **FR-011** - the API key is never logged.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LangSearchEngine {
     /// LangSearch API key (`Authorization: Bearer {api_key}`).
     api_key: String,
     /// Optional injectable HTTP client (for testing).
     client: Option<reqwest::Client>,
+}
+
+impl std::fmt::Debug for LangSearchEngine {
+    /// SEC-039: hand-written so the `api_key` never leaks through `{:?}`; the
+    /// masked form is rendered instead of the raw key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LangSearchEngine")
+            .field("api_key", &super::engine::mask_api_key(&self.api_key))
+            .finish_non_exhaustive()
+    }
 }
 
 impl LangSearchEngine {

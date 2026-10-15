@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use ragent_types::guard::{
     MAX_IDENTIFIER_LEN, MAX_RETRY_AFTER, cap_read, clamp_retry_after, contained_join,
-    is_safe_operand, reject_option_like, validate_identifier, validate_relative_component,
+    is_safe_operand, reject_option_like, reject_symlink_components, reject_symlink_escape,
+    validate_identifier, validate_relative_component,
 };
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,66 @@ fn test_guard_contained_join_detects_a_symlink_escape() {
         assert!(
             contained_join(&root, "link/secret.txt", "case file").is_err(),
             "a symlinked directory must not let a contained join escape the root"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// SEC-006/SEC-059/SEC-030: a symlinked component of a not-yet-created target is
+/// refused, while a plain path (existing or not) is accepted.
+#[test]
+fn test_guard_reject_symlink_components() {
+    let base = std::env::temp_dir().join(format!("ragent-symcomp-{}", std::process::id()));
+    let root = base.join("root");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(&outside).expect("create outside");
+
+    // A path that does not exist yet, under a real directory, is fine.
+    assert!(reject_symlink_components(&root.join("new/spec.md"), "target").is_ok());
+
+    #[cfg(unix)]
+    {
+        let link = root.join("evil");
+        std::os::unix::fs::symlink(&outside, &link).expect("create symlink");
+        assert!(
+            reject_symlink_components(&link.join("SPEC.md"), "target").is_err(),
+            "a symlinked directory component must be refused"
+        );
+        assert!(
+            reject_symlink_components(&link, "target").is_err(),
+            "a symlink itself must be refused"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// SEC-016: a symlinked intermediate directory is caught by the
+/// deepest-existing-ancestor check even when the leaf is not a symlink.
+#[test]
+fn test_guard_reject_symlink_escape_catches_symlinked_ancestor() {
+    let base = std::env::temp_dir().join(format!("ragent-symesc-{}", std::process::id()));
+    let root = base.join("root");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).expect("create root");
+    std::fs::create_dir_all(outside.join("fts")).expect("create outside dir");
+
+    // A contained path (existing or not) passes.
+    assert!(reject_symlink_escape(&root.join("index.db"), &root, "index_dir").is_ok());
+    assert!(reject_symlink_escape(&root.join("new/index.db"), &root, "index_dir").is_ok());
+
+    #[cfg(unix)]
+    {
+        // `root/codeindex -> outside`: the deeper `..fts` leaf is a real dir on
+        // the other side of the link and is not itself a symlink, so only the
+        // ancestor walk catches it.
+        let link = root.join("codeindex");
+        std::os::unix::fs::symlink(&outside, &link).expect("create symlink");
+        assert!(
+            reject_symlink_escape(&link.join("fts"), &root, "index_dir").is_err(),
+            "a symlinked ancestor escaping the root must be refused"
         );
     }
 

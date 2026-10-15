@@ -229,12 +229,14 @@ fn find_references_limited_caps_results() {
         3
     );
     assert_eq!(store.find_references("Target").expect("all").len(), 10);
+    // SEC-047: `limit == 0` is clamped to at least one, not treated as "no
+    // limit" (which would route into the unbounded full scan).
     assert_eq!(
         store
             .find_references_limited("Target", 0)
-            .expect("unlimited")
+            .expect("clamped")
             .len(),
-        10,
-        "limit 0 means no limit"
+        1,
+        "limit 0 must clamp to 1, not mean no limit"
     );
 }

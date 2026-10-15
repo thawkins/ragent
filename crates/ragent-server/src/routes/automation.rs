@@ -35,7 +35,9 @@ use ragent_agent::automation::{
     AutomationService, backend_descriptor, compute_next_due, session_backend_override,
 };
 
-use super::{AppState, error_response, internal_error_response, serialize_response};
+use super::{
+    AppState, check_rate_limit, error_response, internal_error_response, serialize_response,
+};
 
 /// Resolve the execution-backend descriptor a session override names, if any
 /// (FR-033). Exposed for diagnostics and tests.
@@ -106,11 +108,21 @@ fn payload_text(body: &Bytes) -> String {
 }
 
 /// `POST /auto/{id}` - webhook ingress (FR-013).
+///
+/// SEC-061: the ingress is mounted on the unauthenticated outer router (an
+/// external system such as a GitHub webhook has no bearer token), so it shares
+/// the process-wide rate limiter under a dedicated `"webhook"` key. The
+/// automation config exposes no webhook secret, so a per-request signature
+/// cannot be verified here; the rate limit is the enforced guard until a secret
+/// field is added to [`ragent_config::AutomationConfig`].
 async fn webhook_ingest(
     State(state): State<AppState>,
     Path(id): Path<String>,
     body: Bytes,
 ) -> Response {
+    if let Some(rate_limited) = check_rate_limit(&state, "webhook").await {
+        return rate_limited.into_response();
+    }
     let svc = Arc::new(service(&state).await);
     if let Some(response) = guard_automation(&svc, &id) {
         return response;

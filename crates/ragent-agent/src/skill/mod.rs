@@ -578,4 +578,4 @@ pub fn effective_plugin_store_root(cwd: &std::path::Path) -> std::path::PathBuf 
 
 #[cfg(test)]
 #[path = "../../tests/inline/skill_mod.rs"]
-mod tests_tests;
+mod tests;

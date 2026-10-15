@@ -107,6 +107,36 @@ struct HostCallsInner {
     commands: Vec<PluginCommandDecl>,
 }
 
+/// Maximum number of entries retained per host-call sink (SEC-031).
+///
+/// The QuickJS `max_memory_mb` ceiling only accounts for engine allocations, so a
+/// plugin calling `ragent.message.info(...)` in a loop could grow the host
+/// process RSS without bound. Each sink keeps at most this many entries and
+/// truncates each entry's text, so accumulation is bounded by construction.
+pub const MAX_HOST_CALL_ENTRIES: usize = 1000;
+
+/// Maximum length (chars) retained per host-call text entry (SEC-031).
+pub const MAX_HOST_CALL_ENTRY_LEN: usize = 16 * 1024;
+
+/// Truncate `text` to [`MAX_HOST_CALL_ENTRY_LEN`] on a char boundary.
+fn cap_host_call_text(mut text: String) -> String {
+    if text.chars().count() > MAX_HOST_CALL_ENTRY_LEN {
+        let cut = text
+            .char_indices()
+            .nth(MAX_HOST_CALL_ENTRY_LEN)
+            .map_or(text.len(), |(idx, _)| idx);
+        text.truncate(cut);
+    }
+    text
+}
+
+/// Push `value` onto `vec`, dropping it once the sink is at capacity (SEC-031).
+fn push_capped<T>(vec: &mut Vec<T>, value: T) {
+    if vec.len() < MAX_HOST_CALL_ENTRIES {
+        vec.push(value);
+    }
+}
+
 impl HostCalls {
     /// Create an empty sink.
     #[must_use]
@@ -156,44 +186,56 @@ impl HostCalls {
 
     /// Record a message (called from the JS bridge).
     pub fn push_message(&self, level: &str, text: String) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .messages
-            .push(PluginMessage {
+        push_capped(
+            &mut self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .messages,
+            PluginMessage {
                 level: level.to_string(),
-                text,
-            });
+                text: cap_host_call_text(text),
+            },
+        );
     }
 
     /// Record a log line.
     pub fn push_log(&self, level: &str, text: String) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .logs
-            .push(PluginLogLine {
+        push_capped(
+            &mut self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .logs,
+            PluginLogLine {
                 level: level.to_string(),
-                text,
-            });
+                text: cap_host_call_text(text),
+            },
+        );
     }
 
     /// Record a tool registration.
     pub fn push_tool(&self, decl: PluginToolDecl) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .tools
-            .push(decl);
+        push_capped(
+            &mut self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tools,
+            decl,
+        );
     }
 
     /// Record a command registration.
     pub fn push_command(&self, decl: PluginCommandDecl) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .commands
-            .push(decl);
+        push_capped(
+            &mut self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .commands,
+            decl,
+        );
     }
 }
 
@@ -611,6 +653,20 @@ pub fn read_within(root: &std::path::Path, relative: &str) -> Result<String, Str
             ));
         }
     }
-    std::fs::read_to_string(root.join(rel))
-        .map_err(|e| format!("plugin.read_text_file: {relative}: {e}"))
+    // SEC-030: the lexical check above does not stop a symlink inside the plugin
+    // tree (e.g. a git-sourced plugin's `link -> /etc/passwd`) from being
+    // followed. Canonicalise the resolved path and require it to stay inside the
+    // canonicalised root before reading.
+    let joined = root.join(rel);
+    let (Ok(real), Ok(real_root)) = (joined.canonicalize(), root.canonicalize()) else {
+        return Err(format!(
+            "plugin.read_text_file: cannot resolve {relative} inside the plugin directory"
+        ));
+    };
+    if !real.starts_with(&real_root) {
+        return Err(format!(
+            "plugin.read_text_file: path escapes the plugin directory via a symlink: {relative}"
+        ));
+    }
+    std::fs::read_to_string(&real).map_err(|e| format!("plugin.read_text_file: {relative}: {e}"))
 }

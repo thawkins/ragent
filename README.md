@@ -414,6 +414,8 @@ Options:
       --no-tui                 Disable TUI, use plain stdout
       --yes                    Auto-approve all permissions
       --config <CONFIG>        Path to config file
+  -V, --version                Print ragent <version> and exit (answered before
+                               any side effect - no panic hook, no crash marker)
 ```
 
 ## Configuration
@@ -421,6 +423,13 @@ Options:
 ragent reads configuration from `ragent.json` (or `ragent.jsonc`) in the `.ragent/`
 directory, with fallback to `~/.config/ragent/config.json`. The format is compatible
 with OpenCode's `opencode.json`.
+
+A repository's `.ragent/ragent.json` is untrusted input, so `Config::merge_project`
+strips the privileged keys a project may not set: `yolo`, allow-rules, bash/dirs
+lists, `telemetry`, `hooks`, `openai`, `mcp` (stdio servers spawn subprocesses with
+no prompt), `acp` (agents spawn verbatim and it controls the editor-facing server),
+and every provider's `api` block (which redirects the credential and prompt stream).
+These must live in the user-global config. Rejected keys are logged at `warn!`.
 
 ```jsonc
 {
@@ -690,7 +699,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**Unreleased** — The core architecture, tool system (148 tools across 21 categories in
+**v1.0.135** — The core architecture, tool system (148 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin system, pluggable execution backends,
 ACP integration, the automation service, and multi-layered security are functional and
@@ -698,7 +707,17 @@ under active development.
 
 Recent highlights:
 
-- **Unreleased — `/simplify all` pass and MCP discovery-location report** — a quality pass
+- **v1.0.135 — security-hardening pass** — an untrusted project-local config can no
+  longer inject executable sinks (`Config::merge_project` drops a project overlay's
+  `mcp` servers, `acp` section, and provider `api` blocks); new `ragent_types::guard`
+  symlink guards close the escapes across the specs/config/crash/askpass/TUI paths;
+  the MCP/masterfetch/GitHub/open-access clients gain connect and whole-request
+  timeouts, capped redirect chains, and 8 MiB streaming read caps; the binary updater
+  requires a verified SHA-256 digest; `http_request` accepts only the
+  `accept`/`accept-language`/`content-type`/`user-agent` headers; plugin host-call
+  sinks are bounded; and `ragent --version`/`-V` prints the version before any side
+  effect.
+- **v1.0.134 — `/simplify all` pass and MCP discovery-location report** — a quality pass
   over the changed working tree adds four shared `ragent-surface` modules
   (`config_splice` durable atomic JSON write, `marketplace` source resolution, `net`
   redirect policy, `scan` store-scan failure), collapses the four redacting `Debug`

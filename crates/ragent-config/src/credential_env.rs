@@ -33,6 +33,18 @@ pub fn first_credential_env(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| read_credential_env(name))
 }
 
+/// Read a non-secret configuration environment variable.
+///
+/// Behaves like [`read_credential_env`] (unset, blank, or whitespace-only
+/// returns `None` and the value is trimmed) but is named for the non-secret
+/// settings - base URLs, regions, profile names - that were previously read
+/// with an ad-hoc `std::env::var(..).ok().filter(|v| !v.is_empty())` at each
+/// site (audit Medium 11).
+#[must_use]
+pub fn read_config_env(name: &str) -> Option<String> {
+    read_credential_env(name)
+}
+
 /// The environment variables a provider may take its API key from, in
 /// precedence order.
 ///

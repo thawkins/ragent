@@ -242,7 +242,7 @@ fn find_readme_path(working_dir: &Path) -> Option<std::path::PathBuf> {
                 if !path.is_file() {
                     continue;
                 }
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let name = ragent_types::strutil::path_file_name(&path);
                 if wanted
                     .iter()
                     .any(|needle| name.eq_ignore_ascii_case(needle))
@@ -1811,8 +1811,8 @@ pub fn collect_agents_md_content_with_discovery(
     // first, etc.) so we never mix root/global/sub ordering.
     let sort_by_name = |v: &mut Vec<(usize, std::path::PathBuf)>| {
         v.sort_by(|a, b| {
-            let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let a_name = ragent_types::strutil::path_file_name(&a.1);
+            let b_name = ragent_types::strutil::path_file_name(&b.1);
             let a_idx = AGENT_FILE_NAMES
                 .iter()
                 .position(|n| *n == a_name)

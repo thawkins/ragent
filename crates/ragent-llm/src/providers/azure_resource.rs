@@ -512,9 +512,11 @@ impl LlmClient for AzureAnthropicClient {
                                   // FUNC-032 (ANTIPAT 3.3): a corrupt frame must be
                                   // logged, not silently dropped - it can carry
                                   // tool-call deltas.
+                                  // SEC-ragent-llm-020: redact secrets and cap the
+                                  // raw frame before logging.
                                   tracing::warn!(
                                       error = %e,
-                                      frame = %data,
+                                      frame = %crate::provider::http_client::redact_frame(data),
                                       "Azure Anthropic: dropping malformed SSE data frame"
                                   );
                                   continue;

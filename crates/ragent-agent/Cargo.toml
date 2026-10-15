@@ -12,6 +12,8 @@ doctest = false
 
 [dependencies]
 num_cpus = { workspace = true }
+# Shared store/ledger helpers (`quarantine_corrupt_ledger`, `read_ledger_bytes`).
+ragent-surface = { path = "../ragent-surface" }
 sha2 = { workspace = true }
 hex = { workspace = true }
 fs2 = { workspace = true }

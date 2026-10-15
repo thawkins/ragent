@@ -436,11 +436,7 @@ fn resolve_base_url(provider_id: &str, storage: &Storage, config: &Config) -> Op
                     .and_then(|provider| provider.api.as_ref())
                     .and_then(|api| api.base_url.clone())
             })
-            .or_else(|| {
-                std::env::var("GENERIC_OPENAI_API_BASE")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-            }),
+            .or_else(|| ragent_llm::provider::env_key::provider_env_base_url("generic_openai")),
         "azure_foundry" => storage
             .get_setting("azure_foundry_api_base")
             .ok()
@@ -453,11 +449,7 @@ fn resolve_base_url(provider_id: &str, storage: &Storage, config: &Config) -> Op
                     .and_then(|provider| provider.api.as_ref())
                     .and_then(|api| api.base_url.clone())
             })
-            .or_else(|| {
-                std::env::var("AZURE_AI_FOUNDRY_BASE")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-            }),
+            .or_else(|| ragent_llm::provider::env_key::provider_env_base_url("azure_foundry")),
         _ => None,
     }
 }

@@ -172,6 +172,17 @@ CI).
 `Config::merge(base, overlay)` combines two configs. Different sections use
 different merge strategies:
 
+**Project overlays are untrusted (SEC-001/SEC-002/SEC-005).** The project file
+(`./.ragent/ragent.json`) is repository content, so `Config::merge_project`
+strips the privileged keys before the merge and logs each rejected key at
+`warn!`. A project file may **not** set: `yolo`, permission allow-rules, the
+`bash`/`dirs` lists, `telemetry`, `hooks`, `openai`, `mcp` (a stdio server
+spawns a subprocess with no permission prompt), `acp` (an ACP agent spawns
+verbatim, and the section controls the editor-facing server), or any provider's
+`api` block (which redirects the provider credential and prompt stream). Put
+those in the user-global `~/.config/ragent/ragent.json`. The rest of a project
+provider entry (`thinking`, `env`, `models`) still merges.
+
 | Section | Strategy |
 | ------- | -------- |
 | `username`, API keys, `gitlab` | Overlay overrides base when `Some`. |

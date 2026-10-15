@@ -625,16 +625,15 @@ fn func067_gitlab_url_with_github_in_path_stays_gitlab() {
 }
 
 #[test]
-fn func067_lookalike_github_host_is_not_github() {
-    // A host that merely *contains* `github.com` must not route to GitHub; it is
-    // an HTTPS URL, so it is treated as a self-hosted GitLab instance.
-    let p = parse_reverse_repo("https://github.com.evil.example/owner/repo").unwrap();
-    match p {
-        VcsProvider::GitLab { host, .. } => {
-            assert_eq!(host, Some("https://github.com.evil.example".to_string()));
-        }
-        other => panic!("expected GitLab provider for lookalike host, got {other:?}"),
+fn func067_lookalike_github_host_is_refused() {
+    // SEC-013: a host that merely *contains* `github.com` must not route to
+    // GitHub, and it must not become an authenticated self-hosted GitLab
+    // instance either (the PAT would be exfiltrated). It is refused unless the
+    // operator configures it.
+    if std::env::var_os("GITLAB_URL").is_some() {
+        return; // environment-dependent: skip when a configured instance exists
     }
+    assert!(parse_reverse_repo("https://github.com.evil.example/owner/repo").is_err());
 }
 
 #[test]

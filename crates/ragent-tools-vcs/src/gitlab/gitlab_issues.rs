@@ -72,7 +72,12 @@ impl Tool for GitLabListIssuesTool {
         if let Some(labels) = input["labels"].as_str()
             && !labels.is_empty()
         {
-            path.push_str(&format!("&labels={labels}"));
+            // SEC-034: percent-encode the value so `bug&per_page=100` cannot
+            // inject extra query parameters.
+            path.push_str(&format!(
+                "&labels={}",
+                crate::percent::encode_component(labels)
+            ));
         }
 
         let issues = client.get(&path).await?;

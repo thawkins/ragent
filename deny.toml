@@ -44,11 +44,9 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Zlib",
     "BSL-1.0",
     "CC0-1.0",
-    "OpenSSL",
     "MPL-2.0",
     # webpki-roots uses CDLA-Permissive-2.0 (Community Data License Agreement — permissive).
     "CDLA-Permissive-2.0",

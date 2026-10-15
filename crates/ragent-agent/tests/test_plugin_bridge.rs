@@ -2,16 +2,54 @@
 //! picks up enabled-plugin skill directories, and the MCP bridge merges plugin
 //! servers with the configured set.
 //!
-//! Every test is offline and rooted under `target/temp/` (no `/tmp`).
+//! SEC-007: the plugin *enable* flag is read from the trusted user-global store,
+//! so each test redirects `XDG_CONFIG_HOME` into its temp tree (below) and
+//! stages the plugin in that tree's global store. Env mutation is `unsafe` in
+//! edition 2024 and the workspace denies `unsafe_code`, so this target opts back
+//! in explicitly; a process-wide mutex serialises the env-mutating tests.
+#![allow(unsafe_code)]
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use ragent_agent::plugin::plugin_mcp_servers;
 use ragent_agent::skill::effective_skill_dirs;
 use ragent_config::{McpServerConfig, McpTransport};
 
 static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Serialises the tests that set `XDG_CONFIG_HOME`.
+fn env_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Restores `XDG_CONFIG_HOME` on drop.
+struct XdgGuard {
+    prev: Option<std::ffi::OsString>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl XdgGuard {
+    fn set(dir: &Path) -> Self {
+        let _lock = env_lock();
+        let prev = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir) };
+        Self { prev, _lock }
+    }
+}
+
+impl Drop for XdgGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+        }
+    }
+}
 
 struct TempTree(PathBuf);
 
@@ -26,8 +64,15 @@ impl TempTree {
         Self(path)
     }
 
+    /// The plugin store the bridge scans: the *user-global* store under this
+    /// tree's `XDG_CONFIG_HOME` (SEC-007 reads the enable flag from there).
     fn store(&self) -> PathBuf {
-        self.0.join(".ragent/plugins")
+        self.0.join(".config").join("ragent").join("plugins")
+    }
+
+    /// Redirect `XDG_CONFIG_HOME` to this tree and return the guard.
+    fn use_xdg(&self) -> XdgGuard {
+        XdgGuard::set(&self.0.join(".config"))
     }
 }
 
@@ -75,6 +120,7 @@ fn enable(tree: &TempTree, plugin_id: &str) {
 #[test]
 fn effective_skill_dirs_appends_enabled_plugin_skill_dirs() {
     let tree = TempTree::new("skills");
+    let _xdg = tree.use_xdg();
     let plugin = stage_plugin(&tree);
 
     let configured = vec!["/configured/skills".to_string()];
@@ -94,6 +140,7 @@ fn effective_skill_dirs_appends_enabled_plugin_skill_dirs() {
 #[test]
 fn plugin_mcp_servers_merges_and_config_wins() {
     let tree = TempTree::new("mcp");
+    let _xdg = tree.use_xdg();
     stage_plugin(&tree);
     enable(&tree, "mongodb");
 
@@ -130,6 +177,7 @@ fn plugin_mcp_servers_merges_and_config_wins() {
 #[test]
 fn plugin_mcp_servers_contributes_when_not_configured() {
     let tree = TempTree::new("mcp-add");
+    let _xdg = tree.use_xdg();
     stage_plugin(&tree);
     enable(&tree, "mongodb");
 
@@ -154,6 +202,7 @@ fn skill_registry_load_includes_plugin_skills() {
     use ragent_agent::skill::SkillRegistry;
 
     let tree = TempTree::new("registry");
+    let _xdg = tree.use_xdg();
     stage_plugin(&tree);
     enable(&tree, "mongodb");
 
@@ -197,6 +246,7 @@ fn stage_command_plugin(tree: &TempTree) -> PathBuf {
 #[test]
 fn plugin_commands_discovers_prompt_commands_from_the_directory() {
     let tree = TempTree::new("cmd-dir");
+    let _xdg = tree.use_xdg();
     stage_command_plugin(&tree);
     enable(&tree, "commit-commands");
 
@@ -220,6 +270,7 @@ fn plugin_commands_discovers_prompt_commands_from_the_directory() {
 #[test]
 fn plugin_commands_are_inert_until_the_plugin_is_enabled() {
     let tree = TempTree::new("cmd-disabled");
+    let _xdg = tree.use_xdg();
     stage_command_plugin(&tree);
     // Not enabled: a disabled plugin contributes nothing (FR-016).
     let commands = ragent_agent::plugin::plugin_commands(&tree.0, &BTreeSet::new());
@@ -229,6 +280,7 @@ fn plugin_commands_are_inert_until_the_plugin_is_enabled() {
 #[test]
 fn plugin_command_colliding_with_a_builtin_is_namespaced() {
     let tree = TempTree::new("cmd-collide");
+    let _xdg = tree.use_xdg();
     stage_command_plugin(&tree);
     enable(&tree, "commit-commands");
 
@@ -266,6 +318,7 @@ fn stage_agent_plugin(tree: &TempTree) -> PathBuf {
 #[test]
 fn plugin_agent_profile_loads_with_yaml_frontmatter() {
     let tree = TempTree::new("agents");
+    let _xdg = tree.use_xdg();
     stage_agent_plugin(&tree);
 
     // Disabled: nothing contributes.

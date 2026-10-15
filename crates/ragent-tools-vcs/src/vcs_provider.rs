@@ -122,7 +122,7 @@ pub fn parse_reverse_repo(input: &str) -> Result<VcsProvider, String> {
             .map(|(owner, repo)| VcsProvider::GitHub { owner, repo })
             .ok_or_else(usage_error);
     } // GitLab HTTPS URLs: https://host/namespace/project or http://host/...
-    if input.starts_with("https://") || input.starts_with("http://") {
+    if ragent_types::strutil::is_http_url(input) {
         return parse_gitlab_https_url(input);
     }
 
@@ -171,7 +171,7 @@ fn parse_github_prefixed(rest: &str) -> Result<VcsProvider, String> {
 fn parse_gitlab_prefixed(rest: &str) -> Result<VcsProvider, String> {
     let rest = rest.trim().trim_end_matches(".git");
     // If the inner portion is a full URL, delegate to URL parsing.
-    if rest.starts_with("https://") || rest.starts_with("http://") {
+    if ragent_types::strutil::is_http_url(rest) {
         return parse_gitlab_https_url(rest);
     }
     if rest.starts_with("git@") {
@@ -195,7 +195,7 @@ fn parse_gitlab_prefixed(rest: &str) -> Result<VcsProvider, String> {
         // attacker-chosen `gitlab:evil.example/ns/proj` would exfiltrate the
         // token. Accept it only when it matches the configured instance origin.
         let raw = segments[0];
-        let configured = std::env::var("GITLAB_URL").ok().filter(|u| !u.is_empty());
+        let configured = ragent_config::credential_env::read_config_env("GITLAB_URL");
         if !is_trusted_gitlab_host(raw, configured.as_deref()) {
             return Err(format!(
                 "refusing GitLab host '{raw}': it is not the configured instance. \
@@ -250,6 +250,12 @@ fn parse_gitlab_https_url(url: &str) -> Result<VcsProvider, String> {
         return Err(usage_error());
     }
 
+    // SEC-013: refuse a host that impersonates a known provider
+    // (`github.com.evil.example`, `notgitlab.com`). A genuine, distinct
+    // self-hosted instance (`gitlab.corp.example`) is still honoured, so the
+    // full-URL form keeps working for real self-hosted GitLab.
+    reject_lookalike_provider_host(host)?;
+
     Ok(VcsProvider::GitLab {
         host: Some(format!("{scheme}://{host}")),
         project_path: project_path.to_string(),
@@ -279,10 +285,49 @@ fn parse_gitlab_ssh_url(input: &str) -> Result<VcsProvider, String> {
         return Err(usage_error());
     }
 
+    // SEC-013: refuse a lookalike provider host, exactly as the HTTPS form does.
+    reject_lookalike_provider_host(host)?;
+
     Ok(VcsProvider::GitLab {
         host: Some(format!("https://{host}")),
         project_path: path_part.to_string(),
     })
+}
+
+/// Refuse a host whose name merely contains a well-known provider's domain
+/// (SEC-013).
+///
+/// `github.com.evil.example` and `notgitlab.com` both contain `github.com` /
+/// `gitlab.com` as substrings but are attacker-controlled; because the caller
+/// attaches the user's PAT to every request to this host, such a host must be
+/// refused. A genuine self-hosted instance with an unrelated name is unaffected.
+///
+/// # Errors
+///
+/// Returns an error naming the offending host.
+fn reject_lookalike_provider_host(host: &str) -> Result<(), String> {
+    // Compare the bare host (no userinfo/port) against the provider domains.
+    let bare = host
+        .rsplit('@')
+        .next()
+        .unwrap_or(host)
+        .split(':')
+        .next()
+        .unwrap_or(host)
+        .to_ascii_lowercase();
+    const PROVIDER_DOMAINS: &[&str] = &["github.com", "gitlab.com"];
+    for domain in PROVIDER_DOMAINS {
+        if bare == *domain || bare.ends_with(&format!(".{domain}")) {
+            continue; // exact or legitimate subdomain of the provider
+        }
+        if bare.contains(domain) {
+            return Err(format!(
+                "refusing GitLab host '{host}': it impersonates {domain} but is a \
+                 different host"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Heuristic: does a segment look like a host (contains a domain dot or port

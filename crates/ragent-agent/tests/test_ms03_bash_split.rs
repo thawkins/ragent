@@ -25,12 +25,14 @@ fn test_split_still_splits_top_level_separators() {
 }
 
 #[test]
-fn test_split_still_splits_pipelines() {
-    // A single `|` (pipeline) is deliberately kept in one part by the splitter
-    // - only `&&`, `||` and `;` separate sub-commands. The substitution-depth
-    // guard must not change that.
+fn test_split_splits_single_pipe() {
+    // SEC-011: a single `|` (pipeline) is a split point too, so each side of a
+    // compound command is judged separately by the permission layer.
     let parts = split_bash_command("cat file | grep needle");
-    assert_eq!(parts, vec!["cat file | grep needle".to_string()]);
+    assert_eq!(
+        parts,
+        vec!["cat file".to_string(), "grep needle".to_string()]
+    );
 }
 
 #[test]

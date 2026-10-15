@@ -85,7 +85,15 @@ where
             .with_context(|| format!("Creating directory {}", parent.display()))?;
     }
     let text = serde_json::to_string_pretty(&root).context("Serialising updated config")?;
-    std::fs::write(&path, text).with_context(|| format!("Writing {}", path.display()))?;
+    // SEC-022: the config holds plaintext credentials; create it owner-only
+    // (`0o600`) rather than at the process umask (typically `0o644`).
+    {
+        use std::io::Write as _;
+        let mut file = ragent_types::guard::open_owner_only(&path)
+            .with_context(|| format!("Writing {}", path.display()))?;
+        file.write_all(text.as_bytes())
+            .with_context(|| format!("Writing {}", path.display()))?;
+    }
 
     tracing::info!(path = %path.display(), section, "list_config: config updated");
     Ok(())

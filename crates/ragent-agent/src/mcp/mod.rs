@@ -122,7 +122,7 @@ pub fn validate_mcp_config(id: &str, config: &McpServerConfig) -> anyhow::Result
                 anyhow::anyhow!("[{id}] HTTP/SSE transport requires a 'url' field")
             })?;
             let trimmed = url.trim();
-            if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+            if !ragent_types::strutil::is_http_url(trimmed) {
                 // Char-boundary-safe preview: byte slicing can panic on multibyte URLs.
                 let preview: String = trimmed.chars().take(60).collect();
                 anyhow::bail!(

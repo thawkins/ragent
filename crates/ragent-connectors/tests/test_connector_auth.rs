@@ -248,17 +248,37 @@ fn test_resolve_blank_stored_secret_needs_auth() {
 
 #[test]
 fn test_resolve_env_uses_environment_when_set() {
+    // SEC-071: only an env var namespaced to the connector id is read from the
+    // ambient environment, so the descriptor names `NEEDS_ENV_TOKEN`.
     let store = InMemoryCredentialStore::new();
-    let env = MapEnv::new().with_var("ECHO_TOKEN", "from-env");
+    let env = MapEnv::new().with_var("NEEDS_ENV_TOKEN", "from-env");
     let d = descriptor(
         "needs-env",
         ConnectorAuthShape::Env,
-        Some("ECHO_TOKEN"),
+        Some("NEEDS_ENV_TOKEN"),
         &[],
     );
     assert_eq!(
         resolve(&d, &store, &env).expect("no store fault"),
         AuthState::Satisfied
+    );
+}
+
+#[test]
+fn test_resolve_env_ignores_unnamespaced_variable() {
+    // SEC-071: a descriptor naming an arbitrary process secret must not read it
+    // from the environment; with nothing stored the connector needs auth.
+    let store = InMemoryCredentialStore::new();
+    let env = MapEnv::new().with_var("AWS_SECRET_ACCESS_KEY", "leaked");
+    let d = descriptor(
+        "needs-env",
+        ConnectorAuthShape::Env,
+        Some("AWS_SECRET_ACCESS_KEY"),
+        &[],
+    );
+    assert_eq!(
+        resolve(&d, &store, &env).expect("no store fault"),
+        AuthState::NeedsAuth
     );
 }
 
@@ -349,15 +369,16 @@ fn test_secret_value_returns_the_stored_secret() {
 
 #[test]
 fn test_secret_value_env_prefers_live_environment() {
+    // SEC-071: the read is gated on the connector's namespace (`NEEDS_ENV_`).
     let store = InMemoryCredentialStore::new();
-    let env = MapEnv::new().with_var("ECHO_TOKEN", "live");
+    let env = MapEnv::new().with_var("NEEDS_ENV_TOKEN", "live");
     let d = descriptor(
         "needs-env",
         ConnectorAuthShape::Env,
-        Some("ECHO_TOKEN"),
+        Some("NEEDS_ENV_TOKEN"),
         &[],
     );
-    store.set("ECHO_TOKEN", "stale").expect("settable");
+    store.set("NEEDS_ENV_TOKEN", "stale").expect("settable");
     assert_eq!(
         secret_value(&d, &store, &env).expect("no store fault"),
         Some("live".to_string())

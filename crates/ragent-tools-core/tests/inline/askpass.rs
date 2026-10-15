@@ -248,15 +248,19 @@ fn test_safe_session_id_sanitizes() {
 }
 
 #[test]
-fn test_temp_base_dir_is_under_tmp() {
-    if is_windows() {
-        return;
-    }
+fn test_temp_base_dir_is_owner_only() {
+    // SEC-027: the askpass response file must live in a private (0700) directory
+    // rather than the shared, world-readable system temp directory.
     let dir = temp_base_dir("safe-id").expect("temp base dir");
-    assert!(
-        dir.starts_with("/tmp"),
-        "temp base dir under /tmp: {}",
-        dir.display()
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&dir)
+            .expect("stat temp base dir")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "askpass temp dir must be 0700: {mode:o}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

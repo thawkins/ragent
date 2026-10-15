@@ -78,6 +78,27 @@ fn research_root() -> PathBuf {
     RESEARCH_ROOT.clone()
 }
 
+/// Canonicalise the longest existing prefix of `resolved` and report whether it
+/// still resolves inside `canonical_root` (SEC-064).
+///
+/// The previous fallback compared `resolved.starts_with(&canonical_root)` where
+/// `resolved` was built as `canonical_root.join(candidate)`, a tautology for a
+/// relative candidate. Walking to the longest existing prefix and canonicalising
+/// *that* catches a symlinked intermediate directory that would otherwise let a
+/// not-yet-existing target escape the root.
+fn longest_existing_prefix_within(resolved: &StdPath, canonical_root: &StdPath) -> bool {
+    let mut prefix = resolved;
+    loop {
+        match prefix.canonicalize() {
+            Ok(real) => return real.starts_with(canonical_root),
+            Err(_) => match prefix.parent() {
+                Some(parent) => prefix = parent,
+                None => return false,
+            },
+        }
+    }
+}
+
 /// Return the first `paths` entry that resolves outside `root`, if any.
 ///
 /// SEC-ragent-server-002 (SECTASKS T-016): an entry may be absolute, contain
@@ -98,11 +119,13 @@ fn first_out_of_root_path(paths: &[String], root: &StdPath) -> Option<String> {
             Err(_) => {
                 // Does not exist yet: fall back to a lexical check that
                 // rejects any parent-directory component and any absolute
-                // path outside the root.
+                // path outside the root, then confirm the longest existing
+                // prefix of the joined path still resolves inside the root.
                 !resolved
                     .components()
                     .any(|c| c == std::path::Component::ParentDir)
                     && resolved.starts_with(&canonical_root)
+                    && longest_existing_prefix_within(&resolved, &canonical_root)
             }
         };
         if !contained {

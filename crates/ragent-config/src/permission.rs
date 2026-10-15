@@ -221,8 +221,10 @@ impl PermissionChecker {
     /// Creates a new checker with the given static ruleset.
     ///
     /// The ruleset is pre-compiled into glob matchers and indexed by
-    /// permission type. Rules with no pattern or an invalid glob are silently
-    /// dropped.
+    /// permission type. A rule with no pattern is skipped; a rule whose pattern
+    /// fails to compile is dropped with a `warn!`. A malformed **deny** rule is
+    /// not dropped silently: it is recorded as a fail-closed catch-all so an
+    /// intended `deny` protection cannot be lost to a typo (SEC-023).
     ///
     /// # Examples
     ///
@@ -250,8 +252,37 @@ impl PermissionChecker {
             let Some(pattern) = &rule.pattern else {
                 continue;
             };
-            let Ok(glob) = globset::Glob::new(pattern) else {
-                continue;
+            let glob = match globset::Glob::new(pattern) {
+                Ok(glob) => glob,
+                Err(e) => {
+                    // SEC-023: fail closed. A malformed deny rule must not be
+                    // dropped (which silently removes the protection), so it
+                    // becomes a catch-all deny for its permission; a malformed
+                    // allow/ask rule is only logged.
+                    tracing::warn!(
+                        permission = ?rule.permission,
+                        action = ?rule.action,
+                        pattern = %pattern,
+                        error = %e,
+                        "permission rule has an invalid glob pattern"
+                    );
+                    // A literal `**` glob always compiles; the `if let` keeps the
+                    // path unwrap-free without changing behaviour.
+                    if rule.action == PermissionAction::Deny
+                        && let Ok(catch_all) = globset::Glob::new("**")
+                    {
+                        let matcher = catch_all.compile_matcher();
+                        if matches!(rule.permission, Permission::Custom(ref s) if s == "*") {
+                            wildcard_rules.push((matcher, PermissionAction::Deny));
+                        } else {
+                            rules_by_permission
+                                .entry(rule.permission.clone())
+                                .or_default()
+                                .push((matcher, PermissionAction::Deny));
+                        }
+                    }
+                    continue;
+                }
             };
             let matcher = glob.compile_matcher();
 

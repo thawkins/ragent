@@ -253,6 +253,7 @@ fn run_humaneval_hidden_tests(
         // SEC-ragent-bench-002 (SECTASKS T-009/T-048): hard subprocess
         // timeout; the in-script alarm is not a reliable bound.
         let output = Command::new("timeout")
+            .arg("--kill-after=5s")
             .arg(format!(
                 "{}s",
                 crate::exec_guard::FIXTURE_SUBPROCESS_TIMEOUT_SECS
@@ -299,7 +300,11 @@ fn run_humaneval_native_tests(
                 .map_err(|error| format!("write go.mod: {error}"))?;
         }
 
-        let source_path = run_root.join(&file_name);
+        // SEC-004: the file name derives from the untrusted `source_extension`;
+        // contain it so a crafted extension can never escape the temp dir.
+        let source_path =
+            ragent_types::guard::contained_join(&run_root, &file_name, "HumanEval source file")
+                .map_err(|error| format!("HumanEval source path rejected: {error}"))?;
         let mut last_error = None;
         for candidate_source in humaneval_candidate_variants(case, sample, entry_point) {
             let rendered = render_humaneval_native_source(test_code, &candidate_source);

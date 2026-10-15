@@ -40,6 +40,9 @@ const ERROR_KEYWORDS: &[&str] = &["error", "failed"];
 /// SEC-ragent-tools-vcs-006 (SECTASKS T-043).
 const MAX_LOG_EXCERPT_BYTES: usize = 64 * 1024;
 
+/// Maximum size of the Actions log archive download (SEC-032).
+const MAX_LOG_ARCHIVE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Default number of workflow runs inspected by `github_get_actions`.
 const DEFAULT_ACTION_RUNS: u64 = 1;
 
@@ -134,7 +137,11 @@ async fn fetch_run_logs(
     run_id: u64,
 ) -> Result<String> {
     let path = format!("/repos/{owner}/{repo}/actions/runs/{run_id}/logs");
-    let bytes = client.get_bytes(&path).await?;
+    // SEC-032: bound the archive download itself; `get_bytes_limited` streams and
+    // stops at the cap so a hostile endpoint cannot force an unbounded buffer.
+    let bytes = client
+        .get_bytes_limited(&path, MAX_LOG_ARCHIVE_BYTES)
+        .await?;
 
     let cursor = Cursor::new(bytes);
     let mut archive =
@@ -150,22 +157,23 @@ async fn fetch_run_logs(
             output.push_str("\n[log excerpt truncated: size cap reached]\n");
             break;
         }
-        let mut entry = archive
+        let name = format!("entry {i}");
+        // SEC-032: a log archive is attacker-influenced; read at most one more
+        // than the remaining excerpt budget so a zip-bomb entry cannot be fully
+        // decompressed into memory before the cap runs.
+        let headroom = MAX_LOG_EXCERPT_BYTES.saturating_sub(output.len());
+        let entry = archive
             .by_index(i)
             .with_context(|| format!("Failed to read zip entry {i}"))?;
         if entry.is_dir() {
             continue;
         }
-        let name = entry.name().to_string();
-        let mut text = String::new();
-        if entry.read_to_string(&mut text).is_err() {
-            // Fall back to lossy conversion for non-UTF-8 logs.
-            let mut buf = Vec::new();
-            entry
-                .read_to_end(&mut buf)
-                .with_context(|| format!("Failed to read log bytes for {name}"))?;
-            text = String::from_utf8_lossy(&buf).into_owned();
-        }
+        let mut bounded = entry.take((headroom as u64).saturating_add(1));
+        let mut buf = Vec::new();
+        bounded
+            .read_to_end(&mut buf)
+            .with_context(|| format!("Failed to read log bytes for {name}"))?;
+        let text = String::from_utf8_lossy(&buf).into_owned();
         let snippet = filter_log_text(&text);
         if !snippet.is_empty() {
             // SEC-ragent-tools-vcs-006 (SECTASKS T-043): redact credentials

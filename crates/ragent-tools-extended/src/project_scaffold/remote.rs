@@ -152,7 +152,10 @@ fn api_json(
         .header("User-Agent", "ragent-newproj");
     request = match flavor {
         ApiFlavor::GitHub => request
-            .header("Authorization", format!("Bearer {token}"))
+            .header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&token),
+            )
             .header("Accept", "application/vnd.github+json"),
         ApiFlavor::GitLab => request.header("PRIVATE-TOKEN", token),
     };

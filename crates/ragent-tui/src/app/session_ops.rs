@@ -270,6 +270,59 @@ fn bytes_to_tokens(bytes: usize) -> u64 {
     bytes as u64 / BYTES_PER_TOKEN
 }
 
+/// Validate a discovered MCP server executable before it is persisted into a
+/// project `ragent.json`.
+///
+/// SEC-082: discovery accepts a server definition from a scanned config file
+/// and, on enable, writes its `command`/`args` into the project config that the
+/// MCP stdio launcher later spawns. Without vetting, a malicious definition
+/// could persist an empty path, a path containing control characters, or a path
+/// carrying shell metacharacters (`; & | $ \` ( ) < > ^ %`) intended to be
+/// interpreted by a shell. This rejects those shapes and, on Unix, requires the
+/// target to exist and be executable.
+///
+/// # Errors
+///
+/// Returns a human-readable reason when `p` is empty, contains a control
+/// character or shell metacharacter, or (on Unix) does not exist or lacks the
+/// execute bit.
+fn validate_executable(p: &std::path::Path) -> Result<(), String> {
+    let s = p.to_string_lossy();
+    if s.trim().is_empty() {
+        return Err("discovered MCP server has an empty executable path".to_string());
+    }
+    if s.chars().any(char::is_control) {
+        return Err(format!(
+            "discovered MCP server executable '{}' contains a control character",
+            s.escape_debug()
+        ));
+    }
+    const SHELL_METACHARS: &[char] = &[';', '&', '|', '$', '`', '(', ')', '<', '>', '^', '%'];
+    if let Some(bad) = s.chars().find(|c| SHELL_METACHARS.contains(c)) {
+        return Err(format!(
+            "discovered MCP server executable '{s}' contains shell metacharacter '{bad}'"
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(p).map_err(|e| {
+            format!("discovered MCP server executable '{s}' is not accessible: {e}")
+        })?;
+        if !meta.is_file() {
+            return Err(format!(
+                "discovered MCP server executable '{s}' is not a regular file"
+            ));
+        }
+        if meta.permissions().mode() & 0o111 == 0 {
+            return Err(format!(
+                "discovered MCP server executable '{s}' is not executable"
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl App {
     /// Clone the current agent info, apply the selected model/thinking settings,
     /// and inject the role-mode system prompt addition when active.
@@ -3904,11 +3957,30 @@ impl App {
     /// hand-edited `args`/`env` is never clobbered by the discovered defaults.
     /// A missing entry is added from the discovered definition.
     fn ensure_discovered_mcp_config(&self, server: &DiscoveredMcpServer) -> Result<(), String> {
-        // Persist back to ragent.json in the working directory.
-        let config_path = std::env::current_dir()
-            .unwrap_or_default()
-            .join(".ragent")
-            .join("ragent.json");
+        // SEC-082: discovery only proposes a server; before persisting it, vet
+        // the executable so a discovered definition cannot write an empty path,
+        // a control character, or a shell metacharacter payload into the project
+        // config (which the MCP stdio launcher later consumes).
+        validate_executable(&server.executable)?;
+
+        // Persist back to the **user-global** `ragent.json`.
+        //
+        // SEC-001: `merge_project` strips a project-local `mcp` block, so an
+        // entry written into `<cwd>/.ragent/ragent.json` would be dropped at the
+        // next load and the enable rejected as "unknown server". The global file
+        // is where the MCP client reads server definitions from, so discovery
+        // writes there. A project-local file is used only when no global config
+        // directory can be resolved.
+        let config_path = ragent_config::Config::global_config_path().unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(".ragent")
+                .join("ragent.json")
+        });
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
 
         let server_id = server.id.clone();
         let mcp_entry = serde_json::json!({

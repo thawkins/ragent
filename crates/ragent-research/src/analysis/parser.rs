@@ -183,8 +183,8 @@ pub(crate) fn validate_citations_and_dates(
         let mut new_finding = String::with_capacity(finding.len());
         let mut last_end = 0;
         for cap in citation_re.captures_iter(finding) {
-            // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
-            let m = cap.get(0).expect("full match");
+            // Regex group 0 is always present; skip defensively if it is not.
+            let Some(m) = cap.get(0) else { continue };
             new_finding.push_str(&finding[last_end..m.start()]);
             let n: usize = cap[1].parse().unwrap_or(0);
             if n == 0 || n > sources.len() {
@@ -209,8 +209,8 @@ pub(crate) fn validate_citations_and_dates(
             let mut validated_spread = String::with_capacity(spread.len());
             let mut last_end = 0;
             for cap in date_re.captures_iter(spread) {
-                // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
-                let m = cap.get(0).expect("full match");
+                // Regex group 0 is always present; skip defensively if it is not.
+                let Some(m) = cap.get(0) else { continue };
                 validated_spread.push_str(&spread[last_end..m.start()]);
                 let claimed = &cap[1];
                 if valid_dates.iter().any(|d| d == claimed) {
@@ -538,8 +538,8 @@ pub(crate) fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String>
             let mut out = String::with_capacity(text.len());
             let mut last_end = 0;
             for cap in finding_re.captures_iter(text) {
-                // INVARIANT: regex group 0 is always present; the call cannot fail at runtime.
-                let m = cap.get(0).expect("full match");
+                // Regex group 0 is always present; skip defensively if it is not.
+                let Some(m) = cap.get(0) else { continue };
                 out.push_str(&text[last_end..m.start()]);
                 let old_num: usize = cap[1].parse().unwrap_or(0);
                 if old_num > 0 && old_num <= findings.len() {

@@ -1493,6 +1493,10 @@ pub struct McpServerConfig {
 
 redacted_debug_impl!(McpServerConfig);
 
+// The `openai` section carries a bearer token; its `Debug` renders through the
+// redacting impl from this module (the struct lives in `crate::openai`).
+redacted_debug_impl!(OpenAiConfig);
+
 impl Default for McpServerConfig {
     fn default() -> Self {
         Self {
@@ -1748,7 +1752,7 @@ impl std::fmt::Display for ExecutionBackendKind {
 /// `kind` is a plain string so an unknown value from a newer config is
 /// preserved rather than failing the whole config parse; resolution goes
 /// through [`ExecutionBackendKind::from_label`].
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct BackendConfig {
     /// Stable identifier used to select this backend.
     pub id: String,
@@ -1783,6 +1787,8 @@ pub struct BackendConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub credentials: Vec<String>,
 }
+
+redacted_debug_impl!(BackendConfig);
 
 impl BackendConfig {
     /// The name to display for this backend: the explicit `name`, or the id
@@ -2626,7 +2632,10 @@ impl Config {
         ));
         let write_result = (|| -> std::io::Result<()> {
             use std::io::Write as _;
-            let mut file = std::fs::File::create(&tmp_path)?;
+            // SEC-022: the config holds plaintext credentials, so the temp is
+            // created owner-only (`0o600`) rather than at the process umask
+            // (typically `0o644`); the rename carries the mode to the target.
+            let mut file = ragent_types::guard::open_owner_only(&tmp_path)?;
             file.write_all(json.as_bytes())?;
             // Flush to stable storage before the rename so a crash after the
             // rename cannot expose a target whose contents were not yet
@@ -2962,7 +2971,16 @@ impl Config {
     /// - `telemetry` is dropped entirely, so a project cannot enable telemetry
     ///   or point the OTLP endpoint at an attacker host (SEC-ragent-telemetry-002);
     /// - `hooks` contributed by a project are dropped: a project hook runs
-    ///   `sh -c` without ever entering the permission system.
+    ///   `sh -c` without ever entering the permission system;
+    /// - `mcp` servers contributed by a project are dropped: a stdio server is
+    ///   spawned as a subprocess with no permission prompt (SEC-001);
+    /// - `acp` agents contributed by a project are dropped: an ACP agent is
+    ///   spawned verbatim with attacker-chosen `command`/`env`/`cwd`, and the
+    ///   section also controls the editor-facing ACP server (SEC-002);
+    /// - every provider's `api` block is dropped, so a project cannot point a
+    ///   provider credential (`Authorization`/`x-api-key`) and the prompt stream
+    ///   at an attacker-controlled endpoint (SEC-005). The rest of the provider
+    ///   entry (`thinking`, `env`, `models`) still merges.
     ///
     /// Rejected keys are logged at `warn!` so the behaviour is not silent.
     #[must_use]
@@ -3031,6 +3049,39 @@ impl Config {
         if overlay.openai.is_some() {
             overlay.openai = None;
             rejected.push("openai");
+        }
+        // MCP servers declared by a project are spawned as subprocesses at
+        // startup (`Command::new(command).args(..).env(..)`) with no permission
+        // prompt, so a repository could execute a committed payload simply by
+        // carrying an `mcp` entry. The project leg may not contribute servers;
+        // a server intended for a repository must live in the user-global config
+        // (SEC-001).
+        if !overlay.mcp.is_empty() {
+            overlay.mcp.clear();
+            rejected.push("mcp");
+        }
+        // ACP client agents are likewise spawned verbatim (`command`, `args`,
+        // `env`, `cwd`), and the section also controls the editor-facing ACP
+        // server. Both are repository-content-controlled, so the whole section is
+        // dropped from the untrusted overlay (SEC-002).
+        if overlay.acp.is_some() {
+            overlay.acp = None;
+            rejected.push("acp");
+        }
+        // A provider `api` block redirects the endpoint that receives the
+        // provider credential. A project-local file must not be able to point
+        // the credential or the prompt stream at an attacker host, so the `api`
+        // block is dropped from every provider the overlay declares; the base
+        // (user-global) endpoint is preserved and `thinking`/`env`/`models`
+        // still merge (SEC-005).
+        let mut stripped_provider_api = false;
+        for provider in overlay.provider.values_mut() {
+            if provider.api.take().is_some() {
+                stripped_provider_api = true;
+            }
+        }
+        if stripped_provider_api {
+            rejected.push("provider.<id>.api");
         }
 
         if !rejected.is_empty() {
@@ -3869,7 +3920,7 @@ fn default_project_override() -> bool {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct GitLabIntegrationConfig {
     /// GitLab instance base URL, e.g. `https://gitlab.com`.
     pub instance_url: Option<String>,
@@ -3878,6 +3929,8 @@ pub struct GitLabIntegrationConfig {
     /// GitLab username / identity.
     pub username: Option<String>,
 }
+
+redacted_debug_impl!(GitLabIntegrationConfig);
 
 /// Spec-Driven Development (SDD) capability toggles (FR-019).
 ///

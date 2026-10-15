@@ -192,7 +192,7 @@ pub fn install_descriptor(
     descriptor.validate()?;
     let dest = resolve_dest(store, descriptor.id.as_str(), force)?;
     write_manifest(&dest, &descriptor)?;
-    record_enabled(store, descriptor.id.as_str())?;
+    record_enabled(store, &descriptor)?;
     Ok(StagedConnector {
         descriptor,
         installed_dir: dest,
@@ -278,7 +278,7 @@ pub fn stage(
     // Re-write the manifest from the normalised descriptor so the stored copy
     // carries the resolved provenance and source rather than the packaged ones.
     write_manifest(&dest, &descriptor)?;
-    record_enabled(&store, descriptor.id.as_str())?;
+    record_enabled(&store, &descriptor)?;
     Ok(StagedConnector {
         descriptor,
         installed_dir: dest,
@@ -413,9 +413,27 @@ fn resolve_dest(store: &Path, id: &str, force: bool) -> Result<PathBuf, StageErr
 /// Record `id` as enabled in the store ledger so a freshly installed connector
 /// is ready to use; nothing is connected until the next session start or an
 /// explicit `/connectors connect` (FR-011).
-fn record_enabled(store: &Path, id: &str) -> Result<(), StageError> {
+///
+/// SEC-009: a connector whose `stdio` server carries a non-allowlisted command
+/// is recorded **disabled** instead, so a crafted catalogue entry cannot arm an
+/// arbitrary host command on install; the operator must confirm it explicitly
+/// with `/connectors enable`.
+fn record_enabled(store: &Path, descriptor: &ConnectorDescriptor) -> Result<(), StageError> {
     let mut ledger = StoreLedger::load(store);
-    ledger.state_mut(id).enabled = true;
+    let state = ledger.state_mut(descriptor.id.as_str());
+    state.enabled = descriptor.all_commands_allowlisted();
+    if !state.enabled {
+        let commands: Vec<&str> = descriptor
+            .servers
+            .iter()
+            .filter_map(|s| s.command.as_deref())
+            .collect();
+        tracing::warn!(
+            connector = %descriptor.id,
+            commands = %commands.join(", "),
+            "connector installed disabled: its stdio command is not on the allowlist"
+        );
+    }
     ledger.save(store).map_err(StageError::Descriptor)?;
     Ok(())
 }
@@ -488,15 +506,10 @@ fn download_and_extract(url: &str, staging: &Path) -> Result<PathBuf, StageError
     std::fs::create_dir_all(staging).map_err(StageError::io)?;
 
     let client = reqwest::blocking::Client::builder()
-        // Refuse an https -> http redirect so a plaintext mirror cannot
-        // substitute the archive (FR-028).
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.url().scheme() == "https" {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }))
+        // SEC-074: use the shared HTTPS-only, hop-capped redirect policy so a
+        // plaintext mirror cannot substitute the archive (FR-028) and a redirect
+        // chain cannot loop past the shared cap.
+        .redirect(ragent_surface::net::https_only_redirects())
         .timeout(DOWNLOAD_TIMEOUT)
         .build()
         .map_err(StageError::io)?;
@@ -606,7 +619,7 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), StageError> {
         .map_err(|e| StageError::Io(format!("zip open: {e}")))?;
     let mut total: u64 = 0;
     for i in 0..archive.len() {
-        let mut entry = archive
+        let entry = archive
             .by_index(i)
             .map_err(|e| StageError::Io(format!("zip entry {i}: {e}")))?;
         if entry.is_dir() {
@@ -618,8 +631,13 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), StageError> {
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(StageError::io)?;
         }
+        // SEC-070: bound the *read* itself so a zip-bomb entry cannot be fully
+        // decompressed into memory before the size check runs. Read at most the
+        // remaining headroom + 1 byte; anything larger fails here.
+        let remaining = MAX_EXTRACTED_BYTES.saturating_sub(total);
         let mut body = Vec::new();
         entry
+            .take(MAX_SOURCE_BYTES.min(remaining).saturating_add(1))
             .read_to_end(&mut body)
             .map_err(|e| StageError::Io(format!("zip entry {name}: {e}")))?;
         if body.len() as u64 > MAX_SOURCE_BYTES {
@@ -651,7 +669,7 @@ fn extract_tar_gz(bytes: &[u8], staging: &Path) -> Result<(), StageError> {
         .map_err(|e| StageError::Io(format!("tar entries: {e}")))?;
     let mut total: u64 = 0;
     for entry in entries {
-        let mut entry = entry.map_err(|e| StageError::Io(format!("tar entry: {e}")))?;
+        let entry = entry.map_err(|e| StageError::Io(format!("tar entry: {e}")))?;
         if !entry.header().entry_type().is_file() {
             continue;
         }
@@ -665,8 +683,11 @@ fn extract_tar_gz(bytes: &[u8], staging: &Path) -> Result<(), StageError> {
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(StageError::io)?;
         }
+        // SEC-070: bound the read itself (gzip-bomb defence), as for the zip path.
+        let remaining = MAX_EXTRACTED_BYTES.saturating_sub(total);
         let mut body = Vec::new();
         entry
+            .take(MAX_SOURCE_BYTES.min(remaining).saturating_add(1))
             .read_to_end(&mut body)
             .map_err(|e| StageError::Io(format!("tar entry {name}: {e}")))?;
         if body.len() as u64 > MAX_SOURCE_BYTES {

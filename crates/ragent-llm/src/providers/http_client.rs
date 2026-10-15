@@ -162,6 +162,26 @@ pub fn append_stream_chunk_capped(buffer: &mut String, chunk: &str) -> bool {
 /// `response.text()`. 64 KiB is far more than any diagnostic needs.
 pub const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 
+/// Maximum bytes of a malformed stream frame included in a diagnostic log.
+///
+/// SEC-ragent-llm-020 (SECTASKS T-028): a malformed SSE/stream frame is
+/// attacker- or model-controlled and can be arbitrarily large and can carry
+/// secrets. Diagnostics log only a redacted, length-capped prefix.
+pub const MAX_FRAME_LOG_BYTES: usize = 512;
+
+/// Redact secrets from a raw stream frame and cap it for logging.
+///
+/// SEC-ragent-llm-020 (SECTASKS T-028): the frame is passed through
+/// [`ragent_types::sanitize::redact_secrets`] so any registered credential is
+/// masked, then truncated to [`MAX_FRAME_LOG_BYTES`] on a UTF-8 boundary. Use
+/// this for every `frame = %...` / `line = %...` tracing field that logs raw
+/// stream data.
+#[must_use]
+pub fn redact_frame(frame: &str) -> String {
+    let redacted = ragent_types::sanitize::redact_secrets(frame);
+    ragent_types::strutil::truncate_bytes_no_ellipsis(&redacted, MAX_FRAME_LOG_BYTES)
+}
+
 /// Maximum `Retry-After` delay honoured from a response header.
 ///
 /// SEC-ragent-llm-003 (SECTASKS T-028): an endpoint answering `429` with
@@ -173,11 +193,29 @@ pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 ///
 /// Returns the (possibly truncated) body. A read error is formatted into the
 /// returned string so the diagnostic is preserved (FUNC-034).
-pub async fn read_body_capped(response: reqwest::Response, limit: usize) -> String {
-    match response.text().await {
-        Ok(body) => ragent_types::strutil::truncate_bytes_no_ellipsis(&body, limit),
-        Err(e) => format!("<body read failed: {e}>"),
+///
+/// SEC-ragent-llm-005 (SECTASKS T-028): the body is streamed with
+/// [`reqwest::Response::chunk`] and only the first `limit` bytes are buffered,
+/// so a hostile endpoint cannot make the process allocate an arbitrarily large
+/// error body before it is truncated. Bytes are decoded with
+/// `String::from_utf8_lossy` to tolerate a truncation mid-multibyte-character.
+pub async fn read_body_capped(mut response: reqwest::Response, limit: usize) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        if buf.len() >= limit {
+            break;
+        }
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = limit - buf.len();
+                let take = remaining.min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+            }
+            Ok(None) => break,
+            Err(e) => return format!("<body read failed: {e}>"),
+        }
     }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Creates a properly configured HTTP client for LLM provider communication.

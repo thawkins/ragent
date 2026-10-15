@@ -3254,10 +3254,19 @@ impl Storage {
         }
 
         let mut conn = lock_conn!(self)?;
-        let cutoff = older_than_days.map(|days| {
-            let dt = Utc::now() - chrono::Duration::days(i64::from(days));
-            dt.to_rfc3339()
-        });
+        // SEC-049: `older_than_days` is attacker-controlled; use the fallible
+        // chrono constructors so an out-of-range retention window returns an
+        // error instead of panicking inside the subtraction.
+        let cutoff = older_than_days
+            .map(|days| -> Result<String> {
+                let duration = chrono::Duration::try_days(i64::from(days))
+                    .context("memory retention duration out of range")?;
+                let dt = Utc::now()
+                    .checked_sub_signed(duration)
+                    .context("memory retention cutoff out of range")?;
+                Ok(dt.to_rfc3339())
+            })
+            .transpose()?;
 
         // Build a subquery to find IDs to delete.
         let mut conditions = Vec::new();
@@ -4283,7 +4292,15 @@ impl Storage {
         completed_only: bool,
     ) -> Result<usize> {
         let conn = lock_conn!(self)?;
-        let cutoff = (Utc::now() - chrono::Duration::minutes(older_than_minutes)).to_rfc3339();
+        // SEC-049: `older_than_minutes` is attacker-controlled; use the
+        // fallible chrono constructors so an out-of-range retention window
+        // returns an error instead of panicking inside the subtraction.
+        let duration = chrono::Duration::try_minutes(older_than_minutes)
+            .context("background task retention duration out of range")?;
+        let cutoff = Utc::now()
+            .checked_sub_signed(duration)
+            .context("background task retention cutoff out of range")?
+            .to_rfc3339();
         let mut sql = String::from("DELETE FROM background_tasks WHERE updated_at < ?1");
         let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         params_vec.push(Box::new(cutoff));

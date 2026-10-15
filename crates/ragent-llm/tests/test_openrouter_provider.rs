@@ -23,9 +23,12 @@ use std::sync::{Arc, OnceLock};
 use futures::StreamExt;
 use ragent_llm::Provider;
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
-use ragent_llm::provider::openrouter::{OpenRouterClient, OpenRouterProvider, mask_key};
+use ragent_llm::provider::openrouter::{OpenRouterClient, OpenRouterProvider};
+// The key-fingerprint helper lives in `ragent_types::sanitize`; import it under
+// the historical test-local name so the masking assertions stay unchanged.
 use ragent_storage::storage::Storage;
 use ragent_types::event::FinishReason;
+use ragent_types::sanitize::mask_key;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

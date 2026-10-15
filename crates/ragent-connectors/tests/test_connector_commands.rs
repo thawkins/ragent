@@ -64,7 +64,7 @@ fn token_descriptor() -> ConnectorDescriptor {
             "category": "productivity",
             "auth": "token",
             "credential": "GDRIVE_TOKEN",
-            "servers": [ { "id": "main", "transport": "stdio", "command": "/bin/true" } ]
+            "servers": [ { "id": "main", "transport": "stdio", "command": "npx" } ]
         }"#,
     )
     .expect("descriptor parses")
@@ -581,7 +581,7 @@ fn add_local_directory_installs_enabled_and_reports_ok() {
     std::fs::write(
         source.join(MANIFEST_FILE),
         r#"{ "id": "echo", "name": "Echo", "category": "developer",
-             "servers": [ { "id": "main", "transport": "stdio", "command": "/bin/true" } ] }"#,
+             "servers": [ { "id": "main", "transport": "stdio", "command": "npx" } ] }"#,
     )
     .expect("manifest writable");
 

@@ -60,10 +60,23 @@ impl OllamaProvider {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        let base_url = ragent_config::credential_env::read_credential_env("OLLAMA_HOST")
-            .unwrap_or_else(|| DEFAULT_OLLAMA_HOST.to_string())
-            .trim_end_matches('/')
-            .to_string();
+        // SEC-ragent-llm-021: an `OLLAMA_HOST` read from the environment is an
+        // exfiltration vector; validate its scheme/host before use, warning and
+        // falling back to the default on an invalid value.
+        let base_url = match ragent_config::credential_env::read_credential_env("OLLAMA_HOST") {
+            Some(raw) => match super::base_url::validate_base_url("ollama", &raw) {
+                Ok(valid) => valid,
+                Err(e) => {
+                    tracing::warn!(
+                        env = "OLLAMA_HOST",
+                        error = %e,
+                        "ignoring invalid Ollama base URL from environment"
+                    );
+                    DEFAULT_OLLAMA_HOST.to_string()
+                }
+            },
+            None => DEFAULT_OLLAMA_HOST.to_string(),
+        };
         Self { base_url }
     }
 
@@ -204,10 +217,10 @@ impl Provider for OllamaProvider {
         // ANTIPAT 3.6: register a remote/authenticated server key with the
         // shared redaction registry (empty keys are ignored by register_secret).
         ragent_types::sanitize::register_secret(api_key);
-        let url = base_url
-            .unwrap_or(&self.base_url)
-            .trim_end_matches('/')
-            .to_string();
+        // SEC-ragent-llm-005: a config-sourced `base_url` is validated with the
+        // same scheme/host check as the env value, falling back to the
+        // (already-validated) provider base URL on an invalid value.
+        let url = super::base_url::resolve_validated_base_url("ollama", base_url, &self.base_url);
         let client = OllamaClient {
             api_key: if api_key.is_empty() {
                 None
@@ -297,7 +310,10 @@ impl LlmClient for OllamaClient {
 
         // Only send auth header if we have a key (remote servers)
         if let Some(ref key) = self.api_key {
-            req_builder = req_builder.header("Authorization", format!("Bearer {key}"));
+            req_builder = req_builder.header(
+                "Authorization",
+                ragent_types::strutil::bearer_auth_header(&key),
+            );
         }
 
         let timeout_secs = request
