@@ -53,6 +53,30 @@ fn flat_text(app: &ragent_tui::App) -> String {
         .join(" ")
 }
 
+/// The `/plugins list` panel's rendered text: the pinned table header, the
+/// separator, then every scrollable body line (plugin rows followed by the
+/// capability blocks).
+fn panel_text(app: &ragent_tui::App) -> String {
+    let state = app
+        .plugins_list
+        .as_ref()
+        .expect("the `/plugins list` panel must be open");
+    let mut out = String::new();
+    if let Some(header) = &state.heading {
+        out.push_str(header);
+        out.push('\n');
+    }
+    if let Some(separator) = &state.view.separator {
+        out.push_str(separator);
+        out.push('\n');
+    }
+    for line in &state.view.body {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 #[test]
 fn plugins_registered_in_slash_commands() {
     let def = ragent_tui::app::SLASH_COMMANDS
@@ -377,7 +401,11 @@ async fn list_reports_a_discovered_plugin_as_disabled() {
     app.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
-    let listed = last_text(&app);
+    assert!(
+        app.plugins_list.is_some(),
+        "`/plugins list` must open the interactive panel"
+    );
+    let listed = panel_text(&app);
     assert!(
         listed.contains("codex-weather"),
         "list must show the discovered plugin: {listed}"
@@ -420,16 +448,15 @@ async fn list_shows_mcp_server_and_tool_counts() {
     app.session_id = Some("test-session".to_string());
 
     app.execute_slash_command("/plugins list").await;
-    let listed = last_text(&app);
+    let listed = panel_text(&app);
     assert!(
         listed.contains("MCP Tools"),
         "the list table must carry an MCP Tools column: {listed}"
     );
     assert!(
-        listed.contains("MCP server")
-            || listed
-                .lines()
-                .any(|l| l.contains("mongodb") && l.trim_end().ends_with("| 1   | ?         |")),
+        listed
+            .lines()
+            .any(|l| l.contains("mongodb") && l.contains("|   1 |         ? |")),
         "the mongodb row must report one MCP server: {listed}"
     );
     assert!(
@@ -477,11 +504,11 @@ async fn list_shows_live_mcp_tool_count_after_connect() {
     app.adopt_mcp_client_state(&processor).await;
 
     app.execute_slash_command("/plugins list").await;
-    let listed = last_text(&app);
+    let listed = panel_text(&app);
     assert!(
         listed
             .lines()
-            .any(|l| l.contains("mongodb") && l.trim_end().ends_with("| 1   | 2         |")),
+            .any(|l| l.contains("mongodb") && l.contains("|   1 |         2 |")),
         "the mongodb row must report the live tool count, not '?': {listed}"
     );
     assert!(
@@ -523,7 +550,7 @@ async fn add_from_a_local_directory_installs_and_reports_enabled() {
         "the plugin must be installed into the store"
     );
     app.execute_slash_command("/plugins list").await;
-    let listed = last_text(&app);
+    let listed = panel_text(&app);
     assert!(
         listed.contains("enabled"),
         "an added plugin is enabled until disabled: {listed}"

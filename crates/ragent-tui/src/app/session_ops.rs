@@ -1038,6 +1038,7 @@ impl App {
             || !self.question_queue.is_empty()
             || self.provider_setup.is_some()
             || self.mcp_discover.is_some()
+            || self.plugins_list.is_some()
             || self.loop_setup.is_some()
             || self.pending_forcecleanup.is_some()
             || self.pending_rollback.is_some()

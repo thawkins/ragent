@@ -526,16 +526,14 @@ impl PluginManager {
         context.reset_interrupt();
         context.eval(&source).map_err(|e| entry_cause(&e))?;
 
-        let mut tools = parsed.tools;
-        tools.extend(calls.tools());
-        let mut commands = parsed.commands;
-        // Runtime `register_command` contributions are inline (sandbox handlers).
-        commands.extend(
-            calls
-                .commands()
-                .into_iter()
-                .map(crate::manifest::PluginCommandDef::inline),
-        );
+        // A manifest-declared tool/command paired with a matching
+        // `register_tool`/`register_command` call is one contribution (the
+        // declaration carries the metadata, the runtime call the handler); the
+        // merge keeps the declaration and appends only genuinely new runtime
+        // names, so a real duplicate stays a collision (FR-005, FR-024).
+        let tools = crate::manifest::merge_contributed_tools(parsed.tools, calls.tools());
+        let commands =
+            crate::manifest::merge_contributed_commands(parsed.commands, calls.commands());
         Ok(LoadedPlugin {
             descriptor,
             state: LifecycleState::Loaded,

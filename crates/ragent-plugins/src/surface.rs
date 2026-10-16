@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::command_adapter::PluginCommandAdapter;
 use crate::commands::run_store_command;
-use crate::control::run_control_command;
+use crate::control::{PluginListView, build_list_view, run_control_command};
 use crate::harness::run_test_command;
 use crate::session::{PluginSession, PluginSurface};
 use crate::store::{StoreDirs, store_dirs};
@@ -182,4 +182,38 @@ pub fn run_plugin_subcommand(
         run_control_command(&mut session, &mut surface, sub, rest, mcp_tool_counts)
             .unwrap_or_else(|| crate::help::render_help(sub)),
     )
+}
+
+/// Build the structured `/plugins list` view for a browsing surface (spec
+/// `plugins` FR-009, FR-030).
+///
+/// The TUI `/plugins list` panel renders the pinned table plus a scrollable body;
+/// this shares one discovery/parse path with the text surface
+/// ([`run_plugin_subcommand`]) so the panel and CLI can never disagree. The
+/// subsystem master switch is honoured exactly as in the text path: with
+/// `plugins.enabled` false nothing is discovered and the view carries the
+/// disabled-subsystem notice. `mcp_tool_counts` supplies live MCP tool counts
+/// (FR-030), an empty map leaving every server count `?`.
+#[must_use]
+pub fn run_plugin_list_view(
+    workdir: &Path,
+    verbose: bool,
+    mcp_tool_counts: &BTreeMap<String, usize>,
+) -> PluginListView {
+    let (dirs, config) = store_and_config(workdir);
+    if !config.is_enabled() {
+        return PluginListView {
+            attribution: crate::help::attribution("list"),
+            header: None,
+            separator: None,
+            body: vec![
+                "[err] Plugin subsystem is disabled (plugins.enabled = false); \
+                 no plugins were discovered."
+                    .to_string(),
+            ],
+            rows: Vec::new(),
+        };
+    }
+    let manager = crate::lifecycle::PluginManager::new(dirs, config);
+    build_list_view(&manager, verbose, mcp_tool_counts)
 }

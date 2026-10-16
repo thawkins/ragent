@@ -1405,7 +1405,7 @@ impl OutputViewState {
 /// State for the interactive `/mcp discover` dialog.
 ///
 /// Shown as an overlay that lists discovered MCP servers under a block cursor.
-/// `Up`/`Down` move the cursor (the list scrolls to keep it visible), `Enter`
+/// `Up`/`Down` move the cursor (the list scrolls to keep it visible), `Space`
 /// toggles the highlighted server's enabled state, and `Esc` dismisses the
 /// dialog.
 #[derive(Debug, Clone)]
@@ -1441,6 +1441,57 @@ pub(crate) fn discovered_mcp_enabled(
     configured
         .get(server_id)
         .is_some_and(|cfg| !cfg.disabled && ledger.is_enabled(server_id))
+}
+
+/// State for the interactive `/plugins list` dialog (spec `plugins` FR-009).
+///
+/// Shown as an overlay with the plugin table pinned at the top (a fixed column
+/// heading above a scrollable list under a block cursor) and the capability
+/// blocks - contributions, unsupported capabilities, errors, and summary -
+/// listed at the end of the same scrollable body. `Up`/`Down` move the cursor
+/// (the list scrolls to keep it visible) and `Esc` dismisses the dialog.
+#[derive(Debug, Clone)]
+pub struct PluginsListState {
+    /// The pre-formatted view from [`ragent_plugins::PluginListView`]: the pinned
+    /// table header/separator plus the scrollable body lines.
+    pub view: ragent_plugins::PluginListView,
+    /// The pinned table header line (dark-on-light), or `None` when nothing was
+    /// discovered and only the notice body is shown.
+    pub heading: Option<String>,
+    /// Currently highlighted row (0 = first body line).
+    pub selected: usize,
+    /// Index of the first visible body line. Re-clamped by the render pass so the
+    /// block cursor is always on screen.
+    pub scroll_offset: usize,
+    /// Whether the per-plugin telemetry block was requested (`--verbose`), kept
+    /// so a toggle-triggered refresh re-renders with the same detail level.
+    pub verbose: bool,
+    /// Feedback message shown after a toggle (enable/disable) action or on error.
+    pub feedback: Option<String>,
+}
+
+/// State for the interactive `/plugins list` dialog, built from a discovered view.
+///
+/// `workdir` is the project directory the plugin store is resolved against;
+/// `verbose` selects the per-plugin telemetry block (FR-022); `mcp_tool_counts`
+/// supplies the live per-server MCP tool counts (FR-030), an empty map leaving
+/// every count `?`.
+#[must_use]
+pub fn plugins_list_state(
+    workdir: &std::path::Path,
+    verbose: bool,
+    mcp_tool_counts: &std::collections::BTreeMap<String, usize>,
+) -> PluginsListState {
+    let view = ragent_plugins::run_plugin_list_view(workdir, verbose, mcp_tool_counts);
+    let heading = view.header.clone();
+    PluginsListState {
+        view,
+        heading,
+        selected: 0,
+        scroll_offset: 0,
+        verbose,
+        feedback: None,
+    }
 }
 
 /// Core TUI application state.
@@ -3300,6 +3351,8 @@ pub struct App {
     pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
     /// Active MCP discovery dialog, if any.
     pub mcp_discover: Option<McpDiscoverState>,
+    /// Active `/plugins list` dialog, if any (spec `plugins` FR-009).
+    pub plugins_list: Option<PluginsListState>,
     /// Active `/loop` setup dialog, if any (spec `agentloop` T-014).
     pub loop_setup: Option<super::loop_dialog::LoopSetupState>,
     /// Draft values of a cancelled `/loop` setup dialog, restored on

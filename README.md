@@ -237,7 +237,10 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   recorded enabled and loads at the next session start (no JavaScript runs during
   the install); managed through
   `/plugins list|add|remove|enable|disable|test|stores|marketplace|help` in the TUI
-  and the `ragent plugins <sub>` CLI (`/plugins marketplace show` and `/plugins
+  (`/plugins list [--verbose]` opens an interactive table panel with the capability
+  blocks listed at the end; `Space` toggles the highlighted plugin's enabled state) and
+  the `ragent plugins <sub>` CLI (`/plugins marketplace
+  show` and `/plugins
   marketplace <codex|claude> list` list the marketplaces configured for each store,
   one section per store with a name/url/description table; `/plugins marketplace
   <codex|claude> add <source>` registers an additional marketplace from an
@@ -699,7 +702,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.135** — The core architecture, tool system (148 tools across 21 categories in
+**v1.0.136** — The core architecture, tool system (148 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin system, pluggable execution backends,
 ACP integration, the automation service, and multi-layered security are functional and
@@ -707,6 +710,14 @@ under active development.
 
 Recent highlights:
 
+- **v1.0.136 — interactive `/plugins list` panel** — `/plugins list [--verbose]` now
+  opens a `/mcp discover`-style panel: the plugin table is pinned at the top (a fixed
+  column heading and separator) above a scrollable block-cursor list, and the capability
+  blocks (contributions, unsupported capabilities, errors, summary, and telemetry when
+  verbose) are listed at the end of the same body. `Up`/`Down`/`Home`/`End` navigate,
+  `Space` toggles the highlighted plugin's enabled state (enable/disable, with the row
+  tinted yellow when enabled and the outcome shown on a feedback line), and `Esc` closes;
+  `/plugins list --mcp` and the disabled-subsystem notice stay text reports.
 - **v1.0.135 — security-hardening pass** — an untrusted project-local config can no
   longer inject executable sinks (`Config::merge_project` drops a project overlay's
   `mcp` servers, `acp` section, and provider `api` blocks); new `ragent_types::guard`

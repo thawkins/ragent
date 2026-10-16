@@ -5104,6 +5104,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_mcp_discover_dialog(frame, app);
     }
 
+    // `/plugins list` dialog overlay
+    if app.plugins_list.is_some() {
+        render_plugins_list_panel(frame, app);
+    }
+
     // Shortcuts help panel overlay
     if app.show_shortcuts {
         render_shortcuts_panel(frame);
@@ -8217,7 +8222,7 @@ fn render_loop_setup_dialog(frame: &mut Frame, app: &App) {
 ///
 /// A bordered modal listing every discovered MCP server under a block cursor.
 /// `Up`/`Down` move the cursor (the list scrolls, with a scrollbar, to keep it
-/// on screen), `Enter` toggles the highlighted server's enabled state, and `Esc`
+/// on screen), `Space` toggles the highlighted server's enabled state, and `Esc`
 /// closes the dialog. Each row carries an `[x]`/`[ ]` enabled marker. Only ASCII
 /// glyphs are used in the body.
 fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
@@ -8410,7 +8415,192 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "  Up/Down move  Enter toggle  Esc close",
+            "  Up/Down move  Space toggle  Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))),
+        hint_area,
+    );
+}
+
+/// Render the interactive `/plugins list` dialog overlay (spec `plugins`
+/// FR-009).
+///
+/// A bordered modal with the plugin table pinned at the top - a fixed column
+/// heading and separator above a scrollable list under a block cursor - and the
+/// capability blocks (contributions, unsupported capabilities, errors, summary,
+/// and telemetry when verbose) listed at the end of the same scrollable body.
+/// `Up`/`Down` move the cursor (the list scrolls, with a scrollbar, to keep it on
+/// screen), `Space` toggles the highlighted plugin's enabled state, and `Esc`
+/// closes the dialog. An enabled plugin's table row is tinted yellow. Only ASCII
+/// glyphs are used in the body.
+fn render_plugins_list_panel(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let (total, selected, prev_offset, has_heading) = match app.plugins_list.as_ref() {
+        Some(s) => (
+            s.view.body.len(),
+            s.selected,
+            s.scroll_offset,
+            s.heading.is_some(),
+        ),
+        None => return,
+    };
+
+    // Size the dialog: taller when there are more body lines. title(2) +
+    // header(1) + separator(1) + rows + feedback(1) + hint(1) + borders(2).
+    let body_rows = total.max(1) as u16;
+    let dialog_height = (body_rows + 8).clamp(9, 40);
+    let area = {
+        let full = frame.area();
+        let h = dialog_height.min(full.height.saturating_sub(4));
+        // The plugin table is wide (12 columns); use the full width up to a
+        // 160-column ceiling so the columns stay aligned.
+        let w = full.width.min(160);
+        ratatui::layout::Rect {
+            x: (full.width.saturating_sub(w)) / 2,
+            y: (full.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        }
+    };
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" /plugins list ")
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Vertical split: title, pinned column heading, pinned separator, list,
+    // feedback, hint.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    let title_area = chunks[0];
+    let heading_area = chunks[1];
+    let separator_area = chunks[2];
+    let list_area = chunks[3];
+    let feedback_area = chunks[4];
+    let hint_area = chunks[5];
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Installed Plugins",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        title_area,
+    );
+
+    // Clamp the scroll window so the cursor is always on screen, and persist it
+    // so the next frame keeps the same position.
+    let visible_height = list_area.height as usize;
+    let scroll_offset = if visible_height == 0 {
+        0
+    } else if selected < prev_offset {
+        selected
+    } else if selected >= prev_offset + visible_height {
+        selected + 1 - visible_height
+    } else {
+        prev_offset
+    };
+    if let Some(s) = app.plugins_list.as_mut() {
+        s.scroll_offset = scroll_offset;
+    }
+
+    let Some(state) = app.plugins_list.as_ref() else {
+        return;
+    };
+
+    // Pinned column heading and separator (dark on light), matching the other
+    // list panels and never scrolling with the rows.
+    let heading_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Gray)
+        .add_modifier(Modifier::BOLD);
+    if has_heading {
+        let heading = state.heading.clone().unwrap_or_default();
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(heading, heading_style))),
+            heading_area,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                state.view.separator.clone().unwrap_or_default(),
+                heading_style,
+            ))),
+            separator_area,
+        );
+    }
+
+    // The block cursor: a full-row background on the highlighted row.
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+    let enabled_style = Style::default().fg(Color::Yellow);
+    let normal_style = Style::default().fg(Color::White);
+
+    // The first `state.view.rows.len()` body lines are plugin table rows in the
+    // same order as `rows`; an enabled plugin's row is tinted yellow so its state
+    // is visible at a glance (the `State` column still carries the exact value).
+    let row_count = state.view.rows.len();
+    let items: Vec<ListItem> = state
+        .view
+        .body
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+        .map(|(i, line)| {
+            let style = if i < row_count && state.view.rows[i].enabled {
+                enabled_style
+            } else {
+                normal_style
+            };
+            ListItem::new(Line::from(Span::styled(line.clone(), style)))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(cursor_style);
+    let mut list_state = ListState::default();
+    list_state.select(Some(selected.saturating_sub(scroll_offset)));
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Scrollbar when the list overflows its panel.
+    if total > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut sb_state = ScrollbarState::new(total).position(scroll_offset);
+        frame.render_stateful_widget(scrollbar, list_area, &mut sb_state);
+    }
+
+    // Feedback line (error or success).
+    let (feedback_text, feedback_color) = match state.feedback.as_deref() {
+        Some(msg) if msg.starts_with("[ok]") => (msg.to_string(), Color::Green),
+        Some(msg) => (msg.to_string(), Color::Red),
+        None => (String::new(), Color::DarkGray),
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("  {feedback_text}"),
+            Style::default().fg(feedback_color),
+        ))),
+        feedback_area,
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "  Up/Down move  Space toggle  Esc close",
             Style::default().fg(Color::DarkGray),
         ))),
         hint_area,

@@ -372,6 +372,7 @@ impl App {
             mcp_startup_reported: false,
             mcp_enabled_map: ragent_agent::mcp::McpEnableLedger::load().to_map(),
             mcp_discover: None,
+            plugins_list: None,
             loop_setup: None,
             loop_setup_draft: None,
             force_new_message: false,

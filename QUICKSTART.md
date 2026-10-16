@@ -989,7 +989,7 @@ Manage plugins from the TUI or the CLI:
 
 | Command | Description |
 |---|---|
-| `/plugins list [--verbose]` | List discovered plugins with state and contributions |
+| `/plugins list [--verbose]` | Open the interactive plugin panel: the table is pinned at the top (a fixed column heading and separator) above a scrollable list, and the capability blocks (contributions, unsupported capabilities, errors, summary) are listed at the end of the same body. `Up`/`Down`/`Home`/`End` navigate, `Space` toggles the highlighted plugin's enabled state (enable/disable), `Esc` closes; `--verbose` appends per-plugin telemetry counters |
 | `/plugins add <source> [--force]` | Install from a local directory, `.zip`/`.tar.gz`, an `https://` archive URL, or a `git+<https-url>#<ref>[:<subpath>]` git source (enabled and loads at the next session start) |
 | `/plugins remove <pluginid>` | Uninstall a plugin (refused while enabled) |
 | `/plugins enable <pluginid>` | Enable, load, and register its tools/commands |
@@ -2135,6 +2135,16 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.136
+
+- **Interactive `/plugins list` panel** — `/plugins list [--verbose]` now opens a
+  `/mcp discover`-style panel: the plugin table is pinned at the top (a fixed column
+  heading and separator above a scrollable block-cursor list) and the capability blocks
+  (contributions, unsupported capabilities, errors, totals summary, and — with
+  `--verbose` — telemetry) are listed at the end of the same scrollable body. `Up`/`Down`
+  (or `k`/`j`), `Home`/`End`, and `Esc` operate it. `/plugins list --mcp` (the MCP tool
+  inventory) and the disabled-subsystem notice stay text reports.
 
 ## Version 1.0.135
 

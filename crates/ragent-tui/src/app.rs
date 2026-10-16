@@ -28,6 +28,7 @@ mod connector;
 mod models;
 mod newproj;
 mod plugin;
+pub(crate) use self::plugin::toggle_plugin_enabled;
 pub use models::model_part_from_selected_model;
 mod status_bar_cache;
 pub use self::status_bar_cache::StatusBarCache;

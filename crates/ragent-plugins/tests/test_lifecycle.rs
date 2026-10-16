@@ -59,6 +59,62 @@ fn enable_loads_plugin_and_persists_enabled_state() {
     assert!(loaded.context().is_some());
 }
 
+/// FR-005: a tool declared in the manifest *and* registered at runtime under the
+/// same name is one contribution (the manifest supplies the metadata, the
+/// runtime call the handler) and must load, not fail as a `name-collision`.
+#[test]
+fn enable_merges_a_manifest_tool_with_its_runtime_registration() {
+    let tree = TempTree::new("manifest-runtime-merge");
+    write_plugin(
+        &tree,
+        "codex-weather",
+        r#"{ "id": "codex-weather", "name": "Weather", "version": "1.0.0", "entry": "index.js",
+             "tools": [ { "name": "get_weather", "description": "declared", "parameters": { "type": "object" } } ] }"#,
+        r#"
+ragent.register_tool({ name: "get_weather", description: "runtime", parameters: { "type": "object" }, handler: function(a){ return "sunny"; } });
+"#,
+    );
+    let mut manager = tree.manager();
+    let report = manager.enable("codex-weather").expect("enable succeeds");
+
+    assert_eq!(report.state, LifecycleState::Loaded, "{report:?}");
+    assert_eq!(report.error, None);
+    // One merged contribution, not two (which would be a real collision).
+    assert_eq!(report.tools, vec!["plugin_codex-weather_get_weather"]);
+
+    let names = manager
+        .register_plugin_tools("codex-weather", &std::collections::BTreeSet::new(), |_| {})
+        .unwrap_or_else(|e| panic!("merged tool registers without collision: {e}"));
+    assert_eq!(names, vec!["plugin_codex-weather_get_weather".to_string()]);
+}
+
+#[test]
+fn enable_still_rejects_a_genuine_duplicate_within_the_manifest() {
+    // The manifest declares the same tool twice: the merge must keep both so the
+    // registration path sees a real collision (FR-024, the `collider` fixture).
+    let tree = TempTree::new("manifest-dup");
+    write_plugin(
+        &tree,
+        "codex-dup",
+        r#"{ "id": "codex-dup", "name": "Dup", "version": "1.0.0", "entry": "index.js",
+             "tools": [
+                { "name": "twice", "description": "first", "parameters": { "type": "object" } },
+                { "name": "twice", "description": "second", "parameters": { "type": "object" } }
+             ] }"#,
+        "",
+    );
+    let mut manager = tree.manager();
+    let report = manager.enable("codex-dup").expect("enable succeeds");
+    assert_eq!(report.state, LifecycleState::Loaded, "{report:?}");
+
+    let result =
+        manager.register_plugin_tools("codex-dup", &std::collections::BTreeSet::new(), |_| {});
+    assert!(
+        matches!(&result, Err(PluginError::NameCollision(name)) if name == "plugin_codex-dup_twice"),
+        "a manifest duplicate is still a collision; got {result:?}"
+    );
+}
+
 #[test]
 fn enable_unknown_plugin_is_an_error_and_changes_no_state() {
     let tree = TempTree::new("enable-unknown");

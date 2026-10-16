@@ -31,6 +31,7 @@
 //! `/plugins list` / `/plugins test`; add new labels as new dialect sections
 //! are recognised, never reword existing ones.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -870,6 +871,57 @@ fn merge_scanned_skills(skills: &mut Vec<String>, root: &Path) {
             skills.push(rel);
         }
     }
+}
+
+/// Merge a plugin's manifest-declared tools with the tools it registered at
+/// runtime through `ragent.register_tool` (FR-005).
+///
+/// A manifest-declared tool whose handler is supplied by a matching
+/// `register_tool` call is **one** contribution, not two: the manifest entry
+/// keeps its declared name/description/schema and the runtime registration
+/// supplies only the handler, so the pair must not be treated as a duplicate
+/// (nor rejected as a `name-collision`). Every manifest entry is kept and only
+/// those runtime entries whose name is not declared in the manifest are
+/// appended, so a genuine duplicate within either source - a repeated manifest
+/// declaration (the `collider` fixture, TC-014) or two `register_tool` calls
+/// for one name - survives and is still a real collision.
+#[must_use]
+pub fn merge_contributed_tools(
+    manifest: Vec<PluginToolDecl>,
+    registered: Vec<PluginToolDecl>,
+) -> Vec<PluginToolDecl> {
+    let declared: BTreeSet<String> = manifest.iter().map(|d| d.name.clone()).collect();
+    let mut merged = manifest;
+    merged.extend(
+        registered
+            .into_iter()
+            .filter(|d| !declared.contains(&d.name)),
+    );
+    merged
+}
+
+/// Merge a plugin's manifest-declared commands with the commands it registered
+/// at runtime through `ragent.register_command` (FR-004, FR-031).
+///
+/// Mirrors [`merge_contributed_tools`]: a manifest command paired with a
+/// `register_command` of the same name is one contribution (the manifest entry
+/// wins, matching the declared-first precedence the skills/agents/commands-dir
+/// merges use), and the runtime registration is tagged [`CommandSource::Inline`].
+/// A duplicate within either source is preserved and remains a collision.
+#[must_use]
+pub fn merge_contributed_commands(
+    manifest: Vec<PluginCommandDef>,
+    registered: Vec<PluginCommandDecl>,
+) -> Vec<PluginCommandDef> {
+    let declared: BTreeSet<String> = manifest.iter().map(|d| d.decl.name.clone()).collect();
+    let mut merged = manifest;
+    merged.extend(
+        registered
+            .into_iter()
+            .filter(|d| !declared.contains(&d.name))
+            .map(PluginCommandDef::inline),
+    );
+    merged
 }
 
 /// Map a plugin's `hooks` declarations into [`PluginHook`]s (FR-033 hooks

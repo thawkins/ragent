@@ -14,6 +14,18 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   marked `(missing)`), followed by a table of the individual servers discovered.
   The underlying scan is unchanged; it is now reported per location.
 
+- **`/plugins list` interactive panel** — `/plugins list [--verbose]` now opens a
+  `/mcp discover`-style overlay: the plugin table is pinned at the top (a fixed
+  column heading and separator above a scrollable block-cursor list) and the
+  capability blocks (contributions, unsupported capabilities, errors, totals
+  summary, and - with `--verbose` - telemetry) are listed at the end of the same
+  body. `Up`/`Down` (or `k`/`j`) and `Home`/`End` move the cursor, `Space` toggles
+  the highlighted plugin's enabled state (enable/disable, tinting an enabled row
+  yellow and reporting the outcome on a feedback line), and `Esc` closes. The
+  toggle key moved from `Enter` to `Space` in both `/plugins list` and
+  `/mcp discover`; `/plugins list --mcp` and the disabled-subsystem notice stay
+  text reports.
+
 ## Highlights (v1.0.132)
 
 - **Marketplace browsers and alphabetical catalogue ordering** — `/plugins codex`

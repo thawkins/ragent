@@ -470,6 +470,12 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // If the `/plugins list` dialog is active, route all keys there (FR-009).
+    if app.plugins_list.is_some() {
+        handle_plugins_list_key(app, key).await;
+        return None;
+    }
+
     // If the /loop setup dialog is active, route all keys there (T-014).
     if app.loop_setup.is_some() {
         crate::app::handle_loop_setup_key(app, key);
@@ -2667,7 +2673,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
 
 /// Handle key events when the MCP discover dialog is active.
 ///
-/// `Up`/`Down` (or `k`/`j`) move the block cursor, `Enter` toggles the
+/// `Up`/`Down` (or `k`/`j`) move the block cursor, `Space` toggles the
 /// highlighted server's enabled state, and `Esc` dismisses the dialog. The list
 /// scroll is re-clamped to keep the cursor visible at the next render.
 async fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
@@ -2707,7 +2713,7 @@ async fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
         }
 
         // Toggle the highlighted server's enabled state.
-        KeyCode::Enter => {
+        KeyCode::Char(' ') => {
             let Some(srv) = app
                 .mcp_discover
                 .as_ref()
@@ -2721,6 +2727,75 @@ async fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                 if let Some(row) = state.enabled.get_mut(state.selected) {
                     *row = enabled;
                 }
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key events when the `/plugins list` dialog is active (spec `plugins`
+/// FR-009).
+///
+/// `Up`/`Down` (or `k`/`j`) move the block cursor, `Home`/`End` jump to the first
+/// or last row, `Space` toggles the highlighted plugin's enabled state (mirroring
+/// the `/mcp discover` dialog), and `Esc` dismisses the dialog. The list scroll is
+/// re-clamped to keep the cursor visible at the next render. `Space` on a
+/// non-plugin body line (a capability block or the notice row) is a no-op: only
+/// the leading table rows carry a plugin id.
+async fn handle_plugins_list_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Dismiss on Escape
+        KeyCode::Esc => {
+            app.plugins_list = None;
+        }
+
+        // Move the block cursor up.
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(state) = app.plugins_list.as_mut() {
+                state.selected = state.selected.saturating_sub(1);
+            }
+        }
+
+        // Move the block cursor down.
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(state) = app.plugins_list.as_mut() {
+                let last = state.view.body.len().saturating_sub(1);
+                if state.selected < last {
+                    state.selected += 1;
+                }
+            }
+        }
+
+        KeyCode::Home => {
+            if let Some(state) = app.plugins_list.as_mut() {
+                state.selected = 0;
+            }
+        }
+
+        KeyCode::End => {
+            if let Some(state) = app.plugins_list.as_mut() {
+                state.selected = state.view.body.len().saturating_sub(1);
+            }
+        }
+
+        // Toggle the highlighted plugin's enabled state. The plugin table rows are
+        // the first `view.rows.len()` body lines, so a cursor on a trailing
+        // capability block has no row to toggle and is ignored.
+        KeyCode::Char(' ') => {
+            let Some((plugin_id, currently_enabled)) = app.plugins_list.as_ref().and_then(|s| {
+                s.view
+                    .rows
+                    .get(s.selected)
+                    .map(|row| (row.id.clone(), row.enabled))
+            }) else {
+                return;
+            };
+            let feedback = crate::app::toggle_plugin_enabled(app, &plugin_id, currently_enabled);
+            // `toggle_plugin_enabled` rebuilds the panel; set the feedback line on
+            // the fresh state so the next render shows the outcome.
+            if let Some(state) = app.plugins_list.as_mut() {
+                state.feedback = Some(feedback);
             }
         }
 

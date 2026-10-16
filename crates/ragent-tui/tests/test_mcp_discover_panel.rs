@@ -1,7 +1,7 @@
 //! `/mcp discover` panel tests.
 //!
 //! The dialog lists discovered MCP servers under a block cursor. `Up`/`Down`
-//! move the cursor (the list scrolls to keep it visible), `Enter` toggles the
+//! move the cursor (the list scrolls to keep it visible), `Space` toggles the
 //! highlighted server's enabled state in `ragent.json` + the global ledger, and
 //! `Esc` closes the dialog.
 //!
@@ -198,13 +198,13 @@ async fn mcp_discover_escape_closes_the_dialog() {
 }
 
 #[tokio::test]
-async fn mcp_discover_enter_enables_then_disables_the_highlighted_server() {
+async fn mcp_discover_space_enables_then_disables_the_highlighted_server() {
     let (_guard, _env, temp) = enter_project("{}");
     let mut app = support::make_app();
     app.mcp_discover = Some(dialog(vec![discovered("filesystem")]));
 
-    // First Enter adds the server to ragent.json and enables it.
-    press(&mut app, KeyCode::Enter).await;
+    // First Space adds the server to ragent.json and enables it.
+    press(&mut app, KeyCode::Char(' ')).await;
 
     let state = app.mcp_discover.as_ref().expect("dialog open");
     assert!(state.enabled[0], "the toggled row must read enabled");
@@ -229,8 +229,8 @@ async fn mcp_discover_enter_enables_then_disables_the_highlighted_server() {
         "the entry must be written enabled"
     );
 
-    // Second Enter disables it (persisted in the global ledger).
-    press(&mut app, KeyCode::Enter).await;
+    // Second Space disables it (persisted in the global ledger).
+    press(&mut app, KeyCode::Char(' ')).await;
     let state = app.mcp_discover.as_ref().expect("dialog open");
     assert!(!state.enabled[0], "the toggled row must read disabled");
     assert!(
@@ -249,14 +249,14 @@ async fn mcp_discover_enter_enables_then_disables_the_highlighted_server() {
 }
 
 #[tokio::test]
-async fn mcp_discover_enter_lifts_a_hard_disabled_override() {
+async fn mcp_discover_space_lifts_a_hard_disabled_override() {
     let (_guard, _env, temp) = enter_project(
         r#"{ "mcp": { "filesystem": { "type": "stdio", "command": "custom", "disabled": true } } }"#,
     );
     let mut app = support::make_app();
     app.mcp_discover = Some(dialog(vec![discovered("filesystem")]));
 
-    press(&mut app, KeyCode::Enter).await;
+    press(&mut app, KeyCode::Char(' ')).await;
 
     let state = app.mcp_discover.as_ref().expect("dialog open");
     assert!(state.enabled[0]);

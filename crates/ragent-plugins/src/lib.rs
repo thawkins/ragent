@@ -76,9 +76,10 @@ pub use commands::{
     run_marketplace_command, run_store_command, stores_check_requested,
 };
 pub use control::{
-    ControlArgError, ControlCommand, disable_error_report, disable_report,
-    disabled_subsystem_report, enable_error_report, enable_report, parse_control_command,
-    render_list, render_list_with_mcp_tools, run_control_command,
+    ControlArgError, ControlCommand, PluginListRow, PluginListView, build_list_view,
+    disable_error_report, disable_report, disabled_subsystem_report, enable_error_report,
+    enable_report, parse_control_command, render_list, render_list_with_mcp_tools,
+    run_control_command,
 };
 pub use descriptor::{
     CLAUDE_MANIFEST_FILE, CLAUDE_NESTED_MANIFEST, CODEX_MANIFEST_FILE, CODEX_MARKER_FIELD,
@@ -106,8 +107,9 @@ pub use manifest::{
     UNSUP_DESKTOP_MOUNTS, UNSUP_DESKTOP_WINDOW, UNSUP_EXEC, UNSUP_FS, UNSUP_HOOKS, UNSUP_LSP,
     UNSUP_MCP, UNSUP_SKILLS, V1_CAPABILITIES, VersionMismatch, check_api_version, derive_id,
     extract_agent_decls, extract_command_decls, extract_hooks, extract_mcp_servers,
-    extract_skill_dirs, parse_claude_manifest, parse_codex_manifest, parse_manifest,
-    parse_plugin_dir, read_plugin_hooks_file, scan_agent_dir, scan_command_dir, scan_skills_dir,
+    extract_skill_dirs, merge_contributed_commands, merge_contributed_tools, parse_claude_manifest,
+    parse_codex_manifest, parse_manifest, parse_plugin_dir, read_plugin_hooks_file, scan_agent_dir,
+    scan_command_dir, scan_skills_dir,
 };
 pub use remove::{RemoveError, RemoveOutcome, remove};
 pub use report::{add_error_report, add_report, remove_error_report, remove_report};
@@ -136,5 +138,5 @@ pub use store_provider::{ClaudeStoreProvider, CodexStoreProvider, StoreProvider,
 pub use store_seam::{
     FixtureStoreFetcher, NetworkStoreFetcher, StoreIndexFetcher, default_fetcher,
 };
-pub use surface::{ScratchSurface, run_plugin_subcommand, store_and_config};
+pub use surface::{ScratchSurface, run_plugin_list_view, run_plugin_subcommand, store_and_config};
 pub use tool_adapter::{PluginToolAdapter, dispatch_sandbox, plugin_tool_name};

@@ -169,6 +169,30 @@ fn list_shows_row_state_counts_summary_and_contributions() {
 }
 
 #[test]
+fn list_view_carries_per_row_identity_and_enabled_state() {
+    // FR-009: the structured view exposes one row identity per plugin table
+    // line so a browsing surface can toggle the highlighted plugin without
+    // re-parsing the rendered text.
+    let tree = TempTree::new("list-view-rows");
+    write_plugin(&tree, "codex-weather", "", ENTRY);
+    let manager =
+        ragent_plugins::PluginManager::new(tree.dirs(), ragent_config::PluginsConfig::default());
+
+    let view = ragent_plugins::build_list_view(&manager, false, &BTreeMap::new());
+    assert_eq!(view.rows.len(), 1, "one plugin row expected: {view:?}");
+    assert_eq!(view.rows[0].id, "codex-weather");
+    assert!(!view.rows[0].enabled, "a fresh plugin is disabled");
+
+    // Every row's id appears in the leading body lines (the table rows), so a
+    // surface can index the body by `rows` position.
+    assert!(
+        view.body[0].contains("codex-weather"),
+        "the first body line is the plugin table row: {:?}",
+        view.body
+    );
+}
+
+#[test]
 fn list_shows_skill_agent_and_hook_counts_and_details() {
     let tree = TempTree::new("list-contributions");
     // A Claude-dialect plugin contributing a skill, an agent profile, and hooks.

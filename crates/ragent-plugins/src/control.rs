@@ -194,6 +194,16 @@ struct Row {
 }
 
 impl Row {
+    /// Whether the plugin is currently enabled.
+    ///
+    /// `loaded` is a transient sub-state of enabled (the plugin is enabled and
+    /// running this session), so it folds into `enabled` exactly as the summary
+    /// line does; only `disabled` (and `errored` without an enable flag) reads
+    /// as not enabled.
+    fn is_enabled(&self) -> bool {
+        matches!(self.state, LifecycleState::Enabled | LifecycleState::Loaded)
+    }
+
     /// The total number of MCP tools this plugin's servers advertise.
     ///
     /// `None` when a declared server has no live count (the surface has no MCP
@@ -228,6 +238,68 @@ fn declared_server_name(server_id: &str) -> Option<&str> {
     server_id.rsplit_once('.').map(|(_, name)| name)
 }
 
+/// A structured `/plugins list` view: a pinned table plus the trailing blocks
+/// (contributions, unsupported capabilities, errors, summary, and - verbose -
+/// telemetry).
+///
+/// [`Self::header`] and [`Self::separator`] are the two fixed table lines a
+/// surface pins above the scrolling rows; [`Self::body`] is the scrollable
+/// content - the per-plugin table rows, then the trailing capability blocks that
+/// must stay listed at the end. [`Self::render`] rejoins them into the exact
+/// text the pre-panel surfaces printed.
+#[derive(Debug, Clone)]
+pub struct PluginListView {
+    /// The `From: /plugins list` attribution line.
+    pub attribution: String,
+    /// The pinned table header line, or `None` when no plugins were discovered
+    /// (the body then carries a single notice line and there is no table).
+    pub header: Option<String>,
+    /// The pinned table separator line. `Some` exactly when [`Self::header`] is.
+    pub separator: Option<String>,
+    /// The scrollable body: the table rows in discovery order, then the trailing
+    /// blocks.
+    pub body: Vec<String>,
+    /// One entry per leading body line that is a plugin table row, in the same
+    /// order as [`Self::body`]: the plugin id and its enabled flag. Empty when
+    /// no plugin was discovered (the body then carries a single notice line).
+    ///
+    /// A browsing surface uses this to map the highlighted body line to a
+    /// plugin so it can be toggled without re-parsing the rendered table; the
+    /// trailing capability blocks have no corresponding entry.
+    pub rows: Vec<PluginListRow>,
+}
+
+/// One plugin row identity in a [`PluginListView`] (spec `plugins` FR-009).
+///
+/// `enabled` folds the transient `loaded` state into `enabled`, matching the
+/// summary line: a plugin is either enabled (possibly loaded this session) or
+/// disabled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginListRow {
+    /// The plugin id.
+    pub id: String,
+    /// Whether the plugin is currently enabled.
+    pub enabled: bool,
+}
+
+impl PluginListView {
+    /// Render the full text report: the attribution, a blank line, the pinned
+    /// header/separator when a table is present, then every body line.
+    ///
+    /// Byte-identical to the pre-panel `/plugins list` text output, so the CLI
+    /// and TUI text surfaces are unchanged.
+    #[must_use]
+    pub fn render(&self) -> String {
+        let mut lines: Vec<&str> = vec![self.attribution.as_str(), ""];
+        if let (Some(header), Some(separator)) = (&self.header, &self.separator) {
+            lines.push(header);
+            lines.push(separator);
+        }
+        lines.extend(self.body.iter().map(String::as_str));
+        lines.join("\n")
+    }
+}
+
 /// Render the `/plugins list` table (FR-009). Discovery parses manifests only
 /// and executes no plugin code (FR-023); `verbose` appends per-plugin telemetry
 /// counters (FR-022).
@@ -254,9 +326,35 @@ pub fn render_list_with_mcp_tools(
     verbose: bool,
     mcp_tool_counts: &BTreeMap<String, usize>,
 ) -> String {
+    build_list_view(manager, verbose, mcp_tool_counts).render()
+}
+
+/// Build the structured `/plugins list` view: the pinned table header/separator
+/// plus the scrollable body (table rows, then the trailing contributions,
+/// unsupported-capability, error, summary, and telemetry blocks).
+///
+/// The trailing capability blocks stay in [`PluginListView::body`] after the table
+/// rows, so a panel that scrolls the body still lists every plugin's capabilities
+/// at the end. [`render_list_with_mcp_tools`] rejoins the parts into the same text
+/// the pre-panel surfaces printed.
+#[must_use]
+pub fn build_list_view(
+    manager: &PluginManager,
+    verbose: bool,
+    mcp_tool_counts: &BTreeMap<String, usize>,
+) -> PluginListView {
+    let mut view = PluginListView {
+        attribution: attribution("list"),
+        header: None,
+        separator: None,
+        body: Vec::new(),
+        rows: Vec::new(),
+    };
+
     let scanned = manager.discover();
     if scanned.is_empty() {
-        return format!("{}\n\nNo plugins discovered.", attribution("list"));
+        view.body.push("No plugins discovered.".to_string());
+        return view;
     }
 
     let rows: Vec<Row> = scanned
@@ -264,12 +362,17 @@ pub fn render_list_with_mcp_tools(
         .map(|p| row_for(p, manager, mcp_tool_counts))
         .collect();
 
-    let mut lines = vec![attribution("list"), String::new()];
-    lines.push(table_header());
-    lines.push(table_separator());
+    view.header = Some(table_header());
+    view.separator = Some(table_separator());
     for row in &rows {
-        lines.push(table_row(row));
+        view.rows.push(PluginListRow {
+            id: row.id.clone(),
+            enabled: row.is_enabled(),
+        });
+        view.body.push(table_row(row));
     }
+
+    let mut lines: Vec<String> = Vec::new();
 
     let with_contributions: Vec<&Row> = rows
         .iter()
@@ -365,7 +468,8 @@ pub fn render_list_with_mcp_tools(
         }
     }
 
-    lines.join("\n")
+    view.body.extend(lines);
+    view
 }
 
 /// Build the display row for one discovered plugin.

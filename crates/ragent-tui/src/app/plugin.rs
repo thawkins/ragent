@@ -104,6 +104,20 @@ pub(super) fn handle_plugins_command(app: &mut crate::app::App, args: &str) -> O
     if sub == "list" && parses_mcp_flag(rest) {
         return Some(render_mcp_tool_report(app));
     }
+    // `/plugins list [--verbose]` opens the interactive panel (FR-009): the plugin
+    // table pinned at the top and the capability blocks listed at the end of the
+    // same scrollable body. The disabled-subsystem notice has no table to browse,
+    // so it stays a text report (the master-switch guard above renders it).
+    if sub == "list" && store_and_config(&workdir).1.is_enabled() {
+        let verbose = rest
+            .split_whitespace()
+            .any(|token| token == "--verbose" || token == "-v");
+        let counts = live_mcp_tool_counts(app);
+        app.plugins_list = Some(crate::app::state::plugins_list_state(
+            &workdir, verbose, &counts,
+        ));
+        return None;
+    }
     // Seed the collision surface (FR-024) from the live session: built-in tool
     // names plus the `SLASH_COMMANDS` triggers, then run the shared dispatch
     // ladder (store / test / control). The control subcommands drive an ephemeral
@@ -222,4 +236,90 @@ fn parse_store_launch(rest: &str) -> (String, CategoryFilter, bool) {
         }
     }
     (query_tokens.join(" "), category, refresh)
+}
+
+/// Toggle one plugin's enabled state from the `/plugins list` panel (spec
+/// `plugins` FR-009, FR-011, FR-012).
+///
+/// `plugin_id` is the plugin to toggle and `currently_enabled` its state as the
+/// panel last rendered it: `true` disables, `false` enables, mirroring the
+/// `/mcp discover` dialog's `Space` toggle. The change is persisted through the
+/// shared control path ([`ragent_plugins::run_plugin_subcommand`] with
+/// `enable`/`disable`) and the panel is rebuilt so the state column and the
+/// contributions block reflect the new state, with the cursor kept on the
+/// toggled row. An enable/disable also changes the plugin-contributed slash
+/// commands, so the session command surface is re-resolved.
+///
+/// Returns an `[ok]`/`[x]`-prefixed feedback line for the panel's feedback row.
+#[must_use]
+pub(crate) fn toggle_plugin_enabled(
+    app: &mut crate::app::App,
+    plugin_id: &str,
+    currently_enabled: bool,
+) -> String {
+    let workdir = current_working_dir();
+    if !store_and_config(&workdir).1.is_enabled() {
+        return "[x] plugin subsystem is disabled (plugins.enabled = false)".to_string();
+    }
+
+    let sub = if currently_enabled {
+        "disable"
+    } else {
+        "enable"
+    };
+    let report = run_plugin_subcommand(
+        &workdir,
+        sub,
+        plugin_id,
+        app.session_processor
+            .tool_registry
+            .list()
+            .into_iter()
+            .collect(),
+        crate::app::state::SLASH_COMMANDS
+            .iter()
+            .map(|c| c.trigger.to_string())
+            .collect(),
+        &live_mcp_tool_counts(app),
+    )
+    .unwrap_or_else(|| render_help(sub));
+    let ok = !report.contains("[err]");
+
+    // A live enable/disable changes the plugin-contributed slash commands; the
+    // session command surface must adopt the new set so the `/` menu and help
+    // stay in step with the store.
+    if ok {
+        app.plugin_commands = crate::app::state::plugin_commands_for_surface(&app.cwd_path);
+    }
+
+    // Rebuild the panel from the persisted state, keeping the cursor where it
+    // was so a toggle does not scroll the list.
+    let verbose = app.plugins_list.as_ref().is_some_and(|s| s.verbose);
+    let selected = app.plugins_list.as_ref().map_or(0, |s| s.selected);
+    let counts = live_mcp_tool_counts(app);
+    if let Some(state) = app.plugins_list.as_mut() {
+        *state = crate::app::state::plugins_list_state(&workdir, verbose, &counts);
+        let last = state.view.body.len().saturating_sub(1);
+        state.selected = selected.min(last);
+    }
+
+    if ok {
+        format!(
+            "[ok] '{plugin_id}' {}",
+            if currently_enabled {
+                "disabled"
+            } else {
+                "enabled"
+            }
+        )
+    } else {
+        format!(
+            "[x] could not {} '{plugin_id}'",
+            if currently_enabled {
+                "disable"
+            } else {
+                "enable"
+            }
+        )
+    }
 }

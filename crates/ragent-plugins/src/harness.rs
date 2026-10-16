@@ -25,14 +25,15 @@
 //! [`PluginManager`](crate::lifecycle::PluginManager), so it cannot observe or
 //! mutate anything the live session loaded.
 
-use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use crate::error::PluginError;
 use crate::help::attribution;
 use crate::host_api::{HostApiInstall, HostCalls, PluginMessage};
 use crate::lifecycle::scan_id;
-use crate::manifest::{HOST_API_VERSION, ParsedManifest, PluginToolDecl, check_api_version};
+use crate::manifest::{
+    HOST_API_VERSION, ParsedManifest, check_api_version, merge_contributed_tools,
+};
 use crate::runtime::{RuntimePool, SandboxBudget, SandboxContext};
 use crate::store::{StoreDirs, scan_dirs};
 use crate::tool_adapter::dispatch_sandbox;
@@ -191,9 +192,9 @@ pub fn test_plugin(
     ));
 
     // One sample invocation per contributed tool (manifest + register_tool),
-    // deduplicated by name so a manifest-declared tool that also registers a
-    // handler is not invoked twice.
-    for decl in contributed_tools(parsed.tools.clone(), calls.tools()) {
+    // merged so a manifest-declared tool that also registers a handler is not
+    // invoked twice (shared with the lifecycle load path).
+    for decl in merge_contributed_tools(parsed.tools.clone(), calls.tools()) {
         let args = sample_for_schema(&decl.parameters);
         let started = Instant::now();
         let (outcome, detail) = match dispatch_sandbox(&context, plugin_id, &decl.name, &args) {
@@ -245,20 +246,6 @@ fn run_entry(
         .eval(&source)
         .map_err(|e| format!("entry: {}", cause_of(&e)))?;
     Ok(Some(context))
-}
-
-/// Merge manifest-declared and `register_tool`-declared tools, keeping the
-/// first occurrence of each name.
-fn contributed_tools(
-    manifest: Vec<PluginToolDecl>,
-    registered: Vec<PluginToolDecl>,
-) -> Vec<PluginToolDecl> {
-    let mut seen = BTreeSet::new();
-    manifest
-        .into_iter()
-        .chain(registered)
-        .filter(|decl| seen.insert(decl.name.clone()))
-        .collect()
 }
 
 /// Render a [`HarnessReport`] as the `/plugins test` message body (FR-013): one

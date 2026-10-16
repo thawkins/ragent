@@ -1,5 +1,96 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.136] - 2026-10-16
+
+`/plugins list` gains an interactive panel, modelled on the `/mcp discover`
+dialog: the plugin table is pinned at the top (a fixed column heading and
+separator above a scrollable list under a block cursor) and the capability
+blocks (contributions, unsupported capabilities, errors, summary, and - verbose -
+telemetry) are listed at the end of the same scrollable body. `Space` toggles the
+highlighted plugin's enabled state, matching the `/mcp discover` dialog's toggle.
+
+### Added
+
+- **Interactive `/plugins list` panel (spec `plugins` FR-009, FR-030).** `Up`/`Down`
+  (or `k`/`j`), `Home`/`End`, and `Esc` operate a block-cursor list; the pinned
+  column heading and separator never scroll, and a scrollbar appears when the
+  body overflows. `Space` toggles the highlighted plugin's enabled state
+  (`enable`/`disable`) through the shared control path, persists the choice, tints
+  an enabled plugin's row yellow, and reports the outcome on a feedback line; it
+  re-resolves the session's plugin-contributed slash commands. The panel resolves
+  the live MCP tool counts exactly as the text report did, so the `MCP` / `MCP
+  Tools` columns stay accurate. `/plugins list --mcp` (the MCP tool inventory) and
+  the disabled-subsystem notice stay as text reports, since neither has a table to
+  browse.
+
+### Changed
+
+- **Toggle keybinding in the `/plugins list` and `/mcp discover` panels is now
+  `Space`, not `Enter`.** Both panes moved the enable/disable toggle from `Enter`
+  to `Space`, leaving `Enter` free of the accidental-toggle risk; the panel hint
+  line reads `Up/Down move  Space toggle  Esc close`.
+
+- **One discovery path for the panel and the CLI.** `ragent_plugins::control` gains
+  `build_list_view` / `PluginListView` (the pinned header, separator, and
+  scrollable body, plus a per-row plugin-id/enabled list for the toggle) and
+  `PluginListRow`, and `ragent_plugins::surface` gains `run_plugin_list_view`;
+  `render_list_with_mcp_tools` is now `build_list_view(...).render()`, so the new
+  panel and the `ragent plugins list` CLI text cannot disagree.
+
+### Fixed
+
+- **A plugin that declares a tool in its manifest and registers a handler for
+  the same tool at runtime no longer fails to load (spec `plugins` FR-005).**
+  `load_inner` concatenated the manifest `tools[]` with the runtime
+  `register_tool` declarations, so the namespaced name (`plugin_<id>_<tool>`)
+  appeared twice and `register_plugin_tools` rejected the pair as a spurious
+  `name-collision`. Manifest and runtime tools/commands are now merged by name
+  (`manifest::merge_contributed_tools` / `merge_contributed_commands`, shared
+  with the `/plugins test` harness): a manifest entry paired with a runtime
+  registration of the same name collapses to one contribution, while a genuine
+  duplicate within either source - a repeated manifest declaration
+  (the `collider` fixture, TC-014) or two `register_tool` calls for one name -
+  is preserved and still collides.
+
+### Commits (last 10)
+
+- **`31c6dea3` - Version: 1.0.135.** Security-hardening release closing the
+  critical/high band of the `docs/reports/security-audit.md` run; detailed in
+  `[1.0.135]` below.
+- **`827e8754` - Version: 1.0.134.** MCP-discovery ergonomics, the `ask_user`
+  default/fallback timeout, and the value-level redaction sweeps (the MCP
+  enable-ledger atomic write, the `XDG_CONFIG_HOME`-keyed load cache, the
+  session-cwd allowed-root fix, and nested-manifest whole-repo plugin sources);
+  see `[1.0.134]`.
+- **`0b5f9164` - Version: 1.0.133.** Plugin-store browse-panel refinements (the
+  reversed-video navigator headers, `catnav` FR-004) and the `git+<url>#<ref>`
+  install fix (the staged fetch HEAD is now checked out without a path
+  separator, spec `plugins` FR-024); see `[1.0.133]`.
+- **`5995283a` - Version: 1.0.132.** Merged connector/plugin marketplace browsers
+  and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050,
+  `connectors` FR-042..FR-046; `catnav` FR-021 withdrawn); see `[1.0.132]`.
+- **`1e08279f` - Version: 1.0.131 ("backends support").** Release of the
+  OpenHands-parity delta: pluggable execution backends, the LLM security analyzer,
+  the OpenAI-compatible inbound surface and generated OpenAPI 3.1 contract with
+  HTTP MCP transport, the feature-gated ACP server, the automation service, and
+  AgentSkills discovery; see `[1.0.131]`.
+- **`2ed21e3d` - Version: 1.0.130.** The stable-toolchain fix for the `/events`
+  SSE connection cap (`AtomicUsize::try_update` replaced with a
+  `compare_exchange_weak` loop); folded into the `[1.0.131]` release notes.
+- **`e617bcef` - plugin-store category navigator; remove browser tool.** The
+  `/plugins codex` / `/plugins claude` category navigator plus the new
+  `/plugins codex|claude|stores` subcommands, and removal of the `browser` CDP
+  tool and its `ragent-tools-extended::browser` stack, `BrowserConfig`, the
+  `tool_visibility.browser` switch, and `tokio-tungstenite` (registered count
+  152 -> 151 across 22 categories).
+- **`054e5154` - Version: 1.0.129.** Release of the completed M5-M9 code-audit
+  remediation and the M1 secret hardening; see `[1.0.129]`.
+- **`f87e2d95` - Version: 1.0.128.** MCP startup fix; see `[1.0.128]`.
+- **`87024938` - Version: 1.0.127.** "strip unnecessary tools" and the new
+  `TOOLREP.md`; see `[1.0.127]`.
+
 ## [1.0.135] - 2026-10-15
 
 A security-hardening pass that closes the critical/high findings of the

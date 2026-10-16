@@ -127,7 +127,7 @@ from the session's MCP client.
 `/mcp discover` produces no transcript output; it opens an interactive
 dialog fed by `McpClient::discover()`. The dialog lists every discovered server
 under a block cursor: `Up`/`Down` (or `k`/`j`, `Home`/`End`) move the cursor and
-the list scrolls (with a scrollbar) to keep it visible, `Enter` toggles the
+the list scrolls (with a scrollbar) to keep it visible, `Space` toggles the
 highlighted server's enabled state, and `Esc` closes the dialog. Each row carries
 an `[x]`/`[ ]` enabled marker. Toggling a server on adds a `mcp.<id>` entry to
 the project `.ragent/ragent.json` when one is missing (or lifts a

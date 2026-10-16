@@ -1,28 +1,33 @@
 # Project Statistics
 
-**Version:** 1.0.135
+**Version:** 1.0.136
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.135 tree (the
-> security-hardening pass that closed the `docs/reports/security-audit.md`
-> critical/high fix set - `merge_project` dropping project `mcp`/`acp`/provider
-> `api`, the symlink guards, the bounded-HTTP read caps, the verified updater,
-> the `http_request` header allowlist - plus the `ragent --version` flag and the
-> shared-helper de-duplication in `ragent-types`/`ragent-surface`), on top of the
-> v1.0.134 MCP-discovery ergonomics, the `ask_user` default/fallback option, and
-> the `/simplify all` cleanup.
+> Metrics below are measured against the v1.0.136 tree (the interactive
+> `/plugins list` panel - `ragent-plugins` `PluginListView` / `build_list_view`
+> and the `ragent-tui` renderer/key handler - plus the manifest/runtime tool
+> merge fix `merge_contributed_tools` / `merge_contributed_commands`, a new
+> `ragent-plugins` unit-test file and a new `ragent-tui` panel-test file), on top
+> of the v1.0.135 security-hardening pass that closed the
+> `docs/reports/security-audit.md` critical/high fix set - `merge_project`
+> dropping project `mcp`/`acp`/provider `api`, the symlink guards, the
+> bounded-HTTP read caps, the verified updater, the `http_request` header
+> allowlist - plus the `ragent --version` flag and the shared-helper
+> de-duplication in `ragent-types`/`ragent-surface` - on top of the v1.0.134
+> MCP-discovery ergonomics, the `ask_user` default/fallback option, and the
+> `/simplify all` cleanup.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 575,799 (569,320 in `crates/` + 6,479 in root `src/`/`tests/`) |
-| Total Rust files | 1,552 (1,534 workspace crates + 18 root `src/`/`tests/`) |
-| Tests defined | ~10,713 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
-| Test files | 877 external (871 workspace crates + 6 root `tests/`) + `#[cfg(test)]`-bearing sources |
-| Test binaries | ~896 (877 integration test files + 18 lib/bin targets + 1 root bin) |
+| Total Rust lines | 577,037 (570,558 in `crates/` + 6,479 in root `src/`/`tests/`) |
+| Total Rust files | 1,554 (1,536 workspace crates + 18 root `src/`/`tests/`) |
+| Tests defined | ~10,725 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`) |
+| Test files | 882 external (873 workspace crates + 9 root `tests/`) + `#[cfg(test)]`-bearing sources |
+| Test binaries | ~901 (882 integration test files + 18 lib/bin targets + 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 151 (`browser` removed in v1.0.130; `mf_screenshot` engine-gated) |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
@@ -30,7 +35,7 @@
 | Specs on disk | 57 directories in `specs/` |
 | Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 83 slash-command docs |
 | Authors | 1 |
-| Version | 1.0.135 |
+| Version | 1.0.136 |
 
 ---
 
@@ -48,7 +53,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-config` | 60 | 15,227 | 37 |
 | `ragent-connectors` | 44 | 19,235 | 21 |
 | `ragent-llm` | 76 | 24,862 | 41 |
-| `ragent-plugins` | 63 | 23,046 | 36 |
+| `ragent-plugins` | 64 | 23,398 | 37 |
 | `ragent-research` | 159 | 61,499 | 93 |
 | `ragent-server` | 22 | 9,950 | 13 |
 | `ragent-specs` | 37 | 20,468 | 24 |
@@ -58,7 +63,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-core` | 66 | 19,345 | 29 |
 | `ragent-tools-extended` | 159 | 60,473 | 82 |
 | `ragent-tools-vcs` | 67 | 16,110 | 26 |
-| `ragent-tui` | 230 | 120,463 | 172 |
+| `ragent-tui` | 231 | 121,349 | 173 |
 | `ragent-types` | 51 | 11,117 | 28 |
 
 ---
@@ -66,13 +71,13 @@ shows the file count, line count, and test-file count for each crate (including
 ## Crate Size Distribution
 
 ```
-ragent-tui            ############# 120,463 lines (21.2%)
-ragent-agent          ########## 106,715 lines (18.8%)
+ragent-tui            ############# 121,349 lines (21.3%)
+ragent-agent          ########## 106,715 lines (18.7%)
 ragent-research       ####### 61,499 lines (10.8%)
 ragent-tools-extended ####### 60,473 lines (10.6%)
 ragent-llm            ### 24,862 lines (4.4%)
 ragent-codeindex      ### 24,256 lines (4.3%)
-ragent-plugins        ## 23,046 lines (4.0%)
+ragent-plugins        ## 23,398 lines (4.1%)
 ragent-specs          ## 20,468 lines (3.6%)
 ragent-tools-core     ## 19,345 lines (3.4%)
 ragent-connectors     ## 19,235 lines (3.4%)
@@ -128,7 +133,7 @@ test/bench/example sources excluded). Reproduce with:
 cargo llvm-cov --workspace --summary-only --ignore-filename-regex '(^|/)(tests|benches|examples)/|target/'
 ```
 
-The full workspace measurement (v1.0.135 tree, 2026-10-15) reported:
+The full workspace measurement (v1.0.136 tree, 2026-10-16) reported:
 
 **Workspace line coverage: 69.8%** (158,446 instrumented lines, 110,596
 executed, 47,850 missed). Function coverage is 69.4% (15,704 functions, 4,807
@@ -189,8 +194,9 @@ Notes:
 
 ---
 
-_Generated 2026-10-15 (v1.0.135 tree - the `docs/reports/security-audit.md`
-critical/high fix set:
+_Generated 2026-10-16 (v1.0.136 tree - the interactive `/plugins list` panel and
+the manifest/runtime tool merge fix, on top of the v1.0.135
+`docs/reports/security-audit.md` critical/high fix set:
 `Config::merge_project` now drops a project overlay's `mcp`, `acp`, and provider
 `api` blocks (SEC-001/002/005), the new `ragent_types::guard`
 `reject_symlink_components`/`reject_symlink_escape`/`open_owner_only` guards close

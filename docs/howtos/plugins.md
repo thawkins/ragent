@@ -342,7 +342,12 @@ reported, never silently dropped**. The stable labels surfaced by
 Registered tool names are namespaced **`plugin_<pluginid>_<toolname>`**, so a
 plugin tool never collides with a built-in by construction; a *duplicate
 declaration within one plugin* or a *command that collides with a built-in
-slash trigger* is a genuine collision and is rejected.
+slash trigger* is a genuine collision and is rejected. A tool declared in the
+manifest **and** registered at runtime under the same name is **one**
+contribution, not a collision: the manifest entry supplies the name,
+description, and JSON schema, and the `register_tool` call supplies the
+handler. Likewise a manifest `commands[]` entry paired with a `register_command`
+of the same name is one command (the manifest entry wins).
 
 ### 4.6 Plugin id derivation
 
@@ -513,7 +518,7 @@ one set of handlers:
 ### 7.1 Subcommands
 
 ```
-/plugins list [--verbose]        # list discovered plugins
+/plugins list [--verbose]        # open the interactive plugin panel
 /plugins add <source> [--force]  # install a plugin (enabled on install)
 /plugins remove <pluginid>       # uninstall (refused while enabled)
 /plugins enable <pluginid>       # enable, load, register tools/commands
@@ -524,7 +529,7 @@ one set of handlers:
 
 | Form | Description |
 | --- | --- |
-| `list [--verbose]` | One row per discovered plugin: id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), tool and command counts, plus a totals summary. `--verbose` (alias `-v`) appends per-plugin telemetry counters. |
+| `list [--verbose]` | Open the interactive plugin panel. The table is pinned at the top - a fixed column heading and separator above a scrollable block-cursor list - and the capability blocks (contributions, unsupported capabilities, errors, and a totals summary) are listed at the end of the same scrollable body. Each row shows id, name, version, dialect, state (`disabled`/`enabled`/`loaded`/`errored`), the contributed tool/command/skill/agent/hook counts, and the `MCP` server / `MCP Tools` tool counts; an enabled plugin's row is tinted yellow. `Up`/`Down` (or `k`/`j`) move the cursor, `Home`/`End` jump to the ends, `Space` toggles the highlighted plugin's enabled state (enable/disable, reporting the outcome on a feedback line), and `Esc` closes. `--verbose` (alias `-v`) appends the per-plugin telemetry block. The panel and the `ragent plugins list` CLI text share one discovery path, so the two cannot disagree. |
 | `add <source> [--force]` | Install and validate a plugin; reports id and dialect. Recorded **enabled**, so it loads at the next session start. Refuses a duplicate id unless `--force`. |
 | `remove <pluginid>` | Uninstall from the store. **Refused while the plugin is enabled.** |
 | `enable <pluginid>` | Mark enabled, load into the current session, register tools and commands. States the declared permissions and the outcome. |

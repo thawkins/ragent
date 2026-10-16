@@ -224,7 +224,7 @@ with no `ragent.json` edit. Two file shapes are accepted, both requiring a
 scanned after the ragent-native location.
 
 In the dialog, move the block cursor with `Up`/`Down` (or `k`/`j`; `Home`/`End`
-jump to the ends) and press `Enter` to toggle the highlighted server's enabled
+jump to the ends) and press `Space` to toggle the highlighted server's enabled
 state; `Esc` dismisses it and the list scrolls with a scrollbar when there are
 more servers than fit. Enabling a server **writes a new `mcp.<id>` entry into
 `.ragent/ragent.json`** (in the current project) with the discovered command,
