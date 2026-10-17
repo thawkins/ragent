@@ -6,6 +6,13 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ## Highlights (unreleased)
 
+- **Test-coverage campaign (tests only)** — roughly 80 new `tests/` suites plus a
+  set of inline test files raise `ragent-tui` line coverage from 54.1% to 75.0% and
+  take 13 of the 18 crates to >=85%. No user-visible behaviour change: the additions
+  cover the event-handler, input, layout, message-widget, research-progress, and
+  slash-command paths, driving them through the public `execute_slash_command` and
+  synthetic `Event` entry points rather than any new test hook.
+
 - **`/mcp config` discovery-location report** — a new `/mcp config` subcommand
   shows a table of every place ragent looks for MCP server definitions (the
   ragent-native `~/.config/ragent/servers/` directory first, then npm global

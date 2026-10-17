@@ -20,7 +20,7 @@ pub(crate) const NOT_CONFIGURED: &str = "GitLab not configured. Run /gitlab setu
 /// # Errors
 ///
 /// Returns an error when storage is unavailable or GitLab is not configured.
-pub(crate) fn make_client(ctx: &ToolContext) -> Result<GitLabClient> {
+pub fn make_client(ctx: &ToolContext) -> Result<GitLabClient> {
     let storage = ctx
         .storage
         .as_deref()
@@ -33,7 +33,7 @@ pub(crate) fn make_client(ctx: &ToolContext) -> Result<GitLabClient> {
 /// # Errors
 ///
 /// Returns an error when no GitLab remote is detected.
-pub(crate) fn detect_project(ctx: &ToolContext) -> Result<String> {
+pub fn detect_project(ctx: &ToolContext) -> Result<String> {
     GitLabClient::detect_project(&ctx.working_dir).ok_or_else(|| {
         anyhow::anyhow!(
             "Could not detect GitLab project from git remote. \
@@ -48,7 +48,7 @@ pub(crate) fn detect_project(ctx: &ToolContext) -> Result<String> {
 ///
 /// Returns an error when the client cannot be built or the project is
 /// undetected.
-pub(crate) fn detect(ctx: &ToolContext) -> Result<(GitLabClient, String)> {
+pub fn detect(ctx: &ToolContext) -> Result<(GitLabClient, String)> {
     let client = make_client(ctx)?;
     let project = detect_project(ctx)?;
     Ok((client, project))

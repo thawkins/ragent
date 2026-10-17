@@ -416,7 +416,7 @@ fn acp_overlay_is_stripped_from_the_project_leg() {
     // The base entry is unchanged; the overlay's override did not apply.
     assert_eq!(alpha.command, "base-alpha");
     assert!(
-        merged.acp.as_ref().unwrap().agents.get("beta").is_none(),
+        !merged.acp.as_ref().unwrap().agents.contains_key("beta"),
         "the project overlay's new agent must not be added"
     );
     assert_eq!(

@@ -128,3 +128,115 @@ fn test_binary_thinking_support_heuristics() {
     assert!(!model_supports_binary_thinking("mistral:7b"));
     assert!(!model_supports_binary_thinking("codellama:latest"));
 }
+
+// ---------------------------------------------------------------------------
+// Legacy thinking-option parsing (covers parse_legacy_thinking_option arms)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_legacy_thinking_option_disabled_aliases() {
+    for raw in ["disabled", "off", "none", "  DISABLED  "] {
+        let mut request = make_request();
+        request.options.insert("thinking".to_string(), json!(raw));
+        let config = parse_legacy_thinking_option(&request.options).expect("config");
+        assert!(!config.is_effective_enabled(), "{raw} should disable");
+    }
+}
+
+#[test]
+fn test_legacy_thinking_option_auto_with_budget() {
+    let mut request = make_request();
+    request
+        .options
+        .insert("thinking".to_string(), json!("adaptive"));
+    request
+        .options
+        .insert("thinking_budget_tokens".to_string(), json!(4096));
+    let config = parse_legacy_thinking_option(&request.options).expect("config");
+    assert!(config.is_effective_enabled());
+    assert_eq!(config.level, ThinkingLevel::Auto);
+    assert_eq!(config.budget_tokens, Some(4096));
+
+    // Non-u64 budget is ignored.
+    let mut request = make_request();
+    request
+        .options
+        .insert("thinking".to_string(), json!("auto"));
+    request
+        .options
+        .insert("thinking_budget_tokens".to_string(), json!("lots"));
+    let config = parse_legacy_thinking_option(&request.options).expect("config");
+    assert!(config.budget_tokens.is_none());
+}
+
+#[test]
+fn test_legacy_thinking_option_level_names() {
+    for (raw, level) in [
+        ("low", ThinkingLevel::Low),
+        ("medium", ThinkingLevel::Medium),
+        ("high", ThinkingLevel::High),
+    ] {
+        let mut request = make_request();
+        request.options.insert("thinking".to_string(), json!(raw));
+        let config = parse_legacy_thinking_option(&request.options).expect("config");
+        assert_eq!(config.level, level);
+    }
+    // Unknown value -> None.
+    let mut request = make_request();
+    request
+        .options
+        .insert("thinking".to_string(), json!("nonsense"));
+    assert!(parse_legacy_thinking_option(&request.options).is_none());
+}
+
+#[test]
+fn test_reasoning_effort_from_legacy_level_options() {
+    let mut request = make_request();
+    request
+        .options
+        .insert("thinking".to_string(), json!("medium"));
+    assert_eq!(reasoning_effort_from_request(&request), Some("medium"));
+}
+
+#[test]
+fn test_reasoning_levels_from_supported_efforts_empty_and_subset() {
+    assert_eq!(reasoning_levels_from_supported_efforts(None).len(), 0);
+    assert_eq!(reasoning_levels_from_supported_efforts(Some(&[])).len(), 0);
+    let efforts = vec!["low".to_string(), "unknown".to_string()];
+    assert_eq!(
+        reasoning_levels_from_supported_efforts(Some(&efforts)),
+        vec![ThinkingLevel::Auto, ThinkingLevel::Low],
+    );
+}
+
+#[test]
+fn test_gemini_thinking_config_include_thoughts_only() {
+    let mut request = make_request();
+    request
+        .options
+        .insert("include_thoughts".to_string(), json!(true));
+    assert_eq!(
+        gemini_thinking_config_from_request(&request),
+        Some(json!({ "includeThoughts": true }))
+    );
+}
+
+#[test]
+fn test_gemini_thinking_config_disabled_is_minimal() {
+    let mut request = make_request();
+    request.thinking = Some(ThinkingConfig::off());
+    let value = gemini_thinking_config_from_request(&request).expect("config");
+    assert_eq!(value["thinkingLevel"], "minimal");
+    assert_eq!(value["includeThoughts"], false);
+}
+
+#[test]
+fn test_should_warn_unsupported_thinking_legacy_enabled() {
+    let mut request = make_request();
+    request
+        .options
+        .insert("thinking".to_string(), json!("high"));
+    assert!(should_warn_unsupported_thinking(&request));
+    let request = make_request();
+    assert!(!should_warn_unsupported_thinking(&request));
+}

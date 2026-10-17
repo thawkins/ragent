@@ -28,17 +28,24 @@ fn env_lock() -> MutexGuard<'static, ()> {
 }
 
 /// Restores `XDG_CONFIG_HOME` on drop.
+///
+/// `lock` is never read: it is held only to keep the process-wide env mutex
+/// locked for the guard's lifetime, so it is named `lock` (not `_lock`) and
+/// silenced with `#[allow(dead_code)]` under an explanatory comment rather than
+/// pretending it is intentionally unused.
 struct XdgGuard {
     prev: Option<std::ffi::OsString>,
-    _lock: MutexGuard<'static, ()>,
+    // Held for its Drop side effect (unlocking the env mutex); never read.
+    #[allow(dead_code)]
+    lock: MutexGuard<'static, ()>,
 }
 
 impl XdgGuard {
     fn set(dir: &Path) -> Self {
-        let _lock = env_lock();
+        let lock = env_lock();
         let prev = std::env::var_os("XDG_CONFIG_HOME");
         unsafe { std::env::set_var("XDG_CONFIG_HOME", dir) };
-        Self { prev, _lock }
+        Self { prev, lock }
     }
 }
 

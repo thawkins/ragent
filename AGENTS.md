@@ -65,7 +65,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ##### Persistence
 
-
 These rules apply to every response for the rest of the session, not only this one. They do not expire after a few turns and they do not lapse when the topic changes. If you are unsure whether they still apply, they do.
 
 Turn them off only when the reader says "stop adhd mode" or "normal mode". Confirm in one line, then return to your default style.
@@ -166,7 +165,6 @@ Any idiom or figurative phrase ("circle back," "get the ball rolling," "on the s
 Then verify: if the reader reads only the first line and the last line, do they know (a) what to do next, and (b) what just happened?
 
 If yes, send.
-
 
 ## Agent Acknowledgement
 
@@ -270,7 +268,7 @@ When reading files with the `read` tool:
   3. Then read specific sections using `start_line` + `num_lines`
   4. Never read an entire file >100 lines in a single call
 
-@AGENTS-RUST.md
+@AGENTS-LANGUAGE.md
 
 ## Units
 

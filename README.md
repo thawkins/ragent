@@ -2,6 +2,8 @@
 
 An AI coding agent for the terminal, built in Rust.
 
+![ragent terminal UI](assets/screens/ragent-tui.png)
+
 ragent is a Rust coding agent inspired by RooCode, Claude Code, Copilot CLI and
 OpenCode. It provides multi-provider LLM orchestration, a comprehensive built-in
 tool system, a terminal UI, and a client/server architecture — all compiled into a
@@ -9,14 +11,16 @@ single statically-linked binary with zero runtime dependencies.
 
 It is implemented in Rust as a learning exercise for the author.
 
-Read TUI-QUICKSTART for instructions on how to use the tool.
+Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
+[QUICKSTART.md](QUICKSTART.md) for the guided tour.
 
 ## Features
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
-  GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
-  Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, Microsoft Foundry Local,
-  OpenRouter, and a Model Router cluster out of the box, with an extensible provider trait for adding more
+- **Multi-provider LLM support** — Anthropic, OpenAI (Chat Completions and the
+  Responses API), Google Gemini, Hugging Face, GitHub Copilot, xAI, Ollama (local
+  and cloud), Generic OpenAI-compatible endpoints, Azure AI Foundry, Azure Resource
+  (File), Amazon Bedrock, OpenRouter, and a Model Router cluster — 15 registry
+  entries behind an extensible provider trait
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
@@ -36,72 +40,79 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   the action is permitted or refused; it is a tightening-only layer over the static
   rules (a `deny` is hard, an `allow` never overrides an explicit policy `deny`, and
   any analyzer failure degrades to the normal interactive prompt)
-- **Comprehensive tool system** — 148 registered tools across 21 categories
-  (the engine-gated `mf_screenshot` tool is registered only when a drivable
-  headless browser is present — spec `openhands` FR-029 — so the default build
-  advertises 148):
-  - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
-    mkdir, append, file_info, diff, glob, list
-  - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
-    banned commands, denied patterns, directory escape prevention, syntax validation,
-    obfuscation detection, and user allowlist/denylist)
+- **Comprehensive tool system** — **148 registered tools across 21 categories** in
+  the default build (the engine-gated `mf_screenshot` tool registers only when a
+  drivable headless browser is present, taking the count to 149 — spec `openhands`
+  FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
+  are:
+  - **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
+    move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`
+    alias, get_env, the PDF pair (`pdf_read`, `pdf_write`), the structured-memory
+    trio (`memory_store`, `memory_recall`, `memory_forget`), plus
+    `conversation_search` and `session_search`. Read-only tools require `file:read`;
+    mutating tools require `file:write`
+  - **Bash** (3) — bash, bash_reset and the `run_code` alias. Bash carries 7-layer
+    security: safe-command whitelist, banned commands, denied patterns,
+    directory-escape prevention, syntax validation, obfuscation detection, and user
+    allowlist/denylist
     - **Bang commands** — prefix any prompt with `!` (e.g. `! ls -la`) to run a
       shell command directly; the output is sent to the model for review and
       error resolution
-    - **Search** — grep
-    - **Web** — webfetch, websearch, http_request
-      - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
-        codeindex_dependencies, codeindex_status, codeindex_reindex, codeindex_explain,
-        codeindex_path, codeindex_communities, codeindex_godnodes (read-only,
-        hardwired always-allowed)
-      - **Memory** — memory_read, memory_write, memory_replace, memory_store,
-        memory_recall, memory_forget, memory_search, memory_migrate,
-        conversation_search, session_search
-      - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
-      - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
-        and repository management
-      - **PDF** — pdf_read, pdf_write
-      - **Sub-agents** — new_agent, cancel_agent, list_agents, wait_agents, agent_complete
-      - **Planning** — plan_enter, plan_exit
-      - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
-      - **Task Management** — task_create, task_update, task_get, task_list
-      - **Interactive** — question, think
-      - **Utility** — calculator, get_env, ragent_info (reports the running
-        version, build time, git commit, and compiler, plus the current
-        instance's pid, parent pid, start time, uptime, executable path,
-        working directory, user, resident/virtual memory, and thread count), os_info
-        (read-only host
-        report: OS identity and Linux distribution, CPU, graphics adapters and
-        graphics-API versions, physical hardware — system/chassis/motherboard/
-        BIOS identity plus storage devices and network interfaces — memory,
-        uptime, and process environment; also `/osinfo show`)
-      - **Code search & navigation** — codeindex_search, codeindex_symbols,
-      codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
-    - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
-      extraction, search, and crawling; `mf_search` runs DuckDuckGo, Brave,
-      OpenAlex (scholarly works), and Wikipedia (encyclopedia summaries) keyless
-      backends in parallel, plus optional LangSearch / Tavily / Perplexity /
-      Exa API-backed engines when configured
-  - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
-    slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
-    highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
-    a live permission countdown timer (120-second timeout with EXPIRED state), and a
-    message input queue (`Alt+Q` menu / `/queue`) that keeps the input field editable
-    while the agent executes
-  - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
-  - **Session management** — persistent conversation history stored in SQLite;
-    list, resume, export, and import sessions
-  - **Permission system** — multi-layered defense-in-depth with hardwired rules  (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
+  - **Shell** (1) — open (cross-platform file/URL reveal)
+  - **Web** (5) — webfetch, websearch, mf_fetch, mf_search, mf_crawl
+    (`mf_search` runs the keyless DuckDuckGo, Brave, OpenAlex and Wikipedia backends
+    in parallel, plus LangSearch / Tavily / Perplexity / Exa when configured)
+  - **Code intelligence** (10) — codeindex_search, codeindex_symbols,
+    codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex,
+    codeindex_explain, codeindex_path, codeindex_communities, codeindex_godnodes
+    (read-only, hardwired always-allowed)
+  - **Git** (18) — git_status, git_log, git_diff, git_branch, git_show, git_remote,
+    git_tag, git_add, git_reset, git_checkout, git_commit, git_stash, git_cherry_pick,
+    git_push, git_pull, git_fetch, git_clone, git_merge
+  - **GitHub** (11) and **GitLab** (19) — issues, PRs/MRs, pipelines, jobs, and CI/CD
+  - **Teams** (19) — the full team lifecycle, shared tasks, mailbox messaging, and
+    coordination surface
+  - **Agent** (4) — new_agent, cancel_agent, list_agents, wait_agents
+  - **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
+  - **Task** (4) — task_create, task_update, task_get, task_list
+  - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
+  - **Plan** (2) — plan_enter, plan_exit
+  - **None** (8) — calculator, think, agent_complete, ragent_info (running version,
+    build time, git commit, compiler, plus this instance's pid, uptime, memory and
+    thread count), os_info (read-only host report: OS identity and Linux
+    distribution, CPU, graphics adapters and graphics-API versions, physical
+    hardware, memory, uptime, and process environment; also `/osinfo show`),
+    tool_info and commands_info (registry and slash-command dumps)
+  - One each: **model** (model_info), **network** (http_request), **system**
+    (mf_version, mf_cache_clear), **skill** (skill_manage), **storage** (initiative),
+    **ask_user** (ask_user)
+  - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,
+    plus the dynamically registered per-server bridge tools
+- **Terminal UI** — full-screen ratatui interface with provider setup dialog,
+  slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
+  highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
+  a live permission countdown timer (120-second timeout with EXPIRED state), and a
+  message input queue (`Alt+Q` menu / `/queue`) that keeps the input field editable
+  while the agent executes; side panels for context (`Alt+C`), memory (`Alt+M`),
+  telemetry (`Alt+O`) and tasks (`Alt+T`)
+- **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
+- **Session management** — persistent conversation history stored in SQLite;
+  list, resume, export-archive, and import sessions
+- **Permission system** — multi-layered defense-in-depth with hardwired rules
+  (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
   security, file-path guards, and YOLO mode for trusted environments
-- **Agent presets** — general, coder, task, architect, ask, debug, code-review, and
-  orchestrator agents with tailored system prompts
+- **Agent presets** — `general`, `build`, `plan`, `explore`, `ask` and the internal
+  `title`/`summary` helpers, plus language and domain specialists (`rust-coder`,
+  `python-coder`, `typescript-coder`, `fastapi-agent`, `security-auditor`,
+  `test-writer`, `documenter`, `devops-agent`, `database-agent`, `frontend-agent`)
+  with tailored system prompts
 - **Custom agents** — user-defined agents via JSON (OASF format) or Markdown profiles
 - **Project guidelines** — auto-loads `AGENTS.md` from the project root (and
   `~/.local/share/ragent/`) into the system prompt so agents follow project-specific
   conventions
-- **MCP client** — Model Context Protocol support with auto-discovery of 9 known
-  server types, stdio client, and tool bridging; TUI commands (`/mcp` /
-  `/mcp status`, `/mcp config`, `/mcp discover`, `/mcp connect <id>`,
+- **MCP client** — Model Context Protocol support with auto-discovery of 18 known
+  server types, stdio and Streamable-HTTP clients, and tool bridging; TUI commands
+  (`/mcp` / `/mcp status`, `/mcp config`, `/mcp discover`, `/mcp connect <id>`,
   `/mcp disconnect <id>`) with durable global enable/disable state
   (`mcp_state.json`) and live connect/disconnect. `/mcp config` reports where
   ragent looks for MCP definitions (ragent-native, npm global, `PATH`, and the
@@ -130,39 +141,40 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Tool-repeat guard** — after five consecutive identical tool calls the sixth is
   held for confirmation in interactive runs and auto-denied in unattended runs, so
   agent loops cannot hang replaying the same call (FR-044)
-- **Code index** — automatic codebase indexing with tree-sitter parsing (15+ languages),
-    full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
-    tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
-    Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
-    language filtering via `/codeindex lang <language>`; **semantic code graph** with
-    `codeindex_godnodes` (top-N most-connected symbols), `codeindex_path` (shortest
-    path between symbols), `codeindex_explain` (node metadata and edges), and
-    `codeindex_communities` (community detection); graph built in the background
-    via `/codeindex graph build` (phased lock discipline keeps search available
-    during derivation; status-bar `idx`/`graph` busy indicators show progress)
+- **Code index** — automatic codebase indexing with tree-sitter parsing (14 grammars
+  covering 50 language ids), full-text search via Tantivy, incremental updates via
+  file watcher, and LLM-accessible tools; supports Rust, Python,
+  TypeScript/JavaScript, Go, C/C++, Java, Kotlin, OpenSCAD, Terraform, HCL, CMake,
+  Gradle (Groovy and KTS), Maven, and XML; enable/disable via `/codeindex on|off`,
+  language filtering via `/codeindex lang <language>`; **semantic code graph** with
+  `codeindex_godnodes` (top-N most-connected symbols), `codeindex_path` (shortest
+  path between symbols), `codeindex_explain` (node metadata and edges), and
+  `codeindex_communities` (community detection); graph built in the background
+  via `/codeindex graph build` (phased lock discipline keeps search available
+  during derivation; status-bar `idx`/`graph` busy indicators show progress)
 - **Memory system** — three-tier system with file blocks, structured SQLite store,
   and optional embedding-based semantic search; automatic extraction, decay,
   compression, and knowledge graph support
 - **Spec management** — `/spec` slash commands for creating, listing, searching,
   validating, and tracking specification lifecycles; `/spec jtbd` performs
   Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
-  `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` now
-  also emits a manual `TESTPLAN.md` test-plan artifact
-- **GitHub repo reverse-engineering** — `/spec reverse <owner/repo | URL>` fetches
-  a public repo's metadata, root file tree, and README via the GitHub API,
-  then asks the currently selected LLM model to generate a synthetic creation
-  prompt; the `/new` scaffold flags (`--language <lang> --type <type>
-  [--stack <name>]`) steer the prompt towards a target language, app type, and
-  framework stack, and with those flags `--folder <path>` scaffolds a real
-  project (default: the current directory) while `--github` / `--gitlab`
-  create a private remote and push it; `--create <name>` chains into
+  `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` also emits a
+  manual `TESTPLAN.md` test-plan artifact; `/spec govcreate` turns a system
+  architecture document (URL or local file/folder) into a project, and
+  `/spec reverse <owner/repo | URL>` fetches a public repo's metadata, root file
+  tree, and README via the GitHub API, then asks the currently selected LLM model to
+  generate a synthetic creation prompt. With the `/new` scaffold flags
+  (`--language <lang> --type <type> [--stack <name>]`) the reverse prompt is steered
+  towards a target language, app type, and framework stack, and `--folder <path>`
+  scaffolds a real project (default: the current directory) while `--github` /
+  `--gitlab` create a private remote and push it; `--create <name>` chains into
   `/spec create` to auto-generate a spec from the reverse-engineered prompt,
   written under the scaffolded project (`<folder>/specs/<name>/`) when
   `--folder` was used
 - **Project scaffolding** — `/new --language <lang> --type <type>` scaffolds a
   new project in an empty directory: the ragent workspace (`.ragent/`, `specs/`,
   `log/`, `.gitignore`, `AGENTS.md`), a runnable hello-world artifact set for
-  26 application languages (rust, python, go, typescript, shell, ...) with
+  26 application languages (rust, python, go, typescript, ...) with
   library/cmdline/tui/gui layouts (plus a webapp HTTP server for the five web
   languages) plus sample-document stubs for 20 data,
   markup, and build formats (json, yaml, sql, cmake, maven, ...) covering every
@@ -210,7 +222,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   (both `pre_tool_use` and Claude's `PreToolUse` spellings accepted; the
   `hooks.json` file and the group `{matcher, hooks: [...]}` shape are read, a
   plugin hook gets `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, and
-  a blocking Stop hook can feed findings back before the turn ends);
+  a blocking Stop hook can feed findings back before the turn ends).
   `/plugins codex` and `/plugins claude`
   browse each store's official marketplace (`StoreProvider` normalises the Codex and
   Claude document shapes); each panel carries a left-hand navigator column split into a
@@ -302,9 +314,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   (`docs/openapi/ragent-client.d.ts`), emitted from the CLI with
   `ragent openapi --client`. The document carries no runtime data or secrets,
   so `/openapi.json` is public while every described operation declares the
-  native bearer security scheme. MCP servers configured with the `http`
-  transport (`"type": "http"`, `"url": …`) connect over Streamable-HTTP
-  alongside the existing `stdio` transport
+  native bearer security scheme
 - **OpenAI-compatible surface** — an inbound `POST /v1/chat/completions` and
   `GET /v1/models` adapter over the same `SessionProcessor` agent loop, behind
   the native bearer token (FR-003, FR-024). `stream:false` returns an OpenAI
@@ -345,7 +355,7 @@ cargo build --release
 # Binary is at target/release/ragent
 ```
 
-Requires Rust 1.85+ (edition 2024).
+Requires Rust 1.85+ (edition 2024; the pinned toolchain is `stable`).
 
 ## Quick Start
 
@@ -367,8 +377,11 @@ ragent
 # Run a one-shot prompt
 ragent run "Explain this codebase"
 
+# Check that the install is ready (no model or tool is invoked)
+ragent run --dry-run "hello"
+
 # Start the HTTP server only
-ragent serve --port 9100
+ragent serve --addr 127.0.0.1:9100
 ```
 
 Use OpenRouter models directly from the CLI:
@@ -397,42 +410,55 @@ Generic OpenAI-compatible endpoint (including custom port) can be configured in
 ragent [OPTIONS] [COMMAND]
 
 Commands:
-  run      Execute agent with a prompt
-  serve    Start HTTP server only
-  session  Manage sessions (list, resume, import, export)
-  auth     Configure provider authentication
-  models   List available models
-  config   Show resolved configuration
-  new      Scaffold a new project in the current directory
-  plugins  Manage plugins (the `/plugins` slash-command parity surface)
-  connectors  Manage connectors (the `/connectors` slash-command parity surface)
-  automation  Manage automations (the `/automation` slash-command parity surface)
-  openapi  Emit the OpenAPI 3.1 document (or `--client` for the generated typed client)
-  acp-server  Serve the ACP endpoint on stdio for IDE clients (features acp-server)
+  run          Execute agent with prompt
+  serve        Start HTTP server only
+  orchestrate  Run a small orchestration example (demonstrates multi-agent coordinator)
+  session      Manage sessions (list, resume, export-archive, import)
+  memory       Manage persistent memory (export, import, list)
+  auth         Configure provider authentication
+  models       List available models
+  config       Show resolved configuration (show, check)
+  research     Manage research items under `research/`
+  spec         Run spec commands from the CLI (the `/spec` slash-command parity surface)
+  plugins      Manage plugins (the `/plugins` slash-command parity surface)
+  connectors   Manage connectors (the `/connectors` slash-command parity surface)
+  openapi      Emit the OpenAPI 3.1 document (or `--client` for the generated typed client)
+  automation   Manage automations (the `/automation` slash-command parity surface)
+  acp-server   Serve the ACP endpoint on stdio for IDE clients (features acp-server)
+  new          Scaffold a new project in the current directory (the `/new` command)
 
 Options:
       --model <MODEL>          Override model (provider/model format)
-      --agent <AGENT>          Override agent [default: coder]
+      --agent <AGENT>          Override agent [default: general]
       --log-level <LOG_LEVEL>  Log level [default: warn]
       --no-tui                 Disable TUI, use plain stdout
       --yes                    Auto-approve all permissions
+      --log                    Show the log panel in the TUI
       --config <CONFIG>        Path to config file
-  -V, --version                Print ragent <version> and exit (answered before
-                               any side effect - no panic hook, no crash marker)
+      --maxsteps <MAXSTEPS>    Maximum number of agentic loop steps (default: 500)
+      --dry-run                Run a readiness check without invoking any model or tool
+      --json                   Emit the dry-run readiness report as JSON
+      --no-git-context         Disable automatic git context injection
+      --no-readme-context      Disable automatic README context injection
+  -V, --version                Print the ragent version and exit
 ```
+
+`ragent run --dry-run` is the fastest way to confirm a machine is set up: it loads
+config, resolves the provider, lists the registered skills and tools by category, and
+connects MCP servers, then prints a `READY` / `NOT READY` verdict.
 
 ## Configuration
 
 ragent reads configuration from `ragent.json` (or `ragent.jsonc`) in the `.ragent/`
-directory, with fallback to `~/.config/ragent/config.json`. The format is compatible
-with OpenCode's `opencode.json`.
+directory, with fallback to `~/.config/ragent/ragent.json`.
 
 A repository's `.ragent/ragent.json` is untrusted input, so `Config::merge_project`
-strips the privileged keys a project may not set: `yolo`, allow-rules, bash/dirs
-lists, `telemetry`, `hooks`, `openai`, `mcp` (stdio servers spawn subprocesses with
-no prompt), `acp` (agents spawn verbatim and it controls the editor-facing server),
-and every provider's `api` block (which redirects the credential and prompt stream).
-These must live in the user-global config. Rejected keys are logged at `warn!`.
+strips the privileged keys a project may not set: `yolo`, permission allow-rules,
+`bash` allow/deny lists, `dirs` allow/deny lists and allowed roots, `telemetry`,
+`hooks`, `openai`, `mcp` (stdio servers spawn subprocesses with no prompt), `acp`
+(agents spawn verbatim and it controls the editor-facing server), and every
+provider's `api` block (which redirects the credential and prompt stream). These must
+live in the user-global config. Rejected keys are logged at `warn!`.
 
 ```jsonc
 {
@@ -446,29 +472,29 @@ These must live in the user-global config. Rejected keys are logged at `warn!`.
       }
     }
   },
-  "defaultAgent": "coder",
+  "defaultAgent": "general",
   "permissions": [
     { "permission": "file:write", "pattern": "src/**", "action": "allow" }
   ],
-      "memory": {
-        "enabled": true,
-        "structured": { "enabled": true },
-        "semantic": { "enabled": false, "dimensions": 384 }
-      },
-      "compaction": {
-        "auto": true,
-        "threshold": 0.7,
-        "buffer": 0.10,
-        "keep": { "tokens": 0.20 },
-        // Optional: route compaction to a fast/cheap model instead of the
-        // session's primary model. Default: session model.
-        // "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
-        // Optional: cap summary output tokens (default 1500) and per-tool-output
-        // truncation in the compaction prompt (default 2000).
-        // "summary_tokens": 1500,
-        // "tool_output_max_chars": 2000
-      },
-      "tool_visibility": {
+  "memory": {
+    "enabled": true,
+    "structured": { "enabled": true },
+    "semantic": { "enabled": false, "dimensions": 384 }
+  },
+  "compaction": {
+    "auto": true,
+    "threshold": 0.7,
+    "buffer": 0.10,
+    "keep": { "tokens": 0.20 },
+    // Optional: route compaction to a fast/cheap model instead of the
+    // session's primary model. Default: session model.
+    // "model": { "provider_id": "ollama", "model_id": "qwen2.5:1.5b" },
+    // Optional: cap summary output tokens (default 1500) and per-tool-output
+    // truncation in the compaction prompt (default 2000).
+    // "summary_tokens": 1500,
+    // "tool_output_max_chars": 2000
+  },
+  "tool_visibility": {
     "github": true,
     "gitlab": true,
     "teams": true,
@@ -572,7 +598,7 @@ ragent loads them automatically at startup. Use `/agents` to list loaded agents
 and view diagnostics, or `/agent` to open the interactive picker (custom agents
 are marked with a yellow `[custom]` badge).
 
-See [docs/custom-agents.md](docs/custom-agents.md) for the full schema
+See [docs/howtos/custom-agents.md](docs/howtos/custom-agents.md) for the full schema
 reference, template variables (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`,
 `{{DATE}}`), permission rules, and worked examples. Ready-to-use example files
 are in [`examples/agents/`](examples/agents/).
@@ -606,7 +632,8 @@ ragent new --language rust --type cmdline --stack axum
 ragent new --language python --type library --gitlab
 ```
 
-See [`docs/howtos/newproj.md`](docs/howtos/newproj.md) for the full manual.
+See [`docs/howtos/newproj.md`](docs/howtos/newproj.md) for the full manual; `/new help`
+prints the registry-derived accepted-value lists.
 
 ## Teams
 
@@ -634,26 +661,26 @@ Docs and examples:
 
 The project is a Cargo workspace built from 18 focused crates:
 
-| Crate                     | Purpose                                                                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ragent-agent`          | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry                                                                                                                          |
-| `ragent-bench`          | Benchmark runner shared between TUI and CLI                                                                                                                                                       |
-| `ragent-codeindex`      | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher                                                                                                                   |
-| `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
-| `ragent-connectors`     | Connector system: catalogue descriptors, store, providers, MCP bridge, `/connectors` surface                                                                                                     |
-| `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
-| `ragent-plugins`        | Plugin system: Codex/Claude dialect manifests, sandboxed JS runtime, lifecycle, `/plugins` surface                                                                                                |
-| `ragent-research`       | Research system: web/local gathering, synthesis, RESEARCH.md output                                                                                                                               |
-| `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
-| `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
-| `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
-| `ragent-surface`        | Shared surface helpers for the plugin/connector command families (attribution, subcommand tokeniser, store-dir resolution, harness steps, schema samples)                                        |
-| `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
-| `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
-| `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
-| `ragent-tools-vcs`      | GitHub and GitLab tool surface                                                                                                                                                                    |
-| `ragent-tui`            | Ratatui terminal interface                                                                                                                                                                        |
-| `ragent-types`          | Shared IDs, events, messages, and sanitization primitives                                                                                                                                         |
+| Crate                   | Purpose                                                                  |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `ragent-agent`          | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
+| `ragent-bench`          | Benchmark runner shared between the TUI and the CLI                      |
+| `ragent-codeindex`      | Indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher   |
+| `ragent-config`         | Configuration types, defaults, and parsing                               |
+| `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`         |
+| `ragent-llm`            | Provider clients and model registry (14 providers + Model Router)        |
+| `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`           |
+| `ragent-research`       | Web/local research gathering, synthesis, RESEARCH.md output              |
+| `ragent-server`         | Axum HTTP routes and SSE streaming                                       |
+| `ragent-specs`          | Spec lifecycle: discovery, validation, review, archival, JTBD            |
+| `ragent-storage`        | SQLite storage, snapshots, encrypted credentials                         |
+| `ragent-surface`        | Shared helpers for the plugin/connector command surfaces                 |
+| `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                            |
+| `ragent-tools-core`     | Core shell, file and search tools                                        |
+| `ragent-tools-extended` | Extended document, web, memory and codeindex tools                       |
+| `ragent-tools-vcs`      | Git, GitHub and GitLab tool surface                                      |
+| `ragent-tui`            | Ratatui terminal interface                                               |
+| `ragent-types`          | Shared IDs, events, messages and sanitization primitives                 |
 
 The binary entry point (`src/main.rs`) wires these crates together behind a clap CLI.
 
@@ -681,692 +708,48 @@ User Input
 
 ## Performance
 
-Criterion benchmarks currently ship with `ragent-tui`, `ragent-server`, and
-`ragent-codeindex`. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md)
-for full instructions.
+Criterion benchmarks ship with `ragent-agent`, `ragent-bench`, `ragent-codeindex`,
+`ragent-research`, `ragent-server`, `ragent-storage`, and `ragent-tui`. See
+[`docs/userdocs/bench.md`](docs/userdocs/bench.md) for the TUI benchmark runner and
+[`docs/howtos/slashcommands/bench.md`](docs/howtos/slashcommands/bench.md) for the
+`/bench` command family.
 
 ```bash
 # Run crate benchmarks
 cargo bench -p ragent-tui
-cargo bench -p ragent-server
+cargo bench -p ragent-agent
 cargo bench -p ragent-codeindex
 ```
 
-Key optimisations in the current release:
+Key optimisations include:
 
 - **DashMap** replaces `RwLock<HashMap>` in the orchestrator, reducing lock contention
 - **LRU file-read cache** (256-entry, mtime-keyed) avoids redundant disk I/O
 - **Rayon parallel glob** walk for large directory trees
 - **Incremental snapshots** store only changed files (via `similar` diffs)
 - **Async storage writes** via `tokio::task::spawn_blocking` keep the executor free
+- **Phased-lock code-index graph build** on a dedicated OS thread keeps FTS search
+  available while the semantic graph is derived
 
 ## Project Status
 
-**v1.0.136** — The core architecture, tool system (148 tools across 21 categories in
+**v1.0.137** — The core architecture, tool system (148 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
-management, skills system, research system, plugin system, pluggable execution backends,
-ACP integration, the automation service, and multi-layered security are functional and
-under active development.
+management, skills system, research system, plugin and connector systems, pluggable
+execution backends, ACP integration, the automation service, and multi-layered
+security are functional and under active development.
 
-Recent highlights:
+**See [CHANGELOG.md](CHANGELOG.md) for the release-by-release history of every
+feature, fix, and change.**
 
-- **v1.0.136 — interactive `/plugins list` panel** — `/plugins list [--verbose]` now
-  opens a `/mcp discover`-style panel: the plugin table is pinned at the top (a fixed
-  column heading and separator) above a scrollable block-cursor list, and the capability
-  blocks (contributions, unsupported capabilities, errors, summary, and telemetry when
-  verbose) are listed at the end of the same body. `Up`/`Down`/`Home`/`End` navigate,
-  `Space` toggles the highlighted plugin's enabled state (enable/disable, with the row
-  tinted yellow when enabled and the outcome shown on a feedback line), and `Esc` closes;
-  `/plugins list --mcp` and the disabled-subsystem notice stay text reports.
-- **v1.0.135 — security-hardening pass** — an untrusted project-local config can no
-  longer inject executable sinks (`Config::merge_project` drops a project overlay's
-  `mcp` servers, `acp` section, and provider `api` blocks); new `ragent_types::guard`
-  symlink guards close the escapes across the specs/config/crash/askpass/TUI paths;
-  the MCP/masterfetch/GitHub/open-access clients gain connect and whole-request
-  timeouts, capped redirect chains, and 8 MiB streaming read caps; the binary updater
-  requires a verified SHA-256 digest; `http_request` accepts only the
-  `accept`/`accept-language`/`content-type`/`user-agent` headers; plugin host-call
-  sinks are bounded; and `ragent --version`/`-V` prints the version before any side
-  effect.
-- **v1.0.134 — `/simplify all` pass and MCP discovery-location report** — a quality pass
-  over the changed working tree adds four shared `ragent-surface` modules
-  (`config_splice` durable atomic JSON write, `marketplace` source resolution, `net`
-  redirect policy, `scan` store-scan failure), collapses the four redacting `Debug`
-  impls into one `redacted_debug_impl!` macro, takes a fast path in
-  `check_path_within_allowed_roots_cached` when no extra roots are configured, and
-  de-duplicates the TUI question-expiry helpers (`now_unix_ms`,
-  `resolve_default_index`, `format_mmss`) - removing one `unreachable!()` panic on the
-  way. The new `/mcp config` subcommand reports where ragent looks for MCP server
-  definitions and how many it finds at each place.
-- **v1.0.133 — plugin-store navigator titles, per-row counts, and a `git+` install fix** —
-  each navigator on the `/plugins` browse panel now carries a reversed-video header
-  (`Categories` over the category navigator, `Marketplace` over the marketplace
-  navigator) directly above its `ALL` row, the navigator's hit-test area sits below that
-  header so a header click/wheel is inert, and every navigator row shows the number of
-  plugins under it as `Name (N)`. A `git+<url>#<ref>` install with a non-default ref now
-  checks that ref out correctly (the `git checkout` argument is no longer mistaken for a
-  pathspec); the browse panel also gains a bottom-edge search box with a click-to-clear
-  button.
-- **v1.0.132 — marketplace browsers and alphabetical catalogue ordering** — the
-  `/plugins codex|claude` and `/connectors claude` browse panels each merge their
-  store's base endpoint with every additional marketplace registered through the
-  `/plugins marketplace` / `/connectors marketplace` command families, record it in
-  the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces`
-  array, show a per-row **marketplace** column, and resolve each entry's version and
-  description from its own repository manifest off the event loop. Every connector
-  and plugin-store list is now sorted alphabetically by id (case-insensitive), the
-  connector panel pins a column-heading row above its results, and the plugin-store
-  category navigator no longer derives rows from entry tags/keywords.
-- **v1.0.131 — OpenHands-parity release** — the pluggable execution backends
-  (`local`/`docker`/`podman`/`remote`, the `/backend` switcher, a health-visible
-  registry, and sandbox secret injection resolved from the encrypted store at spawn
-  time), the ACP client plus the feature-gated `ragent acp-server`, the
-  OpenAI-compatible inbound surface, the generated OpenAPI 3.1 contract and HTTP MCP
-  transport, the automation service, AgentSkills discovery, and the opt-in LLM
-  security analyzer now ship as a tagged release. The 7-layer bash validation, path
-  containment, and permission system are unchanged and gate every new surface.
-  Registry fixes collected on top of `2ed21e3d`: the fast-path schema tests assert the
-  crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table),
-  `PluginStoreBrowser::set_index` keeps document order, the `mask_key` doctest expects
-  `[REDACTED]`, `machine_output` routes tracing to stderr for the report subcommands so
-  machine-readable stdout stays clean, and the unused `ragent-storage` dependency is
-  dropped from `ragent-tools-extended`.
-- **v1.0.130 — OpenHands parity delta (spec `openhands`)** — ragent closes the six
-  structural gaps to OpenHands: pluggable execution backends (`local`/`docker`/`podman`/
-  `remote`, the `/backend` switcher, a health-visible registry, and sandbox secret
-  injection), an ACP client + feature-gated `ragent acp-server`, an OpenAI-compatible
-  inbound surface (`/v1/chat/completions`, `/v1/models`), a generated OpenAPI 3.1
-  contract and HTTP MCP transport, the automation service (webhook + scheduler + run
-  history + backend confinement), AgentSkills discovery, an LLM security analyzer, and
-  an engine-gated screenshot capability (so the always-erroring `mf_screenshot` stub is
-  no longer advertised — the default build ships 148 tools). The 7-layer bash
-  validation, path containment, and permission system are unchanged and gate every new
-  surface. The manual test plan `specs/openhands/TESTPLAN.md` walks acceptance
-  criteria 1-14 and the CI gates (`cargo fmt`, `cargo clippy --workspace`,
-  `cargo check --workspace`) pass.
-- **v1.0.130 — plugin-store category navigator and `browser` tool removal** —
-  `/plugins codex` and `/plugins claude` gain a left-hand category navigator
-  (`ALL` plus the distinct categories the fetched index declares, driven
-  by keyboard and mouse, with a `--category <name>` launch argument). The
-  `browser` CDP tool and its `browser` visibility switch are removed, so the
-  registered tool count falls 152 -> 151 across 22 categories. `/mcp discover`
-  now scans the ragent-native `~/.config/ragent/servers/` directory first, a
-  startup failure is echoed to stdout when the TUI stderr spool is active, and an
-  unreachable store marketplace reports a clean
-  `<Store> plugin marketplace is unavailable (...)` row. This release also fixes a
-  stable-toolchain build failure in the `/events` SSE connection cap
-  (`AtomicUsize::try_update`, an unstable feature, replaced with a portable
-  `compare_exchange_weak` loop).
-- **v1.0.129 — code-audit remediation complete (M5-M9) and dependency
-  upkeep** — the `docs/plans/code-audit.md` plan is executed through M9. A new
-  `ragent-surface` crate (18th workspace crate) owns the shared
-  `/plugins`/`/connectors` surface glue; the stale, unreferenced
-  `ragent-agent::snapshot` module and the duplicated inline schema test suite are
-  deleted; and the workspace converges on `thiserror 2`, `reqwest 0.13`,
-  `rand 0.10`, and `criterion 0.8` while clearing the yanked `yoke-derive` and
-  migrating `lopdf` 0.44 (the `vendor/lopdf` crate is deleted) and
-  `opentelemetry` 0.33. Test scratch paths move to `target/temp`, diagnostic and
-  live-network tests are `#[ignore]`-gated, new suites cover the calculator, the
-  small tools, the Azure AI Foundry provider, the agent-loop step harness, and
-  the orchestrator `Coordinator`, and `.gitignore` gains the SQLite-sidecar and
-  certificate/credential patterns with a tracked `.env.example` template.
-- **v1.0.128 — config durability, bounded MCP connect, and
-  non-blocking startup** — `ragent.json` writes are now atomic (temp file + `fsync`
-  + rename) so an interrupted write can no longer silently reset a persisted YOLO
-  flag; runtime-flag persistence edits only the single top-level key in the raw
-  global file and logs every write with attribution; every MCP connect runs under a
-  bounded per-attempt timeout with a single timeout retry; MCP connect failures are
-  recorded and reported instead of dropped; the TUI no longer blocks on the MCP
-  connect loop at startup; `ragent_info` now reports runtime execution details
-  (pid, uptime, memory, thread count); and `/spec reverse --folder` scaffolds before
-  the GitHub token gate.
-- **v1.0.126 — Office / LibreOffice document tools removed** — the six
-  `office_*`/`libre_*` document tools and their module set (`office_common`,
-  `office_write`, `office_info`, `libreoffice_common`, `libreoffice_write`,
-  `libreoffice_info`) are gone; only the PDF family (`pdf_read`, `pdf_write`)
-  remains, sharing the new `pdf_common` helper module. The
-  `tool_visibility.office` switch and the unused `docio` helper are removed, the
-  OOXML/ODF `DocumentFormat` variants are dropped (those extensions now return
-  an actionable error from `detect_document_format`), and the dependencies
-  `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and `spreadsheet-ods` are
-  dropped. The registered tool count falls 158 -> 152 across 23 categories.
-- **v1.0.126 — `/simplify all` code-quality pass** — a correctness, performance,
-  and dead-code sweep over the changed set: `pdf_write` now confines an `image`
-  element's `image_path` to the workspace (SEC-tools-extended-002), `pdf_read`
-  parses each PDF once instead of twice, `os_info` computes its JSON once, the
-  TUI `/memory clear` handler scopes deletes to the real project directory, and
-  the connectors `descriptor_by_id` lookup resolves in a single allocating pass.
+Related documents:
 
-- **v1.0.125 — `os_info` host-introspection tool and `/osinfo` command** — a
-  new read-only `os_info` tool (registry 171 -> 172) reports the host OS and
-  distro, CPU, graphics adapters and graphics-API versions, physical hardware
-  (system/chassis/motherboard/BIOS, storage devices, network interfaces),
-  memory, uptime, and the process environment, always without writing a file,
-  making a network request, or reading serial numbers/UUIDs/asset tags. The
-  `/osinfo show [--no-probe]` slash command renders the same report through the
-  tool's collector/renderer, and `/osinfo help` documents both modes. The
-  `probe` parameter defaults to `true` so every graphics API (including OpenGL,
-  OpenGL ES, and Mesa) is reported with a version.
-- **v1.0.125 — research `--papers` replaces `--no-papers`** — scholarly
-  backends (OpenAlex) are now excluded from research web sweeps by default; the
-  new `--papers` flag opts them back in for academic topics.
-  `research.exclude_academic_engines` persists the exclusion, and `--papers`
-  overrides it for a run.
-- **Uncommitted — `/memory clear`, connector lifecycle tracking, TUI-019 fixes,
-  MCP orphan sweep** — `/memory clear` empties this project's structured memories
-  behind a `Yes`/`No` confirmation dialog (`No` selected by default, so a stray
-  `Enter` cannot clear memory); the new
-  `Storage::clear_memories_for_project` deletes only the current project's rows
-  (full path or basename) in one transaction, and the `command_catalog` and
-  `SLASH_COMMANDS` `/memory` entries now list exactly the subcommands the arm
-  handles (`show`, `clear`, `help`).
-- **Uncommitted — connector system tracking, TUI-019 fixes, MCP orphan sweep
-  (spec `connectors`, `SECTASKS`)** — a new `ragent-connectors` crate (the
-  workspace now has 17) adds a Claude-connector-equivalent catalogue over MCP: a
-  connector is a named integration (Google Drive, Slack, GitHub, ...) carrying a
-  category, an auth shape, and one or more MCP servers, resolved onto the
-  existing `McpClient` and the durable `mcp_state.json` ledger. It is driven by
-  the twelve-subcommand `/connectors` family and the `ragent connectors` CLI,
-  with an interactive off-the-event-loop catalogue browser (`/connectors claude`,
-  now with a `--category <name>` filter and a `c` cycle key), an isolated `test`
-  harness, endpoint-provenance reporting (`stores [--check]`), and a `connectors`
-  config block (master switch, store dir, catalogue endpoints and fetch budgets,
-  credential-name mapping). The TUI now drives the session-start connector
-  session for `enable`/`disable`/`connect`/`disconnect`, lists live tool counts
-  from the MCP client, and accepts a connector by id, slug, or display name.
-  Alongside it: the tool name now renders immediately after the step counter in
-  the message window (TUI-019), `/mcp` renders one server per row as a markdown
-  table (TUI-019), the `/tools` subcommand surface is tidied (`/tools list`,
-  `/tools help`), the ANTIPAT M1 ASCII sweep replaces the TUI tool-category and
-  status-bar emoji with plain ASCII marker prefixes, `/yolo` persists to the
-  user-global config only, the spec plan parser accepts `T-001..T-014`
-  dependency ranges, and the **MCP orphan sweep now reaps stdio servers
-  re-parented to the user session manager (`systemd --user`), not just init, so
-  `/mcp` no longer shows `npx -y mongodb-mcp-server@<3>` stuck on every
-  startup**.
-
-- **Version 1.0.122 — security and anti-pattern remediation sweep** — the
-  `ANTIPAT.md` milestones M0 and M2-M7 landed (standards conformance, shared-helper
-  de-duplication, silent-error suppression, vocabulary unification, structural
-  debt, and dependency/tooling hygiene): major dependency bumps (`rmcp` 3.5,
-  `rusqlite` 0.40, `ratatui` 0.30, ...), the retired `ragent-team` shim crate
-  deleted (**17 -> 16 crates**), and the `SECTASKS.md` MS-05 guards consolidated
-  into the new `ragent_types::guard` with a single `ragent_types::sanitize`
-  redaction chokepoint and four `security-guards` CI gates. Only `ANTIPAT.md`
-  M1 (ASCII conformance sweep) remains open.
-
-- **Version 1.0.121** — `tool_info` and `commands_info` (read-only, auto-approved)
-  return a JSON dump of the tool registry and the slash-command catalog
-  (169 -> 171 tools); MCP startup sweeps orphaned stdio servers and shutdown
-  tears down the whole process group; the post-loop rollback capture is removed
-  only after a successful restore; OpenSkills `.agents` discovery and Claude
-  store `*-lsp` stub installs; plus a `/simplify all` pass.
-
-- **Introspection + marketplace fixes (v1.0.120)** — two new read-only tools,
-  `tool_info` and `commands_info`, expose a JSON dump of the tool registry and
-  of every slash command (including plugin-contributed ones); MCP server
-  processes no longer duplicate at startup (orphan sweep with a PPID gate) and
-  are torn down through their whole process group on exit; the TUI post-loop
-  rollback now removes its capture only after the restore fully completes,
-  fixing the intermittent `test_rollback_accept_restores_snapshot` CI flake;
-  OpenSkills installed under `~/.agents/skills/` are discovered; and the Claude
-  store's `*-lsp` marketplace stubs install via a manifest materialised from the
-  marketplace document.
-
-- **MCP transport/session fixes + simplify sweep (v1.0.119)** — a sessionful
-  Streamable-HTTP MCP server now reports its tools: `HttpMcpClient` performs an
-  `initialize` handshake, replays the returned `mcp-session-id`, advertises
-  `text/event-stream`, and unwraps SSE frames, and `McpClient::adopt_connected`
-  adopts an already-running server through that client. The HTTP client is built
-  lazily so it no longer panics outside a Tokio runtime. The TUI prints a
-  per-server MCP startup report (with the declared transport on every line),
-  emitted as soon as the background connect loop settles without blocking the
-  first prompt, `/plugins list` resolves live MCP tool counts, and
-  `/plugins list --mcp` sorts server ids for a deterministic contributions block.
-  A `/simplify all` pass over the recent MCP/swarm/plugins work fixed a progress-bar
-  overflow in `/swarm status`, a pending-marker race in `/spawn`, and `--mcp`
-  flag handling on non-`list` `/plugins` subcommands.
-- **Durable MCP server enable/disable + plugin-bridged servers (v1.0.118)** —
-  whether an MCP server is started is now a persisted choice
-  (`<global state dir>/mcp_state.json`) rather than an implicit effect of being
-  listed in `ragent.json`; a server absent from the ledger is enabled, and
-  `mcp.<id>.disabled: true` always wins. `/mcp connect <id>` / `/mcp disconnect
-  <id>` enable/disable a server live and the choice survives a restart; `/mcp`
-  lists plugin-contributed servers with their live `enabled` state and tool
-  count, and `/plugins list` gains `MCP` / `MCP Tools` columns. Plugin
-  `mcpServers` entries are bridged as `<plugin-id>.<server>` by default. `/tools`
-  now also lists the tools a visibility switch has hidden.
-- **`/spec reverse --folder` scaffolds and hosts the target project (v1.0.117)** —
-  `/spec reverse` now accepts `--folder <path>` plus `--github` / `--gitlab`
-  (with the `/new` scaffold flags present) and creates the project in the target
-  folder before synthesising the prompt; a chained `--create <name>` writes the
-  spec into `<folder>/specs/<name>/`. Usage errors now state the specific cause
-  instead of the bare usage line.
-- **`webapp` app type (v1.0.117)** — `--type webapp` is a first-class registered
-  value for `/new`, `/spec reverse`, and `/spec govcreate`; it generates a tiny
-  dependency-free HTTP-server starter for `rust`, `python`, `go`, `typescript`,
-  and `javascript`, and degrades to a manifest-only layout elsewhere.
-- **`lopdf` joins the lint suite (v1.0.117)** — the vendored `lopdf` crate
-  carries crate-level allowances (matching `vendor/pdf-extract`) so the dead-code
-  lint and `cargo-machete` are green. Full CI hygiene (`cargo check`, the
-  dead-code lint and reason checks, `clippy -D warnings`, `cargo fmt --check`,
-  `cargo audit`, `cargo deny check`) and the entire `cargo test --workspace`
-  suite are green.
-
-- **Detached sub-agents + `/spawn` (v1.0.115)** — `/spawn <agent> <prompt...>`
-  launches a sub-agent directly from the chat input as a **detached**
-  fire-and-forget task: it runs concurrently and shows in the Agents panel, but
-  `list_agents`/`wait_agents` never see it and its result is never injected back
-  into the chat. Every completed sub-agent run (detached or not) now persists
-  its FULL output to `log/subagents/<task-id>.md`, and the completion event
-  carries the real loop `finish_reason` (`stop` / `truncation` / `length` /
-  `cancelled` / `error`), so a provider-side cut is flagged in the Agents panel
-  instead of looking like a healthy finish. The `new_agent` tool gained the
-  matching optional `detached: true` parameter. Spec: `specs/spawnagent/`.
-
-- **Plugin bridges (v1.0.114)** — plugin bridges for skills, MCP servers,
-  slash commands, agents, and hooks (including the full Claude `hooks.json`
-  declaration surface, a `.codex-plugin/plugin.json` recogniser, and the
-  both-nested multi-target descriptor fix); the GitHub credential chain now has
-  a shared `ragent_config::github` resolver with a `gh` CLI fallback and an
-  app-token downgrade, so `/new --github` creates a hosting repository even when
-  `/github login` stored a `ghu_` token; the input field queues slash commands
-  while the agent runs; and a new read-only `ragent_info` tool reports the
-  running version, build time, git commit, and compiler (169 tools).
-
-- **Store providers + plugin-store installs** — `/plugins codex` and `/plugins claude`
-  now browse the stores' own official marketplaces (`openai/plugins` and
-  `anthropics/claude-plugins-official`). A `StoreProvider` trait with per-store Codex and
-  Claude implementations normalises each vendor document shape (`name`-as-id, optional
-  `version`, `local`/`url`/`git-subdir`/repo-relative sources) into the internal model, and
-  the store kind is threaded through the fetch seam so every fetch parses with the right
-  provider. A repo-relative source resolves against the origin's GitHub repository as an
-  installable `git+<repo>#<ref>:<path>` source, and the install pipeline accepts a
-  `git+<https-url>#<ref>[:<subpath>]` source via a shallow `git clone`: a `:<subpath>`
-  source is cloned sparse so a plugin hosted in a subdirectory of a large repository
-  installs without downloading the whole tree, while a whole-repo source (a marketplace
-  `{"source":"./"}` for a plugin published at its repository root) clones the complete
-  tree so its nested `.claude-plugin/plugin.json` manifest is found.
-
-- **Message input queue (v1.0.113)** — the TUI input field
-  stays editable while the primary agent executes: each `Enter` queues the
-  message in a bounded FIFO (default 32, `input_queue_capacity` config, clamped
-  `1..=99`) with a two-digit counter before the prompt, and the oldest entry runs
-  at each turn boundary. An `Alt+Q` queue-control menu (`Next` / `Stop`/`Resume`
-  / `Clear` / `Show`, navigated with `Up`/`Down`/`Enter`) and a
-  `/queue [list|clear|next|help]` slash command expose the same queue; a
-  `Yes`/`No` dialog (default `No`) guards clearing, and the `Show` row opens a
-  scrollable queue-entry panel where `Enter` moves an entry one step toward the
-  front and `Del` removes it. A slash command (`/…`) is queued the same way while
-  a turn runs (FR-017 amendment) and runs at the next turn boundary; only bang
-  commands (`!…`) and teammate-targeted sends keep the busy refusal.
-  Spec `inputqueue` complete (T-001..T-027), 19 new test files (234 new test
-  attributes). This release also lands the full-workspace clippy hygiene pass:
-  the non-existent `clippy::assert_is_empty` allow is removed from 244 files
-  and the `--all-targets` clippy gate is now clean.
-
-- **Plugin system (v1.0.112)** — the **plugin system** goes from spec
-  draft to full implementation: the new `ragent-plugins` crate (234 tests)
-  discovers and normalises Codex- and Claude Code/Desktop-dialect manifests,
-  runs plugin JavaScript on a budgeted embedded `rquickjs` engine behind the
-  versioned `ragent` host API, registers `plugin_<id>_<tool>` tools and slash
-  commands, and drives the `/plugins` six-subcommand family plus the
-  `ragent plugins` CLI parity surface. A `plugins` config block
-  (`enabled`, budget limits, `store_dir`, per-plugin permissions) with
-  overlay-wins merge, eight acceptance/fixture plugins under
-  `assets/plugins/fixtures/`, and a code-quality cleanup pass (shared
-  `ScratchSurface`/`store_and_config`, single `help::attribution` header
-  source, surfaced config-load warnings, hoisted prefix allocation) complete
-  the change set.
-
-- **Release mechanism fix (v1.0.111)** — the release workflow's changelog
-  extractor now matches the Keep a Changelog `## [<version>] - <date>` header
-  form (plus the two legacy forms), so GitHub releases carry their notes; the
-  v1.0.107..v1.0.110 releases were backfilled.
-
-- **TUI paint-safety fix (v1.0.110)** — `should_render` now
-  paints a pending message-cache group at the safety interval, closing the
-  PERF-042 throttle-tail stall where a tool-call row stayed invisible while
-  the status bar showed it running (regression test
-  `test_pending_message_cache_group_forces_safety_paint`), plus dependency and
-  advisory hygiene (dropped unused `dirs`/`tokio`/`tempfile` dependencies;
-  removed four stale `deny.toml` advisory ignores).
-
-- **`/simplify` final phase over v1.0.106..v1.0.108 (v1.0.109)** — the last
-  code-quality findings from the three-commit review window land: dead
-  `utf8_prefix_len` helper removed from the LLM HTTP client (FUNC-033 made it
-  redundant), `config_agents_dir` collapsed into `global_agents_dir`,
-  `extract_http_status` parses status digits byte-wise without an intermediate
-  allocation, and `ragent-research`'s eight poisoned-lock sites now share one
-  `lock_conn()` helper with a dedicated `SourceVaultError::LockPoisoned`
-  variant.
-
-- **Config rules and fixes (v1.0.108)** — code-quality pass over the
-  v1.0.105..v1.0.107 window from five parallel explore reviews: GitLab legacy
-  credential migration scans the real legacy `~/.ragent/` root again (silent
-  no-op migration fixed, regression test pinned), the team-blueprint "global"
-  fallback restores the true legacy `~/.ragent/blueprints(/teams)` scan so old
-  installs keep working, the four `/spec govcreate` mutex-lock sites uniformly
-  recover poisoned locks, `/config show` renders unavailable global dirs as
-  "(unavailable)", `acquire_local` no longer misreports an exact-cap natural
-  completion as budget exhaustion, and shared research helpers
-  (`num_prefix_re`, `join_text`) are deduplicated into single copies.
-
-- **`/spec govcreate` — spec authoring from an architecture document
-  (v1.0.107)** — `/spec govcreate <spec-id>
-  <content-ref> <target-folder>` (and the `ragent spec govcreate` CLI
-  subcommand) acquires an architecture document from a local folder or URL,
-  extracts its content, authors `SPEC.md`/`PLAN.md`/`TESTPLAN.md` via the
-  configured LLM, and writes a new spec — with staged `[ .. ]/[ ok ]/[fail]`
-  progress in the TUI, Escape cancellation, and an FR-011 guard that refuses
-  non-empty targets without `--force`. The same window carries HEAD~3 review
-  fixes: SSE chunk coalescing no longer splits multi-byte UTF-8 sequences
-  driven by `Utf8Error::error_len()` (with six regression tests), secret
-  redaction captures key+separator and widens the value charset to
-  base64/base64url, spec dependency-range expansion is capped at 1000 IDs,
-  `delete_memories_by_filter` reports real row counts, and masterfetch's cache
-  deletes corrupt rows instead of poisoning hits. Documentation: the 612-line
-  `tools.md` is replaced by 26 per-category how-tos in `docs/howtos/tools/`
-  with argument tables and examples, each with a generated PDF.
-
-- **`--url-cloak` research source defanging (v1.0.106)** —
-  `/research create` gained `--url-cloak`, which emits web source URLs as
-  defanged plain text rather than clickable links: the scheme is rewritten
-  (`https://` -> `hxxps://`, `http://` -> `hxxp://`), every dot is bracketed
-  (`example.com` -> `example[.]com`), and the result is wrapped in a Markdown
-  code span. It applies to the `**Sources:**` bullets under each finding and
-  the `References Index` table in `RESEARCH.md` (plus the `Sources Reference`
-  table in `CORPA.md`), leaving non-URL rows untouched, so automated URL
-  scanners do not flag the document. Available on the root CLI, the TUI slash
-  command, and `POST /research` (`url_cloak`), recorded in frontmatter
-  (`url_cloak: true`) for `/research update` replay, and off by default. A
-  follow-up `/simplify` pass over the change set tightened
-  `SourceVault`/`GatherLog` blocking offloads (shared `run_blocking` helper,
-  new `SourceVaultError::TaskPanic`), defanged the `cloak_url` non-URL fallback,
-  hardened `extract_http_status` against "500ms"/"404 bytes" false positives,
-  and folded `assemble_and_write`'s 18 parameters into one `AssembleInput`
-  struct; the how-to manuals were rebuilt to PDF.
-
-- **Research output limits, scholarly-engine exclusion, and progress-table
-  detail (v1.0.105)** — `/research create` caps its
-  `## Concepts` / `## Findings` lists at 5 / 20 by default, reordering
-  most-relevant-first (highest cited source rank, then cited count) before
-  truncation; the limits are set with `--max-concepts N` / `--max-findings N`
-  on the root CLI, TUI, and `POST /research` (`max_concepts` / `max_findings`
-  fields), or persistently via `research.max_concepts` / `research.max_findings`
-  (`0` = unbounded). `mf_search` gained an `exclude_engines` array that drops
-  named backends before any request is dispatched, and research excludes
-  scholarly backends (OpenAlex) by default (`--papers` opts them back in;
-  `research.exclude_academic_engines` persists the exclusion) by routing through
-  it so OpenAlex consumes no search budget and cannot shadow general-web
-  URLs in dedup. `POST /research` gained `papers`; `--oa-enable`/`--no-oa`
-  toggle open-access recovery per run. The per-engine progress table now shows
-  *why* candidates were dropped (five exclusion-reason columns) and *how* fetches
-  failed (seven failure-kind columns). `/spec impl` now expands task-range
-  Dependencies cells (`T-001–T-014`) into every spanned ID, the TASKS panel shows
-  the task ID after the status, and every toggled right-hand side panel takes 50%
-  of the window width.
-
-- **Functional anti-pattern remediation — FUNCPLAN.md (FUNC-038..069,
-  080..082) complete (v1.0.104)** — the second pass closes the plan's M1 tail
-  and all of M2-M5: `mf_search` keyless engines now surface a dead engine as
-  an error instead of a zero-result success; `github_merge_pr` rejects an
-  unknown merge method instead of silently merging; the last three production
-  poison-lock panics recover via `PoisonError::into_inner`; GitLab GETs retry
-  `429` honouring `Retry-After` with bounded request/entry budgets and full
-  pagination; `move_file` renames first (no orphan dirs), `copy_file` refuses
-  a self-copy, `append_file` flushes; GitHub `post`/`put`/`patch` honour
-  `base_url`; percent-encoding is byte-wise (UTF-8 correct) across
-  GitHub/GitLab; codeindex `parent_id` resolves multi-level nesting to a
-  fixpoint; the keyword verifier no longer passes an empty/uncited analysis;
-  the server auth comparison hashes fixed-length digests and the rate limiter
-  enforces exactly 60/min; and a new `scripts/check-poison-locks.sh` guard is
-  wired into `pre-flight.sh` and CI.
-
-- **M1 agent per-turn hot path — PERF-032..040 + PERF-048 complete
-  (v1.0.103)** — the per-turn allocation and clone load in the agent loop is
-  removed: the provider-facing transcript is held and handed out behind an
-  `Arc<Vec<ChatMessage>>` (no per-turn deep clone), a pure history append
-  converts only the new tail (`SessionState::take_cached_for_append`), the
-  subagent tool surface is cached behind the tool-registry version, `LoopTracker`
-  is `Copy`, a new `RequestTokenTracker` makes the per-step token estimate
-  O(changed message) instead of O(history), tool/result pairing is a single
-  pass, the compaction prompt is assembled into one buffer, memory-entry token
-  costs are memoised, the activity log is written by one background task per
-  process, and the TUI viewers retain a single copy of their rendered rows.
-  New benches `turn_loop` / `m3_hot_paths`; new guards `test_activity_writer`
-  and `test_no_percall_regex`. `rustls` bumped 0.23.43 -> 0.23.45
-  (RUSTSEC-2026-0285).
-
-- **Simplify/quality pass across the search, research, agent, and TUI crates
-  (v1.0.102)** — the second `/simplify` sweep deduplicated the API-key search
-  engines behind shared preflight/finish/mask helpers, made engine-merge output
-  deterministic with renumbered positions, resolved the web-gatherer volume
-  policy through one `volume_policy()` helper, and removed the vestigial
-  deadline flag. A third pass (v1.0.101) followed the same pattern across
-  `masterfetch::search` and `ragent-research`.
-
-- **Serper search engine, mf_search resilience, and research webgather
-  cleanups (v1.0.100)** — `mf_search` gained a fifth optional API-backed
-  engine (Serper, Google search) alongside LangSearch / Tavily /
-  Perplexity / Exa, configurable via `serper_api_key` in `ragent.json`;
-  transient engine failures (Wikipedia 429, HTTP 5xx, transport timeouts)
-  are now retried inside the engine call path with exponential backoff
-  (2 retries, 1 s/2 s), account-level quota blocks are reported as
-  `blocked_engines` with reasons instead of retried, and the orchestrator
-  staggers engine starts by 120 ms so keyless backends no longer burst at
-  t=0 (this fixes the "only LangSearch results" `/websearch search`
-  symptom). The research web-gatherer no longer cancels in-flight fetches
-  at the `--web-time` phase deadline (every candidate is fetched to
-  completion; the deadline bounds only the search stage) and the
-  consecutive-failure search circuit breaker was removed in favour of the
-  H-002 retry policy. `/research` gained an interactive clarification
-  gate in the TUI.
-
-- **`/prompt` inspector, tool-repeat guard, redundant command removal
-  (v1.0.96)** — the new read-only `/prompt` slash command
-  renders the assembled system prompt an agent would receive (primary or
-  subagent mode, roster, per-agent override) with its effective tool surface;
-  a tool-repeat guard (FR-044) blocks agent loops stuck replaying the same
-  tool call (sixth identical call prompts in interactive runs, auto-denies in
-  unattended runs); and the redundant `/opt` (plus its `ragent-prompt_opt`
-  crate and `POST /opt` endpoint), `/tasks`, and `/theme` slash commands were
-  removed, returning the workspace to 16 crates.
-
-- **AgentNotice chat-bubble separation + /toolchain fixed-width table
-  (v1.0.94)** — consecutive `AgentNotice` notices now render as their own
-  yellow bubbles (the TUI event handler forces a new assistant message
-  before and after each notice), and the `/toolchain list` table switched
-  to fixed 10/10/10/50 character columns (Language/Runtime clip, Status
-  and Version word-wrap onto continuation grid lines) at a constant
-  93-column width. Released in v1.0.95 with the docupdate pass.
-
-- **Spec-impl tracker semantics + sub-agent completion hard requirement +
-  compaction performance pass (v1.0.93)** — `/spec impl` no longer
-  pre-creates session tracker tasks (`spec_task_update` now
-  creates-or-updates them, seeded from the spec's `PLAN.md`), the
-  sub-agent completion protocol is a mandatory hard requirement enforced in
-  the system prompt, the `agent_complete` tool description, and the
-  mid-run summary nudge, and compaction gained a `compaction.model`
-  fast/cheap summariser override for `/compact`, configurable
-  `summary_tokens` (1500) / `tool_output_max_chars` (2000), an adaptive
-  prompt cap, 180 s / 60 s stream caps with chunk-level cancellation, and an
-  allocation-free token estimator.
-
-- **Subagent interactive-tool blocking (v1.0.92)** — sub-agent runs now deny
-  `ask_user` with a corrective observation instead of stalling the run on an
-  unbounded user-answer wait; a shared `denied_tool_call` helper covers all
-  tool-call denial paths.
-
-- **Scaffold + status-bar simplify pass (v1.0.90)** — the `/new` TUI command
-  and the `ragent new` CLI subcommand now share one `plan_and_emit()`
-  pipeline in the `project_scaffold` engine module (each surface attaches
-  only its own git/hosting outcome lines), the GitHub/GitLab remote flows
-  share a `register_origin_and_push` helper, and the status-bar last-prompt
-  renderer is single-pass. No behaviour change; ~135 duplicated lines
-  removed across the scaffolder and status bar.
-
-- **Research-crate simplify pass (v1.0.88)** — a `/simplify` audit over
-  all `ragent-research` sources fixed a `parse_subject_summary` slice panic
-  (`}`-before-`{` responses no longer panic the analysis merge path), made
-  `AnalysisEngine::with_brief` a required trait method, cached hot regexes
-  behind `OnceLock` statics, deduplicated the two `RESEARCH.md` layout
-  assemblers into a shared section-emitter module, unified search-engine
-  ordering across gather paths, and consolidated per-page media-type
-  classification and pdf/youtube tallies into single passes.
-
-- **UI polish and tool-calling fixes (v1.0.87)** — the status bar's top line
-  now renders the last submitted prompt as a centred bracketed tag (first 32
-  characters, `....` when truncated) between the git branch and the session
-  status, with the working directory shortened to fit and a graceful fallback
-  to the previous layout when the terminal is too narrow; the message window
-  no longer pushes the transcript down with a leading blank line before the
-  first "You:" prompt; and the `text_toolcalls` recovery helpers were tightened
-  to `pub(crate)` visibility.
-
-- **Spec-system documentation and semantics polish (v1.0.86)** — the
-  `/spec` how-to manual now documents the spec file write semantics (atomic
-  temp-file + rename writes, clear-on-empty `REVIEW.md`/`FEEDBACK.md`), the
-  `/spec coverage` report format (shared `Spec::coverage_report()` renderer
-  with `[ok]`/`[wait]`/`[sync]`/`[stop]` task-status symbols), and the
-  automatic task-completion heuristic guarded by `writes_in_spec_dir`
-  (writes outside the active spec directory never complete spec tasks). The
-  master spec gained sections 10.10a–10.10c covering the same semantics.
-
-- **Tool-calling audit remediation (shipped in v1.0.85)** — fixes every
-  HIGH/MED finding from the tool-calling + UTF-8 audit across provider stream
-  parsers, tool dispatch, and the edit-tool family: OpenAI Responses API tool
-  calls no longer silently dropped (missing `ToolCallStart`), Gemini
-  final-chunk `functionCall` parsed before the finishReason flush, malformed
-  tool arguments fail fast with a corrective LLM-visible error instead of
-  silently executing with `{}`, loop restrictions fail closed, schema
-  validation of required args before execution, panicked tool tasks synthesise
-  error results (no orphaned `tool_use`), object-form `arguments` accepted from
-  llama.cpp/vLLM-style servers, Anthropic/Azure parallel `tool_use` blocks keyed
-  by SSE block index, HuggingFace tool-incapable models no longer receive a
-  tools array, CRLF files keep their line endings through edits, BOM round-trip
-  fixed, and a conservative text-format tool-call recovery extractor for models
-  that narrate tool calls as prose.
-
-- **Goal-driven loop programming (`/loop`)** — a goal-driven agentic loop that
-  runs a `LoopSpec` to a stop condition (goal achieved, verification passed,
-  budget exhausted, or interrupted), with a verification gate for verify
-  commands, restriction layers (tool set, read-only globs, scope globs),
-  pre-loop snapshot capture, and a post-loop rollback flow (Enter restores the
-  pre-loop snapshot, Esc keeps changes). The one-shot form
-  `/loop <agent> [flags] <goal>` accepts `--max-steps N`, `--cost_limit N`,
-  and `--timeout N` overrides in any position. Configured via the `loop`
-  section of `ragent.json` (`loop.max_steps` 512 default, `loop.cost_limit`,
-  `loop.error_retry_allowance`, `loop.checkpoints`,
-  `loop.checkpoint_timeout_secs`); see `docs/howtos/loopprogramming.md`
-  (shipped in v1.0.82)
-- **Agents panel reconciliation** — with many concurrent sub-agents the TUI
-  Agents button previously could stay disabled with a zero count: the
-  reconcile poll now also fires periodically (every 1.5 s) and merges the
-  authoritative `AgentManager::tasks_snapshot`, so the panel self-heals
-  regardless of broadcast-lag event loss (shipped in v1.0.82)
-- **How-to documentation set** — three new how-to manuals in `docs/howtos/`:
-  `reactagent.md` (the core per-turn ReACT loop), `loopprogramming.md`
-  (goal-driven loops with `/loop`), and `office.md` (the PDF tool family
-  with format matrix, JSON examples, and configuration)
-
-- **Code index status improvements** — the `codeindex_status` tool never
-  blocks on the store lock: when a background reindex or graph build holds
-  the mutex it returns an immediate busy report built from lock-free progress
-  atomics; `IndexStats` now carries `graph_total_edges`/`graph_nodes`/
-  `graph_communities`; and `codeindex_path`/`codeindex_explain` resolve
-  symbols with exact-match + definition-kind ranking so impl/trait names no
-  longer shadow the real definitions
-- **Config save/load cache coherence (M-025)** — every `Config::save()`
-  invalidates the on-disk load cache (`Config::invalidate_load_cache()`), and
-  the cache key is snapshotted after the auto-creating first load, so TUI
-  config writes (`/codeindex off`, `/tools`, ...) are immediately visible to
-  subsequent loads in the same process — this fixes the v1.0.80 CI failure
-  (run 34023696563)
-
-- **Research web-search quota controls** — `--max-search-calls N` places a hard,
-  run-scoped cap on total web-search calls per research run, shared via `Arc` across
-  every supervisor/competitive researcher and gather pass; a run-scoped query cache
-  memoises identical sub-queries so parallel researchers reuse cached hits instead of
-  re-issuing paid calls (v1.0.79)
-- **`--depth` bounds web volume by default** — the effective web-source budget is
-  derived from the selected depth (shallow 6 / standard 9 / deep 15) unless
-  `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits
-  search/fetch volume (v1.0.79)
-- **`/research update <name>` invocation replay** — re-runs a research item by
-  replaying its recorded invocation line, overwriting `RESEARCH.md` and associated
-  files with freshly gathered results; available via CLI, TUI, and HTTP `PUT /research/{name}`
-  (v1.0.79)
-- **`--mode competitive` defaults `--format` to `comparison-table`** — competitive
-  runs no longer require an explicit `--format comparison-table` (v1.0.79)
-- **GitHub `blob/` URLs no longer fail research gathering** — file-view URLs are
-  rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the
-  readability gate, eliminating guaranteed `readability extraction failed` rejections
-  (v1.0.79)
-- **`/clip` slash command** — copies the rendered message-window transcript to the
-  system clipboard in one step (v1.0.79)
-- **`/research list` renders a human-readable table again** — the fixed-width
-  `NAME/TITLE/STATUS/CREATED/MODIFIED` table is restored as the default output, with
-  JSON behind the `--json` flag (v1.0.79)
-- **Research evaluation scorecard configuration** — new `research.evaluate` section
-  in `ragent.json` controls the self-evaluation scorecard appended to research
-  reports (FR-015 of specs/opendeepresearch)
-- **Clippy `for_kv_map` fix** — Ollama provider iteration now uses `values()`
-  instead of destructuring a key-value pair; the LangSearch merge test
-  expectation was also corrected (v1.0.74)
-- **Sub-agent / teammate step visibility** — TUI step log now shows tool calls
-  from tracked sub-agents and teammates with an `[agent-tag]` prefix; rebuilt
-  step tags for lagged event-bus bursts prevent undercounting (v1.0.73)
-- **Tool-permit handling fix** — `SessionProcessor` now surfaces an explicit
-  error when the per-tool resource permit cannot be acquired (v1.0.73)
-- **Token counting fixes** — TUI context panel percentages now use a consistent
-  bytes-to-tokens conversion so they align with the status-bar usage figure
-  (v1.0.72)
-- **Context side panel** — toggleable `Alt+C` panel showing live, quantified
-  context-window occupancy (v1.0.71)
-- **Research clustering** — `/research cluster` concept extraction and a new
-  `cluster.rs` payload builder (v1.0.71)
-- **One-shot agent runner** — lightweight, provider-agnostic single-prompt
-  execution path without spinning up a full agent loop (v1.0.71)
-- **CPU-spin fixes** — Gemini SSE parser infinite loop fixed (`continue` to
-  `break`), timed-out bash children now killed via `kill_on_drop`, and the
-  TUI idle redraw interval raised from 250 ms to 2 s with dirty-flag gating
-  (v1.0.60)
-- **Performance and resource bounding** — removed `gh auth token` subprocess
-  auto-discovery, replaced background-task polling with `tokio::sync::Notify`,
-  code-index worker busy-spin with `recv_timeout`, capped TUI messages (500),
-  log entries (1000), LLM request stats (1000), read-timestamp map (2000),
-  and added WAL auto-checkpointing (v1.0.59)
-- **Activity log system** — new append-only JSONL event store with
-  `RunId`/`EventId` identifiers, projection types, rollback/resume support,
-  and consistency validation (v1.0.59)
-- **Storage schema-version fast path** — warm starts skip the full migration
-  batch, reducing `Storage::open` from ~41 SQL round-trips to a single
-  `CREATE TABLE` + `SELECT` (v1.0.59)
-- **Research tooling overhaul** — New `polarity.rs`, `run_request.rs`,
-  `contradiction.rs`, `corpus_critic.rs`, and `reconcile.rs` modules; unified
-  `ResearchRunRequest` builder shared across CLI/TUI/HTTP; tier routing with
-  `--tier` flag; IMRAD output format; new HTTP research routes with SSE events
-  and 202+Location async behaviour; 37 new tests (v1.0.58)
-- **Code index semantic graph** — Four new graph analysis tools
-  (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
-  `codeindex_communities`) with community detection, shortest-path traversal,
-  and god-node identification; `/codeindex graph build` sub-command
-- **Threaded codeindex graph build + status indicators** — graph builds run on
-  a dedicated OS thread via `spawn_graph_build` with a phased lock discipline
-  (brief snapshot, lock-free derivation, brief persist), so FTS search stays
-  available during derivation; the TUI status bar shows `idx`/`graph` busy
-  tags while a reindex or graph build runs (uncommitted, v1.0.80 cycle)
-- **Bang commands** — Prefix any prompt with `!` to run a shell command and
-  have the model review its output (v1.0.42)
-- **Compaction fix** — Fixed compaction getting stuck when all messages fit
-  the keep budget; now forces at least one message into the head
-- **Code quality** — Extracted shared helpers for markdown rendering and
-  agent dispatch, eliminated unnecessary clones, cleaned up noise comments
-- **CI fixes** — Resolved clippy `needless_raw_string_hashes`, `vec_init_then_push`,
-  and `useless_borrows_in_formatting` warnings
-
-See [CHANGELOG.md](CHANGELOG.md) for the full history.
+- [SPEC.md](SPEC.md) — the full specification and requirement history
+- [STATS.md](STATS.md) — line, file, test and per-crate composition statistics
+- [QUICKSTART.md](QUICKSTART.md) — the guided feature tour
+- [TUI-QUICKSTART.md](TUI-QUICKSTART.md) — running and driving the terminal UI
+- [docs/howtos/](docs/howtos/) — one how-to manual per subsystem
+- [docs/howtos/tools/INDEX.md](docs/howtos/tools/INDEX.md) — the full tool catalog
 
 ## License
 

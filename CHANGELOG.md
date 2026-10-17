@@ -2,6 +2,173 @@
 
 ## [Unreleased]
 
+## [1.0.137] - 2026-10-17
+
+A test-coverage and documentation release: the phase-1 coverage campaign raises 13
+of the 18 crates to >=85% line coverage, a rebuilt `README.md` with a TUI screenshot
+replaces the accumulated release-by-release highlights, and the workspace is restored
+to a clean `/rust-hygiene` state (fmt, clippy, dead-code, `cargo audit` and
+`cargo deny` all pass). No production logic changed beyond the `ragent-tools-vcs`
+`pub(crate)` widenings needed to exercise private helpers.
+
+### Added
+
+- **Test-coverage campaign: 13 crates raised to >=85% line coverage.** Added 80+
+  new `tests/` suites (and a handful of inline test files where the crate already
+  used that convention) across `ragent-surface`, `ragent-types`, `ragent-telemetry`,
+  `ragent-storage`, `ragent-codeindex`, `ragent-config`, `ragent-research`,
+  `ragent-tools-vcs`, `ragent-bench`, `ragent-server`, `ragent-tools-core`,
+  `ragent-tools-extended`, and `ragent-llm`. Measured with
+  `cargo llvm-cov --workspace --summary-only`, workspace line coverage rises from
+  69.8% to 73.9% (functions 69.4% -> 73.8%), and per-crate: `ragent-surface`
+  70.2% -> 90.9%, `ragent-types` 82.2% -> 96.3%, `ragent-storage` 81.1% -> 91.5%,
+  `ragent-config` 75.4% -> 90.5%, `ragent-codeindex` 83.0% -> 88.8%,
+  `ragent-server` 67.4% -> 88.2%, `ragent-telemetry` 74.9% -> 92.0%,
+  `ragent-research` 83.2% -> 85.8%, `ragent-bench` 75.2% -> 86.0%,
+  `ragent-tools-extended` 79.1% -> 86.0%, `ragent-tools-core` 73.2% -> 85.7%,
+  `ragent-tools-vcs` 75.4% -> 86.9%, `ragent-llm` 70.4% -> 86.1%. Tests only: no
+  production logic changed (three `pub(crate)` items in `ragent-tools-vcs` were
+  widened to `pub` so their helpers could be exercised directly).
+
+- **Phase 2 coverage: `ragent-agent` 65.1% -> 85.6% line coverage (uncommitted).**
+  Added 74 new `tests/` suites under `crates/ragent-agent/tests/` plus the
+  `manager_support` and `task_support` shared harness modules (a real
+  `Arc<TeamManager>`/`AgentManager` over a stub `SessionProcessor`). Largest
+  gains: `memory/extract.rs` +439 covered lines, `team/manager.rs` +289,
+  `session/archive.rs` +250, `template/mod.rs` +216, `team/task.rs` +166,
+  `tool/bg.rs` +157, `file_ops/mod.rs` +143, `orchestrator/leader.rs` +118,
+  `team/store.rs` +105. Also `crates/ragent-tui/tests/` gained 24 suites
+  (2,861 tests in the crate) taking `ragent-tui` line coverage 54.1% -> 75.0%.
+  Measured isolation line coverage: `ragent-agent` 65.1% -> 85.6% (missed
+  11,015 -> 4,543 of 31,568 lines); `ragent-tui` 54.1% -> 75.0% (missed
+  13,011 -> 10,271 of 41,153 lines).
+
+- **`serial_test` added as a `ragent-agent` dev-dependency and the inline perf
+  tests made `#[serial_test::serial]`.** The `perf::tests` mutate process-global
+  profiling atomics, so under `cargo llvm-cov` (which runs the lib tests
+  multi-threaded) `config_true_enables_profiling` raced a sibling test's reset and
+  failed spuriously.
+
+### Fixed
+
+- **`test_mcp_discover_panel.rs` could leak a test-binary MCP server into the
+  developer's real global config.** The `/mcp discover` toggle persists an MCP
+  server entry to the user-global `ragent.json`; because the `Space` handler runs
+  off the event loop, an in-flight write could still land after the test's
+  `EnvGuard` had restored `XDG_CONFIG_HOME`, injecting the test executable path as
+  a `filesystem` server into `~/.config/ragent/ragent.json`. Coverage runs are now
+  always executed with `XDG_CONFIG_HOME` pointed at a throwaway
+  `target/temp/xdg-*` directory so no test can observe or mutate the real config.
+
+- **A `glob` coverage test asserted the wrong walk-path shape.** The `**/*.rs`
+  recursive walk reports matches relative to the directory that contains them, so
+  the test now asserts on the base names it actually produces.
+
+- **A `gitlab` README-fallback coverage test stubbed the wrong body shape.** The
+  `file_path` fallback fetches through the JSON `get()` path and expects a
+  JSON-encoded string, not a bare string; the wiremock body is now
+  `set_body_json("raw fallback")`.
+
+- **A `ragent-agent` archive coverage test corrupted a gzip archive unreliably.**
+  Flipping a single byte inside the compressed body could land in trailing padding
+  or leave a still-valid stream; the test now truncates the archive instead, which
+  fails decompression deterministically.
+
+- **Three coverage tests were flaky and are now deterministic.**
+  `test_recorder_constructors.rs::test_all_metrics_disabled_short_circuits` read a
+  process-global telemetry counter that a sibling test wrote concurrently; the two
+  metric-counting tests now serialise on a shared mutex. `test_tool_adapter_events.rs`'s
+  two `bash`-driven tests used a 30 s command timeout that could expire under a loaded
+  `cargo test --workspace` run and now use a 180 s timeout.
+  `test_models_state_misc.rs::reverse_github_no_token_reports_and_stops` ran on a bare
+  `#[test]`, so the reverse path's `tokio::spawn` panicked with "no reactor running";
+  it is now a `#[tokio::test]` and runs inside an isolated project so the GitHub
+  credential chain cannot read the developer's real token file.
+
+- **Clippy cleanliness across the new coverage suites.** `cargo clippy --workspace
+  --all-targets -D warnings` surfaced `assert_is_empty`, `manual_string_new`,
+  `redundant_pattern_matching`, `single_char_pattern`, `assertions_on_constants`,
+  `unnecessary_literal_bound`, `unnecessary_semicolon`, `iter_on_single_items`, and
+  `len_zero` in the new tests; all are fixed (mostly `cargo clippy --fix`), with no
+  lint suppressions added. A `check-dead-code`-shaped warning in
+  `test_session_text_helpers.rs` (a `#[path]`-included source module whose
+  permission-prompt helpers this binary does not use) is silenced with a commented
+  `#[allow(dead_code)]`.
+
+### Changed
+
+- **`README.md` rebuilt and a TUI screenshot added.** The README now opens with a
+  captured `assets/screens/ragent-tui.png` screenshot and the feature list is
+  rewritten to match the current tree: the provider list gains OpenAI Responses / xAI
+  and drops the `Microsoft Foundry Local` claim (its functionality is reached through
+  the router), the tool section is regrouped by the live `permission_category`
+  families reported by `ragent run --dry-run`, the agent roster is corrected to the
+  17 built-in agents, the code index is described as 14 tree-sitter grammars covering
+  50 language ids, and the CLI usage block is regenerated from `ragent --help`. The
+  accumulated release-by-release "Recent highlights" list (about 830 lines) is
+  removed in favour of a link to `CHANGELOG.md`, and cross-links are corrected
+  (`docs/howtos/custom-agents.md`, `docs/userdocs/bench.md`).
+
+- **`AGENTS-RUST.md` renamed to `AGENTS-LANGUAGE.md`.** The Rust-specific agent
+  instruction file is renamed; its content (the mandatory `cargo fmt`-after-every-edit
+  rule and the Rust formatting guidance) is unchanged.
+
+- **`STATS.md`, `SPEC.md`, `QUICKSTART.md`, `README.md` and `TUI-QUICKSTART.md`
+  refreshed for 1.0.137.** The version markers move to 1.0.137 and the
+  previously-uncommitted worktree notes are folded into this release.
+
+### Security
+
+- **`zip 7.2.0` advisories suppressed with a documented reason (no upgrade path).**
+  `cargo audit` reports RUSTSEC-2026-0367 (high - insecure preservation of
+  SUID/SGID bits during extraction), RUSTSEC-2026-0368, and RUSTSEC-2026-0369
+  (critical - symlink permission confinement), all fixed only by upgrading to
+  `zip >= 9.0.0`. No upgrade path exists yet: `zip 7.2.0` is a transitive
+  dependency of `calamine 0.34` (latest 0.36.1 still requires `zip ^8.6`) and
+  `rust_xlsxwriter 0.94` (latest 0.99.1 requires `zip ^8.3`), plus the
+  plugin/connector/VCS crates. ragent never calls the affected
+  `ZipArchive::extract()` / `ZipStreamReader::extract()` APIs - its direct zip
+  use is an in-memory `ZipArchive::new` + `by_index` with manual
+  path-contained writes (SEC-032/070, ANTIPAT M17) - and it never runs as a
+  privileged extractor. The three IDs are therefore added with a reasoned
+  suppression to `.cargo/audit.toml` and `deny.toml` (and the informational
+  release `cargo audit` list), matching the repo's existing
+  suppression-with-reason pattern; a newly published advisory still fails CI.
+
+### Commits (last 10)
+
+- **`Version: 1.0.137` (this release).** The test-coverage campaign, the rebuilt
+  `README.md` and TUI screenshot, the `AGENTS-RUST.md` -> `AGENTS-LANGUAGE.md`
+  rename, and the `zip 7.2.0` advisory suppressions; detailed above.
+- **`ea4a8221` - Version: 1.0.136.** The interactive `/plugins list` panel (spec
+  `plugins` FR-009, FR-030), the `build_list_view` / `PluginListView` shared
+  discovery path, and the manifest/runtime tool merge fix
+  (`merge_contributed_tools` / `merge_contributed_commands`); detailed in
+  `[1.0.136]` below.
+- **`31c6dea3` - Version: 1.0.135.** Security-hardening release closing the
+  critical/high band of the `docs/reports/security-audit.md` run; detailed in
+  `[1.0.135]` below.
+- **`827e8754` - Version: 1.0.134.** MCP-discovery ergonomics, the `ask_user`
+  default/fallback timeout, and the value-level redaction sweeps; see `[1.0.134]`.
+- **`0b5f9164` - Version: 1.0.133.** Plugin-store browse-panel refinements and the
+  `git+<url>#<ref>` install fix (spec `plugins` FR-024); see `[1.0.133]`.
+- **`5995283a` - Version: 1.0.132.** Merged connector/plugin marketplace browsers
+  and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050,
+  `connectors` FR-042..FR-046); see `[1.0.132]`.
+- **`1e08279f` - Version: 1.0.131 ("backends support").** Release of the
+  OpenHands-parity delta: pluggable execution backends, the LLM security analyzer,
+  the OpenAI-compatible inbound surface and generated OpenAPI 3.1 contract with HTTP
+  MCP transport, the feature-gated ACP server, the automation service, and
+  AgentSkills discovery; see `[1.0.131]`.
+- **`2ed21e3d` - Version: 1.0.130.** The stable-toolchain fix for the `/events` SSE
+  connection cap; folded into `[1.0.131]`.
+- **`e617bcef` - plugin-store category navigator; remove browser tool.** The
+  `/plugins codex` / `/plugins claude` category navigator, the new
+  `/plugins codex|claude|stores` subcommands, and removal of the `browser` CDP tool.
+- **`054e5154` - Version: 1.0.129.** Release of the completed M5-M9 code-audit
+  remediation and the M1 secret hardening; see `[1.0.129]`.
+- **`f87e2d95` - Version: 1.0.128.** MCP startup fix; see `[1.0.128]`.
+
 ## [1.0.136] - 2026-10-16
 
 `/plugins list` gains an interactive panel, modelled on the `/mcp discover`

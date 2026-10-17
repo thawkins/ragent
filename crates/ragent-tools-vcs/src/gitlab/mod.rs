@@ -24,5 +24,6 @@ pub use gitlab_pipelines::{
     GitLabGetPipelineTool, GitLabListJobsTool, GitLabListPipelinesTool, GitLabRetryJobTool,
     GitLabRetryPipelineTool,
 };
+pub use helpers::{detect, detect_project, make_client};
 
 pub use crate::{Tool, ToolContext, ToolOutput};

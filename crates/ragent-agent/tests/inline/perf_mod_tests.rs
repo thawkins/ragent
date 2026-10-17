@@ -20,6 +20,7 @@ impl Drop for StateGuard {
 }
 
 #[test]
+#[serial_test::serial]
 fn default_is_disabled() {
     let _g = StateGuard;
     assert!(!is_profiling_enabled());
@@ -27,6 +28,7 @@ fn default_is_disabled() {
 }
 
 #[test]
+#[serial_test::serial]
 fn master_enabled_can_be_toggled() {
     let _g = StateGuard;
     set_master_enabled(false);
@@ -36,6 +38,7 @@ fn master_enabled_can_be_toggled() {
 }
 
 #[test]
+#[serial_test::serial]
 fn runtime_override_wins_over_config() {
     let _g = StateGuard;
     set_profiling_from_config(true);
@@ -48,11 +51,13 @@ fn runtime_override_wins_over_config() {
 }
 
 #[test]
+#[serial_test::serial]
 fn env_var_name_is_stable() {
     assert_eq!(env_var_name(), "RAGENT_AGENT_PERF");
 }
 
 #[test]
+#[serial_test::serial]
 fn config_false_disables_profiling() {
     let _g = StateGuard;
     set_profiling_from_config(false);
@@ -60,6 +65,7 @@ fn config_false_disables_profiling() {
 }
 
 #[test]
+#[serial_test::serial]
 fn config_true_enables_profiling() {
     let _g = StateGuard;
     set_profiling_from_config(true);
@@ -67,6 +73,7 @@ fn config_true_enables_profiling() {
 }
 
 #[test]
+#[serial_test::serial]
 fn profiling_override_round_trip() {
     let _g = StateGuard;
     assert!(!profiling_override_active());

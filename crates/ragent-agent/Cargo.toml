@@ -93,6 +93,9 @@ chrono = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 tempfile = "3.5"
+# SERIALISES process-global-state tests (perf profiling atomics); the inline
+# perf tests mutate static atomics shared across every test thread.
+serial_test = "4"
 # Team runtime / coordination-tool integration tests (relocated from the
 # retired ragent-team crate in ANTIPAT M7.8) exercise BashTool/CommandCatalog.
 ragent-tools-core = { path = "../ragent-tools-core" }

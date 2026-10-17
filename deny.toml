@@ -33,6 +33,18 @@ ignore = [
     # whose latest release still requires lru ^0.16.3 (fixed only in 0.18.2).
     # ragent never calls LruCache::pop().
     { id = "RUSTSEC-2026-0253", reason = "remaining copy pinned by tantivy 0.26 (requires lru ^0.16.3); ragent never calls LruCache::pop()" },
+    # RUSTSEC-2026-0367 / -0368 / -0369: zip extraction hardening (SUID/SGID bit
+    # preservation, symlink target/permission confinement), fixed in zip >= 9.0.0.
+    # zip 7.2.0 is a transitive dependency of calamine 0.34 (latest 0.36.1 still
+    # requires zip ^8.6) and rust_xlsxwriter 0.94 (latest 0.99.1 requires zip
+    # ^8.3); no release accepts zip >= 9.0.0 yet, so no upgrade path exists.
+    # ragent never calls the affected ZipArchive::extract() /
+    # ZipStreamReader::extract() APIs - its direct zip use is in-memory
+    # ZipArchive::new + by_index with manual path-contained writes
+    # (SEC-032/070/ANTIPAT M17), and it never runs as a privileged extractor.
+    { id = "RUSTSEC-2026-0367", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
+    { id = "RUSTSEC-2026-0368", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
+    { id = "RUSTSEC-2026-0369", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
 ]
 
 [licenses]

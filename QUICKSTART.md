@@ -2136,6 +2136,34 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.137
+
+- **Workspace test-coverage campaign (tests only, no production logic changed)** —
+  roughly 80 new `tests/` suites plus a set of inline test files raise 13 of the 18
+  crates to >=85% line coverage. Workspace line coverage rises from 69.8% to 73.9%.
+  `ragent-agent` 65.1% -> 85.6%, `ragent-tui` 54.1% -> 75.0%, with the biggest
+  single-crate jumps in `ragent-types` (82.2% -> 96.3%), `ragent-telemetry`
+  (74.9% -> 92.0%), and `ragent-surface` (70.2% -> 90.9%). Three `pub(crate)` items
+  in `ragent-tools-vcs` (`run_status`, `filter_log_text`, and the GitLab
+  `make_client`/`detect_project`/`detect` helpers) were widened to `pub` so their
+  helpers could be exercised directly.
+- **Test-isolation fixes** — `serial_test` is added as a `ragent-agent`
+  dev-dependency and the inline perf tests are marked `#[serial_test::serial]`
+  (the `perf::tests` mutate process-global profiling atomics and raced under the
+  multi-threaded `cargo llvm-cov` run). Coverage runs now pin `XDG_CONFIG_HOME` at
+  a throwaway `target/temp/xdg-*` directory so no test can observe or mutate the
+  developer's real `~/.config/ragent/ragent.json` (the `/mcp discover` toggle
+  persists an MCP server entry there). Two coverage tests were corrected: a `glob`
+  test asserted the wrong walk-path shape (matches are reported relative to the
+  containing directory), and a `gitlab` README-fallback test stubbed the wrong body
+  shape (the `file_path` fallback fetches through the JSON `get()` path, so the
+  wiremock body must be `set_body_json`).
+- **Documentation** — `STATS.md` re-measured against the expanded tree (1,704 crate
+  Rust files, 632,708 crate lines, 1,041 external test files, ~13,111 tests), and the
+  version/how-to docs refreshed. `cargo check` clean; `cargo audit` reports the
+  pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369), unchanged by this
+  work.
+
 ## Version 1.0.136
 
 - **Interactive `/plugins list` panel** — `/plugins list [--verbose]` now opens a

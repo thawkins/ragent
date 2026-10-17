@@ -295,3 +295,331 @@ fn test_credentials_not_in_error_messages() {
         assert!(!msg.contains("wJalr"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Converse request body, chat() streams, and error classification
+// ---------------------------------------------------------------------------
+
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
+use futures::StreamExt;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+
+fn sample_creds() -> AwsCredentials {
+    AwsCredentials {
+        access_key: "AKIATEST".to_string(),
+        secret_key: "secret".to_string(),
+        session_token: None,
+        region: "us-east-1".to_string(),
+    }
+}
+
+#[test]
+fn test_converse_request_body_parts_and_tools() {
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: "https://bedrock.us-east-1.amazonaws.com".to_string(),
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let req = ChatRequest {
+        model: "amazon.nova-pro-v1:0".to_string(),
+        messages: Arc::new(vec![
+            crate::llm::ChatMessage {
+                role: "system".to_string(),
+                content: ChatContent::Text("ignored".to_string()),
+            },
+            crate::llm::ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Parts(vec![
+                    crate::llm::ContentPart::Text {
+                        text: "describe".to_string(),
+                    },
+                    crate::llm::ContentPart::ImageUrl {
+                        url: "data:image/jpeg;base64,QUJD".to_string(),
+                    },
+                    crate::llm::ContentPart::ToolUse {
+                        id: "tu1".to_string(),
+                        name: "calc".to_string(),
+                        input: json!({"expr": "2+2"}),
+                    },
+                    crate::llm::ContentPart::ToolResult {
+                        tool_use_id: "tu1".to_string(),
+                        content: Arc::from("4"),
+                    },
+                ]),
+            },
+            crate::llm::ChatMessage {
+                role: "tool".to_string(),
+                content: ChatContent::Text("skipped".to_string()),
+            },
+        ]),
+        tools: Arc::new(vec![ToolDefinition {
+            name: "calc".to_string(),
+            description: "Calculate".to_string(),
+            parameters: json!({"type": "object"}),
+        }]),
+        temperature: Some(0.3),
+        top_p: Some(0.6),
+        max_tokens: Some(512),
+        system: Some(Arc::from("be brief")),
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+    let body = client.build_request_body(&req);
+    // Only the user message survives (system skipped, unknown role skipped).
+    assert_eq!(body["messages"].as_array().expect("msgs").len(), 1);
+    let content = &body["messages"][0]["content"];
+    assert_eq!(content[0]["text"], "describe");
+    assert_eq!(content[1]["image"]["format"], "jpeg");
+    assert_eq!(content[1]["image"]["source"]["bytes"], "QUJD");
+    assert_eq!(content[2]["toolUse"]["toolUseId"], "tu1");
+    assert_eq!(content[3]["toolResult"]["content"][0]["text"], "4");
+    assert_eq!(body["system"][0]["text"], "be brief");
+    assert_eq!(body["inferenceConfig"]["maxTokens"], 512);
+    assert!(body["toolConfig"]["tools"].is_array());
+}
+
+#[test]
+fn test_bedrock_anthropic_request_body_tools_and_thinking() {
+    let client = BedrockAnthropicClient {
+        credentials: sample_creds(),
+        base_url: "https://bedrock.us-east-1.amazonaws.com".to_string(),
+        model_id: "anthropic.claude-sonnet-4-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let req = ChatRequest {
+        model: "anthropic.claude-sonnet-4-v1:0".to_string(),
+        messages: Arc::new(vec![crate::llm::ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Parts(vec![
+                crate::llm::ContentPart::Text {
+                    text: "hi".to_string(),
+                },
+                crate::llm::ContentPart::ImageUrl {
+                    url: "data:image/png;base64,QUJD".to_string(),
+                },
+            ]),
+        }]),
+        tools: Arc::new(vec![ToolDefinition {
+            name: "calc".to_string(),
+            description: "Calculate".to_string(),
+            parameters: json!({"type": "object"}),
+        }]),
+        temperature: None,
+        top_p: None,
+        max_tokens: Some(128),
+        system: Some(Arc::from("sys")),
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+    let body = client.build_request_body(&req);
+    assert_eq!(body["anthropic_version"], "bedrock-2023-06-01");
+    assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+    assert_eq!(body["messages"][0]["content"][1]["type"], "image");
+    assert!(body["tools"].is_array());
+}
+
+async fn spawn_bedrock_stream(body: String) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nConnection: close\r\n\r\n{body}"
+        );
+        let _ = socket.write_all(response.as_bytes()).await;
+        let _ = socket.shutdown().await;
+    });
+    format!("http://{addr}")
+}
+
+async fn spawn_bedrock_status(status: u16, body: String) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let response = format!(
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = socket.write_all(response.as_bytes()).await;
+        let _ = socket.shutdown().await;
+    });
+    format!("http://{addr}")
+}
+
+fn converse_request() -> ChatRequest {
+    ChatRequest {
+        model: "amazon.nova-pro-v1:0".to_string(),
+        messages: Arc::new(vec![crate::llm::ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("hi".to_string()),
+        }]),
+        tools: Arc::new(vec![]),
+        temperature: None,
+        top_p: None,
+        max_tokens: Some(64),
+        system: None,
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: Some(5),
+        thinking: None,
+    }
+}
+
+#[tokio::test]
+async fn test_converse_chat_stream_text_tool_and_finish() {
+    let sse = concat!(
+        "event: messageStart\n",
+        "data: {\"usage\":{\"inputTokens\":9}}\n\n",
+        "event: contentBlockStart\n",
+        "data: {\"start\":{\"toolUse\":{\"toolUseId\":\"tu1\",\"name\":\"calc\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"delta\":{\"text\":\"Hi\"}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"delta\":{\"toolUse\":{\"input\":\"{\\\"x\\\":1}\"}}}\n\n",
+        "event: contentBlockStop\n",
+        "data: {}\n\n",
+        "event: metadata\n",
+        "data: {\"usage\":{\"outputTokens\":4}}\n\n",
+        "event: messageStop\n",
+        "data: {\"stopReason\":\"tool_use\"}\n\n",
+    )
+    .to_string();
+    let url = spawn_bedrock_stream(sse).await;
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let events: Vec<StreamEvent> = client
+        .chat(converse_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::TextDelta { text } if text == "Hi"))
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        StreamEvent::ToolCallStart { id, name } if id == "tu1" && name == "calc"
+    )));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        StreamEvent::ToolCallDelta { args_json, .. } if args_json == "{\"x\":1}"
+    )));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::ToolCallEnd { id } if id == "tu1"))
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        StreamEvent::Usage {
+            input_tokens: 9,
+            output_tokens: 0
+        }
+    )));
+    assert!(
+        events.iter().any(
+            |e| matches!(e, StreamEvent::Finish { reason } if *reason == FinishReason::ToolUse)
+        )
+    );
+}
+
+#[tokio::test]
+async fn test_bedrock_anthropic_chat_stream_blocks() {
+    let sse = concat!(
+        "event: message_start\n",
+        "data: {\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Yo\"}}\n\n",
+        "event: message_delta\n",
+        "data: {\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":1}}\n\n",
+    )
+    .to_string();
+    let url = spawn_bedrock_stream(sse).await;
+    let client = BedrockAnthropicClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "anthropic.claude-sonnet-4-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let events: Vec<StreamEvent> = client
+        .chat(converse_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::TextDelta { text } if text == "Yo"))
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, StreamEvent::Finish { reason } if *reason == FinishReason::Length)
+        )
+    );
+}
+
+#[tokio::test]
+async fn test_bedrock_converse_error_classification() {
+    let throttling = r#"{"error":{"type":"ThrottlingException","message":"slow down"}}"#;
+    let url = spawn_bedrock_status(429, throttling.to_string()).await;
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let err = match client.chat(converse_request()).await {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("ThrottlingException"), "error: {err}");
+
+    let denied = r#"{"error":{"type":"AccessDeniedException","message":"no"}}"#;
+    let url = spawn_bedrock_status(403, denied.to_string()).await;
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let err = match client.chat(converse_request()).await {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("access denied"), "error: {err}");
+}
+
+#[test]
+fn test_build_bedrock_base_url_endpoint_override() {
+    assert_eq!(
+        build_bedrock_base_url("eu-west-1", None),
+        "https://bedrock.eu-west-1.amazonaws.com"
+    );
+    assert_eq!(
+        build_bedrock_base_url("us-east-1", Some("https://vpce.example.com/")),
+        "https://vpce.example.com"
+    );
+}

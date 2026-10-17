@@ -58,7 +58,7 @@ const MAX_ACTION_RUNS: u64 = 30;
 /// cancelled, timed_out, action_required, neutral, skipped, stale) is
 /// reported as `Failed`. A run still in progress (no conclusion) is
 /// reported as `Running`.
-fn run_status(conclusion: Option<&str>, status: &str) -> &'static str {
+pub fn run_status(conclusion: Option<&str>, status: &str) -> &'static str {
     if status == "in_progress" || status == "queued" {
         return "Running";
     }
@@ -105,7 +105,7 @@ pub fn extract_context_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
 
 /// Build a human-readable snippet from a single log file's contents,
 /// showing only the context windows around `error`/`failed` lines.
-fn filter_log_text(text: &str) -> String {
+pub fn filter_log_text(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let ranges = extract_context_ranges(&lines);
     if ranges.is_empty() {

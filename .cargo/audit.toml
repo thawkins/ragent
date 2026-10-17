@@ -8,4 +8,14 @@ ignore = [
     "RUSTSEC-2026-0195", # quick-xml namespace allocation; blocked by ooxmlsdk/calamine
     "RUSTSEC-2024-0436", # paste unmaintained; transitive via tokenizers 0.21 (embeddings feature)
     "RUSTSEC-2026-0253", # lru pop() panic safety; remaining copy pinned by tantivy; pop never called
+    # zip extraction hardening (SUID/SGID bits, symlink confinement), fixed in
+    # zip >= 9.0.0. zip 7.2.0 is pulled by calamine 0.34 (latest 0.36.1 still
+    # requires zip ^8.6) and rust_xlsxwriter 0.94 (latest 0.99.1 requires
+    # zip ^8.3); no upgrade to >= 9.0.0 exists yet. ragent never calls the
+    # affected ZipArchive::extract() / ZipStreamReader::extract() APIs - its
+    # direct zip use is in-memory ZipArchive::new + by_index with manual
+    # path-contained writes (SEC-032/070/ANTIPAT M17).
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
