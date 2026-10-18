@@ -4,6 +4,8 @@ An AI coding agent for the terminal, built in Rust.
 
 ![ragent terminal UI](assets/screens/ragentstart.png)
 
+![ragent mcp start](assets/screens/ragentmcpstartup.png)
+
 ragent is a Rust coding agent inspired by RooCode, Claude Code, Copilot CLI and
 OpenCode. It provides multi-provider LLM orchestration, a comprehensive built-in
 tool system, a terminal UI, and a client/server architecture — all compiled into a
@@ -50,6 +52,8 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   drivable headless browser is present, taking the count to 149 — spec `openhands`
   FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
   are:
+ 
+![ragent tool session](assets/screens/ragentsession.png) 
 
   - **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
     move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`

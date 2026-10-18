@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.0.140] - 2026-10-18
+
+A version bump release. `cargo check` and `cargo audit` both pass with no new
+advisories (866 crate dependencies scanned).
+
 ## [1.0.139] - 2026-10-18
 
 A documentation-and-status-bar release. The status bar names the active
