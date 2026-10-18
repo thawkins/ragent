@@ -17,10 +17,6 @@ mod llm {
     pub use ragent_agent::llm::ToolDefinition;
 }
 
-mod tool {
-    pub use ragent_agent::tool::ToolRegistry;
-}
-
 mod session {
     pub mod loop_state {
         pub use ragent_agent::session::loop_state::LoopSpec;

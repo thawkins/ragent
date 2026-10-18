@@ -28,6 +28,12 @@ cp target/release/ragent ~/.local/bin/
 ragent --version    # or: ragent -V
 ```
 
+Requires Rust 1.85+ (edition 2024, pinned toolchain `stable`). Incremental
+compilation is disabled workspace-wide (`.cargo/config.toml` `[build]
+incremental = false`, repeated in `[profile.dev]`/`[profile.test]`), because the
+`sccache` wrapper cannot cache incremental artifacts - expect full rebuilds.
+`BUILDSTATS.md` records the measured cost of each step.
+
 ---
 
 ## 1. Configure a Provider
@@ -700,17 +706,37 @@ Inside `system_prompt` you can use:
 
 ### Read-only reviewer example
 
-Copy from the bundled examples and install:
+Write this profile to `~/.ragent/agents/security-reviewer.json` (or to
+`.ragent/agents/` for one project only):
 
-```bash
-cp examples/agents/security-reviewer.json ~/.ragent/agents/
+```json
+{
+  "name": "security-reviewer",
+  "description": "OWASP-focused security code reviewer",
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "modules": [{
+    "type": "ragent/agent/v1",
+    "payload": {
+      "system_prompt": "You are a security-focused code reviewer.\nWorking directory: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
+      "mode": "primary",
+      "max_steps": 30,
+      "temperature": 0.2,
+      "permissions": [
+        { "permission": "read", "pattern": "**", "action": "allow" },
+        { "permission": "edit", "pattern": "**", "action": "deny"  },
+        { "permission": "bash", "pattern": "**", "action": "deny"  }
+      ]
+    }
+  }]
+}
 ```
 
 This gives you a security reviewer that can read all files but cannot edit or
 run shell commands.
 
 For the full schema reference and more examples see
-[docs/custom-agents.md](docs/custom-agents.md).
+[docs/howtos/custom-agents.md](docs/howtos/custom-agents.md).
 
 ---
 
@@ -771,7 +797,8 @@ For full details and advanced workflows (plan approval, hooks, graceful shutdown
 
 - [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - [`docs/howtos/teams.md`](docs/howtos/teams.md)
-- [`examples/teams/`](examples/teams/)
+- [`.ragent/blueprints/teams/`](.ragent/blueprints/teams/) (`code-review`,
+  `parallel-feature`, `debate`)
 
 ---
 
@@ -2136,6 +2163,53 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.138
+
+- **One test binary per crate** — every crate (and the root `ragent` package) now
+  sets `autotests = false` and declares a single `[[test]] name = "all"` whose
+  `tests/all.rs` `#[path]`-includes each former top-level test file as a child
+  module. A full `cargo test` links **19 integration targets instead of ~948**;
+  the test-name sets are verified identical to the pre-change sets. Run one file
+  with the filter form:
+
+  ```bash
+  cargo test -p ragent-tui --test all test_slash_commands::
+  cargo test -p ragent-agent --test all test_processor_deep_paths::
+  ```
+
+  Merging binaries merges process state, so each `tests/all.rs` defines one
+  binary-wide `global_env_lock()` and every test that mutates or observes a
+  process-global (`cwd`, `XDG_CONFIG_HOME`, `HOME`, `PATH`, a `static` registry)
+  contends on it. `#[serial]` is still fine for globals needing no value control.
+- **Tests no longer write into the repository** — the research vault root is now
+  explicit `AppState::research_root` state, `session::history::set_subagent_log_root`
+  redirects diverted `wait_agents` batches, and
+  `ragent_tui::app::set_log_root_override` /
+  `use_scratch_log_root_for_tests` redirect TUI log-window spools. A full test run
+  leaves `git status` unchanged; all three are `#[doc(hidden)]` test hooks, so the
+  shipped defaults (`<working dir>/log`, `<working dir>/research`) are unchanged.
+- **Incremental compilation disabled** — `.cargo/config.toml` sets
+  `[build] incremental = false` and the root `Cargo.toml` repeats it on
+  `[profile.dev]` plus a new `[profile.test]` (`debug = "line-tables-only"`).
+  `sccache` cannot cache incremental artifacts, so the cache only consumed disk.
+- **`BUILDSTATS.md`** — new measured record of build/test/coverage time and disk
+  cost (clean 9s, release 7m 37s / 1.80 GiB, debug 2m 41s / 2.40 GiB, full test
+  9m 12s / 14.92 GiB, coverage 9m 58s / 15.82 GiB; re-measured on the final tree:
+  13,862 tests pass, 16 ignored, workspace line coverage 86.58%).
+- **`examples/` removed** — the sample agent/skill/team files are gone; agent
+  profiles live in `.ragent/agents/` (17 per-crate security auditors ship here)
+  and team blueprints in `.ragent/blueprints/teams/` (`code-review`,
+  `parallel-feature`, `debate`).
+- **`.ragent/Instructions/` is tracked** — the per-language instruction packs
+  (rust, python, go, java, kotlin, javascript, php, dotnet, terraform) join the
+  `.gitignore` exception list so they are version-controlled.
+- **`ragent-tui` deep coverage** — 17 more consolidated test files (642 tests,
+  ~16.1k lines) cover the slash dispatch arms, event swarm/research paths, input
+  editing, layout/scroll maths, schedule helpers, message-widget summaries and
+  session/model state. Re-measured coverage puts every one of the 18 crates above
+  85% line coverage, with workspace line coverage at 86.58% (from 73.9%) and
+  `ragent-tui` at 86.77% (from 75.14%).
+
 ## Version 1.0.137
 
 - **Workspace test-coverage campaign (tests only, no production logic changed)** —
@@ -2158,11 +2232,11 @@ parsed into the required structure (FR-005/FR-006).
   containing directory), and a `gitlab` README-fallback test stubbed the wrong body
   shape (the `file_path` fallback fetches through the JSON `get()` path, so the
   wiremock body must be `set_body_json`).
-- **Documentation** — `STATS.md` re-measured against the expanded tree (1,704 crate
-  Rust files, 632,708 crate lines, 1,041 external test files, ~13,111 tests), and the
+- **Documentation** — `STATS.md` re-measured against the expanded tree (1,741 crate
+  Rust files, 652,227 crate lines, 1,078 test files, 13,886 tests), and the
   version/how-to docs refreshed. `cargo check` clean; `cargo audit` reports the
-  pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369), unchanged by this
-  work.
+  pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369, suppressed with
+  a documented reason), unchanged by this work.
 
 ## Version 1.0.136
 

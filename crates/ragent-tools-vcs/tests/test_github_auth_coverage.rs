@@ -8,14 +8,12 @@
 //! written outside the temp directory, and no network is touched.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use ragent_tools_vcs::github::GitHubClient;
 use ragent_tools_vcs::github::auth::{delete_token, load_token, save_token};
 
 /// Serialises every test in this binary that mutates the environment or the
 /// process-global token cache.
-static LOCK: Mutex<()> = Mutex::new(());
 
 /// RAII guard that restores a set of environment variables on drop.
 struct EnvRestore(Vec<(&'static str, Option<String>)>);
@@ -81,9 +79,7 @@ impl TempHome {
 /// Run `f` with a private `XDG_CONFIG_HOME`, `GITHUB_TOKEN` cleared, and the
 /// `gh` CLI fallback disabled, all under the process lock.
 fn with_isolated_env<T>(f: impl FnOnce(&TempHome) -> T) -> T {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let home = TempHome::new();
     let root = home.root().to_string_lossy().to_string();
     let _restore = EnvRestore::apply(&[
@@ -179,9 +175,7 @@ fn test_stored_file_wins_when_no_env_and_no_gh_cli() {
 
 #[test]
 fn test_client_id_env_override_and_default() {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     // Default: the compiled OAuth client id, which is non-empty.
     {
         let _env = EnvRestore::apply(&[("RAGENT_GITHUB_CLIENT_ID", None)]);

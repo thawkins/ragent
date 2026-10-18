@@ -1,6 +1,5 @@
 //! Regression tests for `/bench` slash commands.
 
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use ragent_bench::{BenchProgressHandle, BenchRunEvent, BenchRunOutcome, BenchRunProgress};
@@ -15,11 +14,6 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
     }
-}
-
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn enter_temp_project_dir() -> (tempfile::TempDir, CwdGuard) {
@@ -43,9 +37,7 @@ fn enter_isolated_project_dir() -> (
     tempfile::TempDir,
     CwdGuard,
 ) {
-    let guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = crate::global_env_lock();
     let (temp, cwd) = enter_temp_project_dir();
     (guard, temp, cwd)
 }

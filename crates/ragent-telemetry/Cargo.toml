@@ -7,6 +7,12 @@ license = "MIT"
 description = "OpenTelemetry metrics export subsystem for ragent"
 repository = "https://github.com/thawkins/ragent"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [features]
 # The real OpenTelemetry meter provider and OTLP exporters are enabled by
 # default. Telemetry is hardwired into the ragent binary; this feature can be

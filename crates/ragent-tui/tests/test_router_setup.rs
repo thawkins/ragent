@@ -71,6 +71,7 @@ fn mem_storage() -> Arc<Storage> {
 }
 
 fn make_app_with_storage(storage: Arc<Storage>) -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());

@@ -11,7 +11,7 @@
 //! test enters an isolated tempdir project (holding `.ragent/ragent.json` and
 //! the skill packs) under a process-global mutex that serialises the cwd swap.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_tui::App;
 use ragent_tui::app::{ConfiguredProvider, ProviderSource};
@@ -21,11 +21,9 @@ mod support;
 
 /// The cwd swap below is process-global; one mutex serialises every test in
 /// this binary against it.
-fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn test_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Restores the original working directory on drop.

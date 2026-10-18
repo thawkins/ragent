@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Codebase indexing and structured search for ragent"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 blake3 = { workspace = true }
 globset = { workspace = true }

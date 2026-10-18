@@ -8,8 +8,10 @@ use ragent_types::sanitize::{
     register_secret, seed_secrets, unregister_secret,
 };
 use serde_json::json;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn exact_secret_keys_are_case_insensitive() {
     for key in [
         "token",
@@ -37,6 +39,7 @@ fn exact_secret_keys_are_case_insensitive() {
 }
 
 #[test]
+#[serial]
 fn secret_suffixes_are_matched_but_not_innocent_words() {
     for key in [
         "foo_key",
@@ -58,6 +61,7 @@ fn secret_suffixes_are_matched_but_not_innocent_words() {
 }
 
 #[test]
+#[serial]
 fn mask_key_keeps_only_the_last_four_characters() {
     assert_eq!(mask_key("sk-1234567890abcd"), "...abcd");
     assert_eq!(mask_key("abc"), "...abc");
@@ -71,6 +75,7 @@ fn mask_key_keeps_only_the_last_four_characters() {
 }
 
 #[test]
+#[serial]
 fn redact_json_value_walks_nested_arrays_and_objects() {
     let secret = "sk-live-REDACTJSON0123456789";
     register_secret(secret);
@@ -102,6 +107,7 @@ fn redact_json_value_walks_nested_arrays_and_objects() {
 }
 
 #[test]
+#[serial]
 fn redact_json_value_stops_below_the_depth_limit() {
     let secret = "sk-live-DEPTHLIMIT012345678";
     register_secret(secret);
@@ -119,6 +125,7 @@ fn redact_json_value_stops_below_the_depth_limit() {
 }
 
 #[test]
+#[serial]
 fn mask_edges_keeps_a_consistent_shape_for_each_band() {
     // Empty input is empty.
     assert_eq!(mask_edges("", 4, 12), "");
@@ -131,6 +138,7 @@ fn mask_edges_keeps_a_consistent_shape_for_each_band() {
 }
 
 #[test]
+#[serial]
 fn empty_secrets_are_ignored_by_register_and_seed() {
     // Registering the empty string is a no-op (and must not panic).
     register_secret("");

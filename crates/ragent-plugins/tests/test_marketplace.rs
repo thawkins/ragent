@@ -3,6 +3,14 @@
 //! that turns a manifest-less marketplace stub (the Claude store's `*-lsp`
 //! entries) into an installable plugin (spec `plugins` follow-up; FR-002).
 
+/// Run `body` with the crate-wide lock held, serialising tests that record,
+/// look up, or evict documents in the process-global marketplace registry
+/// (see `tests/all.rs`).
+fn with_registry<T>(body: impl FnOnce() -> T) -> T {
+    let _lock = crate::global_env_lock();
+    body()
+}
+
 use ragent_plugins::marketplace::{
     document_key, inline_manifest_for, lookup, materialize_at, record_document, split_manifest_key,
 };
@@ -81,13 +89,15 @@ fn inline_manifest_refuses_plain_listings_and_unknown_names() {
 
 #[test]
 fn record_then_lookup_roundtrips_the_inline_manifest() {
-    let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
-    record_document(origin, DOC.as_bytes());
-    let key = document_key(origin, DOC.as_bytes());
-    let manifest = lookup(&key, "rust-analyzer-lsp").expect("recorded doc must answer");
-    assert!(manifest.contains("lspServers"));
-    // An unknown key answers nothing.
-    assert!(lookup(&"0".repeat(64), "rust-analyzer-lsp").is_none());
+    with_registry(|| {
+        let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
+        record_document(origin, DOC.as_bytes());
+        let key = document_key(origin, DOC.as_bytes());
+        let manifest = lookup(&key, "rust-analyzer-lsp").expect("recorded doc must answer");
+        assert!(manifest.contains("lspServers"));
+        // An unknown key answers nothing.
+        assert!(lookup(&"0".repeat(64), "rust-analyzer-lsp").is_none());
+    });
 }
 
 #[test]
@@ -116,163 +126,171 @@ fn split_manifest_key_only_splits_a_sha256_suffix() {
 
 #[test]
 fn materialize_writes_the_manifest_for_a_manifest_less_stub() {
-    let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
-    record_document(origin, DOC.as_bytes());
-    let key = document_key(origin, DOC.as_bytes());
+    with_registry(|| {
+        let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
+        record_document(origin, DOC.as_bytes());
+        let key = document_key(origin, DOC.as_bytes());
 
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path().to_path_buf();
-    // The manifest-less stub layout: README + LICENSE, no manifest.
-    std::fs::write(root.join("README.md"), "# stub").unwrap();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        // The manifest-less stub layout: README + LICENSE, no manifest.
+        std::fs::write(root.join("README.md"), "# stub").unwrap();
 
-    let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&key));
-    assert_eq!(returned, root);
-    let written = root.join(".claude-plugin/plugin.json");
-    assert!(written.is_file(), "manifest materialised");
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&written).unwrap()).expect("valid json");
-    assert_eq!(value["name"], "rust-analyzer-lsp");
-    assert!(value.get("lspServers").is_some());
+        let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&key));
+        assert_eq!(returned, root);
+        let written = root.join(".claude-plugin/plugin.json");
+        assert!(written.is_file(), "manifest materialised");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&written).unwrap()).expect("valid json");
+        assert_eq!(value["name"], "rust-analyzer-lsp");
+        assert!(value.get("lspServers").is_some());
+    });
 }
 
 #[test]
 fn materialize_leaves_a_real_manifest_tree_untouched() {
-    let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
-    record_document(origin, DOC.as_bytes());
-    let key = document_key(origin, DOC.as_bytes());
+    with_registry(|| {
+        let origin = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
+        record_document(origin, DOC.as_bytes());
+        let key = document_key(origin, DOC.as_bytes());
 
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path().to_path_buf();
-    let dir = root.join(".claude-plugin");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(
-        dir.join("plugin.json"),
-        r#"{"name": "rust-analyzer-lsp", "version": "9.9.9"}"#,
-    )
-    .unwrap();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let dir = root.join(".claude-plugin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            r#"{"name": "rust-analyzer-lsp", "version": "9.9.9"}"#,
+        )
+        .unwrap();
 
-    let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&key));
-    assert_eq!(returned, root);
-    let body = std::fs::read_to_string(dir.join("plugin.json")).unwrap();
-    assert!(body.contains("9.9.9"), "upstream manifest must win: {body}");
+        let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&key));
+        assert_eq!(returned, root);
+        let body = std::fs::read_to_string(dir.join("plugin.json")).unwrap();
+        assert!(body.contains("9.9.9"), "upstream manifest must win: {body}");
+    });
 }
 
 #[test]
 fn materialize_without_key_or_record_writes_nothing() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path().to_path_buf();
-    std::fs::write(root.join("README.md"), "# stub").unwrap();
+    with_registry(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        std::fs::write(root.join("README.md"), "# stub").unwrap();
 
-    // No key: nothing happens.
-    let returned = materialize_at(root.clone(), "rust-analyzer-lsp", None);
-    assert_eq!(returned, root);
-    assert!(!root.join(".claude-plugin/plugin.json").exists());
+        // No key: nothing happens.
+        let returned = materialize_at(root.clone(), "rust-analyzer-lsp", None);
+        assert_eq!(returned, root);
+        assert!(!root.join(".claude-plugin/plugin.json").exists());
 
-    // A key that was never registered: nothing happens.
-    let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&"f".repeat(64)));
-    assert_eq!(returned, root);
-    assert!(!root.join(".claude-plugin/plugin.json").exists());
+        // A key that was never registered: nothing happens.
+        let returned = materialize_at(root.clone(), "rust-analyzer-lsp", Some(&"f".repeat(64)));
+        assert_eq!(returned, root);
+        assert!(!root.join(".claude-plugin/plugin.json").exists());
+    });
 }
 
 /// End-to-end: the store provider tags a stub entry's source with the
 /// manifest key, `add` clones and materialises, and the plugin installs.
 #[test]
 fn store_provider_tags_stub_sources_so_add_installs_them() {
-    use ragent_plugins::{StoreDirs, StoreKind, add, provider_for};
-    use std::path::PathBuf;
+    with_registry(|| {
+        use ragent_plugins::{StoreDirs, StoreKind, add, provider_for};
+        use std::path::PathBuf;
 
-    // 1. Parse the marketplace document through the real provider; the stub
-    //    entry's source must gain the `#<key>` suffix, the plain entry's must
-    //    not.
-    let origin_url = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
-    let origin = reqwest::Url::parse(origin_url).unwrap();
-    let index = provider_for(StoreKind::Claude)
-        .parse_index(DOC.as_bytes(), &origin)
-        .expect("vendor marketplace parses");
-    let stub = index
-        .entries
-        .iter()
-        .find(|e| e.name == "rust-analyzer-lsp")
-        .expect("stub entry present");
-    let plain = index
-        .entries
-        .iter()
-        .find(|e| e.name == "agent-sdk-dev")
-        .expect("plain entry present");
-    let expected_key = document_key(origin_url, DOC.as_bytes());
-    let expected_suffix = format!("@{expected_key}");
-    assert!(
-        stub.source.ends_with(&expected_suffix),
-        "stub source must carry the manifest key: {}",
-        stub.source
-    );
-    assert!(
-        !plain.source.contains('@'),
-        "plain listing source must be untouched: {}",
-        plain.source
-    );
-    assert!(stub.source.starts_with(
-        "git+https://github.com/anthropics/claude-plugins-official#main:plugins/rust-analyzer-lsp"
-    ));
-
-    // 2. Install the stub's source against a local git mirror of the stub
-    //    layout, so the test performs no network I/O. `materialize_at` writes
-    //    the manifest from the recorded marketplace document.
-    let repo = tempfile::tempdir().expect("repo tempdir");
-    let plugin_dir = repo.path().join("plugins/rust-analyzer-lsp");
-    std::fs::create_dir_all(&plugin_dir).unwrap();
-    std::fs::write(plugin_dir.join("README.md"), "# stub").unwrap();
-    let git = |args: &[&str]| {
-        let out = std::process::Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .output()
-            .expect("git runs");
+        // 1. Parse the marketplace document through the real provider; the stub
+        //    entry's source must gain the `#<key>` suffix, the plain entry's must
+        //    not.
+        let origin_url = "https://raw.githubusercontent.com/anthropics/claude-plugins-official/main/.claude-plugin/marketplace.json";
+        let origin = reqwest::Url::parse(origin_url).unwrap();
+        let index = provider_for(StoreKind::Claude)
+            .parse_index(DOC.as_bytes(), &origin)
+            .expect("vendor marketplace parses");
+        let stub = index
+            .entries
+            .iter()
+            .find(|e| e.name == "rust-analyzer-lsp")
+            .expect("stub entry present");
+        let plain = index
+            .entries
+            .iter()
+            .find(|e| e.name == "agent-sdk-dev")
+            .expect("plain entry present");
+        let expected_key = document_key(origin_url, DOC.as_bytes());
+        let expected_suffix = format!("@{expected_key}");
         assert!(
-            out.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
+            stub.source.ends_with(&expected_suffix),
+            "stub source must carry the manifest key: {}",
+            stub.source
         );
-    };
-    git(&["init", "-q"]);
-    git(&["config", "user.email", "test@example.com"]);
-    git(&["config", "user.name", "test"]);
-    git(&["add", "."]);
-    git(&["commit", "-q", "-m", "stub"]);
+        assert!(
+            !plain.source.contains('@'),
+            "plain listing source must be untouched: {}",
+            plain.source
+        );
+        assert!(stub.source.starts_with(
+            "git+https://github.com/anthropics/claude-plugins-official#main:plugins/rust-analyzer-lsp"
+        ));
 
-    let store = tempfile::tempdir().expect("store tempdir");
-    let dirs = StoreDirs {
-        project: Some(store.path().to_path_buf()),
-        global: None,
-    };
-    let source = format!(
-        "git+file://{}#HEAD:plugins/rust-analyzer-lsp{}",
-        repo.path().display(),
-        expected_suffix
-    );
-    let outcome = add(&dirs, &PathBuf::from("."), &source, false).expect("stub installs");
-    assert_eq!(outcome.parsed.descriptor.id, "rust-analyzer-lsp");
-    assert_eq!(
-        outcome.parsed.descriptor.dialect,
-        ragent_plugins::PluginDialect::Claude
-    );
-    assert!(
-        outcome
-            .installed_dir
-            .join(".claude-plugin/plugin.json")
-            .is_file(),
-        "materialised manifest committed to the store"
-    );
-    // FR-025: the bridged-in lspServers section is reported, never silently
-    // dropped.
-    assert!(
-        outcome
-            .parsed
-            .descriptor
-            .unsupported_capabilities
-            .contains(&ragent_plugins::UNSUP_LSP.to_string()),
-        "lspServers recorded as unsupported: {:?}",
-        outcome.parsed.descriptor.unsupported_capabilities
-    );
+        // 2. Install the stub's source against a local git mirror of the stub
+        //    layout, so the test performs no network I/O. `materialize_at` writes
+        //    the manifest from the recorded marketplace document.
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let plugin_dir = repo.path().join("plugins/rust-analyzer-lsp");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("README.md"), "# stub").unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .output()
+                .expect("git runs");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "stub"]);
+
+        let store = tempfile::tempdir().expect("store tempdir");
+        let dirs = StoreDirs {
+            project: Some(store.path().to_path_buf()),
+            global: None,
+        };
+        let source = format!(
+            "git+file://{}#HEAD:plugins/rust-analyzer-lsp{}",
+            repo.path().display(),
+            expected_suffix
+        );
+        let outcome = add(&dirs, &PathBuf::from("."), &source, false).expect("stub installs");
+        assert_eq!(outcome.parsed.descriptor.id, "rust-analyzer-lsp");
+        assert_eq!(
+            outcome.parsed.descriptor.dialect,
+            ragent_plugins::PluginDialect::Claude
+        );
+        assert!(
+            outcome
+                .installed_dir
+                .join(".claude-plugin/plugin.json")
+                .is_file(),
+            "materialised manifest committed to the store"
+        );
+        // FR-025: the bridged-in lspServers section is reported, never silently
+        // dropped.
+        assert!(
+            outcome
+                .parsed
+                .descriptor
+                .unsupported_capabilities
+                .contains(&ragent_plugins::UNSUP_LSP.to_string()),
+            "lspServers recorded as unsupported: {:?}",
+            outcome.parsed.descriptor.unsupported_capabilities
+        );
+    });
 }

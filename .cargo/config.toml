@@ -2,6 +2,14 @@
 # No special environment variables are required; ragent is pure Rust and
 # does not use bindgen or LLVM.
 
+# Incremental compilation is disabled workspace-wide. sccache (set via
+# RUSTC_WRAPPER) cannot cache incremental artifacts, so the incremental cache
+# only consumes disk. The [profile.dev]/[profile.test] `incremental = false`
+# keys in the root Cargo.toml cover those two profiles; this key also covers
+# every other profile (e.g. bench).
+[build]
+incremental = false
+
 # Statically link the Microsoft C runtime on Windows so the installed binary
 # runs without requiring the Visual C++ redistributable.
 [target.x86_64-pc-windows-msvc]

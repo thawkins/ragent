@@ -213,7 +213,13 @@ async fn test_osinfo_show_matches_tool_renderer() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_osinfo_show_no_probe_matches_process_free_tool_renderer() {
+    // Both reports embed the process working directory, which is
+    // process-global; hold the binary-wide lock so a sibling test cannot
+    // chdir between the two collections (consolidated binaries share one
+    // process).
+    let _lock = crate::global_env_lock();
     // FR-014/FR-020: the `--no-probe` flag selects the process-free collection
     // path, so the slash report matches the tool's own `probe: false` output
     // rather than the probed default.

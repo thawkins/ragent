@@ -7,9 +7,10 @@
 #![allow(unsafe_code)]
 
 use ragent_llm::provider::env_key::{provider_env_key, provider_env_key_vars};
-use tokio::sync::Mutex;
-
-static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+/// The process-wide env lock (see `tests/all.rs`).
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    crate::global_env_lock()
+}
 
 #[tokio::test]
 async fn test_provider_env_key_vars_table() {
@@ -31,7 +32,7 @@ async fn test_provider_env_key_vars_table() {
 
 #[tokio::test]
 async fn test_provider_env_key_reads_and_skips_blank() {
-    let _guard = ENV_LOCK.lock().await;
+    let _guard = env_lock();
 
     // SAFETY: exclusive access to OLLAMA_API_KEY while ENV_LOCK is held.
     unsafe { std::env::remove_var("OLLAMA_API_KEY") };

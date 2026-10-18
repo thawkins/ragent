@@ -73,12 +73,12 @@ source of truth for Rust formatting is the `cargo fmt` command itself. Use it.
 
 Use the `Bash` tool to run the following cargo commands:
 
-- `cargo build` — Build debug binary; allow up to 1000 seconds.
-- `cargo build --release` — Build optimized release binary; allow up to 1000 seconds.
+- `cargo build` — Build debug binary; allow up to 1500 seconds.
+- `cargo build --release` — Build optimized release binary; allow up to 1500 seconds.
 - `cargo check` — Check code without building.
 - Build only debug builds unless specifically asked to perform a `release build`.
 
-Builds can take a long time, so allow up to 1000 seconds for a rebuild.
+Builds can take a long time, so allow up to 1500 seconds for a rebuild.
 
 ## Test Commands
 
@@ -103,11 +103,80 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - Organize related tests together.
 - Follow the naming convention: `test_<component>_<scenario>` (e.g. `test_jog_x_positive`).
 - For each project crate, migrate related tests into suitable subfolders within that crate's `tests/` directory. Review both inline and external tests for migration candidates, and relocate inline tests from `.rs` files into separate files under the appropriate `tests/` subfolder where practical.
-- **Migration strategies** (see `docs/reports/testconsolidate-completion.md` for the full migration report):
+- **Migration strategies** (see `docs/reports/testconsolidation-review.md` for the migration review and plan):
   - **Public-API tests**: use `use ragent_<crate>::module::Item;` — no source changes needed.
   - **Private-item tests**: widen the tested items to `pub(crate)` where necessary and re-import the source module via `#[path = "../src/<module>.rs"] mod <module>;`. Provide shims for `super::` and `crate::` references at the test file root.
   - **Complex cases** (`//!` doc comments + `crate::` cross-module deps): use `#[cfg(test)] #[path = "../../tests/test_<module>.rs"] mod test_<module>;` in the source file to compile the external test within the crate's module tree.
 - **Do not add new inline `#[cfg(test)]` modules** to library source files. All new tests go in `tests/`.
+
+#### One file per test, one binary per crate (consolidated targets)
+
+Keep **one file per unit of test** (descriptive `test_*.rs` names, as above), but
+**one test binary per crate**. Do not create a new auto-discovered top-level
+`[[test]]` target for every file: `cargo`'s default autotest discovery makes each
+top-level `tests/*.rs` file its own binary, and at this workspace's scale (900+
+files) that is 900+ link steps and 900+ separate test binaries. This is **not**
+the layout to grow further.
+
+Instead, each crate exposes a small, fixed number of integration targets, and
+every `tests/test_*.rs` file is included as a child module of that target's root:
+
+```toml
+# crates/<crate>/Cargo.toml
+[package]
+autotests = false          # stop auto-discovering one target per file
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+```
+
+```rust
+// crates/<crate>/tests/all.rs
+#[path = "test_activity_event.rs"] mod test_activity_event;
+#[path = "test_automation_run.rs"] mod test_automation_run;
+// ... one `#[path = ...] mod ...;` line per former top-level test file
+```
+
+Rules for this model:
+
+- **One target per crate** (two or three grouped by feature gate only when a
+  `cfg(feature = ...)` build genuinely requires a different binary). New test
+  files are added as one more `#[path = "test_x.rs"] mod test_x;` line in
+  `tests/all.rs` — never as a new top-level file that becomes its own binary.
+- **Use `#[path]` inclusion, not `mod` relocation.** `#[path]` anchors module
+  resolution at the child file, so an existing test file keeps working unchanged:
+  plain `mod support;`, `#[path = "../src/<module>.rs"]` source re-imports,
+  `include_str!("support/...")`, and inner attributes
+  (`#![forbid(...)]`, `#![allow(...)]`, `#![cfg(feature = ...)]`) on a child
+  module are all preserved.
+- **Test names keep their file prefix.** A test defined in `test_foo.rs` is named
+  `test_foo::<fn>` inside the `all` binary.
+- **Run a single file by filter, not by `--test`.** `cargo test -p <crate> --test test_foo` no longer exists; use `cargo test -p <crate> --test all test_foo::`
+  (the `test_foo::` module prefix isolates that file).
+- **Merging binaries merges process state.** A child module no longer runs in its
+  own process, so process-global resources (env vars, cwd, `static` registries)
+  that were previously isolated between test files now race. When two files touch
+  the same global, serialise the mutating tests with `#[serial]`
+  (`serial_test`) — never by weakening an assertion or by splitting into more
+  targets just to regain isolation.
+- **Do not weaken an assertion to make a consolidated build pass.** A cross-file
+  failure is a real test-isolation bug; mark `#[serial]` or fix the shared state.
+- **`crate::` in a `#[path]`-included source module resolves at the target root.**
+  A test file that does `#[path = "../src/<module>.rs"] mod <module>;` and whose
+  module body refers to `crate::<x>` worked when the file was a binary root, but
+  as a child module of `all` those paths resolve against `all`'s root, not the
+  crate under test. Provide the shim (`pub use ragent_<crate>::<x>;`) at the top
+  of `all.rs` — a `tests/all_prelude.rs` inlined there is the convention — or
+  rewrite the reference to the crate-absolute path (`ragent_<crate>::<x>`).
+- **Expect a narrow `#[allow(clippy::duplicate_mod)]` on `all.rs`.** When two
+  child files each declare the same `#[path = "support/mod.rs"] mod support;`,
+  the shared helper is loaded as a module of several children; clippy's
+  `duplicate_mod` flags it. Hoisting would mean editing every child, so `all.rs`
+  carries the allow (clippy's `duplicate_mod` is the only such case; all other
+  `#![...]` inner attributes stay on the child files).
+- **Prefer a `check-*` guard update, not a new target, for CI.** Convert
+  `cargo test -p <crate> --test <file>` to `cargo test -p <crate> --test all <file>::` — the `::` suffix keeps the filter anchored to that module.
 
 ## Lint & Format Commands
 

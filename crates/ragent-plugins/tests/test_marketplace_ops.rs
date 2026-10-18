@@ -104,6 +104,10 @@ fn an_unrecognised_source_is_refused() {
 
 /// Point `XDG_CONFIG_HOME` at `dir` for the duration of `body` and restore it.
 fn with_config_home<T>(dir: &std::path::Path, body: impl FnOnce() -> T) -> T {
+    // The variable is process-global; consolidated test binaries share one
+    // process, so a sibling file could read or restore it mid-run. Take the
+    // binary-wide lock for the duration.
+    let _lock = crate::global_env_lock();
     let saved = std::env::var_os("XDG_CONFIG_HOME");
     // SAFETY: single-threaded test; the value is restored below.
     unsafe { std::env::set_var("XDG_CONFIG_HOME", dir) };

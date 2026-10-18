@@ -28,6 +28,7 @@ use ragent_tui::App;
 #[allow(dead_code)]
 #[must_use]
 pub fn make_app() -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let provider_registry = Arc::new(provider::create_default_registry());

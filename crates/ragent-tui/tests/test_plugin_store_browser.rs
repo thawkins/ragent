@@ -35,9 +35,27 @@ fn entry(id: &str, name: &str, description: &str, tags: &[&str]) -> StoreEntry {
     }
 }
 
+/// A unique, empty scratch directory to use as the app's working directory.
+///
+/// The installed-plugin set is derived from `<cwd>/.ragent/plugins`, so a test
+/// that asserts on it must not inherit the process working directory (the
+/// crate root, which holds a real plugin store). See AGENTS.md ("Test Layout":
+/// tests must not read or write the repository).
+fn empty_workdir(tag: &str) -> std::path::PathBuf {
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let unique = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../target/temp/plugin-store-browser/{tag}-{}-{unique}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch workdir creatable");
+    dir
+}
+
 /// An app with the panel open for `kind` and the given entries loaded.
 fn open_with_entries(kind: StoreKind, entries: Vec<StoreEntry>) -> App {
     let mut app = support::make_app();
+    app.cwd_path = empty_workdir("entries");
     app.open_plugin_store(kind, "", false);
     app.plugin_store
         .as_mut()
@@ -366,6 +384,7 @@ fn opening_the_panel_derives_the_installed_set_from_the_store() {
     // ships no `codex-*` plugin in the project store, so a store entry carrying
     // that id is reported not-installed.
     let mut app = support::make_app();
+    app.cwd_path = empty_workdir("installed-set");
     app.open_plugin_store(StoreKind::Codex, "", false);
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert!(!browser.is_installed("codex-weather"));

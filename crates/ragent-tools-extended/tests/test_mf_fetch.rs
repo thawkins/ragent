@@ -9,6 +9,10 @@
 //! `unsafe_code`, so this test target opts back in explicitly.
 
 #![allow(unsafe_code)]
+// The crate-wide env lock is a *std* mutex held across the body on
+// purpose: these tests flip the process-global SSRF bypass, so
+// serialisation (not parallelism) is the goal. See `tests/all.rs`.
+#![allow(clippy::await_holding_lock)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -79,6 +83,7 @@ impl Drop for TempDir {
 
 #[tokio::test]
 async fn test_fetch_simple_html_article() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -119,6 +124,7 @@ async fn test_fetch_simple_html_article() {
 
 #[tokio::test]
 async fn test_fetch_raw_format_returns_html() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -139,6 +145,7 @@ async fn test_fetch_raw_format_returns_html() {
 
 #[tokio::test]
 async fn test_fetch_text_format_strips_tags() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -163,6 +170,7 @@ async fn test_fetch_text_format_strips_tags() {
 
 #[tokio::test]
 async fn test_fetch_caches_successful_content() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -190,6 +198,7 @@ async fn test_fetch_caches_successful_content() {
 
 #[tokio::test]
 async fn test_fetch_cache_ttl_zero_bypasses_cache() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -219,6 +228,7 @@ async fn test_fetch_cache_ttl_zero_bypasses_cache() {
 
 #[tokio::test]
 async fn test_fetch_css_selector_narrows_extraction() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -246,6 +256,7 @@ async fn test_fetch_css_selector_narrows_extraction() {
 
 #[tokio::test]
 async fn test_fetch_focus_filters_to_query() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -278,6 +289,7 @@ async fn test_fetch_focus_filters_to_query() {
 
 #[tokio::test]
 async fn test_fetch_offset_paginates_content() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -310,6 +322,7 @@ async fn test_fetch_offset_paginates_content() {
 
 #[tokio::test]
 async fn test_fetch_missing_url_errors() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let tool = MfFetchTool;
     let result = tool.execute(json!({}), &ctx(tmp.path())).await;
@@ -318,6 +331,7 @@ async fn test_fetch_missing_url_errors() {
 
 #[tokio::test]
 async fn test_fetch_ssrf_blocks_backslash_url() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let tool = MfFetchTool;
     let output = tool
@@ -335,6 +349,7 @@ async fn test_fetch_ssrf_blocks_backslash_url() {
 
 #[tokio::test]
 async fn test_fetch_404_returns_content_ok_false() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -355,6 +370,7 @@ async fn test_fetch_404_returns_content_ok_false() {
 
 #[tokio::test]
 async fn test_fetch_invalid_selector_returns_error_output() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -381,6 +397,7 @@ async fn test_fetch_invalid_selector_returns_error_output() {
 
 #[tokio::test]
 async fn test_fetch_metadata_includes_opengraph() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -412,6 +429,7 @@ async fn test_fetch_metadata_includes_opengraph() {
 
 #[tokio::test]
 async fn test_fetch_respect_robots_blocks_disallowed_url() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new()
         .route(
@@ -440,6 +458,7 @@ async fn test_fetch_respect_robots_blocks_disallowed_url() {
 
 #[tokio::test]
 async fn test_fetch_include_links_classifies_links() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/",
@@ -492,6 +511,7 @@ async fn test_fetch_include_links_classifies_links() {
 
 #[tokio::test]
 async fn test_fetch_bulk_urls_returns_combined_output() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new()
         .route(
@@ -537,6 +557,7 @@ async fn test_fetch_bulk_urls_returns_combined_output() {
 
 #[tokio::test]
 async fn test_fetch_bulk_deduplicates_urls() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new()
         .route(
@@ -579,6 +600,7 @@ async fn test_fetch_bulk_deduplicates_urls() {
 
 #[tokio::test]
 async fn test_fetch_bulk_partial_failure_still_returns_results() {
+    let _env_lock = crate::global_env_lock();
     let tmp = TempDir::new();
     let router = Router::new().route(
         "/ok",

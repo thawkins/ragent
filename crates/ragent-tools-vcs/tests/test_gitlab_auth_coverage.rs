@@ -18,7 +18,6 @@ use ragent_tools_vcs::storage::StorageBackend;
 
 /// Serialises every test in this binary that mutates the environment or the
 /// process-global token cache.
-static LOCK: Mutex<()> = Mutex::new(());
 
 /// A minimal in-memory credential/settings store.
 #[derive(Default)]
@@ -117,9 +116,7 @@ impl Drop for EnvRestore {
 /// Run `f` with `HOME`/`XDG_CONFIG_HOME` pointed at a fresh temp dir and the
 /// GitLab env layer cleared, all under the process lock.
 fn with_isolated_env<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let home = tempfile::tempdir().expect("tempdir");
     let home_str = home.path().to_string_lossy().to_string();
     let _restore = EnvRestore::apply(&[

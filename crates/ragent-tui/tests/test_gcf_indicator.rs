@@ -7,7 +7,7 @@
 //!   codeindex icon, with the enabled (`[ok]`) / disabled (`[no]`) marker.
 //! - The `g` keystroke is never inserted into the input buffer (NFR-002).
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, MutexGuard};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_agent::{
@@ -20,6 +20,7 @@ use ratatui::{Terminal, backend::TestBackend};
 /// Build an [`App`] backed by an in-memory database (mirrors the pattern used
 /// by the slash-command tests).
 fn make_app() -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let event_bus = Arc::new(EventBus::default());
     let provider_registry = Arc::new(provider::create_default_registry());
@@ -98,18 +99,10 @@ impl Drop for CwdGuard {
     }
 }
 
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
 /// Acquire the cwd test lock, recovering from any prior poisoning.
+/// The process-wide cwd/env lock (see `tests/all.rs`).
 fn cwd_lock() -> MutexGuard<'static, ()> {
-    let lock = cwd_test_lock().lock();
-    match lock {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    crate::global_env_lock()
 }
 
 /// Create a tempdir, chdir into it with a project-local config primed for

@@ -8,7 +8,8 @@ use std::process::Command;
 // The bash module is a private source file that depends on several crate-wide
 // items. We provide minimal shims at the test root so the module compiles in
 // this integration-test target, then pull the module in via `#[path]`.
-mod shim {
+#[allow(dead_code)]
+pub mod shim {
     // Re-export the async-trait macro required by the `Tool` trait definition.
     pub use async_trait::async_trait;
 
@@ -40,12 +41,12 @@ mod shim {
         /// Working directory for tool execution.
         pub working_dir: std::path::PathBuf,
         /// Event bus for shell notifications.
-        pub event_bus: std::sync::Arc<crate::shim::event::EventBus>,
+        pub event_bus: std::sync::Arc<self::event::EventBus>,
         /// Timestamps of file reads keyed by path.
         pub read_timestamps:
             std::sync::Arc<std::sync::RwLock<std::collections::HashMap<std::path::PathBuf, u64>>>,
         /// Canonical path cache.
-        pub canonical_cache: std::sync::Arc<crate::shim::CanonicalPathCache>,
+        pub canonical_cache: std::sync::Arc<self::CanonicalPathCache>,
         /// Allowed root directories for path escape checking.
         pub allowed_roots: Vec<std::path::PathBuf>,
     }
@@ -138,7 +139,7 @@ mod shim {
             pub fn spawn_watcher(
                 &self,
                 _session_id: String,
-                _event_bus: std::sync::Arc<crate::shim::event::EventBus>,
+                _event_bus: std::sync::Arc<super::event::EventBus>,
             ) {
             }
             /// Stop the stub watcher (no-op).
@@ -150,23 +151,13 @@ mod shim {
 // Re-export the shim items into the crate root so that the bash module's
 // `super::{Tool, ToolContext, ToolOutput}` and `crate::{event, resource,
 // sanitize, askpass}` imports resolve.
-pub use shim::{CanonicalPathCache, Tool, ToolContext, ToolOutput};
-/// Re-exported stub event module.
-pub mod event {
-    pub use crate::shim::event::*;
-}
-/// Re-exported stub resource module.
-pub mod resource {
-    pub use crate::shim::resource::*;
-}
-/// Re-exported stub sanitize module.
-pub mod sanitize {
-    pub use crate::shim::sanitize::*;
-}
-/// Re-exported stub askpass module.
-pub mod askpass {
-    pub use crate::shim::askpass::*;
-}
+// `../src/bash.rs` below is a child of this module, so its
+// `super::{Tool, ToolContext, ToolOutput}` imports resolve here. Its
+// `crate::{event, resource, sanitize, askpass, CanonicalPathCache}` imports
+// resolve at the consolidated test binary root instead (a `#[path]`-included
+// module's `crate::` is the binary root, not this child module), so `all.rs`
+// re-exports the stubs. See AGENTS.md ("Test Layout").
+pub use shim::{Tool, ToolContext, ToolOutput};
 
 // Now pull in the private source module so its wrapper builders and quoting
 // helpers are available to the tests.

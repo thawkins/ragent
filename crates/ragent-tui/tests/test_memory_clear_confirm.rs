@@ -32,6 +32,7 @@ use ragent_tui::{App, app::ScreenMode, layout};
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let provider_registry = Arc::new(provider::create_default_registry());
@@ -149,8 +150,7 @@ impl Drop for CwdGuard {
 
 /// Change the process working directory to `dir`, returning a restoring guard.
 fn with_cwd(dir: &std::path::Path) -> CwdGuard {
-    static CWD_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let lock = CWD_MUTEX.lock().expect("cwd mutex poisoned");
+    let lock = crate::global_env_lock();
     let prev = std::env::current_dir().expect("current dir");
     std::env::set_current_dir(dir).expect("set_current_dir");
     CwdGuard { _lock: lock, prev }

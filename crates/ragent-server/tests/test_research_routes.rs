@@ -1,10 +1,13 @@
 //! HTTP endpoint tests for the research API (RESEARCHPLAN.md Phase 4).
 //!
 //! Tests the Axum routes for the research system using in-process `oneshot`
-//! requests. The research routes read from `cwd/research` (via a `LazyLock`),
-//! so on-disk items are created with unique `test-` prefixed names and cleaned
-//! up after each test. Tests that touch the filesystem are serialized with
-//! a global mutex to avoid concurrent INDEX.md writes.
+//! requests. The vault root comes from `AppState::research_root`, which here
+//! is the git-ignored `target/temp/ragent-server-research/research` sandbox
+//! (see [`crate::research_sandbox`]) - never `cwd/research` - so a test run
+//! cannot rewrite the checked-in `crates/ragent-server/research/` tree.
+//! Items still get unique `test-` prefixed names and are removed after each
+//! test, and filesystem-touching tests stay serialized so concurrent
+//! INDEX.md writes cannot race.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +26,7 @@ use ragent_research::ResearchManager;
 use ragent_server::routes::{AppState, router};
 use tower::ServiceExt;
 
-/// Global mutex to serialize tests that touch `cwd/research` on disk.
+/// Global mutex to serialize tests that touch the shared research sandbox.
 static FS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Build a minimal [`AppState`] for testing research routes.
@@ -87,6 +90,7 @@ fn test_state(token: &str) -> AppState {
         rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        research_root: Arc::new(crate::research_sandbox::research_root()),
     }
 }
 
@@ -138,19 +142,17 @@ fn test_name() -> String {
     )
 }
 
-/// Create a research item on disk in `cwd/research` and return its name.
+/// Create a research item in the sandbox vault and return its name.
 async fn create_test_item(name: &str, topic: &str) {
-    let cwd = std::env::current_dir().unwrap();
-    let mgr = ResearchManager::new(cwd.join("research"));
+    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
     mgr.create(name, &format!("Test: {topic}"), topic)
         .await
         .unwrap();
 }
 
-/// Delete a research item from disk.
+/// Delete a research item from the sandbox vault.
 async fn delete_test_item(name: &str) {
-    let cwd = std::env::current_dir().unwrap();
-    let mgr = ResearchManager::new(cwd.join("research"));
+    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
     let _ = mgr.delete(name).await;
 }
 
@@ -168,8 +170,9 @@ fn auth_put(token: &str, uri: &str) -> Request<Body> {
 /// its RESEARCH.md frontmatter, as a real invocation-aware front-end would.
 async fn create_test_item_with_invocation(name: &str, invocation: &str) {
     create_test_item(name, "replay topic").await;
-    let cwd = std::env::current_dir().unwrap();
-    let path = cwd.join("research").join(name).join("RESEARCH.md");
+    let path = crate::research_sandbox::research_root()
+        .join(name)
+        .join("RESEARCH.md");
     let content = std::fs::read_to_string(&path).unwrap();
     let stamped = content.replacen(
         "\n---\n",
@@ -316,8 +319,7 @@ async fn test_research_delete_with_confirmation() {
     assert!(body.contains("\"deleted\""));
 
     // Verify it's actually gone
-    let cwd = std::env::current_dir().unwrap();
-    let mgr = ResearchManager::new(cwd.join("research"));
+    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
     assert!(mgr.show(&name).await.is_err());
 }
 

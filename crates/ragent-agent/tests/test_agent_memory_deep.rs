@@ -753,7 +753,13 @@ fn history_tool_result_truncation_is_multibyte_safe() {
 #[test]
 fn history_exempt_tool_without_results_metadata_uses_head_tail() {
     // A wait_agents payload over the inline budget with metadata that lacks a
-    // `results` array falls back to head+tail.
+    // `results` array falls back to head+tail. The diverted batch file must
+    // land under `target/` (git-ignored), never the checked-in `log/` tree.
+    ragent_agent::session::history::set_subagent_log_root(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("target/temp/log"),
+    );
     let big = "y".repeat(40_000);
     let out = tool_result_content_for_llm("wait_agents", &big, Some(&json!({ "foo": 1 })));
     assert!(out.contains("middle omitted"), "fallback marker expected");

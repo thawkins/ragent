@@ -77,10 +77,23 @@ For full OASF compatibility or when you need the structured envelope format.
    mkdir -p .ragent/agents
    ```
 
-2. Copy an example and customise it:
+2. Create and customise your own profile. ragent ships no sample JSON tree, so
+   start from the minimal OASF document in
+   [Minimal OASF Agent (.json)](#minimal-oasf-agent-json) below:
 
    ```bash
-   cp examples/agents/minimal-agent.json ~/.ragent/agents/my-agent.json
+   cat > ~/.ragent/agents/my-agent.json <<'EOF'
+   {
+     "name": "my-agent",
+     "description": "My custom agent",
+     "version": "1.0.0",
+     "schema_version": "0.7.0",
+     "modules": [{
+       "type": "ragent/agent/v1",
+       "payload": { "system_prompt": "You are a helpful AI agent.", "mode": "primary" }
+     }]
+   }
+   EOF
    $EDITOR ~/.ragent/agents/my-agent.json
    ```
 
@@ -427,7 +440,7 @@ Report only high-signal issues with file paths and concrete fixes.
 
 ### Security Reviewer OASF (.json)
 
-Read-only OWASP-focused reviewer (see `examples/agents/security-reviewer.json`):
+Read-only OWASP-focused reviewer:
 
 ```json
 {
@@ -452,7 +465,10 @@ Read-only OWASP-focused reviewer (see `examples/agents/security-reviewer.json`):
 }
 ```
 
-See `examples/agents/` for complete, ready-to-use agent files.
+The two profiles above (`Minimal OASF Agent`, `Security Reviewer Profile`) are
+complete, ready-to-use files: write either to `.ragent/agents/<name>.json` (or
+`.md`) and ragent loads it at the next start. Project-local `.ragent/agents/`
+takes priority over `~/.ragent/agents/` for a name clash.
 
 ---
 

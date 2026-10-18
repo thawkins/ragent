@@ -481,13 +481,38 @@ fn exempt_tool_result_for_llm(
     Arc::from(index)
 }
 
+/// Log root the diverted sub-agent batches are written under.
+///
+/// Defaults to `log` (relative to the process working directory, which is the
+/// project root at runtime). Tests set it with
+/// [`set_subagent_log_root`] so a test run writes into `target/temp/` instead
+/// of the checked-in `log/subagents/` tree.
+static SUBAGENT_LOG_ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Point the diverted sub-agent batches at `root` for this process.
+///
+/// Test hook only: the value is set once and applies process-wide. Production
+/// code never calls it, so the default (`log`) is what ships.
+#[doc(hidden)]
+pub fn set_subagent_log_root(root: impl Into<std::path::PathBuf>) {
+    let _ = SUBAGENT_LOG_ROOT.set(root.into()); // INTENTIONAL: first set wins; a second call is a no-op
+}
+
+/// The log root batches are written under (`log` unless overridden).
+fn subagent_log_root() -> std::path::PathBuf {
+    SUBAGENT_LOG_ROOT
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::path::PathBuf::from("log"))
+}
+
 /// Persist a diverted `wait_agents`/`list_agents` payload to
-/// `log/subagents/wait-batch-<millis>.md` under the crate working
-/// directory. Returns the path on success; on any I/O failure the caller
-/// falls back to the head+tail summary. Temp-file + rename so a crash
-/// mid-write never leaves a half-written batch file.
+/// `<log root>/subagents/wait-batch-<millis>.md`. Returns the path on success;
+/// on any I/O failure the caller falls back to the head+tail summary.
+/// Temp-file + rename so a crash mid-write never leaves a half-written batch
+/// file.
 fn persist_exempt_batch(content: &str) -> Option<std::path::PathBuf> {
-    let dir = std::path::Path::new("log").join("subagents");
+    let dir = subagent_log_root().join("subagents");
     if std::fs::create_dir_all(&dir).is_err() {
         return None;
     }

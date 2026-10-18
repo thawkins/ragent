@@ -107,7 +107,7 @@ impl App {
         let agent_name = agent_info.name.clone();
 
         let log_window_path = {
-            let log_dir = cwd_path.join("log").join("logwindow");
+            let log_dir = crate::app::helpers::log_root().join("logwindow");
             // Best-effort directory creation; failure only disables the
             // per-session log window file.
             if let Err(e) = std::fs::create_dir_all(&log_dir) {

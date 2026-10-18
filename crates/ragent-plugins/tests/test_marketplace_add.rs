@@ -18,7 +18,6 @@ use ragent_plugins::run_plugin_subcommand;
 
 /// Serialise the tests that mutate the process-global `XDG_CONFIG_HOME`, so two
 /// env-mutating tests never clobber each other's config home.
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Run a `/plugins marketplace <args>` invocation through the shared dispatch
 /// ladder with `XDG_CONFIG_HOME` pointed at `tree`.
@@ -36,11 +35,11 @@ fn dispatch(tree: &TempTree, args: &str) -> String {
 
 #[test]
 fn marketplace_add_records_the_marketplace_in_the_global_config() {
-    let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let tree = TempTree::new("mp-add");
     let home = tree.path().join("xdg-config");
     let saved = std::env::var_os("XDG_CONFIG_HOME");
-    // SAFETY: single-threaded via `ENV_LOCK`; restored below.
+    // SAFETY: single-threaded via `crate::global_env_mutex()`; restored below.
     unsafe { std::env::set_var("XDG_CONFIG_HOME", &home) };
 
     let added = dispatch(&tree, "claude add anthropics/claude-plugins-community");
@@ -82,11 +81,11 @@ fn marketplace_add_records_the_marketplace_in_the_global_config() {
 
 #[test]
 fn marketplace_remove_drops_a_previously_added_marketplace() {
-    let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let tree = TempTree::new("mp-remove");
     let home = tree.path().join("xdg-config");
     let saved = std::env::var_os("XDG_CONFIG_HOME");
-    // SAFETY: single-threaded via `ENV_LOCK`; restored below.
+    // SAFETY: single-threaded via `crate::global_env_mutex()`; restored below.
     unsafe { std::env::set_var("XDG_CONFIG_HOME", &home) };
 
     let _ = dispatch(&tree, "codex add openai/plugins");

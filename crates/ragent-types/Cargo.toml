@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "ragent-types"
 version = "0.1.0"
 edition = "2024"
@@ -26,3 +27,7 @@ tempfile = "3.14"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "all"
+path = "tests/all.rs"

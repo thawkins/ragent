@@ -13,7 +13,7 @@
 #![allow(unsafe_code)]
 #![cfg(test)]
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_tui::{App, layout};
 use ratatui::{Terminal, backend::TestBackend};
@@ -24,11 +24,9 @@ mod support;
 /// The i18n runtime state and the cwd/env mutations below are process-global;
 /// one mutex serialises every test in this binary against all of them.
 #[allow(clippy::await_holding_lock)]
-fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn test_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Restores cwd, config env vars, and the i18n runtime on drop.

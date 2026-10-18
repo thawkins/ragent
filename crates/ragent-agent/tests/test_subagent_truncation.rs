@@ -28,7 +28,17 @@
 
 use serde_json::json;
 
-use ragent_agent::session::history::tool_result_content_for_llm;
+use ragent_agent::session::history::{set_subagent_log_root, tool_result_content_for_llm};
+
+/// Diverted `wait_agents` batches go under the workspace scratch tree
+/// (`target/temp/`, git-ignored) instead of the checked-in `log/subagents/`.
+fn sandbox_log_root() {
+    set_subagent_log_root(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("target/temp/log"),
+    );
+}
 
 /// Wait/list-agents results are exempt from the 12k generic cap: short
 /// payloads pass through unchanged.
@@ -44,6 +54,7 @@ fn test_wait_agents_short_result_passes_through_unchanged() {
 /// middle, and every task's `output_file` path is surfaced.
 #[test]
 fn test_wait_agents_long_result_diverts_to_batch_file() {
+    sandbox_log_root();
     // Build a fake wait_agents payload with 6 agents, each with a fake
     // output_file path and a sizable report body so the combined content
     // exceeds EXEMPT_TOOL_INLINE_LIMIT (32k chars).

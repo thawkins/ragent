@@ -3,6 +3,7 @@
 //! The secret registry is process-wide, so the tests that mutate it serialise
 //! on a local mutex and clear it before and after.
 
+use serial_test::serial;
 use std::borrow::Cow;
 use std::sync::Mutex;
 
@@ -14,6 +15,7 @@ use ragent_types::sanitize::{
 static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
+#[serial]
 fn cow_borrows_clean_payload_without_allocating() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -28,6 +30,7 @@ fn cow_borrows_clean_payload_without_allocating() {
 }
 
 #[test]
+#[serial]
 fn cow_owns_when_regex_pattern_matches() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -40,6 +43,7 @@ fn cow_owns_when_regex_pattern_matches() {
 }
 
 #[test]
+#[serial]
 fn registered_secret_is_redacted_and_unregister_restores_borrow() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -60,6 +64,7 @@ fn registered_secret_is_redacted_and_unregister_restores_borrow() {
 }
 
 #[test]
+#[serial]
 fn longest_secret_is_replaced_first() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -75,6 +80,7 @@ fn longest_secret_is_replaced_first() {
 }
 
 #[test]
+#[serial]
 fn json_shaped_token_redacts_value_and_preserves_key() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -88,6 +94,7 @@ fn json_shaped_token_redacts_value_and_preserves_key() {
 }
 
 #[test]
+#[serial]
 fn base64_secret_with_slash_plus_equals_redacts_fully() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();

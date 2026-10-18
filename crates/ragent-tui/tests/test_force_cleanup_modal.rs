@@ -3,16 +3,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_agent::team::{MemberStatus, TeamConfig, TeamMember, TeamStore};
 
-use std::sync::Mutex;
-
 #[path = "support/mod.rs"]
 mod support;
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_forcecleanup_modal_confirm_flow() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();

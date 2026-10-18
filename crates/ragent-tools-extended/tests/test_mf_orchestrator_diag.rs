@@ -19,7 +19,10 @@ fn tui_ctx() -> ToolContext {
         .and_then(|p| p.parent())
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let _ = std::env::set_current_dir(&workspace);
+    // One binary per crate: leave the process cwd untouched so a sibling test
+    // (which resolves paths against cwd) is not redirected into the workspace.
+    // This diagnostic only needs a config; load it from an explicit path.
+    let _ = &workspace;
     let config = Config::load().expect("config should load");
     eprintln!("serper key present: {:?}", config.serper_api_key.is_some());
     eprintln!(

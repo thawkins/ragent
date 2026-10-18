@@ -9,8 +9,8 @@
 //! a GitLab token, because those layers take precedence over the store and
 //! would make the store-call count meaningless.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use ragent_tools_vcs::gitlab::auth::{load_token, save_token};
 use ragent_tools_vcs::storage::StorageBackend;
@@ -74,12 +74,10 @@ impl StorageBackend for CountingStorage {
 }
 
 /// The GitLab token cache is process-global, so these tests must not interleave.
-static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn test_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Whether an ambient token layer (env or config) would shadow the store.

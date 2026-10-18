@@ -19,7 +19,7 @@
 #![allow(unsafe_code)]
 #![cfg(test)]
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_tui::App;
 
@@ -29,11 +29,9 @@ mod support;
 /// The GCF runtime flag is process-global and the cwd/env mutations below are
 /// too; one mutex serialises every test in this binary against both.
 #[allow(clippy::await_holding_lock)]
-fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn test_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Toggle the GCF flag for the duration of `f` and always restore it.

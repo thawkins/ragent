@@ -1,6 +1,6 @@
 //! Tests for config-driven thinking defaults in the TUI model picker and status label.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use ragent_agent::{agent, provider};
 use ragent_tui::App;
@@ -16,11 +16,6 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
     }
-}
-
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn enter_temp_config_dir() -> tempfile::TempDir {
@@ -87,9 +82,7 @@ fn seed_anthropic_models(app: &App) {
 
 #[test]
 fn test_models_for_provider_applies_model_and_provider_thinking_defaults() {
-    let _lock = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("current dir");
     let _guard = CwdGuard(original_cwd);
     let temp = enter_temp_config_dir();
@@ -141,9 +134,7 @@ fn test_models_for_provider_applies_model_and_provider_thinking_defaults() {
 
 #[test]
 fn test_provider_label_prefers_agent_default_over_config_thinking() {
-    let _lock = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("current dir");
     let _guard = CwdGuard(original_cwd);
     let temp = enter_temp_config_dir();

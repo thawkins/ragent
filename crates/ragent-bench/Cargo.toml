@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "Benchmark suite runner for ragent — local AI coding benchmarks"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 # Workspace deps
 anyhow.workspace = true

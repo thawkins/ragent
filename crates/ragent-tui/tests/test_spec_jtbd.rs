@@ -5,7 +5,7 @@
 //! (FR-008), agent-override validation (FR-005), and status / logging parity
 //! with `/spec create` (FR-011).
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, MutexGuard};
 
 use ragent_agent::{
     agent,
@@ -23,6 +23,7 @@ use ragent_tui::app::LogLevel;
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let provider_registry = Arc::new(provider::create_default_registry());
@@ -100,18 +101,10 @@ impl Drop for CwdGuard {
     }
 }
 
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
 #[allow(clippy::await_holding_lock)]
+/// The process-wide cwd/env lock (see `tests/all.rs`).
 fn cwd_lock() -> MutexGuard<'static, ()> {
-    let lock = cwd_test_lock().lock();
-    match lock {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    crate::global_env_lock()
 }
 
 /// Create a temp directory, switch the process cwd into it, and return a

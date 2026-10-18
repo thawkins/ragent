@@ -10,7 +10,7 @@
 //! target opts back in explicitly (env mutation is contained to the test).
 #![allow(unsafe_code)]
 use std::fs;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, MutexGuard};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_agent::{
@@ -36,6 +36,7 @@ fn make_app() -> App {
 }
 
 fn make_app_with_storage(storage: Arc<Storage>) -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());
@@ -228,19 +229,11 @@ fn enter_with_cwd() -> CwdGuard {
     }
 }
 
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
 /// Acquire the cwd test lock, recovering from any prior poisoning.
 #[allow(clippy::await_holding_lock)]
+/// The process-wide cwd/env lock (see `tests/all.rs`).
 fn cwd_lock() -> MutexGuard<'static, ()> {
-    let lock = cwd_test_lock().lock();
-    match lock {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+    crate::global_env_lock()
 }
 
 #[tokio::test]
@@ -4962,8 +4955,11 @@ async fn test_slash_mcp_list_includes_plugin_contributed_servers() {
 
     // Point the config resolver at the temp XDG root so the global plugin store
     // above is the one discovery reads.
-    let _xdg = XdgGuard::set(&global_root);
+    // `with_cwd` takes the binary-wide env lock; set XDG *after* it so the
+    // mutation happens under the lock (a concurrent restore here would point a
+    // sibling test's config write at the developer's real config).
     let _guard = with_cwd(root);
+    let _xdg = XdgGuard::set(&global_root);
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 

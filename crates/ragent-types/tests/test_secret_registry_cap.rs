@@ -5,6 +5,7 @@
 //! binary, so the registry these tests touch is not shared with other test
 //! binaries.
 
+use serial_test::serial;
 use std::sync::Mutex;
 
 use ragent_types::sanitize::{
@@ -22,6 +23,7 @@ fn synthetic_secret(index: usize) -> String {
 }
 
 #[test]
+#[serial]
 fn seed_secrets_deduplicates_identical_values() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -46,6 +48,7 @@ fn seed_secrets_deduplicates_identical_values() {
 }
 
 #[test]
+#[serial]
 fn register_secret_deduplicates_identical_values() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();
@@ -63,6 +66,7 @@ fn register_secret_deduplicates_identical_values() {
 }
 
 #[test]
+#[serial]
 fn registry_is_bounded_at_the_named_cap() {
     let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     clear_secret_registry();

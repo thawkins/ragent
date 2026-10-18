@@ -7,6 +7,12 @@ repository.workspace = true
 authors.workspace = true
 description = "Research system for ragent: structured research items with web and local source capture"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 ragent-config = { path = "../ragent-config" }

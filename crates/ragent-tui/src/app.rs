@@ -10,6 +10,8 @@ pub use self::state::*;
 mod helpers;
 pub(crate) use helpers::short_id;
 pub use helpers::{hard_break_lines, image_dimensions_or_placeholder, sanitize_for_display};
+#[doc(hidden)]
+pub use helpers::{set_log_root_override, use_scratch_log_root_for_tests};
 
 mod backend_panel;
 pub use self::backend_panel::{BackendPanelRow, BackendPanelState};

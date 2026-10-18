@@ -1,10 +1,9 @@
 //! Unit tests for mechanical fallback content helpers extracted from
 //! `session.rs` (Milestone F-001).
-
-// Shims so that `crate::document` and `crate::source` resolve correctly
-// when `fallback.rs` is compiled inside this test crate via `#[path]`.
-pub use ragent_research::document;
-pub use ragent_research::source;
+//!
+//! `fallback.rs` refers to `crate::document` / `crate::source`; those shims now
+//! live at the root of the consolidated `all` binary (see `tests/all_prelude.rs`)
+//! because this file is a child module rather than a binary root.
 
 #[path = "../src/session/fallback.rs"]
 mod fallback;

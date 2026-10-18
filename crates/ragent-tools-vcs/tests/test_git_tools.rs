@@ -1,5 +1,10 @@
 //! Integration tests for Milestone 1 local git workspace tools.
 
+// Holds the crate-wide env lock across the body on purpose: it
+// serialises against the PATH-swapping git-shim test, so serialisation
+// (not parallelism) is the goal. See AGENTS.md ("Test Layout").
+#![allow(clippy::await_holding_lock)]
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -27,6 +32,10 @@ fn make_ctx(dir: &Path) -> ToolContext {
 
 #[tokio::test]
 async fn test_git_status_clean() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -45,6 +54,10 @@ async fn test_git_status_clean() {
 
 #[tokio::test]
 async fn test_git_status_modified() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("README.md"), "# Hello\n\nWorld").unwrap();
@@ -65,6 +78,10 @@ async fn test_git_status_modified() {
 
 #[tokio::test]
 async fn test_git_status_untracked() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("new_file.txt"), "new content").unwrap();
@@ -85,6 +102,10 @@ async fn test_git_status_untracked() {
 
 #[tokio::test]
 async fn test_git_status_staged() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("staged.txt"), "staged content").unwrap();
@@ -106,6 +127,10 @@ async fn test_git_status_staged() {
 
 #[tokio::test]
 async fn test_git_status_short_format() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("README.md"), "# Hello\n\nWorld").unwrap();
@@ -130,6 +155,10 @@ async fn test_git_status_short_format() {
 
 #[tokio::test]
 async fn test_git_log_basic() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -151,6 +180,10 @@ async fn test_git_log_basic() {
 
 #[tokio::test]
 async fn test_git_log_author_filter() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -173,6 +206,10 @@ async fn test_git_log_author_filter() {
 
 #[tokio::test]
 async fn test_git_diff_working() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("README.md"), "# Hello\n\nWorld").unwrap();
@@ -192,6 +229,10 @@ async fn test_git_diff_working() {
 
 #[tokio::test]
 async fn test_git_diff_staged() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("staged.txt"), "staged content").unwrap();
@@ -214,6 +255,10 @@ async fn test_git_diff_staged() {
 
 #[tokio::test]
 async fn test_git_diff_stat() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("README.md"), "# Hello\n\nWorld\n\nMore").unwrap();
@@ -233,6 +278,10 @@ async fn test_git_diff_stat() {
 
 #[tokio::test]
 async fn test_git_diff_no_changes() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -255,6 +304,10 @@ async fn test_git_diff_no_changes() {
 
 #[tokio::test]
 async fn test_git_branch_list() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     run_shell("git checkout -b feature-branch", tmp.path());
@@ -292,6 +345,10 @@ async fn test_git_branch_list() {
 
 #[tokio::test]
 async fn test_git_branch_short_format() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -313,6 +370,10 @@ async fn test_git_branch_short_format() {
 
 #[tokio::test]
 async fn test_git_show_head() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -337,6 +398,10 @@ async fn test_git_show_head() {
 
 #[tokio::test]
 async fn test_git_show_stat_false() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -359,6 +424,10 @@ async fn test_git_show_stat_false() {
 
 #[tokio::test]
 async fn test_git_remote_list_empty() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -377,6 +446,10 @@ async fn test_git_remote_list_empty() {
 
 #[tokio::test]
 async fn test_git_remote_add_and_list() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -408,6 +481,10 @@ async fn test_git_remote_add_and_list() {
 
 #[tokio::test]
 async fn test_git_remote_remove() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -441,6 +518,10 @@ async fn test_git_remote_remove() {
 
 #[tokio::test]
 async fn test_git_tag_list_empty() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -459,6 +540,10 @@ async fn test_git_tag_list_empty() {
 
 #[tokio::test]
 async fn test_git_tag_create_and_list() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -487,6 +572,10 @@ async fn test_git_tag_create_and_list() {
 
 #[tokio::test]
 async fn test_git_tag_delete() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     run_shell("git tag v1.0.0", tmp.path());
@@ -509,6 +598,10 @@ async fn test_git_tag_delete() {
 
 #[tokio::test]
 async fn test_git_tag_show() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     run_shell("git tag -a v1.0.0 -m 'Release'", tmp.path());
@@ -538,6 +631,10 @@ async fn test_git_tag_show() {
 
 #[tokio::test]
 async fn test_git_add_paths() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("new.txt"), "new content").unwrap();
@@ -569,6 +666,10 @@ async fn test_git_add_paths() {
 
 #[tokio::test]
 async fn test_git_add_all() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("a.txt"), "a").unwrap();
@@ -593,6 +694,10 @@ async fn test_git_add_all() {
 
 #[tokio::test]
 async fn test_git_commit_basic() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("commit.txt"), "commit me").unwrap();
@@ -613,6 +718,10 @@ async fn test_git_commit_basic() {
 
 #[tokio::test]
 async fn test_git_commit_all() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("tracked.txt"), "tracked").unwrap();
@@ -643,6 +752,10 @@ async fn test_git_commit_all() {
 
 #[tokio::test]
 async fn test_git_reset_unstage_paths() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("staged.txt"), "staged").unwrap();
@@ -663,6 +776,10 @@ async fn test_git_reset_unstage_paths() {
 
 #[tokio::test]
 async fn test_git_reset_mixed() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("file.txt"), "content").unwrap();
@@ -692,6 +809,10 @@ async fn test_git_reset_mixed() {
 
 #[tokio::test]
 async fn test_git_checkout_branch() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     run_shell("git checkout -b feature", tmp.path());
@@ -711,6 +832,10 @@ async fn test_git_checkout_branch() {
 
 #[tokio::test]
 async fn test_git_checkout_create_branch() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -732,6 +857,10 @@ async fn test_git_checkout_create_branch() {
 
 #[tokio::test]
 async fn test_git_checkout_restore_paths() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     fs::write(tmp.path().join("README.md"), "# Modified").unwrap();
@@ -755,6 +884,10 @@ async fn test_git_checkout_restore_paths() {
 
 #[tokio::test]
 async fn test_git_stash_push_and_pop() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     // Create a tracked file then modify it so stash has something to save
@@ -812,6 +945,10 @@ async fn test_git_stash_push_and_pop() {
 
 #[tokio::test]
 async fn test_git_stash_list() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
     // Create a tracked file then modify it so stash has something to save
@@ -841,6 +978,10 @@ async fn test_git_stash_list() {
 
 #[tokio::test]
 async fn test_git_cherry_pick_basic() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -886,6 +1027,10 @@ async fn test_git_cherry_pick_basic() {
 
 #[tokio::test]
 async fn test_git_cherry_pick_no_commit() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -934,6 +1079,10 @@ async fn test_git_cherry_pick_no_commit() {
 
 #[tokio::test]
 async fn test_git_clone_basic() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     // Create a bare repo to clone from
     let bare_dir = tmp.path().join("source.git");
@@ -985,6 +1134,10 @@ async fn test_git_clone_basic() {
 
 #[tokio::test]
 async fn test_git_push_and_fetch() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
 
     // Create bare remote
@@ -1050,6 +1203,10 @@ async fn test_git_push_and_fetch() {
 
 #[tokio::test]
 async fn test_git_pull_fast_forward() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
 
     // Create bare remote
@@ -1117,6 +1274,10 @@ async fn test_git_pull_fast_forward() {
 
 #[tokio::test]
 async fn test_git_fetch_prune() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
 
     let bare_dir = tmp.path().join("remote.git");
@@ -1167,6 +1328,10 @@ async fn test_git_fetch_prune() {
 
 #[tokio::test]
 async fn test_git_merge_fast_forward() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -1207,6 +1372,10 @@ async fn test_git_merge_fast_forward() {
 
 #[tokio::test]
 async fn test_git_merge_no_ff() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -1248,6 +1417,10 @@ async fn test_git_merge_no_ff() {
 
 #[tokio::test]
 async fn test_git_merge_squash() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -1295,6 +1468,10 @@ async fn test_git_merge_squash() {
 
 #[tokio::test]
 async fn test_git_merge_ff_only_abort() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 

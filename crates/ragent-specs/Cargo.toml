@@ -7,6 +7,12 @@ authors = ["Tim Hawkins"]
 description = "Spec management system for ragent: EARS notation specs, validation, and lifecycle tracking"
 repository = "https://github.com/thawkins/ragent"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 # Shared `/new` scaffold flag parser (spec `govdoc` T-002): `/spec govcreate`
 # delegates its trailing flags here so accepted values and error text cannot

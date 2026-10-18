@@ -10252,6 +10252,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             research_runs: std::sync::Arc::new(tokio::sync::Mutex::new(
                                 std::collections::HashMap::new(),
                             )),
+                            research_root: std::sync::Arc::new(self.cwd_path.join("research")),
                         };
 
                         let addr_clone = addr.clone();

@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "ragent-agent"
 version.workspace = true
 edition.workspace = true
@@ -112,3 +113,7 @@ harness = false
 [[bench]]
 name = "m3_hot_paths"
 harness = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"

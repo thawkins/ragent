@@ -17,8 +17,12 @@
 //!   (no other task in the test process reads the variable concurrently).
 
 #![allow(unsafe_code)]
+// The crate-wide env lock is a *std* mutex held across `await` points on
+// purpose: these tests flip the process-global OPENROUTER_API_KEY, so
+// serialisation (not parallelism) is the goal. See `tests/all.rs`.
+#![allow(clippy::await_holding_lock)]
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use futures::StreamExt;
 use ragent_llm::Provider;
@@ -33,24 +37,18 @@ use ragent_types::{ThinkingConfig, ThinkingLevel};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::oneshot;
 
-/// Serialises tests that touch the process-wide `OPENROUTER_API_KEY`.
-static ENV_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
-
-fn env_lock() -> &'static AsyncMutex<()> {
-    ENV_LOCK.get_or_init(|| AsyncMutex::new(()))
-}
-
-/// Removes `OPENROUTER_API_KEY` while holding the shared env lock.
+/// Removes `OPENROUTER_API_KEY` while holding the crate-wide env lock.
 ///
 /// Returns the guard so the environment stays cleared until the caller drops
-/// it. `set_var`/`remove_var` are `unsafe` in Rust 2024; the guard proves
-/// no other test in this target is mutating the variable concurrently.
-async fn lock_and_clear_env() -> tokio::sync::MutexGuard<'static, ()> {
-    let guard = env_lock().lock().await;
-    // SAFETY: exclusive access to OPENROUTER_API_KEY via ENV_LOCK.
+/// it. `set_var`/`remove_var` are `unsafe` in Rust 2024; the guard proves no
+/// other test in this consolidated binary is touching the variable -
+/// `test_provider_offline_coverage` reads it too, so a file-local mutex is not
+/// enough (see `tests/all.rs`).
+fn lock_and_clear_env() -> std::sync::MutexGuard<'static, ()> {
+    let guard = crate::global_env_lock();
+    // SAFETY: exclusive access to OPENROUTER_API_KEY via the shared lock.
     unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
     guard
 }
@@ -110,7 +108,7 @@ fn test_openrouter_mask_key_shapes() {
 
 #[tokio::test]
 async fn test_openrouter_create_client_bails_without_key() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let provider = OpenRouterProvider::new();
     let err = match provider
@@ -130,7 +128,7 @@ async fn test_openrouter_create_client_bails_without_key() {
 
 #[tokio::test]
 async fn test_openrouter_create_client_env_fallback_wins_when_no_arg() {
-    let guard = lock_and_clear_env().await;
+    let guard = lock_and_clear_env();
     set_env_locked("env-key-openrouter-1234");
 
     let provider = OpenRouterProvider::new();
@@ -151,7 +149,7 @@ async fn test_openrouter_create_client_env_fallback_wins_when_no_arg() {
 
 #[tokio::test]
 async fn test_openrouter_stored_credential_satisfies_gate_when_no_arg_or_env() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     // No per-call argument, no env var, but a stored credential: gate passes.
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
@@ -173,7 +171,7 @@ async fn test_openrouter_per_call_arg_beats_storage_and_env() {
     // credential and an env var both exist. Behavioural probe: the gate opens
     // regardless of which source fired; the argument-first order is pinned by
     // the resolution path (non-empty arg short-circuits both fallbacks).
-    let guard = lock_and_clear_env().await;
+    let guard = lock_and_clear_env();
     set_env_locked("env-key-openrouter-1234");
 
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
@@ -198,7 +196,7 @@ async fn test_openrouter_per_call_arg_beats_storage_and_env() {
 
 #[tokio::test]
 async fn test_openrouter_base_url_override_applies_to_chat_client() {
-    let guard = lock_and_clear_env().await;
+    let guard = lock_and_clear_env();
     set_env_locked("override-probe-key-0001");
 
     let provider = OpenRouterProvider::new();
@@ -222,7 +220,7 @@ async fn test_openrouter_base_url_override_applies_to_chat_client() {
 
 #[tokio::test]
 async fn test_openrouter_chat_stream_rejects_non_2xx() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let local_addr = listener.local_addr().unwrap();
@@ -266,7 +264,7 @@ async fn test_openrouter_chat_stream_rejects_non_2xx() {
 
 #[tokio::test]
 async fn test_openrouter_chat_stream_maps_sse_events() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let local_addr = listener.local_addr().unwrap();
@@ -370,7 +368,7 @@ async fn test_openrouter_chat_stream_maps_sse_events() {
 
 #[tokio::test]
 async fn test_openrouter_chat_stream_ignores_unparseable_sse_lines() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let local_addr = listener.local_addr().unwrap();
@@ -490,7 +488,7 @@ fn test_openrouter_request_body_reasoning_uses_legacy_fallback() {
 
 #[tokio::test]
 async fn test_openrouter_chat_stream_emits_reasoning_events_with_transitions() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let local_addr = listener.local_addr().unwrap();
@@ -610,7 +608,7 @@ async fn spawn_json_server(
 
 #[tokio::test]
 async fn test_openrouter_metadata_maps_context_pricing_vision_reasoning() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let body = serde_json::json!({
         "data": [
@@ -689,7 +687,7 @@ async fn test_openrouter_metadata_maps_context_pricing_vision_reasoning() {
 
 #[tokio::test]
 async fn test_openrouter_metadata_uses_top_provider_context_length_fallback() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let body = serde_json::json!({
         "data": [
@@ -725,7 +723,7 @@ async fn test_openrouter_metadata_uses_top_provider_context_length_fallback() {
 
 #[tokio::test]
 async fn test_openrouter_metadata_skips_empty_id_entries() {
-    let _guard = lock_and_clear_env().await;
+    let _guard = lock_and_clear_env();
 
     let body = serde_json::json!({
         "data": [

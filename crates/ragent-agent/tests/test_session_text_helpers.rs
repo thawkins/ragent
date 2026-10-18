@@ -52,10 +52,6 @@ mod llm {
     pub use ragent_agent::llm::ToolDefinition;
 }
 
-mod tool {
-    pub use ragent_agent::tool::ToolRegistry;
-}
-
 mod session {
     pub mod loop_state {
         pub use ragent_agent::session::loop_state::LoopSpec;
@@ -86,11 +82,11 @@ use ragent_agent::tool::create_default_registry;
 mod perms_src;
 
 mod event {
-    pub use ragent_agent::event::{Event, EventBus};
+    pub use ragent_agent::event::EventBus;
 }
 
 mod permission {
-    pub use ragent_agent::permission::{PermissionAction, PermissionChecker, PermissionDecision};
+    pub use ragent_agent::permission::{PermissionAction, PermissionChecker};
 }
 
 use event::EventBus;

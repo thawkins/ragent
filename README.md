@@ -357,6 +357,23 @@ cargo build --release
 
 Requires Rust 1.85+ (edition 2024; the pinned toolchain is `stable`).
 
+Incremental compilation is disabled workspace-wide (`.cargo/config.toml` sets
+`[build] incremental = false`, and `[profile.dev]` / `[profile.test]` repeat it)
+because the configured `sccache` wrapper cannot cache incremental artifacts, so
+the cache only consumed disk. Expect full rebuilds; `BUILDSTATS.md` records the
+measured cost of each step on the reference machine (release build 7m 37s /
+1.80 GiB, debug build 2m 41s / 2.40 GiB, full test run 9m 12s / 14.92 GiB,
+coverage run 9m 58s / 15.82 GiB).
+
+Every crate builds **one** integration-test binary from its `tests/` tree
+(`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
+each `tests/test_*.rs` file), so a full `cargo test` links 19 targets instead of
+~950. Run one file by filter:
+
+```bash
+cargo test -p ragent-tui --test all test_slash_commands::
+```
+
 ## Quick Start
 
 ```bash
@@ -600,8 +617,9 @@ are marked with a yellow `[custom]` badge).
 
 See [docs/howtos/custom-agents.md](docs/howtos/custom-agents.md) for the full schema
 reference, template variables (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`,
-`{{DATE}}`), permission rules, and worked examples. Ready-to-use example files
-are in [`examples/agents/`](examples/agents/).
+`{{DATE}}`), permission rules, and worked examples — the manual carries a
+complete minimal OASF document and a security-reviewer profile you can copy
+straight into `.ragent/agents/`.
 
 ## Project Scaffolding
 
@@ -655,7 +673,8 @@ Docs and examples:
 
 - Guide: [`docs/userdocs/TEAMS.md`](docs/userdocs/TEAMS.md)
 - How-to manual: [`docs/howtos/teams.md`](docs/howtos/teams.md)
-- Example bundles: [`examples/teams/`](examples/teams/)
+- Example blueprints: [`.ragent/blueprints/teams/`](.ragent/blueprints/teams/)
+  (`code-review`, `parallel-feature`, `debate`)
 
 ## Architecture
 
@@ -733,7 +752,7 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.137** — The core architecture, tool system (148 tools across 21 categories in
+**v1.0.138** — The core architecture, tool system (148 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered
@@ -744,12 +763,16 @@ feature, fix, and change.**
 
 Related documents:
 
-- [SPEC.md](SPEC.md) — the full specification and requirement history
+- [SPEC.md](SPEC.md) — the full specification and requirement history (incl. §21.4
+  on the one-test-binary-per-crate layout)
 - [STATS.md](STATS.md) — line, file, test and per-crate composition statistics
+- [BUILDSTATS.md](BUILDSTATS.md) — measured build, test and coverage time/disk cost
 - [QUICKSTART.md](QUICKSTART.md) — the guided feature tour
 - [TUI-QUICKSTART.md](TUI-QUICKSTART.md) — running and driving the terminal UI
 - [docs/howtos/](docs/howtos/) — one how-to manual per subsystem
 - [docs/howtos/tools/INDEX.md](docs/howtos/tools/INDEX.md) — the full tool catalog
+- [docs/reports/testconsolidation-review.md](docs/reports/testconsolidation-review.md)
+  — the test-binary consolidation review and rollout record
 
 ## License
 

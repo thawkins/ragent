@@ -6,11 +6,10 @@
 #[path = "../src/edit_log.rs"]
 mod edit_log;
 
-// `edit_log` now delegates its JSONL append/pick helpers to the crate's
-// `jsonl_log` module (T-305); re-include it here so `crate::jsonl_log`
-// resolves when `edit_log.rs` is compiled as part of this test target.
-#[path = "../src/jsonl_log.rs"]
-mod jsonl_log;
+// `edit_log` delegates its JSONL append/pick helpers to `crate::jsonl_log`
+// (T-305). `crate::` resolves at the consolidated test binary root, so
+// `tests/all.rs` re-includes `src/jsonl_log.rs` there; a copy here would be a
+// second, unused module of this child. See AGENTS.md ("Test Layout").
 
 use edit_log::normalize_outcome;
 

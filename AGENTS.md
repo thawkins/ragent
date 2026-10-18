@@ -293,6 +293,64 @@ When reading files with the `read` tool:
 - **Version**: Use semantic versioning (major.minor.patch-prerelease)
 - Whenever a new feature or function is added ensure that SPEC.md and QUICKSTART.md is updated if relevant.
 
+## Test Layout
+
+- **One file per test unit, one test binary per crate.** Keep every test in a
+  descriptive `tests/test_<component>_<scenario>.rs` file inside its crate's
+  `tests/` directory, but do **not** grow the count of auto-discovered test
+  targets. `cargo`'s default autotest discovery turns each top-level
+  `tests/*.rs` file into its own binary; at this workspace's scale that is 900+
+  link steps and 900+ binaries.
+- Consolidate: set `autotests = false` in the crate's `[package]`, add a single
+  `[[test]] name = "all"` with `path = "tests/all.rs"`, and include each
+  `tests/test_*.rs` file from `tests/all.rs` as a child module via
+  `#[path = "test_x.rs"] mod test_x;`. See the "Test Organization" section of
+  `@AGENTS-LANGUAGE.md` for the full rule and `docs/reports/testconsolidation-review.md`
+  for the review and rollout plan.
+- Add a new test as one more `#[path = ...] mod ...;` line in the crate's
+  `tests/all.rs` — never as a new top-level file that becomes its own binary.
+- Run one consolidated file by filter: `cargo test -p <crate> --test all test_foo::`
+  (test names keep their `test_foo::` file prefix inside the `all` binary).
+- Merging binaries merges process state. Every crate's `tests/all.rs` therefore
+  defines one binary-wide lock:
+
+  ```rust
+  pub fn global_env_mutex() -> &'static std::sync::Mutex<()> { /* OnceLock */ }
+  pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> { /* poison-tolerant */ }
+  ```
+
+  A test that mutates or observes a process-global (cwd, `XDG_CONFIG_HOME`,
+  `HOME`, `PATH`, a `static` registry) takes `crate::global_env_lock()` for as
+  long as it needs the value stable — never a file-local mutex, which under one
+  binary per crate only serialises the children that happen to share that file.
+  `#[serial]` remains fine for globals that need no value control; the shared
+  lock is preferred where the test must also *force* a value (`HOME`, the SSRF
+  bypass, an API-key variable) while it runs. Never weaken an assertion or add a
+  target just to regain isolation.
+- A `#[path]`-included source module resolves `crate::` at the **binary root**,
+  not at the crate under test. When a child includes `src/foo.rs` that refers to
+  `crate::bar`, re-export `bar` from `tests/all.rs` (see the shims at the top of
+  `crates/ragent-agent/tests/all.rs`) — do not add a second copy of the module
+  inside the child.
+- A test that reads a process-global must pin it rather than inherit it:
+  `support::make_app()` takes `cwd_path` from the real process cwd, so a test
+  asserting on a cwd-derived value sets `app.cwd`/`app.cwd_path` explicitly.
+- **Tests must not write into the repository.** A test run must leave the working
+  tree byte-identical: no generated `INDEX.md`/`.index.json`, no per-run item
+  directories, no log spools, no snapshot files under a checked-in path. Point
+  every write at the git-ignored `target/temp/` scratch tree instead:
+  - pass the root explicitly through state (e.g. `AppState::research_root`)
+    rather than reading `std::env::current_dir()` inside a handler, and give the
+    test a `target/temp/...` value;
+  - when a write location is not already a parameter, add a `#[doc(hidden)]`
+    setter over a process-wide `OnceLock` (e.g.
+    `ragent_agent::session::history::set_subagent_log_root`,
+    `ragent_tui::app::set_log_root_override`) and call it from the test;
+  - resolve `target/temp` from `env!("CARGO_MANIFEST_DIR")` so the path is
+    correct regardless of the test's working directory.
+  Never "fix" this by restoring files with `git restore` after a run — that hides
+  the leak and can clobber unrelated work.
+
 ## Documentation Standards
 
 - For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.

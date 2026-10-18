@@ -23,7 +23,7 @@
 #![allow(unsafe_code)]
 #![cfg(test)]
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, MutexGuard};
 
 use ragent_plugins::{
     DEFAULT_CLAUDE_STORE_URL, DEFAULT_CODEX_STORE_URL, EndpointSource, FixtureStoreFetcher,
@@ -34,12 +34,6 @@ use ragent_tui::app::PluginStoreStatus;
 
 #[path = "support/mod.rs"]
 mod support;
-
-/// Serialise the cwd/env-mutating tests in this binary.
-fn launch_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 /// Restores the config-related env vars and the working directory on drop.
 struct LaunchEnv {
@@ -82,7 +76,7 @@ impl Drop for LaunchEnv {
 /// is never read.
 #[allow(clippy::await_holding_lock)]
 fn enter_empty_project() -> (MutexGuard<'static, ()>, LaunchEnv, tempfile::TempDir) {
-    let guard = launch_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let guard = crate::global_env_lock();
     let env = LaunchEnv::new();
     let temp = tempfile::tempdir().expect("tempdir");
     // SAFETY: see `LaunchEnv::drop`; the lock makes this single-threaded.

@@ -28,6 +28,7 @@ use ragent_tui::App;
 const DISMISSED_MARKER: &str = "[User dismissed question]";
 
 fn make_app(event_bus: Arc<EventBus>) -> App {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());

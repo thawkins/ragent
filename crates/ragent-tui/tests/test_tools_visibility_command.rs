@@ -1,7 +1,5 @@
 //! Regression tests for `/tools <switch> on|off`.
 
-use std::sync::{Mutex, OnceLock};
-
 #[path = "support/mod.rs"]
 mod support;
 
@@ -20,15 +18,10 @@ fn enter_temp_config_dir() -> tempfile::TempDir {
     temp
 }
 
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_tools_toggle_persists_and_updates_hidden_registry() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -71,7 +64,7 @@ async fn test_slash_tools_toggle_persists_and_updates_hidden_registry() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_codeindex_off_updates_visibility_and_config() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -113,7 +106,7 @@ async fn test_slash_codeindex_off_updates_visibility_and_config() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_tools_show_lists_source_column() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -164,7 +157,7 @@ async fn test_slash_tools_show_lists_source_column() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_tools_table_rows_fit_message_width() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -217,7 +210,7 @@ async fn test_slash_tools_table_rows_fit_message_width() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_tools_lists_disabled_tools_separately() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = crate::global_env_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();

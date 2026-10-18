@@ -6,7 +6,7 @@
 //! that the test process chdirs into (guarded by a process-wide cwd mutex).
 
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 
 use ragent_tui::App;
 use support::make_app;
@@ -16,14 +16,12 @@ mod support;
 /// Serialize tests that change the process working directory. A poisoned
 /// lock (a panicking sibling) must not cascade into unrelated failures, so
 /// the guard ignores poison.
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 /// Acquire the cwd lock, ignoring a poisoned sibling test.
 #[allow(clippy::await_holding_lock)]
+/// The process-wide cwd/env lock (see `tests/all.rs`).
 fn cwd_lock() -> MutexGuard<'static, ()> {
-    CWD_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::global_env_lock()
 }
 
 /// Run `/<cmd> help` and return the last assistant message text.

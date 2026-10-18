@@ -483,6 +483,44 @@ pub(crate) fn current_working_dir() -> std::path::PathBuf {
     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
+/// Log root the TUI spools write under (`<working dir>/log` by default).
+///
+/// Set once by [`set_log_root_override`] in tests, so a test run writes its
+/// log-window spools into `target/temp/` instead of the checked-in `log/`
+/// tree. Production never sets it and keeps `<working dir>/log`.
+static LOG_ROOT_OVERRIDE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Redirect TUI log spools to `root` for this process.
+///
+/// Test hook only: the first call wins and the value applies process-wide.
+#[doc(hidden)]
+pub fn set_log_root_override(root: impl Into<std::path::PathBuf>) {
+    let _ = LOG_ROOT_OVERRIDE.set(root.into()); // INTENTIONAL: first set wins; later calls are no-ops
+}
+
+/// Point TUI log spools at the workspace scratch tree for this test process.
+///
+/// Resolves `<workspace>/target/temp/log` from the crate's own
+/// `CARGO_MANIFEST_DIR`, so the path is correct whatever directory the test
+/// binary runs in. Git-ignored, so a test run never dirties the repository.
+#[doc(hidden)]
+pub fn use_scratch_log_root_for_tests() {
+    set_log_root_override(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("target/temp/log"),
+    );
+}
+
+/// The directory TUI log spools live under (`<working dir>/log` by default).
+#[must_use]
+pub(crate) fn log_root() -> std::path::PathBuf {
+    LOG_ROOT_OVERRIDE
+        .get()
+        .cloned()
+        .unwrap_or_else(|| current_working_dir().join("log"))
+}
+
 /// Map a log level to its fixed three-letter spool tag.
 ///
 /// The tag is written as the second field of every line in the log spool file

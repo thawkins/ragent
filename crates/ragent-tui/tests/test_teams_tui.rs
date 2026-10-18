@@ -1,18 +1,5 @@
 //! Tests for `test_teams_tui.rs`
 
-/// TUI tests for Teams integration (M4-T9).
-///
-/// Covers:
-/// - `/team status` output with no active team and with an active team
-/// - `/team create` creates a team and updates app state
-/// - `/team tasks` when no team is active
-/// - `/team cleanup` clears in-memory state
-/// - `/team message` with no active team / unknown teammate
-/// - Unknown `/team` subcommand shows error
-/// - `[T]` badge appears when team members are present
-/// - Team events update `active_team` and `team_members`
-use std::sync::Mutex;
-
 use ragent_agent::event::Event;
 use ragent_agent::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
 use ragent_tui::app::LogLevel;
@@ -20,8 +7,6 @@ use ratatui::{Terminal, backend::TestBackend};
 
 #[path = "support/mod.rs"]
 mod support;
-
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 fn unique_team_name(prefix: &str) -> String {
     let nanos = std::time::SystemTime::now()
@@ -114,9 +99,7 @@ async fn test_team_create_no_name_shows_usage() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -152,9 +135,7 @@ async fn test_team_show_no_name_lists_all_registered_teams() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_show_no_name_empty_registry_message() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -202,9 +183,7 @@ async fn test_team_show_no_name_empty_registry_message() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -240,9 +219,7 @@ async fn test_team_show_loads_named_team_details() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_teams_alias_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -268,9 +245,7 @@ async fn test_teams_alias_show_loads_named_team_details() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_teams_alias_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -403,9 +378,7 @@ async fn test_team_delete_no_name_shows_usage() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_delete_removes_existing_team() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -436,9 +409,7 @@ async fn test_team_delete_removes_existing_team() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_delete_active_team_clears_session_state() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -476,9 +447,7 @@ async fn test_team_delete_active_team_clears_session_state() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_delete_active_team_blocked_when_teammates_working() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -514,9 +483,7 @@ async fn test_team_delete_active_team_blocked_when_teammates_working() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_create_sets_active_team() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     // Change into the temp dir so the project-local team is created there.
@@ -577,9 +544,7 @@ async fn test_team_tasks_no_active_team() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_tasks_renders_table_with_status() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -648,9 +613,7 @@ async fn test_team_clear_no_active_team() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_clear_removes_tasks_for_active_team() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -877,9 +840,7 @@ async fn test_event_teammate_spawned_deduplicates() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_event_teammate_spawned_hydrates_session_id_from_store() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -915,9 +876,7 @@ async fn test_event_teammate_spawned_hydrates_session_id_from_store() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -1389,9 +1348,7 @@ async fn test_event_teammate_message_increments_receiver_counter() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_create_slash_rejects_traversal_names() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -1429,9 +1386,7 @@ async fn test_team_create_slash_rejects_traversal_names() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_team_delete_slash_rejects_traversal_names() {
-    let _cwd_guard = CWD_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();

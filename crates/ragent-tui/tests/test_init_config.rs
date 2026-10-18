@@ -6,16 +6,8 @@
 
 #![allow(unsafe_code)]
 
-use std::sync::{Mutex, OnceLock};
-
 #[path = "support/mod.rs"]
 mod support;
-
-/// Serialise env-var mutation across parallel tests.
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 /// Point `XDG_CONFIG_HOME` at a temp directory so `dirs::config_dir()`
 /// returns a sandboxed path. Returns the previous value (if any).
@@ -43,9 +35,7 @@ fn restore_xdg_config_home(original: Option<String>) {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_init_config_creates_default_global_config() {
-    let _lock = env_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -90,9 +80,7 @@ async fn test_slash_init_config_creates_default_global_config() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_init_config_skips_when_config_exists() {
-    let _lock = env_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -130,9 +118,7 @@ async fn test_slash_init_config_skips_when_config_exists() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_slash_init_config_produces_status_message() {
-    let _lock = env_lock()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());

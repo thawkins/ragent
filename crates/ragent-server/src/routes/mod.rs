@@ -109,6 +109,13 @@ pub struct AppState {
     /// Keyed by research name; stores the broadcast channel for SSE events.
     pub research_runs:
         Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::broadcast::Sender<SessionEvent>>>>,
+    /// Research vault root (`<working_dir>/research` in production).
+    ///
+    /// Explicit state rather than a process-global `cwd` lookup so a test can
+    /// point the research routes at `target/temp/` and never write into the
+    /// checked-in `<crate>/research/` tree. The parent directory is treated as
+    /// the project root for `from_files` containment (SEC-002).
+    pub research_root: Arc<std::path::PathBuf>,
 }
 
 /// Count of currently open `/events` SSE connections across the process (F-M9).

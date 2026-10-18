@@ -185,8 +185,11 @@ fn run_plugin_subcommand_handles_stores_without_a_session() {
     )
     .expect("global config writable");
 
+    // Process-global: hold the binary-wide lock so no sibling test can read or
+    // restore the variable mid-run (consolidated binaries share one process).
+    let _lock = crate::global_env_lock();
     let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
-    // SAFETY: single-threaded test; the value is restored below.
+    // SAFETY: serialised by the lock; the value is restored below.
     unsafe { std::env::set_var("XDG_CONFIG_HOME", &config_home) };
 
     let report = run_plugin_subcommand(

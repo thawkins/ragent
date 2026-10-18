@@ -126,6 +126,11 @@ fn test_prompt_display_only_output_is_rendered() {
 
 #[test]
 fn test_prompt_repeated_invocations_are_stable() {
+    // The report embeds the process working directory and the project
+    // config, both process-global; hold the binary-wide lock so no sibling
+    // test can chdir between the two invocations (consolidated binaries
+    // share one process).
+    let _lock = crate::global_env_lock();
     let first = prompt_report("/prompt general");
     let second = prompt_report("/prompt general");
     assert_eq!(

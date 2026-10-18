@@ -6,6 +6,12 @@ authors.workspace = true
 license.workspace = true
 description = "Shared surface helpers for the ragent plugin and connector command families (usage attribution, store-directory resolution, harness steps, and JSON-schema sample generation)"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }

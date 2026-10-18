@@ -4,7 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (unreleased)
+## Highlights (v1.0.138)
+
+- **Deep coverage suites for the TUI (tests only)** — 17 more `tests/` files
+  (642 tests, ~16.1k lines) drive the paths phase 1 left behind: every slash
+  dispatch arm (`test_slash_arms_deep`, `test_slash_heavy_deep`,
+  `test_slash_misc_deep2`, `test_slash_spec_deep{,2}`, `test_slash_teams_deep`,
+  `test_slash_codeindex_deep`), the event-handler swarm/research flows
+  (`test_event_swarm_research_deep`), input editing (`test_input_deep3`), layout
+  and scroll maths (`test_layout_deep`), the schedule/lib helpers, message-widget
+  summaries and session/model state. No user-visible behaviour change; every
+  suite is a child module of the crate's single `tests/all.rs` binary.
+
+- **TUI test spools no longer land in the repository** — a test with `show_log`
+  enabled used to create `<cwd>/log/logwindow/` under the checkout. The spool
+  directory now comes from `helpers::log_root()`, overridable once with
+  `ragent_tui::app::set_log_root_override` / `use_scratch_log_root_for_tests`, so
+  the suites spool into the git-ignored `target/temp/log/logwindow`. `/webapi
+  enable` also passes its `cwd_path` as the server's research vault root, so a
+  TUI test never writes to `crates/ragent-server/research/`.
 
 - **Test-coverage campaign (tests only)** — roughly 80 new `tests/` suites plus a
   set of inline test files raise `ragent-tui` line coverage from 54.1% to 75.0% and
@@ -782,7 +800,10 @@ touch AGENTS.md
 ## Testing
 - Tests live in each crate's `tests/` directory
 - Use `#[test]` for sync tests, `#[tokio::test]` for async tests
+- Each crate builds one `tests/all.rs` target that `#[path]`-includes every
+  `tests/test_*.rs` file; add a new test as one more `#[path] ... mod ...;` line
 - Run tests with `cargo test --workspace`
+- Run one file with `cargo test -p <crate> --test all test_foo::`
 
 ## Tool Preferences
 - Use `codeindex_search` and `codeindex_references` for code symbol lookups

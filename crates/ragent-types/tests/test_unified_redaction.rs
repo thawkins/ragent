@@ -11,6 +11,7 @@ use ragent_types::event::Event;
 use ragent_types::sanitize::{
     clear_secret_registry, redact_secrets, redact_secrets_cow, register_secret,
 };
+use serial_test::serial;
 
 const REGISTERED: &str = "registry-only-value-8f3a1c";
 const GITLAB_PAT: &str = "glpat-abcdefghijklmnopqrst";
@@ -20,6 +21,7 @@ const GITLAB_PAT: &str = "glpat-abcdefghijklmnopqrst";
 /// This half of the redaction contract is independent of the process-global
 /// registry, so it cannot be perturbed by another test in this binary.
 #[test]
+#[serial]
 fn test_pattern_layer_redacts_an_unregistered_gitlab_pat() {
     let out = redact_secrets(&format!(
         "remote=https://oauth2:{GITLAB_PAT}@gitlab.example"
@@ -37,6 +39,7 @@ fn test_pattern_layer_redacts_an_unregistered_gitlab_pat() {
 /// `clear_secret_registry` in the crate-wide `cargo test` run can wipe the
 /// registration between the `register_secret` call and the redaction.
 #[test]
+#[serial]
 fn test_registry_layer_redacts_and_cow_path_still_masks() {
     static REGISTRY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     // A panic under the lock can only be this test's own assertion.
@@ -67,6 +70,7 @@ fn test_registry_layer_redacts_and_cow_path_still_masks() {
 /// Before MS-05 the enum derived `Debug`, so any `tracing::debug!("{event:?}")`
 /// printed the Copilot OAuth token and the device code verbatim.
 #[test]
+#[serial]
 fn test_event_debug_masks_copilot_credentials() {
     let token = "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let complete = Event::CopilotDeviceFlowComplete {
@@ -103,6 +107,7 @@ fn test_event_debug_masks_copilot_credentials() {
 
 /// A benign event must still render its variant name, so logs stay useful.
 #[test]
+#[serial]
 fn test_event_debug_keeps_the_variant_name() {
     let event = Event::SessionCreated {
         session_id: "abc-123".to_string(),

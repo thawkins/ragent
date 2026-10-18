@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.137"
+version = "1.0.138"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -11,6 +11,8 @@ authors = ["Tim Hawkins <tim.thawkins@gmail.com>"]
 
 [package]
 name = "ragent"
+# One integration-test binary for the root crate (see AGENTS.md, "Test Layout").
+autotests = false
 description = "An AI coding agent for the terminal, built in Rust."
 version.workspace = true
 edition.workspace = true
@@ -308,6 +310,10 @@ html2text = { path = "vendor/html2text" }
 name = "ragent"
 path = "src/main.rs"
 
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [features]
 default = []
 # The `telemetry` feature is no longer required; telemetry is hardwired into the
@@ -327,6 +333,13 @@ opt-level = "z"
 
 [profile.dev]
 debug = "line-tables-only"
+# Incremental compilation writes a large cache that is non-cacheable under the
+# sccache RUSTC_WRAPPER, so it costs disk without saving rebuild time here.
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false
 
 [dependencies]
 ragent-agent = { workspace = true }

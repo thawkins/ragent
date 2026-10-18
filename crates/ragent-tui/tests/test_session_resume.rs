@@ -21,6 +21,7 @@ use ragent_tui::app::{LogLevel, ScreenMode};
 
 /// Build an [`App`] and its shared [`SessionManager`] backed by in-memory storage.
 fn make_app_with_manager() -> (App, Arc<SessionManager>) {
+    ragent_tui::app::use_scratch_log_root_for_tests();
     let event_bus = Arc::new(EventBus::default());
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let provider_registry = Arc::new(provider::create_default_registry());

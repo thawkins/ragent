@@ -756,7 +756,14 @@ With a default agent type:
 - Team guide: `docs/userdocs/TEAMS.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
 - Blueprint location: `[PROJECT]/.ragent/blueprints/teams/`, `~/.config/ragent/blueprints/teams/`, or `~/.ragent/blueprints/teams/`
-- Example bundles:
-  - `examples/teams/code-review/`
-  - `examples/teams/parallel-feature/`
-  - `examples/teams/hooks/`
+- Blueprints installed in this repository:
+  - `.ragent/blueprints/teams/code-review/`
+  - `.ragent/blueprints/teams/parallel-feature/`
+  - `.ragent/blueprints/teams/debate/`
+
+Each blueprint directory holds a `README.md`, a spawn-prompt document
+(`spawn-prompts.json` - the roster `team_create` executes; `parallel-feature`
+carries the prose `spawn-prompts.md` variant) and a `task-seed.json` (the shared
+task list `team_create` seeds). Copy one into your own project's
+`.ragent/blueprints/teams/` to use it; a hook script can be attached by pointing
+the blueprint's hook entry at any executable (e.g. a `teammate-idle.sh` gate).

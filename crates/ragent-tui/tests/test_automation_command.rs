@@ -11,7 +11,7 @@
 #![allow(clippy::await_holding_lock)]
 #![cfg(test)]
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_tui::App;
 
@@ -20,11 +20,9 @@ mod support;
 
 /// The cwd/env mutations below are process-global; one mutex serialises every
 /// test in this binary against them.
-fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn test_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Restores cwd and config env vars on drop.

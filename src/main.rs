@@ -1242,6 +1242,7 @@ async fn async_main() -> Result<()> {
                 rate_limiter: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 coordinator: Some(coordinator),
                 research_runs: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                research_root: Arc::new(crate::working_dir().join("research")),
             };
             ragent_server::start_server(&addr, state).await?;
         }

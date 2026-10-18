@@ -6,8 +6,6 @@
 //! we assert the TUI wiring: the command is registered, autocompletes, and the
 //! three invocation forms reach the help renderer and touch no files.
 
-use std::sync::{Mutex, OnceLock};
-
 #[path = "support/mod.rs"]
 mod support;
 
@@ -18,12 +16,6 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
     }
-}
-
-/// Serialise cwd-mutating tests in this binary.
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 /// Enter a fresh temp working directory with an empty `.ragent/`.
@@ -84,7 +76,7 @@ fn connectors_registered_in_slash_commands() {
 
 #[test]
 fn connectors_suggestions_list_all_subcommands() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
 
@@ -139,7 +131,7 @@ fn connectors_suggestions_list_all_subcommands() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn help_bare_and_unknown_all_render_the_usage_block() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -177,7 +169,7 @@ async fn help_bare_and_unknown_all_render_the_usage_block() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn help_creates_no_files() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -197,7 +189,7 @@ async fn help_creates_no_files() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn stores_report_is_attributed_ascii_and_offline() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -222,7 +214,7 @@ async fn stores_report_is_attributed_ascii_and_offline() {
 async fn master_switch_disables_the_subsystem() {
     // FR-021: `connectors.enabled: false` makes `/connectors list` report the
     // disabled subsystem and discover nothing; `help` remains available.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     std::fs::write(
         temp.path().join(".ragent").join("ragent.json"),
@@ -259,7 +251,7 @@ async fn list_reports_a_bridged_server_connected_from_the_live_client() {
     // client, so the connector session tracks nothing. `/connectors list` must
     // still report `connected` and a real tool count by reading the client's
     // per-server state rather than the (empty) tracked snapshot.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let store = temp.path().join(".ragent").join("connectors");
     let dir = store.join("demo");

@@ -6,8 +6,6 @@
 //! assert the TUI wiring: the command is registered, autocompletes, and the
 //! three invocation forms reach the help renderer and touch no files.
 
-use std::sync::{Mutex, OnceLock};
-
 #[path = "support/mod.rs"]
 mod support;
 
@@ -18,12 +16,6 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
     }
-}
-
-/// Serialise cwd-mutating tests in this binary.
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 /// Enter a fresh temp working directory with an empty `.ragent/`.
@@ -104,7 +96,7 @@ fn plugins_registered_in_slash_commands() {
 
 #[test]
 fn plugins_suggestions_list_all_subcommands() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
 
@@ -151,7 +143,7 @@ fn plugins_suggestions_list_all_subcommands() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn help_bare_and_unknown_all_render_the_usage_block() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -194,7 +186,7 @@ async fn help_bare_and_unknown_all_render_the_usage_block() {
 async fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
     // FR-031/FR-038: with no `plugins.stores` block, `/plugins stores` lists
     // both stores, tags each `default`, and names its compiled https endpoint.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
 
     let mut app = support::make_app();
@@ -225,7 +217,7 @@ async fn stores_reports_both_endpoints_as_default_without_a_stores_block() {
 async fn stores_tags_a_configured_endpoint_as_config() {
     // FR-031: a non-empty `plugins.stores.<name>.url` override is tagged
     // `config` and names its URL; the other store keeps its default.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     std::fs::write(
         temp.path().join(".ragent").join("ragent.json"),
@@ -254,7 +246,7 @@ async fn marketplace_show_lists_both_marketplaces_in_separate_sections() {
     // `/plugins marketplace show` renders one section per store with a
     // name/url/description table row. With no `plugins.stores` block both
     // stores resolve their compiled default endpoint, tagged `(default)`.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
 
     let mut app = support::make_app();
@@ -297,7 +289,7 @@ async fn marketplace_show_lists_both_marketplaces_in_separate_sections() {
 async fn marketplace_show_names_a_configured_endpoint() {
     // A `plugins.stores.codex.url` override swaps the default endpoint out of
     // the Codex section and tags the row `(config)`; Claude keeps its default.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     std::fs::write(
         temp.path().join(".ragent").join("ragent.json"),
@@ -330,7 +322,7 @@ async fn bare_marketplace_and_unknown_sub_subcommand_render_usage() {
     // `/plugins marketplace` is only valid with an explicit `show`
     // sub-subcommand; a bare `marketplace` or an unknown tail renders the
     // usage block exactly like an unrecognised `/plugins` subcommand (FR-014).
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, _temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -352,7 +344,7 @@ async fn bare_marketplace_and_unknown_sub_subcommand_render_usage() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn help_creates_no_files() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -387,7 +379,7 @@ fn write_codex_plugin(dir: &std::path::Path, id: &str) {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn list_reports_a_discovered_plugin_as_disabled() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
         &temp
@@ -438,7 +430,7 @@ fn write_claude_mcp_plugin(dir: &std::path::Path, id: &str) {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn list_shows_mcp_server_and_tool_counts() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_claude_mcp_plugin(
         &temp.path().join(".ragent").join("plugins").join("mongodb"),
@@ -471,7 +463,7 @@ async fn list_shows_mcp_server_and_tool_counts() {
 #[tokio::test(flavor = "multi_thread")]
 #[allow(clippy::await_holding_lock)]
 async fn list_shows_live_mcp_tool_count_after_connect() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_claude_mcp_plugin(
         &temp.path().join(".ragent").join("plugins").join("mongodb"),
@@ -520,7 +512,7 @@ async fn list_shows_live_mcp_tool_count_after_connect() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn add_from_a_local_directory_installs_and_reports_enabled() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
 
     // Stage a source directory *outside* the store.
@@ -560,7 +552,7 @@ async fn add_from_a_local_directory_installs_and_reports_enabled() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_harness_reports_per_step_results_without_touching_the_session() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
         &temp
@@ -589,7 +581,7 @@ async fn test_harness_reports_per_step_results_without_touching_the_session() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn enable_loads_the_plugin_and_disable_unloads_it() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
         &temp
@@ -627,7 +619,7 @@ async fn enable_loads_the_plugin_and_disable_unloads_it() {
 async fn master_switch_disables_the_subsystem() {
     // Acceptance criterion 8: `plugins.enabled: false` makes `/plugins list`
     // report the disabled subsystem and discover nothing (FR-016).
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let (_guard, temp) = enter_temp_dir();
     write_codex_plugin(
         &temp

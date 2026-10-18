@@ -93,6 +93,7 @@ fn test_state(token: &str) -> AppState {
         rate_limiter: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        research_root: std::sync::Arc::new(crate::research_sandbox::research_root()),
     }
 }
 

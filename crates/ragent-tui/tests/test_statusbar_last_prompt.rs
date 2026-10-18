@@ -242,6 +242,10 @@ fn test_statusbar_no_prompt_no_tag() {
 #[test]
 fn test_statusbar_branch_before_tag_and_cwd_before_branch() {
     let mut app = support::make_app();
+    // Pin the cwd to the deterministic `~/...` path: `App::new` derives `cwd`
+    // from the process working directory, which a consolidated test binary
+    // shares with the cwd-mutating children.
+    app.cwd = TEST_CWD.to_string();
     app.last_prompt = "hello world".to_string();
     app.git_branch = Some("main".to_string());
     let frame = render_app_to_string(&mut app);

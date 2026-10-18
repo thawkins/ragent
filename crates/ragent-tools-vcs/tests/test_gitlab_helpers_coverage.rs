@@ -6,15 +6,19 @@
 //! the "no remote" message) and the happy path (a configured instance plus a
 //! GitLab remote) without any network use.
 
+// Holds the crate-wide env lock across the body on purpose: it
+// serialises against the PATH-swapping git-shim test, so serialisation
+// (not parallelism) is the goal. See AGENTS.md ("Test Layout").
+#![allow(clippy::await_holding_lock)]
+
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ragent_tools_vcs::ToolContext;
 use ragent_tools_vcs::gitlab::{detect, detect_project, make_client};
 use ragent_tools_vcs::storage::StorageBackend;
 
 /// Serialises tests that mutate `GITLAB_*` environment variables.
-static LOCK: Mutex<()> = Mutex::new(());
 
 /// Minimal in-memory credential/settings store (always empty here).
 #[derive(Default)]
@@ -117,9 +121,7 @@ fn test_make_client_requires_storage() {
 
 #[test]
 fn test_make_client_unconfigured_reports_not_configured() {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let _env = EnvRestore::apply(&[
         ("GITLAB_TOKEN", None),
@@ -138,9 +140,7 @@ fn test_make_client_unconfigured_reports_not_configured() {
 
 #[test]
 fn test_make_client_succeeds_with_env_configuration() {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let _env = EnvRestore::apply(&[
         ("GITLAB_TOKEN", Some("glpat-helper".to_string())),
@@ -155,6 +155,10 @@ fn test_make_client_succeeds_with_env_configuration() {
 
 #[test]
 fn test_detect_project_parses_gitlab_remote() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q"]);
     git(
@@ -173,6 +177,10 @@ fn test_detect_project_parses_gitlab_remote() {
 
 #[test]
 fn test_detect_project_without_remote_errors() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q"]);
     let ctx = ctx_with(dir.path().to_path_buf(), None);
@@ -185,9 +193,7 @@ fn test_detect_project_without_remote_errors() {
 
 #[test]
 fn test_detect_combines_client_and_project() {
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     git(dir.path(), &["init", "-q"]);
     git(
@@ -213,9 +219,7 @@ fn test_detect_combines_client_and_project() {
 #[test]
 fn test_detect_propagates_client_error_first() {
     // No storage, no env config: `detect` fails on the client step.
-    let _lock = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let _env = EnvRestore::apply(&[("GITLAB_TOKEN", None), ("GITLAB_URL", None)]);
     let ctx = ctx_with(dir.path().to_path_buf(), None);

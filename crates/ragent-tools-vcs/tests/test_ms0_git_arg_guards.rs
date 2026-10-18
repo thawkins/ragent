@@ -5,6 +5,11 @@
 //! `reject_option_like` guard, so a value such as `-b` or `--force` was parsed
 //! by git as an option rather than a branch/path/remote (ANTIPAT A-1).
 
+// Holds the crate-wide env lock across the body on purpose: it
+// serialises against the PATH-swapping git-shim test, so serialisation
+// (not parallelism) is the goal. See AGENTS.md ("Test Layout").
+#![allow(clippy::await_holding_lock)]
+
 use std::path::Path;
 
 #[path = "support/mod.rs"]
@@ -30,6 +35,10 @@ fn make_ctx(dir: &Path) -> ToolContext {
 
 #[tokio::test]
 async fn test_git_checkout_rejects_option_like_branch() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -46,6 +55,10 @@ async fn test_git_checkout_rejects_option_like_branch() {
 
 #[tokio::test]
 async fn test_git_checkout_rejects_option_like_source() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -69,6 +82,10 @@ async fn test_git_checkout_rejects_option_like_source() {
 
 #[tokio::test]
 async fn test_git_cherry_pick_rejects_option_like_commit() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -89,6 +106,10 @@ async fn test_git_cherry_pick_rejects_option_like_commit() {
 
 #[tokio::test]
 async fn test_git_add_rejects_option_like_path() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -109,6 +130,10 @@ async fn test_git_add_rejects_option_like_path() {
 
 #[tokio::test]
 async fn test_git_remote_rejects_option_like_name_and_url() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 
@@ -139,6 +164,10 @@ async fn test_git_remote_rejects_option_like_name_and_url() {
 
 #[tokio::test]
 async fn test_git_remote_remove_rejects_option_like_name() {
+    // Holds the crate-wide env lock: `test_git_single_spawn` swaps the
+    // process-global `PATH` to a recording shim, which would poison this
+    // test's own `git` invocations in a shared test binary.
+    let _env_lock = crate::global_env_lock();
     let tmp = tempfile::tempdir().unwrap();
     setup_git_repo(tmp.path());
 

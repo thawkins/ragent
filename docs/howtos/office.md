@@ -280,8 +280,8 @@ array of `ragent.json`, exactly as for the plain file tools.
   test exercises `/tools`, and the step-log input summary for `pdf_read` is
   locked in by `crates/ragent-tui/tests/test_tool_display.rs`.
 - Sample asset files (`assets/pdf/Profile.pdf`, `assets/pdf/vibeSDLC.pdf`) are
-  informal manual fixtures; nothing in `tests/` or `examples/` references them,
-  so they are not CI coverage.
+  informal manual fixtures; nothing in `tests/` references them, so they are not
+  CI coverage.
 - `vendor/pdf-extract` is a workspace-patched dependency used by `pdf_read`
   (and MasterFetch's PDF path); it extracts text fully in memory with no
   external binary.

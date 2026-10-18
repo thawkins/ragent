@@ -1,42 +1,51 @@
 # Project Statistics
 
-**Version:** 1.0.137
+**Version:** 1.0.138
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.137 tree: the test-coverage
-> campaign (roughly 80 new `tests/` suites and a set of inline
-> test files that rise 13 of the 18 crates to >=85% line coverage - see the
-> `[1.0.137]` CHANGELOG entry), on top of the v1.0.136 interactive
-> `/plugins list` panel and the manifest/runtime tool merge fix
-> (`merge_contributed_tools` / `merge_contributed_commands`), on top of the
-> v1.0.135 security-hardening pass that closed the
-> `docs/reports/security-audit.md` critical/high fix set - `merge_project`
-> dropping project `mcp`/`acp`/provider `api`, the symlink guards, the
-> bounded-HTTP read caps, the verified updater, the `http_request` header
-> allowlist - plus the `ragent --version` flag and the shared-helper
-> de-duplication in `ragent-types`/`ragent-surface` - on top of the v1.0.134
-> MCP-discovery ergonomics, the `ask_user` default/fallback option, and the
-> `/simplify all` cleanup.
+> Metrics below are measured against the v1.0.138 tree: the test-coverage
+> campaign (roughly 80 new `tests/` suites and a set of inline test files that
+> rise 13 of the 18 crates to >=85% line coverage - see the `[1.0.137]` CHANGELOG
+> entry), the follow-up `ragent-tui` deep-coverage suites, and the consolidation
+> of every crate onto a single `tests/all.rs` integration target (see the
+> `[1.0.138]` CHANGELOG entry and `docs/reports/testconsolidation-review.md`).
+> Underneath that, the v1.0.136
+> interactive `/plugins list` panel and the manifest/runtime tool merge fix
+> (`merge_contributed_tools` / `merge_contributed_commands`), the v1.0.135
+> security-hardening pass that closed the `docs/reports/security-audit.md`
+> critical/high fix set - `merge_project` dropping project
+> `mcp`/`acp`/provider `api`, the symlink guards, the bounded-HTTP read caps,
+> the verified updater, the `http_request` header allowlist - plus the
+> `ragent --version` flag and the shared-helper de-duplication in
+> `ragent-types`/`ragent-surface` - and the v1.0.134 MCP-discovery ergonomics,
+> the `ask_user` default/fallback option, and the `/simplify all` cleanup.
 
 
 ## Project-wide Metrics
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 639,187 (632,708 in `crates/` + 6,479 in root `src/`/`tests/`) |
-| Total Rust files | 1,722 (1,704 workspace crates + 18 root `src/`/`tests/`) |
-| Tests defined | ~13,111 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`: 13,048 in `crates/` + 63 in root) |
-| Test files | 1,050 external (1,041 in `crates/` `tests/` + 9 root `tests/`) + `#[cfg(test)]`-bearing sources |
-| Test binaries | ~1,078 (1,041 integration test files + 36 lib/bin targets + 1 root bin) |
+| Total Rust lines | 658,744 (652,227 in `crates/` + 6,517 in root `src/`/`tests/`) |
+| Total Rust files | 1,760 (1,741 workspace crates + 19 root `src/`/`tests/`) |
+| Tests defined | 13,886 (`#[test]` / `#[tokio::test]` attributes across `crates/`, `src/`, and root `tests/`: 13,823 in `crates/` + 63 in root) |
+| Test files | 1,088 (1,078 under crate `tests/` trees + 10 root `tests/`), of which 948 are top-level integration files (941 + 7) - the rest are shared `tests/support` helpers |
+| Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate including the root package - plus 18 crate lib targets and the 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 151 (`browser` removed in v1.0.130; `mf_screenshot` engine-gated) |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 18 |
 | Specs on disk | 57 directories in `specs/` |
-| Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 83 slash-command docs |
+| Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 83 slash-command docs (+ generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.137 |
+| Version | 1.0.138 |
+
+The test-binary count is the headline effect of the consolidation rollout: the
+tree holds the same 948 top-level test files, but each crate compiles them into
+ONE `tests/all.rs` target (`autotests = false` + `[[test]] name = "all"` +
+`#[path = "test_x.rs"] mod test_x;`), so a full `cargo test` links 19
+integration binaries instead of ~948. Run one file by filter:
+`cargo test -p <crate> --test all test_foo::`.
 
 ---
 
@@ -48,48 +57,48 @@ shows the file count, line count, and test-file count for each crate (including
 
 | Crate | Rust files | Rust lines | Test files |
 |---|---|---|---|
-| `ragent-agent` | 371 | 128,573 | 215 |
-| `ragent-bench` | 33 | 10,811 | 11 |
-| `ragent-codeindex` | 80 | 25,227 | 50 |
-| `ragent-config` | 71 | 17,325 | 48 |
-| `ragent-connectors` | 44 | 19,235 | 21 |
-| `ragent-llm` | 82 | 28,568 | 47 |
-| `ragent-plugins` | 64 | 23,398 | 37 |
-| `ragent-research` | 165 | 62,940 | 99 |
-| `ragent-server` | 24 | 11,031 | 15 |
-| `ragent-specs` | 37 | 20,468 | 24 |
-| `ragent-storage` | 50 | 17,533 | 45 |
-| `ragent-surface` | 17 | 2,253 | 8 |
-| `ragent-telemetry` | 36 | 11,775 | 27 |
-| `ragent-tools-core` | 73 | 21,409 | 36 |
-| `ragent-tools-extended` | 164 | 62,052 | 87 |
-| `ragent-tools-vcs` | 74 | 17,829 | 33 |
-| `ragent-tui` | 256 | 138,797 | 198 |
-| `ragent-types` | 63 | 13,484 | 40 |
+| `ragent-agent` | 372 | 129,213 | 216 |
+| `ragent-bench` | 34 | 10,841 | 12 |
+| `ragent-codeindex` | 81 | 25,340 | 51 |
+| `ragent-config` | 72 | 17,473 | 49 |
+| `ragent-connectors` | 45 | 19,309 | 22 |
+| `ragent-llm` | 83 | 28,697 | 48 |
+| `ragent-plugins` | 65 | 23,607 | 38 |
+| `ragent-research` | 167 | 63,080 | 101 |
+| `ragent-server` | 26 | 11,126 | 17 |
+| `ragent-specs` | 38 | 20,512 | 25 |
+| `ragent-storage` | 51 | 17,631 | 46 |
+| `ragent-surface` | 18 | 2,277 | 9 |
+| `ragent-telemetry` | 37 | 11,855 | 28 |
+| `ragent-tools-core` | 74 | 21,548 | 37 |
+| `ragent-tools-extended` | 165 | 62,657 | 88 |
+| `ragent-tools-vcs` | 75 | 18,149 | 34 |
+| `ragent-tui` | 274 | 155,280 | 216 |
+| `ragent-types` | 64 | 13,632 | 41 |
 
 ---
 
 ## Crate Size Distribution
 
 ```
-ragent-tui            ############# 138,797 lines (21.9%)
-ragent-agent          ############ 128,573 lines (20.3%)
-ragent-research       ###### 62,940 lines (9.9%)
-ragent-tools-extended ###### 62,052 lines (9.8%)
-ragent-llm            ### 28,568 lines (4.5%)
-ragent-codeindex      ## 25,227 lines (4.0%)
-ragent-plugins        ## 23,398 lines (3.7%)
-ragent-tools-core     ## 21,409 lines (3.4%)
-ragent-specs          ## 20,468 lines (3.2%)
-ragent-connectors     ## 19,235 lines (3.0%)
-ragent-tools-vcs      ## 17,829 lines (2.8%)
-ragent-storage        ## 17,533 lines (2.8%)
-ragent-config         ## 17,325 lines (2.7%)
-ragent-types          # 13,484 lines (2.1%)
-ragent-telemetry      # 11,775 lines (1.9%)
-ragent-server         # 11,031 lines (1.7%)
-ragent-bench          # 10,811 lines (1.7%)
-ragent-surface        # 2,253 lines (0.4%)
+ragent-tui            ############# 155,280 lines (23.6%)
+ragent-agent          ########### 129,213 lines (19.6%)
+ragent-research       ###### 63,080 lines (9.6%)
+ragent-tools-extended ##### 62,657 lines (9.5%)
+ragent-llm            ### 28,697 lines (4.4%)
+ragent-codeindex      ## 25,340 lines (3.8%)
+ragent-plugins        ## 23,607 lines (3.6%)
+ragent-tools-core     ## 21,548 lines (3.3%)
+ragent-specs          ## 20,512 lines (3.1%)
+ragent-connectors     ## 19,309 lines (2.9%)
+ragent-tools-vcs      ## 18,149 lines (2.8%)
+ragent-storage        ## 17,631 lines (2.7%)
+ragent-config         ## 17,473 lines (2.7%)
+ragent-types          # 13,632 lines (2.1%)
+ragent-telemetry      # 11,855 lines (1.8%)
+ragent-server         # 11,126 lines (1.7%)
+ragent-bench          # 10,841 lines (1.6%)
+ragent-surface        # 2,277 lines (0.3%)
 ```
 
 ---
@@ -98,76 +107,94 @@ ragent-surface        # 2,253 lines (0.4%)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tui` | 198 | ~2,747 |
-| `ragent-agent` | 215 | ~1,973 |
-| `ragent-tools-extended` | 87 | ~1,910 |
-| `ragent-research` | 99 | ~1,158 |
-| `ragent-specs` | 24 | ~683 |
-| `ragent-llm` | 47 | ~520 |
-| `ragent-plugins` | 37 | ~492 |
-| `ragent-tools-vcs` | 33 | ~483 |
-| `ragent-codeindex` | 50 | ~455 |
-| `ragent-tools-core` | 36 | ~414 |
-| `ragent-config` | 48 | ~400 |
-| `ragent-types` | 40 | ~396 |
-| `ragent-connectors` | 21 | ~361 |
-| `ragent-storage` | 45 | ~346 |
-| `ragent-telemetry` | 27 | ~294 |
-| `ragent-server` | 15 | ~200 |
-| `ragent-bench` | 11 | ~146 |
-| `ragent-surface` | 8 | ~70 |
-| **Total** | **1,041** | **~13,111** |
+| `ragent-tui` | 216 | ~3,512 |
+| `ragent-agent` | 216 | ~1,983 |
+| `ragent-tools-extended` | 88 | ~1,910 |
+| `ragent-research` | 101 | ~1,158 |
+| `ragent-specs` | 25 | ~683 |
+| `ragent-llm` | 48 | ~520 |
+| `ragent-plugins` | 38 | ~492 |
+| `ragent-tools-vcs` | 34 | ~483 |
+| `ragent-codeindex` | 51 | ~455 |
+| `ragent-tools-core` | 37 | ~414 |
+| `ragent-config` | 49 | ~400 |
+| `ragent-types` | 41 | ~396 |
+| `ragent-connectors` | 22 | ~361 |
+| `ragent-storage` | 46 | ~346 |
+| `ragent-telemetry` | 28 | ~294 |
+| `ragent-server` | 17 | ~200 |
+| `ragent-bench` | 12 | ~146 |
+| `ragent-surface` | 9 | ~70 |
+| **Total** | **1,078** | **~13,823** |
 
-The per-crate test attributes above include both the external `tests/*.rs`
-integration suites and the inline `#[cfg(test)]` modules in library sources
-(`crates/` totals 13,048; the root `src/`+`tests/` tree adds 63). The
-v1.0.137 test-coverage campaign added 170 new external test files
-(roughly 80 in `ragent-agent` plus suites across 12 further crates) and a set
-of inline test files, moving 13 of the 18 crates past 85% line coverage.
+The per-crate test attributes above include both the external `tests/` suites
+(included as child modules of each crate's single `tests/all.rs` target) and the
+inline `#[cfg(test)]` modules in library sources (`crates/` totals 13,823; the
+root `src/`+`tests/` tree adds 63, for 13,886 workspace-wide). The
+v1.0.137 test-coverage campaign added 170 new external test files (roughly 80 in
+`ragent-agent` plus suites across 12 further crates) and a set of inline test
+files, moving 13 of the 18 crates past 85% line coverage; the follow-up
+`ragent-tui` deep-coverage work adds 17 more files (642 tests, ~16.1k lines) on
+top of the phase-1 TUI suites.
+
+`BUILDSTATS.md` records that a full `cargo test --workspace --all-targets` run
+now executes **13,862 passed / 0 failed / 16 ignored** across 40 reporting test
+targets (19 consolidated `tests/all.rs` integration targets carrying 11,706
+tests, 18 crate `src/lib.rs` targets carrying 2,133, the root `src/main.rs`
+target carrying 23, plus one bench and one example target with none;
+`--all-targets` excludes doctests, which CI adds).
 
 ---
 
 ## Test Coverage
 
-Measured with `cargo llvm-cov --workspace --summary-only` (line coverage,
-test/bench/example sources excluded). Reproduce with:
+Measured with `cargo llvm-cov --workspace --all-targets --no-fail-fast` (line
+coverage, test/bench/example sources excluded). Reproduce with:
 
 ```bash
-cargo llvm-cov --workspace --summary-only --ignore-filename-regex '(^|/)(tests|benches|examples)/|target/'
+cargo llvm-cov --workspace --all-targets --no-fail-fast \
+  --json --output-path target/temp/cov-full.json
 ```
 
-The workspace measurement below reports the v1.0.137 tree (2026-10-17) with the
-test-coverage campaign. The campaign raises 13 of the
-18 crates to >=85% line coverage; where a fresh per-crate figure was not
-re-measured in isolation the crate is left unchanged.
+The figures below were **re-measured 2026-10-18 11:27 UTC** against the current
+working tree, so they include both the test-coverage campaign and the
+consolidation rollout; consolidation changes how test files are compiled into
+binaries, not which tests run, and it did not move any figure.
 
-**Workspace line coverage: 69.8% -> 73.9%** (functions 69.4% -> 73.8%). The
+**Workspace line coverage: 69.8% -> 73.9% -> 86.58%** across the campaign and
+the deep-coverage follow-up. Functions 69.4% -> 73.8% -> 83.91%; regions were
+68.6% before and are 85.79% now. The instrumented line total is 158,779
+(unchanged from the phase-1 measurement), of which 137,471 are executed. The
 pre-campaign baseline was 158,446 instrumented lines, 110,596 executed, 47,850
-missed; region coverage was 68.6%. The prior v1.0.95 measurement was 68.9% line /
-67.8% function, but it predated the `ragent-plugins`, `ragent-connectors`, and
-`ragent-surface` crates, so the totals are not directly comparable.
+missed. The prior v1.0.95 measurement was 68.9% line / 67.8% function, but it
+predated the `ragent-plugins`, `ragent-connectors`, and `ragent-surface` crates,
+so the totals are not directly comparable.
 
-| Crate | Baseline | After campaign |
-|---|---:|---:|
-| `ragent-plugins` | 90.2% | 90.3% |
-| `ragent-specs` | 88.1% | 88.1% |
-| `ragent-connectors` | 85.9% | 85.9% |
-| `ragent-surface` | 70.2% | 90.9% |
-| `ragent-types` | 82.2% | 96.3% |
-| `ragent-telemetry` | 74.9% | 92.0% |
-| `ragent-storage` | 81.1% | 91.5% |
-| `ragent-config` | 75.4% | 90.5% |
-| `ragent-codeindex` | 83.0% | 88.8% |
-| `ragent-server` | 67.4% | 88.2% |
-| `ragent-tools-vcs` | 75.4% | 86.9% |
-| `ragent-llm` | 70.4% | 86.1% |
-| `ragent-bench` | 75.2% | 86.0% |
-| `ragent-tools-extended` | 79.1% | 86.0% |
-| `ragent-research` | 83.2% | 85.8% |
-| `ragent-tools-core` | 73.2% | 85.7% |
-| `ragent-agent` | 65.1% | 85.6% |
-| `ragent-tui` | 54.1% | 75.0% |
-| root bin (`src/`) | 31.3% | ~31% |
+| Crate | Baseline | After phase 1 | Current |
+|---|---:|---:|---:|
+| `ragent-plugins` | 90.2% | 90.3% | 90.27% |
+| `ragent-specs` | 88.1% | 88.1% | 90.11% |
+| `ragent-connectors` | 85.9% | 85.9% | 86.74% |
+| `ragent-surface` | 70.2% | 90.9% | 90.89% |
+| `ragent-types` | 82.2% | 96.3% | 96.24% |
+| `ragent-telemetry` | 74.9% | 92.0% | 92.04% |
+| `ragent-storage` | 81.1% | 91.5% | 91.59% |
+| `ragent-config` | 75.4% | 90.5% | 92.21% |
+| `ragent-codeindex` | 83.0% | 88.8% | 89.31% |
+| `ragent-server` | 67.4% | 88.2% | 88.07% |
+| `ragent-tools-vcs` | 75.4% | 86.9% | 87.58% |
+| `ragent-llm` | 70.4% | 86.1% | 86.11% |
+| `ragent-bench` | 75.2% | 86.0% | 86.01% |
+| `ragent-tools-extended` | 79.1% | 86.0% | 86.27% |
+| `ragent-research` | 83.2% | 85.8% | 86.20% |
+| `ragent-tools-core` | 73.2% | 85.7% | 86.99% |
+| `ragent-agent` | 65.1% | 85.6% | 86.73% |
+| `ragent-tui` | 54.1% | 75.0% | 86.77% |
+| root bin (`src/`) | 31.3% | ~31% | 31.94% |
+
+**All 18 crates are now above 85% line coverage.** The largest single gain is
+`ragent-tui` (75.14% -> 86.77%, +4,788 covered lines) from the 17 deep-coverage
+suites; `ragent-specs` (+2.0 pts) and `ragent-config` (+1.8 pts) follow.
 
 Notes:
 
@@ -182,28 +209,35 @@ Notes:
 - Line counts here are executable lines under LLVM profiling, which is smaller
   than the raw `wc -l` figures in the crate table above (declarations, blank
   and comment-only lines are not instrumented).
-- The largest remaining gaps are the TUI event/input paths
-  (`app/slash.rs`, `app/event_handler.rs`, `input.rs`) and the agent session
-  processor - the parts that require a live LLM or terminal to exercise.
+- The deep-coverage follow-up closed most of the TUI gap: the 17 suites drive
+  `app/slash.rs`, `app/event_handler.rs`, `layout.rs`,
+  `widgets/message_widget.rs` and `input.rs` through public entry points,
+  lifting `ragent-tui` from 75.14% to 86.77%.
+- The largest remaining gap is the agent session processor's live-LLM paths -
+  the parts that require a real provider stream to exercise.
 - Root binary sources (`src/cli.rs`, `src/main.rs`, `src/plugins.rs`,
-  `src/connectors.rs`, `src/panic_hook.rs`) remain lightly covered because
-  `cargo llvm-cov` does not drive the interactive TUI.
+  `src/connectors.rs`, `src/panic_hook.rs`) remain lightly covered (31.94%)
+  because `cargo llvm-cov` does not drive the interactive TUI.
 
 ---
 
 ## Key Architecture Ratios
 
-- Test-to-code ratio: ~1 test per 49 lines (13,111 tests / 639,187 lines)
-- Largest crate: `ragent-tui` (138,797 lines, 21.9%)
-- Smallest crate: `ragent-surface` (2,253 lines, 0.4%)
-- Median crate size: ~19,852 lines (`ragent-tools-core` / `ragent-connectors` midpoint)
+- Test-to-code ratio: ~1 test per 47 lines (13,886 tests / 658,744 lines)
+- Largest crate: `ragent-tui` (155,280 lines, 23.6%)
+- Smallest crate: `ragent-surface` (2,277 lines, 0.3%)
+- Median crate size: ~19,975 lines (`ragent-config` / `ragent-specs` midpoint)
 - Crates over 10k lines: 17 of 18
 - Crates under 5k lines: 1 of 18
 
 ---
 
-_Generated 2026-10-17 (v1.0.137 tree - the test-coverage campaign -
+_Generated 2026-10-18 (v1.0.138 tree: the test-consolidation rollout - one
+`tests/all.rs` integration target per crate, 19 binaries instead of
+~948, with every test-name set verified identical to the pre-change set; the
+test-coverage campaign -
 roughly 80 new `tests/` suites raising 13 of 18 crates to >=85% line coverage,
+plus 17 `ragent-tui` deep-coverage suites (642 tests) -
 on top of the interactive `/plugins list` panel and
 the manifest/runtime tool merge fix, on top of the v1.0.135
 `docs/reports/security-audit.md` critical/high fix set:

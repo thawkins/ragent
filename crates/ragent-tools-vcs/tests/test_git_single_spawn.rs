@@ -16,7 +16,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 #[path = "support/mod.rs"]
 mod support;
@@ -31,12 +31,10 @@ use support::setup_git_repo;
 /// the other. A blocking guard is held across the test's awaits (the shim
 /// spawns a subprocess), which is intentional - the test is single-threaded by
 /// construction.
-static SHIM_LOCK: Mutex<()> = Mutex::new(());
 
-fn shim_lock() -> std::sync::MutexGuard<'static, ()> {
-    SHIM_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// The process-wide cwd/env lock (see `tests/all.rs`).
+fn shim_lock() -> MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// Restores `PATH` on drop.

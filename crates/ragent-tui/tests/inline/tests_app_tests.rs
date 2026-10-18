@@ -70,6 +70,7 @@ pub(crate) fn test_app() -> App {
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
 
+    crate::app::use_scratch_log_root_for_tests();
     App::new(
         event_bus,
         storage,

@@ -2,6 +2,223 @@
 
 ## [Unreleased]
 
+## [1.0.138] - 2026-10-18
+
+A build/test-hygiene and coverage release. Every crate now compiles its test
+tree into a single integration-test binary (948 -> 19 targets), a full test
+run no longer writes into the repository, incremental compilation is disabled
+workspace-wide because it only consumed disk, and 17 new `ragent-tui`
+deep-coverage suites raise the workspace to 86.58% line coverage with all 18
+crates above 85%. No production behaviour changed beyond the three
+`#[doc(hidden)]` test write-containment hooks. `cargo check`, `cargo check
+--tests`, the dead-code lint, `cargo clippy -D warnings`, `cargo fmt --check`,
+`cargo machete`, `cargo audit` and `cargo deny` all pass; the full suite is
+13,862 passed / 0 failed / 16 ignored.
+
+### Added
+
+- **Test consolidation: one test binary per crate (rollout step 1, 8 crates).**
+  The 8 low-risk crates now build a single integration-test target instead of one
+  binary per `tests/test_*.rs` file: `ragent-codeindex` (49 -> 1),
+  `ragent-research` (56 -> 1), `ragent-storage` (45 -> 1), `ragent-specs`
+  (18 -> 1), `ragent-server` (14 -> 1), `ragent-surface` (8 -> 1),
+  `ragent-bench` (8 -> 1) and `ragent-telemetry` (23 -> 1) - **221 top-level
+  files down to 8 binaries**, replacing 221 link steps and 221 test processes.
+  Each crate sets `autotests = false` and adds one `[[test]] name = "all"`
+  (`tests/all.rs`) that includes every former file as a child module via
+  `#[path = "test_x.rs"] mod test_x;`. Test names keep their `test_<file>::`
+  prefix and every assertion is unchanged; the consolidated test-name sets are
+  verified identical to the pre-change sets for all 8 crates. Two relocation
+  fixes were required: the `crate::document`/`crate::source` shims in
+  `ragent-research` moved to `tests/all_prelude.rs` (inlined at the top of
+  `all.rs`) because a `#[path]`-included source module resolves `crate::` at the
+  consolidated binary root, and `ragent-telemetry`'s
+  `use crate::TelemetryError` became the explicit
+  `use ragent_telemetry::TelemetryError`. CI's three crate-local
+  `--test <name>` invocations (ragent-research, ragent-specs, ragent-telemetry)
+  now use the filter form `--test all <module::>`. See
+  `docs/reports/testconsolidation-review.md` for the review, the measurement
+  method, and the plan for the remaining crates.
+- **Test consolidation: rollout complete - every crate is one test binary.**
+  The remaining 10 crates plus the root `ragent` package now build a single
+  integration-test target each: `ragent-agent` (182 -> 1), `ragent-tui`
+  (187 -> 1), `ragent-tools-extended` (82 -> 1), `ragent-tools-vcs` (30 -> 1),
+  `ragent-tools-core` (32 -> 1), `ragent-types` (39 -> 1), `ragent-config`
+  (47 -> 1), `ragent-plugins` (36 -> 1), `ragent-llm` (28 -> 1),
+  `ragent-connectors` (20 -> 1), and the root crate (6 -> 1) - **911 top-level
+  test files down to 19 binaries** workspace-wide (19 link steps instead of 912).
+  Every crate's `tests/all.rs` now also defines one binary-wide, poison-tolerant
+  lock (`global_env_mutex()` / `global_env_lock()`), and every test that mutates
+  or observes a process-global (cwd, `XDG_CONFIG_HOME`, `HOME`, `PATH`, the
+  secret registry, the marketplace-document registry, the SSRF test bypass, an
+  API-key variable) contends on it; the ~24 cwd/env-mutating `ragent-tui` files
+  now delegate their file-local mutexes to the same lock. A `#[path]`-included
+  source module resolves `crate::` at the binary root, so `tests/all.rs` in
+  `ragent-agent` and `ragent-tools-core` re-export the crate paths (and the
+  stub modules) those shimmed sources import. Two tests were made hermetic
+  rather than serialised: the plugin-store browser pins `app.cwd_path`, and a
+  manual `masterfetch` diagnostic no longer permanently `chdir`s into the
+  workspace. CI's remaining `--test <name>` invocations were converted to the
+  filter form `--test all <module::>`. See
+  `docs/reports/testconsolidation-review.md` section 8 for the full per-crate
+  table, the failure classes, and the verification record.
+
+- **`BUILDSTATS.md` - measured build/test/coverage cost of the workspace.** A
+  new root document records, per step, the wall time and free-disk delta of
+  `cargo clean`, `cargo build --release --workspace`, `cargo build --workspace`,
+  `cargo test --workspace --all-targets` and
+  `cargo llvm-cov --workspace --all-targets` on the reference machine, plus the
+  test totals (`13,862 passed, 0 failed, 16 ignored` across 40 reporting test
+  targets) and the workspace coverage (86.58% lines, all 18 crates above 85%).
+  Each figure comes from free-space probes immediately before and after the
+  command. The numbers back the incremental-cache removal described in the
+  Unreleased "Changed" section: a release build is 1.80 GiB, a debug build
+  2.40 GiB, the full test run 14.92 GiB, and a coverage run 15.82 GiB.
+
+- **`ragent-tui` deep coverage suites (17 files, 642 tests, ~16.1k lines).** New
+  consolidated children of `crates/ragent-tui/tests/all.rs`:
+  `test_dispatch_ops_deep`, `test_event_swarm_research_deep`, `test_input_deep3`,
+  `test_layout_deep`, `test_lib_schedule_deep`, `test_message_widget_summaries`,
+  `test_message_widget_summaries2`, `test_misc_modules_deep`,
+  `test_modules_arms_deep`, `test_session_models_state_deep`,
+  `test_slash_arms_deep`, `test_slash_codeindex_deep`, `test_slash_heavy_deep`,
+  `test_slash_misc_deep2`, `test_slash_spec_deep`, `test_slash_spec_deep2` and
+  `test_slash_teams_deep`. They drive the slash-command dispatch arms, the
+  event-handler swarm/research paths, input editing, layout and scroll maths,
+  the schedule/lib helpers, message-widget summaries, and session/model state -
+  the paths the phase-1 campaign left uncovered. Tests only: no production
+  logic changed. Re-measured coverage rises `ragent-tui` 75.14% -> 86.77% and
+  the workspace 83.41% -> 86.58%, putting all 18 crates above 85% line
+  coverage.
+
+- **`.ragent/Instructions/` is tracked.** The `.gitignore` exception list gains
+  `!.ragent/Instructions/` alongside the existing `agents`/`blueprints`/
+  `templates` exceptions, so the per-language instruction packs (rust, python,
+  go, java, kotlin, javascript, php, dotnet, terraform, plus `AGENTS.md`) are
+  version-controlled rather than swallowed by the broad `.ragent/` rule.
+
+### Changed
+
+- **Build: incremental compilation disabled and test profile pinned.** The root
+  `Cargo.toml` gains `incremental = false` on `[profile.dev]` and a new
+  `[profile.test]` block (`debug = "line-tables-only"`, `incremental = false`),
+  and `.cargo/config.toml` gains a workspace-wide `[build] incremental = false`
+  so every profile (including `bench`) is covered. sccache (the configured
+  `RUSTC_WRAPPER`) cannot cache incremental artifacts, so the incremental cache
+  wrote tens of gigabytes per build with no reuse benefit; the `target/debug`
+  incremental cache alone had reached ~412 GB. `[profile.test]` also makes the
+  test profile emit line-tables-only debug info explicitly rather than relying
+  on inheritance from `[profile.dev]`. No source or test logic changed.
+
+### Fixed
+
+- **Tests no longer write into the repository.** A test run previously mutated
+  checked-in paths, so `cargo test` left the working tree dirty and the only
+  remedy was `git restore -- crates/ragent-server/research/`, which hides the
+  leak and can clobber unrelated work. Three write paths were rerouted to the
+  git-ignored `target/temp/` scratch tree:
+  - **Research routes** read `<cwd>/research` from a process-global `LazyLock`,
+    so `POST`/`PUT`/`DELETE /research` rewrote
+    `crates/ragent-server/research/INDEX.md` and `.index.json` and left a
+    `test-research-routes-*` directory each run. The vault root is now explicit
+    `AppState::research_root` state (production passes
+    `<working dir>/research`, the TUI `/webapi enable` passes `cwd_path`, tests
+    pass `target/temp/ragent-server-research/research` via the new
+    `tests/research_sandbox.rs` helper). Gather logs follow the same root, so
+    `log/research` no longer accumulates per-run JSONL in the crate tree.
+  - **Diverted `wait_agents` batches** were written to a hard-coded relative
+    `log/subagents/`; `session::history` now honours `set_subagent_log_root`,
+    which the two tests that exercise the divert path point at
+    `target/temp/log`.
+  - **TUI log-window spools** were created under `<cwd>/log/logwindow` by
+    `App::new`, so any test with `show_log` enabled dropped a log file in the
+    repository. The spool directory now comes from `helpers::log_root()`,
+    overridable once with `ragent_tui::app::set_log_root_override` /
+    `use_scratch_log_root_for_tests`; the shared `tests/support/make_app` and
+    every local `make_app` in the crate's test targets call it, so the TUI
+    suites spool into `target/temp/log/logwindow`.
+  Verified end to end: full `cargo test -p ragent-server`, `-p ragent-tui` and
+  `-p ragent-agent` runs leave `git status` unchanged (research index, item
+  directories and all three log trees byte-identical before and after), and
+  `AGENTS.md` gained a "Tests must not write into the repository" rule so the
+  pattern is not reintroduced.
+
+### Removed
+
+- **Build artifacts:** pruned ~577 GB of stale `target/` content - the
+  incremental caches (~412 GB plus per-profile caches under `llvm-cov-target`,
+  `release`, and `temp/`), 76 orphaned ad-hoc `CARGO_TARGET_DIR` override
+  directories (`cov-*`, `tui-*`, `agent-*`, ~141 GB), and accumulated duplicate
+  example builds (~18 GB). `target/` shrank from ~581 GB to ~3.6 GB.
+
+- **The `examples/` directory is deleted.** It held agent JSON profiles
+  (`examples/agents/`), skill packs (`examples/skills/`), team blueprints
+  (`examples/teams/`), a research walkthrough, and two standalone Rust examples
+  (`orchestration_root.rs`, `parallel_edit.rs`). The equivalents now ship either
+  as bundled skills/blueprints inside the crates (team blueprints are resolved
+  from `[PROJECT]/.ragent/blueprints/teams/`, `~/.config/ragent/blueprints/teams/`
+  or `~/.ragent/blueprints/teams/`) or as project-local `.ragent/agents/*.md`
+  profiles, so the parallel copy had drifted. Documentation that pointed at the
+  deleted paths (`README.md`, `QUICKSTART.md`, `docs/howtos/custom-agents.md`,
+  `docs/howtos/teams.md`) now describes the discovery paths instead.
+
+### Documentation
+
+- **`AGENTS.md` gains a "Test Layout" section and `AGENTS-LANGUAGE.md` gains the
+  matching "One file per test, one binary per crate" subsection.** They record
+  the consolidation contract: `autotests = false` plus a single
+  `[[test]] name = "all"`, `#[path = "test_x.rs"] mod test_x;` inclusion, the
+  filter form `cargo test -p <crate> --test all test_foo::` for running one
+  file, the per-crate `global_env_lock()` for process-globals under one binary,
+  the `crate::`-resolves-at-the-binary-root caveat with its shim remedy, and the
+  "tests must not write into the repository" rule with the three containment
+  hooks (`AppState::research_root`, `set_subagent_log_root`,
+  `set_log_root_override`). `docs/reports/testconsolidation-review.md` carries
+  the full review, the measurement method and section 8's per-crate rollout
+  table.
+
+- **`CHANGELOG.md`, `STATS.md`, `SPEC.md`, `README.md`, `QUICKSTART.md`,
+  `TUI-QUICKSTART.md` and the `docs/howtos` manuals refreshed.** Version markers
+  stay at 1.0.137 (this is unreleased worktree work); the statistics are
+  re-measured against the consolidated tree (19 integration test targets
+  instead of ~1,078), the `--test <name>` commands in the docs become
+  `--test all <module::>`, dead `examples/` links are replaced, and the how-to
+  PDFs are regenerated.
+
+### Commits (last 10)
+
+- **`Version: 1.0.138` (this release).** The test-binary consolidation to one
+  target per crate, the test-write containment hooks, incremental compilation
+  disabled, `BUILDSTATS.md`, the 17 `ragent-tui` deep-coverage suites, the
+  `examples/` removal and the tracked `.ragent/Instructions/`; detailed above.
+- **`a2839119` - Version: 1.0.137.** Test-coverage and documentation release:
+  the phase-1 campaign, the rebuilt `README.md` with a TUI screenshot, the
+  `AGENTS-RUST.md` -> `AGENTS-LANGUAGE.md` rename, and the documented
+  `zip 7.2.0` advisory suppressions. See `[1.0.137]`.
+- **`ea4a8221` - Version: 1.0.136.** Interactive `/plugins list` panel, the
+  shared `build_list_view` / `PluginListView` discovery path, and the
+  manifest/runtime tool merge fix. See `[1.0.136]`.
+- **`31c6dea3` - Version: 1.0.135.** Security-hardening pass closing the
+  critical/high band of `docs/reports/security-audit.md`. See `[1.0.135]`.
+- **`827e8754` - Version: 1.0.134.** MCP discovery ergonomics, the `ask_user`
+  default/fallback timeout, and the value-level redaction sweeps; see
+  `[1.0.134]`.
+- **`0b5f9164` - Version: 1.0.133.** Plugin-store browse-panel refinements and
+  the `git+<url>#<ref>` install fix; see `[1.0.133]`.
+- **`5995283a` - Version: 1.0.132.** Merged connector/plugin marketplace
+  browsers and alphabetical catalogue ordering; see `[1.0.132]`.
+- **`1e08279f` - Version: 1.0.131 ("backends support").** OpenHands-parity
+  delta: pluggable execution backends, the LLM security analyzer, the
+  OpenAI-compatible inbound surface, the OpenAPI 3.1 contract, the ACP server,
+  the automation service and AgentSkills discovery; see `[1.0.131]`.
+- **`2ed21e3d` - Version: 1.0.130.** Stable-toolchain fix for the `/events` SSE
+  connection cap (`compare_exchange_weak` replaces the unstable
+  `AtomicUsize::try_update`).
+- **`e617bcef` - plugin-store category navigator; remove browser tool.** The
+  `/plugins codex|claude` category navigator, the new
+  `/plugins codex|claude|stores` subcommands, and removal of the `browser` CDP
+  tool (152 -> 151 tools, 23 -> 22 categories).
+
 ## [1.0.137] - 2026-10-17
 
 A test-coverage and documentation release: the phase-1 coverage campaign raises 13

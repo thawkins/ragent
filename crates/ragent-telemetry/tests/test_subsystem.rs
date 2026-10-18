@@ -5,7 +5,7 @@
 use ragent_telemetry::{OtelConfig, TelemetryState, TelemetrySubsystem};
 
 #[cfg(not(feature = "telemetry"))]
-use crate::TelemetryError;
+use ragent_telemetry::TelemetryError;
 
 #[test]
 fn test_disabled_subsystem_is_noop() {

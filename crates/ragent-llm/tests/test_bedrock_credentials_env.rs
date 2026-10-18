@@ -8,19 +8,14 @@
 
 #![allow(unsafe_code)]
 
+use ragent_llm::providers::bedrock_credentials::{resolve_aws_credentials, resolve_region};
 use std::collections::HashMap;
 use std::io::Write;
-use std::sync::{Mutex, OnceLock};
 
-use ragent_llm::providers::bedrock_credentials::{resolve_aws_credentials, resolve_region};
-
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
+/// The process-wide env lock (see `tests/all.rs`); one binary per crate
+/// shares one process, so every env-mutating file contends on this lock.
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    crate::global_env_lock()
 }
 
 const AWS_VARS: &[&str] = &[

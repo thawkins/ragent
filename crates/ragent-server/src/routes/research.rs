@@ -15,18 +15,8 @@
 //! `routes/mod.rs`.
 
 use std::path::{Path as StdPath, PathBuf};
-use std::sync::{Arc, LazyLock};
 
-/// Cached research root: `cwd/research`.
-///
-/// The working directory does not change during server runtime, so we compute
-/// it once and reuse the value for every request instead of calling
-/// `std::env::current_dir()` (a syscall) on each handler invocation.
-static RESEARCH_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("research")
-});
+use std::sync::Arc;
 
 use axum::{
     Json, Router,
@@ -71,11 +61,26 @@ pub fn research_routes() -> Router<AppState> {
         .route("/{name}/events", get(research_events_stream))
 }
 
-/// Compute the research root from the process working directory. The HTTP
-/// server runs against the same project root as the CLI, so this is the
-/// straightforward `cwd/research`.
-fn research_root() -> PathBuf {
-    RESEARCH_ROOT.clone()
+/// The research vault root held in [`AppState::research_root`].
+///
+/// This is explicit application state rather than a process-global `cwd`
+/// lookup: production passes `<working_dir>/research`, while tests point it at
+/// `target/temp/...` so a test run never rewrites the checked-in
+/// `<crate>/research/` tree.
+fn research_root(state: &AppState) -> PathBuf {
+    state.research_root.as_ref().clone()
+}
+
+/// The project root a research run is confined to: the parent of the vault.
+///
+/// `from_files` containment (SEC-002) and the research session's working
+/// directory both use this, which is the server's working directory in
+/// production.
+fn project_root_for(state: &AppState) -> PathBuf {
+    research_root(state)
+        .parent()
+        .unwrap_or_else(|| StdPath::new("."))
+        .to_path_buf()
 }
 
 /// Canonicalise the longest existing prefix of `resolved` and report whether it
@@ -137,8 +142,8 @@ fn first_out_of_root_path(paths: &[String], root: &StdPath) -> Option<String> {
 
 // -- GET /research --------------------------------------------------------
 
-async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
-    let manager = ResearchManager::new(research_root());
+async fn list_research(State(state): State<AppState>) -> impl IntoResponse {
+    let manager = ResearchManager::new(research_root(&state));
     match manager.list(false).await {
         Ok(items) => {
             let rows: Vec<ResearchItemRow> = items
@@ -518,7 +523,7 @@ async fn create_research(
     State(state): State<AppState>,
     Json(req): Json<CreateResearchRequest>,
 ) -> axum::response::Response {
-    let manager = ResearchManager::new(research_root());
+    let manager = ResearchManager::new(research_root(&state));
 
     // Validate the name and check for duplicates BEFORE building the session
     // config so rejected requests do not pay for config loading / cloning.
@@ -556,10 +561,7 @@ async fn create_research(
     // SEC-ragent-server-002 / SEC-ragent-research-005 (SECTASKS T-016): every
     // `from_files` entry must resolve inside the project root. The research
     // layer re-checks; this boundary check keeps the 400 next to the request.
-    let project_root = research_root()
-        .parent()
-        .unwrap_or_else(|| StdPath::new("."))
-        .to_path_buf();
+    let project_root = project_root_for(&state);
     if let Some(bad) = first_out_of_root_path(&req.from_files, &project_root) {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -600,10 +602,7 @@ async fn create_research(
         };
 
     // Wire the tool registry from the shared session processor.
-    let project_root = research_root()
-        .parent()
-        .unwrap_or_else(|| StdPath::new("."))
-        .to_path_buf();
+    let project_root = project_root_for(&state);
     let provider_registry = state.session_processor.provider_registry.clone();
     let active_model =
         ragent_agent::agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
@@ -746,7 +745,7 @@ async fn update_research(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> axum::response::Response {
-    let manager = ResearchManager::new(research_root());
+    let manager = ResearchManager::new(research_root(&state));
 
     // The item must exist and carry a recorded invocation.
     let item = match manager.show(&name).await {
@@ -808,10 +807,7 @@ async fn update_research(
     let config = ragent_research::build_session_config(&run_req, Some(&cfg));
 
     // Wire the tool registry from the shared session processor.
-    let project_root = research_root()
-        .parent()
-        .unwrap_or_else(|| StdPath::new("."))
-        .to_path_buf();
+    let project_root = project_root_for(&state);
     let provider_registry = state.session_processor.provider_registry.clone();
     let active_model =
         ragent_agent::agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
@@ -904,11 +900,11 @@ struct ShowResearchQuery {
 }
 
 async fn show_research(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(name): Path<String>,
     axum::extract::Query(q): axum::extract::Query<ShowResearchQuery>,
 ) -> impl IntoResponse {
-    let manager = ResearchManager::new(research_root());
+    let manager = ResearchManager::new(research_root(&state));
     match manager.show(&name).await {
         Ok(item) => {
             // Search before building the row so `item.title` can be moved
@@ -962,11 +958,11 @@ struct DeleteResearchQuery {
 }
 
 async fn delete_research(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(name): Path<String>,
     axum::extract::Query(q): axum::extract::Query<DeleteResearchQuery>,
 ) -> impl IntoResponse {
-    let manager = ResearchManager::new(research_root());
+    let manager = ResearchManager::new(research_root(&state));
     let confirm = q.confirm.unwrap_or_default();
     if confirm != format!("delete-{name}") {
         return error_response(
@@ -1013,7 +1009,7 @@ async fn research_events_stream(
 
     let Some(tx) = tx else {
         // No active run - return 404 or check if the item exists on disk.
-        let manager = ResearchManager::new(research_root());
+        let manager = ResearchManager::new(research_root(&state));
         match manager.show(&name).await {
             Ok(item) => {
                 // Item exists but no active run - return its current status.

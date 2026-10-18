@@ -10,11 +10,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 
 /// Serialise tests that change the process working directory.
-static CWD_LOCK: Mutex<()> = Mutex::new(());
-
 /// A temp working directory plus an isolated config/home root. Holds the cwd
 /// lock for its lifetime and restores the previous cwd on drop, so a panicking
 /// test cannot leave the process cwd inside a deleted tempdir.
@@ -26,9 +24,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let lock = CWD_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = crate::global_env_lock();
         let temp = tempfile::tempdir().expect("tempdir");
         let prev = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(temp.path()).expect("set cwd");

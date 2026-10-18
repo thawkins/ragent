@@ -11,16 +11,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 
-/// Serialise tests that change the process working directory. A poisoned
-/// lock (a panicking sibling) must not cascade into unrelated failures.
-static CWD_LOCK: Mutex<()> = Mutex::new(());
+/// Take the crate-wide cwd/env lock (see `tests/all.rs`).
 
 fn cwd_lock() -> MutexGuard<'static, ()> {
-    CWD_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::global_env_lock()
 }
 
 /// Restores the previous cwd on drop so a panicking closure cannot leave the

@@ -26,7 +26,6 @@ use ragent_plugins::{
 /// Serialise the tests that mutate the process-global `XDG_CONFIG_HOME`, so the
 /// shared-dispatch test here and the add/remove tests elsewhere never clobber
 /// each other's config home.
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A stores block that overrides `kind` with `url`, leaving every other field
 /// at its default.
@@ -135,7 +134,7 @@ fn report_is_pure_and_offline() {
     // (no store access, no session). A global config that overrides just Codex
     // lets us assert both provenance tags end to end without writing a project
     // config.
-    let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = crate::global_env_lock();
     let tree = TempTree::new("dispatch");
     let config_home = tree.path().join("xdg-config");
     let global_dir = config_home.join("ragent");

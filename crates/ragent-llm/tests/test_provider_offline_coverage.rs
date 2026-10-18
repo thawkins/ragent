@@ -3,6 +3,15 @@
 //! family. Every test runs without real network egress: HTTP is served by a
 //! one-shot loopback TcpListener.
 
+// `std::env::set_var` / `remove_var` are `unsafe` in Rust 2024; this file
+// mutates `OPENROUTER_API_KEY` only while the crate-wide env lock is held
+// (see `tests/all.rs`), so the workspace's `unsafe_code` deny is lifted here.
+#![allow(unsafe_code)]
+// The env lock is a *std* mutex held across the body on purpose: the
+// empty-key rejection only holds while a sibling file is not setting the
+// variable, so serialisation (not parallelism) is the goal. See `tests/all.rs`.
+#![allow(clippy::await_holding_lock)]
+
 use std::collections::HashMap;
 
 use ragent_llm::provider::Provider;
@@ -292,6 +301,13 @@ async fn test_azure_foundry_provider_identity_and_client() {
 #[tokio::test]
 async fn test_openrouter_provider_requires_key_and_builds_client() {
     use ragent_llm::provider::openrouter::OpenRouterProvider;
+    // Hold the crate-wide env lock: the empty-key rejection only holds while
+    // `OPENROUTER_API_KEY` is unset, and a sibling file in this consolidated
+    // binary sets it (see `tests/all.rs`).
+    let _env_lock = crate::global_env_lock();
+    // SAFETY: serialised by the lock above; restored by the `EnvGuard` below.
+    let saved_key = std::env::var_os("OPENROUTER_API_KEY");
+    unsafe { std::env::remove_var("OPENROUTER_API_KEY") };
     let provider = OpenRouterProvider::new();
     assert_eq!(provider.id(), "openrouter");
     assert!(provider.as_any_static().is::<OpenRouterProvider>());
@@ -313,6 +329,12 @@ async fn test_openrouter_provider_requires_key_and_builds_client() {
         provider.base_url(),
         provider.base_url().trim_end_matches('/')
     );
+    // Restore the saved value so later tests in this binary see the developer's
+    // environment unchanged.
+    match saved_key {
+        Some(prev) => unsafe { std::env::set_var("OPENROUTER_API_KEY", prev) },
+        None => unsafe { std::env::remove_var("OPENROUTER_API_KEY") },
+    }
 }
 
 #[tokio::test]

@@ -10,19 +10,20 @@
 
 #![allow(dead_code)]
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_tui::App;
 
 /// The cwd/env mutations in [`EnvGuard`] are process-global; one mutex
-/// serialises every test in a binary against them.
+/// serialises every test against them.
 ///
-/// Recovers from a poisoned lock so one panicking test does not cascade.
+/// Consolidated test binaries share one process, so this delegates to the
+/// binary-wide lock in `tests/all.rs` rather than a module-local one; a
+/// module-local mutex would only serialise the children that happen to load
+/// this helper. It recovers from poisoning so one panicking test does not
+/// cascade.
 pub fn test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::global_env_lock()
 }
 
 /// Restores cwd and config-related env vars on drop.
@@ -90,7 +91,7 @@ pub fn enter_project(config: &str) -> (MutexGuard<'static, ()>, EnvGuard, tempfi
 /// Build an [`App`] with a live session so `append_assistant_text` records
 /// messages into the message window.
 pub fn app_with_session() -> App {
-    let mut app = crate::support::make_app();
+    let mut app = super::support::make_app();
     app.session_id = Some("slash-support".to_string());
     app
 }

@@ -8,6 +8,10 @@
 //! be fetched (backslash / cloud-metadata rejections are still enforced).
 
 #![allow(unsafe_code)]
+// The crate-wide env lock is a *std* mutex held across the body on
+// purpose: these tests flip the process-global SSRF bypass, so
+// serialisation (not parallelism) is the goal. See `tests/all.rs`.
+#![allow(clippy::await_holding_lock)]
 // `assert!(!x.is_empty())` is clearer than `assert_ne!(x, [])` in these tests.
 #![allow(clippy::assert_is_empty)]
 
@@ -190,6 +194,7 @@ fn test_http_truncate_body_multibyte_boundary() {
 
 #[tokio::test]
 async fn test_http_read_body_capped_and_lossy_and_bytes() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let router = Router::new().route(
         "/",
@@ -219,6 +224,7 @@ async fn test_http_read_body_capped_and_lossy_and_bytes() {
 
 #[tokio::test]
 async fn test_http_read_body_capped_truncates_large_body() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     // A body far above the tiny cap we pass should be truncated with a marker.
     let big = "x".repeat(10_000);
@@ -297,6 +303,7 @@ fn test_caption_xml_to_transcript_with_segmented_text() {
 
 #[tokio::test]
 async fn test_mf_fetch_rejects_bulk_over_cap() {
+    let _env_lock = crate::global_env_lock();
     let scratch = Scratch::new("bulkcap");
     let tool = MfFetchTool;
     let urls: Vec<String> = (0..70)
@@ -311,6 +318,7 @@ async fn test_mf_fetch_rejects_bulk_over_cap() {
 
 #[tokio::test]
 async fn test_mf_fetch_pdf_content_type_extracts_text() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let pdf = tiny_pdf_bytes();
     let router = Router::new().route(
@@ -347,6 +355,7 @@ async fn test_mf_fetch_pdf_content_type_extracts_text() {
 
 #[tokio::test]
 async fn test_mf_crawl_missing_url_bails() {
+    let _env_lock = crate::global_env_lock();
     let scratch = Scratch::new("crawl-nourl");
     let err = MfCrawlTool
         .execute(json!({}), &ctx(scratch.path()))
@@ -357,6 +366,7 @@ async fn test_mf_crawl_missing_url_bails() {
 
 #[tokio::test]
 async fn test_mf_crawl_backslash_url_rejected() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let scratch = Scratch::new("crawl-bs");
     let out = MfCrawlTool
@@ -372,6 +382,7 @@ async fn test_mf_crawl_backslash_url_rejected() {
 
 #[tokio::test]
 async fn test_mf_crawl_backslash_crawl_urls_entry_rejected() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let scratch = Scratch::new("crawl-bsentry");
     let out = MfCrawlTool
@@ -386,6 +397,7 @@ async fn test_mf_crawl_backslash_crawl_urls_entry_rejected() {
 
 #[tokio::test]
 async fn test_mf_crawl_discover_only_and_sitemap_modes_parse() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let router = Router::new().route(
         "/",
@@ -407,6 +419,7 @@ async fn test_mf_crawl_discover_only_and_sitemap_modes_parse() {
 
 #[tokio::test]
 async fn test_mf_crawl_fetches_pages_and_formats_report() {
+    let _env_lock = crate::global_env_lock();
     allow_loopback();
     let router = Router::new()
         .route(
@@ -458,6 +471,7 @@ fn test_crawl_result_struct_defaults() {
 
 #[tokio::test]
 async fn test_mf_search_invalid_engine_bails() {
+    let _env_lock = crate::global_env_lock();
     let scratch = Scratch::new("search-badengine");
     let err = MfSearchTool
         .execute(
@@ -471,6 +485,7 @@ async fn test_mf_search_invalid_engine_bails() {
 
 #[tokio::test]
 async fn test_mf_search_all_engines_excluded_returns_explicit_result() {
+    let _env_lock = crate::global_env_lock();
     let scratch = Scratch::new("search-excluded");
     let out = MfSearchTool
         .execute(
@@ -491,6 +506,7 @@ async fn test_mf_search_all_engines_excluded_returns_explicit_result() {
 
 #[tokio::test]
 async fn test_mf_search_empty_query_bails() {
+    let _env_lock = crate::global_env_lock();
     let scratch = Scratch::new("search-empty");
     let err = MfSearchTool
         .execute(json!({ "query": "   " }), &ctx(scratch.path()))

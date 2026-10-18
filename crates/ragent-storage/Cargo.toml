@@ -7,6 +7,12 @@ authors = ["Tim Hawkins"]
 description = "SQLite persistence layer for ragent sessions, memories, journals, snapshots, and teams"
 repository = "https://github.com/thawkins/ragent"
 
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 

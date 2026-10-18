@@ -25,14 +25,11 @@ use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 /// these tests sets the *same* process environment variable, so without a lock
 /// one test's configured instance can be visible to another test's parse and
 /// turn a trusted host into a rejected one (a flaky failure, not a defect).
-static GITLAB_URL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Run `f` with `GITLAB_URL` set to `configured`, restoring the previous value
 /// afterwards.
 fn with_gitlab_url<T>(configured: &str, f: impl FnOnce() -> T) -> T {
-    let _lock = GITLAB_URL_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _lock = crate::global_env_lock();
     struct Restore(Option<String>);
     impl Drop for Restore {
         fn drop(&mut self) {

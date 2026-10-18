@@ -98,7 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.137). The core architecture, tool system,
+Ragent is in **beta** (v1.0.138). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -1449,7 +1449,7 @@ asserts the gate fails it:
 
 | Gate | Command | Fails when |
 |------|---------|-----------|
-| Redaction tests | `cargo test -p ragent-types --test test_unified_redaction` | a second registry or a leaking `Event` `Debug` appears |
+| Redaction tests | `cargo test -p ragent-types --test all test_unified_redaction::` | a second registry or a leaking `Event` `Debug` appears |
 | File-tool containment | `scripts/check-file-tool-containment.sh` | a registered file tool no longer calls the `allowed_roots`-aware `check_path_within_allowed_roots_cached` helper (a working-dir-only `check_path_within_root_cached` call no longer passes; see 4.6f) |
 | Panic-free production paths | `scripts/check-security-unwraps.sh` | a file exceeds its `.unwrap()`/`.expect()` baseline in `scripts/security-unwrap-baseline.txt` |
 | One guard per rule | `scripts/check-shared-guards.sh` | a crate re-defines a shared guard or a second secret registry |
@@ -4351,6 +4351,66 @@ LLM or executing any tool. The report is rendered as human-readable text by
 default and as JSON when `--json` is supplied. See `QUICKSTART.md` for usage
 examples.
 
+### 21.4 Test Layout: One Test Binary per Crate
+
+`cargo`'s default autotest discovery turns each top-level `tests/*.rs` file into
+its own binary. At this workspace's scale that was ~948 integration binaries and
+~948 link steps per full `cargo test`. Every crate (and the root `ragent`
+package) therefore sets `autotests = false` and declares exactly one integration
+target:
+
+```toml
+[package]
+autotests = false
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+```
+
+```rust
+// crates/<crate>/tests/all.rs
+#[path = "test_agent_memory_deep.rs"] mod test_agent_memory_deep;
+#[path = "test_automation_dispatch.rs"] mod test_automation_dispatch;
+// ... one `#[path]` line per former top-level test file
+```
+
+`#[path]` inclusion is what makes this a pure packaging change: it anchors
+module resolution at the child file, so plain `mod support;`, nested
+`#[path = "../src/<module>.rs"]` source re-imports, `include_str!("support/..")`
+and inner attributes (`#![forbid(...)]`, `#![cfg(feature = ...)]`) all keep
+working. Test names keep a `test_<file>::<fn>` shape, so one file is run with
+the filter form `cargo test -p <crate> --test all test_foo::`. The workspace
+compiles **19 integration test targets instead of ~948**, and `BUILDSTATS.md`
+records the resulting `cargo test --workspace --all-targets` cost (13,862
+passed, 0 failed, 16 ignored across 40 reporting targets) and the re-measured
+coverage (86.58% workspace line coverage, all 18 crates above 85%).
+
+Three consequences are part of the contract:
+
+- **Merging binaries merges process state.** Each `tests/all.rs` defines a
+  binary-wide, poison-tolerant `global_env_mutex()` / `global_env_lock()`, and
+  every test that mutates or observes a process-global (cwd,
+  `XDG_CONFIG_HOME`, `HOME`, `PATH`, a `static` registry) contends on it.
+  `#[serial]` remains acceptable for globals that need no value control.
+- **`crate::` in a `#[path]`-included source module resolves at the binary
+  root**, not at the crate under test. Where a child includes `src/foo.rs` that
+  refers to `crate::bar`, `tests/all.rs` re-exports `bar` (the shims at the top
+  of `crates/ragent-agent/tests/all.rs` are the pattern) rather than duplicating
+  the module.
+- **Tests must not write into the repository.** Three write paths were made
+  injectable so a test run leaves the working tree byte-identical: the research
+  vault root is explicit `AppState::research_root` state (production passes
+  `<working dir>/research`, tests pass `target/temp/ragent-server-research/`),
+  `session::history::set_subagent_log_root` redirects diverted `wait_agents`
+  batches, and `ragent_tui::app::set_log_root_override` /
+  `use_scratch_log_root_for_tests` redirect the TUI log-window spools. All three
+  are `#[doc(hidden)]` `OnceLock` setters — production never calls them, so the
+  shipped defaults (`<working dir>/log`, `<working dir>/research`) are unchanged.
+
+The review, the measurement method and the per-crate rollout record live in
+`docs/reports/testconsolidation-review.md`.
+
 ---
 
 # Appendices
@@ -4361,6 +4421,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.138 | 2026-10-18 | **Test-binary consolidation (§21.4): every crate builds one integration-test target.** Setting `autotests = false` plus a single `[[test]] name = "all"` (`tests/all.rs`) that `#[path]`-includes each former top-level `tests/test_*.rs` file cuts the workspace from ~948 integration binaries to **19** (one per crate plus the root package) - the test-name sets are verified identical to the pre-change sets for all 19. Each `tests/all.rs` also defines one binary-wide, poison-tolerant `global_env_mutex()`/`global_env_lock()`, and every test that mutates or observes a process-global contends on it; `ragent-research` moved its `crate::document`/`crate::source` shims to `tests/all_prelude.rs`, `ragent-telemetry` uses the explicit `ragent_telemetry::TelemetryError` path, and `ragent-agent`/`ragent-tools-core` re-export the crate paths their `#[path]`-included sources import. CI's remaining `--test <name>` invocations were converted to the filter form `--test all <module::>`. **Tests no longer write into the repository:** the research vault root is explicit `AppState::research_root` state (production `<working dir>/research`; tests use `target/temp/ragent-server-research/` via the new `tests/research_sandbox.rs`), `session::history::set_subagent_log_root` redirects diverted `wait_agents` batches, and `ragent_tui::app::set_log_root_override` / `use_scratch_log_root_for_tests` redirect TUI log-window spools - all three are `#[doc(hidden)]` `OnceLock` setters so shipped defaults are unchanged. **Build:** incremental compilation is disabled workspace-wide (`.cargo/config.toml` `[build] incremental = false`, plus `[profile.dev]` and a new `[profile.test]` with `debug = "line-tables-only"`), since the `sccache` wrapper cannot cache incremental artifacts; `BUILDSTATS.md` records the measured per-step cost (release 7m 37s / 1.80 GiB, debug 2m 41s / 2.40 GiB, full test 9m 12s / 14.92 GiB, coverage 9m 58s / 15.82 GiB; 13,862 passed, 0 failed, 16 ignored across 40 reporting targets; workspace line coverage re-measured at 86.58%). **Coverage:** 17 new `ragent-tui` deep-coverage suites (642 tests, ~16.1k lines) exercise the slash dispatch arms, event swarm/research paths, input editing, layout/scroll maths, schedule helpers, message-widget summaries and session/model state. **Repo hygiene:** `examples/` is deleted (agent profiles now live in `.ragent/agents/`, team blueprints in `.ragent/blueprints/teams/` - `code-review`, `parallel-feature`, `debate`), `.ragent/Instructions/` joins the `.gitignore` exception list so the per-language instruction packs are tracked, and `AGENTS.md`/`AGENTS-LANGUAGE.md` gain the "Test Layout" contract with `docs/reports/testconsolidation-review.md` as the review record. Verification: `cargo check --workspace` clean, `cargo audit` clean (1338 advisories loaded, 866 crate dependencies scanned, no new findings). |
 | v1.0.137 | 2026-10-17 | Test-coverage and documentation release (tests only, no production logic changed). The rebuilt `README.md` opens with a captured TUI screenshot and a feature list re-verified against the tree (15 registry providers, 148 tools across 21 categories, 17 built-in agents, 14 tree-sitter grammars / 50 language ids), and the accumulated release highlights list (about 830 lines) is replaced with a pointer to `CHANGELOG.md`; `AGENTS-RUST.md` is renamed to `AGENTS-LANGUAGE.md`. The `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) are suppressed with a documented reason (no upgrade path; the affected extraction APIs are never called). Added ~80 new `tests/` suites - roughly 80 under `crates/ragent-agent/tests/` plus suites across `ragent-surface`, `ragent-types`, `ragent-telemetry`, `ragent-storage`, `ragent-codeindex`, `ragent-config`, `ragent-research`, `ragent-tools-vcs`, `ragent-bench`, `ragent-server`, `ragent-tools-core`, `ragent-tools-extended`, `ragent-llm`, and `ragent-tui` - and a set of inline test files in crates that already used that convention, taking 13 of the 18 crates to >=85% line coverage (workspace 69.8% -> 73.9%). `ragent-agent` 65.1% -> 85.6%, `ragent-tui` 54.1% -> 75.0%. Three `pub(crate)` items in `ragent-tools-vcs` (`run_status`, `filter_log_text`, GitLab `make_client`/`detect_project`/`detect`) were widened to `pub` so their helpers could be exercised directly. Adds `serial_test` as a `ragent-agent` dev-dependency and marks the inline perf tests `#[serial_test::serial]` (the `perf::tests` mutate process-global profiling atomics and raced under the multi-threaded `cargo llvm-cov` run). Fixes three coverage-test defects: `test_mcp_discover_panel.rs` could leak a test-binary MCP server into the developer's real `~/.config/ragent/ragent.json` (runs now pin `XDG_CONFIG_HOME` at a throwaway `target/temp/xdg-*` dir), a `glob` test asserted the wrong walk-path shape (matches are reported relative to the containing directory), and a `gitlab` README-fallback test stubbed the wrong body shape (the `file_path` fallback fetches through the JSON `get()` path, so the wiremock body must be `set_body_json`). `cargo check` clean; `cargo audit` reports the pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) unchanged by this work. |
 | v1.0.136 | 2026-10-16 | Interactive `/plugins list` panel (spec `plugins` FR-009, FR-030). `/plugins list [--verbose]` opens a `/mcp discover`-style overlay: the plugin table is pinned at the top (a fixed column heading and separator above a scrollable block-cursor list) and the capability blocks (contributions, unsupported capabilities, errors, totals summary, and - verbose - telemetry) are listed at the end of the same scrollable body. `Up`/`Down` (or `k`/`j`), `Home`/`End`, and `Esc` operate it and `Space` toggles the highlighted plugin's enabled state (enable/disable, persisted through the shared control path, with the row tinted yellow when enabled and the outcome shown on a feedback line, re-resolving the session's plugin-contributed slash commands); a scrollbar appears when the body overflows. The panel resolves live MCP tool counts exactly as the text report did, so the `MCP` / `MCP Tools` columns stay accurate; `/plugins list --mcp` and the disabled-subsystem notice stay text reports. One discovery path is shared with the CLI: `ragent_plugins::control` gains `build_list_view` / `PluginListView` (with a per-row `PluginListRow` id/enabled list) and `ragent_plugins::surface` gains `run_plugin_list_view`, and `render_list_with_mcp_tools` is now `build_list_view(...).render()`. New test `crates/ragent-tui/tests/test_plugins_list_panel.rs` (7 cases). |
 | v1.0.135 | 2026-10-15 | Security-hardening pass closing the critical/high band of `docs/reports/security-audit.md` (a fresh workspace-wide read-only audit: 4 critical, 15 high, 34 medium, 29 low). **Untrusted project config (SEC-001/002/005):** `Config::merge_project` now drops a project overlay's `mcp` servers (spawned as subprocesses with no permission prompt), its `acp` section (agents spawned verbatim with attacker `command`/`env`/`cwd`, plus the editor-facing server), and every provider's `api` block (which redirects the credential and prompt stream); rejected keys log at `warn!`. **Benchmark argv (SEC-003):** `validate_fixture_command` validates the whole argv against a deny-list of eval/stdin entry points (`-c`, `-e`, `-r`, `--eval[=…]`, `-m`, `-`, `/dev/stdin`, `go run`) so an allowlisted interpreter cannot evaluate inline fixture text. **Connector boundary (SEC-009/071):** a `stdio` `command` is allowlisted (no shell/launcher, absolute path must name a known runtime) and an `env` credential must be namespaced to the connector id. **Symlink defeat (SEC-006/018/027/028/059):** new `ragent_types::guard::{reject_symlink_components, reject_symlink_escape, open_owner_only}`; `contained_join` canonicalises the deepest existing ancestor; applied to the specs writer, config/credential temp files, the updater, the crash marker/panic report/stderr spool (`O_NOFOLLOW` + atomic replace), askpass, and the TUI image source; `list`/`glob` skip a symlinked directory. **Bounded HTTP I/O (SEC-014/032/033/036/042/065/066):** connect/whole-request timeouts, capped redirect chains, and 8 MiB streaming read caps in the MCP HTTP client, masterfetch fetcher, GitHub client, and open-access lookup; the SSRF guard re-runs per redirect hop; the GitHub client refuses a cross-origin URL and streams byte-capped downloads. **Verified update (SEC-043):** `download_and_replace` requires a SHA-256 (`RAGENT_UPDATE_SHA256` or `ReleaseInfo::sha256`) and refuses an unverified artifact. **Header allow-list (SEC-035):** `http_request` accepts only `accept`/`accept-language`/`content-type`/`user-agent`. **Bounded sinks (SEC-031):** plugin host-call sinks cap entries (1000) and entry length (16 KiB). **Telemetry (SEC-052/053/055):** `tool.name` shape-checked (64, `[A-Za-z0-9_.-]`), else exported as `unknown`; the OTLP endpoint is parsed once with `url`. **Owner-only writes (SEC-022/027/076):** secret temp files and the askpass response are `0o600`; the crash marker read is capped (64 KiB). Adds `ragent --version`/`-V` (answered before any side effect) and the shared `strutil::{is_http_url, bearer_auth_header, path_file_name, HTML2TEXT_WIDTH}`, `sanitize::is_secret_json_key`, and `ragent_surface::store::{read_ledger_bytes, quarantine_corrupt_ledger}` helpers, routed through every call site; `deny.toml` drops the stale `Unicode-DFS-2016`/`OpenSSL` license entries. `cargo check --workspace` clean; `cargo audit` reports no new advisories. |

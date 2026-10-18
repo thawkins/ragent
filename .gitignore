@@ -79,6 +79,7 @@ __pycache__/
 !.ragent/blueprints/
 !.ragent/templates/
 !.ragent/agents/
+!.ragent/Instructions/
 # Defense-in-depth: the research vault holds scraped pages that can embed
 # credential-shaped strings and per-vault `vault.db` files. Keep it ignored even
 # if the broad `.ragent/` rule above is ever narrowed.
