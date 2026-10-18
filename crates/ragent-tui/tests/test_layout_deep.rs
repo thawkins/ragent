@@ -1763,11 +1763,46 @@ fn status_bar_full_width_with_all_indicators() {
     let text = painted(&terminal);
     assert!(text.contains("ragent"));
     assert!(text.contains("feature/deep"));
-    assert!(text.contains("B:docker"));
+    assert!(text.contains("Backend:docker"));
     assert!(text.contains("cmp+compress"));
     assert!(text.contains("96%"));
     assert!(text.contains("cdx-idx"));
     assert!(text.contains("cdx-graph"));
+}
+
+#[test]
+fn status_bar_backend_segment_is_full_name_in_cyan() {
+    let mut app = support::make_app();
+    app.cwd = "/home/user/projects/ragent".to_string();
+    app.active_backend = "podman".to_string();
+    let terminal = render(&mut app, 160, 24);
+    let buffer = terminal.backend().buffer();
+
+    // Locate the line-2 cell run that paints "Backend:podman".
+    let line2: Vec<String> = buffer
+        .content
+        .iter()
+        .skip(buffer.area.width as usize)
+        .take(buffer.area.width as usize)
+        .map(|cell| cell.symbol().to_string())
+        .collect();
+    let line2_text: String = line2.concat();
+    let start = line2_text
+        .find("Backend:podman")
+        .expect("line 2 must name the active backend in full");
+    let cells = &buffer.content[buffer.area.width as usize..];
+    for idx in start..start + "Backend:podman".len() {
+        assert_eq!(
+            cells[idx].fg,
+            ratatui::style::Color::Cyan,
+            "backend label cell {idx} ({:?}) must be cyan",
+            cells[idx].symbol()
+        );
+    }
+    assert!(
+        !line2_text.contains("B:podman"),
+        "the abbreviated label must be gone; line was: {line2_text}"
+    );
 }
 
 #[test]

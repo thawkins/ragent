@@ -64,6 +64,9 @@ pub mod colors {
     /// In progress, changed, syncing
     pub const IN_PROGRESS: Color = Color::Cyan;
 
+    /// Active execution backend label
+    pub const BACKEND: Color = Color::Cyan;
+
     /// Labels, separators
     pub const LABEL: Color = Color::DarkGray;
 
@@ -587,17 +590,11 @@ fn build_line2_left(
     let mut spans = Vec::new();
 
     // Active execution backend (spec `openhands` FR-008): always visible, even in
-    // Minimal mode, so the user can always see where tools will run. A non-local
-    // backend is highlighted because it changes where a tool actually executes.
+    // Minimal mode, so the user can always see where tools will run.
     if !app.active_backend.is_empty() {
-        let color = if app.active_backend == "local" {
-            colors::LABEL
-        } else {
-            colors::WARNING
-        };
         spans.push(Span::styled(
-            format!("B:{} ", app.active_backend),
-            Style::default().fg(color),
+            format!("Backend:{} ", app.active_backend),
+            Style::default().fg(colors::BACKEND),
         ));
     }
 

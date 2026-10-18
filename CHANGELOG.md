@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+## [1.0.139] - 2026-10-18
+
+A documentation-and-status-bar release. The status bar names the active
+execution backend in full, the README gains screenshots of the provider, model,
+MCP and plugin selectors, and the TUI status-bar assertions plus the sandbox
+backend how-to follow the new label. No production behaviour changed beyond the
+status-bar label and its colour constant. `cargo check` and `cargo audit` both
+pass with no new advisories (866 crate dependencies scanned).
+
+### Changed
+
+- **Status bar names the active execution backend in full.** The second line's
+  leftmost segment renders `Backend:<name>` instead of the abbreviated
+  `B:<name>`, always in cyan. The previous colouring made `local` dark grey and
+  every other backend yellow; one fixed cyan keeps the segment readable in all
+  three responsive modes and no longer implies a warning when a sandbox is
+  selected. A new `colors::BACKEND` constant carries the colour, replacing the
+  per-backend branch. The `docs/howtos/sandbox-backends.md` walkthrough (and its
+  PDF) and the two status bar assertions (`test_backend_command`,
+  `test_layout_deep`) follow the new label.
+
+### Added
+
+- **README screenshots of the provider, model, MCP and plugin selectors.**
+  `assets/screens/ragentprovider.png`, `ragentmodel.png`,
+  `ragentmcpdiscover.png`, `ragentpluginscodex.png` and
+  `ragentpluginsclaude.png` are embedded next to the features they illustrate,
+  and the header image now points at `ragentstart.png`.
+
 ## [1.0.138] - 2026-10-18
 
 A build/test-hygiene and coverage release. Every crate now compiles its test

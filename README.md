@@ -2,7 +2,7 @@
 
 An AI coding agent for the terminal, built in Rust.
 
-![ragent terminal UI](assets/screens/ragent-tui.png)
+![ragent terminal UI](assets/screens/ragentstart.png)
 
 ragent is a Rust coding agent inspired by RooCode, Claude Code, Copilot CLI and
 OpenCode. It provides multi-provider LLM orchestration, a comprehensive built-in
@@ -21,6 +21,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   and cloud), Generic OpenAI-compatible endpoints, Azure AI Foundry, Azure Resource
   (File), Amazon Bedrock, OpenRouter, and a Model Router cluster — 15 registry
   entries behind an extensible provider trait
+
+![Provider Selector](assets/screens/ragentprovider.png)
+
+![LLM Selector](assets/screens/ragentmodel.png)
+
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
@@ -45,6 +50,7 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   drivable headless browser is present, taking the count to 149 — spec `openhands`
   FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
   are:
+
   - **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
     move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`
     alias, get_env, the PDF pair (`pdf_read`, `pdf_write`), the structured-memory
@@ -118,6 +124,9 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   ragent looks for MCP definitions (ragent-native, npm global, `PATH`, and the
   Claude/Cline/XDG registry directories), the count found at each location, and
   the servers discovered
+
+![MCP Selector](assets/screens/ragentmcpdiscover.png)
+
 - **ACP integration** — Agent Client Protocol support in both directions: an ACP
   **client** that drives Claude Code, Codex, or Gemini CLI as an external
   subprocess over JSON-RPC on stdio, and a **feature-gated, off-by-default ACP
@@ -251,11 +260,8 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `/plugins list|add|remove|enable|disable|test|stores|marketplace|help` in the TUI
   (`/plugins list [--verbose]` opens an interactive table panel with the capability
   blocks listed at the end; `Space` toggles the highlighted plugin's enabled state) and
-  the `ragent plugins <sub>` CLI (`/plugins marketplace
-  show` and `/plugins
-  marketplace <codex|claude> list` list the marketplaces configured for each store,
-  one section per store with a name/url/description table; `/plugins marketplace
-  <codex|claude> add <source>` registers an additional marketplace from an
+  the `ragent plugins <sub>` CLI (`/plugins marketplace show` and `/plugins marketplace <codex|claude> list` list the marketplaces configured for each store,
+  one section per store with a name/url/description table; `/plugins marketplace <codex|claude> add <source>` registers an additional marketplace from an
   `owner/repo` slug, an SSH remote, an `https://` URL, or a local directory, in the
   user-global `plugins.stores.marketplaces`, and the two browse panels fetch and
   merge every configured marketplace into the one panel); a loaded index also has each
@@ -263,6 +269,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   (the vendor listings omit them, Codex especially), with a `loading details...` title
   hint and a `-` version marker while a value stays unknown; `plugins.enabled: false`
   makes the subsystem inert
+
+![CodexPlugins](assets/screens/ragentpluginscodex.png)
+
+![ClaudePlugins](assets/screens/ragentpluginsclaude.png)
+
 - **Connector system** — a Claude-connector-equivalent catalogue of named
   integrations (Google Drive, Slack, GitHub, Git, Postgres, Puppeteer, and the
   wider community catalogue) that reach an external system through one or more
@@ -340,8 +351,7 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   line, column, problematic source line, and caret marker
 - **UI internationalisation** — opt-in locale message catalog (English fallback
   for any missing key) for the status-bar labels, the `/help` header, and panel
-  footers, configured via the `i18n` config section or the `/i18n
-  on|off|status|list|<locale>` command; a non-English ambient `LANG` with an
+  footers, configured via the `i18n` config section or the `/i18n on|off|status|list|<locale>` command; a non-English ambient `LANG` with an
   installed catalog enables it automatically
 
 ## Installation
@@ -680,15 +690,15 @@ Docs and examples:
 
 The project is a Cargo workspace built from 18 focused crates:
 
-| Crate                   | Purpose                                                                  |
-| ----------------------- | ------------------------------------------------------------------------ |
+| Crate                     | Purpose                                                                  |
+| ------------------------- | ------------------------------------------------------------------------ |
 | `ragent-agent`          | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
 | `ragent-bench`          | Benchmark runner shared between the TUI and the CLI                      |
 | `ragent-codeindex`      | Indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher   |
 | `ragent-config`         | Configuration types, defaults, and parsing                               |
-| `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`         |
+| `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`       |
 | `ragent-llm`            | Provider clients and model registry (14 providers + Model Router)        |
-| `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`           |
+| `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`         |
 | `ragent-research`       | Web/local research gathering, synthesis, RESEARCH.md output              |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                       |
 | `ragent-specs`          | Spec lifecycle: discovery, validation, review, archival, JTBD            |

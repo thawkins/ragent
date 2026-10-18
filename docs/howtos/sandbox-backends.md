@@ -139,7 +139,7 @@ file - the project-local `.ragent/ragent.json` when one was loaded, otherwise th
 global config (`persist_active_backend` / `backend_config_path`) - using an atomic
 temp-file-then-rename update. The per-turn config cache is then invalidated, so
 the change takes effect on the **next** turn. After a switch the status bar shows
-`B:<kind>` (a non-`local` backend is highlighted).
+`Backend:<kind>` in cyan.
 
 Because the persistence is by **kind label**, a descriptor-free switch such as
 `/backend docker` writes the bare label. To carry an image, workspace, URL, or
@@ -524,7 +524,7 @@ with `Up`/`Down` and press `Enter` on `sandbox` - or select it in one step:
 ```
 
 Either way, ragent persists `execution_backend: "sandbox"` to the config file and
-the status bar now shows `B:podman`. The change applies to the **next** turn.
+the status bar now shows `Backend:podman`. The change applies to the **next** turn.
 
 ### Step 6 - Run a turn and observe the sandbox
 
@@ -581,7 +581,7 @@ value while re-mounting the same volume (FR-010, FR-023).
 /backend local
 ```
 
-The status bar returns to `B:local`. To reclaim disk used by the sandbox:
+The status bar returns to `Backend:local`. To reclaim disk used by the sandbox:
 
 ```bash
 podman rm -f $(podman ps -a --filter name=ragent-sandbox --format '{{.Names}}')

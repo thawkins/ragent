@@ -4073,7 +4073,8 @@ active backend and the health of every registered backend.
 The TUI surface is the `/backend` family (`crates/ragent-tui/src/app/backend_panel.rs`,
 `App::handle_backend_command`): with no argument (or `show`/`list`) it opens an
 interactive switcher panel that renders the active backend and a health row for
-every registered backend, and the status bar names the active backend. Moving the
+every registered backend, and the status bar's second line opens with
+`Backend:<name>` in cyan naming the active backend. Moving the
 cursor and pressing `Enter` switches the active backend (persisting
 `execution_backend`), after which its health is re-reported. `/backend <kind|id>`
 switches directly; `/backend help` renders the usage table. A container backend is

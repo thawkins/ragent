@@ -157,7 +157,7 @@ async fn status_bar_surfaces_the_default_local_backend() {
     let frame = render_app_to_string(&mut app);
     let line2 = frame.lines().nth(1).unwrap_or("");
     assert!(
-        line2.contains("B:local"),
+        line2.contains("Backend:local"),
         "the status bar must surface the active backend; line was: {line2}"
     );
 }
