@@ -2275,7 +2275,10 @@ impl Config {
     ///
     /// If a project-local config (`.ragent/ragent.json`) was loaded during
     /// [`Config::load`], this writes back to that path. Otherwise it writes
-    /// to the global config file (`~/.config/ragent/ragent.json`).
+    /// to the global config file (`~/.config/ragent/ragent.json`), or to the
+    /// explicit `--config <file>` when one was registered with
+    /// [`Config::set_config_write_target`] - that file is the only loaded source
+    /// in `--config` mode, so it is the only file whose write round-trips.
     ///
     /// The file is only touched when the serialised JSON differs from the
     /// existing content, avoiding unnecessary writes and timestamp churn.
@@ -2290,7 +2293,9 @@ impl Config {
                 && p.parent()
                     .is_some_and(|parent| parent.file_name().is_some_and(|f| f == ".ragent"))
         });
-        let path = if was_loaded_from_project {
+        let path = if let Some(explicit) = Self::config_write_target() {
+            explicit
+        } else if was_loaded_from_project {
             project_path
         } else {
             Self::global_config_path()
@@ -2365,6 +2370,43 @@ impl Config {
     #[must_use]
     pub fn global_config_path() -> Option<PathBuf> {
         Self::global_config_dir().map(|d| d.join("ragent.json"))
+    }
+
+    /// The shared slot holding an explicit config-file write target.
+    fn write_target_slot() -> &'static std::sync::Mutex<Option<PathBuf>> {
+        use std::sync::OnceLock;
+        static TARGET: OnceLock<std::sync::Mutex<Option<PathBuf>>> = OnceLock::new();
+        TARGET.get_or_init(|| std::sync::Mutex::new(None))
+    }
+
+    /// Register (or clear) the file a privileged runtime-flag write must target.
+    ///
+    /// `ragent --config <file>` replaces the layered load ([`Config::load`]) with
+    /// a single explicit file, so the user-global `ragent.json` is never read in
+    /// that mode. A runtime-flag toggle (`yolo`, `edit_log`, `activity_log`) that
+    /// wrote the global file would therefore never round-trip: the next
+    /// `--config <file>` start takes its value from the explicit file, which
+    /// still holds the old one (the "/yolo does not persist" report). The binary
+    /// registers the `--config` path here after a successful parse so the flag
+    /// write lands in the file that is actually loaded.
+    ///
+    /// Passing `None` restores the default (user-global) target.
+    pub fn set_config_write_target(target: Option<PathBuf>) {
+        let mut guard = Self::write_target_slot()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = target;
+    }
+
+    /// The registered explicit config write target, if any.
+    ///
+    /// See [`Config::set_config_write_target`].
+    #[must_use]
+    pub fn config_write_target() -> Option<PathBuf> {
+        let guard = Self::write_target_slot()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.clone()
     }
 
     /// Snapshot the current global `ragent.json` into a timestamped backup
@@ -2666,15 +2708,23 @@ impl Config {
     /// `activity_log`, `gcf`), whose values must round-trip without disturbing
     /// anything else in the file.
     ///
+    /// When the process was started with an explicit `--config <file>`, that
+    /// file - not the user-global one - is the loaded source, so it is the write
+    /// target (see [`Config::set_config_write_target`]); writing the global file
+    /// there would never be read back and the toggle would appear to be lost.
+    ///
     /// Returns the path that was written.
     ///
     /// # Errors
     ///
-    /// Returns an error if the global config directory cannot be resolved, an
-    /// existing config file is present but not valid JSON, or the write fails.
+    /// Returns an error if the config directory cannot be resolved, an existing
+    /// config file is present but not valid JSON, or the write fails.
     pub(crate) fn set_global_bool_key(key: &str, value: bool) -> anyhow::Result<PathBuf> {
-        let path = Self::global_config_path()
-            .ok_or_else(|| anyhow::anyhow!("no config directory found"))?;
+        let path = match Self::config_write_target() {
+            Some(explicit) => explicit,
+            None => Self::global_config_path()
+                .ok_or_else(|| anyhow::anyhow!("no config directory found"))?,
+        };
         let mut json: serde_json::Value = match std::fs::read_to_string(&path) {
             Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).map_err(|e| {
                 anyhow::anyhow!("Failed to parse global config '{}': {}", path.display(), e)

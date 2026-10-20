@@ -150,7 +150,7 @@ fn find_row(terminal: &Terminal<TestBackend>, app: &App, needle: &str) -> Option
 }
 
 // ---------------------------------------------------------------------------
-// The panel is a bordered, titled, ASCII-only modal
+// The panel is a bordered, titled modal with Unicode box-drawing borders
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -182,12 +182,12 @@ fn the_panel_is_a_bordered_modal_with_the_catalogue_name_and_counts() {
     let left = area.x as usize;
     assert_eq!(
         first.chars().nth(left),
-        Some('+'),
+        Some('\u{250c}'),
         "top-left corner is drawn: {first:?}"
     );
     assert_eq!(
         last.chars().nth(left),
-        Some('+'),
+        Some('\u{2514}'),
         "bottom-left corner is drawn: {last:?}"
     );
 }
@@ -209,15 +209,34 @@ fn the_footer_lists_the_available_keys() {
 }
 
 #[test]
-fn every_painted_glyph_in_the_panel_is_ascii() {
+fn the_panel_is_framed_with_unicode_box_drawing_borders() {
     let mut app = open(sample(), &["github"], 0);
     let terminal = render(&mut app, 100, 30);
     let area = app.connector_store_area;
     let buffer = terminal.backend().buffer();
-    for y in area.y..area.y + area.height {
-        for x in area.x..area.x + area.width {
+    let right = area.x + area.width.saturating_sub(1);
+    let bottom = area.y + area.height.saturating_sub(1);
+
+    // The four corners are ratatui's default box-drawing glyphs.
+    assert_eq!(buffer[(area.x, area.y)].symbol(), "\u{250c}", "top-left");
+    assert_eq!(buffer[(right, area.y)].symbol(), "\u{2510}", "top-right");
+    assert_eq!(buffer[(area.x, bottom)].symbol(), "\u{2514}", "bottom-left");
+    assert_eq!(buffer[(right, bottom)].symbol(), "\u{2518}", "bottom-right");
+
+    // Both edges are vertical rules, never the ASCII `|`.
+    for y in area.y + 1..bottom {
+        assert_eq!(buffer[(area.x, y)].symbol(), "\u{2502}", "left edge y={y}");
+        assert_eq!(buffer[(right, y)].symbol(), "\u{2502}", "right edge y={y}");
+    }
+
+    // The inner body keeps plain ASCII text and markers.
+    for y in area.y + 1..bottom {
+        for x in area.x + 1..right {
             let symbol = buffer[(x, y)].symbol();
-            assert!(symbol.is_ascii(), "non-ASCII glyph {symbol:?} at ({x},{y})");
+            assert!(
+                symbol.is_ascii(),
+                "non-ASCII body glyph {symbol:?} at ({x}, {y})"
+            );
         }
     }
 }

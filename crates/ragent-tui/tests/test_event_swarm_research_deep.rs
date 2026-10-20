@@ -27,7 +27,7 @@ use ragent_agent::event::{Event, FinishReason};
 use ragent_agent::mcp::{McpServer, McpStatus};
 use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::task::{ReportStatus, TaskEntry, TaskStatus};
-use ragent_agent::team::{MemberStatus, SwarmState, TeamConfig, TeamMember, TeamStore};
+use ragent_agent::team::{Mailbox, MemberStatus, SwarmState, TeamConfig, TeamMember, TeamStore};
 use ragent_tui::App;
 use ragent_tui::app::{BgTaskView, ProviderSetupStep, SpecImplState};
 
@@ -905,16 +905,24 @@ async fn enter_with_a_focused_teammate_routes_the_message_to_its_mailbox() {
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
-    // The mailbox write boundary rejects an unauthenticated `lead` sender
-    // (SEC-ragent-team-003), so the failure surfaces on the status line - the
-    // focused-input path never reaches the success arm.
-    assert!(
-        app.status.starts_with("Failed to send message:"),
-        "got: {}",
-        app.status
-    );
-    assert!(app.status.contains("authenticated sender session id"));
+    // FR-058: the focused-input path routes the message to the teammate's
+    // mailbox as the authenticated lead session
+    // (SEC-ragent-team-003), reports success, and clears the input.
+    assert_eq!(app.status, "message sent to swarm-s1");
     assert_eq!(app.input, "", "the input buffer is cleared");
+    let store = TeamStore::load_by_name("team-a", temp.path()).expect("load team");
+    let mail = Mailbox::open(&store.dir, "tm-001")
+        .and_then(|mb| mb.read_all())
+        .expect("read mailbox");
+    assert_eq!(mail.len(), 1, "exactly one routed message");
+    assert_eq!(mail[0].from, "lead");
+    assert_eq!(mail[0].to, "tm-001");
+    assert_eq!(mail[0].content, "please review the diff");
+    assert_eq!(
+        mail[0].sender_session_id.as_deref(),
+        Some("slash-support"),
+        "the lead-origin message must carry the authenticated sender session id"
+    );
 }
 
 #[tokio::test]

@@ -62,8 +62,10 @@ where
     slash::mcp_display_servers(previous, configured, working_dir, live)
 }
 mod spawn;
+mod subagent_events;
 mod swarm;
 pub mod toolchain;
+mod windows;
 
 /// Test hook: expose the private `/spawn` poll to the integration test suite
 /// (`tests/test_slash_commands.rs`) without widening the production surface.

@@ -155,6 +155,29 @@ impl MemberStatus {
             Self::Failed => "failed",
         }
     }
+
+    /// Return the compact status word the UI panels paint for this state
+    /// (spec `agentui` FR-023, NFR-009).
+    ///
+    /// This is the single canonical status-word mapping: every panel takes its
+    /// wording from here, so no surface can disagree with another about what a
+    /// teammate is doing. The words match [`MemberStatus::as_str`] except where
+    /// the snake_case spelling is too wide for a table column
+    /// (`plan_pending` -> `planning`, `shutting_down` -> `stopping`).
+    #[must_use]
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            Self::Spawning => "spawning",
+            Self::Working => "working",
+            Self::Idle => "idle",
+            Self::PlanPending => "planning",
+            Self::Blocked => "blocked",
+            Self::Suspended => "suspended",
+            Self::ShuttingDown => "stopping",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
 }
 
 /// Plan approval state for a teammate that has submitted a plan.

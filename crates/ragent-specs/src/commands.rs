@@ -1798,8 +1798,24 @@ Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is
     ///
     /// * `spec_id` - The spec identifier (directory name under `specs/`).
     /// * `plan_md` - The current `PLAN.md` content, used for status preservation.
+    ///   Empty for a SPEC-only spec (one whose plan has not been generated yet);
+    ///   the reference block is then omitted rather than emitted empty.
     #[must_use]
     pub fn build_update_prompt(spec_id: &str, plan_md: &str) -> String {
+        let preservation_note = if plan_md.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\n**Existing PLAN.md content (for reference - preserve task statuses \
+                 where IDs are unchanged):**\n\n{plan_md}"
+            )
+        };
+        let status_rule = if plan_md.trim().is_empty() {
+            "Status values: Pending for all new tasks."
+        } else {
+            "Status values: Pending for all new tasks.\n     - Preserve the status of any \
+             existing task IDs that remain unchanged."
+        };
         format!(
             r"You are an expert specification writer. An existing spec has been updated.
 Re-read the current `specs/{spec_id}/SPEC.md` and regenerate `specs/{spec_id}/PLAN.md` and `specs/{spec_id}/TESTPLAN.md` to match.
@@ -1819,20 +1835,15 @@ Then write the following files using the `write` tool:
      - Link each task to relevant requirements from `SPEC.md`.
      - Effort values: S, M, L.
      - Priority values: Critical, High, Medium, Low.
-     - Status values: Pending for all new tasks.
-     - Preserve the status of any existing task IDs that remain unchanged.
+     - {status_rule}
 
 2. `specs/{spec_id}/TESTPLAN.md` - A **manual** test plan (human-readable, not automated test code):
    - YAML frontmatter with `status: draft`.
    - A `## Test Cases` section with manual test cases.
    - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results.
-   - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`.
+   - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`.{preservation_note}
 
-**Existing PLAN.md content (for reference - preserve task statuses where IDs are unchanged):**
-
-{plan_md}
-
-Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete.",
+Use the `write` tool to write `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete.",
         )
     }
 

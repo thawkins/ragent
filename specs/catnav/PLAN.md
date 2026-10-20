@@ -58,7 +58,7 @@ The category filter operates entirely in memory after the single index fetch (sp
 The left column is the navigator: `ALL` first, then the distinct categories sorted
 case-insensitively. The active category is painted in the active-category colour; the
 row under the category cursor carries a block cursor independent of the result-list
-cursor. Only ASCII glyphs are used (FR-004).
+cursor. The body is plain ASCII inside the panel's Unicode box-drawing border (FR-004).
 
 ## Requirement Coverage Map
 
@@ -67,7 +67,7 @@ cursor. Only ASCII glyphs are used (FR-004).
 | FR-001 Navigator lists ALL + distinct categories, sorted | T-003, T-004 |
 | FR-002 Active category state + cursor + colour | T-003, T-004 |
 | FR-003 Category read from entry, empty means uncategorised | T-001, T-002 |
-| FR-004 ASCII layout, title/search/footer kept | T-004 |
+| FR-004 Plain-ASCII body in Unicode borders, title/search/footer kept | T-004 |
 | FR-005 Footer hints + title active category | T-004 |
 | FR-006 One navigator for both stores | T-003, T-004, T-005 |
 | FR-007 Down moves category cursor + applies | T-003, T-005 |
@@ -145,7 +145,8 @@ category in the active-category colour. Render `ALL` only while the fetch is loa
 (FR-016) and when the index declares no categories (FR-018). Keep the result area's
 empty-state line (FR-019). Extend `plugin_store_title` with `-- category <name>` and
 `plugin_store_footer` with the navigation hints. Recompute the navigator width from
-`Frame::area` every frame so a resize stays correct (FR-020). ASCII only (FR-004).
+`Frame::area` every frame so a resize stays correct (FR-020). Plain-ASCII body inside the
+Unicode panel border (FR-004).
 
 ### T-005 - Keyboard routing
 

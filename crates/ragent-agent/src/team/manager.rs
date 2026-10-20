@@ -1389,17 +1389,23 @@ impl TeamManager {
         // teammate's `team_shutdown_ack` reply can copy it.
         let correlation_id = uuid::Uuid::new_v4().to_string();
         let mailbox = Mailbox::open(&self.team_dir, agent_id)?;
-        mailbox.push(MailboxMessage::new_correlated(
-            "lead".to_string(),
-            agent_id.to_string(),
-            MessageType::ShutdownRequest,
-            if graceful {
-                "Graceful shutdown requested by TeamManager; call team_shutdown_ack to terminate."
-            } else {
-                "Immediate shutdown requested by TeamManager; agent loop cancelled."
-            },
-            &correlation_id,
-        ))?;
+        // SEC-ragent-team-003: a lead-authored shutdown request must carry
+        // the lead session id that the push validates, or the unified
+        // shutdown path is rejected at the mailbox write boundary.
+        mailbox.push(
+            MailboxMessage::new_correlated(
+                "lead".to_string(),
+                agent_id.to_string(),
+                MessageType::ShutdownRequest,
+                if graceful {
+                    "Graceful shutdown requested by TeamManager; call team_shutdown_ack to terminate."
+                } else {
+                    "Immediate shutdown requested by TeamManager; agent loop cancelled."
+                },
+                &correlation_id,
+            )
+            .with_sender_session(&self.lead_session_id),
+        )?;
 
         // -- On-disk status update -----------------------------------------
         let mut store = TeamStore::load(&self.team_dir)?;

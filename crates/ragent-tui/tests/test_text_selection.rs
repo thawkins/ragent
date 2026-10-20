@@ -217,12 +217,22 @@ fn test_mouse_up_preserves_selection() {
     assert!(app.text_selection.is_some());
 }
 
+/// Render one frame so the renderer records the window hit areas and the
+/// painted-row click map (spec `agentui` A3: rows resolve through the
+/// render-recorded map, not hand-set coordinates).
+fn render(app: &mut App) {
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, app))
+        .expect("render frame");
+}
+
 #[test]
 fn test_clicking_active_agents_row_opens_output_view() {
     let mut app = make_app();
     app.session_id = Some("lead-s1".to_string());
     app.show_agents_window = true;
-    app.active_agents_area = Rect::new(0, 10, 80, 8);
     app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-12345678".to_string(),
         parent_session_id: "lead-s1".to_string(),
@@ -241,7 +251,10 @@ fn test_clicking_active_agents_row_opens_output_view() {
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
     });
-    app.handle_mouse_event(mouse_down(2, 12));
+    // Painted rows: 0 header, 1 primary, 2 task-12345678.
+    render(&mut app);
+    let point = app.active_agents_area;
+    app.handle_mouse_event(mouse_down(point.x + 5, point.y + 2));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
 }
@@ -255,9 +268,12 @@ fn test_clicking_teams_row_opens_output_view() {
     let mut member = TeamMember::new("writer", "tm-001", "general");
     member.session_id = Some("tm-s1".to_string());
     app.team_members.push(member);
-    app.teams_area = Rect::new(0, 20, 80, 8);
 
-    app.handle_mouse_event(mouse_down(2, 23));
+    // Painted rows: 0 header, 1 lead, 2 tm-001 (relative to the rows rect,
+    // which the renderer records separately from the frame content area).
+    render(&mut app);
+    let point = app.teams_rows_area;
+    app.handle_mouse_event(mouse_down(point.x + 5, point.y + 2));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("tm-s1"));
 }

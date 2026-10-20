@@ -437,15 +437,9 @@ fn is_path_within(child: &Path, root: &Path) -> bool {
 /// `/alias/project/src/main.rs` be accepted when the working directory is
 /// `/home/user/project` and `/alias/project` points to the same directory.
 fn is_alias_within(child: &Path, root: &Path) -> bool {
-    let Ok(root_meta) = root.metadata() else {
-        return false;
-    };
-
     let mut candidate: Option<&Path> = Some(child);
     while let Some(p) = candidate {
-        if let Ok(meta) = p.metadata()
-            && same_file_identity(&meta, &root_meta)
-        {
+        if same_file_identity(p, root) {
             return true;
         }
         candidate = p.parent();
@@ -453,32 +447,20 @@ fn is_alias_within(child: &Path, root: &Path) -> bool {
     false
 }
 
-/// Compare two [`std::fs::Metadata`] records by device and inode.
-#[cfg(unix)]
-fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    a.dev() == b.dev() && a.ino() == b.ino()
-}
-
-#[cfg(windows)]
-fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    // Volume serial number + file index uniquely identify a file on NTFS and
-    // ReFS when both values are available.  Fall back to `false` on filesystems
-    // that do not expose them.
-    match (
-        a.volume_serial_number(),
-        a.file_index(),
-        b.volume_serial_number(),
-        b.file_index(),
-    ) {
-        (Some(va), Some(ia), Some(vb), Some(ib)) => va == vb && ia == ib,
-        _ => false,
+/// Compare two paths by filesystem identity: device/inode on unix, volume
+/// serial number + file index on windows (via the `same-file` crate, which
+/// uses only stable win32 APIs - the std `windows_by_handle` feature is
+/// unstable and breaks the Windows build).
+#[cfg(any(unix, windows))]
+fn same_file_identity(a: &Path, b: &Path) -> bool {
+    match same_file::is_same_file(a, b) {
+        Ok(same) => same,
+        Err(_) => false,
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn same_file_identity(_a: &std::fs::Metadata, _b: &std::fs::Metadata) -> bool {
+fn same_file_identity(_a: &Path, _b: &Path) -> bool {
     // On other platforms, fall back to the canonical path equality that
     // `std::fs::canonicalize` already provides for symlinks.  Bind mounts are
     // not a concern here, so we keep the portable fallback.

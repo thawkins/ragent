@@ -155,7 +155,8 @@ overlay containing a title line with the store name (and, once a filter is activ
 active category and marketplace), a search-query field, a scrollable
 result list, a footer listing the available keys, a left-hand navigator column split into
 the category and marketplace navigators (FR-052), and a search box along the bottom
-edge of the inner area (FR-051), using only ASCII glyphs. Each navigator shall carry a
+edge of the inner area (FR-051). The panel shall frame itself with the same Unicode
+box-drawing borders every other panel uses. Each navigator shall carry a
 one-row header directly above its `ALL` entry naming the navigation type (`Categories`
 over the category navigator and `Marketplace` over the marketplace navigator), painted in
 reversed video (black foreground on a white background) as a distinct header band, and the
@@ -362,7 +363,7 @@ guards.
    plugin code.
 9. The panel never blocks the event loop: the agent turn and TUI animation continue
    during fetch and install.
-10. No non-ASCII glyphs are used anywhere in the panel.
+10. The panel is framed with Unicode box-drawing borders, like every other panel.
 11. The left navigator column is split into a category navigator (top) and a marketplace
     navigator (bottom), each listing `ALL` plus the distinct values the index declares
     (FR-052).
@@ -541,7 +542,7 @@ set, and leave the active category unchanged; an already-empty query shall be a 
 The clear button shall occupy the box's rightmost columns and its painted area shall be
 recorded for hit-testing, so a click is only acted on inside the button; on a row too
 narrow to hold both the label and the button the button is dropped rather than squeezing
-the field below a usable width. Only ASCII glyphs shall be drawn.
+the field below a usable width.
 
 **FR-052** - The browse panel's left-hand navigator column shall be split vertically into
 a category navigator in the upper half and a marketplace navigator in the lower half. The

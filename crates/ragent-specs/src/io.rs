@@ -174,8 +174,9 @@ impl SpecIo {
     /// Discover all specs under the given root directory.
     ///
     /// Each immediate subdirectory is considered a spec if it contains
-    /// both `SPEC.md` and `PLAN.md`. Returns a list of `Spec` structs
-    /// with basic metadata populated.
+    /// `SPEC.md`. `PLAN.md` is optional: a spec that has not yet had its
+    /// plan generated is still discoverable, with an empty `plan_md`.
+    /// Returns a list of `Spec` structs with basic metadata populated.
     pub async fn discover_specs(specs_root: &Path) -> Result<Vec<Spec>, SpecError> {
         let mut specs = Vec::new();
         let mut entries = fs::read_dir(specs_root).await?;
@@ -185,8 +186,7 @@ impl SpecIo {
                 continue;
             }
             let spec_md_path = path.join("SPEC.md");
-            let plan_md_path = path.join("PLAN.md");
-            if !spec_md_path.is_file() || !plan_md_path.is_file() {
+            if !spec_md_path.is_file() {
                 continue;
             }
             let dir_name = path
@@ -202,15 +202,14 @@ impl SpecIo {
     }
 
     /// Read a spec and plan from disk into a fully-populated `Spec`.
+    ///
+    /// Only `SPEC.md` is required. When `PLAN.md` is absent the returned
+    /// `Spec` carries an empty `plan_md` and no tasks.
     pub async fn read_spec(specs_root: &Path, id: &SpecId) -> Result<Spec, SpecError> {
         let dir = specs_root.join(id.dir_name());
         let spec_md_path = dir.join("SPEC.md");
-        let plan_md_path = dir.join("PLAN.md");
         if !spec_md_path.is_file() {
             return Err(SpecError::NotFound(spec_md_path.display().to_string()));
-        }
-        if !plan_md_path.is_file() {
-            return Err(SpecError::NotFound(plan_md_path.display().to_string()));
         }
         Self::load_spec_from_dir(&dir, id.clone()).await
     }
@@ -223,7 +222,9 @@ impl SpecIo {
         let spec_md_path = dir.join("SPEC.md");
         let plan_md_path = dir.join("PLAN.md");
         let spec_md = Self::read_file(&spec_md_path).await?;
-        let plan_md = Self::read_file(&plan_md_path).await?;
+        // PLAN.md is optional: a SPEC-only spec (plan not yet generated)
+        // must still load, yielding an empty plan and no tasks.
+        let plan_md = Self::read_optional(&plan_md_path).await;
         let review_md = Self::read_optional(&dir.join("REVIEW.md")).await;
         let feedback_md = Self::read_optional(&dir.join("FEEDBACK.md")).await;
         let modified_at = Self::modified_time(&spec_md_path).await?;
@@ -265,7 +266,7 @@ impl SpecIo {
             fs::create_dir_all(&dir).await?;
         }
         Self::atomic_write(dir.join("SPEC.md"), &spec.spec_md).await?;
-        Self::atomic_write(dir.join("PLAN.md"), &spec.plan_md).await?;
+        Self::write_plan(dir.join("PLAN.md"), &spec.plan_md).await?;
         Self::write_or_clear(dir.join("REVIEW.md"), &spec.review_md).await?;
         Self::write_or_clear(dir.join("FEEDBACK.md"), &spec.feedback_md).await?;
         Ok(())
@@ -280,6 +281,18 @@ impl SpecIo {
             if path.exists() {
                 fs::remove_file(&path).await?;
             }
+            return Ok(());
+        }
+        Self::atomic_write(path, content).await
+    }
+
+    /// Write `PLAN.md`, skipping the write entirely when the in-memory plan is
+    /// empty. Unlike [`write_or_clear`](crate::io::SpecIo::write_or_clear) this
+    /// never deletes an existing file: `PLAN.md` is optional, but an on-disk
+    /// plan is real work that must not be destroyed by an empty in-memory
+    /// value (for example a SPEC-only spec read before the plan was authored).
+    async fn write_plan(path: PathBuf, content: &str) -> Result<(), SpecError> {
+        if content.is_empty() {
             return Ok(());
         }
         Self::atomic_write(path, content).await
@@ -303,7 +316,7 @@ impl SpecIo {
             fs::create_dir_all(&dir).await?;
         }
         Self::atomic_write(dir.join("SPEC.md"), spec_md).await?;
-        Self::atomic_write(dir.join("PLAN.md"), plan_md).await?;
+        Self::write_plan(dir.join("PLAN.md"), plan_md).await?;
         Self::write_or_clear(dir.join("REVIEW.md"), review_md).await?;
         Self::write_or_clear(dir.join("FEEDBACK.md"), feedback_md).await?;
         Ok(())

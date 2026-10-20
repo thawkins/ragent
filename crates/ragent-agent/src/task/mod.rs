@@ -355,6 +355,14 @@ pub struct AgentManager {
     /// PERF (FR-016): `DashMap` replaces `RwLock<HashMap>` for the same
     /// lock-contention reason as `tasks`.
     cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
+    /// Cooperative-suspension flags, keyed by the sub-agent's CHILD session
+    /// id (the session processor's loop consults this map by session id; the
+    /// public `suspend_task`/`resume_task` API translates a task id into the
+    /// child session via the `tasks` map). While a task's flag is set the
+    /// agent loop parks at its next inter-step safe point - no further LLM
+    /// request, no further tool execution - until `resume_task` clears it or
+    /// the turn is cancelled.
+    suspend_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
     /// Event bus for publishing sub-agent lifecycle events.
     event_bus: Arc<EventBus>,
     /// Session processor for running sub-agent loops.
@@ -395,6 +403,7 @@ impl AgentManager {
         Self {
             tasks: Arc::new(DashMap::new()),
             cancel_flags: Arc::new(DashMap::new()),
+            suspend_flags: Arc::new(DashMap::new()),
             event_bus,
             processor,
             max_background,
@@ -444,6 +453,8 @@ impl AgentManager {
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
             .insert(task_id.clone(), cancel_flag.clone());
+        self.suspend_flags
+            .insert(child_sid.clone(), Arc::new(AtomicBool::new(false)));
 
         // Publish start event
         self.event_bus.publish(Event::SubagentStart {
@@ -481,6 +492,7 @@ impl AgentManager {
                     }
                 }
                 self.cancel_flags.remove(&task_id);
+                self.suspend_flags.remove(&child_sid);
                 self.event_bus.publish(Event::SubagentComplete {
                     session_id: parent_session_id.to_string(),
                     task_id: task_id.clone(),
@@ -508,6 +520,7 @@ impl AgentManager {
                     }
                 }
                 self.cancel_flags.remove(&task_id);
+                self.suspend_flags.remove(&child_sid);
                 self.event_bus.publish(Event::SubagentComplete {
                     session_id: parent_session_id.to_string(),
                     task_id: task_id.clone(),
@@ -642,6 +655,8 @@ impl AgentManager {
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
             .insert(task_id.clone(), cancel_flag.clone());
+        self.suspend_flags
+            .insert(child_sid.clone(), Arc::new(AtomicBool::new(false)));
 
         // Publish start event
         self.event_bus.publish(Event::SubagentStart {
@@ -661,6 +676,7 @@ impl AgentManager {
         let event_bus = self.event_bus.clone();
         let tasks = self.tasks.clone();
         let cancel_flags = self.cancel_flags.clone();
+        let suspend_flags = self.suspend_flags.clone();
         let processor = self.processor.clone();
         let background_timeout_secs = self.background_timeout_secs;
         let tid = task_id.clone();
@@ -786,6 +802,9 @@ impl AgentManager {
                         }
                     }
                     cancel_flags.remove(&tid);
+                    if let Some(child) = tasks.get(&tid).map(|e| e.child_session_id.clone()) {
+                        suspend_flags.remove(&child);
+                    }
                     event_bus.publish(Event::SubagentComplete {
                         session_id: parent_sid,
                         task_id: tid,
@@ -816,6 +835,9 @@ impl AgentManager {
                         }
                     }
                     cancel_flags.remove(&tid);
+                    if let Some(child) = tasks.get(&tid).map(|e| e.child_session_id.clone()) {
+                        suspend_flags.remove(&child);
+                    }
 
                     if is_cancelled {
                         event_bus.publish(Event::SubagentCancelled {
@@ -851,31 +873,107 @@ impl AgentManager {
             anyhow::bail!("Task '{task_id}' not found or already completed")
         }
     }
-    /// M7-T1: Suspend a running sub-agent task (pause its event loop without
-    /// cancelling).
+    /// Suspend a running sub-agent task (cooperative pause).
     ///
-    /// **Decision (M7-T1):** suspension is not implemented because the session
-    /// processor's agent loop does not honour `suspend_flags` - the loop keeps
-    /// running and consuming tokens. Rather than ship a misleading no-op, the
-    /// method returns a clear error explaining that suspension is unavailable,
-    /// and the `SubagentSuspended` / `SubagentResumed` events are never
-    /// published. The TUI buttons that previously called these methods should
-    /// use [`AgentManager::cancel_agent`] instead.
+    /// Sets the task's suspend flag and marks the entry `Suspended`; the
+    /// agent loop parks the turn at its next inter-step safe point - no
+    /// further LLM request, no further tool execution - until
+    /// [`AgentManager::resume_task`] clears the flag. Suspension takes
+    /// effect only between steps: the LLM call or tool execution in progress
+    /// when the request lands finishes first. A task already suspended is an
+    /// idempotent no-op; a finished or terminating task is rejected.
     ///
-    /// See `docs/team-unification-decision.md` for the rationale.
-    pub async fn suspend_task(&self, _task_id: &str) -> anyhow::Result<()> {
-        anyhow::bail!(
-            "suspend_task is not implemented - the agent loop does not honour \
-               suspend flags. Use cancel_agent to stop a running sub-agent instead."
-        )
+    /// A suspended BACKGROUND task keeps consuming its
+    /// `background_timeout_secs` wall-clock budget; a suspension longer than
+    /// the remaining budget ends in the normal timeout error.
+    pub async fn suspend_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let child = {
+            // PERF (FR-016): DashMap - short-lived shard guard; dropped
+            // before the flag store so no guard is held across the publish.
+            let entry = self
+                .tasks
+                .get(task_id)
+                .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
+            if entry.status == TaskStatus::Suspended {
+                return Ok(()); // Already parked: idempotent no-op.
+            }
+            if !matches!(entry.status, TaskStatus::Running) {
+                anyhow::bail!("Task '{task_id}' is not running (status: {})", entry.status);
+            }
+            entry.child_session_id.clone()
+        };
+        if let Some(flag) = self.suspend_flags.get(&child) {
+            flag.store(true, Ordering::Relaxed);
+        }
+        if let Some(mut entry) = self.tasks.get_mut(task_id) {
+            entry.status = TaskStatus::Suspended;
+        }
+        let parent = self
+            .tasks
+            .get(task_id)
+            .map(|e| e.parent_session_id.clone())
+            .unwrap_or_default();
+        self.event_bus.publish(Event::SubagentSuspended {
+            session_id: parent,
+            task_id: task_id.to_string(),
+            child_session_id: child,
+        });
+        tracing::info!(task_id, "Sub-agent suspend requested");
+        Ok(())
     }
 
-    /// M7-T1: Resume a suspended task - not implemented (see [`AgentManager::suspend_task`]).
-    pub async fn resume_task(&self, _task_id: &str) -> anyhow::Result<()> {
-        anyhow::bail!(
-            "resume_task is not implemented - the agent loop does not honour \
-               suspend flags. Use cancel_agent and re-spawn instead."
-        )
+    /// Resume a previously suspended sub-agent task.
+    ///
+    /// Clears the suspend flag so the parked agent loop continues at the next
+    /// safe point, and marks the entry `Running`. Resuming a task that is not
+    /// suspended but still running is an idempotent no-op; resuming an
+    /// unknown or finished task is rejected.
+    pub async fn resume_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let child = {
+            let entry = self
+                .tasks
+                .get(task_id)
+                .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
+            match entry.status {
+                TaskStatus::Suspended => entry.child_session_id.clone(),
+                TaskStatus::Running => return Ok(()), // Never parked: no-op.
+                _ => anyhow::bail!(
+                    "Task '{task_id}' is not suspended (status: {})",
+                    entry.status
+                ),
+            }
+        };
+        if let Some(flag) = self.suspend_flags.get(&child) {
+            flag.store(false, Ordering::Relaxed);
+        }
+        if let Some(mut entry) = self.tasks.get_mut(task_id) {
+            entry.status = TaskStatus::Running;
+        }
+        let parent = self
+            .tasks
+            .get(task_id)
+            .map(|e| e.parent_session_id.clone())
+            .unwrap_or_default();
+        self.event_bus.publish(Event::SubagentResumed {
+            session_id: parent,
+            task_id: task_id.to_string(),
+            child_session_id: child,
+        });
+        tracing::info!(task_id, "Sub-agent resume requested");
+        Ok(())
+    }
+
+    /// The suspend flag for a sub-agent CHILD session, if one is registered.
+    ///
+    /// The session processor's loop consults this at each inter-step safe
+    /// point; when the returned flag is set the loop parks until
+    /// [`AgentManager::resume_task`] clears it. Returns `None` for sessions
+    /// that were not spawned by this manager (plain chat turns, ACP and
+    /// remote dispatch), which makes the check a cheap no-op there.
+    pub fn suspend_flag_for_session(&self, child_session_id: &str) -> Option<Arc<AtomicBool>> {
+        self.suspend_flags
+            .get(child_session_id)
+            .map(|flag| Arc::clone(flag.value()))
     }
 
     /// Kill a running or suspended task (forcible termination).

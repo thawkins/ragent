@@ -2163,6 +2163,32 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Uncommitted (post-1.0.141)
+
+- **Agent and Team Member panel (spec `agentui`)** — the `Agents` and `Teams`
+  buttons beside the message input open live control popups (sub-agent tree
+  with `[stop]`/`[x]` columns and a background-shell section; teammate rows
+  with focus markers, status, and counters), a one-row teammate strip sits
+  under the status bar, destructive row actions require a Yes/No confirmation,
+  `Space` suspends/resumes and `Shift+K` kills the selected row, and rows
+  scroll and re-status live. Sub-agent suspension is cooperative: a parked
+  sub-agent finishes its in-flight LLM call or tool execution before idling,
+  and `resume_task` unparks it.
+- **`/yolo on|off|status`** — the subcommands now set, clear, and report the
+  flag as documented (`on`/`off` persist, `status` is read-only, a bare
+  `/yolo` still toggles), instead of every argument toggling the state. A
+  toggle made under `ragent --config <file>` writes that file, the one that is
+  loaded, so the value round-trips (the user-global config remains the write
+  target when no `--config` is given).
+- **Wider text-format tool-call recovery** — when a model narrates its tool
+  call as text, the loop now also recognises the plain `<toolcall>` pair, a
+  slash-dropped close-tag variant, and the `tool_call` underscore spelling,
+  and scans the reasoning channel as well as the visible text; the transcript
+  scrubs the raw narration so only the executed call is shown.
+- **A spec directory holding only `SPEC.md` is valid** — it is listed, readable,
+  and a target for `/spec update`; `PLAN.md`/`TESTPLAN.md` may be generated
+  later.
+
 ## Version 1.0.138
 
 - **One test binary per crate** — every crate (and the root `ragent` package) now

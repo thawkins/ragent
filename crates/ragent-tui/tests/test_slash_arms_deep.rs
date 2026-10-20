@@ -26,7 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Utc;
 use ragent_agent::task::{ReportStatus, TaskEntry};
 use ragent_agent::team::{
-    MemberStatus, Task as TeamTask, TaskStatus as TeamTaskStatus, TeamMember, TeamStore,
+    MAX_MESSAGE_BYTES, MemberStatus, Task as TeamTask, TaskStatus as TeamTaskStatus, TeamMember,
+    TeamStore,
 };
 use ragent_tui::App;
 use ragent_tui::app::{ConfiguredProvider, ProviderSource};
@@ -248,9 +249,11 @@ async fn team_message_reports_send_failure_and_missing_team() {
     app.team_members
         .push(TeamMember::new("alice", "tm-001", "general"));
 
-    // The mailbox rejects an unauthenticated lead claim, which is the real
-    // error path of the handler.
-    app.execute_slash_command("/team message alice please review")
+    // A message over the mailbox size limit is the real error path of the
+    // handler (SEC-ragent-team-006); the lead-origin sender is authenticated
+    // (SEC-ragent-team-003), so only the size boundary rejects here.
+    let oversized = "x".repeat(MAX_MESSAGE_BYTES + 1);
+    app.execute_slash_command(&format!("/team message alice {oversized}"))
         .await;
     assert!(
         app.status.starts_with("Failed to send message:"),

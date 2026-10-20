@@ -296,3 +296,59 @@ async fn reverse_folder_without_scaffold_flags_is_refused() {
         app.status
     );
 }
+
+// ---------------------------------------------------------------------------
+// SPEC-only specs (PLAN.md is optional)
+// ---------------------------------------------------------------------------
+
+/// An app whose project has one spec directory holding only `SPEC.md`.
+///
+/// `PLAN.md` is optional per `docs/howtos/slashcommands/spec.md`: a spec whose
+/// plan has not been generated yet must still be listed and readable.
+fn app_with_spec_only() -> (
+    std::sync::MutexGuard<'static, ()>,
+    slash_support::EnvGuard,
+    tempfile::TempDir,
+    App,
+) {
+    let (guard, env, temp) = enter_project(r#"{ "defaultAgent": "general" }"#);
+    let dir = temp.path().join("specs").join("spec-only");
+    std::fs::create_dir_all(&dir).expect("create spec dir");
+    std::fs::write(dir.join("SPEC.md"), SPEC_MD).expect("write SPEC.md");
+    let app = app_with_session();
+    (guard, env, temp, app)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_starts_regeneration_for_spec_only_spec() {
+    let (_g, _e, t, mut app) = app_with_spec_only();
+    app.execute_slash_command("/spec update spec-only").await;
+    assert_eq!(
+        app.status,
+        ragent_specs::SpecCommand::build_update_status("spec-only"),
+        "a SPEC-only spec must update, not report not-found"
+    );
+    assert!(
+        !t.path().join("specs/spec-only/PLAN.md").exists(),
+        "reading a SPEC-only spec must not create an empty PLAN.md"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_shows_spec_only_spec() {
+    let (_g, _e, _t, mut app) = app_with_spec_only();
+    app.execute_slash_command("/spec list").await;
+    let text = slash_support::all_messages(&app);
+    assert!(text.contains("spec-only"), "list output: {text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn validate_spec_only_spec_reports_missing_plan_without_not_found() {
+    let (_g, _e, _t, mut app) = app_with_spec_only();
+    app.execute_slash_command("/spec validate spec-only").await;
+    assert!(
+        !app.status.contains("not found"),
+        "validate must not report not-found for a SPEC-only spec: {}",
+        app.status
+    );
+}

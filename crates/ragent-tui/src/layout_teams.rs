@@ -1,9 +1,19 @@
-//! Teams subpanel - shown at the bottom of the log panel when a team is active.
+//! Teams subpanel - the table body of the Teams popup window.
 //!
-//! Renders the active team as a compact table with lead + teammates, including
-//! status, elapsed time, step count, and tasks claimed/completed.
+//! Projects the active team into the rows painted inside the Teams modal: the
+//! lead row, one row per teammate, and the empty-state hint (spec `agentui`
+//! FR-021 through FR-026).
+//!
+//! Every structural glyph the table paints is declared once in [`glyphs`] and
+//! every column position in [`columns`], so a glyph or column change cannot
+//! leave the header and the rows disagreeing (NFR-003, NFR-011). Identifiers,
+//! labels and model strings are truncated on a character boundary so a
+//! multi-byte sequence can never be split (NFR-004). Status words come from the
+//! canonical mapping in the agent crate ([`MemberStatus::display_label`]) so the
+//! panel cannot disagree with tool output (NFR-009).
 
-use crate::theme::colors;
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -13,116 +23,466 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use ragent_agent::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
+use ragent_agent::team::{MemberStatus, TaskStatus, TaskStore, TeamMember, TeamStore};
 
 use crate::app::App;
+use crate::theme::colors;
 use crate::utils::{format_elapsed, short_id};
 
-/// Map a `MemberStatus` to a coloured status label.
-fn status_label(status: &MemberStatus) -> (&'static str, Color) {
+/// Every structural glyph the Teams table paints (NFR-003).
+///
+/// The renderer takes each of these from here rather than spelling the
+/// character inline, so the header, the lead row and the teammate rows can
+/// never drift apart.
+pub mod glyphs {
+    /// Marker painted on the lead row (FR-021).
+    pub const LEAD: &str = "* ";
+    /// Focus marker painted in front of the focused teammate's connector
+    /// (FR-022).
+    pub const FOCUS: &str = ">";
+    /// Stand-in for [`FOCUS`] on an unfocused teammate row (FR-022).
+    pub const FOCUS_NONE: &str = " ";
+    /// Branch glyph for the last teammate row (FR-022).
+    pub const BRANCH_LAST: &str = "`- ";
+    /// Branch glyph for a teammate row with a later sibling (FR-022).
+    pub const BRANCH_MID: &str = "|- ";
+    /// Suspend control painted on a live teammate row.
+    pub const STOP: &str = "[stop]";
+    /// Resume control painted in place of [`STOP`] while suspended.
+    pub const RESUME: &str = ">";
+    /// Kill control painted on a live teammate row.
+    pub const KILL: &str = "[x]";
+    /// Literal painted in the model column of a teammate with no genuine
+    /// override (FR-024).
+    pub const INHERITED: &str = "(inherited)";
+    /// Literal painted in the status column of the lead row (FR-021).
+    pub const LEAD_STATUS: &str = "active";
+    /// Literal painted in the model column of the lead row (FR-021).
+    pub const LEAD_MODEL: &str = "lead";
+    /// Literal painted in a count column that has no value (FR-021, FR-025).
+    pub const NONE: &str = "-";
+    /// Hint painted beneath the lead row while the team has no members
+    /// (FR-026).
+    pub const EMPTY_HINT: &str = "(no teammates yet - use team_spawn tool or blueprint)";
+}
+
+/// Column layout of the Teams table, counted in display columns from the left
+/// edge of the table area (FR-020 through FR-025).
+///
+/// The widths are chosen so the action controls land past the counters: the
+/// six-column `[stop]` control starts at [`STOP_X`] and the four-column `[x]`
+/// control at [`KILL_X`]. The compile-time assertion below fails the build if an
+/// edit to any width moves them.
+pub mod columns {
+    /// Width of the leading focus-marker plus connector segment (FR-022).
+    pub const MARKER_W: usize = 4;
+    /// Width of the short identifier column (FR-021, FR-022).
+    pub const ID_W: usize = 8;
+    /// Columns separating two adjacent fixed columns.
+    pub const GAP_W: usize = 1;
+    /// Width of the `<name>-<short id>` label column (FR-022).
+    pub const LABEL_W: usize = 31;
+    /// Width of the status-word column (FR-021, FR-023).
+    pub const STATUS_W: usize = 10;
+    /// Width of the model column, the point a `<provider>/<model>` string is
+    /// truncated to (FR-024).
+    pub const MODEL_W: usize = 17;
+    /// Width of the right-aligned elapsed-time column (FR-021).
+    pub const ELAPSED_W: usize = 7;
+    /// Width of the right-aligned step-count column (FR-021).
+    pub const STEPS_W: usize = 5;
+    /// Width of the right-aligned claimed-task column (FR-025).
+    pub const CLAIMED_W: usize = 7;
+    /// Width of the right-aligned completed-task column (FR-025).
+    pub const DONE_W: usize = 5;
+    /// Width of the right-aligned sent-message column (FR-025).
+    pub const SENT_W: usize = 5;
+    /// Width of the right-aligned received-message column (FR-025).
+    pub const RECV_W: usize = 5;
+    /// Columns separating the counters from the controls, and the two controls
+    /// from each other.
+    pub const CONTROL_GAP_W: usize = 2;
+    /// First column of the `[stop]` control.
+    pub const STOP_X: usize = 115;
+    /// Width of the `[stop]` control column.
+    pub const STOP_W: usize = 6;
+    /// First column of the `[x]` control.
+    pub const KILL_X: usize = 123;
+    /// Width of the `[x]` control column.
+    pub const KILL_W: usize = 4;
+}
+
+/// The fixed columns must add up to the pinned `[stop]` column.
+const _: () = assert!(
+    columns::MARKER_W
+        + columns::ID_W
+        + columns::GAP_W
+        + columns::LABEL_W
+        + columns::GAP_W
+        + columns::STATUS_W
+        + columns::GAP_W
+        + columns::MODEL_W
+        + columns::GAP_W
+        + columns::ELAPSED_W
+        + columns::GAP_W
+        + columns::STEPS_W
+        + columns::GAP_W
+        + columns::CLAIMED_W
+        + columns::GAP_W
+        + columns::DONE_W
+        + columns::GAP_W
+        + columns::SENT_W
+        + columns::GAP_W
+        + columns::RECV_W
+        + columns::CONTROL_GAP_W
+        == columns::STOP_X
+);
+
+/// The control columns must follow the counters without overlapping.
+const _: () =
+    assert!(columns::STOP_X + columns::STOP_W + columns::CONTROL_GAP_W == columns::KILL_X);
+
+/// Whether `status` is terminal, in which case the row carries no controls.
+fn is_terminal(status: &MemberStatus) -> bool {
+    matches!(
+        status,
+        MemberStatus::ShuttingDown | MemberStatus::Stopped | MemberStatus::Failed
+    )
+}
+
+/// The colour painted for one teammate state (FR-023).
+///
+/// Every state has its own colour so a glance at the table distinguishes them.
+/// The word itself comes from [`MemberStatus::display_label`] (NFR-009).
+fn status_color(status: &MemberStatus) -> Color {
     match status {
-        MemberStatus::Spawning => ("spawning", Color::Yellow),
-        MemberStatus::Working => ("working", Color::Cyan),
-        MemberStatus::Idle => ("idle", Color::Green),
-        MemberStatus::PlanPending => ("planning", Color::Magenta),
-        MemberStatus::Blocked => ("blocked", colors::HINT),
-        MemberStatus::Suspended => ("suspended", Color::DarkGray),
-        MemberStatus::ShuttingDown => ("stopping", Color::Yellow),
-        MemberStatus::Stopped => ("stopped", colors::HINT),
-        MemberStatus::Failed => ("failed", Color::Red),
+        MemberStatus::Spawning => Color::Yellow,
+        MemberStatus::Working => Color::Cyan,
+        MemberStatus::Idle => Color::Green,
+        MemberStatus::PlanPending => Color::Magenta,
+        MemberStatus::Blocked => Color::LightRed,
+        MemberStatus::Suspended => Color::DarkGray,
+        MemberStatus::ShuttingDown => Color::LightYellow,
+        MemberStatus::Stopped => colors::HINT,
+        MemberStatus::Failed => Color::Red,
     }
 }
 
-/// Render a count cell: "-" when zero, otherwise the number.
+/// Clip `text` to at most `budget` characters.
+///
+/// The cut is taken on a character boundary so a multi-byte sequence can never
+/// be split, and the result never exceeds the budget (NFR-004).
+fn clip(text: &str, budget: usize) -> String {
+    text.chars().take(budget).collect()
+}
+
+/// Render a message-count cell: `"-"` when zero, otherwise the number (FR-025).
 fn count_cell(n: u32) -> String {
     if n == 0 {
-        "-".to_string()
+        glyphs::NONE.to_string()
     } else {
         n.to_string()
     }
 }
 
+/// The dimmed style shared by cells that carry no value (FR-025).
+fn hint_style() -> Style {
+    Style::default().fg(colors::HINT)
+}
+
+/// One padded column cell of a Teams row.
+///
+/// Carrying the width and alignment with the text keeps the header, the lead row
+/// and the teammate rows in the same column grid (NFR-011).
+struct Cell {
+    text: String,
+    style: Style,
+    width: usize,
+    right: bool,
+}
+
+impl Cell {
+    /// A left-aligned cell.
+    fn left(text: impl Into<String>, width: usize, style: Style) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            width,
+            right: false,
+        }
+    }
+
+    /// A right-aligned (numeric) cell.
+    fn right(text: impl Into<String>, width: usize, style: Style) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            width,
+            right: true,
+        }
+    }
+
+    /// The padded span this cell paints.
+    fn span(&self) -> Span<'static> {
+        let padded = if self.right {
+            format!("{:>width$}", self.text, width = self.width)
+        } else {
+            format!("{:<width$}", self.text, width = self.width)
+        };
+        Span::styled(padded, self.style)
+    }
+}
+
+/// Join a row's leading marker spans and its cells into one painted line.
+///
+/// A single blank column separates adjacent cells, matching [`columns::GAP_W`]
+/// and the header built by [`header_line`].
+fn row_line(marker: Vec<Span<'static>>, cells: &[Cell]) -> Line<'static> {
+    let mut spans = marker;
+    for (index, cell) in cells.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" ".repeat(columns::GAP_W), Style::default()));
+        }
+        spans.push(cell.span());
+    }
+    Line::from(spans)
+}
+
+/// The dimmed header row naming every column (FR-020).
+fn header_line() -> Line<'static> {
+    let dim = Style::default()
+        .fg(colors::HINT)
+        .add_modifier(Modifier::DIM);
+    let cells = vec![
+        Cell::left("id", columns::ID_W, dim),
+        Cell::left("name", columns::LABEL_W, dim),
+        Cell::left("status", columns::STATUS_W, dim),
+        Cell::left("model", columns::MODEL_W, dim),
+        Cell::right("elapsed", columns::ELAPSED_W, dim),
+        Cell::right("steps", columns::STEPS_W, dim),
+        Cell::right("claimed", columns::CLAIMED_W, dim),
+        Cell::right("done", columns::DONE_W, dim),
+        Cell::right("sent", columns::SENT_W, dim),
+        Cell::right("recv", columns::RECV_W, dim),
+    ];
+    let mut line = row_line(
+        vec![Span::styled(" ".repeat(columns::MARKER_W), dim)],
+        &cells,
+    );
+    let mut spans = std::mem::take(&mut line.spans);
+    spans.push(Span::styled(
+        " ".repeat(columns::CONTROL_GAP_W),
+        Style::default(),
+    ));
+    spans.push(Span::styled(
+        format!("{:<width$}", glyphs::STOP, width = columns::STOP_W),
+        dim,
+    ));
+    spans.push(Span::styled(
+        " ".repeat(columns::CONTROL_GAP_W),
+        Style::default(),
+    ));
+    spans.push(Span::styled(
+        format!("{:<width$}", glyphs::KILL, width = columns::KILL_W),
+        dim,
+    ));
+    Line::from(spans)
+}
+
+/// Build the trailing `[stop]` / `[x]` control spans for a teammate row.
+///
+/// A live row paints the suspend control padded to [`columns::STOP_W`] - `>`
+/// instead of `[stop]` while suspended, padded so `[x]` never moves - then a
+/// gap and the kill control.
+fn control_spans(suspended: bool) -> Vec<Span<'static>> {
+    let (glyph, fg) = if suspended {
+        (glyphs::RESUME, Color::Green)
+    } else {
+        (glyphs::STOP, Color::Yellow)
+    };
+    vec![
+        Span::styled(" ".repeat(columns::CONTROL_GAP_W), Style::default()),
+        Span::styled(
+            format!("{glyph:<width$}", width = columns::STOP_W),
+            Style::default().fg(fg).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ".repeat(columns::CONTROL_GAP_W), Style::default()),
+        Span::styled(
+            glyphs::KILL,
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+    ]
+}
+
+/// One painted row's action controls, captured in table scroll space.
+///
+/// Every painted teammate row records one entry; a terminal row records the
+/// placeholder with an empty identifier, so a click on such a row cannot
+/// resolve to a teammate at all (FR-071, NFR-011). `row` is the row's line
+/// index within the table; the renderer stores it in `Rect::y` so hit-test
+/// placement shifts directly with the paint (NFR-011).
+struct RowControl {
+    row: u16,
+    agent_id: String,
+}
+
+/// The task counts painted in one teammate row: `(claimed, done)` (FR-025).
+type TaskCounts = HashMap<String, (usize, usize)>;
+
+/// Read the per-agent task counts from the team task store.
+///
+/// The store is read once per frame (NFR-002), never once per row.
+fn task_counts(app: &App) -> TaskCounts {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    app.active_team
+        .as_ref()
+        .and_then(|team| TeamStore::load_by_name(&team.name, &working_dir).ok())
+        .and_then(|store| TaskStore::open(&store.dir).ok())
+        .and_then(|tasks| tasks.read().ok())
+        .map(|list| {
+            let mut counts: TaskCounts = HashMap::new();
+            for task in &list.tasks {
+                let Some(agent) = task.assigned_to.as_ref() else {
+                    continue;
+                };
+                let entry = counts.entry(agent.clone()).or_default();
+                entry.0 += 1; // claimed
+                if task.status == TaskStatus::Completed {
+                    entry.1 += 1; // done
+                }
+            }
+            counts
+        })
+        .unwrap_or_default()
+}
+
+/// The elapsed time of the lead session, from its persisted creation timestamp.
+///
+/// Falls back to `"-"` when the session is not in storage or its timestamp is
+/// not RFC 3339 (FR-021).
+fn lead_elapsed(app: &App, lead_session: &str) -> String {
+    app.storage
+        .get_session(lead_session)
+        .ok()
+        .flatten()
+        .and_then(|session| DateTime::parse_from_rfc3339(&session.created_at).ok())
+        .map(|dt| format_elapsed(dt.with_timezone(&Utc)))
+        .unwrap_or_else(|| glyphs::NONE.to_string())
+}
+
+/// The `(text, colour)` pair the model column paints for one teammate (FR-024).
+///
+/// A genuine override paints `<provider>/<model>` clipped to
+/// [`columns::MODEL_W`] in magenta. A member with no override - or whose
+/// override is the globally selected provider/model, which the status bar
+/// already shows - paints the inherited literal in hint colour.
+fn model_column(member: &TeamMember, global_model: Option<&str>) -> (String, Color) {
+    let Some(model_ref) = member.model_override.as_ref() else {
+        return (glyphs::INHERITED.to_string(), colors::HINT);
+    };
+    let rendered = format!("{}/{}", model_ref.provider_id, model_ref.model_id);
+    if global_model == Some(rendered.as_str()) {
+        return (glyphs::INHERITED.to_string(), colors::HINT);
+    }
+    (clip(&rendered, columns::MODEL_W), Color::Magenta)
+}
+
+/// Build the `<name>-<short id>` label of one teammate row (FR-022).
+///
+/// The label is clipped to [`columns::LABEL_W`] on a character boundary so it
+/// can never overflow its column or split a multi-byte sequence (NFR-004).
+fn teammate_label(member: &TeamMember, id_short: &str) -> String {
+    let label = format!("{}-{}", member.name, id_short);
+    clip(&label, columns::LABEL_W)
+}
+
+/// Build the four fixed cells that follow the marker and label columns.
+///
+/// `steps` is the live tool-call count, `claimed`/`done` come from the team task
+/// store and `sent`/`recv` from the per-agent message counters (FR-025). Zero
+/// message counts paint `"-"`; a non-zero count paints in its category colour.
+fn counter_cells(
+    elapsed: &str,
+    steps: &str,
+    claimed: usize,
+    done: usize,
+    sent: u32,
+    recv: u32,
+) -> Vec<Cell> {
+    let hint = hint_style();
+    vec![
+        Cell::right(elapsed, columns::ELAPSED_W, hint),
+        Cell::right(steps, columns::STEPS_W, hint),
+        Cell::right(
+            claimed.to_string(),
+            columns::CLAIMED_W,
+            Style::default().fg(if claimed > 0 {
+                Color::Yellow
+            } else {
+                colors::HINT
+            }),
+        ),
+        Cell::right(
+            done.to_string(),
+            columns::DONE_W,
+            Style::default().fg(if done > 0 { Color::Green } else { colors::HINT }),
+        ),
+        Cell::right(
+            count_cell(sent),
+            columns::SENT_W,
+            Style::default().fg(if sent > 0 { Color::Cyan } else { colors::HINT }),
+        ),
+        Cell::right(
+            count_cell(recv),
+            columns::RECV_W,
+            Style::default().fg(if recv > 0 { Color::Cyan } else { colors::HINT }),
+        ),
+    ]
+}
+
+/// Translate a row-space hit rectangle into screen space inside `inner`.
+///
+/// Returns `None` when the row is scrolled out of view or the control does not
+/// fit inside the painted table, so a click can never resolve to a control the
+/// user cannot see (NFR-011).
+fn place(rect: Rect, inner: Rect, scroll: u16) -> Option<Rect> {
+    if rect.width == 0 || rect.y < scroll {
+        return None;
+    }
+    let y = inner.y + (rect.y - scroll);
+    if y >= inner.bottom() {
+        return None;
+    }
+    let x = inner.x + rect.x;
+    let width = rect.width.min(inner.right().saturating_sub(x));
+    if width == 0 || y < inner.y {
+        return None;
+    }
+    Some(Rect::new(x, y, width, 1))
+}
+
 /// Render the Teams subpanel into `area`.
 ///
-/// Shows the active team name, the lead (current session), and all known
-/// teammates with their status, elapsed time, step count, tasks claimed/done.
+/// The first row is the dimmed header (FR-020), the second the lead row
+/// (FR-021), then one row per teammate (FR-022 through FR-025) or the empty-state
+/// hint when the team has no members (FR-026).
 pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     app.team_row_button_areas.clear();
     app.team_row_button_agent_ids.clear();
     app.team_row_kill_areas.clear();
     app.team_row_kill_agent_ids.clear();
+    app.teams_row_agent_ids.clear();
 
     app.refresh_team_member_session_ids();
     let team_name = app
         .active_team
         .as_ref()
-        .map(|t| t.name.clone())
+        .map(|team| team.name.clone())
         .unwrap_or_else(|| "team".to_string());
 
-    let members = &app.team_members;
     let lead_session = app.session_id.clone().unwrap_or_default();
     let lead_steps = app.event_bus.current_tool_calls(&lead_session);
-    let lead_elapsed = app
-        .storage
-        .get_session(&lead_session)
-        .ok()
-        .flatten()
-        .and_then(|s| DateTime::parse_from_rfc3339(&s.created_at).ok())
-        .map(|dt| format_elapsed(dt.with_timezone(&Utc)))
-        .unwrap_or_else(|| "-".to_string());
-
-    // Load task counts per agent from the team task store.
-    let working_dir = std::env::current_dir().unwrap_or_default();
-    let task_counts: std::collections::HashMap<String, (usize, usize)> = app
-        .active_team
-        .as_ref()
-        .and_then(|t| {
-            TeamStore::load_by_name(&t.name, &working_dir)
-                .ok()
-                .and_then(|s| TaskStore::open(&s.dir).ok())
-                .and_then(|ts| ts.read().ok())
-                .map(|list| {
-                    let mut counts: std::collections::HashMap<String, (usize, usize)> =
-                        std::collections::HashMap::new();
-                    for task in &list.tasks {
-                        if let Some(agent) = &task.assigned_to {
-                            let entry = counts.entry(agent.clone()).or_default();
-                            entry.0 += 1; // claimed
-                            if task.status == TaskStatus::Completed {
-                                entry.1 += 1; // completed
-                            }
-                        }
-                    }
-                    counts
-                })
-        })
-        .unwrap_or_default();
-
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Column widths (tight but readable).
-    // id=8, name=35, status=10, model=18, elapsed=7, steps=5, claimed=7, done=6, sent=5, recv=5
-    let dim = Style::default()
-        .fg(colors::HINT)
-        .add_modifier(Modifier::DIM);
-    // -- header ------------------------------------------------------------
-    lines.push(Line::from(vec![
-        Span::styled("  ", Style::default()),
-        Span::styled(format!("{:<8} ", "id"), dim),
-        Span::styled(format!("{:<31} ", "name"), dim),
-        Span::styled(format!("{:<10} ", "status"), dim),
-        Span::styled(format!("{:<18} ", "model"), dim),
-        Span::styled(format!("{:>7} ", "elapsed"), dim),
-        Span::styled(format!("{:>5} ", "steps"), dim),
-        Span::styled(format!("{:>7} ", "claimed"), dim),
-        Span::styled(format!("{:>6} ", "done"), dim),
-        Span::styled(format!("{:>5} ", "sent"), dim),
-        Span::styled(format!("{:>5} ", "recv"), dim),
-        Span::styled(format!(" {:>3} {:>3}", ">[stop]", "[x]"), dim),
-    ]));
-
-    // -- lead row ---------------------------------------------------------
-    let lead_status_color = Color::Green;
+    let lead_elapsed = lead_elapsed(app, &lead_session);
     let lead_agent_id = app.agent_name.clone();
     let (lead_sent, lead_recv) = app
         .team_message_counts
@@ -130,218 +490,195 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .or_else(|| app.team_message_counts.get("lead"))
         .copied()
         .unwrap_or((0, 0));
-    lines.push(Line::from(vec![
-        Span::styled("* ", Style::default().fg(lead_status_color)),
-        Span::styled(
-            format!("{:<8} ", short_id(&lead_session)),
-            Style::default()
-                .fg(lead_status_color)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{:<31} ", app.agent_name.as_str()),
-            Style::default().fg(lead_status_color),
-        ),
-        Span::styled(
-            format!("{:<10} ", "active"),
-            Style::default().fg(lead_status_color),
-        ),
-        Span::styled(
-            format!("{:<18} ", "lead"),
-            Style::default().fg(colors::HINT),
-        ),
-        Span::styled(
-            format!("{:>7} ", lead_elapsed),
-            Style::default().fg(colors::HINT),
-        ),
-        Span::styled(
-            format!("{:>5} ", lead_steps),
-            Style::default().fg(colors::HINT),
-        ),
-        Span::styled(format!("{:>7} ", "-"), Style::default().fg(colors::HINT)),
-        Span::styled(format!("{:>6} ", "-"), Style::default().fg(colors::HINT)),
-        Span::styled(
-            format!("{:>5} ", count_cell(lead_sent)),
-            Style::default().fg(if lead_sent > 0 {
-                Color::Cyan
-            } else {
-                colors::HINT
-            }),
-        ),
-        Span::styled(
-            format!("{:>5} ", count_cell(lead_recv)),
-            Style::default().fg(if lead_recv > 0 {
-                Color::Cyan
-            } else {
-                colors::HINT
-            }),
-        ),
-    ]));
-    // -- teammate rows -----------------------------------------------------
-    for (i, member) in members.iter().enumerate() {
-        let (status_str, status_color) = status_label(&member.status);
-        let id_short = short_id(&member.agent_id);
-        let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
 
+    let counts = task_counts(app);
+    let global_model = app.active_model_ref_string();
+    let member_count = app.team_members.len();
+
+    let mut lines: Vec<Line> = Vec::new();
+    // Click key per painted row, kept index-aligned with `lines` (T-008): the
+    // header and the empty-state hint open nothing, the lead row is the
+    // `"lead"` sentinel, and a teammate row carries its agent id.
+    let mut row_keys: Vec<String> = Vec::new();
+    lines.push(header_line());
+    row_keys.push(String::new());
+
+    // -- lead row (FR-021) -------------------------------------------------
+    let lead = Color::Green;
+    lines.push(row_line(
+        vec![Span::styled(
+            format!("{:<width$}", glyphs::LEAD, width = columns::MARKER_W),
+            Style::default().fg(lead),
+        )],
+        &[
+            Cell::left(
+                short_id(&lead_session),
+                columns::ID_W,
+                Style::default().fg(lead).add_modifier(Modifier::BOLD),
+            ),
+            Cell::left(
+                clip(&app.agent_name, columns::LABEL_W),
+                columns::LABEL_W,
+                Style::default().fg(lead).add_modifier(Modifier::BOLD),
+            ),
+            Cell::left(
+                glyphs::LEAD_STATUS,
+                columns::STATUS_W,
+                Style::default().fg(lead),
+            ),
+            Cell::left(glyphs::LEAD_MODEL, columns::MODEL_W, hint_style()),
+            Cell::right(lead_elapsed, columns::ELAPSED_W, hint_style()),
+            Cell::right(lead_steps.to_string(), columns::STEPS_W, hint_style()),
+            // The lead owns no claimable task slot (FR-021).
+            Cell::right(glyphs::NONE, columns::CLAIMED_W, hint_style()),
+            Cell::right(glyphs::NONE, columns::DONE_W, hint_style()),
+            Cell::right(
+                count_cell(lead_sent),
+                columns::SENT_W,
+                Style::default().fg(if lead_sent > 0 {
+                    Color::Cyan
+                } else {
+                    colors::HINT
+                }),
+            ),
+            Cell::right(
+                count_cell(lead_recv),
+                columns::RECV_W,
+                Style::default().fg(if lead_recv > 0 {
+                    Color::Cyan
+                } else {
+                    colors::HINT
+                }),
+            ),
+        ],
+    ));
+    row_keys.push("lead".to_string());
+
+    // -- teammate rows (FR-022 through FR-025) -----------------------------
+    let mut controls: Vec<RowControl> = Vec::new();
+    for (index, member) in app.team_members.iter().enumerate() {
+        let member_agent_name = member.agent_id.clone();
+        let id_short = short_id(&member.agent_id);
+        let label = teammate_label(member, &id_short);
+        let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
         let steps = member
             .session_id
             .as_deref()
             .map(|sid| app.event_bus.current_tool_calls(sid))
             .unwrap_or(0);
-
-        let (claimed, done) = task_counts.get(&member.agent_id).copied().unwrap_or((0, 0));
-
+        let (claimed, done) = counts.get(&member.agent_id).copied().unwrap_or((0, 0));
         let (sent, recv) = app
             .team_message_counts
             .get(&member.agent_id)
             .copied()
             .unwrap_or((0, 0));
+        let (model_text, model_color) = model_column(member, global_model.as_deref());
 
-        let connector = if i + 1 == members.len() {
-            "└ "
+        let focus = if is_focused {
+            glyphs::FOCUS
         } else {
-            "├ "
+            glyphs::FOCUS_NONE
         };
-        let name_color = if is_focused {
-            Color::Yellow
+        let connector = if index + 1 == member_count {
+            glyphs::BRANCH_LAST
         } else {
-            Color::White
+            glyphs::BRANCH_MID
         };
-        let name_mod = if is_focused {
-            Modifier::BOLD | Modifier::UNDERLINED
+        let name_style = if is_focused {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Modifier::empty()
+            Style::default().fg(Color::White)
         };
-        let focus_marker = if is_focused { ">" } else { " " };
-        let name_label = {
-            let name_with_id = format!("{}-{}", member.name, id_short);
-            let truncated: String = name_with_id.chars().take(31).collect();
-            truncated
-        };
+
+        // FR-052: a `lead` sender or recipient never increments a counter, so
+        // the lead row's own sent/recv cells are always `-`; a member whose
+        // agent id equals the team lead's agent name (the "lead" counter key
+        // the event handlers skip) is rendered the same way.
+        let counters_hidden = member_agent_name == "lead";
 
         let mut spans = vec![
-            Span::styled(focus_marker, Style::default().fg(Color::Yellow)),
-            Span::styled(connector, Style::default().fg(Color::Blue)),
             Span::styled(
-                format!("{:<8} ", id_short),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::styled(
-                format!("{:<31} ", name_label),
-                Style::default().fg(name_color).add_modifier(name_mod),
-            ),
-            Span::styled(
-                format!("{:<10} ", status_str),
-                Style::default().fg(status_color),
-            ),
-        ];
-
-        // Model column: show override or "(inherited)"
-        let model_label: String = member
-            .model_override
-            .as_ref()
-            .map(|mr| {
-                let full = format!("{}/{}", mr.provider_id, mr.model_id);
-                full.chars().take(17).collect()
-            })
-            .unwrap_or_else(|| "(inherited)".to_string());
-        let model_color = if member.model_override.is_some() {
-            Color::Magenta
-        } else {
-            colors::HINT
-        };
-        spans.push(Span::styled(
-            format!("{:<18} ", model_label),
-            Style::default().fg(model_color),
-        ));
-
-        spans.extend_from_slice(&[
-            Span::styled(
-                format!("{:>7} ", format_elapsed(member.created_at)),
-                Style::default().fg(colors::HINT),
-            ),
-            Span::styled(format!("{:>5} ", steps), Style::default().fg(colors::HINT)),
-            Span::styled(
-                format!("{:>7} ", claimed),
-                Style::default().fg(if claimed > 0 {
+                format!("{focus}{connector}"),
+                Style::default().fg(if is_focused {
                     Color::Yellow
                 } else {
-                    colors::HINT
+                    Color::Blue
                 }),
             ),
-            Span::styled(
-                format!("{:>6} ", done),
-                Style::default().fg(if done > 0 { Color::Green } else { colors::HINT }),
-            ),
-            Span::styled(
-                format!("{:>5} ", count_cell(sent)),
-                Style::default().fg(if sent > 0 { Color::Cyan } else { colors::HINT }),
-            ),
-            Span::styled(
-                format!("{:>5} ", count_cell(recv)),
-                Style::default().fg(if recv > 0 { Color::Cyan } else { colors::HINT }),
-            ),
-        ]);
-
-        // Play/Stop and Kill buttons for non-terminal teammates.
-        let is_terminal = matches!(
-            member.status,
-            MemberStatus::ShuttingDown | MemberStatus::Stopped | MemberStatus::Failed
+            Cell::left(id_short, columns::ID_W, Style::default().fg(Color::Cyan)).span(),
+            Span::styled(" ".repeat(columns::GAP_W), Style::default()),
+            Cell::left(label, columns::LABEL_W, name_style).span(),
+            Span::styled(" ".repeat(columns::GAP_W), Style::default()),
+            Cell::left(
+                member.status.display_label(),
+                columns::STATUS_W,
+                Style::default().fg(status_color(&member.status)),
+            )
+            .span(),
+            Span::styled(" ".repeat(columns::GAP_W), Style::default()),
+            Cell::left(
+                model_text,
+                columns::MODEL_W,
+                Style::default().fg(model_color),
+            )
+            .span(),
+        ];
+        let mut counters = counter_cells(
+            &format_elapsed(member.created_at),
+            &steps.to_string(),
+            claimed,
+            done,
+            sent,
+            recv,
         );
-        if !is_terminal {
-            let (btn_char, btn_fg) = if member.status == MemberStatus::Suspended {
-                (">", Color::Green)
-            } else {
-                ("[stop]", Color::Yellow)
-            };
-            spans.push(Span::styled("  ", Style::default()));
-            spans.push(Span::styled(
-                btn_char,
-                Style::default().fg(btn_fg).add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled("  ", Style::default()));
-            spans.push(Span::styled(
-                "[x]",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ));
-            // Compute x positions from cumulative column widths.
-            // Pre-button columns: focus(1) + connector(2) + id(9) + name(32)
-            //   + status(11) + model(19) + elapsed(8) + steps(6)
-            //   + claimed(8) + done(7) + sent(6) + recv(6) = 115
-            // + 2 spaces before button char
-            let btn_x: u16 = 115 + 2;
-            let kill_x: u16 = btn_x + 4; // button char(2) + 2 spaces
-            let row = lines.len() as u16;
-            app.team_row_button_areas.push(Rect::new(btn_x, row, 4, 1));
-            app.team_row_kill_areas.push(Rect::new(kill_x, row, 3, 1));
-            app.team_row_button_agent_ids.push(member.agent_id.clone());
-            app.team_row_kill_agent_ids.push(member.agent_id.clone());
-        } else {
-            app.team_row_button_areas.push(Rect::default());
-            app.team_row_kill_areas.push(Rect::default());
-            app.team_row_button_agent_ids.push(String::new());
-            app.team_row_kill_agent_ids.push(String::new());
+        if counters_hidden {
+            // The sent and received cells stay at the "-" literal because the
+            // event handlers never increment a `lead` counter key (FR-052).
+            counters[4] = Cell::right(glyphs::NONE, columns::SENT_W, hint_style());
+            counters[5] = Cell::right(glyphs::NONE, columns::RECV_W, hint_style());
         }
+        for cell in &counters {
+            spans.push(Span::styled(" ".repeat(columns::GAP_W), Style::default()));
+            spans.push(cell.span());
+        }
+
+        if !is_terminal(&member.status) {
+            spans.extend(control_spans(member.status == MemberStatus::Suspended));
+        }
+        // Every painted teammate row records one control entry; a terminal row
+        // records the placeholder pair (FR-071, NFR-011).
+        controls.push(RowControl {
+            row: lines.len() as u16,
+            agent_id: if is_terminal(&member.status) {
+                String::new()
+            } else {
+                member.agent_id.clone()
+            },
+        });
         lines.push(Line::from(spans));
+        row_keys.push(member.agent_id.clone());
     }
-    // Show a hint when no teammates yet.
-    if members.is_empty() {
+
+    // -- empty state (FR-026) ---------------------------------------------
+    if member_count == 0 {
         lines.push(Line::from(vec![Span::styled(
-            "  (no teammates yet - use team_spawn tool or blueprint)",
+            format!("  {}", glyphs::EMPTY_HINT),
             Style::default()
                 .fg(colors::HINT)
                 .add_modifier(Modifier::DIM),
         )]));
+        row_keys.push(String::new());
     }
-    let total_lines = lines.len() as u16;
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
             " Team: {}  (lead + {} teammate{}) ",
             team_name,
-            members.len(),
-            if members.len() == 1 { "" } else { "s" }
+            member_count,
+            if member_count == 1 { "" } else { "s" }
         ))
         .title_style(
             Style::default()
@@ -351,58 +688,75 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .border_style(Style::default().fg(Color::Blue));
 
     let inner = block.inner(area);
-    let visible_lines = inner.height;
-    app.teams_max_scroll = total_lines.saturating_sub(visible_lines);
-    app.teams_scroll_offset = app.teams_scroll_offset.min(app.teams_max_scroll);
-    let scroll = app.teams_scroll_offset;
+    let visible = inner.height;
+    let max_scroll = (lines.len() as u16).saturating_sub(visible);
+    app.teams_max_scroll = max_scroll;
+    // `teams_area` keeps the frame's content area (FR-008 geometry); the
+    // painted-rows rectangle goes to `teams_rows_area` so a click maps onto
+    // the row it was painted on without knowing the table border's offset
+    // (FR-056, NFR-011).
+    app.teams_area = area;
+    app.teams_rows_area = inner;
+    let scroll = app.teams_scroll_offset.min(max_scroll);
+    app.teams_row_agent_ids = row_keys;
 
     // Render only the visible slice, mirroring the message-window pattern.
     let window: Vec<Line> = lines
         .into_iter()
         .skip(scroll as usize)
-        .take(visible_lines as usize)
+        .take(visible as usize)
         .collect();
-    let paragraph = Paragraph::new(window).block(block);
+    frame.render_widget(Paragraph::new(window).block(block), area);
 
-    frame.render_widget(paragraph, area);
-
-    // Adjust stored button areas for scroll/position, keeping IDs in sync.
-    // The row index captured in each Rect's `y` corresponds to the line's
-    // position in the full (un-sliced) list, so we subtract the scroll offset
-    // and add the block top border.
-    let mut shifted_button_areas: Vec<Rect> = Vec::new();
-    let mut shifted_button_agent_ids: Vec<String> = Vec::new();
-    for (i, r) in app.team_row_button_areas.iter().enumerate() {
-        if r.width == 0 || r.y < scroll {
-            continue;
-        }
-        let y = area.y + 1 + (r.y - scroll);
-        if y >= area.y && y < area.y + area.height {
-            shifted_button_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
-            shifted_button_agent_ids.push(app.team_row_button_agent_ids[i].clone());
-        }
+    // Record every control entry in screen space. A live control scrolls into
+    // a placed rectangle; a terminal-row placeholder or an out-of-view control
+    // keeps its vector position as `Rect::default()` with an empty identifier,
+    // which can never match a click - so each hit-rect vector stays
+    // index-aligned with its identifier vector and with the painted rows
+    // (FR-056, FR-071, NFR-011).
+    for control in &controls {
+        // An empty identifier marks the terminal-row placeholder: it is never
+        // placed, so its entry is the inert default pair (FR-071).
+        let live = !control.agent_id.is_empty();
+        let stop = Rect::new(
+            columns::STOP_X as u16,
+            control.row,
+            columns::STOP_W as u16,
+            1,
+        );
+        let (placed, placed_id) = (
+            if live {
+                place(stop, inner, scroll)
+            } else {
+                None
+            },
+            control.agent_id.clone(),
+        );
+        app.team_row_button_areas.push(placed.unwrap_or_default());
+        app.team_row_button_agent_ids
+            .push(placed.map(|_| placed_id).unwrap_or_default());
+        let kill = Rect::new(
+            columns::KILL_X as u16,
+            control.row,
+            columns::KILL_W as u16,
+            1,
+        );
+        let (placed, placed_id) = (
+            if live {
+                place(kill, inner, scroll)
+            } else {
+                None
+            },
+            control.agent_id.clone(),
+        );
+        app.team_row_kill_areas.push(placed.unwrap_or_default());
+        app.team_row_kill_agent_ids
+            .push(placed.map(|_| placed_id).unwrap_or_default());
     }
-    app.team_row_button_areas = shifted_button_areas;
-    app.team_row_button_agent_ids = shifted_button_agent_ids;
 
-    let mut shifted_kill_areas: Vec<Rect> = Vec::new();
-    let mut shifted_kill_agent_ids: Vec<String> = Vec::new();
-    for (i, r) in app.team_row_kill_areas.iter().enumerate() {
-        if r.width == 0 || r.y < scroll {
-            continue;
-        }
-        let y = area.y + 1 + (r.y - scroll);
-        if y >= area.y && y < area.y + area.height {
-            shifted_kill_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
-            shifted_kill_agent_ids.push(app.team_row_kill_agent_ids[i].clone());
-        }
-    }
-    app.team_row_kill_areas = shifted_kill_areas;
-    app.team_row_kill_agent_ids = shifted_kill_agent_ids;
-
-    if app.teams_max_scroll > 0 {
-        let mut scrollbar_state = ScrollbarState::new(app.teams_max_scroll as usize)
-            .position(app.teams_scroll_offset as usize);
+    if max_scroll > 0 {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,

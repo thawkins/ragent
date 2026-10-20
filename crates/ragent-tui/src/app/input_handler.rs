@@ -340,6 +340,31 @@ impl App {
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // While the destructive row-action confirmation dialog is open it owns
+        // the mouse as the topmost modal (spec `agentui` T-009): a click inside
+        // the painted dialog picks the option whose half of the dialog row the
+        // pointer landed in, and every other mouse event is swallowed so no
+        // surface beneath the modal can react (FR-036, FR-037, FR-040, FR-070).
+        if self.row_action_confirm_open() {
+            let area = self.row_action_confirm_area;
+            if event.kind == MouseEventKind::Down(MouseButton::Left)
+                && area.width > 0
+                && area.contains((event.column, event.row).into())
+            {
+                if event.column < area.x + area.width / 2 {
+                    self.row_action_confirm_accept();
+                } else {
+                    self.row_action_confirm_cancel();
+                }
+            }
+            self.assert_ui_invariants();
+            self.debug_log_input_transition(
+                "mouse-row-action-confirm",
+                &before_input,
+                before_cursor,
+            );
+            return;
+        }
         // While the plugin-store browse panel is open it owns the mouse as well as
         // the keyboard: every mouse event is routed to the panel and swallowed, so a
         // click in the navigator can never start a text selection behind the modal
@@ -381,6 +406,45 @@ impl App {
         }
 
         match event.kind {
+            // While an agentui popup table is open its wheel owns the scroll:
+            // the offset moves by SCROLL_STEP_LINES and re-clamps to the
+            // maximum the renderer computed (render clamps the painted slice,
+            // so the two can never disagree). The popups are topmost, so these
+            // arms precede the research/output-view and pane checks; a wheel
+            // over the popup can thus never scroll the surface beneath it
+            // (spec `agentui` FR-008, FR-059, T-017).
+            MouseEventKind::ScrollUp
+                if self.active_agents_area.contains((event.column, event.row).into()) =>
+            {
+                self.active_agents_scroll_offset = (self
+                    .active_agents_scroll_offset
+                    .saturating_add(SCROLL_STEP_LINES))
+                .min(self.active_agents_max_scroll);
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown
+                if self.active_agents_area.contains((event.column, event.row).into()) =>
+            {
+                self.active_agents_scroll_offset =
+                    self.active_agents_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp
+                if self.teams_area.contains((event.column, event.row).into()) =>
+            {
+                self.teams_scroll_offset = (self.teams_scroll_offset.saturating_add(
+                    SCROLL_STEP_LINES,
+                ))
+                .min(self.teams_max_scroll);
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown
+                if self.teams_area.contains((event.column, event.row).into()) =>
+            {
+                self.teams_scroll_offset =
+                    self.teams_scroll_offset.saturating_sub(SCROLL_STEP_LINES);
+                self.needs_redraw = true;
+            }
             MouseEventKind::ScrollUp => {
                 if self.research_view.is_some()
                     && self
@@ -477,34 +541,22 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {
-                    if self.active_tasks.is_empty() && self.bg_tasks.is_empty() {
-                        return;
-                    }
-                    self.show_agents_window = !self.show_agents_window;
-                    if self.show_agents_window {
-                        self.show_teams_window = false;
-                    }
+                    self.toggle_agents_window();
                     return;
                 }
                 if self.teams_button_area.contains(pos.into()) {
-                    if self.active_team.is_none() {
-                        return;
-                    }
-                    self.show_teams_window = !self.show_teams_window;
-                    if self.show_teams_window {
-                        self.show_agents_window = false;
-                    }
+                    self.toggle_teams_window();
                     return;
                 }
                 if self.agents_close_button_area.contains(pos.into()) {
-                    self.show_agents_window = false;
+                    self.close_agents_window();
                     return;
                 }
-                                  if self.teams_close_button_area.contains(pos.into()) {
-                                      self.show_teams_window = false;
-                                      return;
-                                  }
-                                  if self.research_view.is_some() {
+                if self.teams_close_button_area.contains(pos.into()) {
+                    self.close_teams_window();
+                    return;
+                }
+                if self.research_view.is_some() {
                     if self.research_view_area.contains(pos.into()) {
                         return;
                     }
@@ -523,122 +575,193 @@ impl App {
                     self.selected_agent_session_id = None;
                     self.selected_agent_index = None;
                 }
-                                  if self
-                                      .active_agents_area
-                                      .contains((event.column, event.row).into())
-                                  {
-                                      let row = event.row.saturating_sub(self.active_agents_area.y);
-                                      let absolute_row =
-                                          row.saturating_add(self.active_agents_scroll_offset) as usize;
-
-                                                                              // Check button clicks first (Play/Stop and Kill)
-                                                                              for (i, area) in self.agent_row_button_areas.iter().enumerate() {
-                                                                                  if area.contains((event.column, event.row).into()) {
-                                                                                      let task_id = &self.agent_row_button_task_ids[i];
-                                                                                      if let Some(task) = self.active_tasks.iter().find(|t| t.id == *task_id).cloned() {
-                                                                                          if task.status == ragent_agent::task::TaskStatus::Suspended {
-                                                                                              self.resume_agent_task(&task.id);
-                                                                                          } else {
-                                                                                              self.suspend_agent_task(&task.id);
-                                                                                          }
-                                                                                      } else if self.bg_tasks.iter().any(|t| t.id == *task_id) {
-                                                                                          let id = task_id.clone();
-                                                                                          self.cancel_bg_task(&id);
-                                                                                      }
-                                                                                      return;
-                                                                                  }
-                                                                              }
-                                                                              for (i, area) in self.agent_row_kill_areas.iter().enumerate() {
-                                                                                  if area.contains((event.column, event.row).into()) {
-                                                                                      let task_id = &self.agent_row_kill_task_ids[i];
-                                                                                      if let Some(task) = self.active_tasks.iter().find(|t| t.id == *task_id).cloned() {
-                                                                                          self.kill_agent_task(&task.id);
-                                                                                      } else if self.bg_tasks.iter().any(|t| t.id == *task_id) {
-                                                                                          let id = task_id.clone();
-                                                                                          self.cancel_bg_task(&id);
-                                                                                      }
-                                                                                      return;
-                                                                                  }
-                                                                                                                                                              }
-                                                                                                                      if absolute_row == 1 {                                          if let Some(ref sid) = self.session_id {
-                                              self.selected_agent_index = Some(0);
-                                              self.open_output_view_session(sid.clone(), "primary".to_string());
-                                          }
-                                          return;
-                                      }
-                                      if absolute_row >= 2 {
-                                          let idx = absolute_row - 2;
-                                          if let Some(task) = self.active_tasks.get(idx).cloned() {
-                                              self.selected_agent_index = Some(idx + 1);
-                                              self.open_output_view_session(
-                                                  task.child_session_id.clone(),
-                                                  format!("{} [{}]", task.agent_name, short_session_id(&task.id)),                            );
+                if self
+                    .active_agents_area
+                    .contains((event.column, event.row).into())
+                {
+                    // Button clicks first (Play/Stop and Kill); each arm
+                    // returns on a hit.
+                    for (i, area) in self.agent_row_button_areas.iter().enumerate() {
+                        if area.contains((event.column, event.row).into()) {
+                            let task_id = &self.agent_row_button_task_ids[i];
+                            // A terminal-row placeholder is inert (FR-071).
+                            if task_id.is_empty() {
+                                return;
+                            }
+                            if let Some(task) =
+                                self.active_tasks.iter().find(|t| t.id == *task_id).cloned()
+                            {
+                                // A suspend is not destructive and a resume
+                                // restores a running subject, so neither
+                                // direction confirms (FR-035; the dialog
+                                // covers only the FR-036 termination).
+                                if task.status == ragent_agent::task::TaskStatus::Suspended {
+                                    self.resume_agent_task(&task.id);
+                                } else {
+                                    self.suspend_agent_task(&task.id);
+                                }
+                            } else if let Some(bg) =
+                                self.bg_tasks.iter().find(|t| t.id == *task_id).cloned()
+                            {
+                                // Cancelling destroys the shell task: confirm
+                                // first (FR-037).
+                                self.open_row_action(crate::app::RowAction::CancelBackground {
+                                    task_id: bg.id,
+                                    command: bg.command,
+                                });
+                            }
+                            return;
                         }
-                        return;
                     }
+                    for (i, area) in self.agent_row_kill_areas.iter().enumerate() {
+                        if area.contains((event.column, event.row).into()) {
+                            let task_id = &self.agent_row_kill_task_ids[i];
+                            // A terminal-row placeholder is inert (FR-071).
+                            if task_id.is_empty() {
+                                return;
+                            }
+                            if let Some(task) =
+                                self.active_tasks.iter().find(|t| t.id == *task_id).cloned()
+                            {
+                                // Terminating a sub-agent is destructive:
+                                // confirm first (FR-036).
+                                self.open_row_action(crate::app::RowAction::KillSubagent {
+                                    task_id: task.id,
+                                    agent_name: task.agent_name,
+                                });
+                            } else if let Some(bg) =
+                                self.bg_tasks.iter().find(|t| t.id == *task_id).cloned()
+                            {
+                                self.open_row_action(crate::app::RowAction::CancelBackground {
+                                    task_id: bg.id,
+                                    command: bg.command,
+                                });
+                            }
+                            return;
+                        }
+                    }
+                    let row = event.row.saturating_sub(self.active_agents_area.y);
+                    let absolute_row =
+                        row.saturating_add(self.active_agents_scroll_offset) as usize;
+                    // Row clicks resolve through the renderer's painted-row map
+                    // so a click always opens the task painted on that line
+                    // (A3, FR-033, FR-034). A non-selectable or stale row is
+                    // consumed and ignored (FR-069, FR-070).
+                    if let Some(row_key) = self.agents_row_task_ids.get(absolute_row) {
+                        if row_key.as_str() == "primary" {
+                            // -- FR-033: the primary agent row ----------------
+                            if let Some(ref sid) = self.session_id {
+                                self.selected_agent_index = Some(0);
+                                self.open_output_view_session(sid.clone(), "primary".to_string());
+                                self.needs_redraw = true;
+                            }
+                        } else if !row_key.is_empty() {
+                            // -- FR-034: a sub-agent row ----------------------
+                            let found = self
+                                .active_tasks
+                                .iter()
+                                .enumerate()
+                                .find(|(_, t)| t.id == *row_key)
+                                .map(|(idx, t)| (idx, t.clone()));
+                            if let Some((idx, task)) = found {
+                                self.selected_agent_index = Some(idx + 1);
+                                self.open_output_view_session(
+                                    task.child_session_id.clone(),
+                                    format!(
+                                        "{} [{}]",
+                                        task.agent_name,
+                                        short_session_id(&task.id)
+                                    ),
+                                );
+                                self.needs_redraw = true;
+                            }
+                        }
+                    }
+                    return;
                 }
-                                  if self.teams_area.contains((event.column, event.row).into()) {
-                                      let row = event.row.saturating_sub(self.teams_area.y);
-                                      let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
 
-                                                                                                                                                              // Check button clicks first (Play/Stop and Kill)
-                                                                                                                                                              for (i, area) in self.team_row_button_areas.iter().enumerate() {
-                                                                                                                                                                  if area.contains((event.column, event.row).into()) {
-                                                                                                                                                                      let agent_id = &self.team_row_button_agent_ids[i];
-                                                                                                                                                                      if let Some(member) = self.team_members.iter().find(|m| m.agent_id == *agent_id).cloned() {
-                                                                                                                                                                          if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                                                                                                                                                                              let tm = self.session_processor.team_manager.get().cloned();
-                                                                                                                                                                              let id = member.agent_id.clone();
-                                                                                                                                                                              let is_suspended = member.status == ragent_agent::team::MemberStatus::Suspended;
-                                                                                                                                                                              handle.spawn(async move {
-                                                                                                                                                                                  if let Some(tm) = tm {
-                                                                                                                                                                                      if is_suspended {
-                                                                                                                                                                                          let _ = tm.resume_teammate(&id).await;  // INTENTIONAL: detached teammate control; failure surfaces via team status
-                                                                                                                                                                                      } else {
-                                                                                                                                                                                          let _ = tm.suspend_teammate(&id).await;  // INTENTIONAL: detached teammate control; failure surfaces via team status
-                                                                                                                                                                                      }
-                                                                                                                                                                                  }
-                                                                                                                                                                              });
-                                                                                                                                                                          }
-                                                                                                                                                                      }
-                                                                                                                                                                      return;
-                                                                                                                                                                  }
-                                                                                                                                                              }
-                                                                                                                                                              for (i, area) in self.team_row_kill_areas.iter().enumerate() {
-                                                                                                                                                                  if area.contains((event.column, event.row).into()) {
-                                                                                                                                                                      let agent_id = &self.team_row_kill_agent_ids[i];
-                                                                                                                                                                      if let Some(member) = self.team_members.iter().find(|m| m.agent_id == *agent_id).cloned() {
-                                                                                                                                                                          if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                                                                                                                                                                              let tm = self.session_processor.team_manager.get().cloned();
-                                                                                                                                                                              let id = member.agent_id.clone();
-                                                                                                                                                                              handle.spawn(async move {
-                                                                                                                                                                                  if let Some(tm) = tm {
-                                                                                                                                                                                      if let Err(e) = tm.shutdown_teammate(&id, false).await {
-                                                                                                                                                                                          tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
-                                                                                                                                                                                      }
-                                                                                                                                                                                  }
-                                                                                                                                                                              });
-                                                                                                                                                                          }
-                                                                                                                                                                      }
-                                                                                                                                                                      return;
-                                                                                                                                                                  }
-                                                                                                                                                              }                                      // Account for border line at row 0
-                                      if absolute_row == 2 {
-                                          // Lead row clicked - unfocus any teammate
-                                          self.focused_teammate = None;
-                                          self.status = "focus: lead (you)".to_string();
-                                          return;
-                                      }
-                                      if absolute_row >= 3 {
-                                          // Teammate rows start at absolute_row 3 (after border, header, lead)
-                                          let idx = absolute_row - 3;
-                                          if let Some(member) = self.team_members.get(idx).cloned() {
-                                              // Focus this teammate (same as /team focus <name>)
-                                              self.focus_teammate_by_id(&member.agent_id);
-                                          }
-                                          return;
-                                      }
-                                                                      } // Scrollbar drag takes priority (rightmost column of pane)
+                if self.teams_area.contains((event.column, event.row).into()) {
+                    // Button clicks first (Play/Stop and Kill); each arm
+                    // returns on a hit.
+                    for (i, area) in self.team_row_button_areas.iter().enumerate() {
+                        if area.contains((event.column, event.row).into()) {
+                            let agent_id = &self.team_row_button_agent_ids[i];
+                            // A terminal-row placeholder is inert (FR-071).
+                            if agent_id.is_empty() {
+                                return;
+                            }
+                            if let Some(member) = self
+                                .team_members
+                                .iter()
+                                .find(|m| m.agent_id == *agent_id)
+                                .cloned()
+                            {
+                                if member.status == ragent_agent::team::MemberStatus::Suspended {
+                                    // Resuming restores a subject that is
+                                    // already suspended: not destructive, so
+                                    // no dialog (FR-040 confirms only the
+                                    // suspend direction).
+                                    self.dispatch_resume_teammate(&member.agent_id);
+                                } else {
+                                    // Suspending a live teammate destroys its
+                                    // in-flight turn: confirm first (FR-040).
+                                    self.open_row_action(crate::app::RowAction::SuspendTeammate {
+                                        agent_id: member.agent_id,
+                                        name: member.name,
+                                    });
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    for (i, area) in self.team_row_kill_areas.iter().enumerate() {
+                        if area.contains((event.column, event.row).into()) {
+                            let agent_id = &self.team_row_kill_agent_ids[i];
+                            // A terminal-row placeholder is inert (FR-071).
+                            if agent_id.is_empty() {
+                                return;
+                            }
+                            if let Some(member) = self
+                                .team_members
+                                .iter()
+                                .find(|m| m.agent_id == *agent_id)
+                                .cloned()
+                            {
+                                // Shutting a teammate down is destructive:
+                                // confirm first (FR-040).
+                                self.open_row_action(crate::app::RowAction::ShutdownTeammate {
+                                    agent_id: member.agent_id,
+                                    name: member.name,
+                                });
+                            }
+                            return;
+                        }
+                    }
+                    // The rows rectangle (not the frame content area) is the
+                    // click basis: the table's border and title rows live
+                    // above it, so (screen row - rows.y) + scroll indexes the
+                    // painted rows (FR-056, NFR-011).
+                    let row = event.row.saturating_sub(self.teams_rows_area.y);
+                    let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
+                    // Row clicks resolve through the renderer's painted-row
+                    // map: the lead row clears focus (FR-039), a teammate row
+                    // focuses it and opens its output view (FR-038). A blank or
+                    // stale row is consumed and ignored (FR-069, FR-070).
+                    if let Some(row_key) = self.teams_row_agent_ids.get(absolute_row).cloned() {
+                        if row_key.as_str() == "lead" {
+                            // Lead row clicked - unfocus any teammate
+                            self.focused_teammate = None;
+                            self.status = "focus: lead (you)".to_string();
+                            self.needs_redraw = true;
+                        } else if !row_key.is_empty() {
+                            // Focus this teammate (same as /team focus <name>)
+                            self.focus_teammate_by_id(&row_key);
+                        }
+                    }
+                    return;
+                }
+
+                    // Scrollbar drag takes priority (rightmost column of pane)
                                                     if self.message_area.height > 0
                                                         && event.column == self.message_area.right().saturating_sub(1)
                                                         && self.message_area.contains(pos.into())
@@ -1070,10 +1193,12 @@ impl App {
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT);
             // Alt+X (open the stop dialog) and every key while the stop
-            // dialog is open fall through to normal processing instead of
-            // being consumed by the banner - the stop confirmation must
-            // never appear dead mid-run.
+            // dialog or the destructive row-action confirmation is open fall
+            // through to normal processing instead of being consumed by the
+            // banner - a confirmation dialog must never appear dead mid-run,
+            // or its `Enter`/`Esc` answer swallowed by the banner's dismissal.
             let is_stop_confirm = self.pending_stop_confirm
+                || self.row_action_confirm_open()
                 || (matches!(key.code, KeyCode::Char('x'))
                     && key.modifiers.contains(KeyModifiers::ALT));
             // The always-on quit keys (Ctrl+C/Ctrl+D) also fall through, so
@@ -1099,6 +1224,32 @@ impl App {
             self.debug_log_input_transition("key-history-picker", &before_input, before_cursor);
             return;
         }
+        // Destructive row-action confirmation dialog (spec `agentui` T-009):
+        // while it is open it owns the keyboard, before the Agents/Teams arms
+        // so no `Space`/`Shift+K` can perform or repeat the destructive action
+        // behind it, and before the input buffer so no keystroke leaks
+        // (FR-036, FR-037, FR-040, FR-069). `Left`/`Right`/`Tab`/`BackTab`
+        // move between `Yes` and `No`, `Enter` selects, `Esc` dismisses;
+        // everything else is swallowed so nothing reaches the input buffer.
+        if self.row_action_confirm_open() {
+            match key.code {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.row_action_confirm_toggle();
+                }
+                KeyCode::Enter => {
+                    if self.row_action_confirm_is_yes() {
+                        self.row_action_confirm_accept();
+                    } else {
+                        self.row_action_confirm_cancel();
+                    }
+                }
+                KeyCode::Esc => self.row_action_confirm_cancel(),
+                _ => {}
+            }
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("key-row-action-confirm", &before_input, before_cursor);
+            return;
+        }
         // Agent / Teams dialog keyboard shortcuts
         if self.show_agents_window {
             if key.code == KeyCode::Char(' ') {
@@ -1121,45 +1272,40 @@ impl App {
                     if idx == 0 {
                         self.status = "Cannot kill primary agent".to_string();
                     } else if let Some(task) = self.active_tasks.get(idx - 1).cloned() {
-                        self.kill_agent_task(&task.id);
+                        // Killing is destructive: confirm first (FR-036).
+                        self.open_row_action(crate::app::RowAction::KillSubagent {
+                            task_id: task.id,
+                            agent_name: task.agent_name,
+                        });
                     }
                 }
                 return;
             }
         }
         if self.show_teams_window {
-            if key.code == KeyCode::Char(' ') {
-                if let Some(ref focused) = self.focused_teammate {
-                    // For teams, space on a focused teammate triggers shutdown
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let tm = self.session_processor.team_manager.get().cloned();
-                        let id = focused.clone();
-                        handle.spawn(async move {
-                            if let Some(tm) = tm {
-                                if let Err(e) = tm.shutdown_teammate(&id, false).await {
-                                    tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
-                                }
-                            }
-                        });
-                    }
+            if key.code == KeyCode::Char(' ') || key.code == KeyCode::Char('K') {
+                // For teams, Space and Shift+K on a focused teammate request
+                // the same graceful shutdown (FR-045); TC-022 expects a
+                // confirmation prompt, so both route through the dialog. The
+                // members re-check keeps a stale focus a no-op (FR-069), and a
+                // focus whose agent id names the lead can never arm a shutdown
+                // - the lead is protected from every key path (FR-067).
+                let focused = self.focused_teammate.clone();
+                let member_name = focused.as_ref().and_then(|id| {
+                    self.team_members
+                        .iter()
+                        .find(|m| &m.agent_id == id)
+                        .map(|m| m.name.clone())
+                });
+                if let Some((id, name)) = focused.zip(member_name)
+                    && id != "lead"
+                {
+                    self.open_row_action(crate::app::RowAction::ShutdownTeammate {
+                        agent_id: id,
+                        name,
+                    });
                 }
                 return;
-            }
-            if key.code == KeyCode::Char('K') && key.modifiers.contains(KeyModifiers::SHIFT) {
-                if let Some(ref focused) = self.focused_teammate {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let tm = self.session_processor.team_manager.get().cloned();
-                        let id = focused.clone();
-                        handle.spawn(async move {
-                            if let Some(tm) = tm {
-                                if let Err(e) = tm.shutdown_teammate(&id, false).await {
-                                    tracing::warn!(teammate = %id, error = %e, "failed to shutdown teammate");
-                                }
-                            }
-                        });
-                    }
-                    return;
-                }
             }
         }
 

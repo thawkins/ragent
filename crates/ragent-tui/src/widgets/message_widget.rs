@@ -177,6 +177,110 @@ pub fn canonical_tool_name(tool: &str) -> &str {
     }
 }
 
+/// Open/close markup pairs a model may narrate tool-call invocations with.
+/// Mirrors the agent loop's recovery dialects so what the loop can recover is
+/// also what the transcript display can scrub.
+const NARRATED_TOOLCALL_TAGS: [(&str, &str); 5] = [
+    ("\u{e5b6}call\u{e5b6}", "\u{e5b6}/call\u{e5b6}"),
+    ("<function_calls>", "</function_calls>"),
+    ("<toolcall>", "</toolcall>"),
+    ("<toolcall>", "<toolcall>"),
+    ("<tool_call>", "<tool_call>"),
+];
+
+/// Whether one display line is a piece of narrated tool-call markup.
+///
+/// A line matches when its trimmed text starts with one of the narration open
+/// tags, or it fully parses as a tool-call JSON shape (`name` plus
+/// `arguments`/`input`/`parameters`) - the latter covers an invocation the
+/// model printed as a one-line JSON object instead of tagged markup.
+fn is_toolcall_narration(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if NARRATED_TOOLCALL_TAGS
+        .iter()
+        .any(|(open, _)| trimmed.starts_with(open))
+    {
+        return true;
+    }
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(value) => value
+            .as_object()
+            .map(|o| {
+                o.contains_key("name")
+                    && (o.contains_key("arguments")
+                        || o.contains_key("input")
+                        || o.contains_key("parameters"))
+            })
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+/// Removes narrated tool-call markup from a rendered line list.
+///
+/// When a model prints its next tool call as text (tagged markup or a bare
+/// JSON object), the raw narration must not appear as chat content: the
+/// agent loop recovered the invocation and executed it, and the transcript
+/// should show the executed call instead. Lines inside an open/closed markup
+/// block are dropped with the block, and one-line JSON tool-call shapes are
+/// dropped individually.
+///
+/// The `<toolcall>` spelling has TWO close forms (`</toolcall>` and the
+/// slash-dropped `<toolcall>`), so a block keeps the set of closable tags
+/// from its open match rather than one tag: when the open line already
+/// carries one of them the block is single-line, otherwise every following
+/// line is suppressed until any of the candidates appears.
+pub(crate) fn scrub_narrated_toolcalls(lines: Vec<Line<'_>>) -> Vec<Line<'_>> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut inside_block: Option<Vec<&'static str>> = None;
+    for line in lines {
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        if let Some(close_tags) = inside_block.as_ref() {
+            if close_tags.iter().any(|close| text.contains(close)) {
+                inside_block = None;
+            }
+            continue;
+        }
+        let trimmed = text.trim();
+        // Every dialect whose open tag the line starts with: the close form
+        // cannot be known from an open tag that shares its spelling between
+        // dialects, so remember all of them.
+        let close_candidates: Vec<&'static str> = NARRATED_TOOLCALL_TAGS
+            .iter()
+            .filter(|(open, _)| trimmed.starts_with(*open))
+            .map(|(_, close)| *close)
+            .collect();
+        if !close_candidates.is_empty() {
+            // Content after the open tag (same line): a close tag visible in
+            // the remainder closes the block NOW - the single-line form.
+            let body_start = NARRATED_TOOLCALL_TAGS
+                .iter()
+                .filter_map(|(open, _)| text.find(open).map(|pos| pos + open.len()))
+                .min()
+                .unwrap_or(0);
+            let after_body = &text[body_start.min(text.len())..];
+            if close_candidates
+                .iter()
+                .any(|close| after_body.contains(close))
+            {
+                continue;
+            }
+            // The block continues on later lines; drop this line and
+            // everything until any candidate close tag arrives.
+            inside_block = Some(close_candidates);
+            continue;
+        }
+        if is_toolcall_narration(&text) {
+            continue;
+        }
+        out.push(line);
+    }
+    out
+}
+
 /// Strip the working directory prefix from a path to produce a project-relative path.
 pub fn make_relative_path(path: &str, cwd: &str) -> String {
     // Expand ~ in cwd to the home directory for comparison
@@ -2874,11 +2978,25 @@ impl<'a> MessageWidget<'a> {
                     ];
                     // The tool name always comes immediately after the step
                     // counter, with every other parameter rendered after it.
-                    if canonical_tool_name(tool) == "think" || summary.is_empty() {
-                        spans.push(Span::styled(display_name, name_style));
+                    //
+                    // A `think` call renders its own thought under the header
+                    // from its tool state, so the header keeps the name only -
+                    // unlike the other tools there is no input summary to
+                    // print, and printing the model's full argument inline
+                    // would duplicate the lines that follow.
+                    let (name_span, argument_span) = if canonical_tool_name(tool) == "think" {
+                        (display_name, None)
+                    } else if summary.is_empty() {
+                        (display_name, None)
                     } else {
-                        spans.push(Span::styled(format!("{} ", display_name), name_style));
-                        spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
+                        (
+                            format!("{} ", display_name),
+                            Some(Span::styled(summary, Style::default().fg(Color::DarkGray))),
+                        )
+                    };
+                    spans.push(Span::styled(name_span, name_style));
+                    if let Some(argument) = argument_span {
+                        spans.push(argument);
                     }
                     // Show line range for read tool (and aliases) in bold
                     if canonical_tool_name(tool) == "read" {
@@ -2995,13 +3113,27 @@ impl<'a> MessageWidget<'a> {
                                         .and_then(|out| out.get("text"))
                                         .and_then(|v| v.as_str())
                                 })
+                                .or_else(|| {
+                                    state
+                                        .input
+                                        .get("thought")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|_| state.output.is_none())
+                                })
                             {
+                                let mut thought_lines = Vec::new();
                                 for line in thought.lines() {
-                                    lines.push(Line::from(Span::styled(
+                                    thought_lines.push(Line::from(Span::styled(
                                         format!("  {}", line),
                                         theme::think(),
                                     )));
                                 }
+                                // A model may narrate its next tool call as
+                                // markup INSIDE the thought; the loop recovers
+                                // and executes that call, so the transcript
+                                // shows the executed call instead of the raw
+                                // narration.
+                                lines.extend(scrub_narrated_toolcalls(thought_lines));
                             }
                         } else if tool == "agent_complete" {
                             // Render the full task completion summary
@@ -3094,12 +3226,16 @@ impl<'a> MessageWidget<'a> {
                     }
                 }
                 MessagePart::Reasoning { text } => {
+                    let mut reasoning_lines = Vec::new();
                     for line in text.lines() {
-                        lines.push(Line::from(Span::styled(
+                        reasoning_lines.push(Line::from(Span::styled(
                             format!("  {}", line),
                             theme::think(),
                         )));
                     }
+                    // Reasoning text is also a place models narrate tool-call
+                    // markup into; scrub it the same way as think outputs.
+                    lines.extend(scrub_narrated_toolcalls(reasoning_lines));
                 }
                 MessagePart::Image(img) => {
                     let name = img

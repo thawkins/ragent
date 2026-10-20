@@ -870,6 +870,14 @@ impl App {
                     "help".to_string(),
                 ]
             }
+            "yolo" => {
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "status".to_string(),
+                    "help".to_string(),
+                ]
+            }
             "i18n" => {
                 vec![
                     "on".to_string(),
@@ -6176,6 +6184,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                     &member.agent_id,
                                                     MessageType::Message,
                                                     text,
+                                                )
+                                                // SEC-ragent-team-003: see
+                                                // send_teammate_message.
+                                                .with_sender_session(
+                                                    &self.session_id.clone().unwrap_or_default(),
                                                 );
                                                 match mb.push(msg) {
                                                     Ok(_) => {
@@ -7198,56 +7211,101 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "yolo" => {
-                if args.trim() == "help" {
-                    self.append_assistant_text(
-                        "From: /yolo help\n\n## /yolo \u{2014} YOLO mode toggle\n\n| Subcommand | Description |\n|---|---|\n| `/yolo` | Toggle YOLO mode \u{2014} bypasses bash denied-pattern checks, the dynamic context allowlist, MCP config validation, and obfuscation detection |\n| `/yolo help` | Show this help |\n\n[warn] YOLO mode lets the agent execute any command without restriction. The state persists in the config across restarts.",
-                    );
-                    self.status = "yolo: help".to_string();
-                    self.needs_redraw = true;
-                    return;
-                }
-                match ragent_config::yolo::toggle_persist() {
-                    Ok(new_state) => {
-                        let label = if new_state {
-                            "ENABLED [warn]"
-                        } else {
-                            "disabled"
+                // `/yolo <sub>`; a bare `/yolo` toggles (spec: `/yolo on|off|status`).
+                let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+                match sub.as_str() {
+                    "" | "on" | "off" => {
+                        let requested = match sub.as_str() {
+                            "on" => Some(true),
+                            "off" => Some(false),
+                            _ => None,
                         };
-                        let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
-                        if new_state {
-                            output.push_str(
-                                "All command validation is now **bypassed**:\n\
-                                 - Bash denied-pattern checks - **off**\n\
-                                 - Dynamic context allowlist - **off**\n\
-                                 - MCP config validation - **off**\n\
-                                 - Obfuscation detection - **off**\n\n\
-                                 [warn]  The agent can now execute **any** command without restriction.\n\
-                                 Use `/yolo` again to re-enable safety checks.\n",
-                            );
-                        } else {
-                            output.push_str("All safety checks have been **re-enabled**.\n");
-                        }
-                        self.append_assistant_text(&output);
+                        let result = match requested {
+                            Some(enabled) => {
+                                ragent_config::yolo::persist_yolo(enabled).map(|()| enabled)
+                            }
+                            None => ragent_config::yolo::toggle_persist(),
+                        };
+                        match result {
+                            Ok(new_state) => {
+                                let label = if new_state {
+                                    "ENABLED [warn]"
+                                } else {
+                                    "disabled"
+                                };
+                                let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
+                                if new_state {
+                                    output.push_str(
+                                        "All command validation is now **bypassed**:\n\
+                                         - Bash denied-pattern checks - **off**\n\
+                                         - Dynamic context allowlist - **off**\n\
+                                         - MCP config validation - **off**\n\
+                                         - Obfuscation detection - **off**\n\n\
+                                         [warn]  The agent can now execute **any** command without restriction.\n\
+                                         Use `/yolo` again to re-enable safety checks.\n",
+                                    );
+                                } else {
+                                    output
+                                        .push_str("All safety checks have been **re-enabled**.\n");
+                                }
+                                self.append_assistant_text(&output);
 
-                        self.status = format!("YOLO mode {label}");
-                        self.push_log_no_agent(
-                            if new_state {
-                                LogLevel::Warn
+                                self.status = format!("YOLO mode {label}");
+                                self.push_log_no_agent(
+                                    if new_state {
+                                        LogLevel::Warn
+                                    } else {
+                                        LogLevel::Info
+                                    },
+                                    format!("YOLO mode {label}"),
+                                );
+                            }
+                            Err(e) => {
+                                self.status = format!("[warn] failed to persist YOLO mode: {e}");
+                                self.append_assistant_text(&format!(
+                                    "From: /yolo\n[warn] Failed to persist YOLO mode: {e}\n"
+                                ));
+                                self.push_log_no_agent(
+                                    LogLevel::Error,
+                                    format!("YOLO persist failed: {e}"),
+                                );
+                            }
+                        }
+                    }
+                    "status" | "show" => {
+                        let enabled = ragent_config::yolo::is_enabled();
+                        self.append_assistant_text(&format!(
+                            "From: /yolo status\n\nYOLO mode: **{}**",
+                            if enabled { "enabled" } else { "disabled" }
+                        ));
+                        self.status = format!(
+                            "YOLO mode {}",
+                            if enabled {
+                                "ENABLED [warn]"
                             } else {
-                                LogLevel::Info
-                            },
-                            format!("YOLO mode {label}"),
+                                "disabled"
+                            }
                         );
                     }
-                    Err(e) => {
-                        self.status = format!("[warn] failed to persist YOLO mode: {e}");
-                        self.append_assistant_text(&format!(
-                            "From: /yolo\n[warn] Failed to persist YOLO mode: {e}\n"
-                        ));
-                        self.push_log_no_agent(
-                            LogLevel::Error,
-                            format!("YOLO persist failed: {e}"),
-                        );
+                    _ => {
+                        let help = "From: /yolo help\n\n## /yolo \u{2014} YOLO mode toggle\n\n\
+                                    | Subcommand | Description |\n|---|---|\n\
+                                    | `/yolo` | Toggle YOLO mode \u{2014} bypasses bash denied-pattern checks, the dynamic context allowlist, MCP config validation, and obfuscation detection |\n\
+                                    | `/yolo on` | Enable YOLO mode |\n\
+                                    | `/yolo off` | Disable YOLO mode |\n\
+                                    | `/yolo status` | Show whether YOLO mode is enabled |\n\
+                                    | `/yolo help` | Show this help |\n\n\
+                                    [warn] YOLO mode lets the agent execute any command without restriction. The state persists in the config across restarts.";
+                        if sub == "help" || sub == "--help" || sub == "-h" {
+                            self.append_assistant_text(help);
+                            self.status = "yolo: help".to_string();
+                        } else {
+                            self.append_assistant_text(&format!(
+                                "From: /yolo\n\nUnknown subcommand `{sub}`. \
+                                 Usage: `/yolo [on|off|status|help]`"
+                            ));
+                            self.status = "yolo: usage".to_string();
+                        }
                     }
                 }
                 self.needs_redraw = true;

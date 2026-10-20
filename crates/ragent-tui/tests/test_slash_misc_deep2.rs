@@ -388,18 +388,49 @@ async fn clip_and_name_and_undo() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn yolo_toggle() {
     let (_g, _e, _t, mut app) = isolated_app();
+    // `/yolo on` sets the state rather than flipping it: repeating it must not
+    // turn YOLO back off (the documented "Enable" contract).
     app.execute_slash_command("/yolo on").await;
     assert!(
         app.status.contains("YOLO mode ENABLED"),
         "got {}",
         app.status
     );
+    app.execute_slash_command("/yolo on").await;
+    assert!(
+        app.status.contains("YOLO mode ENABLED"),
+        "repeating `/yolo on` must keep YOLO on, got {}",
+        app.status
+    );
+    // `/yolo off` likewise sets, and repeating it stays off.
     app.execute_slash_command("/yolo off").await;
     assert!(
-        app.status.contains("YOLO mode DISABLED") || app.status.contains("YOLO mode"),
+        app.status.contains("YOLO mode disabled"),
         "got {}",
         app.status
     );
+    app.execute_slash_command("/yolo off").await;
+    assert!(
+        app.status.contains("YOLO mode disabled"),
+        "repeating `/yolo off` must keep YOLO off, got {}",
+        app.status
+    );
+    // `/yolo status` reports without changing the state.
+    app.execute_slash_command("/yolo on").await;
+    app.execute_slash_command("/yolo status").await;
+    assert_eq!(app.status, "YOLO mode ENABLED [warn]");
+    assert!(last_message(&app).contains("YOLO mode: **enabled**"));
+    // A bare `/yolo` still toggles.
+    app.execute_slash_command("/yolo").await;
+    assert!(
+        app.status.contains("YOLO mode disabled"),
+        "got {}",
+        app.status
+    );
+    // An unknown subcommand is refused without touching the state.
+    app.execute_slash_command("/yolo frobnicate").await;
+    assert_eq!(app.status, "yolo: usage");
+    assert!(last_message(&app).contains("Unknown subcommand"));
 }
 
 // ---------------------------------------------------------------------------

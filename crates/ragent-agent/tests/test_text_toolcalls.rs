@@ -187,3 +187,178 @@ fn test_spans_cover_each_block_and_blanking_preserves_offsets() {
     }
     assert!(extract_text_tool_calls(&buffer).is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Plain-ASCII `<toolcall>` dialect
+// ---------------------------------------------------------------------------
+
+const ASCII_OPEN: &str = "<toolcall>";
+const ASCII_CLOSE: &str = "</toolcall>";
+const ASCII_PLAIN: &str = "<toolcall>";
+
+#[test]
+fn test_ascii_dialect_name_only() {
+    // The exact user-reported shape: the markup decoded to literal text and
+    // the invocation carries no arguments.
+    let text = format!("{ASCII_OPEN}Read{ASCII_CLOSE}");
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "Read");
+    assert_eq!(calls[0].args_json, "{}");
+}
+
+#[test]
+fn test_ascii_dialect_plain_close_tag() {
+    // The closing form with the slash dropped: two identical tags.
+    let text = format!("{ASCII_OPEN}Read{ASCII_PLAIN}");
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "Read");
+}
+
+#[test]
+fn test_ascii_dialect_json_payload() {
+    let text = format!(
+        "{ASCII_OPEN}\n{{\"name\": \"read_file\", \"arguments\": {{\"path\": \"src/x.rs\"}}}}\n{ASCII_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "read_file");
+    let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
+    assert_eq!(args["path"], "src/x.rs");
+}
+
+#[test]
+fn test_ascii_dialect_xml_parameter_payload() {
+    let text = format!(
+        "{ASCII_OPEN}<function=bash>\n<parameter=command>\ncargo test\n</parameter>\n</function>{ASCII_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "bash");
+    let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
+    assert_eq!(args["command"], "cargo test");
+}
+
+#[test]
+fn test_ascii_dialect_multiple_calls_and_spans() {
+    let text = format!("A{ASCII_OPEN}read{ASCII_CLOSE} B{ASCII_OPEN}write{ASCII_CLOSE} C");
+    let (calls, spans) = extract_text_tool_calls_with_spans(&text);
+    assert_eq!(calls.len(), 2);
+    assert_eq!(spans.len(), 2);
+    assert!(text[spans[0].0..].starts_with(ASCII_OPEN));
+    assert!(text[..spans[0].1].ends_with(ASCII_CLOSE));
+    // Blanking wipes both blocks and no second pass recovers anything.
+    let mut buffer = text.clone();
+    blank_spans(&mut buffer, &spans);
+    assert!(extract_text_tool_calls(&buffer).is_empty());
+}
+
+#[test]
+fn test_ascii_dialect_prose_body_is_not_recovered() {
+    // A prose body between ASCII toolcall tags must not become a call.
+    let text = format!("{ASCII_OPEN}Use the read tool to inspect files{ASCII_CLOSE}");
+    assert!(extract_text_tool_calls(&text).is_empty());
+    // An unterminated open tag is left alone.
+    assert!(extract_text_tool_calls("text <toolcall> no close").is_empty());
+}
+
+#[test]
+fn test_ascii_dialect_bare_name_must_be_identifier() {
+    // Non-identifier bodies stay unrecovered (paths, punctuation, digits).
+    let text = format!("{ASCII_OPEN}src/main.rs{ASCII_CLOSE}");
+    assert!(extract_text_tool_calls(&text).is_empty());
+    let text = format!("{ASCII_OPEN}9lives{ASCII_CLOSE}");
+    assert!(extract_text_tool_calls(&text).is_empty());
+    let text = format!("{ASCII_OPEN}-{ASCII_CLOSE}");
+    assert!(extract_text_tool_calls(&text).is_empty());
+}
+// ---------------------------------------------------------------------------
+// Underscore-spelled `tool_call` dialect (Mistral/GLM/Kimi style markup)
+// ---------------------------------------------------------------------------
+
+const UNDERSCORE_OPEN: &str = "<tool_call>";
+const UNDERSCORE_CLOSE: &str = "<tool_call>";
+
+#[test]
+fn test_underscore_dialect_json_payload() {
+    let text = format!(
+        "{UNDERSCORE_OPEN}\n{{\"name\": \"read\", \"arguments\": {{\"path\": \"src/lib.rs\"}}}}\n{UNDERSCORE_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "read");
+    let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
+    assert_eq!(args["path"], "src/lib.rs");
+}
+
+#[test]
+fn test_underscore_dialect_xml_payload() {
+    let text = format!(
+        "{UNDERSCORE_OPEN}<function=bash>\n<parameter=command>\ncargo build\n</parameter>\n</function>{UNDERSCORE_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "bash");
+}
+
+#[test]
+fn test_underscore_dialect_multiple_and_spans() {
+    let text =
+        format!("{UNDERSCORE_OPEN}read{UNDERSCORE_CLOSE} {UNDERSCORE_OPEN}write{UNDERSCORE_CLOSE}");
+    let (calls, spans) = extract_text_tool_calls_with_spans(&text);
+    assert_eq!(calls.len(), 2);
+    assert_eq!(spans.len(), 2);
+    let mut buffer = text.clone();
+    blank_spans(&mut buffer, &spans);
+    assert!(extract_text_tool_calls(&buffer).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Backtick-fenced JSON bodies (a trailing fence defeats the raw parse)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_json_body_wrapped_in_backticks() {
+    let text = format!(
+        "{ASCII_OPEN}`{{\"name\": \"grep\", \"arguments\": {{\"pattern\": \"fn main\"}}}}`{ASCII_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "grep");
+    let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
+    assert_eq!(args["pattern"], "fn main");
+}
+
+#[test]
+fn test_json_body_wrapped_in_fenced_code_block() {
+    let text = format!(
+        "{ASCII_OPEN}\n```json\n{{\"name\": \"read\", \"arguments\": {{}}}}\n```\n{ASCII_CLOSE}"
+    );
+    let calls = extract_text_tool_calls(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "read");
+}
+
+#[test]
+fn test_unbalanced_backtick_body_is_not_recovered() {
+    // One-sided fences stay unrecovered - conservative behaviour.
+    let text = format!("{ASCII_OPEN}`{{\"name\": \"read\"}}{ASCII_CLOSE}");
+    assert!(extract_text_tool_calls(&text).is_empty());
+    let text = format!("`not a call`");
+    assert!(extract_text_tool_calls(&text).is_empty());
+}
+
+#[test]
+fn test_fenced_span_covers_the_whole_block() {
+    let text =
+        format!("{ASCII_OPEN}`{{\"name\": \"read\", \"arguments\": {{}}}}`{ASCII_CLOSE} tail");
+    let (calls, spans) = extract_text_tool_calls_with_spans(&text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(spans.len(), 1);
+    assert!(text[spans[0].0..].starts_with(ASCII_OPEN));
+    assert!(text[..spans[0].1].ends_with(ASCII_CLOSE));
+    let mut buffer = text.clone();
+    blank_spans(&mut buffer, &spans);
+    assert!(extract_text_tool_calls(&buffer).is_empty());
+}

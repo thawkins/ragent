@@ -1658,6 +1658,68 @@ impl SessionProcessor {
             loop_state.last_reported_input_tokens = last_input_tokens;
         }
 
+        // F9: text-format tool-call recovery. Some providers and models
+        // cannot emit native tool-call fields and narrate the invocation
+        // as text (markup dialects or bare tool-call JSON). When the step
+        // produced NO native tool calls, attempt a conservative extraction
+        // from the TEXT buffer first, then the REASONING buffer - several
+        // reasoning-capable models narrate their invocations inside the
+        // reasoning channel instead of the visible text. Ordinary prose
+        // never matches (markup tags must be literally present, or the
+        // whole response must be the JSON). Recovered spans are blanked
+        // from the buffer so the model does not see its own narration
+        // duplicated alongside the ToolUse part on the next round-trip.
+        // Performing this here keeps every caller's saved text/reasoning
+        // parts blanked without each caller reordering its own code.
+        if tool_calls.is_empty() {
+            if !text_buffer.is_empty() {
+                let (recovered, spans) =
+                    crate::session::text_toolcalls::extract_text_tool_calls_with_spans(
+                        &text_buffer,
+                    );
+                if !recovered.is_empty() {
+                    tracing::info!(
+                        session_id = %session_id,
+                        count = recovered.len(),
+                        surface = "text",
+                        "recovered tool call(s) from text-format output"
+                    );
+                    self.event_bus.publish(Event::AgentNotice {
+                        session_id: session_id.to_string(),
+                        message: format!(
+                            "Recovered {} tool call(s) from text-format output.",
+                            recovered.len()
+                        ),
+                    });
+                    tool_calls = recovered;
+                    crate::session::text_toolcalls::blank_spans(&mut text_buffer, &spans);
+                }
+            }
+            if tool_calls.is_empty() && !reasoning_buffer.is_empty() {
+                let (recovered, spans) =
+                    crate::session::text_toolcalls::extract_text_tool_calls_with_spans(
+                        &reasoning_buffer,
+                    );
+                if !recovered.is_empty() {
+                    tracing::info!(
+                        session_id = %session_id,
+                        count = recovered.len(),
+                        surface = "reasoning",
+                        "recovered tool call(s) from reasoning-channel output"
+                    );
+                    self.event_bus.publish(Event::AgentNotice {
+                        session_id: session_id.to_string(),
+                        message: format!(
+                            "Recovered {} tool call(s) from reasoning-channel output.",
+                            recovered.len()
+                        ),
+                    });
+                    tool_calls = recovered;
+                    crate::session::text_toolcalls::blank_spans(&mut reasoning_buffer, &spans);
+                }
+            }
+        }
+
         Ok(LlmStepResult {
             text_buffer,
             reasoning_buffer,

@@ -272,6 +272,36 @@ fn test_spec_update_prompt() {
     );
 }
 
+#[test]
+fn test_spec_update_prompt_without_existing_plan() {
+    // A SPEC-only spec (no PLAN.md yet) must still produce a usable prompt:
+    // the "Existing PLAN.md content" reference block and the status-preservation
+    // rule have nothing to preserve, so both are omitted rather than emitted
+    // empty.
+    let prompt = SpecCommand::build_update_prompt("agentui", "");
+
+    assert!(
+        prompt.contains("specs/agentui/PLAN.md"),
+        "prompt should still ask for PLAN.md: {prompt}"
+    );
+    assert!(
+        prompt.contains("specs/agentui/TESTPLAN.md"),
+        "prompt should still ask for TESTPLAN.md: {prompt}"
+    );
+    assert!(
+        !prompt.contains("Existing PLAN.md content"),
+        "empty plan must not emit an empty reference block: {prompt}"
+    );
+    assert!(
+        !prompt.contains("Preserve the status"),
+        "nothing to preserve when there is no plan: {prompt}"
+    );
+    assert!(
+        prompt.contains("Status values: Pending for all new tasks."),
+        "task status rule must still be stated: {prompt}"
+    );
+}
+
 // -- Specify subcommand tests (T-001, FR-001) -------------------------------
 
 #[test]

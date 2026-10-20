@@ -1335,8 +1335,6 @@ impl App {
                 background,
                 ..
             } if self.is_current_or_descendant_session(session_id) => {
-                telemetry_counters::increment_subagent_spawns(1);
-                telemetry_counters::add_agents_active(1);
                 // Map the child session's short_sid to the task id for display.
                 // The task id already encodes the agent type plus a unique suffix
                 // (e.g. "explore-a1b2c3d4") so tools and panels can distinguish
@@ -1344,37 +1342,32 @@ impl App {
                 let short_sid = short_session_id(child_session_id);
                 self.sid_to_display_name.insert(short_sid, task_id.clone());
 
-                // Add to active_tasks so the agent panel shows it immediately.
-                let entry = ragent_agent::task::TaskEntry {
-                    id: task_id.clone(),
-                    parent_session_id: session_id.clone(),
-                    child_session_id: child_session_id.clone(),
-                    agent_name: agent.clone(),
-                    task_prompt: task.clone(),
+                // Add to active_tasks so the agent panel shows it immediately
+                // (FR-047); a replayed spawn refreshes the painted row instead
+                // of appending a second one (FR-072).
+                let appended = self.note_subagent_started(
+                    session_id,
+                    task_id,
+                    child_session_id,
+                    agent,
+                    task,
                     background,
-                    detached: false,
-                    status: ragent_agent::task::TaskStatus::Running,
-                    result: None,
-                    error: None,
-                    created_at: chrono::Utc::now(),
-                    completed_at: None,
-                    reported: false,
-                    waiter_count: 0,
-                    output_file: None,
-                    report_status: ragent_agent::task::ReportStatus::default(),
-                };
-                self.active_tasks.push(entry);
-                let (icon, kind) = if background {
-                    ("[bg]", "Background")
-                } else {
-                    ("[fg]", "Foreground")
-                };
-                self.push_log_for(
-                    LogLevel::Info,
-                    format!("{} {} task started: {} ({})", icon, kind, task_id, agent),
-                    None,
-                    Some(child_session_id.clone()),
                 );
+                if appended {
+                    telemetry_counters::increment_subagent_spawns(1);
+                    telemetry_counters::add_agents_active(1);
+                    let (icon, kind) = if background {
+                        ("[bg]", "Background")
+                    } else {
+                        ("[fg]", "Foreground")
+                    };
+                    self.push_log_for(
+                        LogLevel::Info,
+                        format!("{} {} task started: {} ({})", icon, kind, task_id, agent),
+                        None,
+                        Some(child_session_id.clone()),
+                    );
+                }
             }
             Event::SubagentComplete {
                 ref session_id,
@@ -1385,31 +1378,29 @@ impl App {
                 success,
                 ..
             } if self.is_current_or_descendant_session(session_id) => {
-                telemetry_counters::add_agents_active(-1);
-                telemetry_counters::increment_agents_completed(1);
-                if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
-                    if let Some(t) = self.active_tasks.get_mut(idx) {
-                        // Propagate the finish signature so the Agents popup
-                        // shows truncation / continuation on the completed
-                        // row instead of leaving it at the spawn default.
-                        // Classification is centralised in
-                        // `ReportStatus::from_finish_reason_label` so the panel
-                        // can never disagree with the row written by the task
-                        // registry (`list_agents` / `wait_agents`).
-                        t.report_status =
-                            ragent_agent::task::ReportStatus::from_finish_reason_label(
-                                finish_reason,
-                            );
-                    }
-                    self.active_tasks.remove(idx);
+                // Record the report status derived from the finish reason and
+                // drop the row (FR-048). Both the painted status and the log
+                // marker come from that one derived value, so the panel can
+                // never disagree with the row written by the task registry
+                // (`list_agents` / `wait_agents`).
+                let recorded = self.note_subagent_completed(task_id, finish_reason);
+                self.close_agents_window_when_empty();
+                let report_status = recorded.unwrap_or_else(|| {
+                    ragent_agent::task::ReportStatus::from_finish_reason_label(finish_reason)
+                });
+                if recorded.is_some() {
+                    telemetry_counters::add_agents_active(-1);
                 }
+                telemetry_counters::increment_agents_completed(1);
                 let icon = if success { "[ok]" } else { "[err]" };
-                let suffix = match finish_reason.as_str() {
-                    "continued" => " (truncated; continuation retry recovered the tail)",
-                    "truncation" | "truncated" | "length" => {
+                let suffix = match report_status {
+                    ragent_agent::task::ReportStatus::Continued => {
+                        " (truncated; continuation retry recovered the tail)"
+                    }
+                    ragent_agent::task::ReportStatus::Truncated => {
                         " (TRUNCATED by provider; report is incomplete)"
                     }
-                    _ => "",
+                    ragent_agent::task::ReportStatus::Complete => "",
                 };
                 self.push_log_for(
                     LogLevel::Info,
@@ -1428,30 +1419,36 @@ impl App {
                 ref session_id,
                 ref task_id,
             } if self.is_current_or_descendant_session(session_id) => {
-                if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
-                    let child_session_id = self.active_tasks[idx].child_session_id.clone();
-                    self.active_tasks.remove(idx);
-                    self.push_log_for(
-                        LogLevel::Info,
-                        format!("[cancel] Task cancelled ({})", short_id(task_id)),
-                        None,
-                        Some(child_session_id),
-                    );
-                } else {
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("[cancel] Task cancelled ({})", short_id(task_id)),
-                    );
+                // Remove the row (FR-049). The cancel log line is attributed to
+                // the cancelled agent's own output view when the row was still
+                // tracked; a cancel for an untracked task is log-only.
+                match self.note_subagent_cancelled(task_id) {
+                    Some(child_session_id) => {
+                        telemetry_counters::add_agents_active(-1);
+                        self.push_log_for(
+                            LogLevel::Info,
+                            format!("[cancel] Task cancelled ({})", short_id(task_id)),
+                            None,
+                            Some(child_session_id),
+                        );
+                    }
+                    None => {
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!("[cancel] Task cancelled ({})", short_id(task_id)),
+                        );
+                    }
                 }
+                // The list may have just emptied: drop the Agents window with
+                // it (FR-063).
+                self.close_agents_window_when_empty();
             }
             Event::SubagentSuspended {
                 ref session_id,
                 ref task_id,
                 ref child_session_id,
             } if self.is_current_or_descendant_session(session_id) => {
-                if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
-                    task.status = ragent_agent::task::TaskStatus::Suspended;
-                }
+                self.note_subagent_suspended(task_id);
                 self.push_log_for(
                     LogLevel::Info,
                     format!("[pause] Task suspended ({})", short_id(task_id)),
@@ -1464,9 +1461,7 @@ impl App {
                 ref task_id,
                 ref child_session_id,
             } if self.is_current_or_descendant_session(session_id) => {
-                if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
-                    task.status = ragent_agent::task::TaskStatus::Running;
-                }
+                self.note_subagent_resumed(task_id);
                 self.push_log_for(
                     LogLevel::Info,
                     format!("> Task resumed ({})", short_id(task_id)),
@@ -1490,6 +1485,9 @@ impl App {
                     None,
                     Some(child_session_id.clone()),
                 );
+                // The list may have just emptied: drop the Agents window with
+                // it (FR-063).
+                self.close_agents_window_when_empty();
             }
             Event::BackgroundTaskSpawned {
                 ref session_id,
@@ -1553,6 +1551,9 @@ impl App {
                 // Remove the background task from the Agents panel once it
                 // reaches a terminal state.
                 self.bg_tasks.retain(|t| t.id != *task_id);
+                // The list may have just emptied: drop the Agents window with
+                // it (FR-063).
+                self.close_agents_window_when_empty();
             }
             Event::TeammateSpawned {
                 ref session_id,
@@ -1573,35 +1574,54 @@ impl App {
                 // Always refresh the stored values (session id, status, current task)
                 // from disk so races between UI hydration and spawn events don't
                 // leave the UI showing an outdated state.
+                let mut known_team_dir: Option<std::path::PathBuf> = None;
                 let teammate_session_id = if let Some(m) = self
                     .team_members
                     .iter_mut()
                     .find(|m| m.agent_id == *agent_id)
                 {
                     let working_dir = std::env::current_dir().unwrap_or_default();
-                    if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
-                        && let Some(stored) = store
+                    if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir) {
+                        known_team_dir = Some(store.dir.clone());
+                        // FR-050: the spawned teammate implies its team is the
+                        // active one, even when the `team_create` tool result
+                        // never reached this session (e.g. a server-driven
+                        // run that skipped the lead's own tool path). Without
+                        // this the strip can never become visible because its
+                        // visibility rule requires an active team.
+                        if self.active_team.is_none() {
+                            self.active_team = Some(store.config.clone());
+                        }
+                        if let Some(stored) = store
                             .config
                             .members
                             .iter()
                             .find(|x| x.agent_id == *agent_id)
-                    {
-                        m.session_id = stored.session_id.clone();
-                        m.status = stored.status.clone();
-                        m.current_task_id = stored.current_task_id.clone();
-                        // Map this teammate's session short_sid -> a unique display
-                        // label (name + agent id) so tool step tags and panels can
-                        // distinguish teammates with the same name.
-                        if let Some(ref sid) = stored.session_id {
-                            let short_sid = short_session_id(sid);
-                            let display_name = format!("{}-{}", teammate_name, agent_id);
-                            self.sid_to_display_name.insert(short_sid, display_name);
+                        {
+                            m.session_id = stored.session_id.clone();
+                            m.status = stored.status.clone();
+                            m.current_task_id = stored.current_task_id.clone();
+                            // Map this teammate's session short_sid -> a unique display
+                            // label (name + agent id) so tool step tags and panels can
+                            // distinguish teammates with the same name.
+                            if let Some(ref sid) = stored.session_id {
+                                let short_sid = short_session_id(sid);
+                                let display_name = format!("{}-{}", teammate_name, agent_id);
+                                self.sid_to_display_name.insert(short_sid, display_name);
+                            }
                         }
                     }
                     m.session_id.clone()
                 } else {
                     None
                 };
+                // FR-051: bind the runtime tracker (watchdog, suspend/resume
+                // dispatches, `record_progress`) when this session never
+                // created a `TeamManager`, so the progress recording in the
+                // status handlers below is not a silent no-op for the whole
+                // run. `reconcile = false`: the spawning owner manages its own
+                // members; this only attaches observation.
+                self.ensure_team_manager_for_team_inner(team_name, known_team_dir, false);
                 self.show_teams = true;
                 self.push_log_for(
                     LogLevel::Info,
@@ -1644,15 +1664,21 @@ impl App {
                 ref message_type,
                 ref preview,
             } if self.is_current_session(session_id) => {
-                // Track sent count for sender.
-                let from_counts = self
-                    .team_message_counts
-                    .entry(from.clone())
-                    .or_insert((0, 0));
-                from_counts.0 = from_counts.0.saturating_add(1);
-                // Track received count for recipient.
-                let to_counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
-                to_counts.1 = to_counts.1.saturating_add(1);
+                // Same counter rule as TeammateMessage (FR-052): increment the
+                // sender's sent count and the recipient's received count,
+                // ignoring a sender or recipient named `lead` so the lead's
+                // own columns never move.
+                if from.as_str() != "lead" {
+                    let counts = self
+                        .team_message_counts
+                        .entry(from.clone())
+                        .or_insert((0, 0));
+                    counts.0 = counts.0.saturating_add(1);
+                }
+                if to.as_str() != "lead" {
+                    let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
+                    counts.1 = counts.1.saturating_add(1);
+                }
                 self.push_log_for(
                     LogLevel::Info,
                     format!(
@@ -1715,6 +1741,60 @@ impl App {
                     self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
+            Event::TeammateSuspended {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+            } if self.is_current_session(session_id) => {
+                // FR-040 plumbing: the `[stop]` click (or `/team suspend`)
+                // suspends the teammate on disk and publishes this event; the
+                // row must follow immediately instead of waiting for the next
+                // render-time store hydration.
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Suspended;
+                }
+                // M6-T1: record progress so the watchdog does not flag this
+                // teammate as hung.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
+                }
+                self.push_log_for(
+                    LogLevel::Info,
+                    format!("[pause] [{team_name}] Teammate {agent_id} suspended"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
+                );
+            }
+            Event::TeammateResumed {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+            } if self.is_current_session(session_id) => {
+                // The resume direction of the same control restores the row;
+                // the runtime marks the member idle again on disk.
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Idle;
+                }
+                // M6-T1: record progress so the watchdog does not flag this
+                // teammate as hung.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
+                }
+                self.push_log_for(
+                    LogLevel::Info,
+                    format!("[play] [{team_name}] Teammate {agent_id} resumed (idle)"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
+                );
+            }
             Event::TeamTaskClaimed {
                 ref session_id,
                 ref team_name,
@@ -1773,6 +1853,9 @@ impl App {
                 self.team_message_counts.clear();
                 self.show_teams = false;
                 self.focused_teammate = None;
+                // FR-053: cleanup hides the Teams popup too, so a removed team
+                // cannot keep a window open showing a lead row with no team.
+                self.show_teams_window = false;
                 if self
                     .swarm_state
                     .as_ref()
@@ -2141,60 +2224,219 @@ impl App {
         }
     }
 
+    /// Dispatch a background-shell cancellation through the background task
+    /// service on the async runtime, never blocking the render loop
+    /// (FR-037, FR-068).
+    ///
+    /// The request itself is logged immediately as an attributed panel line
+    /// (the background task's row session id when the row is still tracked),
+    /// so the log panel and the row agree on ownership (NFR-008); a failure
+    /// later logs a warn-level trace naming the task id and error, and the
+    /// row converges on the next completion event or reconciliation pass.
     pub(crate) fn cancel_bg_task(&mut self, task_id: &str) {
+        // Attribute the panel-triggered request to the row's own session
+        // while the row is still tracked (NFR-008).
+        let row_session = self
+            .bg_tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .map(|t| t.session_id.clone());
+        self.push_log_for(
+            LogLevel::Info,
+            format!(
+                "[cancel] Cancel requested for background task {}",
+                short_id(task_id)
+            ),
+            None,
+            row_session,
+        );
+        self.needs_redraw = true;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let bg = self.session_processor.bg_service.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(bg) = bg {
                     if let Err(e) = bg.cancel(&id).await {
-                        tracing::warn!(task_id = %id, error = %e, "failed to cancel background task");
+                        // The identifiers are embedded in the message (not
+                        // tracing fields) so the TUI tracing layer - which
+                        // forwards only the message field - shows them
+                        // (NFR-008).
+                        tracing::warn!("failed to cancel background task {id}: {e}");
                     }
                 }
             });
         }
     }
 
+    /// Dispatch a sub-agent suspend request on the async runtime (FR-035,
+    /// FR-068). The request is logged attributed to the child session
+    /// (NFR-008); a failure logs a warn-level trace with the task id and
+    /// error, and the row reconciles on the next registry poll (FR-054).
     pub(crate) fn suspend_agent_task(&mut self, task_id: &str) {
+        let child_session = self
+            .active_tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .map(|t| t.child_session_id.clone());
+        self.push_log_for(
+            LogLevel::Info,
+            format!("[pause] Suspend requested for task {}", short_id(task_id)),
+            None,
+            child_session,
+        );
+        self.needs_redraw = true;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
                     if let Err(e) = tm.suspend_task(&id).await {
-                        tracing::warn!(task_id = %id, error = %e, "failed to suspend agent task");
+                        tracing::warn!("failed to suspend agent task {id}: {e}");
                     }
                 }
             });
         }
     }
 
+    /// Dispatch a sub-agent resume request on the async runtime (FR-035,
+    /// FR-068). Attribution and failure logging match
+    /// [`App::suspend_agent_task`].
     pub(crate) fn resume_agent_task(&mut self, task_id: &str) {
+        let child_session = self
+            .active_tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .map(|t| t.child_session_id.clone());
+        self.push_log_for(
+            LogLevel::Info,
+            format!("> Resume requested for task {}", short_id(task_id)),
+            None,
+            child_session,
+        );
+        self.needs_redraw = true;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
                     if let Err(e) = tm.resume_task(&id).await {
-                        tracing::warn!(task_id = %id, error = %e, "failed to resume agent task");
+                        tracing::warn!("failed to resume agent task {id}: {e}");
                     }
                 }
             });
         }
     }
 
+    /// Dispatch a sub-agent termination request on the async runtime (FR-036,
+    /// FR-068). The request is logged attributed to the child session
+    /// (NFR-008); a failure logs a warn-level trace naming the task id.
     pub(crate) fn kill_agent_task(&mut self, task_id: &str) {
+        let child_session = self
+            .active_tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .map(|t| t.child_session_id.clone());
+        self.push_log_for(
+            LogLevel::Info,
+            format!("[kill] Kill requested for task {}", short_id(task_id)),
+            None,
+            child_session,
+        );
+        self.needs_redraw = true;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
                     if let Err(e) = tm.kill_task(&id).await {
-                        tracing::warn!(task_id = %id, error = %e, "failed to kill agent task");
+                        tracing::warn!("failed to kill agent task {id}: {e}");
                     }
                 }
             });
         }
+    }
+
+    /// Dispatch a suspend request for team member `agent_id` on the async
+    /// runtime, never blocking the render loop (FR-040, FR-068).
+    ///
+    /// The request is logged immediately as an attributed panel line (the
+    /// member session id when known, NFR-008); a failure logs a warn-level
+    /// trace naming the teammate id and error, and the row keeps its current
+    /// status until the next event (spec error table).
+    pub(crate) fn dispatch_suspend_teammate(&mut self, agent_id: &str) {
+        self.log_teammate_action(agent_id, "[pause]", "suspend");
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let tm = self.session_processor.team_manager.get().cloned();
+            let id = agent_id.to_string();
+            handle.spawn(async move {
+                if let Some(tm) = tm {
+                    if let Err(e) = tm.suspend_teammate(&id).await {
+                        tracing::warn!("failed to suspend teammate {id}: {e}");
+                    }
+                }
+            });
+        }
+    }
+
+    /// Dispatch a graceful shutdown request for team member `agent_id` on the
+    /// async runtime (FR-040, FR-068). Attribution and failure logging match
+    /// [`App::dispatch_suspend_teammate`].
+    pub(crate) fn dispatch_shutdown_teammate(&mut self, agent_id: &str) {
+        self.log_teammate_action(agent_id, "[stop]", "shutdown");
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let tm = self.session_processor.team_manager.get().cloned();
+            let id = agent_id.to_string();
+            handle.spawn(async move {
+                if let Some(tm) = tm {
+                    if let Err(e) = tm.shutdown_teammate(&id, true).await {
+                        tracing::warn!("failed to shutdown teammate {id}: {e}");
+                    }
+                }
+            });
+        }
+    }
+
+    /// Dispatch a resume request for team member `agent_id` on the async
+    /// runtime, never blocking the render loop (FR-040, FR-068). The resume
+    /// direction of the teammate `[stop]` control opens no confirmation
+    /// dialog - it restores a subject the user already suspended - so this
+    /// is the only entry the control needs for that direction. Attribution
+    /// and failure logging match [`App::dispatch_suspend_teammate`].
+    pub(crate) fn dispatch_resume_teammate(&mut self, agent_id: &str) {
+        self.log_teammate_action(agent_id, "[play]", "resume");
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let tm = self.session_processor.team_manager.get().cloned();
+            let id = agent_id.to_string();
+            handle.spawn(async move {
+                if let Some(tm) = tm {
+                    if let Err(e) = tm.resume_teammate(&id).await {
+                        tracing::warn!("failed to resume teammate {id}: {e}");
+                    }
+                }
+            });
+        }
+    }
+
+    /// Emit the attributed request line shared by the three teammate
+    /// dispatchers (NFR-008): the line names the teammate id and the action,
+    /// and is stamped with the member's session id when known so the log
+    /// panel and the teammate's output view agree on ownership. The team name
+    /// prefixes the message in the same `[<team>]` shape the lifecycle events
+    /// use.
+    fn log_teammate_action(&mut self, agent_id: &str, icon: &str, verb: &str) {
+        let session_id = self.team_member_session_id_by_agent_id(agent_id);
+        let team_prefix = self
+            .active_team
+            .as_ref()
+            .map(|t| format!("[{}] ", t.name))
+            .unwrap_or_default();
+        self.push_log_for(
+            LogLevel::Info,
+            format!("{icon} {team_prefix}Teammate {agent_id} {verb} requested"),
+            None,
+            session_id,
+        );
+        self.needs_redraw = true;
     }
 
     pub(crate) fn open_output_view_team_member(
@@ -2205,6 +2447,8 @@ impl App {
         session_id: Option<String>,
     ) {
         self.selected_agent_session_id = session_id.clone();
+        // Opening the overlay is a content change: repaint (NFR-005).
+        self.needs_redraw = true;
         self.output_view = Some(OutputViewState {
             target: OutputViewTarget::TeamMember {
                 team_name,
@@ -2305,7 +2549,14 @@ impl App {
         });
     }
 
-    pub(crate) fn cycle_focused_teammate(&mut self, forward: bool) {
+    /// Cycle teammate focus forward or backward (FR-046): `forward` moves to
+    /// the next member (from no focus to the first), backward to the previous
+    /// (from no focus to the last). Each landed focus opens that teammate's
+    /// output view; moving past either end clears focus together with the
+    /// output view. Exposed `pub` for the consolidated test target; not part
+    /// of the crate's public API surface.
+    #[doc(hidden)]
+    pub fn cycle_focused_teammate(&mut self, forward: bool) {
         if self.team_members.is_empty() {
             self.focused_teammate = None;
             return;
@@ -2350,7 +2601,11 @@ impl App {
         }
     }
 
-    pub(crate) fn focus_teammate_by_id(&mut self, agent_id: &str) {
+    /// Set teammate focus by agent id, opening the newly focused teammate's
+    /// output view (FR-046). Exposed `pub` for the consolidated test target;
+    /// not part of the crate's public API surface.
+    #[doc(hidden)]
+    pub fn focus_teammate_by_id(&mut self, agent_id: &str) {
         let member = self
             .team_members
             .iter()
@@ -2370,6 +2625,7 @@ impl App {
                 m.session_id.clone(),
             );
             self.status = format!("team: focused -> {}", m.name);
+            self.needs_redraw = true;
         }
     }
 
@@ -2397,12 +2653,11 @@ impl App {
         }
     }
 
-    pub(crate) fn send_teammate_message(
-        &mut self,
-        team_name: &str,
-        teammate_name: &str,
-        text: &str,
-    ) {
+    /// Route a message into a teammate's mailbox (FR-058) - the arm behind
+    /// the focused-teammate Enter path. Exposed `pub` for the consolidated
+    /// test target; not part of the crate's public API surface.
+    #[doc(hidden)]
+    pub fn send_teammate_message(&mut self, team_name: &str, teammate_name: &str, text: &str) {
         let member = self
             .team_members
             .iter()
@@ -2418,7 +2673,11 @@ impl App {
                             &member.agent_id,
                             MessageType::Message,
                             text,
-                        );
+                        )
+                        // SEC-ragent-team-003: a lead-origin message must
+                        // carry the lead session id to pass Mailbox::push
+                        // validation (the TUI is the authenticated lead).
+                        .with_sender_session(&self.session_id.clone().unwrap_or_default());
                         match mb.push(msg) {
                             Ok(_) => {
                                 self.push_log_no_agent(

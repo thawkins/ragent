@@ -246,15 +246,23 @@ async fn tc_001_navigator_lists_all_and_the_distinct_fixture_categories_sorted()
     open_fixture(&mut claude, StoreKind::Claude, claude_index()).await;
     assert_eq!(category_rows(&claude), ["Database", "Productivity"]);
 
-    // The panel keeps its title, search field, and ASCII-only body (FR-004).
+    // The panel keeps its title, search field, and an ASCII body inside the
+    // Unicode box-drawing border (FR-004).
     let terminal = render(&mut app, 120, 40);
     let area = app.plugin_store_area;
     let buffer = terminal.backend().buffer();
-    for y in area.y..area.y + area.height {
-        for x in area.x..area.x + area.width {
+    let right = area.x + area.width.saturating_sub(1);
+    let bottom = area.y + area.height.saturating_sub(1);
+    assert_eq!(
+        buffer[(area.x, area.y)].symbol(),
+        "\u{250c}",
+        "top-left border corner"
+    );
+    for y in area.y + 1..bottom {
+        for x in area.x + 1..right {
             assert!(
                 buffer[(x, y)].symbol().is_ascii(),
-                "non-ASCII glyph at ({x}, {y})"
+                "non-ASCII body glyph at ({x}, {y})"
             );
         }
     }
@@ -682,21 +690,35 @@ async fn tc_013_every_category_is_reachable_by_keyboard_alone() {
 }
 
 // ---------------------------------------------------------------------------
-// AC10 - the panel is ASCII-only, including the fixture categories
+// AC10 - the panel is framed with Unicode borders and an ASCII body
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn acceptance_10_the_panel_is_ascii_only_with_the_fixture_categories() {
+async fn acceptance_10_the_panel_uses_unicode_borders_over_an_ascii_body() {
     let mut app = new_app();
     open_fixture(&mut app, StoreKind::Codex, codex_index()).await;
     let terminal = render(&mut app, 120, 40);
     let area = app.plugin_store_area;
     let buffer = terminal.backend().buffer();
-    for y in area.y..area.y + area.height {
-        for x in area.x..area.x + area.width {
+    let right = area.x + area.width.saturating_sub(1);
+    let bottom = area.y + area.height.saturating_sub(1);
+
+    // Every border cell is a box-drawing glyph, like every other panel.
+    assert_eq!(buffer[(area.x, area.y)].symbol(), "\u{250c}", "top-left");
+    assert_eq!(buffer[(right, area.y)].symbol(), "\u{2510}", "top-right");
+    assert_eq!(buffer[(area.x, bottom)].symbol(), "\u{2514}", "bottom-left");
+    assert_eq!(buffer[(right, bottom)].symbol(), "\u{2518}", "bottom-right");
+    for y in area.y + 1..bottom {
+        assert_eq!(buffer[(area.x, y)].symbol(), "\u{2502}", "left rule");
+        assert_eq!(buffer[(right, y)].symbol(), "\u{2502}", "right rule");
+    }
+
+    // The body inside the border carries only ASCII text and markers.
+    for y in area.y + 1..bottom {
+        for x in area.x + 1..right {
             assert!(
                 buffer[(x, y)].symbol().is_ascii(),
-                "non-ASCII glyph {:?} at ({x}, {y})",
+                "non-ASCII body glyph {:?} at ({x}, {y})",
                 buffer[(x, y)].symbol()
             );
         }

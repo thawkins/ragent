@@ -1046,6 +1046,10 @@ impl App {
             || self.pending_memory_delete.is_some()
             || self.pending_router_save.is_some()
             || self.pending_stop_confirm
+            // The destructive row-action confirmation dialog (spec `agentui`
+            // T-009) is likewise a modal overlay: every key routes to it, so
+            // no character may reach the input buffer while it is open.
+            || self.row_action_confirm.is_some()
             || self.output_view.is_some()
             || self.memory_view.is_some()
             || self.research_view.is_some()
@@ -4970,6 +4974,8 @@ impl App {
 
     pub(crate) fn open_output_view_session(&mut self, session_id: String, label: String) {
         self.selected_agent_session_id = Some(session_id.clone());
+        // Opening the overlay is a content change: repaint (NFR-005).
+        self.needs_redraw = true;
         self.output_view = Some(OutputViewState {
             target: OutputViewTarget::Session { session_id, label },
             scroll_offset: 0,

@@ -348,22 +348,22 @@ async fn kill_task_unknown_and_finished_are_rejected() {
 }
 
 #[tokio::test]
-async fn suspend_and_resume_are_documented_no_ops() {
+async fn suspend_and_resume_unknown_task_rejected() {
     let mgr = manager(4);
     let suspend = mgr
         .suspend_task("any")
         .await
-        .expect_err("suspend is not implemented");
+        .expect_err("unknown task suspend");
     assert!(
-        suspend.to_string().contains("not implemented"),
+        suspend.to_string().contains("not found"),
         "suspend err: {suspend}"
     );
     let resume = mgr
         .resume_task("any")
         .await
-        .expect_err("resume is not implemented");
+        .expect_err("unknown task resume");
     assert!(
-        resume.to_string().contains("not implemented"),
+        resume.to_string().contains("not found"),
         "resume err: {resume}"
     );
 }

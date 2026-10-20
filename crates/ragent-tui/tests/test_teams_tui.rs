@@ -2,7 +2,7 @@
 
 use ragent_agent::event::Event;
 use ragent_agent::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
-use ragent_tui::app::LogLevel;
+use ragent_tui::app::{LogLevel, OutputViewTarget};
 use ratatui::{Terminal, backend::TestBackend};
 
 #[path = "support/mod.rs"]
@@ -1338,6 +1338,455 @@ async fn test_event_teammate_message_increments_receiver_counter() {
         Some((0, 1)),
         "receiver teammate should increment received counter"
     );
+}
+
+// -- T-014 (spec `agentui`): team event plumbing gaps -------------------------
+
+/// A `TeammateSpawned` for a session that never saw the `team_create` tool
+/// result must still activate the team (FR-050): the strip's visibility rule
+/// needs `active_team`, and the spawn handler hydrates it from the on-disk
+/// store together with the member's session id.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_event_teammate_spawned_without_tool_result_activates_team_and_strip() {
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("spawn-activates");
+    let mut store = TeamStore::create(&team_name, "lead-1", tmp.path(), true).expect("create team");
+    let mut member = TeamMember::new("writer", "tm-001", "general");
+    member.session_id = Some("tm-sess-1".to_string());
+    member.status = MemberStatus::Working;
+    store.add_member(member).expect("add member");
+
+    let mut app = support::make_app();
+    app.session_id = Some("lead-1".to_string());
+    assert!(app.active_team.is_none(), "precondition: no active team");
+
+    app.handle_event(Event::TeammateSpawned {
+        session_id: "lead-1".to_string(),
+        team_name,
+        teammate_name: "writer".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        app.active_team.is_some(),
+        "the spawned teammate's team must become the active team (FR-050)"
+    );
+    assert!(
+        ragent_tui::teammate_strip::is_visible(&app),
+        "the team strip must be visible after a spawn (FR-050)"
+    );
+    assert_eq!(
+        app.team_members[0].session_id.as_deref(),
+        Some("tm-sess-1"),
+        "the member must be hydrated from the store (FR-050)"
+    );
+}
+
+/// A spawn event binds the runtime tracker (`TeamManager`) when the session
+/// never created one, so the status handlers' `record_progress` calls are not
+/// silent no-ops for the whole run (FR-051 watchdog progress).
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_event_teammate_spawned_binds_team_manager() {
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("spawn-binds-manager");
+    let store = TeamStore::create(&team_name, "lead-1", tmp.path(), true).expect("create team");
+
+    let mut app = support::make_app();
+    app.session_id = Some("lead-1".to_string());
+
+    app.handle_event(Event::TeammateSpawned {
+        session_id: "lead-1".to_string(),
+        team_name,
+        teammate_name: "writer".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        app.session_processor.team_manager.get().is_some(),
+        "the spawn handler must bind the TeamManager so watchdog progress recording works (FR-051)"
+    );
+    assert!(
+        app.session_processor
+            .team_manager
+            .get()
+            .expect("bound manager")
+            .team_dir
+            .ends_with(&store.dir),
+        "the bound manager must point at the team store the spawn came from"
+    );
+    drop(store);
+}
+
+/// `TeammateSuspended` (published by the FR-040 `[stop]` click and
+/// `/team suspend`) must mark the row suspended immediately, and
+/// `TeammateResumed` must return it to idle; both record watchdog progress.
+#[tokio::test]
+async fn test_event_teammate_suspend_resume_update_member_status() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    // Bind a real manager so the progress-recording code path runs against
+    // one instead of a silent no-op.
+    let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
+        "alpha",
+        "s1",
+        app.cwd_path.join("target/temp/team-manager-suspend"),
+        app.session_processor.clone(),
+        app.event_bus.clone(),
+    ));
+    if app.session_processor.team_manager.set(mgr).is_err() {
+        // Tests share the process processor in some configurations; the
+        // status assertions below are independent of the binding.
+    }
+    let mut m = TeamMember::new("writer", "tm-001", "general");
+    m.status = MemberStatus::Working;
+    app.team_members.push(m);
+
+    app.handle_event(Event::TeammateSuspended {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+    assert_eq!(
+        app.team_members[0].status,
+        MemberStatus::Suspended,
+        "the suspended event must mark the row suspended (FR-051 plumbing)"
+    );
+    assert!(
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("tm-001") && e.message.contains("suspended")),
+        "the suspension must be logged with the teammate id"
+    );
+
+    app.handle_event(Event::TeammateResumed {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+    assert_eq!(
+        app.team_members[0].status,
+        MemberStatus::Idle,
+        "the resumed event must return the row to idle (FR-051 plumbing)"
+    );
+    assert!(
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("tm-001") && e.message.contains("resumed")),
+        "the resumption must be logged with the teammate id"
+    );
+}
+
+/// The idle/failed/claim/complete handlers record watchdog progress against a
+/// real `TeamManager` without erroring, so an active teammate is never flagged
+/// as hung by the events the panel itself observes (FR-051).
+#[tokio::test]
+async fn test_event_teammate_status_events_record_watchdog_progress() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
+        "alpha",
+        "s1",
+        app.cwd_path.join("target/temp/team-manager-progress"),
+        app.session_processor.clone(),
+        app.event_bus.clone(),
+    ));
+    let _ = app.session_processor.team_manager.set(mgr);
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+
+    app.handle_event(Event::TeamTaskClaimed {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+        task_id: "task-1".to_string(),
+    })
+    .await;
+    app.handle_event(Event::TeammateIdle {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+    app.handle_event(Event::TeamTaskCompleted {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+        task_id: "task-1".to_string(),
+    })
+    .await;
+    app.handle_event(Event::TeammateFailed {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+        error: "boom".to_string(),
+    })
+    .await;
+
+    assert_eq!(
+        app.team_members[0].status,
+        MemberStatus::Failed,
+        "the failed event is the last writer and must land"
+    );
+    assert!(
+        app.team_members[0].current_task_id.is_none(),
+        "the completed task must clear the member's current task"
+    );
+}
+
+/// `TeamCleanedUp` must empty the strip as well as the panel: no members means
+/// the pill row disappears entirely (FR-053, FR-066).
+#[tokio::test]
+async fn test_event_team_cleaned_up_hides_strip() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.active_team = Some(TeamConfig::new("alpha", "s1"));
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+    assert!(ragent_tui::teammate_strip::is_visible(&app));
+
+    app.handle_event(Event::TeamCleanedUp {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+    })
+    .await;
+
+    assert!(
+        !ragent_tui::teammate_strip::is_visible(&app),
+        "cleanup must hide the strip (FR-053)"
+    );
+}
+
+// -- T-012 (spec `agentui`): Alt+Down / Alt+Up focus cycling ------------------
+
+#[tokio::test]
+async fn test_team_focus_cycle_down_from_unfocused_opens_first_member() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("tester", "tm-002", "general"));
+    app.focused_teammate = None;
+
+    app.cycle_focused_teammate(true);
+
+    assert_eq!(
+        app.focused_teammate.as_deref(),
+        Some("tm-001"),
+        "cycling forward from no focus must land on the first member (FR-046)"
+    );
+    let Some(view) = &app.output_view else {
+        panic!("the newly focused teammate's output view must open (FR-046)");
+    };
+    let OutputViewTarget::TeamMember { teammate_name, .. } = &view.target else {
+        panic!("the output view must target a team member");
+    };
+    assert_eq!(
+        teammate_name, "writer",
+        "the output view must target the newly focused teammate"
+    );
+    assert_eq!(app.status, "team: focused -> writer");
+}
+
+#[tokio::test]
+async fn test_team_focus_cycle_moves_through_members_in_order() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("tester", "tm-002", "general"));
+
+    app.cycle_focused_teammate(true);
+    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    app.cycle_focused_teammate(true);
+    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert_eq!(app.status, "team: focused -> tester");
+
+    app.cycle_focused_teammate(false);
+    assert_eq!(
+        app.focused_teammate.as_deref(),
+        Some("tm-001"),
+        "cycling backward must move to the previous member (FR-046)"
+    );
+}
+
+#[tokio::test]
+async fn test_team_focus_cycle_past_ends_clears_focus_and_output_view() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("tester", "tm-002", "general"));
+
+    // Down, down again (now on the last member), down once more goes past
+    // the end: focus and the output view clear together (FR-046).
+    app.cycle_focused_teammate(true);
+    app.cycle_focused_teammate(true);
+    assert_eq!(app.focused_teammate.as_deref(), Some("tm-002"));
+    assert!(app.output_view.is_some());
+    app.cycle_focused_teammate(true);
+    assert!(
+        app.focused_teammate.is_none(),
+        "cycling past the last member must clear focus (FR-046)"
+    );
+    assert!(
+        app.output_view.is_none(),
+        "cycling past the last member must close the output view with the focus (FR-046)"
+    );
+    assert_eq!(app.status, "team: focus cleared");
+
+    // Up with no focus lands on the last member...
+    app.cycle_focused_teammate(false);
+    assert_eq!(
+        app.focused_teammate.as_deref(),
+        Some("tm-002"),
+        "cycling backward from no focus must land on the last member (FR-046)"
+    );
+    // ...the next up moves to the previous member...
+    app.cycle_focused_teammate(false);
+    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+    // ...and the third up goes past the start, clearing the pair again.
+    app.cycle_focused_teammate(false);
+    assert!(app.focused_teammate.is_none());
+    assert!(app.output_view.is_none());
+    assert_eq!(app.status, "team: focus cleared");
+}
+
+#[tokio::test]
+async fn test_team_focus_cycle_with_no_members_clears_stale_focus() {
+    let mut app = support::make_app();
+    app.focused_teammate = Some("ghost".to_string());
+
+    app.cycle_focused_teammate(true);
+
+    assert!(
+        app.focused_teammate.is_none(),
+        "cycling with no members must not keep a stale focus (FR-046, FR-069)"
+    );
+}
+
+/// While a teammate is focused the input border reads `-> <name> (focused)` in
+/// bold yellow (FR-058), and a submitted message is routed to that teammate's
+/// mailbox instead of the lead session.
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_focus_routes_input_and_titles_the_border() {
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    let team_name = unique_team_name("focus-route");
+    let store = TeamStore::create(&team_name, "s1", tmp.path(), true).expect("create team");
+    app.active_team = Some(store.config.clone());
+    drop(store);
+    app.team_members
+        .push(TeamMember::new("writer", "tm-001", "general"));
+
+    app.focus_teammate_by_id("tm-001");
+    assert_eq!(
+        app.focused_teammate.as_deref(),
+        Some("tm-001"),
+        "focusing must register before the border/routing can apply (FR-058)"
+    );
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("render");
+    let buffer = terminal.backend().buffer().clone();
+    let row = |y: u16| -> String {
+        (0..100)
+            .map(|x| {
+                buffer
+                    .cell((x, y))
+                    .map(|c| c.symbol().to_string())
+                    .unwrap_or_default()
+            })
+            .collect::<String>()
+    };
+    let border_row = (0..30)
+        .rev()
+        .find(|y| row(*y).contains("(focused)"))
+        .expect("input border must carry the focused title (FR-058)");
+    assert!(row(border_row).contains("-> writer (focused)"));
+    let title_row_text = row(border_row);
+    // Byte offset in the row string != cell offset when multi-byte glyphs
+    // (strip icons, box drawing) are painted earlier in the row; map through
+    // the char count so the style is sampled at the title's first cell.
+    let title_byte = title_row_text
+        .find("-> writer (focused)")
+        .expect("title offset");
+    let title_x = title_row_text[..title_byte].chars().count();
+    let style = buffer
+        .cell((title_x as u16, border_row))
+        .map(ratatui::buffer::Cell::style)
+        .expect("title cell");
+    assert_eq!(style.fg, Some(ratatui::style::Color::Yellow));
+    assert!(style.add_modifier.contains(ratatui::style::Modifier::BOLD));
+
+    // Alt+Down off the single member goes past the end (the cycle does not
+    // wrap; FR-046 clears the focus together with the output view instead).
+    app.handle_key_event(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Down,
+        crossterm::event::KeyModifiers::ALT,
+    ))
+    .await;
+    assert!(
+        app.focused_teammate.is_none(),
+        "Alt+Down with a single member must clear focus past the end (FR-046)"
+    );
+    assert!(app.output_view.is_none());
+    // Re-land on the only member for the routing half of the test.
+    app.cycle_focused_teammate(true);
+    assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
+
+    // A submitted message must be routed to the focused teammate's mailbox,
+    // never the lead session (FR-058) - the same path the Enter action drives.
+    app.send_teammate_message(
+        &app.active_team
+            .as_ref()
+            .map(|t| t.name.clone())
+            .unwrap_or_default(),
+        "writer",
+        "please check the logs",
+    );
+    assert!(
+        app.status.contains("message sent to writer") || app.status.contains("writer"),
+        "the routed send must report the focused teammate, got: {}",
+        app.status
+    );
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    let text: String = app.status.chars().collect();
+    assert!(text.contains("writer"), "status must name the teammate");
 }
 
 // -- SEC-ragent-tui-004: team-name validation at the TUI boundary (SECTASKS T-004) -

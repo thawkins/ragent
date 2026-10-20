@@ -131,7 +131,9 @@ Runs a Jobs-To-Be-Done analysis on the spec through the general agent.
 ```
 /spec update auth-refactor
 ```
-Regenerates PLAN.md and TESTPLAN.md after SPEC.md edits.
+Regenerates PLAN.md and TESTPLAN.md after SPEC.md edits. A spec with only a
+`SPEC.md` (no plan yet) is a valid target too: the prompt then omits the
+"existing plan" reference block, because there is nothing to preserve.
 
 ```
 /spec govcreate payments-arch https://docs.provider.gov/payment-service ./payments-svc

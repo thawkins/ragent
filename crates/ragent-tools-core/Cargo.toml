@@ -39,6 +39,10 @@ ignore = { workspace = true }
 regex = { workspace = true }
 rayon = { workspace = true }
 
+# File-identity comparison (dev/ino on unix, volume serial + file index on
+# windows) used by the path-containment alias check
+same-file = "1.0"
+
 # Shell utilities
 which = "8.0"
 

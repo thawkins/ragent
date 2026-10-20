@@ -1955,11 +1955,20 @@ fn layout_agents_window_paints_the_tree_and_buttons() {
     assert!(screen.contains("Agents"), "the overlay title must paint");
     assert!(screen.contains("lead"), "the primary agent row must paint");
     assert!(app.active_agents_area.width > 0);
-    // Only the non-terminal rows (two agent tasks plus one running background
-    // shell task) keep a hit rectangle; terminal rows are filtered out.
-    assert_eq!(app.agent_row_button_areas.len(), 3);
-    assert_eq!(app.agent_row_kill_areas.len(), 3);
-    assert_eq!(app.agent_row_button_task_ids.len(), 3);
+    // Every action-capable painted row keeps a hit-rect entry; a terminal row
+    // (the completed task-3 and completed bg-2) records the inert placeholder
+    // instead of shrinking the vectors (FR-071, NFR-011).
+    assert_eq!(app.agent_row_button_areas.len(), 5);
+    assert_eq!(app.agent_row_kill_areas.len(), 5);
+    assert_eq!(app.agent_row_button_task_ids.len(), 5);
+    assert_eq!(
+        app.agent_row_button_task_ids[2], "",
+        "task-3 is a placeholder"
+    );
+    assert_eq!(
+        app.agent_row_button_task_ids[4], "",
+        "bg-2 is a placeholder"
+    );
 }
 
 #[test]
@@ -1967,7 +1976,9 @@ fn layout_agents_window_scrolls_past_the_visible_window() {
     let mut app = app_with_agent_tree();
     app.show_agents_window = true;
     app.active_agents_scroll_offset = 2;
-    let _ = render(&mut app, 140, 20);
+    // The Agents modal is 70% of the terminal height (spec `agentui` FR-006), so
+    // the tree only overflows the table area at a short height.
+    let _ = render(&mut app, 140, 14);
     assert!(app.active_agents_max_scroll > 0);
 }
 
@@ -2009,10 +2020,15 @@ fn layout_teams_window_paints_the_lead_and_teammates() {
     assert!(screen.contains("Teams"), "the overlay title must paint");
     assert!(screen.contains("reviewer"), "teammate rows must paint");
     assert!(screen.contains("working"));
-    // Two non-terminal teammates carry buttons; the stopped one is filtered out.
-    assert_eq!(app.team_row_button_areas.len(), 2);
-    assert_eq!(app.team_row_kill_areas.len(), 2);
-    assert_eq!(app.team_row_button_agent_ids[0], "tm-001");
+    // Every painted teammate row keeps a control entry; the stopped one is the
+    // inert placeholder (FR-071, NFR-011). reviewer and tester are live
+    // (tester is Suspended); archivist is the stopped placeholder row.
+    assert_eq!(app.team_row_button_areas.len(), 3);
+    assert_eq!(app.team_row_kill_areas.len(), 3);
+    assert_eq!(
+        app.team_row_button_agent_ids,
+        vec!["tm-001".to_string(), "tm-002".to_string(), String::new()]
+    );
 }
 
 #[test]

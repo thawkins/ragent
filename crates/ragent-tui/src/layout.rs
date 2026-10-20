@@ -45,7 +45,8 @@ use crate::app::{
 };
 use crate::widgets::message_widget::{
     INDENT_SPACES, canonical_tool_name, capitalize_tool_name, is_agent_notice, read_line_range,
-    render_agent_notice_lines, tool_inline_diff, tool_input_summary, tool_result_summary,
+    render_agent_notice_lines, scrub_narrated_toolcalls, tool_inline_diff, tool_input_summary,
+    tool_result_summary,
 };
 
 /// Padding applied to each side of a content-sized table column.
@@ -106,22 +107,22 @@ const PLUGIN_STORE_NAV_GAP: u16 = 1;
 
 /// The title painted on the row directly above the plugin-store category
 /// navigator's `ALL` entry, naming the navigation type (spec `pluginstores`
-/// FR-004). Rendered in reversed video (black on white). ASCII only.
+/// FR-004). Rendered in reversed video (black on white).
 const PLUGIN_STORE_CATEGORY_TITLE: &str = "Categories";
 
 /// The title painted on the row directly above the plugin-store marketplace
 /// navigator's `ALL` entry, naming the navigation type (spec `pluginstores`
-/// FR-004). Rendered in reversed video (black on white). ASCII only.
+/// FR-004). Rendered in reversed video (black on white).
 const PLUGIN_STORE_MARKETPLACE_TITLE: &str = "Marketplace";
 
 /// The label painted at the left edge of the plugin-store bottom search box
-/// (spec `pluginstores` FR-004). ASCII only, like the rest of the panel.
+/// (spec `pluginstores` FR-004).
 const PLUGIN_STORE_SEARCH_LABEL: &str = " search: ";
 
 /// The clear button painted at the right edge of the plugin-store bottom search
 /// box (spec `pluginstores` FR-004). A left-click inside the button clears the
 /// live search filter; the text is also the hit affordance, so click-to-clear is
-/// discoverable. ASCII only.
+/// discoverable.
 const PLUGIN_STORE_CLEAR_LABEL: &str = "[x] clear";
 
 /// Narrowest terminal columns the plugin-store search box's editable field is
@@ -169,22 +170,6 @@ const CONNECTOR_CATALOGUE_HEADING_ID: &str = "Id";
 const CONNECTOR_CATALOGUE_HEADING_CATEGORY: &str = "Category";
 const CONNECTOR_CATALOGUE_HEADING_MARKETPLACE: &str = "Marketplace";
 const CONNECTOR_CATALOGUE_HEADING_DESCRIPTION: &str = "Description";
-
-/// An ASCII-only border set for the plugin-store panel (spec `pluginstores`
-/// FR-004, acceptance criterion 10).
-///
-/// ratatui's default border draws Unicode box-drawing glyphs; the store panel
-/// must use only ASCII, so every border cell is a `+`, `-`, or `|`.
-const PLUGIN_STORE_ASCII_BORDER: ratatui::symbols::border::Set = ratatui::symbols::border::Set {
-    top_left: "+",
-    top_right: "+",
-    bottom_left: "+",
-    bottom_right: "+",
-    vertical_left: "|",
-    vertical_right: "|",
-    horizontal_top: "-",
-    horizontal_bottom: "-",
-};
 
 /// PERF-042: minimum interval between re-renders of a message whose cache
 /// group is already populated while it is being streamed.
@@ -358,6 +343,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.memory_clear_confirm_open {
         render_memory_clear_confirm(frame, app);
     }
+    // Destructive row-action confirmation dialog (spec `agentui` T-009) - a
+    // modal drawn above the chat (and therefore above the Agents and Teams
+    // windows, which render inside the chat pass) so the answer applies to the
+    // topmost surface (FR-036, FR-037, FR-040).
+    if app.row_action_confirm.is_some() {
+        render_row_action_confirm(frame, app);
+    } else {
+        app.row_action_confirm_area = Rect::default();
+        app.row_action_confirm_yes_area = Rect::default();
+        app.row_action_confirm_no_area = Rect::default();
+    }
     // Plugin-store browse panel (spec `pluginstores` T-006) - a full-screen-ish
     // modal drawn last so it sits above every other overlay while it owns the
     // keyboard (FR-004, FR-015).
@@ -395,9 +391,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 /// A bordered, titled modal listing every registered backend with its id, kind,
 /// health, and secret-free connection summary. The active backend carries an
 /// `[active]` marker and the highlighted row carries the block cursor; an
-/// `unavailable` row is dimmed because it cannot be selected. Only ASCII glyphs
-/// are used in the body. The panel area is recomputed from `Frame::area` every
-/// frame and stored back in [`App::backend_panel_area`] for tests.
+/// `unavailable` row is dimmed because it cannot be selected. The panel area is
+/// recomputed from `Frame::area` every frame and stored back in
+/// [`App::backend_panel_area`] for tests.
 fn render_backend_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
@@ -530,7 +526,6 @@ fn render_backend_panel(frame: &mut Frame, app: &mut App) {
 /// presenting a title line with the catalogue name, the current search query,
 /// the active category, and the visible/total result count; a fixed
 /// column-heading row above a scrollable result list; and a footer of key hints.
-/// Only ASCII glyphs are used in the body.
 ///
 /// The result column carries a pinned column-heading row (`Id`, `Category`,
 /// `Marketplace`, `Description`) painted dark-on-light directly above the list,
@@ -591,7 +586,6 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(PLUGIN_STORE_ASCII_BORDER)
         .title(Span::styled(
             title,
             Style::default()
@@ -804,7 +798,7 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
 /// still-loading or category-less catalogue yields an `ALL`-only navigator. The
 /// navigator viewport height is recorded on the browser so the handlers clamp a
 /// wheel scroll; the scroll offset is otherwise left exactly as the wheel set
-/// it, so scrolling away from the cursor sticks. Only ASCII glyphs are drawn.
+/// it, so scrolling away from the cursor sticks.
 fn render_connector_catalogue_navigator(
     frame: &mut Frame,
     browser: &mut ragent_connectors::CatalogueBrowser,
@@ -855,7 +849,7 @@ fn render_connector_catalogue_navigator(
 /// Names the catalogue, the live search field, the active category, the
 /// visible/total counts, and - when the parser skipped any malformed entries -
 /// the skipped count, so a partial result set is visible at a glance rather than
-/// silently short. ASCII only.
+/// silently short.
 fn connector_catalogue_title(browser: &ragent_connectors::CatalogueBrowser) -> String {
     let total = browser.all.len();
     let visible = browser.filtered.len();
@@ -1183,8 +1177,7 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
 /// The panel is a bordered, titled modal overlay, modelled on
 /// [`render_queue_show_panel`], presenting a title line with the store name, the
 /// current search query, and the visible/total result count; a scrollable result
-/// list; and a footer of key hints. Only ASCII glyphs are used in the body
-/// (FR-004).
+/// list; and a footer of key hints.
 ///
 /// The highlighted result row carries the block cursor: a full-row background
 /// applied through [`ratatui::widgets::List::highlight_style`], which patches the
@@ -1250,7 +1243,6 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(PLUGIN_STORE_ASCII_BORDER)
         .title(Span::styled(
             title,
             Style::default()
@@ -1524,7 +1516,7 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
 /// the field is clipped from the left, so the most recently typed characters stay
 /// visible. The painted clear-button area is returned so the caller can cache it
 /// for click hit-testing; [`Rect::default`] is returned when the row is too narrow
-/// to hold the button. Only ASCII glyphs are drawn.
+/// to hold the button.
 fn render_plugin_store_search_box(
     frame: &mut Frame,
     browser: &crate::app::PluginStoreBrowser,
@@ -1666,7 +1658,7 @@ fn plugin_store_flex_widths(
 /// still-loading or category-less index yields an `ALL`-only navigator. The
 /// navigator viewport height is recorded on the browser so the handlers clamp a
 /// wheel scroll; the scroll offset is otherwise left exactly as the wheel set it,
-/// so scrolling away from the cursor sticks. Only ASCII glyphs are drawn (FR-004).
+/// so scrolling away from the cursor sticks.
 fn render_plugin_store_navigator(
     frame: &mut Frame,
     browser: &mut crate::app::PluginStoreBrowser,
@@ -1726,7 +1718,7 @@ fn render_plugin_store_navigator(
 /// result cursors; the active marketplace is painted in the active-category colour.
 /// A still-loading or marketplace-less index yields an `ALL`-only navigator. The
 /// viewport height is recorded on the browser so the handlers clamp a wheel scroll,
-/// which is otherwise left exactly as the wheel set it. Only ASCII glyphs are drawn.
+/// which is otherwise left exactly as the wheel set it.
 fn render_plugin_store_marketplace_navigator(
     frame: &mut Frame,
     browser: &mut crate::app::PluginStoreBrowser,
@@ -1791,8 +1783,7 @@ enum PluginStoreBody {
 /// entries - the skipped count, so a partial result set is visible at a glance
 /// rather than silently short (FR-025). While the off-loop manifest enrichment is
 /// still running a `loading details...` hint is appended, so a still-blank
-/// version/description reads as pending rather than missing (FR-048). ASCII only
-/// (acceptance criterion 10).
+/// version/description reads as pending rather than missing (FR-048).
 fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
     let total = browser.all.len();
     let visible = browser.filtered.len();
@@ -1852,7 +1843,7 @@ fn plugin_store_body(browser: &crate::app::PluginStoreBrowser) -> PluginStoreBod
 /// malformed-entry count when the parser skipped any (FR-013, FR-017, FR-025).
 ///
 /// Reported through the status rather than a result row, so the line is the only
-/// place a partial parse surfaces in the body. ASCII only.
+/// place a partial parse surfaces in the body.
 fn plugin_store_empty_line(browser: &crate::app::PluginStoreBrowser) -> String {
     let skipped = browser.skipped;
     if browser.all.is_empty() {
@@ -2004,11 +1995,152 @@ fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
     );
 }
 
+/// Render the destructive row-action confirmation dialog (spec `agentui`
+/// T-009, FR-036, FR-037, FR-040).
+///
+/// A bordered `Yes`/`No` modal opened above the Agents and Teams windows; its
+/// title names the action (`Kill sub-agent?`, `Cancel background task?`,
+/// `Suspend teammate?`, `Shut down teammate?`) and its body names the exact
+/// target the action would hit (`RowAction::body`), so the user answers about
+/// a specific row rather than a generic warning. `No` is the default selection
+/// (state.rs `ROW_ACTION_CONFIRM_NO`), so a stray `Enter` cannot terminate a
+/// task or teammate (FR-069).
+///
+/// The dialog only paints state here - it dispatches nothing. The suspension,
+/// termination, cancellation or shutdown runs in
+/// `App::row_action_confirm_accept` on an explicit `Yes`; `No`/`Esc` (or a
+/// click on `No`) dismiss it and leave the row untouched (FR-069).
+///
+/// Layout (spec `agentui` PLAN "Confirmation modal shape"): the body line, a
+/// blank row, then the centred `[ Yes ]` / `[ No ]` button spans, a blank row
+/// and the key hint. The two painted button rectangles are cached on
+/// [`App::row_action_confirm_yes_area`] / [`App::row_action_confirm_no_area`]
+/// and the dialog itself on [`App::row_action_confirm_area`], so the mouse
+/// router can answer the dialog by clicking exactly the button it painted
+/// (NFR-010).
+fn render_row_action_confirm(frame: &mut Frame, app: &mut App) {
+    let Some(ref pending) = app.row_action_confirm else {
+        return;
+    };
+    let selected = pending.selected;
+
+    let title = pending.action.title();
+    let body = pending.action.body();
+
+    // Widths: the buttons are fixed spans; the dialog must be wide enough for
+    // the widest of the title, the body and the centred button pair (four
+    // padding columns so nothing touches a border).
+    const YES_LABEL: &str = "[ Yes ]";
+    const NO_LABEL: &str = "[ No ]";
+    const BUTTON_GAP: u16 = 8;
+    const INNER_ROWS: u16 = 5;
+    let yes_label_w = YES_LABEL.chars().count() as u16;
+    let no_label_w = NO_LABEL.chars().count() as u16;
+    let buttons_w = yes_label_w + BUTTON_GAP + no_label_w;
+    let body_w = body.chars().count() as u16;
+    let width = (title.chars().count() as u16)
+        .max(body_w.saturating_add(4))
+        .max(buttons_w.saturating_add(4))
+        .max(34);
+    let height = INNER_ROWS + 2; // plus the top and bottom border rows
+
+    let screen = frame.area();
+    let area = centered_rect_fixed(width, height, screen);
+    app.row_action_confirm_area = area;
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Yellow));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Body line naming the target, centred on the row under the title.
+    let body_x = inner.x + inner.width.saturating_sub(body_w) / 2;
+    let body_line = Line::from(Span::styled(
+        body,
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(
+        Paragraph::new(body_line),
+        Rect::new(body_x, inner.y, body_w, 1),
+    );
+
+    // The centred button pair, painted exactly where the cached hit rects
+    // below will say it is (NFR-010): a click answers the button it painted.
+    let pair_x = inner.x + inner.width.saturating_sub(buttons_w) / 2;
+    let buttons_y = inner.y + 2;
+    let selected_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let normal_style = Style::default().fg(Color::White);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            YES_LABEL,
+            if selected == crate::app::ROW_ACTION_CONFIRM_YES {
+                selected_style
+            } else {
+                normal_style
+            },
+        )),
+        Rect::new(pair_x, buttons_y, yes_label_w, 1),
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            NO_LABEL,
+            if selected == crate::app::ROW_ACTION_CONFIRM_NO {
+                selected_style
+            } else {
+                normal_style
+            },
+        )),
+        Rect::new(pair_x + yes_label_w + BUTTON_GAP, buttons_y, no_label_w, 1),
+    );
+    app.row_action_confirm_yes_area = Rect::new(pair_x, buttons_y, yes_label_w, 1);
+    app.row_action_confirm_no_area =
+        Rect::new(pair_x + yes_label_w + BUTTON_GAP, buttons_y, no_label_w, 1);
+
+    // The key hint sits on the inner row under the buttons; omitted when the
+    // dialog is too small to carry it.
+    let hint = if inner.height > 4 {
+        Line::from(Span::styled(
+            "<-/-> move * Enter select * Esc close",
+            Style::default().fg(Color::DarkGray),
+        ))
+    } else {
+        Line::default()
+    };
+    frame.render_widget(
+        Paragraph::new(hint).alignment(Alignment::Center),
+        Rect::new(inner.x, inner.y.saturating_add(4), inner.width, 1),
+    );
+}
+
+/// Terminal columns reserved as the gap between the Agents and Teams buttons.
+const SIDE_BUTTON_GAP: u16 = 1;
+
+/// Narrowest terminal width a side button is drawn at when the column has room
+/// for it, borders included (spec `agentui` FR-001).
+const SIDE_BUTTON_MIN_WIDTH: u16 = 7;
+
 /// Compute the widths for the Agents/Teams side buttons from pre-built labels.
 ///
 /// Each button width is its label width plus 2 for borders, with a minimum of
-/// 7. When the two buttons and their gap no longer fit in `button_col_area`
-/// the widths are scaled down proportionally so they still fit.
+/// [`SIDE_BUTTON_MIN_WIDTH`]. While the pair plus the gap fits in
+/// `button_col_w` both labels are drawn in full, so neither is truncated
+/// (spec `agentui` FR-001). When the column is too narrow the available width
+/// is split in proportion to the two natural widths, keeping each button at
+/// least one column wide, so the pair always matches the column exactly and
+/// neither button can be painted over the input field (NFR-010, NFR-004).
 ///
 /// `draw_input_side_buttons` builds the labels once and passes them here so
 /// the per-frame label allocations are not repeated for the width pass and the
@@ -2016,18 +2148,24 @@ fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
 ///
 /// Returns `(agents_width, teams_width)`.
 fn side_button_widths(agents_label: &str, teams_label: &str, button_col_w: u16) -> (u16, u16) {
-    let gap = 1u16;
-    let agents_w = (agents_label.chars().count() as u16 + 2).max(7);
-    let teams_w = (teams_label.chars().count() as u16 + 2).max(7);
-    let total = agents_w.saturating_add(gap).saturating_add(teams_w);
+    let agents_w = (agents_label.chars().count() as u16 + 2).max(SIDE_BUTTON_MIN_WIDTH);
+    let teams_w = (teams_label.chars().count() as u16 + 2).max(SIDE_BUTTON_MIN_WIDTH);
+    let total = agents_w
+        .saturating_add(SIDE_BUTTON_GAP)
+        .saturating_add(teams_w);
     if total <= button_col_w {
         return (agents_w, teams_w);
     }
-    // Scale down proportionally so both buttons still fit in the column.
-    let scale = f64::from(button_col_w) / f64::from(total);
-    let scaled_agents = ((f64::from(agents_w) * scale) as u16).max(7);
-    let scaled_teams = ((f64::from(teams_w) * scale) as u16).max(7);
-    (scaled_agents, scaled_teams)
+    // Not enough room for both labels in full: share the column between the
+    // two buttons in proportion to their natural widths.
+    let budget = button_col_w.saturating_sub(SIDE_BUTTON_GAP);
+    if budget <= 1 {
+        return (budget, 0);
+    }
+    let natural = u32::from(agents_w) + u32::from(teams_w);
+    let scaled = (u32::from(agents_w) * u32::from(budget) / natural) as u16;
+    let agents_fit = scaled.clamp(1, budget - 1);
+    (agents_fit, budget - agents_fit)
 }
 
 pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u16) {
@@ -2042,12 +2180,16 @@ pub(crate) fn input_side_button_widths(app: &App, button_col_w: u16) -> (u16, u1
 /// truncated. Never narrower than the responsive breakpoint width.
 pub(crate) fn input_side_buttons_total_width(app: &App) -> u16 {
     let (agents_w, teams_w) = input_side_button_widths(app, u16::MAX);
-    let gap = 1u16;
-    agents_w.saturating_add(gap).saturating_add(teams_w).max(12)
+    agents_w
+        .saturating_add(SIDE_BUTTON_GAP)
+        .saturating_add(teams_w)
+        .max(12)
 }
 
-/// Label for the Agents button. Shows the number of live sub-agent and
-/// background-shell tasks in parentheses when any exist.
+/// Label for the Agents button (spec `agentui` FR-002).
+///
+/// The count is the sum of the live sub-agent tasks and the live background
+/// shell tasks. The bare label `" Agents "` is used when that sum is 0.
 fn agents_button_label(app: &App) -> String {
     let count = app.active_tasks.len() + app.bg_tasks.len();
     if count == 0 {
@@ -2057,13 +2199,22 @@ fn agents_button_label(app: &App) -> String {
     }
 }
 
-/// Label for the Teams button. Shows the number of active (non-terminal)
-/// team members in parentheses when an active team exists.
+/// Label for the Teams button (spec `agentui` FR-003).
+///
+/// The count is the number of team members whose status is not
+/// `ShuttingDown`, `Stopped` or `Failed`, so a teammate that is winding down is
+/// no longer advertised as live. The bare label `" Teams "` is used when that
+/// count is 0.
 fn teams_button_label(app: &App) -> String {
     let count = app
         .team_members
         .iter()
-        .filter(|m| !matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed))
+        .filter(|m| {
+            !matches!(
+                m.status,
+                MemberStatus::ShuttingDown | MemberStatus::Stopped | MemberStatus::Failed
+            )
+        })
         .count();
     if count == 0 {
         " Teams ".to_string()
@@ -2072,8 +2223,58 @@ fn teams_button_label(app: &App) -> String {
     }
 }
 
+/// Styles for one side button, returned as `(text, border)`.
+///
+/// Three states, in precedence order: **active** paints white on blue with a
+/// bold modifier (spec `agentui` FR-005), **enabled** paints white text inside a
+/// dark grey border, and **disabled** dims both so the button reads as
+/// unavailable (FR-004).
+fn side_button_styles(active: bool, enabled: bool) -> (Style, Style) {
+    if active {
+        (
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Blue).bg(Color::Blue),
+        )
+    } else if enabled {
+        (
+            Style::default().fg(Color::White),
+            Style::default().fg(Color::DarkGray),
+        )
+    } else {
+        let dimmed = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM);
+        (dimmed, dimmed)
+    }
+}
+
+/// Truncate a side-button label to `cols` characters without splitting a
+/// multi-byte character (spec `agentui` NFR-004).
+///
+/// Only reached when the button column is narrower than the two labels need;
+/// the labels themselves are pure ASCII, so this is a defensive guard rather
+/// than a routine path.
+fn fit_button_label(label: &str, cols: u16) -> String {
+    let budget = usize::from(cols);
+    if label.chars().count() <= budget {
+        return label.to_string();
+    }
+    label.chars().take(budget).collect()
+}
+
+/// Render the bordered Agents/Teams button column immediately left of the
+/// message input (spec `agentui` FR-001..FR-005).
+///
+/// Both buttons are laid out inside `button_col_area` and their rects are
+/// recorded in [`App::agents_button_area`] / [`App::teams_button_area`] so the
+/// mouse hit-tests in the input handler resolve to the painted cells. Each
+/// button's text and border style come from [`side_button_styles`]: active
+/// (white on blue, bold) when its window is open, enabled (white) when its
+/// subject exists, and dimmed when it does not.
 fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Rect) {
-    let gap = 1u16;
     // Build the labels once and reuse them for both the width pass and the
     // render pass instead of allocating them again per call (PERF-048).
     let agents_label = agents_button_label(app);
@@ -2081,82 +2282,54 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     let (agents_w, teams_w) =
         side_button_widths(&agents_label, &teams_label, button_col_area.width);
     let agents_x = button_col_area.x;
-    let teams_x = agents_x.saturating_add(agents_w).saturating_add(gap);
+    let teams_x = agents_x
+        .saturating_add(agents_w)
+        .saturating_add(SIDE_BUTTON_GAP);
     let y = button_col_area.y;
     let h = button_col_area.height.max(3);
 
     app.agents_button_area = Rect::new(agents_x, y, agents_w, h);
     app.teams_button_area = Rect::new(teams_x, y, teams_w, h);
 
-    let agents_enabled = !app.active_tasks.is_empty() || !app.bg_tasks.is_empty();
-    let teams_enabled = app.active_team.is_some();
+    let agents_enabled = app.agents_window_available();
+    let teams_enabled = app.teams_window_available();
     let agents_active = agents_enabled && app.show_agents_window;
     let teams_active = teams_enabled && app.show_teams_window;
 
-    let agents_text_style = if agents_active {
-        Style::default()
-            .fg(Color::White)
-            .bg(Color::Blue)
-            .add_modifier(Modifier::BOLD)
-    } else if agents_enabled {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    };
-    let teams_text_style = if teams_active {
-        Style::default()
-            .fg(Color::White)
-            .bg(Color::Blue)
-            .add_modifier(Modifier::BOLD)
-    } else if teams_enabled {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    };
+    let (agents_text_style, agents_border_style) =
+        side_button_styles(agents_active, agents_enabled);
+    let (teams_text_style, teams_border_style) = side_button_styles(teams_active, teams_enabled);
 
-    let agents_border_style = if agents_active {
-        Style::default().fg(Color::Blue).bg(Color::Blue)
-    } else if agents_enabled {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    };
-    let teams_border_style = if teams_active {
-        Style::default().fg(Color::Blue).bg(Color::Blue)
-    } else if teams_enabled {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    };
+    // The label sits inside the two border columns; fit it to the inner width
+    // so a squeezed column truncates the text instead of letting it bleed over
+    // the input field.
+    if agents_w > 0 {
+        let agents_text = fit_button_label(&agents_label, agents_w.saturating_sub(2));
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(agents_text, agents_text_style)))
+                .style(agents_text_style)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(agents_border_style),
+                ),
+            app.agents_button_area,
+        );
+    }
 
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(agents_label, agents_text_style)))
-            .style(agents_text_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(agents_border_style),
-            ),
-        app.agents_button_area,
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(teams_label, teams_text_style)))
-            .style(teams_text_style)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(teams_border_style),
-            ),
-        app.teams_button_area,
-    );
+    if teams_w > 0 {
+        let teams_text = fit_button_label(&teams_label, teams_w.saturating_sub(2));
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(teams_text, teams_text_style)))
+                .style(teams_text_style)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(teams_border_style),
+                ),
+            app.teams_button_area,
+        );
+    }
 }
 
 /// Apply a visual highlight to cells within the active text selection.
@@ -4888,8 +5061,9 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     refresh_input_render_cache(app, input_inner_width as u16);
     let input_height = app.input_render_cache.height;
 
-    // Whether to show the teammate strip (1 row under the status bar).
-    let team_strip = app.active_team.is_some() && !app.team_members.is_empty();
+    // Whether to show the teammate strip (1 row under the status bar, FR-027).
+    // A team with no members reserves no line at all (FR-066).
+    let team_strip = crate::teammate_strip::is_visible(app);
     let team_strip_h = if team_strip { 1u16 } else { 0 };
 
     let chunks = Layout::default()
@@ -4906,7 +5080,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     crate::layout_statusbar::render_status_bar_v2(frame, app, chunks[0]);
 
     if team_strip {
-        render_teammate_strip(frame, app, chunks[1]);
+        crate::teammate_strip::render(frame, app, chunks[1]);
     }
 
     // Split the middle area horizontally when an auxiliary side panel is visible.
@@ -4944,6 +5118,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
+            app.teams_rows_area = Rect::default();
             app.memory_area = Rect::default();
             app.telemetry_area = Rect::default();
             app.tasks_area = h_chunks[1];
@@ -4959,6 +5134,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
+            app.teams_rows_area = Rect::default();
             app.tasks_area = Rect::default();
             app.telemetry_area = Rect::default();
             app.memory_area = h_chunks[1];
@@ -4971,6 +5147,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
+            app.teams_rows_area = Rect::default();
             app.tasks_area = Rect::default();
             app.memory_area = Rect::default();
             app.telemetry_area = h_chunks[1];
@@ -4986,6 +5163,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
+            app.teams_rows_area = Rect::default();
             app.tasks_area = Rect::default();
             app.memory_area = Rect::default();
             app.telemetry_area = Rect::default();
@@ -5019,6 +5197,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
                     app.profile_area = h_chunks[1];
                     app.active_agents_area = Rect::default();
                     app.teams_area = Rect::default();
+                    app.teams_rows_area = Rect::default();
                     app.memory_area = Rect::default();
                     app.telemetry_area = Rect::default();
                     render_profile_panel(frame, app, h_chunks[1]);
@@ -5040,6 +5219,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.context_panel_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
+        app.teams_rows_area = Rect::default();
         render_messages(frame, app, chunks[2]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[2]);
     }
@@ -5813,6 +5993,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     app.active_agents_area = Rect::default();
     app.teams_area = Rect::default();
+    app.teams_rows_area = Rect::default();
 
     // Determine which session to display logs for.
     // If a specific agent is selected, show its logs; otherwise show primary session.
@@ -6710,9 +6891,120 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     }
 }
 
+/// Terminal-width percentage the Agents popup occupies (spec `agentui` FR-006).
+const AGENTS_WINDOW_PERCENT_W: u16 = 90;
+
+/// Terminal-height percentage the Agents popup occupies (spec `agentui` FR-006).
+const AGENTS_WINDOW_PERCENT_H: u16 = 70;
+
+/// Terminal-width percentage the Teams popup occupies (spec `agentui` FR-017).
+const TEAMS_WINDOW_PERCENT_W: u16 = 90;
+
+/// Terminal-height percentage the Teams popup occupies (spec `agentui` FR-017).
+const TEAMS_WINDOW_PERCENT_H: u16 = 70;
+
+/// Maximum terminal columns a popup Close button occupies (spec `agentui` FR-007,
+/// FR-018).
+const WINDOW_CLOSE_MAX_WIDTH: u16 = 10;
+
+/// Maximum terminal rows a popup Close button occupies (spec `agentui` FR-007,
+/// FR-018).
+const WINDOW_CLOSE_MAX_HEIGHT: u16 = 3;
+
+/// Terminal rows reserved between a popup's content area and its Close button
+/// (spec `agentui` FR-008).
+const WINDOW_CLOSE_SEPARATOR_ROWS: u16 = 1;
+
+/// The computed rectangles of a bordered popup-window frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowFrame {
+    /// The bordered modal rectangle.
+    area: Rect,
+    /// The bordered Close button, pinned to the bottom-right of the inner area.
+    close: Rect,
+    /// The scrollable content (table) area.
+    content: Rect,
+}
+
+/// Compute the frame rectangles for a centred popup window.
+///
+/// The modal is centred at `percent_w` x `percent_h` of `screen` and clamped to
+/// the terminal rectangle, so it stays fully visible at any size (NFR-010). The
+/// Close button is clamped to at most [`WINDOW_CLOSE_MAX_WIDTH`] columns and
+/// [`WINDOW_CLOSE_MAX_HEIGHT`] rows and pinned to the bottom-right of the inner
+/// area so it always fits (FR-007). The content area is the inner area minus the
+/// Close button height and one separating row, clamped to a minimum height of
+/// one row (FR-008) and to the inner area so it can never paint outside the
+/// frame (NFR-010).
+fn window_frame(percent_w: u16, percent_h: u16, screen: Rect) -> WindowFrame {
+    let area = centered_rect(percent_w, percent_h, screen).intersection(screen);
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+
+    let close_w = WINDOW_CLOSE_MAX_WIDTH.min(inner.width);
+    let close_h = WINDOW_CLOSE_MAX_HEIGHT.min(inner.height);
+    let close = Rect::new(
+        inner.right().saturating_sub(close_w),
+        inner.bottom().saturating_sub(close_h),
+        close_w,
+        close_h,
+    );
+
+    let content_h = inner
+        .height
+        .saturating_sub(close_h.saturating_add(WINDOW_CLOSE_SEPARATOR_ROWS))
+        .max(1)
+        .min(inner.height);
+    let content = Rect::new(inner.x, inner.y, inner.width, content_h);
+
+    WindowFrame {
+        area,
+        close,
+        content,
+    }
+}
+
+/// Testable wrapper for the private [`window_frame`] geometry helper.
+///
+/// Returns `(modal, close, content)` so the popup-frame arithmetic can be
+/// asserted offline without a live terminal (spec `agentui` NFR-001).
+#[doc(hidden)]
+pub fn window_frame_testable(percent_w: u16, percent_h: u16, screen: Rect) -> (Rect, Rect, Rect) {
+    let geo = window_frame(percent_w, percent_h, screen);
+    (geo.area, geo.close, geo.content)
+}
+
+/// The percentage width the Agents popup occupies (spec `agentui` FR-006).
+#[doc(hidden)]
+pub fn agents_window_percent_w() -> u16 {
+    AGENTS_WINDOW_PERCENT_W
+}
+
+/// The percentage height the Agents popup occupies (spec `agentui` FR-006).
+#[doc(hidden)]
+pub fn agents_window_percent_h() -> u16 {
+    AGENTS_WINDOW_PERCENT_H
+}
+
+/// The percentage width the Teams popup occupies (spec `agentui` FR-017).
+#[doc(hidden)]
+pub fn teams_window_percent_w() -> u16 {
+    TEAMS_WINDOW_PERCENT_W
+}
+
+/// The percentage height the Teams popup occupies (spec `agentui` FR-017).
+#[doc(hidden)]
+pub fn teams_window_percent_h() -> u16 {
+    TEAMS_WINDOW_PERCENT_H
+}
+
 fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(58, 56, frame.area());
-    frame.render_widget(Clear, area);
+    let geo = window_frame(
+        AGENTS_WINDOW_PERCENT_W,
+        AGENTS_WINDOW_PERCENT_H,
+        frame.area(),
+    );
+    // Clear the underlay so the modal never shows the chat through its gaps.
+    frame.render_widget(Clear, geo.area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -6723,21 +7015,20 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Cyan));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    frame.render_widget(block, geo.area);
 
-    let close_w = 10u16.min(inner.width);
-    let close_h = 3u16.min(inner.height);
-    let close_x = inner.right().saturating_sub(close_w);
-    let close_y = inner.bottom().saturating_sub(close_h);
-    let close_area = Rect::new(close_x, close_y, close_w, close_h);
-    app.agents_close_button_area = close_area;
+    app.agents_close_button_area = geo.close;
+    app.active_agents_area = geo.content;
+    render_active_agents_subpanel(frame, app, geo.content);
 
-    let content_h = inner.height.saturating_sub(close_h + 1);
-    let content_area = Rect::new(inner.x, inner.y, inner.width, content_h.max(1));
-    app.active_agents_area = content_area;
-    render_active_agents_subpanel(frame, app, content_area);
+    render_window_close_button(frame, geo.close);
+}
 
+/// Paint the bordered ` Close ` button shared by both modal windows.
+///
+/// The caller supplies the clamped button rectangle from [`window_frame`], so
+/// the label always fits (spec `agentui` FR-007, FR-018).
+fn render_window_close_button(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " Close ",
@@ -6749,13 +7040,14 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
         .alignment(Alignment::Center),
-        close_area,
+        area,
     );
 }
 
 fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(90, 56, frame.area());
-    frame.render_widget(Clear, area);
+    let geo = window_frame(TEAMS_WINDOW_PERCENT_W, TEAMS_WINDOW_PERCENT_H, frame.area());
+    // Clear the underlay so the modal never shows the chat through its gaps.
+    frame.render_widget(Clear, geo.area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -6766,110 +7058,13 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Blue));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    frame.render_widget(block, geo.area);
 
-    let close_w = 10u16.min(inner.width);
-    let close_h = 3u16.min(inner.height);
-    let close_x = inner.right().saturating_sub(close_w);
-    let close_y = inner.bottom().saturating_sub(close_h);
-    let close_area = Rect::new(close_x, close_y, close_w, close_h);
-    app.teams_close_button_area = close_area;
+    app.teams_close_button_area = geo.close;
+    app.teams_area = geo.content;
+    crate::layout_teams::render_teams_subpanel(frame, app, geo.content);
 
-    let content_h = inner.height.saturating_sub(close_h + 1);
-    let content_area = Rect::new(inner.x, inner.y, inner.width, content_h.max(1));
-    app.teams_area = content_area;
-    crate::layout_teams::render_teams_subpanel(frame, app, content_area);
-
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Close ",
-            Style::default().fg(Color::DarkGray),
-        )))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
-        .alignment(Alignment::Center),
-        close_area,
-    );
-}
-
-/// Render a single-row teammate strip below the status bar.
-///
-/// Shows each teammate as a compact pill: `[icon] name (status)`.
-/// The focused teammate is highlighted with a different background.
-fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
-    use ragent_agent::team::MemberStatus;
-
-    let bg = Color::Rgb(30, 30, 40);
-    let mut spans: Vec<Span<'_>> = Vec::new();
-    spans.push(Span::styled(
-        " [team] ",
-        Style::default().fg(Color::Blue).bg(bg),
-    ));
-
-    for member in &app.team_members {
-        let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
-
-        let (status_icon, status_color) = match member.status {
-            MemberStatus::Working => ("▶", Color::Cyan),
-            MemberStatus::Idle => ("●", Color::Green),
-            MemberStatus::Spawning => ("◌", Color::Yellow),
-            MemberStatus::Blocked => ("◈", Color::DarkGray),
-            MemberStatus::PlanPending => ("◎", Color::Magenta),
-            MemberStatus::Suspended => ("[pause]", Color::DarkGray),
-            MemberStatus::ShuttingDown => ("◌", Color::Yellow),
-            MemberStatus::Stopped => ("○", Color::DarkGray),
-            MemberStatus::Failed => ("✗", Color::Red),
-        };
-
-        let pill_bg = if is_focused {
-            Color::Rgb(50, 50, 80)
-        } else {
-            bg
-        };
-        let name_color = if is_focused {
-            Color::White
-        } else {
-            Color::Gray
-        };
-        let border_char = if is_focused { "▸" } else { " " };
-
-        spans.push(Span::styled(
-            format!("{border_char}{status_icon} "),
-            Style::default().fg(status_color).bg(pill_bg),
-        ));
-        // Truncate name to 16 chars
-        let display_name: String = member.name.chars().take(16).collect();
-        spans.push(Span::styled(
-            display_name,
-            Style::default()
-                .fg(name_color)
-                .bg(pill_bg)
-                .add_modifier(if is_focused {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ));
-        spans.push(Span::styled(" ", Style::default().bg(bg)));
-    }
-
-    // Hint at right edge
-    let hint = " Alt+^v:cycle ";
-    let used: usize = spans.iter().map(|s| s.content.len()).sum();
-    let remaining = (area.width as usize).saturating_sub(used + hint.len());
-    spans.push(Span::styled(" ".repeat(remaining), Style::default().bg(bg)));
-    spans.push(Span::styled(
-        hint,
-        Style::default().fg(Color::DarkGray).bg(bg),
-    ));
-
-    let line = Line::from(spans);
-    let bar = Paragraph::new(line).style(Style::default().bg(bg));
-    frame.render_widget(bar, area);
+    render_window_close_button(frame, geo.close);
 }
 
 /// Render a single message into formatted lines (FR-003, FR-006).
@@ -7058,13 +7253,27 @@ fn messages_to_lines(
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ];
-                    if canonical_tool_name(tool) == "think" || summary.is_empty() {
-                        spans.push(Span::styled(display_name, name_style));
+                    // The tool name always comes immediately after the step
+                    // counter, with every other parameter rendered after it.
+                    //
+                    // A `think` call renders its own thought under the header
+                    // from its tool state, so the header keeps the name only -
+                    // unlike the other tools there is no input summary to
+                    // print, and printing the model's full argument inline
+                    // would duplicate the lines that follow.
+                    let (name_span, argument_span) = if canonical_tool_name(tool) == "think" {
+                        (display_name, None)
+                    } else if summary.is_empty() {
+                        (display_name, None)
                     } else {
-                        // The tool name always comes immediately after the step
-                        // counter, with every other parameter rendered after it.
-                        spans.push(Span::styled(format!("{} ", display_name), name_style));
-                        spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
+                        (
+                            format!("{} ", display_name),
+                            Some(Span::styled(summary, Style::default().fg(Color::DarkGray))),
+                        )
+                    };
+                    spans.push(Span::styled(name_span, name_style));
+                    if let Some(argument) = argument_span {
+                        spans.push(argument);
                     }
                     if tool == "read" {
                         if let Some(range) = read_line_range(&state.output) {
@@ -7126,16 +7335,30 @@ fn messages_to_lines(
                                         .and_then(|out| out.get("text"))
                                         .and_then(|v| v.as_str())
                                 })
+                                .or_else(|| {
+                                    state
+                                        .input
+                                        .get("thought")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|_| state.output.is_none())
+                                })
                             {
                                 // SEC-080: `thought` is tool output; neutralise
                                 // any embedded terminal escapes before rendering.
                                 let thought = sanitize_terminal(thought);
+                                let mut thought_lines = Vec::new();
                                 for line in thought.as_ref().lines() {
-                                    lines.push(Line::from(Span::styled(
+                                    thought_lines.push(Line::from(Span::styled(
                                         format!("  {}", line),
                                         theme::think(),
                                     )));
                                 }
+                                // A model may narrate its next tool call as
+                                // markup INSIDE the thought; the loop recovers
+                                // and executes that call, so the transcript
+                                // shows the executed call instead of the raw
+                                // narration.
+                                lines.extend(scrub_narrated_toolcalls(thought_lines));
                             }
                         } else if tool == "multiedit" || tool == "multi_edit" {
                             if let Some(file_stats) = state
@@ -7243,12 +7466,16 @@ fn messages_to_lines(
                     // SEC-080: reasoning text is model output and may embed an
                     // escape sequence; neutralise before rendering.
                     let text = sanitize_terminal(text);
+                    let mut reasoning_lines = Vec::new();
                     for line in text.as_ref().lines() {
-                        lines.push(Line::from(Span::styled(
+                        reasoning_lines.push(Line::from(Span::styled(
                             format!("  {}", line),
                             theme::think(),
                         )));
                     }
+                    // Reasoning text is also a place models narrate tool-call
+                    // markup into; scrub it the same way as think outputs.
+                    lines.extend(scrub_narrated_toolcalls(reasoning_lines));
                 }
                 MessagePart::Image(img) => {
                     let name = img
@@ -8223,8 +8450,8 @@ fn render_loop_setup_dialog(frame: &mut Frame, app: &App) {
 /// A bordered modal listing every discovered MCP server under a block cursor.
 /// `Up`/`Down` move the cursor (the list scrolls, with a scrollbar, to keep it
 /// on screen), `Space` toggles the highlighted server's enabled state, and `Esc`
-/// closes the dialog. Each row carries an `[x]`/`[ ]` enabled marker. Only ASCII
-/// glyphs are used in the body.
+/// closes the dialog. Each row carries an `[x]`/`[ ]` enabled marker. The body
+/// uses only ASCII glyphs.
 fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
@@ -8431,8 +8658,8 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
 /// and telemetry when verbose) listed at the end of the same scrollable body.
 /// `Up`/`Down` move the cursor (the list scrolls, with a scrollbar, to keep it on
 /// screen), `Space` toggles the highlighted plugin's enabled state, and `Esc`
-/// closes the dialog. An enabled plugin's table row is tinted yellow. Only ASCII
-/// glyphs are used in the body.
+/// closes the dialog. An enabled plugin's table row is tinted yellow. The body
+/// uses only ASCII glyphs.
 fn render_plugins_list_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 

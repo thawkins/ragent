@@ -556,6 +556,9 @@ mod test_tool_repeat_guard;
 #[path = "test_tool_result_arc_str.rs"]
 mod test_tool_result_arc_str;
 
+#[path = "test_task_suspend_resume.rs"]
+mod test_task_suspend_resume;
+
 #[path = "test_tool_task_adapters.rs"]
 mod test_tool_task_adapters;
 

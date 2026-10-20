@@ -27,7 +27,7 @@ pub fn set_enabled(enabled: bool) {
 /// Persist the requested YOLO state to the config file and update the runtime
 /// flag.
 ///
-/// YOLO is a privileged, user-only toggle: the value always lands in the
+/// YOLO is a privileged, user-only toggle: the value normally lands in the
 /// **user-global** config (`~/.config/ragent/ragent.json`), never the
 /// project-local `.ragent/ragent.json`. Project config is untrusted repository
 /// content whose `yolo` key is stripped by
@@ -35,6 +35,11 @@ pub fn set_enabled(enabled: bool) {
 /// (SECTASKS T-011), so a project-file write could never round-trip on the next
 /// load. A repo therefore cannot turn YOLO on for a reviewer, while a user's own
 /// `/yolo` toggle still persists across restarts.
+///
+/// When the process was started with `ragent --config <file>`, that explicit
+/// file is the loaded source and becomes the write target (see
+/// [`Config::set_config_write_target`](crate::config::Config::set_config_write_target)),
+/// because nothing else is read back on the following start.
 ///
 /// Any error during persistence is returned so callers can decide how to
 /// report it.

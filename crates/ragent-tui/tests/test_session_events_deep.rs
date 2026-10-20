@@ -1392,28 +1392,44 @@ async fn connector_catalogue_panel_swallows_keys_via_handle_key() {
 }
 
 #[tokio::test]
-async fn render_frame_with_connector_panel_open_is_ascii() {
+async fn render_frame_with_connector_panel_open_has_unicode_borders() {
     let mut app = open_connector_catalogue(vec![connector("github", "developer")]);
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
         .expect("draw");
-    // The panel's own painted area must be ASCII-only; the surrounding app
-    // chrome (logo) may carry non-ASCII glyphs, so scope the check to the panel.
+    // The panel frames itself with the default Unicode box-drawing glyphs; the
+    // surrounding app chrome (logo) may carry other glyphs, so scope the check
+    // to the panel's own border.
     let area = app.connector_store_area;
     assert!(
         area.width > 0 && area.height > 0,
         "the panel painted an area"
     );
     let buffer = terminal.backend().buffer().clone();
-    for y in area.y..area.y + area.height {
-        for x in area.x..area.x + area.width {
-            assert!(
-                buffer[(x, y)].symbol().is_ascii(),
-                "a panel glyph must be ASCII at ({x},{y}): {:?}",
-                buffer[(x, y)].symbol()
-            );
-        }
+    let right = area.x + area.width.saturating_sub(1);
+    assert_eq!(
+        buffer[(area.x, area.y)].symbol(),
+        "\u{250c}",
+        "top-left border corner"
+    );
+    assert_eq!(
+        buffer[(right, area.y)].symbol(),
+        "\u{2510}",
+        "top-right border corner"
+    );
+    let bottom = area.y + area.height.saturating_sub(1);
+    assert_eq!(
+        buffer[(area.x, bottom)].symbol(),
+        "\u{2514}",
+        "bottom-left border corner"
+    );
+    for y in area.y + 1..bottom {
+        assert_eq!(
+            buffer[(area.x, y)].symbol(),
+            "\u{2502}",
+            "left border rule at y={y}"
+        );
     }
 }

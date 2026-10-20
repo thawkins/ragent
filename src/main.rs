@@ -528,7 +528,7 @@ async fn async_main() -> Result<()> {
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("Failed to read config file '{safe_path}': {e}"))?;
 
-        serde_json::from_str(&content).map_err(|e| {
+        let mut parsed: Config = serde_json::from_str(&content).map_err(|e| {
             let line = e.line();
             let column = e.column();
             let problematic_line = content
@@ -558,7 +558,14 @@ async fn async_main() -> Result<()> {
                 " ".repeat(column.saturating_sub(1)),
                 e
             )
-        })?
+        })?;
+        // The explicit file is the only config this process loaded, so a
+        // runtime-flag toggle (`/yolo`, Alt+Y) must write back to it; the
+        // user-global `ragent.json` is never read in `--config` mode and a write
+        // there would never round-trip (the "/yolo does not persist" report).
+        ragent_config::Config::set_config_write_target(Some(path.clone()));
+        parsed.config_paths.push(path);
+        parsed
     } else {
         Config::load()?
     };

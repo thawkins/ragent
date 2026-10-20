@@ -1556,6 +1556,8 @@ async fn event_teammate_lifecycle_updates_members() {
         Some("crashed")
     );
 
+    // FR-053: cleanup also hides the Teams popup window.
+    app.show_teams_window = true;
     app.handle_event(Event::TeamCleanedUp {
         session_id: "sess-1".to_string(),
         team_name: "alpha".to_string(),
@@ -1563,6 +1565,9 @@ async fn event_teammate_lifecycle_updates_members() {
     .await;
     assert!(app.team_members.is_empty());
     assert!(!app.show_teams);
+    assert!(!app.show_teams_window);
+    assert!(app.team_message_counts.is_empty());
+    assert!(app.focused_teammate.is_none());
 }
 
 #[tokio::test]
@@ -1590,6 +1595,67 @@ async fn event_teammate_message_tracks_counts() {
     .await;
     assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((2, 0)));
     assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+}
+
+#[tokio::test]
+async fn event_message_counters_ignore_lead() {
+    // FR-052: a sender or recipient named `lead` never increments a counter,
+    // on either the direct-message or the P2P path.
+    let mut app = app_with_session("sess-1");
+
+    app.handle_event(Event::TeammateMessage {
+        session_id: "sess-1".to_string(),
+        team_name: "alpha".to_string(),
+        from: "lead".to_string(),
+        to: "tm-001".to_string(),
+        message_type: "notice".to_string(),
+        preview: "from lead".to_string(),
+    })
+    .await;
+    assert!(
+        !app.team_message_counts.contains_key("lead"),
+        "a lead sender must not gain a sent counter"
+    );
+    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((0, 1)));
+
+    app.handle_event(Event::TeammateMessage {
+        session_id: "sess-1".to_string(),
+        team_name: "alpha".to_string(),
+        from: "tm-001".to_string(),
+        to: "lead".to_string(),
+        message_type: "notice".to_string(),
+        preview: "to lead".to_string(),
+    })
+    .await;
+    assert_eq!(app.team_message_counts.get("tm-001").copied(), Some((1, 1)));
+    assert!(!app.team_message_counts.contains_key("lead"));
+
+    app.handle_event(Event::TeammateP2PMessage {
+        session_id: "sess-1".to_string(),
+        team_name: "alpha".to_string(),
+        from: "lead".to_string(),
+        to: "tm-002".to_string(),
+        message_type: "chat".to_string(),
+        preview: "p2p from lead".to_string(),
+    })
+    .await;
+    assert!(
+        !app.team_message_counts.contains_key("lead"),
+        "a lead P2P sender must not gain a sent counter"
+    );
+    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((0, 1)));
+
+    app.handle_event(Event::TeammateP2PMessage {
+        session_id: "sess-1".to_string(),
+        team_name: "alpha".to_string(),
+        from: "tm-002".to_string(),
+        to: "lead".to_string(),
+        message_type: "chat".to_string(),
+        preview: "p2p to lead".to_string(),
+    })
+    .await;
+    assert_eq!(app.team_message_counts.get("tm-002").copied(), Some((1, 1)));
+    assert!(!app.team_message_counts.contains_key("lead"));
 }
 
 #[tokio::test]

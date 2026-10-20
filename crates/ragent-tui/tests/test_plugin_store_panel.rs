@@ -1,7 +1,8 @@
 //! Render tests for the plugin-store browse panel (spec `pluginstores` T-006).
 //!
 //! Covers FR-004 (bordered, titled modal with a search field, a result list, and
-//! a footer of key hints, ASCII-only), FR-005 (the highlighted row carries a
+//! a footer of key hints, framed with Unicode box-drawing borders), FR-005 (the
+//! highlighted row carries a
 //! full-row block cursor via `List::highlight_style`, and installed rows use the
 //! installed colour with an `[installed]` marker), FR-011/FR-017 (loading, error,
 //! and empty bodies render an explicit state line rather than a blank list), and
@@ -126,7 +127,7 @@ fn find_row(terminal: &Terminal<TestBackend>, app: &App, needle: &str) -> Option
 }
 
 // ---------------------------------------------------------------------------
-// FR-004 - bordered, titled modal, ASCII-only
+// FR-004 - bordered, titled modal, Unicode box-drawing borders
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -147,18 +148,19 @@ fn the_panel_is_a_bordered_modal_with_the_store_name_and_counts_in_the_title() {
         title.contains("search:"),
         "title carries the search field label: {title:?}"
     );
-    // A four-corner border frames the panel (ASCII `+` corners, FR-004).
+    // A four-corner border frames the panel with the default ratatui
+    // box-drawing glyphs (FR-004), like every other panel.
     let first = full_row(&terminal, area.y);
     let last = full_row(&terminal, area.y + area.height.saturating_sub(1));
     let left = area.x as usize;
     assert_eq!(
         first.chars().nth(left),
-        Some('+'),
+        Some('\u{250c}'),
         "top-left corner is drawn: {first:?}"
     );
     assert_eq!(
         last.chars().nth(left),
-        Some('+'),
+        Some('\u{2514}'),
         "bottom-left corner is drawn: {last:?}"
     );
 }
@@ -185,17 +187,33 @@ fn the_footer_lists_the_available_keys() {
 }
 
 #[test]
-fn every_painted_glyph_in_the_panel_is_ascii() {
+fn the_panel_is_framed_with_unicode_box_drawing_borders() {
     let mut app = open(StoreKind::Codex, sample(), &["codex-time"]);
     let terminal = render(&mut app, 100, 30);
     let area = app.plugin_store_area;
     let buffer = terminal.backend().buffer();
-    for y in area.y..area.y + area.height {
-        for x in area.x..area.x + area.width {
+    let right = area.x + area.width.saturating_sub(1);
+    let bottom = area.y + area.height.saturating_sub(1);
+
+    // The four corners are ratatui's default box-drawing glyphs.
+    assert_eq!(buffer[(area.x, area.y)].symbol(), "\u{250c}", "top-left");
+    assert_eq!(buffer[(right, area.y)].symbol(), "\u{2510}", "top-right");
+    assert_eq!(buffer[(area.x, bottom)].symbol(), "\u{2514}", "bottom-left");
+    assert_eq!(buffer[(right, bottom)].symbol(), "\u{2518}", "bottom-right");
+
+    // Both edges are vertical rules, never the ASCII `|`.
+    for y in area.y + 1..bottom {
+        assert_eq!(buffer[(area.x, y)].symbol(), "\u{2502}", "left edge y={y}");
+        assert_eq!(buffer[(right, y)].symbol(), "\u{2502}", "right edge y={y}");
+    }
+
+    // The inner body keeps plain ASCII text and markers.
+    for y in area.y + 1..bottom {
+        for x in area.x + 1..right {
             let symbol = buffer[(x, y)].symbol();
             assert!(
                 symbol.is_ascii(),
-                "non-ASCII glyph {symbol:?} at ({x}, {y})"
+                "non-ASCII body glyph {symbol:?} at ({x}, {y})"
             );
         }
     }

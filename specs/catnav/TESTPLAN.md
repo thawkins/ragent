@@ -152,8 +152,8 @@ gone and the result count is non-zero).
 - The Claude panel shows its own categories (`Database`, `Productivity`) from the same
   navigator implementation (FR-006); `claude-todo`'s `todo` tag is not a row (FR-021
   withdrawn).
-- The panel keeps its title, search field, and footer key hints; only ASCII glyphs are
-  used (FR-004).
+- The panel keeps its title, search field, footer key hints, and its Unicode
+  box-drawing border with a plain-ASCII body (FR-004).
 
 ### TC-002 - Keyboard: Down/Up move the category cursor and narrow the list on the same press
 
@@ -429,7 +429,8 @@ takes a moment (or the panel is opened and read in the first frames).
 - Steps 2-3 the navigator column width and the panel area are re-derived so the
   navigator and result list stay fully visible; the navigator is never clipped off the
   panel (FR-020).
-- Only ASCII glyphs are used throughout (FR-004).
+- The navigator and result body use only ASCII glyphs inside the Unicode panel border
+  (FR-004).
 
 ### TC-013 - Keyboard-only regression: every category is reachable without a mouse
 

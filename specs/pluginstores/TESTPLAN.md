@@ -122,7 +122,8 @@ index (`<CODEX_URL>`) so the panel has content.
 - Step 4 the Codex panel opens; step 6 the Claude panel opens, each with the matching
   store name in the title (FR-001, FR-004).
 - The panel is a bordered, titled modal with a search field, a result list, and a footer
-  of key hints; only ASCII glyphs are used (FR-004).
+  of key hints, framed with the same Unicode box-drawing borders every other panel uses
+  (FR-004).
 - Opening the panel starts the fetch and places focus in the search field without
   disturbing any running agent turn (FR-007).
 
@@ -655,14 +656,14 @@ alphabetically first row) - the store analogue of
   drift (step 2).
 - The click clears the query, restores the full result set, and leaves the active
   category unchanged (step 3).
-- A click on an already-empty query is a no-op; every painted glyph in the panel stays
-  ASCII.
+- A click on an already-empty query is a no-op; the panel body stays ASCII inside a
+  Unicode box-drawing border.
 
 Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
 (`the_search_box_sits_on_the_bottom_edge_with_a_clear_button`,
 `the_search_box_field_reflects_the_live_query`,
 `the_search_box_clear_button_clears_the_filter_on_click`, and
-`every_painted_glyph_in_the_panel_is_ascii`).
+`the_panel_is_framed_with_unicode_box_drawing_borders`).
 
 ## Cleanup
 
@@ -781,7 +782,8 @@ assertions).
 - The title renders black-on-white (reversed video) as a distinct header band (step 2).
 - A click or wheel on the title row is inert and never mis-mapped onto the `ALL` row
   (step 4).
-- The header uses ASCII glyphs only and issues no network request.
+- The header is plain ASCII text inside the Unicode border and issues no network
+  request.
 
 Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
 (`each_navigator_has_a_reversed_video_title_above_its_all_row`); the navigator hit-test

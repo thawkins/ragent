@@ -2191,6 +2191,28 @@ impl SessionProcessor {
                 loop_interrupted = true;
                 break;
             }
+            // Sub-agent suspension gate (spec `agentui` FR-035): when this
+            // child session was parked by `AgentManager::suspend_task`, wait
+            // here - no further stage runs - until `resume_task` clears the
+            // flag or the user cancels the turn (a set cancel flag falls
+            // through to the cancel branch below). The check is a DashMap
+            // lookup; sessions not spawned by the agent manager (plain chat
+            // turns, ACP and remote dispatch) have no entry and skip the
+            // gate entirely. Suspension takes effect between steps: the LLM
+            // call or tool execution in progress when the request lands
+            // finishes first.
+            if let Some(suspend_flag) = self
+                .agent_manager
+                .get()
+                .and_then(|m| m.suspend_flag_for_session(session_id))
+            {
+                while suspend_flag.load(Ordering::Relaxed) {
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                }
+            }
             if let Some(tracker) = loop_tracker.as_mut() {
                 if !tracker.begin_step() {
                     // FR-013/FR-014: the step or token budget was reached -
@@ -2540,42 +2562,6 @@ impl SessionProcessor {
                         .map(Some)
                     })
                     .await;
-                }
-            }
-
-            // F9: text-format tool-call recovery. Some providers and models
-            // cannot emit native tool-call fields and narrate the invocation
-            // as text (markup dialects or bare tool-call JSON). When the step
-            // produced NO native tool calls, attempt a conservative extraction
-            // from the text buffer so the call is executed instead of left as
-            // prose. Ordinary prose never matches (markup tags must be
-            // literally present, or the whole response must be the JSON).
-            // Recovered spans are blanked from the buffer so the model does
-            // not see its own narration duplicated alongside the ToolUse part
-            // on the next round-trip.
-            if llm_result.tool_calls.is_empty() && !llm_result.text_buffer.is_empty() {
-                let (recovered, spans) =
-                    crate::session::text_toolcalls::extract_text_tool_calls_with_spans(
-                        &llm_result.text_buffer,
-                    );
-                if !recovered.is_empty() {
-                    tracing::info!(
-                        session_id = %session_id,
-                        count = recovered.len(),
-                        "recovered tool call(s) from text-format output"
-                    );
-                    self.event_bus.publish(Event::AgentNotice {
-                        session_id: session_id.to_string(),
-                        message: format!(
-                            "Recovered {} tool call(s) from text-format output.",
-                            recovered.len()
-                        ),
-                    });
-                    llm_result.tool_calls = recovered;
-                    crate::session::text_toolcalls::blank_spans(
-                        &mut llm_result.text_buffer,
-                        &spans,
-                    );
                 }
             }
 

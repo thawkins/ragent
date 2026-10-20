@@ -136,9 +136,9 @@ distinct **active-category colour**, with the row under the category cursor carr
 `category` field of the store index entry (A1), treating an absent or empty field as
 "uncategorised" so that such an entry is visible under `ALL` only.
 
-**FR-004** - The system shall render the navigator and the result list in an ASCII-only
-layout, and shall keep the existing panel title, search field, and footer key hints
-visible.
+**FR-004** - The system shall render the navigator and the result list as plain-ASCII
+text inside the panel's standard Unicode box-drawing border, and shall keep the existing
+panel title, search field, and footer key hints visible.
 
 **FR-005** - The system shall extend the panel footer key hints to name the category
 navigation keys, and shall report the active category in the panel title line.
@@ -308,7 +308,8 @@ Focus cycles between two panes inside the panel:
 8. The result area shows the explicit empty-state line when the category and query match
    nothing, and the navigator stays operable.
 9. No keystroke or click in the navigator installs, downloads, or executes anything.
-10. The panel, navigator included, uses only ASCII glyphs.
+10. The panel, navigator included, keeps its Unicode box-drawing border and a plain-ASCII
+    body.
 
 ## Open Questions
 

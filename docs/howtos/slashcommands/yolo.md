@@ -28,7 +28,10 @@ enable message lists; the full bypass surface is documented below.
 | `/yolo status` | Prints the current state |
 
 The flag is stored as a persistent runtime flag (`config.yolo`), so it
-persists across restarts.
+persists across restarts. It is written to the **user-global** config
+(`~/.config/ragent/ragent.json`); a project-local `.ragent/ragent.json` cannot
+set it. When you launch with `ragent --config <file>`, that file is the only
+config loaded, so the flag is written there instead.
 
 ## Bypass surface
 

@@ -109,7 +109,12 @@ Start implementation:
 
 ## 3. What specs are
 
-A spec is a self-contained directory under `specs/<id>/`:
+A spec is a self-contained directory under `specs/<id>/`. **Only `SPEC.md` is
+required**: a directory holding just a `SPEC.md` is discovered by `/spec list`,
+`/spec search` and the `spec_*` tools, and is a valid target for
+`/spec update <name>`, `/spec plan <name>` and `/spec validate <name>`. This is
+what makes a hand-authored or partially-generated spec usable before its plan
+exists. Everything below `SPEC.md` in the tree is optional and derived.
 
 ```text
 specs/

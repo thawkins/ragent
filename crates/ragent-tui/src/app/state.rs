@@ -23,6 +23,7 @@ use ragent_agent::team::{MemberStatus, SwarmState, TeamConfig, TeamMember};
 use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
 use ragent_connectors::{ALL_CATEGORY, CatalogueBrowser, CategoryFilter, CategoryFilterState};
+use ragent_types::strutil::short_suffix;
 
 use super::BackendPanelState;
 
@@ -30,6 +31,7 @@ pub use ragent_connectors::CatalogueBrowseStatus as ConnectorBrowseStatus;
 use ragent_plugins::{StoreEntry, StoreError, StoreIndex, StoreIndexFetcher, StoreKind};
 use serde::Serialize;
 
+use crate::app::helpers::short_id;
 use crate::app::session_ops::recover_poisoned;
 use crate::theme::StatusHistory;
 
@@ -1110,6 +1112,101 @@ pub struct PendingForceCleanup {
     pub team_name: String,
     /// Active teammate display names (for modal listing).
     pub active_members: Vec<String>,
+}
+
+/// The destructive row action a confirmation dialog is asking about (spec
+/// `agentui` T-009, FR-036, FR-037, FR-040).
+///
+/// The dialog opens on the row controls that terminate or suspend a running
+/// subject: `[x]` on a sub-agent row, `[stop]`/`[x]` on a background shell
+/// row, `[stop]` on a non-suspended teammate row and `[x]` on a teammate row.
+/// A sub-agent or teammate `[stop]` that would resume an already-suspended
+/// subject opens no dialog (FR-035: only the destructive direction is
+/// confirmed).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowAction {
+    /// Terminate a sub-agent task (`[x]` on a sub-agent row, FR-036).
+    KillSubagent {
+        /// The task id the answer dispatches to.
+        task_id: String,
+        /// The agent name shown by the row, for the dialog body.
+        agent_name: String,
+    },
+    /// Cancel a background shell task (`[stop]`/`[x]` on a background shell
+    /// row, FR-037).
+    CancelBackground {
+        /// The task id the answer dispatches to.
+        task_id: String,
+        /// The shell command shown by the row, for the dialog body.
+        command: String,
+    },
+    /// Suspend a teammate whose status is not suspended (`[stop]` on a
+    /// non-suspended teammate row, FR-040).
+    SuspendTeammate {
+        /// The member id the answer dispatches to.
+        agent_id: String,
+        /// The member name shown by the row, for the dialog body.
+        name: String,
+    },
+    /// Shut a teammate down gracefully (`[x]` on a teammate row, FR-040).
+    ShutdownTeammate {
+        /// The member id the answer dispatches to.
+        agent_id: String,
+        /// The member name shown by the row, for the dialog body.
+        name: String,
+    },
+}
+
+impl RowAction {
+    /// The dialog title naming the action (spec `agentui` T-009, FR-036,
+    /// FR-037, FR-040).
+    #[must_use]
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::KillSubagent { .. } => " Kill sub-agent? ",
+            Self::CancelBackground { .. } => " Cancel background task? ",
+            Self::SuspendTeammate { .. } => " Suspend teammate? ",
+            Self::ShutdownTeammate { .. } => " Shut down teammate? ",
+        }
+    }
+
+    /// The one-line body naming the target the action applies to (spec
+    /// `agentui` T-009: the dialog names the target as well as the action).
+    #[must_use]
+    pub fn body(&self) -> String {
+        match self {
+            Self::KillSubagent {
+                task_id,
+                agent_name,
+            } => {
+                format!("{agent_name} [{}]", short_suffix(task_id, 8))
+            }
+            Self::CancelBackground { task_id, command } => {
+                format!(
+                    "background task {} [{}]",
+                    short_suffix(command, 24),
+                    short_suffix(task_id, 8)
+                )
+            }
+            Self::SuspendTeammate { agent_id, name }
+            | Self::ShutdownTeammate { agent_id, name } => {
+                format!("{name} ({agent_id})")
+            }
+        }
+    }
+}
+
+/// State of the destructive row-action confirmation dialog (spec `agentui`
+/// T-009). Reuses the shape of the queue-clear / memory-clear confirmations: a
+/// selected option whose default is `No`, so a stray `Enter` cannot run the
+/// action (FR-069).
+#[derive(Debug, Clone)]
+pub struct PendingRowAction {
+    /// The action the dialog asks about; the `Yes` answer dispatches it.
+    pub action: RowAction,
+    /// Selected option index within the dialog:
+    /// [`ROW_ACTION_CONFIRM_YES`] (`Yes`) or [`ROW_ACTION_CONFIRM_NO`] (`No`).
+    pub selected: usize,
 }
 
 /// Pending rollback offer after a goal-driven loop terminated (FR-020, T-013).
@@ -3197,14 +3294,33 @@ pub struct App {
     pub active_agents_max_scroll: u16,
     /// Cached area of the active-agents subpanel.
     pub active_agents_area: Rect,
-    /// Per-row click targets for Play/Stop buttons in the agents dialog.
+    /// Control hit-rects and identifiers for the agent buttons (Play/Stop) in
+    /// the agents dialog.
+    ///
+    /// One entry per action-capable painted row (a sub-agent tree row or a
+    /// background shell row), index-aligned with
+    /// [`App::agent_row_button_task_ids`] (NFR-011). A terminal row records the
+    /// `Rect::default()` placeholder with an empty identifier, which can never
+    /// match a click (FR-071); a control scrolled out of view records the same
+    /// default rect (FR-056).
     pub agent_row_button_areas: Vec<Rect>,
     /// Parallel task IDs for the agent button click targets.
     pub agent_row_button_task_ids: Vec<String>,
-    /// Per-row click targets for Kill buttons in the agents dialog.
+    /// Control hit-rects for the Kill (`[x]`) controls, index-aligned with
+    /// [`App::agent_row_kill_task_ids`] under the same placeholder rule.
     pub agent_row_kill_areas: Vec<Rect>,
     /// Parallel task IDs for the agent kill click targets.
     pub agent_row_kill_task_ids: Vec<String>,
+    /// Painted-row -> click key for the Agents table (spec `agentui` T-008).
+    ///
+    /// Index equals the painted content row (0 = header, 1 = primary, then the
+    /// sub-agent tree and the background section). An empty string marks a row
+    /// that opens nothing (header, background heading and background rows),
+    /// `"primary"` is the primary row, and a task id is a sub-agent row.
+    /// Recorded by the renderer every frame; a row click resolves through this
+    /// map instead of an `active_tasks` position, so the tree-painted rows
+    /// always open the task painted on that line (FR-033, FR-034, FR-069).
+    pub agents_row_task_ids: Vec<String>,
     // -- Active-agents panel caches (FR-003, FR-008) ------------------------
     /// Cached set of custom-agent names for the active-agents panel.
     /// Rebuilt only when `custom_agent_defs.len()` changes (FR-003).
@@ -3267,8 +3383,17 @@ pub struct App {
     pub context_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
-    /// Cached area of the teams subpanel.
+    /// Cached area of the teams subpanel (frame content geometry, FR-008).
     pub teams_area: Rect,
+    /// The painted-rows rectangle inside the Teams table: the bordered
+    /// table block's inner area, recorded by the renderer every frame.
+    ///
+    /// The row-click mapping `(screen row - rows area.y) + scroll offset`
+    /// indexes the painted rows, so a click always resolves to the
+    /// identifier of the row it was painted on (spec `agentui` FR-056,
+    /// NFR-011). Reset to the empty rect wherever the frame content area is
+    /// reset, so a hidden surface cannot receive a click (FR-057).
+    pub teams_rows_area: Rect,
     /// Cached area of the output overlay.
     pub output_view_area: Rect,
     /// Cached area of the research markdown viewer overlay.
@@ -3494,14 +3619,31 @@ pub struct App {
     pub teams_scroll_offset: u16,
     /// Max scroll for the Teams panel.
     pub teams_max_scroll: u16,
-    /// Per-row click targets for Play/Stop buttons in the teams dialog.
+    /// Control hit-rects for the teammate buttons (suspend/resume) in the
+    /// teams dialog.
+    ///
+    /// One entry per painted teammate row, index-aligned with
+    /// [`App::team_row_button_agent_ids`] (NFR-011). A terminal row records the
+    /// `Rect::default()` placeholder with an empty identifier, which can never
+    /// match a click (FR-071); a control scrolled out of view records the same
+    /// default rect (FR-056).
     pub team_row_button_areas: Vec<Rect>,
     /// Parallel agent IDs for the team button click targets.
     pub team_row_button_agent_ids: Vec<String>,
-    /// Per-row click targets for Kill buttons in the teams dialog.
+    /// Control hit-rects for the teammate Kill (`[x]`) controls, index-aligned
+    /// with [`App::team_row_kill_agent_ids`] under the same placeholder rule.
     pub team_row_kill_areas: Vec<Rect>,
     /// Parallel agent IDs for the team kill click targets.
     pub team_row_kill_agent_ids: Vec<String>,
+    /// Painted-row -> click key for the Teams table (spec `agentui` T-008).
+    ///
+    /// Index equals the painted content row (0 = header, 1 = lead, then the
+    /// teammate rows or the empty-state hint). An empty string marks a row
+    /// that opens nothing, `"lead"` is the lead row, and a member agent id is
+    /// a teammate row. A lead click clears focus and a teammate click focuses
+    /// it (FR-038, FR-039); stale ids are ignored without mutating state
+    /// (FR-069).
+    pub teams_row_agent_ids: Vec<String>,
     /// Currently focused teammate (agent_id). When set, the status
     /// bar shows a focus indicator and the input box routes messages
     /// to this teammate's mailbox instead of the lead session.
@@ -3770,6 +3912,29 @@ pub struct App {
     /// Pending Alt+X stop-agent confirmation. When `true`, Enter confirms the
     /// halt and Esc keeps the agent running (nothing is stopped until Yes).
     pub pending_stop_confirm: bool,
+    /// Pending destructive row-action confirmation (spec `agentui` T-009,
+    /// FR-036, FR-037, FR-040): `Some` while the `Yes`/`No` dialog naming the
+    /// target and the action is displayed over the Agents/Teams windows.
+    ///
+    /// The dialog only arms the request - the suspension, termination or
+    /// shutdown runs in [`App::row_action_confirm_accept`] on an explicit
+    /// `Yes`; `No` / `Esc` (or clicking `No`) dismiss and leave the row
+    /// untouched (FR-069).
+    pub row_action_confirm: Option<PendingRowAction>,
+    /// Cached area of the destructive row-action confirmation dialog (spec
+    /// `agentui` NFR-010). Set during render so the mouse router can answer
+    /// the dialog with a click; kept in [`Rect::default`] while closed.
+    pub row_action_confirm_area: Rect,
+    /// Cached rectangle of the dialog's painted `[ Yes ]` button span (spec
+    /// `agentui` T-009, NFR-010). A left-click inside it is the `Yes` answer;
+    /// `Rect::default` while the dialog is closed, which can never match a
+    /// click.
+    pub row_action_confirm_yes_area: Rect,
+    /// Cached rectangle of the dialog's painted `[ No ]` button span (spec
+    /// `agentui` T-009, NFR-010). A left-click inside it is the `No` answer;
+    /// `Rect::default` while the dialog is closed, which can never match a
+    /// click.
+    pub row_action_confirm_no_area: Rect,
 
     // -- Research progress (`/research create`) -------------------------------
     /// Live progress trackers for all running/completed `/research create`
@@ -4883,46 +5048,97 @@ impl App {
 
     /// Merge a task-registry snapshot into `active_tasks` (idempotent).
     ///
-    /// Merge semantics:
-    /// - entries tracked by the registry but no longer `Running` (completed,
-    ///   failed, cancelled, terminating) are removed from `active_tasks`;
+    /// Merge semantics (FR-054):
+    /// - entries tracked by the registry but finished (completed, failed,
+    ///   cancelled, terminating) are removed from `active_tasks` - the ghost a
+    ///   dropped completion event would otherwise leave behind;
     /// - registry `Running` entries missing from `active_tasks` are added
     ///   (repairing a dropped `SubagentStart` event);
+    /// - registry `Suspended` entries keep their painted row (FR-049: a
+    ///   suspended run is paused, not finished - it can be resumed and killed,
+    ///   and the status refresh below keeps the painted status converged with
+    ///   the registry);
     /// - entries NOT tracked by the registry (bench tasks, shell views) are
     ///   left untouched.
+    ///
+    /// NFR-008: every log line the merge emits is attributed to the affected
+    /// child session (one line per removed ghost, one per re-added row) so the
+    /// log panel and the output view agree on ownership.
     pub fn apply_registry_reconciliation(&mut self, snapshot: Vec<ragent_agent::task::TaskEntry>) {
         use ragent_agent::task::TaskStatus;
         let registry: HashMap<String, ragent_agent::task::TaskEntry> =
             snapshot.into_iter().map(|e| (e.id.clone(), e)).collect();
 
-        // Remove entries the registry tracks but that are no longer running.
-        let before = self.active_tasks.len();
+        // Ghosts the merge is about to drop need their identity captured first
+        // so the removal log line can be attributed to the child session.
+        let removed_ghosts: Vec<ragent_agent::task::TaskEntry> = registry
+            .values()
+            .filter(|entry| {
+                matches!(
+                    entry.status,
+                    TaskStatus::Completed
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                        | TaskStatus::Terminating
+                ) && self.active_tasks.iter().any(|t| t.id == entry.id)
+            })
+            .cloned()
+            .collect();
+
+        // Remove entries the registry tracks but that are finished; a registry
+        // `Suspended` status keeps the row painted (FR-049).
         self.active_tasks.retain(|t| match registry.get(&t.id) {
-            Some(entry) => entry.status == TaskStatus::Running,
+            Some(entry) => {
+                matches!(entry.status, TaskStatus::Running | TaskStatus::Suspended)
+            }
             None => true, // not registry-tracked (bench etc.) - keep
         });
-        let removed = before - self.active_tasks.len();
 
         // Add missing running entries; refresh status for tracked ones.
-        let mut added = 0usize;
+        let mut added: Vec<&ragent_agent::task::TaskEntry> = Vec::new();
         for (id, entry) in &registry {
             if let Some(existing) = self.active_tasks.iter_mut().find(|t| &t.id == id) {
                 existing.status = entry.status.clone();
             } else if entry.status == TaskStatus::Running {
                 self.active_tasks.push(entry.clone());
-                added += 1;
+                added.push(entry);
             }
         }
 
-        if removed > 0 || added > 0 {
-            self.push_log_no_agent(
+        // One attributed log line per affected task (NFR-008) instead of a
+        // single unattributed summary, so the log panel's output filter and
+        // the per-agent output view agree on which session the repair is for.
+        for ghost in &removed_ghosts {
+            self.push_log_for(
                 LogLevel::Info,
                 format!(
-                    "[reconcile] Agents panel synced with task registry after dropped events \
-                     (+{added} / -{removed})"
+                    "[reconcile] removed stale row ({}) - registry reports it finished",
+                    short_id(&ghost.id)
                 ),
+                None,
+                Some(ghost.child_session_id.clone()),
             );
+        }
+        for entry in &added {
+            self.push_log_for(
+                LogLevel::Info,
+                format!(
+                    "[reconcile] re-added running task ({}) after dropped events",
+                    short_id(&entry.id)
+                ),
+                None,
+                Some(entry.child_session_id.clone()),
+            );
+        }
+
+        if !removed_ghosts.is_empty() || !added.is_empty() {
             self.needs_redraw = true;
+        }
+        // The registry merge is the safety net for dropped lifecycle events
+        // (FR-054); when it removes a ghost the window may already be able to
+        // empty, so the auto-close runs on the merge too (FR-063).
+        if !removed_ghosts.is_empty() {
+            self.close_agents_window_when_empty();
         }
     }
 }
@@ -4978,6 +5194,15 @@ pub const MEMORY_CLEAR_CONFIRM_YES: usize = 0;
 /// dialog. `No` is the default selection so pressing `Enter` without changing
 /// the selection does not clear memory.
 pub const MEMORY_CLEAR_CONFIRM_NO: usize = 1;
+
+/// Index of the `Yes` option in the destructive row-action confirmation dialog
+/// (spec `agentui` T-009, FR-036, FR-037, FR-040).
+pub const ROW_ACTION_CONFIRM_YES: usize = 0;
+
+/// Index of the `No` option in the destructive row-action confirmation dialog.
+/// `No` is the default selection so a stray `Enter` cannot terminate a task or
+/// teammate (FR-069).
+pub const ROW_ACTION_CONFIRM_NO: usize = 1;
 
 /// Row index of the `Next` option in the queue-control menu (spec `inputqueue`
 /// FR-021).

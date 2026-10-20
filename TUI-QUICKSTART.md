@@ -4,6 +4,38 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (uncommitted, post-1.0.141)
+
+- **Agent and Team Member panel (spec `agentui`)** — the `Agents` and `Teams`
+  buttons beside the message input open live control popups. The Agents window
+  lists the primary agent and an ancestor-indented sub-agent tree (status,
+  elapsed time, step count, `[stop]`/`[x]` columns, a background-shell
+  section); the Teams window lists the lead and every teammate (focus marker,
+  status word, model column, claimed/done/sent/recv counters); a one-row
+  teammate strip under the status bar shows each teammate's status glyph and
+  focused highlight. Clicking an agent row opens its output view; clicking a
+  teammate routes the input to that teammate's mailbox. Destructive actions
+  (kill, shell cancel, teammate suspend/shutdown) ask Yes/No first and the
+  answer is dispatched off the render thread.
+- **Window keyboard control** — with a window open `Space` suspends/resumes
+  the selected row, `Shift+K` arms the kill dialog, `Alt+Down`/`Alt+Up` cycle
+  focus, and the window keys win over the input buffer until `Esc` closes.
+  Both tables scroll with `Up`/`Down`, `Home`/`End`, and the mouse wheel, with
+  vertical scrollbars when they overflow. The Agents window closes itself when
+  its list empties.
+- **Cooperative suspension** — a suspended sub-agent stops after its
+  in-flight LLM call or tool execution finishes; the loop parks between steps
+  and `resume_task` (the same row's button, or `Space`) releases it. A
+  cancelled turn falls through the normal cancel path instead.
+- **Narrated tool calls are invisible** — when a model prints its next tool
+  call as text (tag markup or a one-line JSON object), the transcript now
+  scrubs the raw narration and shows only the executed call, matching the
+  loop's own recovery dialects, including calls narrated inside the reasoning
+  channel.
+- **Unicode borders everywhere** — the plugin-store and connector-catalogue
+  panels draw the same box-drawing frames as every other panel; the
+  ASCII-only border requirement is withdrawn.
+
 ## Highlights (v1.0.138)
 
 - **Deep coverage suites for the TUI (tests only)** — 17 more `tests/` files

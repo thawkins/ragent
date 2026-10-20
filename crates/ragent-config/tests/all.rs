@@ -120,6 +120,9 @@ mod test_plugins_config;
 #[path = "test_research_config.rs"]
 mod test_research_config;
 
+#[path = "test_config_write_target.rs"]
+mod test_config_write_target;
+
 #[path = "test_runtime_flag_toggles.rs"]
 mod test_runtime_flag_toggles;
 

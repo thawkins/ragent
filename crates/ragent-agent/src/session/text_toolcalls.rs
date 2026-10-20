@@ -33,6 +33,34 @@ const TOOL_CALL_CLOSE: &str = "\u{e5b6}/call\u{e5b6}";
 const FUNCTION_CALLS_OPEN: &str = "<function_calls>";
 /// End tag of the XML function-calls dialect.
 const FUNCTION_CALLS_CLOSE: &str = "</function_calls>";
+/// Start tag of the plain-ASCII tool-call dialect some models emit when
+/// their pseudo-XML markup arrives decoded as literal text.
+const TOOLCALL_OPEN: &str = "<toolcall>";
+/// End tag of the plain-ASCII dialect in its usual closing form.
+const TOOLCALL_CLOSE_SLASH: &str = "</toolcall>";
+/// Bare end tag variant: the same close tag with the slash dropped. Some
+/// decoding layers emit `<toolcall>` for the closing tag when the markup
+/// arrives as plain text, so a name may sit between two identical tags.
+const TOOLCALL_CLOSE_PLAIN: &str = "<toolcall>";
+/// Start tag of the underscore-spelled tool-call dialect some chat templates
+/// emit when their markup arrives decoded as literal text (Mistral/GLM/Kimi
+/// style: `tool_call` with an underscore instead of the Qwen `call`).
+const TOOL_CALL_UNDERSCORE_OPEN: &str = "<tool_call>";
+/// End tag of the underscore-spelled dialect.
+const TOOL_CALL_UNDERSCORE_CLOSE: &str = "<tool_call>";
+
+/// Recognised (open, close) tag pairs, tried in order until one yields calls.
+/// The final pair has identical open/close tags: some decoding layers emit
+/// `<toolcall>` for the closing tag too (the slash is dropped when the
+/// markup arrives as plain text), so a name may sit between two identical
+/// tags.
+const DIALECT_TAGS: [(&str, &str); 5] = [
+    (TOOL_CALL_OPEN, TOOL_CALL_CLOSE),
+    (FUNCTION_CALLS_OPEN, FUNCTION_CALLS_CLOSE),
+    (TOOLCALL_OPEN, TOOLCALL_CLOSE_SLASH),
+    (TOOLCALL_OPEN, TOOLCALL_CLOSE_PLAIN),
+    (TOOL_CALL_UNDERSCORE_OPEN, TOOL_CALL_UNDERSCORE_CLOSE),
+];
 
 /// Extracts tool calls from assistant text that carries tool-call markup.
 ///
@@ -41,7 +69,10 @@ const FUNCTION_CALLS_CLOSE: &str = "</function_calls>";
 /// 1. private-tag blocks whose payload is a JSON object with `name` and
 ///    `arguments`/`input`/`parameters` keys (Qwen-style dialect),
 /// 2. `function=name` blocks with `parameter=key` elements (XML dialect),
-/// 3. when no markup is present and the whole trimmed response parses as a
+/// 3. plain-ASCII `<toolcall>` blocks carrying any of the above payloads, or
+///    a bare tool name alone (the dialect that appears when a model's
+///    pseudo-XML markup is decoded to literal text), or
+/// 4. when no markup is present and the whole trimmed response parses as a
 ///    JSON array of `{"name": ..., "arguments": ...}` objects (or a single
 ///    such object), the bare-JSON form.
 ///
@@ -56,10 +87,7 @@ const FUNCTION_CALLS_CLOSE: &str = "</function_calls>";
 pub(crate) fn extract_text_tool_calls_with_spans(
     text: &str,
 ) -> (Vec<PendingToolCall>, Vec<(usize, usize)>) {
-    for (open_tag, close_tag) in [
-        (TOOL_CALL_OPEN, TOOL_CALL_CLOSE),
-        (FUNCTION_CALLS_OPEN, FUNCTION_CALLS_CLOSE),
-    ] {
+    for (open_tag, close_tag) in DIALECT_TAGS {
         let (calls, spans) = scan_blocks_with_spans(text, open_tag, close_tag);
         if !calls.is_empty() {
             return (calls, spans);
@@ -94,6 +122,12 @@ pub(crate) fn blank_spans(buffer: &mut String, spans: &[(usize, usize)]) {
 /// Span-aware markup scan: finds every `open_tag ... close_tag` block in
 /// `text`, parses the bodies, and returns the calls plus the `(start, end)`
 /// byte span of each complete block (tags included).
+///
+/// A body that fails direct parsing gets one retry with a single balanced
+/// backtick pair stripped: chat templates frequently quote the invocation in
+/// a fenced code block and the raw fenced body alone never parses. On
+/// success the call is recovered with the SAME span (tags included), so
+/// blanking wipes the whole block including its fence.
 fn scan_blocks_with_spans(
     text: &str,
     open_tag: &str,
@@ -113,10 +147,50 @@ fn scan_blocks_with_spans(
         if let Some(call) = parse_markup_body(body) {
             calls.push(call);
             spans.push((open_start, block_end));
+        } else if let Some(fenced) = strip_balanced_backticks(body) {
+            if let Some(call) = parse_markup_body(fenced) {
+                calls.push(call);
+                spans.push((open_start, block_end));
+            }
         }
         cursor = block_end;
     }
     (calls, spans)
+}
+
+/// Strips ONE balanced backtick pair from around `body` when the body starts
+/// and ends with a grave accent (optionally as a triple-backtick fence).
+///
+/// A fenced block may carry a short language tag (` ```json `): when the
+/// post-fence content begins with a lone identifier word on its own line and
+/// the call payload starts on the following line, the tag line is skipped
+/// too. The accent pair must wrap the whole remaining content - any interior
+/// structure stays untouched. Returns `None` when there is no balanced pair,
+/// so non-fenced prose bodies never match.
+fn strip_balanced_backticks(body: &str) -> Option<&str> {
+    let trimmed = body.trim();
+    let inner = if let Some(rest) = trimmed.strip_prefix("```") {
+        let rest = rest.strip_suffix("```")?;
+        // Drop a lone lowercase-ish language tag line ("json", "rust", ...).
+        match rest.find('\n') {
+            Some(first_line_end) => {
+                let (tag, after) = rest.split_at(first_line_end);
+                let is_tag = !tag.is_empty()
+                    && tag.len() <= 16
+                    && tag.chars().all(|c| c.is_ascii_alphanumeric());
+                if is_tag && after[1..].trim_start().starts_with('{') {
+                    &after[1..]
+                } else {
+                    rest
+                }
+            }
+            None => rest,
+        }
+    } else {
+        trimmed.strip_prefix('`')?.strip_suffix('`')?
+    };
+    let stripped = inner.trim();
+    (stripped.len() < trimmed.len()).then_some(stripped)
 }
 
 /// Parses the inner payload of one markup block.
@@ -128,7 +202,13 @@ fn parse_markup_body(body: &str) -> Option<PendingToolCall> {
         return Some(call);
     }
     // XML dialect: `function=name` with `parameter` elements.
-    parse_xml_tool_call(body)
+    if let Some(call) = parse_xml_tool_call(body) {
+        return Some(call);
+    }
+    // Bare tool name only (e.g. a decoded `<toolcall>Read</toolcall>`
+    // invocation with no arguments). Conservative: the body must be a single
+    // identifier token, so an argument-bearing or prose body never matches.
+    bare_tool_name(body).map(|name| make_pending_call(&name, Value::Object(serde_json::Map::new())))
 }
 
 /// Parses `function=name` plus `parameter` element markup.
@@ -173,6 +253,21 @@ fn parse_xml_tool_call(body: &str) -> Option<PendingToolCall> {
     // still a call; the registry's required-args validation handles tools that
     // genuinely need parameters.
     Some(make_pending_call(&name, Value::Object(object)))
+}
+
+/// Accepts a body consisting of exactly one identifier token (a Rust/JSON
+/// name shape: letters, digits, underscores and hyphens, not starting with a
+/// digit or hyphen). Everything else - prose, punctuation, paths - is None.
+fn bare_tool_name(body: &str) -> Option<String> {
+    let mut chars = body.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return None;
+    }
+    Some(body.to_string())
 }
 
 /// Parses the whole trimmed response as bare tool-call JSON.

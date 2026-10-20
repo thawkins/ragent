@@ -283,3 +283,151 @@ async fn test_poll_end_to_end_with_registry_backed_manager() {
         "registry running entry must be re-added, ids: {ids:?}"
     );
 }
+/// T-015/FR-049: a registry `Suspended` status is not finished - the painted
+/// row keeps its slot and the status refresh converges the painted status with
+/// the registry, so the row renders as suspended rather than vanishing.
+#[test]
+fn test_reconcile_keeps_suspended_row_and_refreshes_status() {
+    let mut app = make_app();
+    app.active_tasks
+        .push(entry("t1", ragent_agent::task::TaskStatus::Running));
+
+    let snapshot = vec![
+        entry("t1", ragent_agent::task::TaskStatus::Suspended),
+        entry("t2", ragent_agent::task::TaskStatus::Running),
+    ];
+    app.apply_registry_reconciliation(snapshot);
+
+    let ids: Vec<String> = app.active_tasks.iter().map(|t| t.id.clone()).collect();
+    assert!(ids.contains(&"t1".to_string()), "ids: {ids:?}");
+    assert!(ids.contains(&"t2".to_string()), "ids: {ids:?}");
+    let t1 = app.active_tasks.iter().find(|t| t.id == "t1").unwrap();
+    assert_eq!(
+        t1.status,
+        ragent_agent::task::TaskStatus::Suspended,
+        "painted status must converge with the registry"
+    );
+    assert!(app.needs_redraw, "status change must repaint");
+}
+
+/// T-015/NFR-008: the merge attributes each removal log line to the removed
+/// task's child session, so the log panel's output filter and the per-agent
+/// output view agree on ownership.
+#[test]
+fn test_reconcile_ghost_removal_log_is_attributed_to_child_session() {
+    let mut app = make_app();
+    app.active_tasks
+        .push(entry("t1", ragent_agent::task::TaskStatus::Running));
+
+    let before = app.log_entries.len();
+    let snapshot = vec![entry("t1", ragent_agent::task::TaskStatus::Completed)];
+    app.apply_registry_reconciliation(snapshot);
+
+    let new_entries = &app.log_entries[before..];
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "exactly one attribution line, got: {:?}",
+        new_entries.iter().map(|e| &e.message).collect::<Vec<_>>()
+    );
+    let line = &new_entries[0];
+    assert_eq!(
+        line.session_id.as_deref(),
+        Some("child-t1"),
+        "removal line must be attributed to the child session"
+    );
+    assert!(
+        line.message.contains("[reconcile] removed stale row (t1)"),
+        "message: {}",
+        line.message
+    );
+}
+
+/// T-015/NFR-008: the merge attributes each re-addition log line to the
+/// re-added task's child session.
+#[test]
+fn test_reconcile_readd_log_is_attributed_to_child_session() {
+    let mut app = make_app();
+
+    let before = app.log_entries.len();
+    let snapshot = vec![entry("t2", ragent_agent::task::TaskStatus::Running)];
+    app.apply_registry_reconciliation(snapshot);
+
+    let new_entries = &app.log_entries[before..];
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "exactly one attribution line, got: {:?}",
+        new_entries.iter().map(|e| &e.message).collect::<Vec<_>>()
+    );
+    let line = &new_entries[0];
+    assert_eq!(
+        line.session_id.as_deref(),
+        Some("child-t2"),
+        "re-add line must be attributed to the child session"
+    );
+    assert!(
+        line.message
+            .contains("[reconcile] re-added running task (t2)"),
+        "message: {}",
+        line.message
+    );
+}
+
+/// The idempotent second pass must be silent: a merge with nothing to change
+/// emits no log lines and leaves the redraw flag alone.
+#[test]
+fn test_reconcile_clean_merge_neither_logs_nor_repaints() {
+    let mut app = make_app();
+    app.needs_redraw = false;
+
+    let before = app.log_entries.len();
+    let snapshot = vec![entry("t1", ragent_agent::task::TaskStatus::Running)];
+    app.apply_registry_reconciliation(snapshot.clone());
+    let first_redraw = app.needs_redraw;
+    app.needs_redraw = false;
+    app.apply_registry_reconciliation(snapshot);
+
+    assert!(
+        first_redraw,
+        "the divergent first pass must request a repaint"
+    );
+    assert_eq!(
+        app.log_entries.len(),
+        before + 1,
+        "only the first pass adds an entry"
+    );
+    assert!(
+        app.active_tasks.len() == 1,
+        "the merge must never duplicate the row"
+    );
+    assert!(!app.needs_redraw, "a clean pass must not repaint");
+}
+
+/// A terminated registry entry that was never painted gains no ghost row and
+/// no reconciliation log line - the safety net only repairs divergence, it
+/// never paints finished work.
+#[test]
+fn test_reconcile_never_adds_finished_registry_entries() {
+    let mut app = make_app();
+    let before = app.log_entries.len();
+
+    let snapshot = vec![
+        entry("done-1", ragent_agent::task::TaskStatus::Completed),
+        entry("fail-1", ragent_agent::task::TaskStatus::Failed),
+        entry("term-1", ragent_agent::task::TaskStatus::Terminating),
+        entry("cxl-1", ragent_agent::task::TaskStatus::Cancelled),
+    ];
+    app.apply_registry_reconciliation(snapshot);
+
+    assert!(
+        app.active_tasks.is_empty(),
+        "no finished entry is painted, ids: {:?}",
+        app.active_tasks.iter().map(|t| &t.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        app.log_entries.len(),
+        before,
+        "no log line for never-painted finished tasks"
+    );
+}

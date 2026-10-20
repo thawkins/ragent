@@ -41,6 +41,12 @@ mod test_active_tasks_reconcile;
 mod test_agent_notice_separation;
 #[path = "test_agent_switching.rs"]
 mod test_agent_switching;
+#[path = "test_agents_window_frame.rs"]
+mod test_agents_window_frame;
+#[path = "test_agents_window_table.rs"]
+mod test_agents_window_table;
+#[path = "test_agentui_t019_offline.rs"]
+mod test_agentui_t019_offline;
 #[path = "test_app_send_sync.rs"]
 mod test_app_send_sync;
 #[path = "test_automation_command.rs"]
@@ -151,6 +157,8 @@ mod test_govcreate_registration;
 mod test_hard_break_lines;
 #[path = "test_history.rs"]
 mod test_history;
+#[path = "test_hit_rect_lifecycle.rs"]
+mod test_hit_rect_lifecycle;
 #[path = "test_hook_warning_flagged.rs"]
 mod test_hook_warning_flagged;
 #[path = "test_i18n_command.rs"]
@@ -207,6 +215,8 @@ mod test_input_queue_show_panel;
 mod test_input_queue_slash;
 #[path = "test_input_unicode.rs"]
 mod test_input_unicode;
+#[path = "test_keyboard_control.rs"]
+mod test_keyboard_control;
 #[path = "test_layout_deep.rs"]
 mod test_layout_deep;
 #[path = "test_layout_extra.rs"]
@@ -347,6 +357,12 @@ mod test_rollback_flow;
 mod test_router_save_dialog;
 #[path = "test_router_setup.rs"]
 mod test_router_setup;
+#[path = "test_row_action_confirm.rs"]
+mod test_row_action_confirm;
+#[path = "test_row_action_dispatch.rs"]
+mod test_row_action_dispatch;
+#[path = "test_row_click_destinations.rs"]
+mod test_row_click_destinations;
 #[path = "test_run_cost_banner.rs"]
 mod test_run_cost_banner;
 #[path = "test_scrolling.rs"]
@@ -417,18 +433,28 @@ mod test_statusbar_layout;
 mod test_stop_confirm_dialog;
 #[path = "test_stream_metrics.rs"]
 mod test_stream_metrics;
+#[path = "test_subagent_events.rs"]
+mod test_subagent_events;
 #[path = "test_subagent_step_log.rs"]
 mod test_subagent_step_log;
 #[path = "test_swarm_more.rs"]
 mod test_swarm_more;
 #[path = "test_tasks_panel.rs"]
 mod test_tasks_panel;
+#[path = "test_teammate_strip.rs"]
+mod test_teammate_strip;
 #[path = "test_teams_tui.rs"]
 mod test_teams_tui;
+#[path = "test_teams_window_frame.rs"]
+mod test_teams_window_frame;
+#[path = "test_teams_window_table.rs"]
+mod test_teams_window_table;
 #[path = "test_telemetry_slash.rs"]
 mod test_telemetry_slash;
 #[path = "test_text_selection.rs"]
 mod test_text_selection;
+#[path = "test_think_narration_scrub.rs"]
+mod test_think_narration_scrub;
 #[path = "test_thinking_defaults.rs"]
 mod test_thinking_defaults;
 #[path = "test_thinking_selector.rs"]
@@ -441,3 +467,9 @@ mod test_tool_event_state;
 mod test_tools_visibility_command;
 #[path = "test_widgets_and_events_extra.rs"]
 mod test_widgets_and_events_extra;
+#[path = "test_window_lifecycle.rs"]
+mod test_window_lifecycle;
+#[path = "test_window_routing.rs"]
+mod test_window_routing;
+#[path = "test_window_scroll_wheel.rs"]
+mod test_window_scroll_wheel;

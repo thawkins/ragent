@@ -252,3 +252,75 @@ fn test_spec_new_feedback_md_empty() {
     let spec = Spec::new(id, "Test");
     assert_eq!(spec.feedback_md, "");
 }
+
+// -- Optional PLAN.md (SPEC-only specs) -------------------------------------
+
+#[tokio::test]
+async fn test_discover_specs_includes_spec_only_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join("spec-only")).await.unwrap();
+    fs::write(root.join("spec-only/SPEC.md"), "# Spec Only\n")
+        .await
+        .unwrap();
+    fs::create_dir_all(root.join("empty-dir")).await.unwrap();
+
+    let specs = SpecIo::discover_specs(root).await.unwrap();
+    assert_eq!(specs.len(), 1, "only the SPEC.md directory is a spec");
+    assert_eq!(specs[0].id.as_str(), "spec-only");
+    assert_eq!(specs[0].title, "Spec Only");
+    assert_eq!(specs[0].plan_md, "");
+    assert_eq!(specs[0].tasks.len(), 0);
+}
+
+#[tokio::test]
+async fn test_read_spec_without_plan_md_succeeds() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("no-plan").unwrap();
+    fs::create_dir_all(root.join("no-plan")).await.unwrap();
+    fs::write(root.join("no-plan/SPEC.md"), "# No Plan\n")
+        .await
+        .unwrap();
+
+    let spec = SpecIo::read_spec(root, &id).await.unwrap();
+    assert_eq!(spec.title, "No Plan");
+    assert_eq!(spec.plan_md, "");
+    assert_eq!(spec.tasks.len(), 0);
+}
+
+#[tokio::test]
+async fn test_write_spec_omits_plan_md_when_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("no-write-plan").unwrap();
+    let mut spec = Spec::new(id.clone(), "No Plan");
+    spec.spec_md = "# Spec\n".to_string();
+    spec.plan_md = String::new();
+    SpecIo::write_spec(root, &spec).await.unwrap();
+
+    assert!(root.join("no-write-plan/SPEC.md").is_file());
+    assert!(!root.join("no-write-plan/PLAN.md").exists());
+}
+
+#[tokio::test]
+async fn test_write_spec_keeps_existing_plan_md_when_in_memory_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("keep-plan").unwrap();
+    SpecIo::create_spec_dir(root, &id, "# Spec\n", "# Existing Plan\n")
+        .await
+        .unwrap();
+    let mut spec = SpecIo::read_spec(root, &id).await.unwrap();
+    spec.plan_md = String::new();
+    spec.spec_md = "# Spec v2\n".to_string();
+    SpecIo::write_spec(root, &spec).await.unwrap();
+
+    // An empty in-memory plan must never destroy an on-disk plan.
+    assert_eq!(
+        fs::read_to_string(root.join("keep-plan/PLAN.md"))
+            .await
+            .unwrap(),
+        "# Existing Plan\n"
+    );
+}

@@ -244,7 +244,12 @@ below documents the current state of all subsystems.
   single-character ellipsis glyph (U+2026).
 - **`/yolo` persists to the user-global config only** — the toggle always writes
   `~/.config/ragent/ragent.json`, never the project-local `.ragent/ragent.json`
-  (SECTASKS T-011).
+  (SECTASKS T-011). When the process is started with `ragent --config <file>`,
+  that explicit file is the only config loaded, so it becomes the write target
+  instead (the user-global file is never read in that mode).
+- **`/yolo on|off|status` are real subcommands** — `on`/`off` set and persist the
+  state (repeating either is idempotent), `status` reports it without changing
+  it, a bare `/yolo` toggles, and an unknown subcommand is refused.
 - **Spec plan parser** — dependency-range expansion accepts `T-001..T-014` and
   `T-001...T-014` in addition to the existing dash and `through` spellings.
 - **`os_info` host-introspection tool and `/osinfo` command (spec `osinfo`)** —
@@ -769,6 +774,7 @@ Key event types include:
 | `CompressionStarted` / `CompressionFinished` | Context compaction lifecycle (auto pre-send summarisation and emergency overflow compaction) |
 | `TeammateIdle` / `TeammateFailed` / `TeammateResumed` | Team coordination |
 | `SubagentSpawned` / `SubagentCompleted` / `SubagentKilled` | Background agents |
+| `SubagentSuspended` / `SubagentResumed` | Cooperative suspension of a background sub-agent (spec `agentui` FR-035) |
 | `RouterClassification` / `RouterTierSelected` | Model-router routing decisions |
 | `RunCostSummary` | Per-run token/cost summary emitted at session run end |
 | `FromFileBodyPreview` | Preview of text extracted from a `--from-file` research seed |
@@ -1119,6 +1125,25 @@ graph LR
 | Stream | Emit assistant chunks and tool call events |
 | Execute Tools | Check permissions, run tools, record results |
 | Record | Append assistant message + tool results to SQLite |
+
+Between steps the loop also runs two gates:
+
+- **Sub-agent suspension gate (spec `agentui` FR-035)** — a child session
+  parked by `AgentManager::suspend_task` waits here (a 200 ms poll that
+  breaks on the cancel flag) until `resume_task` clears its flag or the turn
+  is cancelled; sessions not spawned by the manager skip the gate. The
+  suspension is cooperative: the LLM call or tool execution in flight when
+  the request lands finishes first.
+- **Text-format tool-call recovery** — when the step produced no native tool
+  calls, the loop (in `session/loop_steps.rs`, before callers save the
+  buffers) extracts pending calls from the text buffer first and then the
+  reasoning buffer, blanking any recovered spans so the narration is not
+  re-sent. The recogniser accepts the Qwen private-tag JSON dialect, the XML
+  `function=` dialect, the plain `<toolcall>` pair (including a slash-dropped
+  close-tag variant that produces two identical tags), the underscore-spelled
+  `tool_call` pair, and a bare tool-call JSON object/array; ordinary prose
+  never matches, and recovered calls flow through the normal dispatch
+  pipeline (loop restrictions, hooks, permission checks, registry).
 
 ### 3.8 Autonomous Loop Tools
 
@@ -1881,9 +1906,13 @@ The TUI is a ratatui full-screen interface with these panels:
 | Chat | Conversation stream with markdown and syntax highlighting |
 | Log | Step-numbered tool calls with pretty-printed JSON |
 | Status bar | Provider/model, context usage, compression indicator, YOLO state |
+| Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
+| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` columns, and a background-shell section; rows open the agent's output view (spec `agentui` FR-006..FR-016) |
+| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; clicking a teammate routes the input to its mailbox (spec `agentui` FR-017..FR-026) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
+| Row-action dialog | Yes/No confirmation for destructive row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) drawn over the windows, keyboard and mouse answered (spec `agentui` T-009) |
 
 ### 6.2 Slash Commands
 
@@ -1904,7 +1933,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
-| `/yolo` | Toggle YOLO mode |
+| `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
@@ -2025,7 +2054,8 @@ left-click on the clear button clears the search filter through the same in-memo
 as the keyboard editor, restoring the full result set while leaving the active category
 untouched; the button is inert when the query is already empty. A row too narrow to hold
 both the label and the button drops the button rather than squeezing the field below a
-usable width. Only ASCII glyphs are drawn.
+usable width. The panel is framed with the same Unicode box-drawing borders every other
+panel uses, over a plain-ASCII body.
 
 A vendor marketplace is a *listing* rather than a native index: the Codex catalogue
 carries neither a version nor a description, and the Claude catalogue carries a
@@ -2374,14 +2404,18 @@ requirements, and implementation tasks.
 
 ### 10.2 Directory Layout
 
-Specs live in `specs/<SpecId>/` (50 spec directories as of v1.0.109; the newest
-is `specs/plugins/` — a draft spec for a Codex/Claude-compatible JavaScript
-plugin system with a `/plugins` six-subcommand family):
+Specs live in `specs/<SpecId>/` (58 spec directories as of v1.0.141). Only
+`SPEC.md` is required: a directory holding just a `SPEC.md` is discoverable and
+readable, and is a valid target for `/spec update`, `/spec plan` and
+`/spec validate`. Every other file in the layout below is optional and derived.
+The newest is `specs/agentui/` — a draft spec for the Agent and Team Member
+panel (the `Agents` and `Teams` popups, the teammate strip, and their live
+event plumbing):
 
 ```text
 specs/
 └── testspec/
-    ├── SPEC.md          # EARS requirements and status
+    ├── SPEC.md          # EARS requirements and status (required)
     ├── PLAN.md          # Implementation tasks and Phase -1 gates
     ├── TASKS.md         # Ordered task list extracted from PLAN.md
     ├── TESTPLAN.md      # Manual test-plan with TC-NNN test cases
@@ -3009,6 +3043,12 @@ graph LR
     Idle --> Cleanup[team_cleanup]
     Shutdown --> Cleanup
 ```
+
+Mailbox writes are validated at the boundary: a message authored by the lead
+(the `team_shutdown_teammate` shutdown request, lead-to-teammate chat) must
+carry the lead session id (`MailboxMessage::with_sender_session`,
+SEC-ragent-team-003), so a lead-authored message pushed without one is rejected
+at the write boundary rather than silently forwarded.
 
 ### 14.3 Team Tools (20)
 
@@ -4422,6 +4462,10 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| Uncommitted | 2026-10-18 | **Agent and Team Member panel (spec `agentui`, T-001..T-020).** The `Agents` and `Teams` buttons open live control popups (sub-agent tree with `[stop]`/`[x]` columns and a background-shell section; teammate rows with focus markers, canonical `MemberStatus::display_label()` status words, model column, counters) plus a one-row teammate strip under the status bar. Row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) are gated by a Yes/No confirmation modal dispatched off the render thread; `Space`/`Shift+K` keyboard control works with primary-agent protection and window-key precedence; `Alt+Down`/`Alt+Up` cycle focus; both tables scroll with clamped offsets, vertical scrollbars, and the wheel, with an index-aligned hit-rect lifecycle; a 1500 ms registry reconciliation safety net plus full sub-agent/team event plumbing keep the rows live (`SubagentSuspended`/`SubagentResumed` re-status rows and the Agents window auto-closes when its list empties). **Cooperative sub-agent suspension (agentui FR-035):** `AgentManager` gains `suspend_flags` and real `suspend_task`/`resume_task` (Running->Suspended / Suspended->Running, idempotent, publishing `SubagentSuspended`/`SubagentResumed`), and the agent loop parks at a new inter-step safe point while the flag is set (200 ms poll, cancel-flag break); sessions without a manager entry skip the gate. **Text-format tool-call recovery widened:** the F9 pass moves into `loop_steps` (so every caller's text/reasoning parts are saved blanked), scans the reasoning channel as a second surface with per-surface `AgentNotice`s, and gains three dialects - plain `<toolcall>`, a slash-dropped close-tag variant (two identical tags), and the underscore `tool_call` pair; the message widget scrubs narrated tool-call markup and one-line tool-call JSON from the transcript (`scrub_narrated_toolcalls`). **`/yolo on|off|status` are real subcommands and YOLO persists under `--config`:** the handler dispatches on the subcommand instead of always toggling, and `ragent --config <file>` registers the file with the new `Config::set_config_write_target` so runtime-flag writes (`yolo`, `edit_log`, `activity_log`) and `save_to_source` land in the loaded file. **A spec with only `SPEC.md` is discoverable** (`discover_specs`/`read_spec` no longer require `PLAN.md`; `write_spec` skips empty plans; `/spec update` omits the existing-plan block when there is none). **Plugin-store and connector-catalogue panels draw Unicode box-drawing borders** (spec `pluginstores`/`catnav` FR-004 ASCII-only requirement reversed; `PLUGIN_STORE_ASCII_BORDER` deleted). **SEC-ragent-team-003:** lead-authored mailbox messages (`team_shutdown_teammate`, lead-to-teammate chat) carry the lead session id via `with_sender_session`. **Windows-safe path-alias containment:** `ragent-tools-core`'s `is_alias_within` uses the `same-file` crate (`same_file::is_same_file`) instead of the unstable `windows_by_handle` metadata field. 58 spec directories on disk; new consolidated suites `test_task_suspend_resume`, `test_config_write_target`, `test_think_narration_scrub`, and 20 agentui suites. |
+| v1.0.141 | 2026-10-18 | Version bump. Session screenshot renamed to `assets/screens/ragentsession.png` and re-embedded in the README. |
+| v1.0.140 | 2026-10-18 | Version bump. README screenshot additions: `ragentmcpstartup.png` and the session image. |
+| v1.0.139 | 2026-10-18 | Status bar names the active execution backend in full (`Backend:<name>`, fixed cyan via `colors::BACKEND`); README gains screenshots of the provider, model, MCP-discover and plugin-selector panels; sandbox-backends how-to and status-bar assertions follow. |
 | v1.0.138 | 2026-10-18 | **Test-binary consolidation (§21.4): every crate builds one integration-test target.** Setting `autotests = false` plus a single `[[test]] name = "all"` (`tests/all.rs`) that `#[path]`-includes each former top-level `tests/test_*.rs` file cuts the workspace from ~948 integration binaries to **19** (one per crate plus the root package) - the test-name sets are verified identical to the pre-change sets for all 19. Each `tests/all.rs` also defines one binary-wide, poison-tolerant `global_env_mutex()`/`global_env_lock()`, and every test that mutates or observes a process-global contends on it; `ragent-research` moved its `crate::document`/`crate::source` shims to `tests/all_prelude.rs`, `ragent-telemetry` uses the explicit `ragent_telemetry::TelemetryError` path, and `ragent-agent`/`ragent-tools-core` re-export the crate paths their `#[path]`-included sources import. CI's remaining `--test <name>` invocations were converted to the filter form `--test all <module::>`. **Tests no longer write into the repository:** the research vault root is explicit `AppState::research_root` state (production `<working dir>/research`; tests use `target/temp/ragent-server-research/` via the new `tests/research_sandbox.rs`), `session::history::set_subagent_log_root` redirects diverted `wait_agents` batches, and `ragent_tui::app::set_log_root_override` / `use_scratch_log_root_for_tests` redirect TUI log-window spools - all three are `#[doc(hidden)]` `OnceLock` setters so shipped defaults are unchanged. **Build:** incremental compilation is disabled workspace-wide (`.cargo/config.toml` `[build] incremental = false`, plus `[profile.dev]` and a new `[profile.test]` with `debug = "line-tables-only"`), since the `sccache` wrapper cannot cache incremental artifacts; `BUILDSTATS.md` records the measured per-step cost (release 7m 37s / 1.80 GiB, debug 2m 41s / 2.40 GiB, full test 9m 12s / 14.92 GiB, coverage 9m 58s / 15.82 GiB; 13,862 passed, 0 failed, 16 ignored across 40 reporting targets; workspace line coverage re-measured at 86.58%). **Coverage:** 17 new `ragent-tui` deep-coverage suites (642 tests, ~16.1k lines) exercise the slash dispatch arms, event swarm/research paths, input editing, layout/scroll maths, schedule helpers, message-widget summaries and session/model state. **Repo hygiene:** `examples/` is deleted (agent profiles now live in `.ragent/agents/`, team blueprints in `.ragent/blueprints/teams/` - `code-review`, `parallel-feature`, `debate`), `.ragent/Instructions/` joins the `.gitignore` exception list so the per-language instruction packs are tracked, and `AGENTS.md`/`AGENTS-LANGUAGE.md` gain the "Test Layout" contract with `docs/reports/testconsolidation-review.md` as the review record. Verification: `cargo check --workspace` clean, `cargo audit` clean (1338 advisories loaded, 866 crate dependencies scanned, no new findings). |
 | v1.0.137 | 2026-10-17 | Test-coverage and documentation release (tests only, no production logic changed). The rebuilt `README.md` opens with a captured TUI screenshot and a feature list re-verified against the tree (15 registry providers, 148 tools across 21 categories, 17 built-in agents, 14 tree-sitter grammars / 50 language ids), and the accumulated release highlights list (about 830 lines) is replaced with a pointer to `CHANGELOG.md`; `AGENTS-RUST.md` is renamed to `AGENTS-LANGUAGE.md`. The `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) are suppressed with a documented reason (no upgrade path; the affected extraction APIs are never called). Added ~80 new `tests/` suites - roughly 80 under `crates/ragent-agent/tests/` plus suites across `ragent-surface`, `ragent-types`, `ragent-telemetry`, `ragent-storage`, `ragent-codeindex`, `ragent-config`, `ragent-research`, `ragent-tools-vcs`, `ragent-bench`, `ragent-server`, `ragent-tools-core`, `ragent-tools-extended`, `ragent-llm`, and `ragent-tui` - and a set of inline test files in crates that already used that convention, taking 13 of the 18 crates to >=85% line coverage (workspace 69.8% -> 73.9%). `ragent-agent` 65.1% -> 85.6%, `ragent-tui` 54.1% -> 75.0%. Three `pub(crate)` items in `ragent-tools-vcs` (`run_status`, `filter_log_text`, GitLab `make_client`/`detect_project`/`detect`) were widened to `pub` so their helpers could be exercised directly. Adds `serial_test` as a `ragent-agent` dev-dependency and marks the inline perf tests `#[serial_test::serial]` (the `perf::tests` mutate process-global profiling atomics and raced under the multi-threaded `cargo llvm-cov` run). Fixes three coverage-test defects: `test_mcp_discover_panel.rs` could leak a test-binary MCP server into the developer's real `~/.config/ragent/ragent.json` (runs now pin `XDG_CONFIG_HOME` at a throwaway `target/temp/xdg-*` dir), a `glob` test asserted the wrong walk-path shape (matches are reported relative to the containing directory), and a `gitlab` README-fallback test stubbed the wrong body shape (the `file_path` fallback fetches through the JSON `get()` path, so the wiremock body must be `set_body_json`). `cargo check` clean; `cargo audit` reports the pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) unchanged by this work. |
 | v1.0.136 | 2026-10-16 | Interactive `/plugins list` panel (spec `plugins` FR-009, FR-030). `/plugins list [--verbose]` opens a `/mcp discover`-style overlay: the plugin table is pinned at the top (a fixed column heading and separator above a scrollable block-cursor list) and the capability blocks (contributions, unsupported capabilities, errors, totals summary, and - verbose - telemetry) are listed at the end of the same scrollable body. `Up`/`Down` (or `k`/`j`), `Home`/`End`, and `Esc` operate it and `Space` toggles the highlighted plugin's enabled state (enable/disable, persisted through the shared control path, with the row tinted yellow when enabled and the outcome shown on a feedback line, re-resolving the session's plugin-contributed slash commands); a scrollbar appears when the body overflows. The panel resolves live MCP tool counts exactly as the text report did, so the `MCP` / `MCP Tools` columns stay accurate; `/plugins list --mcp` and the disabled-subsystem notice stay text reports. One discovery path is shared with the CLI: `ragent_plugins::control` gains `build_list_view` / `PluginListView` (with a per-row `PluginListRow` id/enabled list) and `ragent_plugins::surface` gains `run_plugin_list_view`, and `render_list_with_mcp_tools` is now `build_list_view(...).render()`. New test `crates/ragent-tui/tests/test_plugins_list_panel.rs` (7 cases). |
@@ -4989,9 +5033,13 @@ The TUI is a ratatui full-screen interface with these panels:
 | Chat | Conversation stream with markdown and syntax highlighting |
 | Log | Step-numbered tool calls with pretty-printed JSON |
 | Status bar | Provider/model, context usage, compression indicator, YOLO state |
+| Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
+| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` columns, and a background-shell section; rows open the agent's output view (spec `agentui` FR-006..FR-016) |
+| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; clicking a teammate routes the input to its mailbox (spec `agentui` FR-017..FR-026) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
+| Row-action dialog | Yes/No confirmation for destructive row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) drawn over the windows, keyboard and mouse answered (spec `agentui` T-009) |
 
 ### 6.2 Slash Commands
 
@@ -5012,7 +5060,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
-| `/yolo` | Toggle YOLO mode |
+| `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
@@ -5321,12 +5369,14 @@ requirements, and implementation tasks.
 
 ### 10.2 Directory Layout
 
-Specs live in `specs/<SpecId>/`:
+Specs live in `specs/<SpecId>/`. Only `SPEC.md` is required; every other file in
+the layout is optional and derived, so a spec whose plan has not been generated
+yet is still listed, readable, and a valid `/spec update` / `/spec plan` target:
 
 ```text
 specs/
 └── testspec/
-    ├── SPEC.md          # EARS requirements and status
+    ├── SPEC.md          # EARS requirements and status (required)
     ├── PLAN.md          # Implementation tasks and Phase -1 gates
     ├── TASKS.md         # Ordered task list extracted from PLAN.md
     ├── TESTPLAN.md      # Manual test-plan with TC-NNN test cases

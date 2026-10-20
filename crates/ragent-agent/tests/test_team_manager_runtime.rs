@@ -12,7 +12,7 @@ use ragent_agent::team::manager::{
     HookOutcome, build_team_prompt_addition, run_hook, run_team_hook, teammate_retry_backoff,
     validate_hook_command,
 };
-use ragent_agent::team::{MemberStatus, Task, TaskStore, TeamStore};
+use ragent_agent::team::{Mailbox, MemberStatus, MessageType, Task, TaskStore, TeamStore};
 
 #[path = "manager_support/mod.rs"]
 mod manager_support;
@@ -330,34 +330,38 @@ async fn resume_non_suspended_member_errors() {
     assert!(err.to_string().contains("not suspended"), "err: {err}");
 }
 
-// KNOWN DEFECT (characterization): `TeamManager::shutdown_teammate` builds its
-// `ShutdownRequest` with `MailboxMessage::new_correlated("lead", ..)` but never
-// calls `.with_sender_session(..)`, so `MailboxMessage::validate` (the
-// SEC-ragent-team-003 sender-identity invariant) rejects it and the whole call
-// errors before the on-disk status update. Every other lead-originated message
-// (team_approve_plan, team_assign_task, team_broadcast, ...) attaches the sender
-// session id; this one is missing it. This test pins the *current* (broken)
-// behaviour so the coverage suite is honest about it - a future fix that attaches
-// the sender id should flip this assertion.
+// `TeamManager::shutdown_teammate` builds its `ShutdownRequest` as a
+// lead-authored message, so it must carry the authenticated sender session id
+// (SEC-ragent-team-003): without it the mailbox push rejects the request before
+// the on-disk status update, and the graceful path can never shut a teammate
+// down. With the sender id attached the call succeeds, pushes the request into
+// the teammate's mailbox, and marks the member `ShuttingDown` on disk.
 #[tokio::test]
-async fn shutdown_teammate_currently_errors_on_lead_sender_validation() {
-    let (manager, _tmp, _bus) = team_manager("shutdown-bug-team", "lead-1", true);
+async fn shutdown_teammate_stamps_lead_sender_session_and_marks_shutting_down() {
+    let (manager, _tmp, _bus) = team_manager("shutdown-team", "lead-1", true);
 
-    let err = manager
+    manager
         .shutdown_teammate("tm-001", true)
         .await
-        .expect_err("current behaviour: the push is rejected by message validation");
-    assert!(
-        err.to_string()
-            .contains("carries no authenticated sender session id"),
-        "unexpected error: {err}"
+        .expect("graceful shutdown succeeds once the sender session id is attached");
+
+    let mbox = Mailbox::open(&manager.team_dir, "tm-001").expect("open teammate mailbox");
+    let messages = mbox.read_all().expect("read mailbox");
+    let request = messages
+        .iter()
+        .find(|m| m.message_type == MessageType::ShutdownRequest)
+        .expect("the shutdown request was pushed");
+    assert_eq!(
+        request.sender_session_id.as_deref(),
+        Some("lead-1"),
+        "the lead-authored request carries the authenticated sender session id"
     );
 
-    // The on-disk status is therefore left untouched.
     let store = TeamStore::load(&manager.team_dir).expect("load");
-    assert_ne!(
+    assert_eq!(
         store.config.member_by_id("tm-001").expect("member").status,
-        MemberStatus::ShuttingDown
+        MemberStatus::ShuttingDown,
+        "the on-disk status moves to ShuttingDown (graceful path)"
     );
 }
 

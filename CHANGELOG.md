@@ -2,6 +2,173 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A spec with only a `SPEC.md` is now discoverable, so `/spec update <name>`
+  can find and plan it.** `SpecIo::discover_specs` and `SpecIo::read_spec` both
+  required `PLAN.md` next to `SPEC.md`, which meant a hand-authored or
+  partially-generated spec - `specs/agentui/` is one - was invisible to
+  `/spec list`, `/spec search`, `spec_list`/`spec_read`/`spec_coverage`, and was
+  reported as "not found" by `/spec update`, `/spec plan` and `/spec validate`.
+  Only `SPEC.md` is required now: a missing plan loads as an empty `plan_md`
+  with no tasks, and the doc comments say so. `write_spec` skips the `PLAN.md`
+  write when the in-memory plan is empty, so reading a SPEC-only spec can never
+  create an empty plan file, and an existing on-disk plan is never destroyed by
+  an empty in-memory value. `SpecCommand::build_update_prompt` omits the
+  "Existing PLAN.md content" reference block (and the status-preservation rule)
+  when there is no plan to preserve, instead of emitting an empty one. Covered
+  by four new `test_spec_io` cases, three new `test_slash_spec_deep2` cases
+  (`/spec update`, `/spec list`, `/spec validate` against a SPEC-only spec) and
+  `test_slash_spec::test_spec_update_prompt_without_existing_plan`.
+  `specs/agentui/SPEC.md` (the Agent and Team Member panel spec) is now listed
+  by `spec_list` and is a valid `/spec update agentui` target.
+
+- **`/yolo on|off|status` now does what it says, and YOLO persists under
+  `--config`.** Two separate defects made YOLO look like it was not persisting.
+  (1) The `/yolo` handler only special-cased `help`; every other argument was
+  ignored and the command always toggled, so `/yolo on` while YOLO was already
+  on turned it **off** and `/yolo off` turned it **on** - despite
+  `docs/howtos/slashcommands/yolo.md` documenting `on`/`off`/`status`. The
+  handler now dispatches on the subcommand: `on`/`off` set and persist the
+  state, `status` reports it without changing it, a bare `/yolo` still toggles,
+  and an unknown subcommand is refused with `yolo: usage`. The autocomplete
+  token list gains the four subcommands. (2) `ragent --config <file>` parses
+  that one file and never calls `Config::load`, so the user-global
+  `~/.config/ragent/ragent.json` was never read - yet the runtime-flag toggles
+  wrote it. The toggle therefore never round-tripped: the next `--config` start
+  took its value from the explicit file, which still held the old one. The
+  binary now registers the explicit path with the new
+  `Config::set_config_write_target`, and both `Config::set_global_bool_key`
+  (the single-key writer used by `yolo`/`edit_log`/`activity_log`) and
+  `Config::save_to_source` target it, so every config write lands in the file
+  that is actually loaded. Without `--config` nothing changes: the write still
+  goes to the user-global file, and the project-local `.ragent/ragent.json`
+  remains untrusted (`merge_project` strips its `yolo`).
+  New `crates/ragent-config/tests/test_config_write_target.rs` covers the
+  write-target routing, and `test_slash_misc_deep2::yolo_toggle` now asserts
+  that repeating `/yolo on` stays on.
+
+- **The Windows path-alias containment check is stable-toolchain safe.**
+  `is_alias_within` in `ragent-tools-core` compared two `std::fs::Metadata`
+  records using `MetadataExt::volume_serial_number()` / `file_index()` on
+  Windows, which belong to the unstable `windows_by_handle` feature and break
+  any stable-Rust Windows build. The comparison now goes through the
+  `same-file` crate (1.0, stable win32 APIs): `same_file_identity` takes two
+  paths and delegates to `same_file::is_same_file`, the null-checking
+  `root.metadata()` preamble is gone (one stat per ancestor instead of two),
+  and the unix device/inode arm and the non-unix fallback arm collapse into a
+  single `#[cfg(any(unix, windows))]` body plus a `#[cfg(not(...))]` false
+  fallback. `ragent-tools-core/Cargo.toml` gains the `same-file = "1.0"`
+  dependency. No behaviour change on unix.
+
+### Added
+
+- **The Agent and Team Member panel is implemented (spec `agentui`,
+  T-001..T-020).** The `Agents` and `Teams` buttons beside the message input
+  now open live control popups: the Agents window renders the primary agent
+  row plus an ancestor-indented sub-agent tree, completed/cancelled/terminating
+  badges, `[stop]`/`[x]` action columns, and a background-shell section with
+  live/terminal rows; the Teams window renders the lead row plus teammate rows
+  with focus markers, a status vocabulary taken from the single canonical
+  `MemberStatus::display_label()` mapping (`plan_pending` reads `planning`,
+  `shutting_down` reads `stopping`), a model column that suppresses the
+  inherited global model, and claimed/done/sent/recv counters. A single-row
+  teammate strip under the status bar shows one pill per teammate with a status
+  glyph, a 16-column name, focused highlighting, and an `Alt+^v:cycle` hint.
+  Destructive row actions (sub-agent kill, background-shell cancel, teammate
+  shutdown, teammate suspend) go through a Yes/No confirmation modal with
+  keyboard and mouse answering; suspend/resume dispatches to
+  `AgentManager::suspend_task` / `resume_task`, and teammate actions dispatch
+  to the team service off the render thread with warn-level attribution on
+  failure. Keyboard control (`Space` suspend/resume, `Shift+K` kill, primary
+  protection, window-key precedence over the input buffer), `Alt+Down` /
+  `Alt+Up` focus cycling, row-click destinations (agent output view, teammate
+  focus with mailbox routing), clamped scrolling with vertical scrollbars and
+  wheel support over both tables, index-aligned hit-rect lifecycle, suspension
+  between steps, the 1500 ms registry-reconciliation safety net, sub-agent and
+  team event plumbing (`SubagentSuspended` / `SubagentResumed` re-status rows,
+  the Agents window auto-closes when its list empties), and the offline
+  deterministic render/isolation suites are all implemented and covered by the
+  spec's TESTPLAN cases. `specs/agentui/` (PLAN.md, TESTPLAN.md) is the 58th
+  spec directory, and its 20 tasks are complete.
+- **Cooperative sub-agent suspension.** `AgentManager` carries a
+  `suspend_flags` DashMap keyed by the sub-agent's child session id, and
+  `suspend_task` / `resume_task` replace the M7-T1 documented-no-op stubs:
+  suspend is Running->Suspended (idempotent when already suspended, rejecting
+  other states), resume is Suspended->Running, and both publish
+  `SubagentSuspended` / `SubagentResumed`. The session processor's loop parks
+  at a new inter-step safe point - after the FR-016 interrupt safe-point,
+  before the budget `begin_step` gate - while the flag is set, polling every
+  200 ms and breaking on the cancel flag so an in-flight LLM call or tool
+  execution finishes first and a cancelled turn flows through the existing
+  cancel branch. `suspend_flag_for_session(session_id)` returns `None` for
+  sessions not spawned by the manager (plain chat, ACP, remote dispatch), so
+  the gate is a free DashMap miss there. Flags are removed at every task
+  completion, cancellation, and error cleanup site. The new
+  `crates/ragent-agent/tests/test_task_suspend_resume.rs` drives a real
+  `spawn_sync` against a scripted provider and asserts the freeze-during-park
+  behaviour.
+- **Text-format tool-call recovery is widened: more dialects and the reasoning
+  channel.** The F9 recovery in the agent loop moves from the processor into
+  `loop_steps` so every caller's saved text/reasoning parts stay blanked, and
+  now scans the REASONING buffer as a second surface (several reasoning-capable
+  models narrate their invocations there) with per-surface `AgentNotice`
+  messages. The recogniser gains three dialects on top of the Qwen private-tag
+  and XML `function=` shapes: a plain-ASCII `<toolcall>` pair, a bare close-tag
+  variant where the slash is dropped so a name can sit between two identical
+  tags, and the underscore-spelled `tool_call` pair used by Mistral / GLM /
+  Kimi-style chat templates. The message widget scrubs the narration from the
+  transcript (`scrub_narrated_toolcalls`): tag-delimited blocks are dropped
+  with their markers and one-line tool-call JSON shapes (`name` plus
+  `arguments`/`input`/`parameters`) are dropped individually, mirroring the
+  exact dialect set the loop recovers; the new
+  `crates/ragent-tui/tests/test_think_narration_scrub.rs` covers the scrub and
+  `test_text_toolcalls.rs` covers the parser.
+- **Team mailbox shutdown requests carry the lead session id
+  (SEC-ragent-team-003).** `TeamManager::shutdown_teammate` pushed a lead-
+  authored `ShutdownRequest` without the sender-session id the mailbox write
+  boundary validates, so the unified shutdown path was rejected there. The
+  message is now built with `.with_sender_session(&self.lead_session_id)`, and
+  the TUI's teammate-message send path passes its session id the same way.
+
+### Changed
+
+- **Plugin-store and connector-catalogue panels now draw Unicode box-drawing
+  borders.** The two browse overlays were the only panels in the TUI framed with
+  ASCII `+`/`-`/`|`, because spec `pluginstores` FR-004 mandated "only ASCII
+  glyphs". That requirement is reversed: both panels now use ratatui's default
+  `Block::default().borders(Borders::ALL)` border set, matching every other panel
+  and dialog. The `PLUGIN_STORE_ASCII_BORDER` constant and its two
+  `.border_set(...)` call sites are deleted, the stale "ASCII only" doc comments
+  across `layout.rs` are removed, and spec `pluginstores` FR-004 plus acceptance
+  criterion 10, `specs/catnav` FR-004 and acceptance criterion 10, and the two
+  test plans are rewritten to require a plain-ASCII *body* inside the Unicode
+  border. The panel tests now assert the four box-drawing corners and both
+  vertical rules (`\u{250c} \u{2510} \u{2514} \u{2518} \u{2502}`) instead of
+  asserting the whole panel area is ASCII (`test_plugin_store_panel`,
+  `test_plugin_store_category_acceptance`, `test_connector_catalogue_panel`,
+  `test_session_events_deep`).
+
+> The version-bump commits since v1.0.138 (v1.0.139 status-bar backend
+> label plus README screenshots, v1.0.140 screenshot additions, v1.0.141
+> screenshot rename) are documented in their own sections below. The last ten
+> commits (`v1.0.132`..`v1.0.141`) are all release bumps already written up
+> beneath this Unreleased block; the entries above cover the current
+> uncommitted working-tree changes.
+
+## [1.0.142] - 2026-10-19
+
+A feature-and-fix release shipping the AgentUI work and the session-safety
+fixes: the new Agent and Team Member panel (both windows, teammate strip,
+row-action confirmations, keyboard control), cooperative sub-agent
+suspension/resume, the widened text-format tool-call recovery pass, the
+mailbox sender-session hardening (SEC-ragent-team-003), SPEC-only spec
+discovery, the `/yolo on|off|status` subcommand with `--config` write-target
+routing, and the Windows-stable path-alias containment check via `same-file`.
+`cargo check`, `cargo check --tests` and `cargo audit` all pass with no new
+advisories (866 crate dependencies scanned); the full suite is 14,334 passed /
+0 failed / 16 ignored.
+
 ## [1.0.141] - 2026-10-18
 
 A version bump release. `cargo check` and `cargo audit` both pass with no new

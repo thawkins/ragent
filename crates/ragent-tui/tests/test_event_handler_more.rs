@@ -413,29 +413,32 @@ async fn team_task_claimed_and_completed_update_member_task_id() {
 }
 
 #[tokio::test]
-async fn teammate_suspended_and_resumed_are_accepted_noops() {
-    // These variants carry no explicit arm; the catch-all must leave state
-    // intact while still marking the frame dirty.
+async fn teammate_suspended_and_resumed_update_the_member_row() {
+    // T-014 (spec `agentui`): the two variants gained explicit arms - the
+    // runtime publishes them from the FR-040 suspend/resume dispatch and
+    // `/team suspend`, so the row must follow instead of relying on the
+    // next render-time store hydration.
     let mut app = app_with_session("s1");
     app.team_members
         .push(TeamMember::new("writer", "tm-001", "general"));
-    let before = app.team_members[0].status;
+    assert_eq!(app.team_members[0].status, MemberStatus::Spawning);
 
-    for event in [
-        Event::TeammateSuspended {
-            session_id: "s1".to_string(),
-            team_name: "alpha".to_string(),
-            agent_id: "tm-001".to_string(),
-        },
-        Event::TeammateResumed {
-            session_id: "s1".to_string(),
-            team_name: "alpha".to_string(),
-            agent_id: "tm-001".to_string(),
-        },
-    ] {
-        app.handle_event(event).await;
-    }
-    assert_eq!(app.team_members[0].status, before);
+    app.handle_event(Event::TeammateSuspended {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+    assert_eq!(app.team_members[0].status, MemberStatus::Suspended);
+    assert!(app.needs_redraw);
+
+    app.handle_event(Event::TeammateResumed {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+    })
+    .await;
+    assert_eq!(app.team_members[0].status, MemberStatus::Idle);
     assert!(app.needs_redraw);
 }
 
