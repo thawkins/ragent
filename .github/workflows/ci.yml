@@ -134,9 +134,9 @@ jobs:
       - name: Verify no new silent error suppression (ANTIPAT M4)
         run: bash scripts/check-silent-errors.sh
       - name: Verify the shared guard regression suite
-        run: cargo test -p ragent-types --test all test_shared_guards::
+        run: 'cargo test -p ragent-types --test all test_shared_guards::'
       - name: Verify the unified redaction regression suite
-        run: cargo test -p ragent-types --test all test_unified_redaction::
+        run: 'cargo test -p ragent-types --test all test_unified_redaction::'
 
   ms0-regression:
     name: ANTIPAT M0 regression suites
@@ -152,23 +152,23 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - name: Shared guard unit tests
-        run: cargo test -p ragent-types --test all test_shared_guards::
+        run: 'cargo test -p ragent-types --test all test_shared_guards::'
       - name: Unified redaction tests
-        run: cargo test -p ragent-types --test all test_unified_redaction::
+        run: 'cargo test -p ragent-types --test all test_unified_redaction::'
       - name: Research retry-clamp tests (ANTIPAT M0.2)
-        run: cargo test -p ragent-research --test all test_search_retry_clamp::
+        run: 'cargo test -p ragent-research --test all test_search_retry_clamp::'
       - name: Git argv-injection guard tests (ANTIPAT M0.3)
-        run: cargo test -p ragent-tools-vcs --test all test_ms0_git_arg_guards::
+        run: 'cargo test -p ragent-tools-vcs --test all test_ms0_git_arg_guards::'
       - name: Config redaction + denylist tests (ANTIPAT M0.8)
-        run: cargo test -p ragent-config --test all test_ms0_config_guards::
+        run: 'cargo test -p ragent-config --test all test_ms0_config_guards::'
       - name: Plugin integrity tests (ANTIPAT M0.6)
-        run: cargo test -p ragent-plugins --test all test_add::
+        run: 'cargo test -p ragent-plugins --test all test_add::'
       - name: Spec containment tests (ANTIPAT M0.7)
-        run: cargo test -p ragent-specs --test all test_govcreate_authoring::
+        run: 'cargo test -p ragent-specs --test all test_govcreate_authoring::'
       - name: Channel SSRF tests (ANTIPAT M0.5)
-        run: cargo test -p ragent-tools-extended --test all test_channels::
+        run: 'cargo test -p ragent-tools-extended --test all test_channels::'
       - name: Telemetry toggle tests (ANTIPAT M0.15)
-        run: cargo test -p ragent-telemetry --features telemetry --test all test_metric_toggles::
+        run: 'cargo test -p ragent-telemetry --features telemetry --test all test_metric_toggles::'
 
   clippy:
     name: Clippy

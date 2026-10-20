@@ -156,6 +156,28 @@
 > beneath this Unreleased block; the entries above cover the current
 > uncommitted working-tree changes.
 
+## [1.0.145] - 2026-10-20
+
+A CI-workflow repair release. The `ci.yml` workflow had been failing
+un-parsed since the test-consolidation rollout: eleven `run:` lines ending in
+the consolidated-target `::` test-filter suffix
+(`cargo test -p <crate> --test all test_x::`) are exactly the shape YAML
+reads as a mapping-value indicator, so every workflow run at
+`ref: .github/workflows/ci.yml` died at parse time with
+"mapping values are not allowed here" and never executed a step. All eleven
+lines are now single-quoted; the workflow parses locally with PyYAML and
+every other workflow file stays clean. `cargo check` and `cargo audit` pass
+with no new advisories (866 crate dependencies scanned).
+
+### Fixed
+
+- **The CI workflow parses again.** `.github/workflows/ci.yml` carried eleven
+  bare `run: cargo test ... test_x::` lines whose trailing `::` broke YAML
+  parsing ("mapping values are not allowed here"), a latent defect introduced
+  with the one-target-per-crate test consolidation that had silently taken
+  the whole CI down since then; each line is now single-quoted and the
+  document parses.
+
 ## [1.0.144] - 2026-10-20
 
 The second Windows-portability release, closing the follow-up errors from the
