@@ -282,7 +282,7 @@ fn process_alive(pid: u32) -> bool {
             let mut code: u32 = 0;
             let ok = GetExitCodeProcess(handle, &mut code) != 0;
             CloseHandle(handle);
-            ok && code != STILL_ACTIVE
+            ok && code != STILL_ACTIVE as u32
         }
     }
     #[cfg(not(any(unix, windows)))]

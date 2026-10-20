@@ -156,6 +156,41 @@
 > beneath this Unreleased block; the entries above cover the current
 > uncommitted working-tree changes.
 
+## [1.0.144] - 2026-10-20
+
+The second Windows-portability release, closing the follow-up errors from the
+first Windows build (`cargo run` on `x86_64-pc-windows-msvc`): one hard error
+and the remaining dead-code/unused warnings. Linux verification is unchanged
+(`cargo check` with `-D warnings` on the touched crates, `cargo fmt --check`,
+`cargo audit` pass with no new advisories).
+
+### Fixed
+
+- **`STILL_ACTIVE` compares as `u32` on Windows.** `process_alive` in
+  `src/crash_dump.rs` compared `GetExitCodeProcess`'s `u32` exit code against
+  the `STILL_ACTIVE` constant, which windows-sys declares as a **signed**
+  `NTSTATUS` (`i32`) - E0308/E0277 under the MSVC toolchain. The comparison
+  now casts: `code != STILL_ACTIVE as u32`. Both constants encode the same
+  bit pattern (`0x00000103`), so the semantics are unchanged. Linux and macOS
+  compile the same `#[cfg(unix)]` arm as before.
+- **The Windows fallback of `stderr_spool::install` no longer warns about its
+  `log_dir` parameter.** The `#[cfg(not(unix))]` twin keeps the parameter for
+  API parity with the Unix signature and now consumes it with
+  `let _ = log_dir;` (the same `INTENTIONAL` convention the storage crate
+  uses for platform-guarded parameters).
+
+### Changed
+
+- **The `/proc`-derived MCP-orphan helper functions and the SQLite
+  `sibling` helper no longer emit dead-code warnings on Windows.** Five
+  private helpers in `ragent-agent`'s `mcp` module
+  (`is_launcher_basename`, `cmdline_basenames`, `package_match_token`,
+  `part_matches_token`, `orphan_match_tokens`) are only reachable through
+  `orphan_cmdline_matches`, which reads `/proc/<pid>/cmdline` and is already
+  `#[cfg(unix)]`; each now carries `#[cfg(unix)]` (and `sibling` in
+  `ragent-storage`'s permission-tightening path joins it) so the Windows
+  build compiles warning-free without deleting working Unix code.
+
 ## [1.0.143] - 2026-10-20
 
 A Windows-portability release: the four Windows-only compile errors

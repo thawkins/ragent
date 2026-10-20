@@ -1736,6 +1736,7 @@ pub fn parse_port(value: &str) -> Option<u16> {
 /// child. Matching then keys on the package argument (see
 /// [`orphan_match_tokens`]) rather than the launcher name, because every
 /// MCP server on the machine shares the same `npx` executable name.
+#[cfg(unix)]
 fn is_launcher_basename(basename: &str) -> bool {
     let stem = basename.strip_suffix(".exe").unwrap_or(basename);
     matches!(stem, "npx" | "npm" | "bunx" | "pnpx")
@@ -1751,6 +1752,7 @@ fn is_launcher_basename(basename: &str) -> bool {
 /// basename (argv[0]'s executable) is used by the plain-command matcher, and
 /// the launcher matcher keys on the extracted package token rather than
 /// arbitrary basenames.
+#[cfg(unix)]
 fn cmdline_basenames(raw: &[u8]) -> Vec<String> {
     if raw.is_empty() {
         return Vec::new();
@@ -1771,6 +1773,7 @@ fn cmdline_basenames(raw: &[u8]) -> Vec<String> {
 /// `.../node_modules/mongodb-mcp-server/dist/index.js`, basename
 /// `index.js`) yields nothing; [`part_matches_token`] handles that case with
 /// the exact-segment rule below.
+#[cfg(unix)]
 fn package_match_token<'a>(fragment: &'a str, package: &str) -> Option<&'a str> {
     if fragment.is_empty() {
         return None;
@@ -1791,6 +1794,7 @@ fn package_match_token<'a>(fragment: &'a str, package: &str) -> Option<&'a str> 
 /// segments). The exact-segment rule is deliberately strict: a segment that
 /// merely *contains* the token (`mongodb-mcp-server-2`) does not match, so
 /// one package's name cannot sweep another's.
+#[cfg(unix)]
 fn part_matches_token(part: &str, token: &str) -> bool {
     if package_match_token(part, token).is_some() {
         return true;
@@ -1824,6 +1828,7 @@ fn part_matches_token(part: &str, token: &str) -> bool {
 /// Returns `None` when no safe identifier extractable from the config remains:
 /// a launcher command with no positional package argument, or a `command`
 /// whose basename cannot be told apart from any same-named process.
+#[cfg(unix)]
 fn orphan_match_tokens(
     command: &str,
     args: &[String],

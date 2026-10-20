@@ -127,6 +127,7 @@ pub fn install(log_dir: &Path) -> Option<Spool> {
 /// not-installed behaviour.
 #[cfg(not(unix))]
 pub fn install(log_dir: &Path) -> Option<Spool> {
+    let _ = log_dir; // INTENTIONAL: parameter retained for API parity
     // Windows: there is no dup2/pipe fd surgery in std and the fd-2 redirect is
     // meaningless the way the TUI spool needs it (the CRT owns fd 2 per handle).
     // The TUI runs without the stderr mirror there; panics land through the

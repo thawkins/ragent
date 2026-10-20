@@ -336,6 +336,7 @@ pub(crate) fn restrict_dir_permissions(path: &Path) {
 }
 
 /// Append `suffix` to a path's file name (`/a/b.db` + `-wal` -> `/a/b.db-wal`).
+#[cfg(unix)]
 fn sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
     let mut os = path.as_os_str().to_os_string();
     os.push(suffix);
