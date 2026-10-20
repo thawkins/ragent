@@ -156,6 +156,54 @@
 > beneath this Unreleased block; the entries above cover the current
 > uncommitted working-tree changes.
 
+## [1.0.143] - 2026-10-20
+
+A Windows-portability release: the four Windows-only compile errors
+(E0425 `libc::killpg` / `SIGKILL` / `libc::kill` missing on Windows, and the
+E0596 mutable-borrow error under `#[cfg(windows)]` in the backend detector)
+are fixed with cfg-gated twins mirroring the existing MCP teardown split.
+Unix and macOS behaviour is byte-for-byte unchanged, and `cargo check`,
+`cargo clippy`, the crash-dump tests, `cargo audit` and `cargo deny check`
+all still pass on Linux with no new advisories (866 crate dependencies
+scanned).
+
+### Fixed
+
+- **The hook process-group kill is Unix-only and the Windows build
+  compiles.** `kill_hook_process_group` in `ragent-agent`'s team manager was
+  written against `libc` (`libc::killpg(pid, SIGKILL)`), which does not exist
+  on Windows, so the crate failed E0425 there. The function is now split like
+  the existing `mcp::kill_stdio_child` teardown: the `libc` body compiles
+  under `#[cfg(unix)]` unchanged, and a documented `#[cfg(windows)]`
+  twin is a no-op because a Windows hook child is bound by its own
+  `KillOnDrop` handle and dies with it.
+- **The backend detector no longer mutates its candidate list on Windows, and
+  no longer warns on Unix.** `binary_candidates` declared `let mut candidates`
+  but only mutated the list on Windows (`.exe` suffix probing), so the
+  `x86_64-pc-windows-msvc` build failed E0596 (cannot borrow as mutable from
+  a non-`mut` binding - the conditional-mutation lint does not see through
+  `cfg`) while Unix builds emitted an `unused_mut` warning. The binding is
+  now cfg-scoped: `#[cfg(windows)] let mut candidates` /
+  `#[cfg(not(windows))] let candidates`.
+- **`crash_dump`'s liveness probe works on Windows.** `process_alive` used
+  `libc::kill(pid, 0)` and read `libc::EPOCH`; that errno-0 liveness trick is
+  a Unix idiom absent on Windows. The function is now a three-arm platform
+  split: the Unix `libc` path is unchanged, a `#[cfg(windows)]` arm uses
+  `windows-sys` - `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` +
+  `GetExitCodeProcess` (`STILL_ACTIVE` means alive) + `CloseHandle` with the
+  handle checked - and any other platform reports `true` (treat as stale, the
+  safe default for a crash scanner). The workspace `Cargo.toml` gains a
+  cfg-gated `windows-sys` dependency (`Win32_Foundation`,
+  `Win32_System_Threading`). The inline tests are gated
+  `#[cfg(all(test, unix))]`.
+- **`stderr_spool::install` is Unix-only and returns `None` elsewhere.** The
+  fd 2 -> pipe redirect was written with `libc::pipe` / `libc::dup` /
+  `libc::dup2`, none of which exist on Windows (where stderr is a HANDLE, not
+  a file descriptor). The Unix body compiles under `#[cfg(unix)]`
+  unchanged; `#[cfg(not(unix))]` returns `None` with a doc note that the
+  spooler is not installed, so the TUI on Windows has no stderr mirror and
+  the rest of the module's callers behave as if it were disabled.
+
 ## [1.0.142] - 2026-10-19
 
 A feature-and-fix release shipping the AgentUI work and the session-safety

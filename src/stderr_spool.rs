@@ -2,7 +2,7 @@
 //!
 //! The TUI owns the alternate screen, so anything written to raw stderr -
 //! Rust's default panic hook, `eprintln!`, C-library diagnostics - is painted
-//! over by the next ratatui frame and lost. This module replaces the
+//! over by the next ratatui frame and lost. On Unix this module replaces the
 //! process-wide standard-error *file descriptor* (fd 2) with the write end of a
 //! pipe and drains that pipe on a dedicated thread into a
 //! [`ragent_types::stderr_spool::Spool`], which keeps only the newest 1000
@@ -12,6 +12,10 @@
 //! library exposes no way to replace the C-level stderr descriptor that the
 //! default panic hook and C libraries write to. The redirection happens once,
 //! at startup, before the TUI threads are spawned.
+//!
+//! Windows has no `dup2`/pipe fd surgery in std (the CRT owns fd 2 per
+//! HANDLE), so [`install`] is a no-op there: `None` leaves stderr untouched,
+//! which is exactly the documented not-installed behaviour.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,6 +48,7 @@ pub fn is_active() -> bool {
 /// `write(2, ...)` still reaches the terminal, and that every descriptor is
 /// checked before use and closed exactly once on the failure paths.
 #[allow(unsafe_code)]
+#[cfg(unix)]
 pub fn install(log_dir: &Path) -> Option<Spool> {
     if std::fs::create_dir_all(log_dir).is_err() {
         return None;
@@ -113,4 +118,19 @@ pub fn install(log_dir: &Path) -> Option<Spool> {
     // the terminal.
     ACTIVE.store(true, Ordering::Relaxed);
     Some(spool)
+}
+
+/// Windows equivalent: the fd-2 pipe redirect is a Unix fd operation with no
+/// std equivalent (the CRT owns fd 2 per HANDLE), so the TUI runs without the
+/// stderr mirror there and panics land through the panic hook as everywhere
+/// else. Returning `None` leaves stderr untouched, exactly the documented
+/// not-installed behaviour.
+#[cfg(not(unix))]
+pub fn install(log_dir: &Path) -> Option<Spool> {
+    // Windows: there is no dup2/pipe fd surgery in std and the fd-2 redirect is
+    // meaningless the way the TUI spool needs it (the CRT owns fd 2 per handle).
+    // The TUI runs without the stderr mirror there; panics land through the
+    // panic hook as everywhere else. Returning None leaves stderr untouched,
+    // exactly the documented not-installed behaviour.
+    None
 }

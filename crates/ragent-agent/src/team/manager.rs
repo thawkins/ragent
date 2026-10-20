@@ -437,6 +437,7 @@ pub fn validate_hook_command(command: &str) -> std::result::Result<(), &'static 
 /// spawned without `process_group(0)`, so the group id equals the child pid and
 /// `killpg` reaches whatever the hook spawned. A pid that is not a group leader
 /// returns `ESRCH` and the plain `kill` fallback covers it.
+#[cfg(unix)]
 #[allow(unsafe_code)]
 fn kill_hook_process_group(pid: u32) {
     let pid = pid as i32;
@@ -450,6 +451,12 @@ fn kill_hook_process_group(pid: u32) {
         let _ = libc::kill(pid, libc::SIGKILL);
     }
 }
+
+/// Windows equivalent: tokio cannot signal a Windows pid without a handle, and
+/// the hook child does not survive its own `KillOnDrop` teardown there, so
+/// nothing further is required when the 30 s hook timeout fires.
+#[cfg(windows)]
+fn kill_hook_process_group(_pid: u32) {}
 
 /// Look up and run a quality-gate hook for the given event in a team's settings.
 ///

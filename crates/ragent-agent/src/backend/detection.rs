@@ -99,6 +99,11 @@ pub fn command_on_path(name: &str) -> bool {
 
 /// The file names to look for a binary under on this platform.
 fn binary_candidates(name: &str) -> Vec<String> {
+    // Windows appends `PATHEXT` variants (kept mutable there); the unix build
+    // never mutates the vector, which is why the `mut` is cfg-scoped.
+    #[cfg(windows)]
+    let mut candidates = vec![name.to_string()];
+    #[cfg(not(windows))]
     let candidates = vec![name.to_string()];
     #[cfg(windows)]
     {

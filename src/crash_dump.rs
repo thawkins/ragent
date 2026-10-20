@@ -245,24 +245,54 @@ pub fn previous_unclean_exit(working_dir: &Path) -> std::io::Result<Option<Crash
     Ok(None)
 }
 
-/// Test whether a pid is still alive via `kill(pid, 0)`.
+/// Test whether a pid is still alive.
 ///
 /// # Safety note
 ///
-/// Uses the one approved `unsafe` FFI call for signal 0 (a liveness probe that
-/// does not deliver a signal). The invariant is that `pid` is a value read back
+/// Unix uses the one approved `unsafe` FFI call for signal 0 (a liveness probe
+/// that does not deliver a signal); Windows uses an `OpenProcess` handle and
+/// `GetExitCodeProcess` via windows-sys (kernel32 imports are statically
+/// linked by `windows_link`). The invariant is that `pid` is a value read back
 /// from a record file; an invalid pid simply yields `false`.
 #[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    // SAFETY: `kill` with signal 0 performs only an existence/permission check
-    // and cannot deliver a signal. The return value is used directly.
-    let rc = unsafe { libc::kill(pid as i32, 0) };
-    rc == 0
+    #[cfg(unix)]
+    {
+        // SAFETY: `kill` with signal 0 performs only an existence/permission
+        // check and cannot deliver a signal. The return value is used directly.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: `OpenProcess`/`GetExitCodeProcess`/`CloseHandle` take plain
+        // integer and pointer-to-integer arguments; the handle is closed on
+        // every path and the pid is only probed, never signalled.
+        unsafe {
+            let handle: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut code: u32 = 0;
+            let ok = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            ok && code != STILL_ACTIVE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        // Unknown platform: a stale marker is reported (the safe default for a
+        // crash scanner) rather than silently hiding it.
+        true
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "../tests/inline/crash_dump_tests.rs"]
 mod tests;

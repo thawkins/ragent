@@ -5256,7 +5256,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ragent"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5284,11 +5284,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5348,7 +5349,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5373,7 +5374,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5497,7 +5498,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5527,7 +5528,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5712,7 +5713,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.142"
+version = "1.0.143"
 dependencies = [
  "anyhow",
  "arboard",
