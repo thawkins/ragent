@@ -1699,6 +1699,34 @@ fn merge_connector_bridge(
     Some(session)
 }
 
+/// The OS stack the program body runs on, sized well above the Windows MSVC
+/// linker default (1 MiB for the main thread): config parsing, tool
+/// registration and the first TUI render all execute on this thread via
+/// `block_on`, and the Linux ~8 MiB rlimit headroom was sufficient there
+/// while the 1 MiB Windows reserve overflowed.
+const MAIN_THREAD_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+/// Process entry point: run [`main_body`] on an explicitly sized OS thread.
+///
+/// The Windows MSVC linker gives the main thread a 1 MiB stack reserve while
+/// Linux grows the main thread stack to the ~8 MiB rlimit, so ragent aborted
+/// at startup on Windows with "thread '<main>' has overflowed its stack".
+/// Spawning the program body on its own thread with an explicit large stack
+/// gives every platform the same headroom; a panic payload raised on that
+/// thread is re-raised here with `resume_unwind` so the panic-hook output and
+/// the 101 exit code are unchanged.
+fn main() -> Result<()> {
+    std::thread::Builder::new()
+        .name("ragent-main".to_string())
+        .stack_size(MAIN_THREAD_STACK_BYTES)
+        .spawn(main_body)
+        .map_err(|e| anyhow::anyhow!("failed to spawn program body thread: {e}"))?
+        .join()
+        .unwrap_or_else(|payload| {
+            std::panic::resume_unwind(payload);
+        })
+}
+
 /// Wrap the tokio entrypoint so the runtime is shut down with a bounded
 /// grace period instead of the default unbounded drop.
 ///
@@ -1707,7 +1735,7 @@ fn merge_connector_bridge(
 /// blocking task (e.g. an abandoned code-index reindex join) therefore kept
 /// the process alive burning CPU after the TUI had already exited. Arming a
 /// `shutdown_timeout` bounds that wait so the prompt returns promptly.
-fn main() -> Result<()> {
+fn main_body() -> Result<()> {
     let working_dir = crate::working_dir();
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|e| anyhow::anyhow!("failed to create tokio runtime: {e}"))?;

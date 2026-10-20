@@ -112,13 +112,9 @@ jobs:
             *.pkg
           if-no-files-found: error
 
-  # Disabled: Windows-x86_64 build job is kept in the workflow file but skipped
-  # so the release pipeline does not depend on a platform that is currently
-  # failing to compile.
   build-windows:
     name: Build - Windows-x86_64
     runs-on: windows-latest
-    if: false
 
     steps:
       - name: Checkout
@@ -172,6 +168,7 @@ jobs:
     needs:
       - build-linux
       - build-macos-arm64
+      - build-windows
     runs-on: ubuntu-latest
 
     steps:
@@ -189,6 +186,12 @@ jobs:
         with:
           name: ragent-${{ github.ref_name }}-macos-arm64
           path: macos
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ragent-${{ github.ref_name }}-windows-x86_64
+          path: windows
 
       - name: Extract release notes from CHANGELOG.md
         id: changelog
@@ -217,6 +220,7 @@ jobs:
           files: |
             linux/*
             macos/*
+            windows/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

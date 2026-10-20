@@ -1,8 +1,33 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.146] - 2026-10-20
 
 ### Fixed
+
+- **Ragent no longer overflows its stack at startup on Windows.** The Windows
+  MSVC linker reserves a 1 MiB stack for the main thread, while Linux grows
+  the main-thread stack toward the ~8 MiB rlimit: config parsing, tool
+  registration and the first TUI render all run on that thread via
+  `Runtime::block_on`, and they recursed past 1 MiB on Windows, aborting with
+  "thread '<main>' has overflowed its stack". `main` is now a thin entry point
+  that spawns `main_body` on an explicitly sized OS thread
+  (`ragent-main`, 32 MiB via `std::thread::Builder::stack_size`), joins it,
+  and re-raises a panic payload with `std::panic::resume_unwind`, so the
+  panic-hook output, the crash marker, and the 101 exit code are unchanged.
+  `tokio::block_on` runs the future on the calling thread, so sizing that
+  thread fixes the whole startup path; tokio worker threads still carry their
+  own 2 MiB default stacks.
+
+### Changed
+
+- **The Windows-x86_64 build job is re-enabled in the "Build and Release"
+  workflow.** `build-windows` runs again on `windows-latest` (release binary
+  plus a WiX `.msi`), the `release` job waits on it, downloads its
+  `ragent-<version>-windows-x86_64` artifact, and publishes the `.exe` and
+  `.msi` on the GitHub release alongside the Linux and macOS assets. The
+  platform was disabled while the compile failed; the stable-toolchain
+  `same-file` containment fix above and the main-thread stack fix make the
+  Windows build viable again.
 
 - **A spec with only a `SPEC.md` is now discoverable, so `/spec update <name>`
   can find and plan it.** `SpecIo::discover_specs` and `SpecIo::read_spec` both
@@ -132,6 +157,15 @@
   the TUI's teammate-message send path passes its session id the same way.
 
 ### Changed
+
+- **The Windows-x86_64 build job is re-enabled in the "Build and Release"
+  workflow.** `build-windows` runs again on `windows-latest` (release binary
+  plus a WiX `.msi`), the `release` job waits on it, downloads its
+  `ragent-<version>-windows-x86_64` artifact, and publishes the `.exe` and
+  `.msi` on the GitHub release alongside the Linux and macOS assets. The
+  platform was disabled while the compile failed; the stable-toolchain
+  `same-file` containment fix above and the main-thread stack fix make the
+  Windows build viable again.
 
 - **Plugin-store and connector-catalogue panels now draw Unicode box-drawing
   borders.** The two browse overlays were the only panels in the TUI framed with
