@@ -73,6 +73,11 @@ fn click_at(pos: (u16, u16)) -> MouseEvent {
     click(pos.0, pos.1)
 }
 
+/// A plain key press (`test_row_action_confirm.rs` shape).
+fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
+}
+
 /// A live sub-agent task (`test_row_action_confirm.rs` shape).
 fn task(id: &str, agent: &str, status: TaskStatus) -> TaskEntry {
     TaskEntry {
@@ -190,13 +195,14 @@ fn app_with_teams_window(status: MemberStatus) -> App {
 // FR-035: the [stop] toggle on a sub-agent row
 // ---------------------------------------------------------------------------
 
-/// A `[stop]` click on a running sub-agent row requests suspension without a
-/// dialog, and the request is logged attributed to the child session
+/// Space on the cursor-selected running sub-agent row requests suspension
+/// without a dialog, and the request is logged attributed to the child session
 /// (NFR-008). The runtime-bound `AgentManager` accepts the request
 /// asynchronously; the row stays painted until the lifecycle event or the
-/// reconciliation pass converges it (FR-054).
+/// reconciliation pass converges it (FR-054). (Old [stop]-click trigger
+/// retired with the row mouse.)
 #[tokio::test]
-async fn stop_click_on_a_running_subagent_requests_suspension() {
+async fn space_on_a_running_subagent_requests_suspension() {
     let mut app = app_with_agents_window();
     app.active_tasks
         .push(task("a1b2c3d4", "explore", TaskStatus::Running));
@@ -214,10 +220,11 @@ async fn stop_click_on_a_running_subagent_requests_suspension() {
         .agent_manager
         .set(Arc::clone(&manager));
     render(&mut app);
-    let rect = app.agent_row_button_areas[0];
     app.needs_redraw = false;
 
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.move_agents_cursor(1);
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
 
     assert!(
         !app.row_action_confirm_open(),
@@ -237,18 +244,19 @@ async fn stop_click_on_a_running_subagent_requests_suspension() {
     );
 }
 
-/// A `[stop]` click on a suspended sub-agent row requests resumption instead
-/// (FR-035's other direction), again without a dialog.
+/// Space on the cursor-selected suspended sub-agent row requests resumption
+/// instead (FR-035's other direction), again without a dialog.
 #[tokio::test]
-async fn stop_click_on_a_suspended_subagent_requests_resumption() {
+async fn space_on_a_suspended_subagent_requests_resumption() {
     let mut app = app_with_agents_window();
     app.active_tasks
         .push(task("b2c3d4e5", "explore", TaskStatus::Suspended));
     render(&mut app);
-    let rect = app.agent_row_button_areas[0];
     app.needs_redraw = false;
 
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.move_agents_cursor(1);
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
 
     assert!(!app.row_action_confirm_open(), "resume opens no dialog");
     assert!(
@@ -290,8 +298,10 @@ async fn kill_answer_terminates_the_task_through_the_manager() {
         .set(Arc::clone(&manager));
     render(&mut app);
 
-    // Open the dialog from the painted [x] control and answer Yes by mouse.
-    app.handle_mouse_event(click_at(centre(app.agent_row_kill_areas[0])));
+    // Arm the dialog from the keyboard cursor (Del) and answer Yes by mouse.
+    app.move_agents_cursor(1);
+    app.handle_key_event(key(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     assert!(app.row_action_confirm_open(), "the kill confirms first");
     render(&mut app);
     app.handle_mouse_event(click_at(centre(app.row_action_confirm_yes_area)));
@@ -323,10 +333,15 @@ async fn kill_answer_terminates_the_task_through_the_manager() {
 // FR-037: the confirmed cancel dispatches through the real service
 // ---------------------------------------------------------------------------
 
-/// The confirmed background-shell `[stop]` answer cancels the task through
+/// The confirmed background-shell cancel answer cancels the task through
 /// the real `BackgroundTaskService`: a real `sleep` process is spawned, then
 /// cancelled, and the service publishes the `cancelled` status event. The
 /// cancellation is requested attributed to the row's session (NFR-008).
+///
+/// The trigger is armed directly through `open_row_action`: the keyboard
+/// cursor never covers background rows (they are service-terminated, not
+/// cursorable), so the old bg `[stop]`-click trigger is retired; the dialog
+/// and the dispatch are unchanged (FR-037).
 #[tokio::test]
 async fn background_cancel_answer_cancels_through_the_service() {
     let mut app = app_with_agents_window();
@@ -346,8 +361,10 @@ async fn background_cancel_answer_cancels_through_the_service() {
     // Subscribe before the dispatch so the service's status event is captured.
     let mut rx = app.event_bus.subscribe();
     render(&mut app);
-    // With no sub-agent rows, the background row owns the first button rect.
-    app.handle_mouse_event(click_at(centre(app.agent_row_button_areas[0])));
+    app.open_row_action(ragent_tui::app::RowAction::CancelBackground {
+        task_id: task_id.clone(),
+        command: "sleep 30".to_string(),
+    });
     assert!(
         app.row_action_confirm_open(),
         "the background cancel confirms first (FR-037)"
@@ -424,16 +441,19 @@ fn bind_team_manager(app: &mut App, status: MemberStatus) -> PathBuf {
     store.dir
 }
 
-/// The confirmed teammate `[stop]` answer suspends the member through the
+/// Space on the cursor-selected teammate suspends the member through the
 /// real `TeamManager`: the on-disk store shows `Suspended` and the request
-/// line is attributed to the member session (NFR-008).
+/// line is attributed to the member session (NFR-008). (Old [stop]-click
+/// trigger retired with the row mouse.)
 #[tokio::test]
-async fn teammate_suspend_answer_suspends_through_the_manager() {
+async fn teammate_space_answer_suspends_through_the_manager() {
     let mut app = app_with_teams_window(MemberStatus::Working);
     let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
     render(&mut app);
 
-    app.handle_mouse_event(click_at(centre(app.team_row_button_areas[0])));
+    app.move_teams_cursor(1);
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
     assert!(
         app.row_action_confirm_open(),
         "suspending a live teammate confirms first (FR-040)"
@@ -458,15 +478,17 @@ async fn teammate_suspend_answer_suspends_through_the_manager() {
     let _ = std::fs::remove_dir_all(scratch);
 }
 
-/// A `[stop]` click on an already-suspended teammate resumes it directly -
-/// no dialog, no confirmation - and the store returns to `Idle` (FR-040).
+/// Space on the cursor-selected already-suspended teammate resumes it directly
+/// - no dialog, no confirmation - and the store returns to `Idle` (FR-040).
 #[tokio::test]
-async fn teammate_stop_on_a_suspended_row_resumes_without_a_dialog() {
+async fn teammate_space_on_a_suspended_row_resumes_without_a_dialog() {
     let mut app = app_with_teams_window(MemberStatus::Suspended);
     let store_dir = bind_team_manager(&mut app, MemberStatus::Suspended);
     render(&mut app);
 
-    app.handle_mouse_event(click_at(centre(app.team_row_button_areas[0])));
+    app.move_teams_cursor(1);
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
     assert!(
         !app.row_action_confirm_open(),
         "the resume direction opens no dialog (FR-040)"
@@ -483,16 +505,19 @@ async fn teammate_stop_on_a_suspended_row_resumes_without_a_dialog() {
     let _ = std::fs::remove_dir_all(scratch);
 }
 
-/// The confirmed teammate `[x]` answer requests graceful shutdown through the
+/// The confirmed teammate `Del` answer requests graceful shutdown through the
 /// real `TeamManager`: the store shows `ShuttingDown` (the teammate is
-/// expected to ack) and the request line is attributed (NFR-008).
+/// expected to ack) and the request line is attributed (NFR-008). (Old [x]-
+/// click trigger retired with the row mouse.)
 #[tokio::test]
-async fn teammate_shutdown_answer_requests_graceful_shutdown() {
+async fn teammate_del_answer_requests_graceful_shutdown() {
     let mut app = app_with_teams_window(MemberStatus::Working);
     let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
     render(&mut app);
 
-    app.handle_mouse_event(click_at(centre(app.team_row_kill_areas[0])));
+    app.move_teams_cursor(1);
+    app.handle_key_event(key(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
     assert!(
         app.row_action_confirm_open(),
         "shutting a teammate down confirms first (FR-040)"

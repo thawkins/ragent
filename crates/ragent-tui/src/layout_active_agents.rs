@@ -35,6 +35,9 @@ pub mod glyphs {
     pub const PRIMARY: &str = "* ";
     /// Status-dot marker painted on a sub-agent row (FR-012) and on a
     /// background shell task row (FR-016).
+    ///
+    /// Kept ASCII on purpose: the table tests slice painted rows by byte
+    /// offset, so every table glyph must render one byte per cell.
     pub const ROW_DOT: &str = "o ";
     /// Branch glyph for a task that is the last child of its parent (FR-011).
     pub const BRANCH_LAST: &str = "`- ";
@@ -64,13 +67,14 @@ pub mod glyphs {
     pub const BG_HEADING: &str = " Background shell tasks ";
 }
 
-/// Column layout of the Agents table, counted in display columns from the left
-/// edge of the table area (FR-009 through FR-016).
+/// Column layout of the Agents table (FR-009 through FR-016).
 ///
-/// The widths are chosen so the control columns land where FR-015 pins them:
-/// the six-column `[stop]` control starts at [`STOP_X`] and the four-column
-/// `[x]` control at [`KILL_X`]. The compile-time assertion below fails the
-/// build if an edit to any width moves them.
+/// Painted rows indent behind [`columns::CONTENT_X`] blank columns (FR-073),
+/// and the control columns are chosen so the FR-015 controls sit where the
+/// spec pins them in that indented row space: the six-column `[stop]` control
+/// starts at [`columns::STOP_X`] and the four-column `[x]` control at
+/// [`columns::KILL_X`]. The compile-time assertion below fails the build if
+/// an edit to any width moves them.
 pub mod columns {
     /// Width of the leading status-marker segment (`"o "` / `"* "`).
     pub const MARKER_W: usize = 2;
@@ -87,11 +91,15 @@ pub mod columns {
     pub const ELAPSED_W: usize = 8;
     /// Width of the right-aligned step-count column (FR-012).
     pub const STEPS_W: usize = 7;
-    /// First column of the `[stop]` control (FR-015).
+    /// Blank columns painted before every table line so the content indents
+    /// into the panel (FR-073). Hit rectangles live in the same indented row
+    /// space, so the control columns below are measured after this margin.
+    pub const CONTENT_X: usize = 5;
+    /// First column of the `[stop]` control behind the leading margin (FR-015).
     pub const STOP_X: usize = 70;
     /// Width of the `[stop]` control column (FR-015).
     pub const STOP_W: usize = 6;
-    /// First column of the `[x]` control (FR-015).
+    /// First column of the `[x]` control behind the leading margin (FR-015).
     pub const KILL_X: usize = 77;
     /// Width of the `[x]` control column (FR-015).
     pub const KILL_W: usize = 4;
@@ -120,6 +128,97 @@ fn is_terminal(status: &TaskStatus) -> bool {
         status,
         TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
     )
+}
+
+/// Paint the block cursor over one painted table row, full table width.
+///
+/// The cursor is the selection affordance replaced by keyboard navigation
+/// (Up/Down/PgUp/PgDn move it, Space/Del/Enter act on it), so it overrides the
+/// zebra-band: the row is restyled with one distinct background across every
+/// span, and a trailing pad fills the unpainted remainder edge to edge (the
+/// same trick [`band_line`] uses) so the cursor rectangle reads as one block.
+fn cursor_line(line: Line, width: usize) -> Line {
+    let painted: usize = line
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    let mut spans: Vec<Span> = line
+        .spans
+        .into_iter()
+        .map(|span| {
+            Span::styled(
+                span.content.to_string(),
+                span.style.bg(CURSOR_BG).add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect();
+    if width > painted {
+        spans.push(Span::styled(
+            " ".repeat(width - painted),
+            Style::default().bg(CURSOR_BG),
+        ));
+    }
+    Line::from(spans).style(Style::default().bg(CURSOR_BG))
+}
+
+/// Subtle band background painted on alternating table rows.
+///
+/// The modal clears to black underneath, so a near-black blue-grey stripe on
+/// every other data row separates neighbouring rows without shouting; the
+/// strip's two background tones sit in the same family for a coherent panel.
+const BAND_BG: Color = Color::Rgb(22, 22, 30);
+
+/// Block-cursor background painted on the keyboard-selected row.
+///
+/// A slate blue that is clearly lighter than [`BAND_BG`] (so a cursor row
+/// never reads as a band) but stays dim enough that the row text remains
+/// legible; the same tone family as the teammate-strip focus highlight.
+const CURSOR_BG: Color = Color::Rgb(50, 50, 90);
+
+/// Give one painted table row the zebra-band background across the full
+/// table width.
+///
+/// A trailing background-coloured spacer fills the unpainted remainder so the
+/// band covers the row from edge to edge instead of stopping at the last
+/// control column. The cut never panics on a row wider than `width`: there is
+/// simply nothing left to pad.
+fn band_line(line: Line, width: usize) -> Line {
+    let painted: usize = line
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    let mut spans = line.spans;
+    if width > painted {
+        spans.push(Span::styled(
+            " ".repeat(width - painted),
+            Style::default().bg(BAND_BG),
+        ));
+    }
+    Line::from(spans).style(Style::default().bg(BAND_BG))
+}
+
+/// An unbanded filler row: a blank line that reserves one row of the table
+/// body so the band pattern continues over rows past the live list.
+fn filler_line(banded: bool, width: usize) -> Line<'static> {
+    if banded {
+        band_line(Line::default(), width)
+    } else {
+        Line::default()
+    }
+}
+
+/// Prepend the blank leading margin to one painted table line (FR-073).
+///
+/// The band and filler helpers keep padding to the full table width, so the
+/// margin only shifts where the first glyph lands; the line's own style is
+/// carried over unchanged. The margin span outlives every row's borrow, so the
+/// merged line keeps the input line's lifetime.
+fn margin_line(line: Line) -> Line {
+    let mut spans = vec![Span::raw(" ".repeat(columns::CONTENT_X))];
+    spans.extend(line.spans);
+    Line::from(spans).style(line.style)
 }
 
 /// The status dot colour, row text colour and label suffix for `status`.
@@ -235,41 +334,6 @@ fn control_spans(live: bool, suspended: bool) -> Vec<Span<'static>> {
     ]
 }
 
-/// Record one painted row's control hit rectangle / identifier pair.
-///
-/// A terminal row paints no control, so it records the `Rect::default()`
-/// placeholder with an empty identifier instead of shrinking the vectors: the
-/// placeholder can never match a click (zero width) and never resolves to a
-/// task at all (empty identifier), while the vector stays index-aligned with
-/// the painted rows (FR-015, FR-071, NFR-011). `row` is the row's painted line
-/// index; the renderer stores it in `Rect::y` so hit-test placement shifts
-/// directly with the paint instead of relying on button-order arithmetic.
-fn record_controls(
-    row: u16,
-    live: bool,
-    id: &str,
-    button_areas: &mut Vec<Rect>,
-    kill_areas: &mut Vec<Rect>,
-    button_task_ids: &mut Vec<String>,
-    kill_task_ids: &mut Vec<String>,
-) {
-    let (button, kill, name) = if live {
-        (
-            Rect::new(columns::STOP_X as u16, row, columns::STOP_W as u16, 1),
-            Rect::new(columns::KILL_X as u16, row, columns::KILL_W as u16, 1),
-            id.to_string(),
-        )
-    } else {
-        // Terminal-row placeholder (FR-071): zero width and an empty
-        // identifier make the entry unresolvable by construction.
-        (Rect::default(), Rect::default(), String::new())
-    };
-    button_areas.push(button);
-    kill_areas.push(kill);
-    button_task_ids.push(name.clone());
-    kill_task_ids.push(name);
-}
-
 /// How one task row's leading fixed columns are styled.
 #[derive(Debug, Clone, Copy)]
 struct RowStyle {
@@ -295,6 +359,9 @@ fn fixed_spans(
     if style.bold_label {
         label_style = label_style.add_modifier(Modifier::BOLD);
     }
+    // The `primary` / `bg` / `fg` type word is metadata, not content: it paints
+    // in the hint colour so the row colour belongs to the label alone.
+    let type_style = Style::default().fg(colors::HINT);
     vec![
         Span::styled(marker, Style::default().fg(style.marker)),
         Span::styled(
@@ -307,7 +374,7 @@ fn fixed_spans(
         ),
         Span::styled(
             format!("{type_label:<width$}", width = columns::TYPE_W),
-            Style::default().fg(style.row),
+            type_style,
         ),
         Span::styled(
             format!("{elapsed:>width$}", width = columns::ELAPSED_W),
@@ -326,7 +393,8 @@ fn fixed_spans(
 fn header_line() -> Line<'static> {
     let dim = Style::default()
         .fg(colors::HINT)
-        .add_modifier(Modifier::DIM);
+        .add_modifier(Modifier::DIM)
+        .add_modifier(Modifier::BOLD);
     Line::from(vec![
         Span::styled(" ".repeat(columns::MARKER_W), dim),
         Span::styled(format!("{:<width$} ", "id", width = columns::ID_W), dim),
@@ -354,16 +422,15 @@ fn header_line() -> Line<'static> {
     ])
 }
 
-/// Recursively build the sub-agent tree rows with their control columns.
+/// Recursively build the sub-agent tree rows.
 ///
 /// `last_stack` records, for every ancestor of the current row, whether that
 /// ancestor was its parent's last child; each entry contributes one two-column
-/// tree segment (FR-011). `button_areas` / `kill_areas` receive one entry per
-/// painted row, index-aligned with their identifier vectors (NFR-011).
-/// `row_task_ids` receives the clicked task id of every row pushed to `out`,
-/// in paint order, so a row click resolves to the task painted on that line
-/// (FR-034, FR-069).
-fn build_task_rows_with_buttons<'a>(
+/// tree segment (FR-011). `row_task_ids` receives the task id of every
+/// sub-agent row pushed to `out`, in paint order, so the keyboard cursor
+/// ordinal (`agents_cursor_subagent`) resolves to the same rows the table
+/// paints (FR-034).
+fn build_task_rows<'a>(
     tasks_map: &HashMap<&'a str, Vec<&'a TaskEntry>>,
     parent_sid: &str,
     last_stack: &[bool],
@@ -372,10 +439,6 @@ fn build_task_rows_with_buttons<'a>(
     teammate_ids: &HashSet<String>,
     out: &mut Vec<Line<'a>>,
     row_task_ids: &mut Vec<String>,
-    button_areas: &mut Vec<Rect>,
-    kill_areas: &mut Vec<Rect>,
-    button_task_ids: &mut Vec<String>,
-    kill_task_ids: &mut Vec<String>,
 ) {
     let children = tasks_map.get(parent_sid).cloned().unwrap_or_default();
     for (idx, task) in children.iter().enumerate() {
@@ -406,24 +469,20 @@ fn build_task_rows_with_buttons<'a>(
             &format_elapsed(task.created_at),
             &steps,
         );
+        // The `[stop]`/`[x]` columns stay painted as status indicators: the
+        // keyboard Space/Del now act on the row, and the glyph shows what
+        // each currently means (suspended rows paint `>` = resume).
+        spans.extend(control_spans(
+            !is_terminal(&task.status),
+            task.status == TaskStatus::Suspended,
+        ));
 
-        let live = !is_terminal(&task.status);
-        spans.extend(control_spans(live, task.status == TaskStatus::Suspended));
-        record_controls(
-            out.len() as u16,
-            live,
-            &task.id,
-            button_areas,
-            kill_areas,
-            button_task_ids,
-            kill_task_ids,
-        );
         out.push(Line::from(spans));
         row_task_ids.push(task.id.clone());
 
         let mut new_stack = last_stack.to_vec();
         new_stack.push(is_last);
-        build_task_rows_with_buttons(
+        build_task_rows(
             tasks_map,
             &task.child_session_id,
             &new_stack,
@@ -432,10 +491,6 @@ fn build_task_rows_with_buttons<'a>(
             teammate_ids,
             out,
             row_task_ids,
-            button_areas,
-            kill_areas,
-            button_task_ids,
-            kill_task_ids,
         );
     }
 }
@@ -448,11 +503,8 @@ fn build_task_rows_with_buttons<'a>(
 /// custom agent definitions and team members on every render, so they always
 /// reflect the current configuration (FR-062).
 pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
-    app.agent_row_button_areas.clear();
-    app.agent_row_button_task_ids.clear();
-    app.agent_row_kill_areas.clear();
-    app.agent_row_kill_task_ids.clear();
     app.agents_row_task_ids.clear();
+    app.agents_subagent_task_ids.clear();
 
     let primary_session = app.session_id.clone().unwrap_or_default();
     let primary_name = app.agent_name.clone();
@@ -511,11 +563,8 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     row_keys.push("primary".to_string());
 
     // -- sub-agents (FR-011 through FR-015) --------------------------------
-    let mut button_areas: Vec<Rect> = Vec::new();
-    let mut kill_areas: Vec<Rect> = Vec::new();
-    let mut button_task_ids: Vec<String> = Vec::new();
-    let mut kill_task_ids: Vec<String> = Vec::new();
-    build_task_rows_with_buttons(
+    let subagent_row_start = row_keys.len();
+    build_task_rows(
         &tasks_map,
         &primary_session,
         &[],
@@ -524,19 +573,22 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         &teammate_ids,
         &mut lines,
         &mut row_keys,
-        &mut button_areas,
-        &mut kill_areas,
-        &mut button_task_ids,
-        &mut kill_task_ids,
     );
+    // The keyboard cursor is an ordinal over the painted sub-agent rows only:
+    // publish the task ids in DFS paint order for the cursor's Space/Del/
+    // Enter resolution and the scroll sync (FR-034).
+    app.agents_subagent_task_ids = row_keys[subagent_row_start..].to_vec();
 
     // -- background shell tasks (FR-016) -----------------------------------
     if !app.bg_tasks.is_empty() {
+        // The heading carries the window accent so the section reads as a
+        // titled group, not as more rows (FR-016).
         lines.push(Line::from(vec![Span::styled(
             glyphs::BG_HEADING,
             Style::default()
-                .fg(colors::HINT)
-                .add_modifier(Modifier::BOLD),
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::DIM),
         )]));
         row_keys.push(String::new());
         let command_budget = columns::LABEL_W.min(columns::BG_COMMAND_MAX_W);
@@ -561,18 +613,12 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
                 &format_elapsed(task.created_at),
                 "-",
             );
-            // Background shell tasks are never suspended, only cancelled.
-            let live = !matches!(task.status.as_str(), "completed" | "failed" | "cancelled");
-            spans.extend(control_spans(live, false));
-            record_controls(
-                lines.len() as u16,
-                live,
-                &task.id,
-                &mut button_areas,
-                &mut kill_areas,
-                &mut button_task_ids,
-                &mut kill_task_ids,
-            );
+            // The `[stop]`/`[x]` columns stay painted as status indicators:
+            // the keyboard Space/Del act on sub-agent rows, but the old
+            // background-shell cancel glyph keeps its meaning (FR-016).
+            if task.status == "running" {
+                spans.extend(control_spans(true, false));
+            }
             lines.push(Line::from(spans));
             row_keys.push(String::new());
         }
@@ -583,26 +629,49 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     let max_scroll = total_lines.saturating_sub(visible);
     app.active_agents_max_scroll = max_scroll;
     let scroll = app.active_agents_scroll_offset.min(max_scroll);
-    app.agents_row_task_ids = row_keys;
+    app.agents_row_task_ids = row_keys.clone();
 
-    // Render only the visible slice, mirroring the message-window pattern.
-    let window: Vec<Line> = lines
+    // Paint the block cursor over the selected sub-agent row, then keep the
+    // viewport on that row: when the user pages past the edge the offset
+    // follows the cursor instead of desynchronising (FR-034).
+    let mut cursor_painted_row: Option<u16> = None;
+    if let Some(cursor) = app.agents_cursor_subagent
+        && let Some(task_id) = app.agents_subagent_task_ids.get(cursor)
+    {
+        if let Some(row_position) = row_keys.iter().position(|key| key == task_id) {
+            if row_position >= scroll as usize && row_position < scroll as usize + visible as usize
+            {
+                cursor_painted_row = Some((row_position as u16).saturating_sub(scroll));
+            }
+        }
+    }
+
+    // Render only the visible slice, mirroring the message-window pattern,
+    // banding every odd data row (the header on row 0 stays clean) and
+    // continuing the band pattern over the trailing body so the table panel
+    // reads as one surface.
+    let table_width = area.width as usize;
+    let mut window: Vec<Line> = lines
         .into_iter()
         .skip(scroll as usize)
         .take(visible as usize)
+        .enumerate()
+        .map(|(index, line)| {
+            let line = margin_line(line);
+            if Some(index as u16) == cursor_painted_row {
+                return cursor_line(line, table_width);
+            }
+            if index % 2 == 1 {
+                band_line(line, table_width)
+            } else {
+                line
+            }
+        })
         .collect();
+    for index in window.len()..visible as usize {
+        window.push(filler_line(index % 2 == 1, table_width));
+    }
     frame.render_widget(Paragraph::new(window), area);
-
-    // Store button areas shifted by scroll and area position, keeping IDs in
-    // sync 1:1 (`record_controls` pushes both in lockstep). Each Rect's `y`
-    // holds the row's painted line index in scroll space (captured at build
-    // time), so no button-order arithmetic is needed. A placeholder or an
-    // out-of-view entry keeps its vector position as `Rect::default()`, which
-    // can never match a click (FR-056, FR-071, NFR-011).
-    app.agent_row_button_areas = shift_areas(&button_areas, area, scroll);
-    app.agent_row_button_task_ids = button_task_ids;
-    app.agent_row_kill_areas = shift_areas(&kill_areas, area, scroll);
-    app.agent_row_kill_task_ids = kill_task_ids;
 
     if total_lines > visible {
         let mut sb_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
@@ -610,30 +679,4 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             .style(Style::default().fg(colors::HINT));
         frame.render_stateful_widget(scrollbar, area, &mut sb_state);
     }
-}
-
-/// Translate a row-space hit rectangle into screen space for `area`.
-///
-/// Returns `None` for a zero-width placeholder, a control scrolled out of view
-/// and a control clipped by the table bottom, so a click can never resolve to
-/// a control the user cannot see (FR-056, NFR-011).
-fn shift_area(rect: Rect, area: Rect, scroll: u16) -> Option<Rect> {
-    if rect.width == 0 || rect.y < scroll {
-        return None;
-    }
-    let y = area.y + (rect.y - scroll);
-    if y >= area.y + area.height {
-        return None;
-    }
-    Some(Rect::new(area.x + rect.x, y, rect.width, 1))
-}
-
-/// Shift every control rectangle into screen space, keeping one default
-/// placeholder per unplaceable entry so the vector stays index-aligned with
-/// the painted rows and the identifier vector (NFR-011).
-fn shift_areas(areas: &[Rect], area: Rect, scroll: u16) -> Vec<Rect> {
-    areas
-        .iter()
-        .map(|rect| shift_area(*rect, area, scroll).unwrap_or_default())
-        .collect()
 }

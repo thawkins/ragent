@@ -414,11 +414,150 @@ fn test_window_scroll_wheel_scrolls_the_rendered_teams_table_end_to_end() {
     );
 }
 
-/// A wheel keeps every recorded hit-rect aligned with the row it sits on: the
-/// renderer recorded the shifted rects, and the offset composition the row
-/// click uses indexes the still-painted rows (FR-056, T-017).
+// ---------------------------------------------------------------------------
+// Scrollbar-gutter drag (FR-059's mouse half; the row clicks are keyboard-only)
+// ---------------------------------------------------------------------------
+
+/// A left-button press, drag movement and release event.
+/// (The hit-rect-on-wheel test was retired with the row clicks: the cursor
+/// row maps are scroll-invariant, which `test_hit_rect_lifecycle.rs` pins.)
+const fn mouse_event(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }
+}
+
+/// Clicking the Agents scrollbar gutter starts a thumb drag with
+/// jump-to-position, a Drag event keeps moving the offset, and the button
+/// release clears the drag state (FR-059).
 #[test]
-fn test_window_scroll_wheel_keeps_hit_rects_on_the_painted_rows() {
+fn test_agents_scrollbar_gutter_drag_jumps_then_drags_then_ends() {
+    let mut app = support::make_app();
+    app.active_agents_area = Rect::new(5, 5, 100, 20);
+    app.active_agents_max_scroll = 20;
+
+    // Click at the gutter's column, near the top of the track: jump-to-
+    // position.
+    let gutter = app.active_agents_area.right() - 1;
+    app.needs_redraw = false;
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        gutter,
+        8,
+    ));
+    assert_eq!(
+        app.scrollbar_drag,
+        Some(ragent_tui::app::ScrollbarDragPane::AgentsWindow),
+        "a gutter click must start the Agents-window drag (FR-059)"
+    );
+    let jumped = app.active_agents_scroll_offset;
+    assert!(
+        jumped > 0 && jumped < 20,
+        "the click must jump the offset to a track-fraction position, got {jumped}"
+    );
+
+    // A drag further down the track moves the offset again.
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        gutter,
+        15,
+    ));
+    let dragged = app.active_agents_scroll_offset;
+    assert!(
+        dragged >= jumped,
+        "dragging down the track must not scroll up: {jumped} -> {dragged}"
+    );
+
+    // Releasing the button clears the drag state.
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        gutter,
+        15,
+    ));
+    assert_eq!(
+        app.scrollbar_drag, None,
+        "the release must clear the drag state (FR-059)"
+    );
+}
+
+/// The Teams scrollbar gutter drags the same way (FR-059).
+#[test]
+fn test_teams_scrollbar_gutter_drag_jumps_then_drags_then_ends() {
+    let mut app = support::make_app();
+    app.teams_area = Rect::new(5, 5, 110, 20);
+    app.teams_max_scroll = 15;
+
+    let gutter = app.teams_area.right() - 1;
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        gutter,
+        10,
+    ));
+    assert_eq!(
+        app.scrollbar_drag,
+        Some(ragent_tui::app::ScrollbarDragPane::TeamsWindow),
+        "a gutter click must start the Teams-window drag (FR-059)"
+    );
+    let jumped = app.teams_scroll_offset;
+    assert!(
+        jumped > 0 && jumped < 15,
+        "the click must jump the offset to a track-fraction position, got {jumped}"
+    );
+
+    // The track's last pixel row is the area's bottom edge row; fraction 1.0
+    // jumps the offset to the maximum.
+    let bottom_row = app.teams_area.bottom().saturating_sub(1);
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        gutter,
+        bottom_row,
+    ));
+    let bottom = app.teams_scroll_offset;
+    assert_eq!(
+        bottom, 15,
+        "a click at the track bottom jumps to the maximum (FR-059)"
+    );
+
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        gutter,
+        bottom_row,
+    ));
+    assert_eq!(app.scrollbar_drag, None);
+}
+
+/// A gutter click on a non-overflowing table never starts a drag (there is no
+/// scrollbar to grab).
+#[test]
+fn test_a_gutter_click_without_overflow_starts_no_drag() {
+    let mut app = support::make_app();
+    app.active_agents_area = Rect::new(5, 5, 100, 20);
+    app.active_agents_max_scroll = 0;
+
+    let gutter = app.active_agents_area.right() - 1;
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        gutter,
+        8,
+    ));
+    assert_eq!(app.scrollbar_drag, None, "no scrollbar, no drag (FR-059)");
+    assert_eq!(app.active_agents_scroll_offset, 0);
+}
+
+// ---------------------------------------------------------------------------
+// PgUp / PgDn: the keyboard paging siblings of the wheel (FR-059's keyboard
+// half; the cursor pages one viewport at a time)
+// ---------------------------------------------------------------------------
+
+/// PgUp on the Agents window pages the cursor up and clamps at the first row;
+/// PgDn pages down and clamps at the last row (FR-034, FR-059).
+#[tokio::test]
+async fn test_agents_page_keys_move_the_cursor_one_page_and_clamp() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
     let mut app = support::make_app();
     app.session_id = Some("lead-session-0001".to_string());
     app.agent_name = "general".to_string();
@@ -428,22 +567,89 @@ fn test_window_scroll_wheel_keeps_hit_rects_on_the_painted_rows() {
             .push(task(&id, "lead-session-0001", "explore"));
     }
     let _ = render_agents(&mut app, 160, 14);
-    let area = app.active_agents_area;
-    let (col, row) = centre(area);
-    app.handle_mouse_event(wheel_up(col, row));
+    assert!(
+        app.active_agents_area.height > 0,
+        "the view must be laid out"
+    );
 
-    let buffer = render_agents(&mut app, 160, 14);
-    for (i, task_id) in app.agent_row_button_task_ids.iter().enumerate() {
-        let rect = app.agent_row_button_areas[i];
-        if task_id.is_empty() || rect == Rect::default() {
-            continue;
-        }
-        let painted: String = (rect.x..rect.x + rect.width)
-            .filter_map(|x| buffer.cell((x, rect.y)).map(|c| c.symbol().to_string()))
-            .collect();
-        assert!(
-            painted.contains("[stop]"),
-            "click target for {task_id} must sit on its painted control: {painted:?}"
-        );
+    // First PgDn starts from the top of the list.
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .await;
+    let first_page = app.agents_cursor_subagent.expect("the cursor must be set");
+    assert!(
+        first_page >= 1,
+        "one page must move the cursor at least one row: {first_page}"
+    );
+    for _ in 0..8 {
+        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .await;
     }
+    assert_eq!(
+        app.agents_cursor_subagent,
+        Some(11),
+        "paging down past the end clamps at the last sub-agent (FR-034)"
+    );
+
+    for _ in 0..8 {
+        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+            .await;
+    }
+    assert_eq!(
+        app.agents_cursor_subagent,
+        Some(0),
+        "paging up past the top clamps at the first sub-agent (FR-034)"
+    );
+}
+
+/// The Teams PgUp/PgDn behave the same way (FR-038, FR-059).
+#[tokio::test]
+async fn test_teams_page_keys_move_the_cursor_one_page_and_clamp() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = support::make_app();
+    app.session_id = Some("lead-session-0001".to_string());
+    app.agent_name = "general".to_string();
+    app.active_team = Some(ragent_agent::team::TeamConfig::new(
+        "page-keys-teams",
+        "lead-session-0001",
+    ));
+    for i in 0..12 {
+        let mut member = ragent_agent::team::TeamMember::new(
+            format!("member-{i:02}"),
+            format!("tm-{i:03}"),
+            "general",
+        );
+        member.status = ragent_agent::team::MemberStatus::Working;
+        member.session_id = Some(format!("tm-{i:03}-session"));
+        app.team_members.push(member);
+    }
+    let _ = render_teams(&mut app, 170, 14);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .await;
+    let first_page = app.teams_cursor_teammate.expect("the cursor must be set");
+    assert!(
+        first_page >= 1,
+        "one page must move the cursor: {first_page}"
+    );
+
+    for _ in 0..8 {
+        app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .await;
+    }
+    assert_eq!(
+        app.teams_cursor_teammate,
+        Some(11),
+        "paging down past the end clamps at the last teammate (FR-038)"
+    );
+
+    for _ in 0..8 {
+        app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+            .await;
+    }
+    assert_eq!(
+        app.teams_cursor_teammate,
+        Some(0),
+        "paging up past the top clamps at the first teammate (FR-038)"
+    );
 }

@@ -88,7 +88,10 @@ fn pill(member: &TeamMember, focused: bool) -> (Vec<Span<'static>>, usize) {
     let name_style = if focused {
         base.fg(Color::White).add_modifier(Modifier::BOLD)
     } else {
-        base.fg(Color::Gray)
+        // Bright grey rather than terminal Gray: an unfocused pill stays
+        // comfortably readable on the strip background while the focused
+        // pill keeps both the bolder background and the bold weight.
+        base.fg(Color::Rgb(208, 208, 208))
     };
 
     let head = format!("{marker}{glyph} ");
@@ -122,7 +125,10 @@ pub fn strip_line(app: &App, width: u16) -> Line<'static> {
         used = header.width();
         spans.push(Span::styled(
             header,
-            Style::default().fg(Color::Blue).bg(STRIP_BG),
+            Style::default()
+                .fg(Color::Blue)
+                .bg(STRIP_BG)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 

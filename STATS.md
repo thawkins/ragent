@@ -1,26 +1,17 @@
 # Project Statistics
 
-**Version:** 1.0.141
+**Version:** 1.0.147
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
-> Metrics below are measured against the v1.0.141 tree plus the uncommitted
-> work on top of it (the `agentui` Agent and Team Member panel, cooperative
-> sub-agent suspension, the widened text-format tool-call recovery, the
-> `/yolo on|off|status` subcommands and `--config` write target, and the
-> mailbox sender-session fix), rebuilding on the v1.0.138 consolidated test
-> layout (see the `[1.0.138]` CHANGELOG entry and
-> `docs/reports/testconsolidation-review.md`) and the v1.0.137 coverage
-> campaign. Underneath that, the v1.0.136
-> interactive `/plugins list` panel and the manifest/runtime tool merge fix
-> (`merge_contributed_tools` / `merge_contributed_commands`), the v1.0.135
-> security-hardening pass that closed the `docs/reports/security-audit.md`
-> critical/high fix set - `merge_project` dropping project
-> `mcp`/`acp`/provider `api`, the symlink guards, the bounded-HTTP read caps,
-> the verified updater, the `http_request` header allowlist - plus the
-> `ragent --version` flag and the shared-helper de-duplication in
-> `ragent-types`/`ragent-surface` - and the v1.0.134 MCP-discovery ergonomics,
-> the `ask_user` default/fallback option, and the `/simplify all` cleanup.
+> Metrics below are measured against the v1.0.147 tree plus the uncommitted
+> work on top of it (the `agentui` keyboard-first rework with the Agents/Teams
+> block cursor and output-view Close bar, the `/team forcecleanup` shutdown
+> fix, and the raised tool watchdog), rebuilding on the v1.0.142 AgentUI panel
+> and the v1.0.138 consolidated test layout (see the `[1.0.138]` CHANGELOG
+> entry and `docs/reports/testconsolidation-review.md`) and the v1.0.137
+> coverage campaign. The new `countreport.md` adds a per-crate
+> function-definition inventory (25,823 workspace-wide).
 
 
 ## Project-wide Metrics
@@ -29,6 +20,7 @@
 |---|---|
 | Total Rust lines | 672,747 (666,223 in `crates/` + 6,524 in root `src/`/`tests/`) |
 | Total Rust files | 1,781 (1,762 workspace crates + 19 root `src/`/`tests/`) |
+| Function definitions | 25,823 (8,588 in `src/` + 17,235 in `tests/`; 67% test code - `countreport.md`, lexical lower bounds, uncommitted 2026-10-20 tree) |
 | Tests defined | 14,172 (`#[test]` / `#[tokio::test]` attributes (including `flavor = ...` variants) across `crates/`, `src/`, and root `tests/`: 14,109 in `crates/` + 63 in root) |
 | Test files | 1,106 (1,096 under crate `tests/` trees + 10 root `tests/`), of which 1,056 carry tests (939 consolidated `test_*.rs` + 125 `tests/inline/*` modules) and the rest are `tests/all.rs` roots and `tests/support` helpers |
 | Test binaries | 38 (19 consolidated `[[test]] name = "all"` integration targets - one per crate including the root package - plus 18 crate lib targets and the 1 root bin) |
@@ -39,7 +31,7 @@
 | Specs on disk | 58 directories in `specs/` |
 | Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 83 slash-command docs (+ generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.141 |
+| Version | 1.0.147 |
 
 The test-binary count is the headline effect of the consolidation rollout: the
 tree still holds 939 consolidated `test_*.rs` files plus 125 `tests/inline/*`
@@ -139,7 +131,10 @@ files, moving 13 of the 18 crates past 85% line coverage; the follow-up
 `ragent-tui` deep-coverage work adds 17 more files (642 tests, ~16.1k lines) on
 top of the phase-1 TUI suites, and the uncommitted `agentui` line adds about 20
 more TUI suites (roughly 900 tests) plus the suspension, write-target, and
-recovery suites in `ragent-agent` and `ragent-config`.
+recovery suites in `ragent-agent` and `ragent-config`. The uncommitted
+keyboard-first rework adds the `test_agents_teams_cursor` (17 cases) and
+`test_output_view_close_bar` suites and rewrites the window, hit-rect,
+keyboard-control, row-action, and wheel suites around the block cursor.
 
 `BUILDSTATS.md` records that a full `cargo test --workspace --all-targets` run
 executes **14,012 passed / 0 failed / 16 ignored** across 40 reporting test
@@ -235,10 +230,46 @@ Notes:
 - Crates over 10k lines: 17 of 18
 - Crates under 5k lines: 1 of 18
 
+Function definitions by crate (see `countreport.md`; lexical lower bounds):
+
+```
+ragent-tui             ############# 5,871 fns (22.7%)
+ragent-agent           ########## 4,532 fns (17.6%)
+ragent-tools-extended  ###### 2,889 fns (11.2%)
+ragent-research        ##### 2,418 fns (9.4%)
+ragent-llm             ## 1,082 fns (4.2%)
+ragent-codeindex       ## 1,041 fns (4.0%)
+ragent-plugins         # 974 fns (3.8%)
+ragent-specs           # 962 fns (3.7%)
+ragent-tools-vcs       # 940 fns (3.6%)
+ragent-connectors      # 850 fns (3.3%)
+ragent-tools-core      # 834 fns (3.2%)
+ragent-config          # 749 fns (2.9%)
+ragent-storage         # 579 fns (2.2%)
+ragent-types           # 579 fns (2.2%)
+ragent-telemetry       # 522 fns (2.0%)
+ragent-bench           # 377 fns (1.5%)
+ragent-server          # 351 fns (1.4%)
+ragent (root binary)   # 159 fns (0.6%)
+ragent-surface         # 114 fns (0.4%)
+```
+
+Test share: 17,235 of 25,823 definitions (67%) live under `tests/`; the
+most test-dominant crates by ratio are `ragent-specs` (73%), `ragent-tui`
+(79%) and `ragent-tools-extended` (74%).
+
 ---
 
-_Generated 2026-10-18 (v1.0.141 tree plus the uncommitted agentui release line:
-the Agent and Team Member panel per spec `agentui` (the Agents and Teams popup
+_Generated 2026-10-20 (v1.0.147 tree plus the uncommitted agentui keyboard-first
+rework: the Agents/Teams block cursor replacing mouse row clicks (FR-033..FR-046,
+FR-065, FR-069..FR-070; click-to-select retained), the output-view Close bar
+button (FR-074/FR-075), the FR-077 key legend, the 70%-width Agents modal, the
+`/team forcecleanup` shutdown race fix, the tool watchdog raised to 5000 s, and
+the `countreport.md` per-crate function inventory (25,823 definitions). On top
+of the v1.0.142/1.0.143-1.0.146 Windows portability releases
+(the 32 MiB main-thread stack, `same-file` containment, cfg-gated libc twins,
+re-enabled Windows CI), the Agent and Team Member panel per spec `agentui`
+(the Agents and Teams popup
 windows, the teammate strip, row actions with confirmation modals, cooperative
 sub-agent suspension, and the live event plumbing), the widened text-format
 tool-call recovery (a fifth dialect family plus reasoning-channel scanning and

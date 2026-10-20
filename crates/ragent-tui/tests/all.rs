@@ -41,6 +41,8 @@ mod test_active_tasks_reconcile;
 mod test_agent_notice_separation;
 #[path = "test_agent_switching.rs"]
 mod test_agent_switching;
+#[path = "test_agents_teams_cursor.rs"]
+mod test_agents_teams_cursor;
 #[path = "test_agents_window_frame.rs"]
 mod test_agents_window_frame;
 #[path = "test_agents_window_table.rs"]
@@ -265,6 +267,8 @@ mod test_new_command;
 mod test_osinfo_command;
 #[path = "test_osinfo_registration.rs"]
 mod test_osinfo_registration;
+#[path = "test_output_view_close_bar.rs"]
+mod test_output_view_close_bar;
 #[path = "test_output_view_live_steps.rs"]
 mod test_output_view_live_steps;
 #[path = "test_perf_message_cache.rs"]

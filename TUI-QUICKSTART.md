@@ -4,7 +4,25 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (uncommitted, post-1.0.141)
+## Highlights (uncommitted, post-1.0.147)
+
+- **Keyboard-first Agents/Teams windows (spec `agentui` T-022)** — a block
+  cursor replaces mouse row clicks: `Up`/`Down` move one row, `PgUp`/`PgDn`
+  page, `Space` toggles sub-agent suspend/resume, `Del`/`Shift+K` arms the
+  kill/shutdown confirmation, and `Enter` opens the cursor row's output view.
+  Clicking a row selects it (click-to-select is retained after a regression in
+  the hit-rect rework); the `[stop]`/`[x]` glyphs are status indicators only;
+  the primary agent, the lead, and background-shell rows are outside the
+  cursor; and a stale index degrades to a safely consumed no-op rather than
+  acting on the wrong row. The FR-077 key legend sits in each window's footer,
+  the Agents modal is 70% of the terminal width, and the output-view overlay
+  gains a bordered Close bar button bottom-right (`Esc` still closes).
+- **`/team forcecleanup` is race-free** — the confirmed cleanup awaits a real
+  `shutdown_teammate` per active member before removing the team directory,
+  instead of spawning a detached "shutdown" agent loop whose config writes
+  could recreate the directory mid-deletion.
+- **Tool watchdog raised to 5000 s** — a stalled tool call is killed after
+  ~83 minutes instead of ~33.
 
 - **Agent and Team Member panel (spec `agentui`)** — the `Agents` and `Teams`
   buttons beside the message input open live control popups. The Agents window
@@ -13,14 +31,16 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   section); the Teams window lists the lead and every teammate (focus marker,
   status word, model column, claimed/done/sent/recv counters); a one-row
   teammate strip under the status bar shows each teammate's status glyph and
-  focused highlight. Clicking an agent row opens its output view; clicking a
-  teammate routes the input to that teammate's mailbox. Destructive actions
+  focused highlight. Clicking an agent row selects it (then `Enter` opens its
+  output view); clicking a teammate selects it for the same keyboard actions.
+  Destructive actions
   (kill, shell cancel, teammate suspend/shutdown) ask Yes/No first and the
   answer is dispatched off the render thread.
-- **Window keyboard control** — with a window open `Space` suspends/resumes
-  the selected row, `Shift+K` arms the kill dialog, `Alt+Down`/`Alt+Up` cycle
-  focus, and the window keys win over the input buffer until `Esc` closes.
-  Both tables scroll with `Up`/`Down`, `Home`/`End`, and the mouse wheel, with
+- **Window keyboard control** — with a window open the block cursor moves with
+  `Up`/`Down`/`PgUp`/`PgDn`, `Space` suspends/resumes the cursor row, `Del`/
+  `Shift+K` arms the kill dialog, `Enter` opens the row's output view,
+  `Alt+Down`/`Alt+Up` cycle focus, and the window keys win over the input
+  buffer until `Esc` closes. Both tables scroll with the mouse wheel, with
   vertical scrollbars when they overflow. The Agents window closes itself when
   its list empties.
 - **Cooperative suspension** — a suspended sub-agent stops after its

@@ -79,16 +79,16 @@ fn row_text(buffer: &Buffer, y: u16, area: Rect) -> String {
 
 // -- FR-006: geometry --------------------------------------------------------
 
-/// The modal occupies 90% of the terminal width and 70% of its height, and is
+/// The modal occupies 70% of the terminal width and 70% of its height, and is
 /// centred with equal margins (FR-006).
 #[test]
-fn test_agents_modal_occupies_90_by_70_percent_and_is_centred() {
+fn test_agents_modal_occupies_70_by_70_percent_and_is_centred() {
     for (width, height) in [(120u16, 40u16), (160, 44), (80, 24), (200, 50)] {
         let mut app = make_app();
         let _ = render(&mut app, width, height);
         let modal = expected_modal(width, height);
 
-        let want_w = u32::from(width) * 90 / 100;
+        let want_w = u32::from(width) * 70 / 100;
         let want_h = u32::from(height) * 70 / 100;
         assert!(
             modal.width.abs_diff(want_w as u16) <= 2,

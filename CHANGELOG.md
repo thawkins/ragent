@@ -1,10 +1,73 @@
 # Changelog
 
+## [1.0.148] - 2026-10-20
+
+Release 1.0.148: the `agentui` keyboard-first
+rework, the team `/forcecleanup` shutdown fix, a longer tool watchdog, and the
+per-crate `countreport.md` function inventory.
+
+### Changed
+
+- **The Agents and Teams windows are keyboard-first: a block cursor replaces
+  mouse row clicks (spec `agentui` T-022).** `App` gains a cursor state pair
+  (`agents_cursor_subagent` / `teams_cursor_teammate`) with navigation and
+  action methods in `windows.rs` (`move_agents_cursor`, `page_agents_cursor`,
+  `agents_cursor_toggle_stop_resume`, `agents_cursor_kill`,
+  `agents_cursor_open_output`, the `teams_*` mirrors, and
+  `agents_cursor_from_click` / `teams_cursor_from_click`, which map a mouse
+  click to the painted absolute row and select the underlying sub-agent or
+  teammate). The input handler routes `Up`/`Down` to one-row cursor moves,
+  `PgUp`/`PgDn` to paging, `Space` to stop/resume, `Del`/`Shift+K` to the
+  kill/shutdown confirmation, and `Enter` to the output view; a cursor row
+  paints in reverse video and the key legend (FR-077) sits in the window
+  footer. The row-click destination handlers and the `[stop]`/`[x]` hit-rects
+  retire: the glyphs remain as status indicators only (FR-076), the primary
+  agent / lead row and background-shell rows are outside the cursor (FR-033,
+  FR-037, FR-039), stale-index actions are consumed no-ops (FR-045, FR-069),
+  and the Agents modal narrows from 90% to 70% width - the narrowest centred
+  width that keeps the pinned control columns inside the table (FR-015 note in
+  `layout.rs`). The output-view overlay gains a bottom-right bordered Close
+  bar button rendered through the shared modal `window_frame` helper
+  (FR-074/FR-075), and the wheel-ownership rules for the overlay are
+  re-specified. `specs/agentui/SPEC.md` gains FR-033..FR-046, FR-065, FR-069..
+  FR-070 and the revised FR-015/FR-056/FR-057, `PLAN.md` is re-planned as
+  T-008/T-011/T-016/T-021/T-022, and `TESTPLAN.md` tracks the new cases; the
+  window, hit-rect, keyboard-control, row-action, and wheel test suites are
+  rewritten around the cursor, and `test_agents_teams_cursor.rs` (17 cases)
+  plus `test_output_view_close_bar.rs` are the new consolidated suites. A
+  regression carried by this rework is fixed en route: a click inside the
+  popups had become a bare consume after the hit-rect rework, so click
+  -to-select is back (clicking selects the row; `Space`/`Del`/`Enter` act).
+- **`/team forcecleanup` no longer races its own directory removal.** The
+  confirmed `/team forcecleanup` path fired a detached `tokio::spawn` of
+  `spawn_teammate(.., "shutdown", ..)` - which starts a NEW agent loop with
+  the literal prompt "shutdown" (a wasted LLM turn), reloads/re-saves
+  `config.json` under the spawn lock, and recreates `config.json` + lock +
+  atomic-rename temp files inside the team directory while the main task ran
+  `remove_dir_all` on it. The racing writes made the removal fail `ENOTEMPTY`
+  and left the team directory behind (the `CI`
+  `team_forcecleanup_deactivates_persisted_members` flake). The path now
+  awaits the unified immediate-shutdown path (`tm.shutdown_teammate`) for
+  every non-Stopped member before removing the directory, so all writes into
+  the tree are serialised and aborted loops cannot recreate it.
+- **The tool watchdog timeout is raised from 2000 s to 5000 s.**
+  `TOOL_WATCHDOG_TIMEOUT` in `crates/ragent-agent/src/session/processor.rs`
+  (and the numbers quoted in `docs/howtos/reactagent.md`) move from ~33m20s to
+  ~83m20s, so long-running research/codeindex tool calls are no longer killed
+  mid-run.
+- **`countreport.md` - a per-crate function-definition inventory.** One
+  `explore` sub-agent per workspace crate counted `fn` definitions with a
+  shared line-anchored ripgrep pattern over `src/` and `tests/`, cross-checked
+  by a single deterministic pass: 25,823 definitions workspace-wide (8,588 in
+  `src/`, 17,235 in `tests/`, 67% test code), with `ragent-tui` the largest
+  (5,871). Report carries the method and caveats (closures / macro-generated
+  fns excluded; lexical lower bounds).
+
 ## [1.0.147] - 2026-10-20
 
 ### Fixed
 
-- **Two CI flake tests are deterministic.**
+- **Two CI flake tests are deterministic (commit `f7b38867`, release 1.0.147).**
   - `ragent-tui` `/osinfo` cross-renderer tests pin the process working
     directory. `test_osinfo_show_matches_tool_renderer` compares the
     `/osinfo show` slash report against the `os_info` tool collect, and both
@@ -26,12 +89,16 @@
 - **CI workflow YAML hardening: quoted the remaining `run:` scalar containing
   `::`** (the clippy allow-list line), preventing GitHub's workflow-file
   parser from rejecting the file as it did for releases 1.0.142-1.0.144.
+- **The release 1.0.147 commit (`f7b38867`) touches only the workflow, the
+  CHANGELOG and the two flake-test files above** plus the version bump; no
+  production code changed.
 
 ## [1.0.146] - 2026-10-20
 
 ### Fixed
 
-- **Ragent no longer overflows its stack at startup on Windows.** The Windows
+- **Ragent no longer overflows its stack at startup on Windows
+  (commit `1b2e9cd5`, release 1.0.146).** The Windows
   MSVC linker reserves a 1 MiB stack for the main thread, while Linux grows
   the main-thread stack toward the ~8 MiB rlimit: config parsing, tool
   registration and the first TUI render all run on that thread via
@@ -48,7 +115,7 @@
 ### Changed
 
 - **The Windows-x86_64 build job is re-enabled in the "Build and Release"
-  workflow.** `build-windows` runs again on `windows-latest` (release binary
+  workflow** (same commit, `1b2e9cd5`). `build-windows` runs again on `windows-latest` (release binary
   plus a WiX `.msi`), the `release` job waits on it, downloads its
   `ragent-<version>-windows-x86_64` artifact, and publishes the `.exe` and
   `.msi` on the GitHub release alongside the Linux and macOS assets. The
@@ -57,7 +124,7 @@
   Windows build viable again.
 
 - **A spec with only a `SPEC.md` is now discoverable, so `/spec update <name>`
-  can find and plan it.** `SpecIo::discover_specs` and `SpecIo::read_spec` both
+  can find and plan it (same commit).** `SpecIo::discover_specs` and `SpecIo::read_spec` both
   required `PLAN.md` next to `SPEC.md`, which meant a hand-authored or
   partially-generated spec - `specs/agentui/` is one - was invisible to
   `/spec list`, `/spec search`, `spec_list`/`spec_read`/`spec_coverage`, and was
@@ -219,7 +286,7 @@
 
 ## [1.0.145] - 2026-10-20
 
-A CI-workflow repair release. The `ci.yml` workflow had been failing
+A CI-workflow repair release (commit `0735c682`). The `ci.yml` workflow had been failing
 un-parsed since the test-consolidation rollout: eleven `run:` lines ending in
 the consolidated-target `::` test-filter suffix
 (`cargo test -p <crate> --test all test_x::`) are exactly the shape YAML
@@ -241,7 +308,7 @@ with no new advisories (866 crate dependencies scanned).
 
 ## [1.0.144] - 2026-10-20
 
-The second Windows-portability release, closing the follow-up errors from the
+The second Windows-portability release (commit `7a826b15`), closing the follow-up errors from the
 first Windows build (`cargo run` on `x86_64-pc-windows-msvc`): one hard error
 and the remaining dead-code/unused warnings. Linux verification is unchanged
 (`cargo check` with `-D warnings` on the touched crates, `cargo fmt --check`,
@@ -276,7 +343,7 @@ and the remaining dead-code/unused warnings. Linux verification is unchanged
 
 ## [1.0.143] - 2026-10-20
 
-A Windows-portability release: the four Windows-only compile errors
+A Windows-portability release (commit `9405d9dc`): the four Windows-only compile errors
 (E0425 `libc::killpg` / `SIGKILL` / `libc::kill` missing on Windows, and the
 E0596 mutable-borrow error under `#[cfg(windows)]` in the backend detector)
 are fixed with cfg-gated twins mirroring the existing MCP teardown split.
@@ -324,7 +391,7 @@ scanned).
 
 ## [1.0.142] - 2026-10-19
 
-A feature-and-fix release shipping the AgentUI work and the session-safety
+A feature-and-fix release (commit `2a93eaf5`) shipping the AgentUI work and the session-safety
 fixes: the new Agent and Team Member panel (both windows, teammate strip,
 row-action confirmations, keyboard control), cooperative sub-agent
 suspension/resume, the widened text-format tool-call recovery pass, the
@@ -333,21 +400,28 @@ discovery, the `/yolo on|off|status` subcommand with `--config` write-target
 routing, and the Windows-stable path-alias containment check via `same-file`.
 `cargo check`, `cargo check --tests` and `cargo audit` all pass with no new
 advisories (866 crate dependencies scanned); the full suite is 14,334 passed /
-0 failed / 16 ignored.
+0 failed / 16 ignored. The nearby releases `cb0d32ec` (1.0.141),
+`c00b258e` (1.0.140), `98d7599f` (1.0.139) and `ea7ac0da` (1.0.138) are the
+screenshot/version-bump bumps and the test-consolidation mega-release already
+written up in their own entries below.
 
 ## [1.0.141] - 2026-10-18
 
-A version bump release. `cargo check` and `cargo audit` both pass with no new
-advisories (866 crate dependencies scanned).
+A version bump release (commit `cb0d32ec`). `cargo check` and `cargo audit` both pass with no new
+advisories (866 crate dependencies scanned). The session screenshot
+`assets/screens/Pasted image.png` is renamed `ragentsession.png` and
+re-embedded.
 
 ## [1.0.140] - 2026-10-18
 
-A version bump release. `cargo check` and `cargo audit` both pass with no new
+A version bump release (commit `c00b258e`). README screenshot additions:
+`ragentmcpstartup.png`, the tool-session image, and the header screenshot.
+`cargo check` and `cargo audit` both pass with no new
 advisories (866 crate dependencies scanned).
 
 ## [1.0.139] - 2026-10-18
 
-A documentation-and-status-bar release. The status bar names the active
+A documentation-and-status-bar release (commit `98d7599f`). The status bar names the active
 execution backend in full, the README gains screenshots of the provider, model,
 MCP and plugin selectors, and the TUI status-bar assertions plus the sandbox
 backend how-to follow the new label. No production behaviour changed beyond the
@@ -375,6 +449,8 @@ pass with no new advisories (866 crate dependencies scanned).
   and the header image now points at `ragentstart.png`.
 
 ## [1.0.138] - 2026-10-18
+
+The test-consolidation mega-release (commit `ea7ac0da`).
 
 A build/test-hygiene and coverage release. Every crate now compiles its test
 tree into a single integration-test binary (948 -> 19 targets), a full test

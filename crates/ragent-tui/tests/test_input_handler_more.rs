@@ -384,37 +384,52 @@ async fn history_picker_up_clamps_at_top() {
 // ===========================================================================
 // Agents / Teams window Space and Shift+K shortcuts
 // ===========================================================================
+//
+// The keyboard block cursor never reaches the primary agent row or the lead
+// (the cursor range covers sub-agent / teammate rows only, FR-067), so the
+// old `selected_agent_index = Some(0)` refusal cases are retired. These tests
+// pin the new no-row surface: with no cursorable rows the window keys are a
+// consumed no-op reporting on the status line, and the input never sees them.
 
 #[tokio::test]
-async fn space_on_the_primary_agent_row_is_refused() {
+async fn agents_window_keys_with_no_rows_are_consumed_no_ops() {
     let mut app = app_with_session("s1");
     app.show_agents_window = true;
-    app.selected_agent_index = Some(0);
 
     app.handle_key_event(key(KeyCode::Char(' '))).await;
-    assert_eq!(app.status, "Cannot suspend primary agent");
-}
-
-#[tokio::test]
-async fn shift_k_on_the_primary_agent_row_is_refused() {
-    let mut app = app_with_session("s1");
-    app.show_agents_window = true;
-    app.selected_agent_index = Some(0);
+    assert_eq!(
+        app.status, "agents: selected row is gone",
+        "Space with no cursorable rows reports the consumed no-op"
+    );
 
     app.handle_key_event(kmod(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
-    assert_eq!(app.status, "Cannot kill primary agent");
+    assert_eq!(
+        app.status, "agents: selected row is gone",
+        "Shift+K with no cursorable rows reports the consumed no-op"
+    );
+    assert!(
+        !app.row_action_confirm_open(),
+        "an empty range arms no dialog"
+    );
 }
 
 #[tokio::test]
-async fn space_in_the_teams_window_with_a_focused_teammate_does_not_panic() {
+async fn space_in_the_teams_window_with_no_teammates_is_a_consumed_no_op() {
     let mut app = app_with_session("s1");
     app.show_teams_window = true;
-    app.focused_teammate = Some("tm-001".to_string());
 
     app.handle_key_event(key(KeyCode::Char(' '))).await;
-    // No panic: with no live TeamManager the shutdown is a best-effort no-op.
+    assert_eq!(
+        app.status, "teams: selected row is gone",
+        "Space with no cursorable teammate rows reports the consumed no-op"
+    );
+    // No panic: the consumed no-op path never dispatches (FR-069).
     assert!(app.show_teams_window);
+    assert!(
+        !app.row_action_confirm_open(),
+        "an empty range arms no dialog"
+    );
 }
 
 // ===========================================================================

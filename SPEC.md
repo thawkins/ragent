@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.122</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.147</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-09-26
+          <strong>Date:</strong> 2026-10-20
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,7 +98,8 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.138). The core architecture, tool system,
+Ragent is in **beta** (v1.0.147, with the uncommitted `agentui` keyboard-first
+rework on top). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -742,6 +743,17 @@ graph TD
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
 
+Per-crate `fn`-definition counts (lexical lower bounds from `countreport.md`,
+cross-checked by deterministic ripgrep, uncommitted 2026-10-20 tree):
+`ragent-tui` 5,871 · `ragent-agent` 4,532 · `ragent-tools-extended` 2,889 ·
+`ragent-research` 2,418 · `ragent-llm` 1,082 · `ragent-codeindex` 1,041 ·
+`ragent-plugins` 974 · `ragent-specs` 962 · `ragent-tools-vcs` 940 ·
+`ragent-connectors` 850 · `ragent-tools-core` 834 · `ragent-config` 749 ·
+`ragent-storage` 579 · `ragent-types` 579 · `ragent-telemetry` 522 ·
+`ragent-bench` 377 · `ragent-server` 351 · root `ragent` binary 159 ·
+`ragent-surface` 114 — 25,823 workspace-wide (8,588 in `src/`, 17,235 in
+`tests/`, 67% test code).
+
 ### 2.3 Event Bus Flow
 
 The event bus is a tokio broadcast channel (`tokio::sync::broadcast`). Every
@@ -1133,7 +1145,9 @@ Between steps the loop also runs two gates:
   breaks on the cancel flag) until `resume_task` clears its flag or the turn
   is cancelled; sessions not spawned by the manager skip the gate. The
   suspension is cooperative: the LLM call or tool execution in flight when
-  the request lands finishes first.
+  the request lands finishes first. A separate hard watchdog kills any
+  single tool call and terminates the run when it stalls past
+  `TOOL_WATCHDOG_TIMEOUT` (5000 s; see `session/processor.rs`).
 - **Text-format tool-call recovery** — when the step produced no native tool
   calls, the loop (in `session/loop_steps.rs`, before callers save the
   buffers) extracts pending calls from the text buffer first and then the
@@ -1907,8 +1921,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | Log | Step-numbered tool calls with pretty-printed JSON |
 | Status bar | Provider/model, context usage, compression indicator, YOLO state |
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
-| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` columns, and a background-shell section; rows open the agent's output view (spec `agentui` FR-006..FR-016) |
-| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; clicking a teammate routes the input to its mailbox (spec `agentui` FR-017..FR-026) |
+| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
+| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
@@ -1983,6 +1997,7 @@ graph LR
     App --> Log[Log Widget]
     App --> Input[Input Widget]
     App --> Status[Status Bar]
+    App --> Windows[Agents / Teams Windows + Output View Close Bar]
     App --> Dialogs[Permission / Question Dialogs]
     EventBus --> App
 ```
@@ -4462,6 +4477,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| Uncommitted | 2026-10-20 | **Keyboard-first Agents/Teams windows (spec `agentui` T-021/T-022).** Both popups move from mouse row clicks to a block cursor: `Up`/`Down` move one row, `PgUp`/`PgDn` page, `Space` toggles sub-agent suspend/resume and `Del`/`Shift+K` arms the kill/shutdown confirmation, `Enter` opens the cursor row's output view, and clicking a row selects it (the `[stop]`/`[x]` glyphs remain as status indicators only; primary/lead and background-shell rows are outside the cursor; stale indices degrade to consumed no-ops). A bordered Close bar button lands bottom-right of the output-view overlay (FR-074/FR-075), the FR-077 key legend sits in each window's footer, the Agents modal narrows to 70% width (the narrowest centred width that keeps the pinned control columns inside the table), and cursor/scroll row maps stay index-aligned through scroll and window reopen (FR-056/FR-065). **`/team forcecleanup` shutdown race fixed:** the fire-and-forget `tokio::spawn` of `spawn_teammate(.., "shutdown", ..)` (a wasted LLM loop that also re-created `config.json` inside the directory being deleted, failing `remove_dir_all` with `ENOTEMPTY`) is replaced by an awaited per-member `tm.shutdown_teammate` loop before the directory removal. **Tool watchdog timeout raised 2000 s -> 5000 s** (`TOOL_WATCHDOG_TIMEOUT` in `processor.rs`; `docs/howtos/reactagent.md` follows). **New `countreport.md`:** per-crate `fn`-definition inventory (25,823 workspace-wide across 8,588 `src/` + 17,235 `tests/` definitions; `ragent-tui` the largest at 5,871), counted with a shared line-anchored ripgrep pattern by one `explore` sub-agent per crate and cross-checked deterministically. |
 | Uncommitted | 2026-10-18 | **Agent and Team Member panel (spec `agentui`, T-001..T-020).** The `Agents` and `Teams` buttons open live control popups (sub-agent tree with `[stop]`/`[x]` columns and a background-shell section; teammate rows with focus markers, canonical `MemberStatus::display_label()` status words, model column, counters) plus a one-row teammate strip under the status bar. Row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) are gated by a Yes/No confirmation modal dispatched off the render thread; `Space`/`Shift+K` keyboard control works with primary-agent protection and window-key precedence; `Alt+Down`/`Alt+Up` cycle focus; both tables scroll with clamped offsets, vertical scrollbars, and the wheel, with an index-aligned hit-rect lifecycle; a 1500 ms registry reconciliation safety net plus full sub-agent/team event plumbing keep the rows live (`SubagentSuspended`/`SubagentResumed` re-status rows and the Agents window auto-closes when its list empties). **Cooperative sub-agent suspension (agentui FR-035):** `AgentManager` gains `suspend_flags` and real `suspend_task`/`resume_task` (Running->Suspended / Suspended->Running, idempotent, publishing `SubagentSuspended`/`SubagentResumed`), and the agent loop parks at a new inter-step safe point while the flag is set (200 ms poll, cancel-flag break); sessions without a manager entry skip the gate. **Text-format tool-call recovery widened:** the F9 pass moves into `loop_steps` (so every caller's text/reasoning parts are saved blanked), scans the reasoning channel as a second surface with per-surface `AgentNotice`s, and gains three dialects - plain `<toolcall>`, a slash-dropped close-tag variant (two identical tags), and the underscore `tool_call` pair; the message widget scrubs narrated tool-call markup and one-line tool-call JSON from the transcript (`scrub_narrated_toolcalls`). **`/yolo on|off|status` are real subcommands and YOLO persists under `--config`:** the handler dispatches on the subcommand instead of always toggling, and `ragent --config <file>` registers the file with the new `Config::set_config_write_target` so runtime-flag writes (`yolo`, `edit_log`, `activity_log`) and `save_to_source` land in the loaded file. **A spec with only `SPEC.md` is discoverable** (`discover_specs`/`read_spec` no longer require `PLAN.md`; `write_spec` skips empty plans; `/spec update` omits the existing-plan block when there is none). **Plugin-store and connector-catalogue panels draw Unicode box-drawing borders** (spec `pluginstores`/`catnav` FR-004 ASCII-only requirement reversed; `PLUGIN_STORE_ASCII_BORDER` deleted). **SEC-ragent-team-003:** lead-authored mailbox messages (`team_shutdown_teammate`, lead-to-teammate chat) carry the lead session id via `with_sender_session`. **Windows-safe path-alias containment:** `ragent-tools-core`'s `is_alias_within` uses the `same-file` crate (`same_file::is_same_file`) instead of the unstable `windows_by_handle` metadata field. 58 spec directories on disk; new consolidated suites `test_task_suspend_resume`, `test_config_write_target`, `test_think_narration_scrub`, and 20 agentui suites. |
 | v1.0.141 | 2026-10-18 | Version bump. Session screenshot renamed to `assets/screens/ragentsession.png` and re-embedded in the README. |
 | v1.0.140 | 2026-10-18 | Version bump. README screenshot additions: `ragentmcpstartup.png` and the session image. |
@@ -5034,8 +5050,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | Log | Step-numbered tool calls with pretty-printed JSON |
 | Status bar | Provider/model, context usage, compression indicator, YOLO state |
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
-| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` columns, and a background-shell section; rows open the agent's output view (spec `agentui` FR-006..FR-016) |
-| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; clicking a teammate routes the input to its mailbox (spec `agentui` FR-017..FR-026) |
+| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
+| Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
 | Question dialog | Modal user question (free-text or multiple-choice) |
@@ -5104,6 +5120,7 @@ graph LR
     App --> Log[Log Widget]
     App --> Input[Input Widget]
     App --> Status[Status Bar]
+    App --> Windows[Agents / Teams Windows + Output View Close Bar]
     App --> Dialogs[Permission / Question Dialogs]
     EventBus --> App
 ```

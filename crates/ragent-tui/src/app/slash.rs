@@ -8,7 +8,7 @@ use ragent_agent::session::loop_state::LoopSpec;
 use ragent_agent::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
 };
-use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
+use ragent_agent::{event::Event, mcp::McpClient, message::Message};
 use ragent_types::ThinkingLevel;
 use ragent_types::strutil::truncate_bytes;
 
@@ -6479,40 +6479,39 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             let team_name = team.name.clone();
                             match TeamStore::load_by_name(&team_name, &working_dir) {
                                 Ok(mut store) => {
-                                    // Attempt graceful shutdown of active teammate sessions first
+                                    // Attempt shutdown of active teammate sessions first.
+                                    //
+                                    // This used to fire-and-forget a `tokio::spawn`
+                                    // of `spawn_teammate(.., "shutdown", ..)`, which
+                                    // does not shut a teammate down at all: it
+                                    // starts a NEW agent loop with the prompt
+                                    // "shutdown" (one wasted LLM turn), reloads and
+                                    // re-saves `config.json`, and re-creates the
+                                    // companion lock file inside the team directory
+                                    // while `remove_dir_all` below was deleting that
+                                    // same tree. The racing writes made the removal
+                                    // fail with ENOTEMPTY and left the team
+                                    // directory behind (CI flake in
+                                    // `team_forcecleanup_deactivates_persisted_members`).
+                                    // The unified immediate-shutdown path is awaited
+                                    // here instead: every write into the directory is
+                                    // serialised before it is removed, any live
+                                    // agent/poll loop is aborted so it cannot recreate
+                                    // the tree after removal, and the member is marked
+                                    // Stopped on disk.
+                                    let manager =
+                                        self.session_processor.team_manager.get().cloned();
                                     let mut deactivated: Vec<String> = Vec::new();
                                     for m in &mut store.config.members {
                                         if m.status != MemberStatus::Stopped {
-                                            // Try to contact team manager to request shutdown if available
-                                            if self.session_processor.team_manager.get().is_some() {
-                                                // best-effort: ignore errors
-                                                // Best-effort: request teammate to shutdown asynchronously.
-                                                // Fire-and-forget via tokio::spawn; ignore result.
-                                                let team_name_clone = store.config.name.clone();
-                                                let m_name = m.name.clone();
-                                                let m_agent_type = m.agent_type.clone();
-                                                let working_dir_clone = store.dir.clone();
-                                                let active_model: Option<
-                                                    &ragent_agent::agent::ModelRef,
-                                                > = None;
-                                                if let Some(tm_arc) =
-                                                    self.session_processor.team_manager.get()
-                                                {
-                                                    let tm = tm_arc.clone();
-                                                    tokio::spawn(async move {
-                                                        let _ = tm  // INTENTIONAL: fallible wiring/persistence call; the in-memory state is authoritative
-                                                            .spawn_teammate(
-                                                                &team_name_clone,
-                                                                &m_name,
-                                                                &m_agent_type,
-                                                                "shutdown",
-                                                                active_model,
-                                                                None,
-                                                                &working_dir_clone,
-                                                            )
-                                                            .await;
-                                                    });
-                                                }
+                                            if let Some(tm) = manager.as_ref() {
+                                                let agent_id = m.agent_id.clone();
+                                                // INTENTIONAL: fallible best-effort shutdown; the
+                                                // directory removal below is the authoritative
+                                                // teardown, and a member with no live handle is
+                                                // still marked Stopped on disk by the call.
+                                                let _ =
+                                                    tm.shutdown_teammate(&agent_id, false).await;
                                             }
                                             let desc = format!("{} ({})", m.name, m.agent_id);
                                             m.status = MemberStatus::Stopped;

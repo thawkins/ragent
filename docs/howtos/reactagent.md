@@ -218,7 +218,7 @@ Tool execution is gated by the multi-layered permission system:
 - A permission prompt times out to **deny** (safe default).
 
 A tool task that neither finishes nor panics is killed at the tool watchdog
-timeout (`TOOL_WATCHDOG_TIMEOUT` = 2000 s) and the whole run is terminated with
+timeout (`TOOL_WATCHDOG_TIMEOUT` = 5000 s) and the whole run is terminated with
 status `error`; an ordinary task join failure is logged and skipped instead.
 
 ---
@@ -257,7 +257,7 @@ spawned tool task; `ToolCallBatch` at step end) -> `MessageEnd`.
 | 5 | User cancel | `FinishReason::Cancelled`, partial message persisted |
 | 6 | Human interrupt (`Esc` during a `/loop` run) | `HumanIntervention` -> status `interrupted`; takes precedence over budget at safe points |
 | 7 | Unrecoverable provider error (prep or stream stage) | status `error`, `Err` returned |
-| 8 | Tool watchdog | tool stalls past 2000 s -> run terminated |
+| 8 | Tool watchdog | tool stalls past 5000 s -> run terminated |
 
 Not terminations: the one-shot sub-agent summary nudge, and verification
 failures that still have steps remaining (they become the next observation).

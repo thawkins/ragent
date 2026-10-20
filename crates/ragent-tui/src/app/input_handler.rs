@@ -406,6 +406,31 @@ impl App {
         }
 
         match event.kind {
+            // The output overlay is the topmost scrollable surface, so its
+            // wheel arms precede the popup arms: a wheel over the 90-cent
+            // overlay also lies inside the Agents/Teams popup area beneath it,
+            // and those earlier arms used to steal the event, leaving the
+            // overlay pinned to its newest page (bug report, fixed as T-021).
+            // Research/memory keep their own later arms but are listed after
+            // the overlay for the same z-order reason.
+            MouseEventKind::ScrollUp
+                if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into()) =>
+            {
+                self.scroll_output_view_by(SCROLL_STEP_LINES as i16);
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown
+                if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into()) =>
+            {
+                self.scroll_output_view_by(-(SCROLL_STEP_LINES as i16));
+                self.needs_redraw = true;
+            }
             // While an agentui popup table is open its wheel owns the scroll:
             // the offset moves by SCROLL_STEP_LINES and re-clamps to the
             // maximum the renderer computed (render clamps the painted slice,
@@ -452,12 +477,6 @@ impl App {
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_research_view_by(SCROLL_STEP_LINES as i16);
-                } else if self.output_view.is_some()
-                    && self
-                        .output_view_area
-                        .contains((event.column, event.row).into())
-                {
-                    self.scroll_output_view_by(SCROLL_STEP_LINES as i16);
                 } else {
                     match self.pane_at(event.column, event.row) {
                         Some(SelectionPane::Messages) => {
@@ -498,12 +517,6 @@ impl App {
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_research_view_by(-(SCROLL_STEP_LINES as i16));
-                } else if self.output_view.is_some()
-                    && self
-                        .output_view_area
-                        .contains((event.column, event.row).into())
-                {
-                    self.scroll_output_view_by(-(SCROLL_STEP_LINES as i16));
                 } else {
                     match self.pane_at(event.column, event.row) {
                         Some(SelectionPane::Messages) => {
@@ -556,6 +569,36 @@ impl App {
                     self.close_teams_window();
                     return;
                 }
+                // The output overlay's Close bar button (FR-075). Checked with
+                // the other close buttons so it runs before the inside-click
+                // consume arm below.
+                if self.output_view_close_button_area.contains(pos.into()) {
+                    self.close_output_view();
+                    return;
+                }
+                // Scrollbar-gutter drag for the two popup tables: a click on
+                // the painted scrollbar's column starts a thumb drag (with
+                // jump-to-position), and the drag arm keeps it moving until
+                // the button is released (FR-059). Checked before the popup
+                // consume arms, which would otherwise swallow the click.
+                if self.active_agents_max_scroll > 0
+                    && self.active_agents_area.height > 0
+                    && event.column == self.active_agents_area.right().saturating_sub(1)
+                    && self.active_agents_area.contains(pos.into())
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::AgentsWindow);
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::AgentsWindow);
+                    return;
+                }
+                if self.teams_max_scroll > 0
+                    && self.teams_area.height > 0
+                    && event.column == self.teams_area.right().saturating_sub(1)
+                    && self.teams_area.contains(pos.into())
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::TeamsWindow);
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::TeamsWindow);
+                    return;
+                }
                 if self.research_view.is_some() {
                     if self.research_view_area.contains(pos.into()) {
                         return;
@@ -571,193 +614,36 @@ impl App {
                     return;
                 }
                 if self.output_view.is_some() {
-                    self.output_view = None;
-                    self.selected_agent_session_id = None;
-                    self.selected_agent_index = None;
+                    self.close_output_view();
                 }
                 if self
                     .active_agents_area
                     .contains((event.column, event.row).into())
                 {
-                    // Button clicks first (Play/Stop and Kill); each arm
-                    // returns on a hit.
-                    for (i, area) in self.agent_row_button_areas.iter().enumerate() {
-                        if area.contains((event.column, event.row).into()) {
-                            let task_id = &self.agent_row_button_task_ids[i];
-                            // A terminal-row placeholder is inert (FR-071).
-                            if task_id.is_empty() {
-                                return;
-                            }
-                            if let Some(task) =
-                                self.active_tasks.iter().find(|t| t.id == *task_id).cloned()
-                            {
-                                // A suspend is not destructive and a resume
-                                // restores a running subject, so neither
-                                // direction confirms (FR-035; the dialog
-                                // covers only the FR-036 termination).
-                                if task.status == ragent_agent::task::TaskStatus::Suspended {
-                                    self.resume_agent_task(&task.id);
-                                } else {
-                                    self.suspend_agent_task(&task.id);
-                                }
-                            } else if let Some(bg) =
-                                self.bg_tasks.iter().find(|t| t.id == *task_id).cloned()
-                            {
-                                // Cancelling destroys the shell task: confirm
-                                // first (FR-037).
-                                self.open_row_action(crate::app::RowAction::CancelBackground {
-                                    task_id: bg.id,
-                                    command: bg.command,
-                                });
-                            }
-                            return;
-                        }
-                    }
-                    for (i, area) in self.agent_row_kill_areas.iter().enumerate() {
-                        if area.contains((event.column, event.row).into()) {
-                            let task_id = &self.agent_row_kill_task_ids[i];
-                            // A terminal-row placeholder is inert (FR-071).
-                            if task_id.is_empty() {
-                                return;
-                            }
-                            if let Some(task) =
-                                self.active_tasks.iter().find(|t| t.id == *task_id).cloned()
-                            {
-                                // Terminating a sub-agent is destructive:
-                                // confirm first (FR-036).
-                                self.open_row_action(crate::app::RowAction::KillSubagent {
-                                    task_id: task.id,
-                                    agent_name: task.agent_name,
-                                });
-                            } else if let Some(bg) =
-                                self.bg_tasks.iter().find(|t| t.id == *task_id).cloned()
-                            {
-                                self.open_row_action(crate::app::RowAction::CancelBackground {
-                                    task_id: bg.id,
-                                    command: bg.command,
-                                });
-                            }
-                            return;
-                        }
-                    }
-                    let row = event.row.saturating_sub(self.active_agents_area.y);
-                    let absolute_row =
-                        row.saturating_add(self.active_agents_scroll_offset) as usize;
-                    // Row clicks resolve through the renderer's painted-row map
-                    // so a click always opens the task painted on that line
-                    // (A3, FR-033, FR-034). A non-selectable or stale row is
-                    // consumed and ignored (FR-069, FR-070).
-                    if let Some(row_key) = self.agents_row_task_ids.get(absolute_row) {
-                        if row_key.as_str() == "primary" {
-                            // -- FR-033: the primary agent row ----------------
-                            if let Some(ref sid) = self.session_id {
-                                self.selected_agent_index = Some(0);
-                                self.open_output_view_session(sid.clone(), "primary".to_string());
-                                self.needs_redraw = true;
-                            }
-                        } else if !row_key.is_empty() {
-                            // -- FR-034: a sub-agent row ----------------------
-                            let found = self
-                                .active_tasks
-                                .iter()
-                                .enumerate()
-                                .find(|(_, t)| t.id == *row_key)
-                                .map(|(idx, t)| (idx, t.clone()));
-                            if let Some((idx, task)) = found {
-                                self.selected_agent_index = Some(idx + 1);
-                                self.open_output_view_session(
-                                    task.child_session_id.clone(),
-                                    format!(
-                                        "{} [{}]",
-                                        task.agent_name,
-                                        short_session_id(&task.id)
-                                    ),
-                                );
-                                self.needs_redraw = true;
-                            }
-                        }
-                    }
+                    // Click-to-select: the click moves the block cursor onto
+                    // the clicked row, so the mouse and keyboard share the
+                    // same selection; Space/Del/Enter remain the only actions
+                    // (keyboard-first FR-055 with the click half restored).
+                    let absolute_row = event
+                        .row
+                        .saturating_sub(self.active_agents_area.y)
+                        .saturating_add(
+                            self.active_agents_scroll_offset
+                                .min(self.active_agents_max_scroll),
+                        )
+                        as usize;
+                    self.agents_cursor_from_click(absolute_row);
                     return;
                 }
 
                 if self.teams_area.contains((event.column, event.row).into()) {
-                    // Button clicks first (Play/Stop and Kill); each arm
-                    // returns on a hit.
-                    for (i, area) in self.team_row_button_areas.iter().enumerate() {
-                        if area.contains((event.column, event.row).into()) {
-                            let agent_id = &self.team_row_button_agent_ids[i];
-                            // A terminal-row placeholder is inert (FR-071).
-                            if agent_id.is_empty() {
-                                return;
-                            }
-                            if let Some(member) = self
-                                .team_members
-                                .iter()
-                                .find(|m| m.agent_id == *agent_id)
-                                .cloned()
-                            {
-                                if member.status == ragent_agent::team::MemberStatus::Suspended {
-                                    // Resuming restores a subject that is
-                                    // already suspended: not destructive, so
-                                    // no dialog (FR-040 confirms only the
-                                    // suspend direction).
-                                    self.dispatch_resume_teammate(&member.agent_id);
-                                } else {
-                                    // Suspending a live teammate destroys its
-                                    // in-flight turn: confirm first (FR-040).
-                                    self.open_row_action(crate::app::RowAction::SuspendTeammate {
-                                        agent_id: member.agent_id,
-                                        name: member.name,
-                                    });
-                                }
-                            }
-                            return;
-                        }
-                    }
-                    for (i, area) in self.team_row_kill_areas.iter().enumerate() {
-                        if area.contains((event.column, event.row).into()) {
-                            let agent_id = &self.team_row_kill_agent_ids[i];
-                            // A terminal-row placeholder is inert (FR-071).
-                            if agent_id.is_empty() {
-                                return;
-                            }
-                            if let Some(member) = self
-                                .team_members
-                                .iter()
-                                .find(|m| m.agent_id == *agent_id)
-                                .cloned()
-                            {
-                                // Shutting a teammate down is destructive:
-                                // confirm first (FR-040).
-                                self.open_row_action(crate::app::RowAction::ShutdownTeammate {
-                                    agent_id: member.agent_id,
-                                    name: member.name,
-                                });
-                            }
-                            return;
-                        }
-                    }
-                    // The rows rectangle (not the frame content area) is the
-                    // click basis: the table's border and title rows live
-                    // above it, so (screen row - rows.y) + scroll indexes the
-                    // painted rows (FR-056, NFR-011).
-                    let row = event.row.saturating_sub(self.teams_rows_area.y);
-                    let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
-                    // Row clicks resolve through the renderer's painted-row
-                    // map: the lead row clears focus (FR-039), a teammate row
-                    // focuses it and opens its output view (FR-038). A blank or
-                    // stale row is consumed and ignored (FR-069, FR-070).
-                    if let Some(row_key) = self.teams_row_agent_ids.get(absolute_row).cloned() {
-                        if row_key.as_str() == "lead" {
-                            // Lead row clicked - unfocus any teammate
-                            self.focused_teammate = None;
-                            self.status = "focus: lead (you)".to_string();
-                            self.needs_redraw = true;
-                        } else if !row_key.is_empty() {
-                            // Focus this teammate (same as /team focus <name>)
-                            self.focus_teammate_by_id(&row_key);
-                        }
-                    }
+                    // Same click-to-select contract for the Teams window.
+                    let absolute_row = event
+                        .row
+                        .saturating_sub(self.teams_area.y)
+                        .saturating_add(self.teams_scroll_offset.min(self.teams_max_scroll))
+                        as usize;
+                    self.teams_cursor_from_click(absolute_row);
                     return;
                 }
 
@@ -1250,61 +1136,91 @@ impl App {
             self.debug_log_input_transition("key-row-action-confirm", &before_input, before_cursor);
             return;
         }
-        // Agent / Teams dialog keyboard shortcuts
-        if self.show_agents_window {
-            if key.code == KeyCode::Char(' ') {
-                // Space = Play/Stop toggle on selected agent row
-                if let Some(idx) = self.selected_agent_index {
-                    if idx == 0 {
-                        self.status = "Cannot suspend primary agent".to_string();
-                    } else if let Some(task) = self.active_tasks.get(idx - 1).cloned() {
-                        if task.status == ragent_agent::task::TaskStatus::Suspended {
-                            self.resume_agent_task(&task.id);
-                        } else {
-                            self.suspend_agent_task(&task.id);
-                        }
-                    }
+        // Agent / Teams dialog keyboard shortcuts. The popup owns the keyboard
+        // for its navigation keys only (FR-055): unmapped keys still reach the
+        // input editor, and while the output overlay sits on top of the popup
+        // its own keys (Esc close, PgUp/PgDn scroll) keep working.
+        if self.show_agents_window && self.output_view.is_none() {
+            let consumed = match key.code {
+                KeyCode::Up => {
+                    self.move_agents_cursor(-1);
+                    true
                 }
-                return;
-            }
-            if key.code == KeyCode::Char('K') && key.modifiers.contains(KeyModifiers::SHIFT) {
-                if let Some(idx) = self.selected_agent_index {
-                    if idx == 0 {
-                        self.status = "Cannot kill primary agent".to_string();
-                    } else if let Some(task) = self.active_tasks.get(idx - 1).cloned() {
-                        // Killing is destructive: confirm first (FR-036).
-                        self.open_row_action(crate::app::RowAction::KillSubagent {
-                            task_id: task.id,
-                            agent_name: task.agent_name,
-                        });
-                    }
+                KeyCode::Down => {
+                    self.move_agents_cursor(1);
+                    true
                 }
+                KeyCode::PageUp => {
+                    self.page_agents_cursor(-1);
+                    true
+                }
+                KeyCode::PageDown => {
+                    self.page_agents_cursor(1);
+                    true
+                }
+                KeyCode::Char(' ') => {
+                    self.agents_cursor_toggle_stop_resume();
+                    true
+                }
+                KeyCode::Delete => {
+                    self.agents_cursor_kill();
+                    true
+                }
+                KeyCode::Enter => {
+                    self.agents_cursor_open_output();
+                    true
+                }
+                KeyCode::Char('K') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    self.agents_cursor_kill();
+                    true
+                }
+                _ => false,
+            };
+            if consumed {
+                self.assert_ui_invariants();
+                self.debug_log_input_transition("key-agents-window", &before_input, before_cursor);
                 return;
             }
         }
-        if self.show_teams_window {
-            if key.code == KeyCode::Char(' ') || key.code == KeyCode::Char('K') {
-                // For teams, Space and Shift+K on a focused teammate request
-                // the same graceful shutdown (FR-045); TC-022 expects a
-                // confirmation prompt, so both route through the dialog. The
-                // members re-check keeps a stale focus a no-op (FR-069), and a
-                // focus whose agent id names the lead can never arm a shutdown
-                // - the lead is protected from every key path (FR-067).
-                let focused = self.focused_teammate.clone();
-                let member_name = focused.as_ref().and_then(|id| {
-                    self.team_members
-                        .iter()
-                        .find(|m| &m.agent_id == id)
-                        .map(|m| m.name.clone())
-                });
-                if let Some((id, name)) = focused.zip(member_name)
-                    && id != "lead"
-                {
-                    self.open_row_action(crate::app::RowAction::ShutdownTeammate {
-                        agent_id: id,
-                        name,
-                    });
+        if self.show_teams_window && self.output_view.is_none() {
+            let consumed = match key.code {
+                KeyCode::Up => {
+                    self.move_teams_cursor(-1);
+                    true
                 }
+                KeyCode::Down => {
+                    self.move_teams_cursor(1);
+                    true
+                }
+                KeyCode::PageUp => {
+                    self.page_teams_cursor(-1);
+                    true
+                }
+                KeyCode::PageDown => {
+                    self.page_teams_cursor(1);
+                    true
+                }
+                KeyCode::Char(' ') => {
+                    self.teams_cursor_toggle_stop_resume();
+                    true
+                }
+                KeyCode::Delete => {
+                    self.teams_cursor_shutdown();
+                    true
+                }
+                KeyCode::Enter => {
+                    self.teams_cursor_focus();
+                    true
+                }
+                KeyCode::Char('K') | KeyCode::Char('k') => {
+                    self.teams_cursor_shutdown();
+                    true
+                }
+                _ => false,
+            };
+            if consumed {
+                self.assert_ui_invariants();
+                self.debug_log_input_transition("key-teams-window", &before_input, before_cursor);
                 return;
             }
         }

@@ -4717,6 +4717,10 @@ impl App {
             ScrollbarDragPane::ContextPanel => {
                 (self.context_panel_area, self.context_panel_max_scroll)
             }
+            ScrollbarDragPane::AgentsWindow => {
+                (self.active_agents_area, self.active_agents_max_scroll)
+            }
+            ScrollbarDragPane::TeamsWindow => (self.teams_area, self.teams_max_scroll),
         };
         if area.height <= 1 || max_scroll == 0 {
             return;
@@ -4748,7 +4752,11 @@ impl App {
             | ScrollbarDragPane::Tasks => ((1.0 - fraction) * max_scroll as f32).round() as u16,
             ScrollbarDragPane::Memory
             | ScrollbarDragPane::Telemetry
-            | ScrollbarDragPane::ContextPanel => (fraction * max_scroll as f32).round() as u16,
+            | ScrollbarDragPane::ContextPanel
+            // The popup tables store "lines from top" like the memory family:
+            // offset 0 = top of the list (FR-059).
+            | ScrollbarDragPane::AgentsWindow
+            | ScrollbarDragPane::TeamsWindow => (fraction * max_scroll as f32).round() as u16,
         };
 
         match pane {
@@ -4759,6 +4767,10 @@ impl App {
             ScrollbarDragPane::Memory => self.memory_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Telemetry => self.telemetry_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::ContextPanel => self.context_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::AgentsWindow => {
+                self.active_agents_scroll_offset = offset.min(max_scroll)
+            }
+            ScrollbarDragPane::TeamsWindow => self.teams_scroll_offset = offset.min(max_scroll),
         }
     }
 

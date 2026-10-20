@@ -715,11 +715,14 @@ fn test_teams_empty_state_hint_is_absent_with_members() {
 
 // -- Row controls -----------------------------------------------------------
 
-/// Live teammate rows record hit rectangles aligned with the painted rows;
-/// a terminal row records the zero-width placeholder with an empty
-/// identifier, keeping both vectors index-aligned (FR-071, NFR-011).
+/// The painted control columns align with the published row maps: a live
+/// teammate row paints `[stop]` and `[x]` at their pinned columns (a terminal
+/// row paints neither), the row map stays index-aligned with the painted rows,
+/// and the cursor ordinal list names exactly the teammate rows in paint order
+/// (the keyboard cursor reads these vectors instead of the retired hit-rect
+/// vectors; FR-071, NFR-011, FR-038).
 #[test]
-fn test_teams_row_control_hit_rects_track_live_rows_only() {
+fn test_teams_row_controls_paint_at_the_pinned_columns_and_track_the_cursor_list() {
     let mut app = open_teams(vec![
         member("reviewer", "tm-001", MemberStatus::Working),
         member("tester", "tm-002", MemberStatus::Stopped),
@@ -729,59 +732,68 @@ fn test_teams_row_control_hit_rects_track_live_rows_only() {
     let content = table_inner(app.teams_area);
     let lead_y = row_containing(&buffer, &["id", "name", "status", "model"]) + 1;
 
+    // Live rows paint both controls at their pinned columns; the stopped row
+    // paints neither.
+    let live_y = lead_y + 1;
+    let stop = column_text(&buffer, content, live_y, columns::STOP_X, columns::STOP_W);
     assert_eq!(
-        app.team_row_button_areas.len(),
-        app.team_row_button_agent_ids.len(),
-        "the stop hit-rect vector must stay index-aligned with its ids (NFR-011)"
+        stop.trim(),
+        glyphs::STOP,
+        "the first teammate's row must paint [stop] at its documented column"
     );
+    let kill = column_text(&buffer, content, live_y, columns::KILL_X, columns::KILL_W);
     assert_eq!(
-        app.team_row_kill_areas.len(),
-        app.team_row_kill_agent_ids.len(),
-        "the kill hit-rect vector must stay index-aligned with its ids (NFR-011)"
-    );
-    assert_eq!(
-        app.team_row_button_agent_ids,
-        vec!["tm-001".to_string(), String::new(), "tm-003".to_string(),],
-        "live teammates record their id; a terminal row records the placeholder (FR-071)"
-    );
-    assert_eq!(
-        app.team_row_kill_agent_ids, app.team_row_button_agent_ids,
-        "both control vectors stay index-aligned with each other (NFR-011)"
+        kill.trim(),
+        glyphs::KILL,
+        "the first teammate's row must paint [x] at its documented column"
     );
 
-    // Painted rows: lead at `lead_y`, tm-001 at +1, the stopped tm-002 at +2
-    // (a placeholder entry), tm-003 at +3.
-    assert_eq!(
-        app.team_row_button_areas[0].y,
-        lead_y + 1,
-        "the first control row must be the first teammate's painted row"
-    );
-    assert_eq!(
-        app.team_row_button_areas[1],
-        Rect::default(),
-        "the terminal row's entry is the inert placeholder (FR-071)"
-    );
-    assert_eq!(
-        app.team_row_button_areas[2].y,
-        lead_y + 3,
-        "the third teammate's control must stay aligned with its painted row"
-    );
-    assert_eq!(
-        app.team_row_button_areas[0].x,
-        content.x + columns::STOP_X as u16,
-        "the stop control must sit at its documented column"
-    );
-    assert_eq!(
-        app.team_row_kill_areas[0].x,
-        content.x + columns::KILL_X as u16,
-        "the kill control must sit at its documented column"
-    );
-
-    // The painted controls appear on the same row as the recorded rectangle.
-    let row = screen_row(&buffer, app.team_row_button_areas[0].y);
+    let stopped_y = lead_y + 2;
+    let stopped_row = screen_row(&buffer, stopped_y);
     assert!(
-        row.contains(glyphs::STOP) && row.contains(glyphs::KILL),
-        "the recorded control row must paint both controls: {row:?}"
+        stopped_row.contains("tm-002"),
+        "a terminal teammate row still paints: {stopped_row:?}"
+    );
+    assert!(
+        !stopped_row.contains(glyphs::STOP) && !stopped_row.contains(glyphs::KILL),
+        "a terminal teammate row paints no controls (FR-071): {stopped_row:?}"
+    );
+
+    let third_y = lead_y + 3;
+    let third = column_text(&buffer, content, third_y, columns::STOP_X, columns::STOP_W);
+    assert_eq!(
+        third.trim(),
+        glyphs::STOP,
+        "the third teammate's controls must stay aligned with its painted row"
+    );
+
+    // The row map stays index-aligned with the painted rows: header, lead and
+    // the three teammates.
+    assert_eq!(
+        app.teams_row_agent_ids.len(),
+        5,
+        "one row key per painted row"
+    );
+    assert_eq!(app.teams_row_agent_ids[0], "", "the header opens nothing");
+    assert_eq!(
+        app.teams_row_agent_ids[1], "lead",
+        "the lead row keeps its own sentinel key"
+    );
+    assert_eq!(app.teams_row_agent_ids[2], "tm-001");
+    assert_eq!(app.teams_row_agent_ids[3], "tm-002");
+    assert_eq!(app.teams_row_agent_ids[4], "tm-003");
+
+    // The cursor ordinal list covers teammate rows only, in paint order - a
+    // terminal row still carries its id, so Space/Del on it resolve (and are
+    // refused) through the member status, not through the paint.
+    assert_eq!(
+        app.teams_teammate_agent_ids,
+        vec![
+            "tm-001".to_string(),
+            "tm-002".to_string(),
+            "tm-003".to_string(),
+        ],
+        "the cursor range must name the teammate rows in paint order"
     );
 }
 

@@ -1300,6 +1300,11 @@ pub enum ScrollbarDragPane {
     Telemetry,
     /// Dragging the Context pane scrollbar.
     ContextPanel,
+    /// Dragging the Agents popup table scrollbar (keyboard-cursor counterpart:
+    /// the popup's own top-anchored offset, FR-059).
+    AgentsWindow,
+    /// Dragging the Teams popup table scrollbar (same top-anchored contract).
+    TeamsWindow,
 }
 
 /// Identifies which pane a text selection lives in.
@@ -3292,34 +3297,26 @@ pub struct App {
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
     pub active_agents_max_scroll: u16,
+    /// Cursor row for the Agents window, as an ordinal over the painted
+    /// sub-agent tree rows only (0 = the first sub-agent in DFS order; the
+    /// primary row, header, background heading and background rows are never
+    /// addressable). `None` = no row selected. Moved by `Up`/`Down`/`PgUp`/
+    /// `PgDn`; `Space`, `Del` and `Enter` act on the row it selects.
+    pub agents_cursor_subagent: Option<usize>,
+    /// Sub-agent task ids in painted DFS order, recorded by the renderer every
+    /// frame so the cursor ordinal, `Space`/`Del`/`Enter` and scroll-sync all
+    /// resolve to the same rows the table paints (replaces the mouse row map).
+    pub agents_subagent_task_ids: Vec<String>,
     /// Cached area of the active-agents subpanel.
     pub active_agents_area: Rect,
-    /// Control hit-rects and identifiers for the agent buttons (Play/Stop) in
-    /// the agents dialog.
-    ///
-    /// One entry per action-capable painted row (a sub-agent tree row or a
-    /// background shell row), index-aligned with
-    /// [`App::agent_row_button_task_ids`] (NFR-011). A terminal row records the
-    /// `Rect::default()` placeholder with an empty identifier, which can never
-    /// match a click (FR-071); a control scrolled out of view records the same
-    /// default rect (FR-056).
-    pub agent_row_button_areas: Vec<Rect>,
-    /// Parallel task IDs for the agent button click targets.
-    pub agent_row_button_task_ids: Vec<String>,
-    /// Control hit-rects for the Kill (`[x]`) controls, index-aligned with
-    /// [`App::agent_row_kill_task_ids`] under the same placeholder rule.
-    pub agent_row_kill_areas: Vec<Rect>,
-    /// Parallel task IDs for the agent kill click targets.
-    pub agent_row_kill_task_ids: Vec<String>,
     /// Painted-row -> click key for the Agents table (spec `agentui` T-008).
     ///
     /// Index equals the painted content row (0 = header, 1 = primary, then the
     /// sub-agent tree and the background section). An empty string marks a row
     /// that opens nothing (header, background heading and background rows),
     /// `"primary"` is the primary row, and a task id is a sub-agent row.
-    /// Recorded by the renderer every frame; a row click resolves through this
-    /// map instead of an `active_tasks` position, so the tree-painted rows
-    /// always open the task painted on that line (FR-033, FR-034, FR-069).
+    /// Recorded by the renderer every frame; kept for diagnostics and for the
+    /// cursor's painted-row -> scroll sync.
     pub agents_row_task_ids: Vec<String>,
     // -- Active-agents panel caches (FR-003, FR-008) ------------------------
     /// Cached set of custom-agent names for the active-agents panel.
@@ -3412,6 +3409,10 @@ pub struct App {
     pub agents_close_button_area: Rect,
     /// Cached click target for Teams popup close button.
     pub teams_close_button_area: Rect,
+    /// Cached click target for the output view overlay's Close bar button
+    /// (spec `agentui` FR-075). Zeroed wherever the overlay area is reset, so
+    /// a hidden surface cannot receive a click.
+    pub output_view_close_button_area: Rect,
     /// MCP server display list for `/mcp` and `/plugins list`: the configured
     /// `mcp` section plus every server an enabled plugin bridges (ids
     /// `<plugin-id>.<server>`), with the live status and tool list adopted from
@@ -3619,30 +3620,23 @@ pub struct App {
     pub teams_scroll_offset: u16,
     /// Max scroll for the Teams panel.
     pub teams_max_scroll: u16,
-    /// Control hit-rects for the teammate buttons (suspend/resume) in the
-    /// teams dialog.
-    ///
-    /// One entry per painted teammate row, index-aligned with
-    /// [`App::team_row_button_agent_ids`] (NFR-011). A terminal row records the
-    /// `Rect::default()` placeholder with an empty identifier, which can never
-    /// match a click (FR-071); a control scrolled out of view records the same
-    /// default rect (FR-056).
-    pub team_row_button_areas: Vec<Rect>,
-    /// Parallel agent IDs for the team button click targets.
-    pub team_row_button_agent_ids: Vec<String>,
-    /// Control hit-rects for the teammate Kill (`[x]`) controls, index-aligned
-    /// with [`App::team_row_kill_agent_ids`] under the same placeholder rule.
-    pub team_row_kill_areas: Vec<Rect>,
-    /// Parallel agent IDs for the team kill click targets.
-    pub team_row_kill_agent_ids: Vec<String>,
+    /// Cursor row for the Teams window, as an ordinal over the painted
+    /// teammate rows only (0 = the first teammate; the header, lead row and
+    /// empty-state hint are never addressable). `None` = no row selected.
+    /// Moved by `Up`/`Down`/`PgUp`/`PgDn`; `Space`, `Del` and `Enter` act on
+    /// the row it selects.
+    pub teams_cursor_teammate: Option<usize>,
+    /// Teammate agent ids in painted row order, recorded by the renderer every
+    /// frame so the cursor ordinal, `Space`/`Del`/`Enter` and scroll-sync all
+    /// resolve to the same rows the table paints (replaces the mouse row map).
+    pub teams_teammate_agent_ids: Vec<String>,
     /// Painted-row -> click key for the Teams table (spec `agentui` T-008).
     ///
     /// Index equals the painted content row (0 = header, 1 = lead, then the
     /// teammate rows or the empty-state hint). An empty string marks a row
     /// that opens nothing, `"lead"` is the lead row, and a member agent id is
-    /// a teammate row. A lead click clears focus and a teammate click focuses
-    /// it (FR-038, FR-039); stale ids are ignored without mutating state
-    /// (FR-069).
+    /// a teammate row. Recorded by the renderer every frame; kept for
+    /// diagnostics and the cursor's painted-row -> scroll sync.
     pub teams_row_agent_ids: Vec<String>,
     /// Currently focused teammate (agent_id). When set, the status
     /// bar shows a focus indicator and the input box routes messages

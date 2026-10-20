@@ -151,12 +151,15 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 - **Agent and Team Member panel** — the `Agents` and `Teams` buttons beside the
   message input open live control popups: the Agents window lists the primary
   agent and an ancestor-indented sub-agent tree with status, elapsed time,
-  step count, and `[stop]`/`[x]` action columns plus a background-shell
-  section; the Teams window lists the lead and every teammate with focus
-  markers, live status, and counters; a single-row teammate strip sits under
-  the status bar. Rows carry suspend/resume and kill actions behind Yes/No
-  confirmation modals, respond to `Space`/`Shift+K` keyboard control,
-  scroll with the wheel, and re-status live from sub-agent and team events;
+  and step count plus a background-shell section; the Teams window lists the
+  lead and every teammate with focus markers, live status, and counters; a
+  single-row teammate strip sits under the status bar. Both windows are
+  keyboard-first: a block cursor moves with `Up`/`Down`/`PgUp`/`PgDn`,
+  `Space` toggles suspend/resume, `Del`/`Shift+K` arms the kill/shutdown
+  confirmation modal, `Enter` opens the row's output view, and clicking a row
+  selects it (the `[stop]`/`[x]` glyphs are status indicators only); windows
+  scroll with the wheel, re-status live from sub-agent and team events, and
+  closure is available via the bottom-right Close bar button or `Esc`;
   suspension is cooperative - the parked sub-agent finishes its in-flight
   LLM call or tool before idling (spec `agentui`)
 - **Prompt inspector** — `/prompt` renders the assembled system prompt an agent

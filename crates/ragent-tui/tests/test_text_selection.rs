@@ -229,7 +229,10 @@ fn render(app: &mut App) {
 }
 
 #[test]
-fn test_clicking_active_agents_row_opens_output_view() {
+fn test_opening_active_agents_row_output_view_from_the_keyboard() {
+    // The row-mouse model is retired: the sub-agent overlay opens through the
+    // cursor (Down + Enter), the same destination chain the old row click
+    // drove (FR-034).
     let mut app = make_app();
     app.session_id = Some("lead-s1".to_string());
     app.show_agents_window = true;
@@ -251,16 +254,17 @@ fn test_clicking_active_agents_row_opens_output_view() {
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
     });
-    // Painted rows: 0 header, 1 primary, 2 task-12345678.
     render(&mut app);
-    let point = app.active_agents_area;
-    app.handle_mouse_event(mouse_down(point.x + 5, point.y + 2));
+    app.move_agents_cursor(1);
+    app.agents_cursor_open_output();
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
 }
 
 #[test]
-fn test_clicking_teams_row_opens_output_view() {
+fn test_opening_teams_row_output_view_from_the_keyboard() {
+    // The teammate overlay opens through the cursor (Down + Enter), the same
+    // destination chain the old row click drove (FR-038).
     let mut app = make_app();
     app.session_id = Some("lead-s1".to_string());
     app.show_teams_window = true;
@@ -269,13 +273,17 @@ fn test_clicking_teams_row_opens_output_view() {
     member.session_id = Some("tm-s1".to_string());
     app.team_members.push(member);
 
-    // Painted rows: 0 header, 1 lead, 2 tm-001 (relative to the rows rect,
-    // which the renderer records separately from the frame content area).
     render(&mut app);
-    let point = app.teams_rows_area;
-    app.handle_mouse_event(mouse_down(point.x + 5, point.y + 2));
-    assert!(app.output_view.is_some());
-    assert_eq!(app.selected_agent_session_id.as_deref(), Some("tm-s1"));
+    app.move_teams_cursor(1);
+    app.teams_cursor_focus();
+    assert!(app.focused_teammate.as_deref() == Some("tm-001"));
+    let view = app.output_view.as_ref().expect("the overlay must open");
+    match &view.target {
+        ragent_tui::app::OutputViewTarget::TeamMember { session_id, .. } => {
+            assert_eq!(session_id.as_deref(), Some("tm-s1"));
+        }
+        other => panic!("expected a TeamMember target, got {other:?}"),
+    }
 }
 
 #[test]

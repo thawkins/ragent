@@ -977,9 +977,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 Some(InputAction::FocusPrevTeammate)
             }
             KeyCode::Esc => {
-                app.output_view = None;
-                app.selected_agent_session_id = None;
-                app.selected_agent_index = None;
+                app.close_output_view();
                 None
             }
             _ => None,

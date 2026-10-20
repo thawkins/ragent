@@ -5324,6 +5324,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_output_view_overlay(frame, app);
     } else {
         app.output_view_area = Rect::default();
+        app.output_view_close_button_area = Rect::default();
     }
     // Research markdown viewer overlay (above output view).
     if app.research_view.is_some() {
@@ -6698,8 +6699,18 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(90, 70, frame.area());
+    // The overlay reuses the modal window frame: same border treatment, minus
+    // a bottom-right Close bar button (FR-074, FR-075) like the Agents and
+    // Teams popups. The content shrinks accordingly and scroll math is based
+    // on the content inner width, so nothing else changes.
+    let geo = window_frame(
+        OUTPUT_WINDOW_PERCENT_W,
+        OUTPUT_WINDOW_PERCENT_H,
+        frame.area(),
+    );
+    let area = geo.area;
     app.output_view_area = area;
+    app.output_view_close_button_area = geo.close;
     frame.render_widget(Clear, area);
 
     let Some(view) = app.output_view.as_mut() else {
@@ -6748,7 +6759,7 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Cyan));
-    let inner = block.inner(area);
+    let inner = block.inner(geo.content);
 
     // -- Output-view line cache (mirrors render_messages / render_log_panel) -
     //
@@ -6878,21 +6889,31 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
 
     let paragraph = Paragraph::new(window).block(block);
 
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, geo.content);
 
     if total > visible {
         let scroll_position = view.max_scroll.saturating_sub(view.scroll_offset) as usize;
         let mut sb_state = ScrollbarState::new(view.max_scroll as usize).position(scroll_position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            area,
+            geo.content,
             &mut sb_state,
         );
     }
+
+    // The Close bar button (FR-075), painted after the scrollbar so a clipped
+    // right edge cannot paint through it.
+    render_window_close_button(frame, geo.close);
 }
 
 /// Terminal-width percentage the Agents popup occupies (spec `agentui` FR-006).
-const AGENTS_WINDOW_PERCENT_W: u16 = 90;
+///
+/// 70 percent is the narrowest centred modal that still keeps the pinned
+/// `[stop]` / `[x]` control columns fully inside the table: the controls end at
+/// column 81 (FR-015), so their host terminal needs at least 120 columns and a
+/// 70 percent modal is the first centred width that yields an inner area wide
+/// enough. Below a 120-column terminal the last control is clipped (accepted).
+const AGENTS_WINDOW_PERCENT_W: u16 = 70;
 
 /// Terminal-height percentage the Agents popup occupies (spec `agentui` FR-006).
 const AGENTS_WINDOW_PERCENT_H: u16 = 70;
@@ -6902,6 +6923,15 @@ const TEAMS_WINDOW_PERCENT_W: u16 = 90;
 
 /// Terminal-height percentage the Teams popup occupies (spec `agentui` FR-017).
 const TEAMS_WINDOW_PERCENT_H: u16 = 70;
+
+/// Terminal-width percentage the output view overlay occupies. Kept at 90 per
+/// cent for continuity with the pre-FR-074 overlay geometry (width was never
+/// spec-pinned), now expressed through the shared [`window_frame`] helper.
+const OUTPUT_WINDOW_PERCENT_W: u16 = 90;
+
+/// Terminal-height percentage the output view overlay occupies (see
+/// [`OUTPUT_WINDOW_PERCENT_W`]).
+const OUTPUT_WINDOW_PERCENT_H: u16 = 70;
 
 /// Maximum terminal columns a popup Close button occupies (spec `agentui` FR-007,
 /// FR-018).
@@ -6924,6 +6954,24 @@ struct WindowFrame {
     close: Rect,
     /// The scrollable content (table) area.
     content: Rect,
+}
+
+impl WindowFrame {
+    /// The band of rows between the content area's bottom and the Close
+    /// button's top - the separator row the content deliberately does not
+    /// paint - extended left to the inner border so a key legend has room to
+    /// the Close button's left.
+    fn legend_area(&self) -> Rect {
+        let y = self.content.bottom();
+        let height = self
+            .close
+            .y
+            .saturating_sub(y)
+            .max(1)
+            .min(self.area.bottom().saturating_sub(y).max(1));
+        let width = self.close.x.saturating_sub(self.area.x + 1);
+        Rect::new(self.area.x + 1, y, width, height)
+    }
 }
 
 /// Compute the frame rectangles for a centred popup window.
@@ -7021,6 +7069,11 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
     app.active_agents_area = geo.content;
     render_active_agents_subpanel(frame, app, geo.content);
 
+    render_window_key_legend(
+        frame,
+        "Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open",
+        geo.legend_area(),
+    );
     render_window_close_button(frame, geo.close);
 }
 
@@ -7032,7 +7085,9 @@ fn render_window_close_button(frame: &mut Frame, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " Close ",
-            Style::default().fg(Color::DarkGray),
+            // Bright text inside the quiet border so the one control every
+            // user looks for is never the dimmest thing on the panel.
+            Style::default().fg(Color::White),
         )))
         .block(
             Block::default()
@@ -7042,6 +7097,23 @@ fn render_window_close_button(frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Center),
         area,
     );
+}
+
+/// Paint the popup's key legend, dim, along the bottom status band to the
+/// left of the Close button (spec `agentui` keyboard contract). The band sits
+/// in the separator row the content area deliberately leaves unpainted, so
+/// the legend never competes with the table rows; the text is clipped to the
+/// available width, and on a very narrow terminal an empty rect paints
+/// nothing.
+fn render_window_key_legend(frame: &mut Frame, text: &str, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let line = Line::from(Span::styled(
+        text.to_string(),
+        Style::default().fg(Color::DarkGray),
+    ));
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
@@ -7064,6 +7136,11 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
     app.teams_area = geo.content;
     crate::layout_teams::render_teams_subpanel(frame, app, geo.content);
 
+    render_window_key_legend(
+        frame,
+        "Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open",
+        geo.legend_area(),
+    );
     render_window_close_button(frame, geo.close);
 }
 

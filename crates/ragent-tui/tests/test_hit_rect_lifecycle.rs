@@ -1,26 +1,37 @@
-//! Tests for the hit-rect lifecycle (spec `agentui` T-016).
+//! Tests for the row-map lifecycle behind the Agents / Teams popup windows
+//! (spec `agentui` T-016, keyboard-first rework).
 //!
-//! Covers the index alignment of every control hit-rect vector with its
-//! identifier vector and with the painted rows (NFR-011), the terminal-row
-//! `Rect::default()` placeholders and their inert clicks (FR-071), the
-//! scroll-offset composition that keeps a click on the painted cell (FR-056),
-//! the area resets while a side panel occupies the side column or no side
-//! column exists (FR-057), the stale-row no-op without mutating unrelated
-//! state (FR-069) and the blank popup cell that consumes the click (FR-070).
+//! The hit-rect state vectors were retired: the windows are keyboard-driven
+//! through a block cursor, so the renderer now publishes the painted *row
+//! maps* (`agents_row_task_ids` + `agents_subagent_task_ids`,
+//! `teams_row_agent_ids` + `teams_teammate_agent_ids`) that the cursor helpers
+//! resolve against. This file pins the new invariants in their place:
+//!
+//! - alignment: the row map stays index-aligned with the painted rows and the
+//!   cursor ordinal list is exactly the cursorable slice of it (NFR-011's
+//!   alignment contract, re-expressed on the published vectors);
+//! - scroll-independence: the maps stay correct across scroll offsets - one
+//!   map per painted row no matter where the viewport sits (FR-056's paint
+//!   mapping contract, re-expressed);
+//! - the cursor rectangle is painted on the row the cursor names: after a
+//!   scroll the painted cursor row is the one whose buffer background is the
+//!   cursor colour (FR-056, FR-034);
+//! - the area resets while a side panel occupies the side column or no side
+//!   column exists (FR-057, kept from the old suite);
+//! - the control glyphs stay the documented strings (NFR-003, kept).
 //!
 //! Every case drives the real public render entry point through a ratatui
-//! `TestBackend` and the real mouse router ([`App::handle_mouse_event`]), so
-//! the assertions exercise the same path a real click takes (NFR-001). All
-//! state is synthetic and in-memory; nothing is written into the repository
-//! (NFR-012, NFR-006 - the test code itself uses safe index lookups only).
+//! `TestBackend`, so the assertions exercise the same path a real frame takes
+//! (NFR-001). All state is synthetic; nothing is written into the repository
+//! (NFR-012).
 
 mod support;
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 
 use ragent_agent::task::{ReportStatus, TaskEntry, TaskStatus};
 use ragent_agent::team::{MemberStatus, TeamConfig, TeamMember};
@@ -33,17 +44,7 @@ const LEAD_SESSION: &str = "lead-session-0001";
 
 /// A team name no team store on disk can own, so the FR-060 render hydration
 /// never overrides the synthetic member statuses these cases rely on.
-const TEAM_NAME: &str = "hit-rect-lifecycle";
-
-/// A left-button press at `(col, row)`.
-const fn click(col: u16, row: u16) -> MouseEvent {
-    MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: col,
-        row,
-        modifiers: KeyModifiers::empty(),
-    }
-}
+const TEAM_NAME: &str = "row-map-lifecycle";
 
 /// A sub-agent [`TaskEntry`] with `agent`'s label and a session id derived
 /// from the task id.
@@ -65,18 +66,6 @@ fn task(id: &str, parent_session: &str, agent: &str, status: TaskStatus) -> Task
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
-    }
-}
-
-/// A background shell task view.
-fn bg_task(id: &str, command: &str, status: &str) -> ragent_tui::app::BgTaskView {
-    ragent_tui::app::BgTaskView {
-        id: id.to_string(),
-        session_id: LEAD_SESSION.to_string(),
-        command: command.to_string(),
-        status: status.to_string(),
-        created_at: chrono::Utc::now(),
-        completed_at: None,
     }
 }
 
@@ -130,15 +119,14 @@ fn row_containing(buffer: &Buffer, needle: &str) -> u16 {
 }
 
 // ---------------------------------------------------------------------------
-// NFR-011 / FR-071: alignment and placeholders
+// NFR-011: the published row maps stay index-aligned with the painted rows
 // ---------------------------------------------------------------------------
 
-/// Every control hit-rect vector stays index-aligned with its identifier
-/// vector across live rows and terminal placeholders (NFR-011), and a terminal
-/// row records the inert `Rect::default()` placeholder with an empty
-/// identifier (FR-071, acceptance 6).
+/// The Agents row map carries one key per painted row (empty on the header,
+/// primary, background heading and background rows, the task id on a sub-agent
+/// row), and the cursor ordinal list is exactly the sub-agent slice (NFR-011).
 #[test]
-fn test_hit_rect_lifecycle_agents_vectors_stay_index_aligned_with_placeholders() {
+fn test_agents_row_maps_stay_index_aligned_with_the_painted_rows() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
@@ -148,62 +136,71 @@ fn test_hit_rect_lifecycle_agents_vectors_stay_index_aligned_with_placeholders()
         task("live-c", LEAD_SESSION, "plan", TaskStatus::Suspended),
     ];
     app.bg_tasks = vec![
-        bg_task("bg-live", "sleep 30", "running"),
-        bg_task("bg-done", "true", "completed"),
+        ragent_tui::app::BgTaskView {
+            id: "bg-live".to_string(),
+            session_id: LEAD_SESSION.to_string(),
+            command: "sleep 30".to_string(),
+            status: "running".to_string(),
+            created_at: chrono::Utc::now(),
+            completed_at: None,
+        },
+        ragent_tui::app::BgTaskView {
+            id: "bg-done".to_string(),
+            session_id: LEAD_SESSION.to_string(),
+            command: "true".to_string(),
+            status: "completed".to_string(),
+            created_at: chrono::Utc::now(),
+            completed_at: Some(chrono::Utc::now()),
+        },
     ];
 
-    render_agents(&mut app, 160, 44);
+    let buffer = render_agents(&mut app, 160, 44);
+    let area = app.active_agents_area;
 
+    // Painted rows: 0 header, 1 primary, 2 live-a, 3 done-b, 4 live-c, then
+    // the background heading and two background rows.
     assert_eq!(
-        app.agent_row_button_areas.len(),
-        app.agent_row_button_task_ids.len(),
-        "the stop hit-rect vector must stay index-aligned with its ids (NFR-011)"
+        app.agents_row_task_ids,
+        vec![
+            String::new(),
+            "primary".to_string(),
+            "live-a".to_string(),
+            "done-b".to_string(),
+            "live-c".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ],
+        "one row key per painted row, aligned with the paint order (NFR-011)"
     );
     assert_eq!(
-        app.agent_row_button_areas.len(),
-        5,
-        "one entry per action-capable painted row"
-    );
-    assert_eq!(
-        app.agent_row_kill_areas.len(),
-        app.agent_row_kill_task_ids.len()
-    );
-    assert_eq!(app.agent_row_kill_areas.len(), 5);
-
-    // The identifiers keep paint order; terminal rows are empty placeholders.
-    assert_eq!(
-        app.agent_row_button_task_ids,
+        app.agents_subagent_task_ids,
         vec![
             "live-a".to_string(),
-            String::new(),
+            "done-b".to_string(),
             "live-c".to_string(),
-            "bg-live".to_string(),
-            String::new(),
-        ]
+        ],
+        "the cursor ordinal list is the sub-agent slice in paint order (NFR-011)"
     );
-    assert_eq!(app.agent_row_kill_task_ids, app.agent_row_button_task_ids);
 
-    for (i, rect) in app.agent_row_button_areas.iter().enumerate() {
-        if app.agent_row_button_task_ids[i].is_empty() {
-            assert_eq!(
-                *rect,
-                Rect::default(),
-                "a terminal row's entry is the inert placeholder (FR-071)"
-            );
-        } else {
-            assert_eq!(
-                rect.width,
-                columns::STOP_W as u16,
-                "live entries keep their rect"
-            );
-        }
-    }
+    // The keys name the rows that actually paint those ids (a terminal row
+    // still paints and still carries its key - the cursor resolves the status
+    // through the task list, not through the paint, FR-071's re-expression).
+    let painted_row = row_containing(&buffer, "live-a");
+    assert!(
+        painted_row >= area.y && painted_row < area.y + area.height,
+        "the painted rows must include live-a"
+    );
+    assert_eq!(
+        app.agents_row_task_ids.len(),
+        8,
+        "the map is republished on every render with the same row count"
+    );
 }
 
-/// The Teams control vectors use the same alignment and placeholder rule
-/// (NFR-011, FR-071).
+/// The Teams row map uses the same alignment and cursor-slice rule (NFR-011).
 #[test]
-fn test_hit_rect_lifecycle_teams_vectors_stay_index_aligned_with_placeholders() {
+fn test_teams_row_maps_stay_index_aligned_with_the_painted_rows() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
@@ -216,127 +213,126 @@ fn test_hit_rect_lifecycle_teams_vectors_stay_index_aligned_with_placeholders() 
 
     render_teams(&mut app, 170, 44);
 
+    // Painted rows: header, lead (its own sentinel), three teammates (a
+    // terminal member still paints and still carries its key, FR-071's
+    // re-expression).
     assert_eq!(
-        app.team_row_button_areas.len(),
-        app.team_row_button_agent_ids.len(),
-        "the stop hit-rect vector must stay index-aligned with its ids (NFR-011)"
+        app.teams_row_agent_ids,
+        vec![
+            String::new(),
+            "lead".to_string(),
+            "tm-001".to_string(),
+            "tm-002".to_string(),
+            "tm-003".to_string(),
+        ],
+        "one row key per painted row, aligned with the paint order (NFR-011)"
     );
     assert_eq!(
-        app.team_row_button_areas.len(),
-        3,
-        "one entry per painted teammate row"
-    );
-    assert_eq!(
-        app.team_row_kill_areas.len(),
-        app.team_row_kill_agent_ids.len(),
-    );
-    assert_eq!(app.team_row_kill_areas.len(), 3);
-    assert_eq!(
-        app.team_row_button_agent_ids,
-        vec!["tm-001".to_string(), String::new(), "tm-003".to_string()]
-    );
-    assert_eq!(app.team_row_kill_agent_ids, app.team_row_button_agent_ids);
-    assert_eq!(
-        app.team_row_button_areas[1],
-        Rect::default(),
-        "a terminal row's entry is the inert placeholder (FR-071)"
-    );
-    assert_eq!(
-        app.team_row_kill_areas[1],
-        Rect::default(),
-        "a terminal row's kill entry is the inert placeholder (FR-071)"
+        app.teams_teammate_agent_ids,
+        vec![
+            "tm-001".to_string(),
+            "tm-002".to_string(),
+            "tm-003".to_string(),
+        ],
+        "the cursor ordinal list is the teammate slice in paint order (NFR-011)"
     );
 }
 
 // ---------------------------------------------------------------------------
-// FR-071: placeholder clicks are inert
+// FR-056: the row maps stay correct across scroll offsets
 // ---------------------------------------------------------------------------
 
-/// A clickable rect whose identifier is empty - the exact shape the
-/// renderers record for a terminal row - is consumed by the router and never
-/// resolves to a task: no dispatch, no output view, no unrelated state
-/// mutated (FR-071, FR-069, FR-070). The vectors are driven directly (as the
-/// mouse-control coverage does) so the guard is exercised at the real router
-/// entry point.
-#[tokio::test]
-async fn test_hit_rect_lifecycle_agents_empty_identifier_click_is_inert() {
+/// The Agents row maps are unchanged by scrolling: the same row count, same
+/// ids, one map per painted line - the viewport only picks the slice to paint
+/// (FR-056).
+#[test]
+fn test_agents_row_maps_are_unchanged_by_scrolling() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
-    app.active_tasks
-        .push(task("live-a", LEAD_SESSION, "explore", TaskStatus::Running));
-    app.bg_tasks = vec![bg_task("bg-live", "sleep 30", "running")];
-    app.agent_row_button_areas = vec![Rect::new(10, 10, 6, 1)];
-    app.agent_row_button_task_ids = vec![String::new()];
-    app.agent_row_kill_areas = vec![Rect::new(20, 10, 4, 1)];
-    app.agent_row_kill_task_ids = vec![String::new()];
+    for i in 0..12 {
+        app.active_tasks.push(task(
+            &format!("task-{i:02}"),
+            LEAD_SESSION,
+            "explore",
+            TaskStatus::Running,
+        ));
+    }
 
-    app.status = "sentinel".to_string();
-    app.handle_mouse_event(click(13, 10)); // [stop] placeholder
-    app.handle_mouse_event(click(22, 10)); // [x] placeholder
+    app.active_agents_scroll_offset = 0;
+    render_agents(&mut app, 160, 14);
+    let scrolled_at_zero = app.agents_row_task_ids.clone();
+    assert!(app.active_agents_max_scroll > 0, "12 tasks must overflow");
+
+    // Render twice with different offsets; the published maps must agree.
+    app.active_agents_scroll_offset = 2;
+    render_agents(&mut app, 160, 14);
+    let scrolled_at_two = app.agents_row_task_ids.clone();
+
+    app.active_agents_scroll_offset = 5;
+    render_agents(&mut app, 160, 14);
 
     assert_eq!(
-        app.status, "sentinel",
-        "the empty-identifier click mutates nothing (FR-071)"
+        app.agents_row_task_ids, scrolled_at_two,
+        "the row map must not depend on the scroll offset (FR-056)"
     );
-    assert!(
-        app.output_view.is_none(),
-        "the empty-identifier click opens nothing"
-    );
-    assert_eq!(app.selected_agent_index, None);
     assert_eq!(
-        app.active_tasks.len(),
-        1,
-        "no suspend/resume was dispatched"
+        app.agents_row_task_ids, scrolled_at_zero,
+        "the row map must not depend on the scroll offset (FR-056)"
     );
-    assert_eq!(app.bg_tasks.len(), 1, "no cancellation was dispatched");
+    assert_eq!(
+        app.agents_subagent_task_ids,
+        (0..12).map(|i| format!("task-{i:02}")).collect::<Vec<_>>(),
+        "the cursor list covers every sub-agent row in paint order (FR-056)"
+    );
 }
 
-/// The Teams router applies the same guard: a clickable empty-identifier
-/// entry never focuses, never dispatches and leaves the member list alone
-/// (FR-071, FR-069).
-#[tokio::test]
-async fn test_hit_rect_lifecycle_teams_empty_identifier_click_is_inert() {
+/// The Teams row maps are unchanged by scrolling too (FR-056).
+#[test]
+fn test_teams_row_maps_are_unchanged_by_scrolling() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
     app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members = vec![member("tm-001", "reviewer", MemberStatus::Working)];
-    app.team_row_button_areas = vec![Rect::new(10, 10, 6, 1)];
-    app.team_row_button_agent_ids = vec![String::new()];
-    app.team_row_kill_areas = vec![Rect::new(20, 10, 4, 1)];
-    app.team_row_kill_agent_ids = vec![String::new()];
+    for i in 0..12 {
+        app.team_members.push(member(
+            &format!("tm-{i:03}"),
+            &format!("member-{i:02}"),
+            MemberStatus::Working,
+        ));
+    }
 
-    app.status = "sentinel".to_string();
-    app.handle_mouse_event(click(13, 10));
-    app.handle_mouse_event(click(22, 10));
+    app.teams_scroll_offset = 0;
+    render_teams(&mut app, 170, 14);
+    let at_zero = app.teams_row_agent_ids.clone();
+    assert!(app.teams_max_scroll > 0, "12 members must overflow");
+
+    app.teams_scroll_offset = 2;
+    render_teams(&mut app, 170, 14);
+    let at_two = app.teams_row_agent_ids.clone();
+
+    app.teams_scroll_offset = 5;
+    render_teams(&mut app, 170, 14);
 
     assert_eq!(
-        app.status, "sentinel",
-        "the empty-identifier click mutates nothing (FR-071)"
+        app.teams_row_agent_ids, at_two,
+        "the row map must not depend on the scroll offset (FR-056)"
     );
-    assert!(
-        app.focused_teammate.is_none(),
-        "the empty-identifier click focuses nothing"
+    assert_eq!(
+        app.teams_row_agent_ids, at_zero,
+        "the row map must not depend on the scroll offset (FR-056)"
     );
-    assert!(app.output_view.is_none());
-    assert_eq!(app.team_members.len(), 1, "the member list is untouched");
 }
 
 // ---------------------------------------------------------------------------
-// FR-056: hit-rects track scrolling
+// FR-056 / FR-034: the painted cursor follows the cursor row across scroll
 // ---------------------------------------------------------------------------
 
-/// A non-zero scroll offset shifts every recorded rect by the offset plus the
-/// table origin, so each entry sits on the row painted after the scroll
-/// (FR-056), and a control scrolled out of view falls back to the inert
-/// placeholder.
-///
-/// The terminal is deliberately short (like
-/// `layout_agents_window_scrolls_past_the_visible_window`) so 12 tasks
-/// overflow the table and the offset actually clamps to a positive maximum.
+/// The cursor's painted rectangle sits on the row the cursor names, even after
+/// the viewport scrolls: the painted row's background is the block-cursor
+/// colour (FR-056, FR-034).
 #[test]
-fn test_hit_rect_lifecycle_scroll_shifts_the_recorded_rects() {
+fn test_the_agents_cursor_painted_row_follows_the_scroll() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
@@ -348,85 +344,127 @@ fn test_hit_rect_lifecycle_scroll_shifts_the_recorded_rects() {
             TaskStatus::Running,
         ));
     }
-    // Row space: header = 0, primary = 1, task-i = 2 + i.
-    let row_space: Vec<u16> = (0..12).map(|i| 2 + i).collect();
-    app.active_agents_scroll_offset = 2;
-    let buffer = render_agents(&mut app, 160, 14);
-    let area = app.active_agents_area;
-    assert!(
-        app.active_agents_max_scroll > 2,
-        "12 tasks must overflow the short-terminal table"
-    );
 
-    for (i, space) in row_space.iter().enumerate() {
-        let expected_row = i32::from(*space) - 2;
-        let rect = app.agent_row_button_areas[i];
-        if (0..area.height as i32).contains(&expected_row) {
-            assert_eq!(
-                rect.y,
-                area.y + expected_row as u16,
-                "the shifted rect must sit on the row painted after the scroll (FR-056)"
-            );
-            assert_eq!(rect.x, area.x + columns::STOP_X as u16);
-            // And the painted control is on that very cell.
-            let row = screen_row(&buffer, rect.y);
-            assert!(
-                row.contains(glyphs::STOP),
-                "the shifted cell paints [stop]: {row:?}"
-            );
-        } else {
-            assert_eq!(
-                rect,
-                Rect::default(),
-                "a control scrolled out of view becomes the inert placeholder"
-            );
-        }
-    }
-}
-
-/// A row click resolves through the painted-row map under scroll, opening the
-/// output view of the task the user actually sees on that row (FR-056, A3).
-#[test]
-fn test_hit_rect_lifecycle_scrolled_row_click_resolves_to_the_painted_task() {
-    let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    for i in 0..12 {
-        app.active_tasks.push(task(
-            &format!("task-{i:02}"),
-            LEAD_SESSION,
-            "explore",
-            TaskStatus::Running,
-        ));
-    }
+    // Put the cursor on sub-agent ordinal 3 (task-03) and scroll so it sits
+    // mid-viewport rather than on the first visible row.
+    app.agents_cursor_subagent = Some(3);
     app.active_agents_scroll_offset = 2;
     let buffer = render_agents(&mut app, 160, 14);
     let area = app.active_agents_area;
 
-    // In the scrolled table only row spaces >= 2 paint, so the visible tasks
-    // are 00..02; task-02 sits on row space 4, painted at area.y + 2.
-    let painted = row_containing(&buffer, "task-02");
+    // task-03 paints at row space 2 + 3 = 5; with the offset at 2 it paints
+    // area.y + 3 inside the table.
+    let painted = row_containing(&buffer, "task-03");
     assert_eq!(
         painted,
-        area.y + 2,
-        "task-02 must paint at its shifted row (FR-056)"
+        area.y + 3,
+        "task-03 must paint at its scrolled row (FR-056)"
     );
-    app.needs_redraw = false;
-    app.handle_mouse_event(click(area.x + 5, painted));
-
-    let view = app
-        .output_view
-        .as_ref()
-        .expect("the scrolled row opens its view");
-    match &view.target {
-        ragent_tui::app::OutputViewTarget::Session { session_id, .. } => {
-            assert_eq!(
-                session_id, "task-02-session",
-                "the click resolves to the painted task (FR-056)"
-            );
-        }
-        _ => panic!("a sub-agent click opens a Session output view"),
+    // And that row carries the cursor background across its full width.
+    for col in area.x..area.x + area.width - 1 {
+        let cell = buffer
+            .cell((col, painted))
+            .cloned()
+            .unwrap_or_else(|| panic!("cell off the buffer"));
+        assert_eq!(
+            cell.bg,
+            Color::Rgb(50, 50, 90),
+            "the cursor row must paint the block-cursor background (col {col}, FR-034)"
+        );
     }
+    // A neighbouring row must NOT carry it (the cursor is one row).
+    let other = painted + 1;
+    let cell = buffer
+        .cell((area.x + 5, other))
+        .cloned()
+        .unwrap_or_else(|| panic!("cell off the buffer"));
+    assert_ne!(
+        cell.bg,
+        Color::Rgb(50, 50, 90),
+        "the row below the cursor must not wear the cursor background"
+    );
+}
+
+/// The Teams cursor paints the same block background on the teammate row the
+/// cursor names (FR-056, FR-038).
+#[test]
+fn test_the_teams_cursor_painted_row_follows_the_scroll() {
+    let mut app = make_app();
+    app.session_id = Some(LEAD_SESSION.to_string());
+    app.agent_name = "general".to_string();
+    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    for i in 0..12 {
+        app.team_members.push(member(
+            &format!("tm-{i:03}"),
+            &format!("member-{i:02}"),
+            MemberStatus::Working,
+        ));
+    }
+
+    // Cursor ordinal 2 = tm-002 (member-02), with a viewport offset that
+    // shifts it below its top-of-table slot.
+    app.teams_cursor_teammate = Some(2);
+    app.teams_scroll_offset = 1;
+    let buffer = render_teams(&mut app, 170, 44);
+    let rows = app.teams_rows_area;
+
+    let painted = row_containing(&buffer, "tm-002");
+    assert!(
+        painted >= rows.y && painted < rows.y + rows.height,
+        "the cursor row must paint inside the table (FR-056)"
+    );
+    for col in rows.x..rows.x + rows.width - 1 {
+        let cell = buffer
+            .cell((col, painted))
+            .cloned()
+            .unwrap_or_else(|| panic!("cell off the buffer"));
+        assert_eq!(
+            cell.bg,
+            Color::Rgb(50, 50, 90),
+            "the cursor row must paint the block-cursor background (col {col}, FR-038)"
+        );
+    }
+}
+
+/// The sync helper keeps the cursor row visible: moving the cursor down past
+/// the visible edge adjusts the scroll offset so the row is painted (FR-034's
+/// scroll-sync half) - observable through the row maps and the offset itself.
+#[test]
+fn test_moving_the_cursor_past_the_visible_edge_scrolls_the_row_into_view() {
+    let mut app = make_app();
+    app.session_id = Some(LEAD_SESSION.to_string());
+    app.agent_name = "general".to_string();
+    for i in 0..12 {
+        app.active_tasks.push(task(
+            &format!("task-{i:02}"),
+            LEAD_SESSION,
+            "explore",
+            TaskStatus::Running,
+        ));
+    }
+    // Publish the row maps and viewport first.
+    render_agents(&mut app, 160, 14);
+
+    // Move to the last sub-agent: cursor 11 must scroll the offset up so the
+    // row paints instead of hiding below the fold.
+    for _ in 0..30 {
+        app.move_agents_cursor(1);
+    }
+    assert_eq!(app.agents_cursor_subagent, Some(11));
+    let painted_offset = app.active_agents_scroll_offset;
+    let visible = app.active_agents_area.height.max(1);
+    assert!(
+        usize::from(painted_offset) + usize::from(visible) >= 13,
+        "the viewport must reach the last row after cursor 11: offset {painted_offset}, visible {visible}"
+    );
+
+    // The cursor row's task id is still in the row map (a paint-order
+    // invariant the Space/Del/Enter resolution depends on).
+    assert_eq!(
+        app.agents_subagent_task_ids.get(11).map(String::as_str),
+        Some("task-11"),
+        "the cursor list must still name the last row (FR-034)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -435,9 +473,9 @@ fn test_hit_rect_lifecycle_scrolled_row_click_resolves_to_the_painted_task() {
 
 /// While a side panel occupies the side column (each of the exclusive panels),
 /// and while no side column exists, both panel areas reset to the empty
-/// rectangle so no hidden surface can receive a click (FR-057).
+/// rectangle so no hidden surface can receive a wheel event or a drag (FR-057).
 #[test]
-fn test_hit_rect_lifecycle_side_panels_clear_both_areas() {
+fn test_side_panels_clear_both_areas() {
     type Flag = fn(&mut App);
     let cases: [(&str, Flag); 6] = [
         ("tasks", |app| app.show_tasks_panel = true),
@@ -471,7 +509,7 @@ fn test_hit_rect_lifecycle_side_panels_clear_both_areas() {
 /// The log panel (the one side panel FR-057 carves out) still clears both
 /// areas while it occupies the side column.
 #[test]
-fn test_hit_rect_lifecycle_log_panel_clears_both_areas() {
+fn test_log_panel_clears_both_areas() {
     let mut app = make_app();
     app.active_agents_area = Rect::new(1, 1, 40, 10);
     app.teams_area = Rect::new(1, 1, 40, 10);
@@ -491,114 +529,16 @@ fn test_hit_rect_lifecycle_log_panel_clears_both_areas() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-069: stale control clicks mutate nothing
-// ---------------------------------------------------------------------------
-
-/// A recorded control rect whose task no longer exists is ignored without
-/// panic and without mutating unrelated state (FR-069, NFR-006).
-#[tokio::test]
-async fn test_hit_rect_lifecycle_stale_control_click_is_ignored() {
-    let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_tasks
-        .push(task("gone-a", LEAD_SESSION, "explore", TaskStatus::Running));
-    let _ = render_agents(&mut app, 160, 44);
-
-    // The task list changes between render and click (FR-069).
-    app.active_tasks.clear();
-    app.status = "sentinel".to_string();
-    let rect = app.agent_row_button_areas[0];
-    app.handle_mouse_event(click(rect.x + rect.width / 2, rect.y));
-
-    assert_eq!(
-        app.status, "sentinel",
-        "a stale control click mutates nothing (FR-069)"
-    );
-    assert!(app.output_view.is_none());
-}
-
-// ---------------------------------------------------------------------------
-// FR-070: blank popup cells consume the click
-// ---------------------------------------------------------------------------
-
-/// A left-click on a blank cell below the last painted row inside the Agents
-/// popup table area is consumed: nothing on the surface beneath reacts
-/// (FR-070).
-#[test]
-fn test_hit_rect_lifecycle_agents_blank_cell_click_is_consumed() {
-    let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_tasks
-        .push(task("solo-a", LEAD_SESSION, "explore", TaskStatus::Running));
-    let buffer = render_agents(&mut app, 160, 44);
-
-    let area = app.active_agents_area;
-    let last = row_containing(&buffer, "solo-a");
-    // Two rows below the last painted row is still inside the table area
-    // because the popup is 70% of a 44-row terminal.
-    let blank_y = (last + 2).min(area.y + area.height - 1);
-    assert!(
-        blank_y < area.y + area.height,
-        "the blank cell must sit inside the table"
-    );
-
-    app.status = "sentinel".to_string();
-    app.handle_mouse_event(click(area.x + 10, blank_y));
-
-    assert!(
-        app.output_view.is_none(),
-        "the blank cell opens nothing (FR-070)"
-    );
-    assert_eq!(
-        app.selected_agent_index, None,
-        "the blank cell selects nothing"
-    );
-    assert_eq!(
-        app.status, "sentinel",
-        "the blank cell mutates nothing on the surface beneath"
-    );
-}
-
-/// A left-click on a blank cell below the Teams table's content is consumed
-/// too (FR-070).
-#[test]
-fn test_hit_rect_lifecycle_teams_blank_cell_click_is_consumed() {
-    let mut app = make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.agent_name = "general".to_string();
-    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
-    app.team_members = vec![member("tm-001", "reviewer", MemberStatus::Working)];
-    let buffer = render_teams(&mut app, 170, 44);
-
-    let area = app.teams_area;
-    // The id column paints only in the table (not in the teammate strip), so
-    // this row probe cannot land on the strip above the status bar.
-    let last = row_containing(&buffer, "tm-001");
-    let blank_y = (last + 3).min(area.y + area.height - 1);
-    app.status = "sentinel".to_string();
-    app.handle_mouse_event(click(area.x + 10, blank_y));
-
-    assert!(
-        app.focused_teammate.is_none(),
-        "the blank cell focuses nothing (FR-070)"
-    );
-    assert_eq!(
-        app.status, "sentinel",
-        "the blank cell mutates nothing on the surface beneath"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Glyph sanity for the control columns used by the tests above
+// NFR-003: the control glyphs stay the documented strings
 // ---------------------------------------------------------------------------
 
 /// The `[stop]` and `[x]` glyph constants stay pinned in the renderer module
-/// so the tests above cannot silently drift from the painted controls
+/// so the row assertions cannot silently drift from the painted controls
 /// (NFR-003).
 #[test]
-fn test_hit_rect_lifecycle_control_glyphs_are_the_documented_strings() {
+fn test_control_glyphs_are_the_documented_strings() {
     assert_eq!(glyphs::STOP, "[stop]");
     assert_eq!(glyphs::KILL, "[x]");
+    assert_eq!(columns::STOP_X, 70, "the agents cursor column is pinned");
+    assert_eq!(columns::KILL_X, 77, "the agents kill column is pinned");
 }

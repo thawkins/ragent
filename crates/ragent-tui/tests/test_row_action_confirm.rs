@@ -59,11 +59,6 @@ fn centre(rect: Rect) -> (u16, u16) {
     )
 }
 
-/// A left-button press at the centre of a recorded hit rect.
-fn click_at(pos: (u16, u16)) -> MouseEvent {
-    click(pos.0, pos.1)
-}
-
 /// A live sub-agent task.
 fn task(id: &str, agent: &str, status: TaskStatus) -> TaskEntry {
     TaskEntry {
@@ -427,13 +422,14 @@ async fn mouse_click_outside_the_dialog_is_swallowed() {
 // Destructive trigger points route through the dialog
 // ---------------------------------------------------------------------------
 
-/// `Shift+K` on the selected sub-agent row opens the dialog naming the task;
-/// key #2 is consumed by the dialog so no second kill can fire behind it
-/// (FR-036, FR-069).
+/// `Shift+K` on the cursor-selected sub-agent row opens the dialog naming the
+/// task; key #2 is consumed by the dialog so no second kill can fire behind it
+/// (FR-036, FR-069). (Old selected_agent_index trigger retired.)
 #[tokio::test]
 async fn shift_k_on_a_selected_agent_row_opens_the_kill_dialog() {
     let mut app = app_with_task();
-    app.selected_agent_index = Some(1); // the first sub-agent row
+    render(&mut app);
+    app.agents_cursor_subagent = Some(0); // the only sub-agent row
 
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
@@ -461,42 +457,42 @@ async fn shift_k_on_a_selected_agent_row_opens_the_kill_dialog() {
     );
 }
 
-/// `Shift+K` on the primary row still refuses with the documented status text
-/// and opens no dialog (FR-044).
+/// The keyboard cursor cannot reach the primary row at all: it never lands
+/// below the sub-agent list's bottom, never above its first row, so the old
+/// "primary refusal" case is retired in favour of the range invariant (FR-067).
 #[tokio::test]
-async fn shift_k_on_the_primary_row_refuses_without_a_dialog() {
+async fn the_agents_cursor_range_covers_subagent_rows_only() {
     let mut app = app_with_task();
-    app.selected_agent_index = Some(0);
+    render(&mut app);
 
-    app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
-        .await;
-
-    assert!(
-        !app.row_action_confirm_open(),
-        "the primary row must never reach the dialog"
-    );
+    // Down from no selection starts on the first sub-agent row.
+    app.move_agents_cursor(1);
+    assert_eq!(app.agents_cursor_subagent, Some(0));
+    // The cursor ordinal 0 names the sub-agent, never the primary/lead (FR-067).
     assert_eq!(
-        app.status, "Cannot kill primary agent",
-        "the documented refusal text (FR-044)"
+        app.agents_subagent_task_ids.first().map(String::as_str),
+        Some("a1b2c3d4"),
+        "the first cursor row must be a sub-agent (FR-067)"
     );
 }
 
-/// Clicking the `[x]` control of a background shell row opens the cancel
-/// dialog naming the command (FR-037).
+/// Arming the background-shell cancel directly through `open_row_action` (the
+/// keyboard cursor never covers background rows, so the trigger is
+/// service-level; the confirm flow itself is unchanged, FR-037).
 #[tokio::test]
-async fn background_kill_click_opens_the_cancel_dialog() {
+async fn background_cancel_opens_the_cancel_dialog() {
     let mut app = app_with_task();
     app.active_tasks.clear();
     app.bg_tasks = vec![bg_task("cc112233", "sleep 30")];
-    render(&mut app);
-    let rect = app.agent_row_kill_areas[0];
     app.needs_redraw = false;
-
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.open_row_action(RowAction::CancelBackground {
+        task_id: "cc112233".to_string(),
+        command: "sleep 30".to_string(),
+    });
 
     assert!(
         app.row_action_confirm_open(),
-        "the [x] cancel confirms first"
+        "the background cancel confirms first"
     );
     match app.row_action_confirm.as_ref().map(|p| &p.action) {
         Some(RowAction::CancelBackground { task_id, command }) => {
@@ -508,28 +504,20 @@ async fn background_kill_click_opens_the_cancel_dialog() {
     assert!(app.needs_redraw, "arming the dialog requests a redraw");
 }
 
-/// Clicking the `[stop]` control of a working teammate opens the suspend
-/// dialog naming the member (FR-040).
+/// Space on the cursor-selected working teammate opens the suspend dialog
+/// naming the member (FR-040's suspend direction confirms; the old row click
+/// trigger is retired).
 #[tokio::test]
-async fn teammate_stop_click_on_a_working_member_opens_the_suspend_dialog() {
+async fn teammate_space_on_a_working_member_opens_the_suspend_dialog() {
     let mut app = app_with_team(MemberStatus::Working);
     render(&mut app);
-    let rect = app.team_row_button_areas[0];
-    println!(
-        "rect={rect:?} ids={:?} teams={:?}",
-        app.team_row_button_agent_ids, app.teams_area
-    );
-    println!(
-        "statuses={:?}",
-        app.team_members
-            .iter()
-            .map(|m| (m.agent_id.clone(), m.status.clone()))
-            .collect::<Vec<_>>()
-    );
-    println!("cwd={:?}", std::env::current_dir().unwrap_or_default());
+    // The cursor list covers the painted teammate rows; ordinal 0 = tm-001.
+    app.move_teams_cursor(1);
+    assert_eq!(app.teams_cursor_teammate, Some(0));
     app.needs_redraw = false;
 
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.row_action_confirm_open(),
@@ -545,16 +533,17 @@ async fn teammate_stop_click_on_a_working_member_opens_the_suspend_dialog() {
     assert!(app.needs_redraw, "arming the dialog requests a redraw");
 }
 
-/// Clicking `[stop]` on an ALREADY SUSPENDED teammate resumes it directly: no
-/// dialog opens (FR-040 confirms only the suspend direction; FR-035 rule).
+/// Space on an ALREADY SUSPENDED teammate resumes it directly: no dialog opens
+/// (FR-040 confirms only the suspend direction; FR-035 rule).
 #[tokio::test]
-async fn teammate_stop_click_on_a_suspended_member_resumes_without_a_dialog() {
+async fn teammate_space_on_a_suspended_member_resumes_without_a_dialog() {
     let mut app = app_with_team(MemberStatus::Suspended);
     render(&mut app);
-    let rect = app.team_row_button_areas[0];
+    app.move_teams_cursor(1);
     app.needs_redraw = false;
 
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
 
     assert!(
         !app.row_action_confirm_open(),
@@ -566,16 +555,17 @@ async fn teammate_stop_click_on_a_suspended_member_resumes_without_a_dialog() {
     );
 }
 
-/// Clicking the `[x]` control of a teammate row opens the shutdown dialog
+/// `Del` on the cursor-selected teammate row opens the shutdown dialog
 /// (FR-040).
 #[tokio::test]
-async fn teammate_kill_click_opens_the_shutdown_dialog() {
+async fn teammate_del_opens_the_shutdown_dialog() {
     let mut app = app_with_team(MemberStatus::Working);
     render(&mut app);
-    let rect = app.team_row_kill_areas[0];
+    app.move_teams_cursor(1);
     app.needs_redraw = false;
 
-    app.handle_mouse_event(click_at(centre(rect)));
+    app.handle_key_event(key(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
 
     assert!(
         app.row_action_confirm_open(),
@@ -591,25 +581,29 @@ async fn teammate_kill_click_opens_the_shutdown_dialog() {
     assert!(app.needs_redraw, "arming the dialog requests a redraw");
 }
 
-/// `Space` and `Shift+K` on the focused teammate route through the same
-/// shutdown dialog (FR-045, TC-022), consuming the key either way.
+/// `Space` and `Shift+K` on the cursor-selected teammate route through the
+/// suspend direction (Space confirms only the suspend; the old
+/// focused_teammate Space shutdown case is retired - the cursor model confirms
+/// the destructive direction via `Del`, FR-045's re-expression).
 #[tokio::test]
-async fn teammate_keyboard_keys_route_through_the_shutdown_dialog() {
+async fn teammate_keyboard_keys_consume_the_key_either_way() {
     let mut app = app_with_team(MemberStatus::Working);
-    app.focused_teammate = Some("tm-001".to_string());
+    render(&mut app);
+    app.move_teams_cursor(1);
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
-    assert!(app.row_action_confirm_open(), "Space confirms the shutdown");
+    assert!(app.row_action_confirm_open(), "Space confirms the suspend");
     match app.row_action_confirm.as_ref().map(|p| &p.action) {
-        Some(RowAction::ShutdownTeammate { agent_id, name }) => {
+        Some(RowAction::SuspendTeammate { agent_id, name }) => {
             assert_eq!(agent_id, "tm-001");
             assert_eq!(name, "reviewer");
         }
-        other => panic!("expected ShutdownTeammate from Space, got {other:?}"),
+        other => panic!("expected SuspendTeammate from Space, got {other:?}"),
     }
 
-    // The dialog consumes the follow-up key so Shift+K cannot re-arm it.
+    // The dialog consumes the follow-up key so the destructive key cannot
+    // re-arm or fire behind it.
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
     assert!(
@@ -622,12 +616,13 @@ async fn teammate_keyboard_keys_route_through_the_shutdown_dialog() {
     );
 }
 
-/// `Space` on a selected RUNNING sub-agent row suspends it without a dialog:
-/// the suspend direction is not destructive (FR-035/A7 parity with the mouse).
+/// `Space` on the cursor-selected RUNNING sub-agent row suspends it without a
+/// dialog: the suspend direction is not destructive (FR-035 parity with the
+/// mouse; the old selected_agent_index trigger is retired).
 #[tokio::test]
 async fn space_on_a_running_agent_row_suspends_without_a_dialog() {
     let mut app = app_with_task();
-    app.selected_agent_index = Some(1);
+    app.move_agents_cursor(1);
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;

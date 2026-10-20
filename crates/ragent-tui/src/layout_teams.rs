@@ -142,6 +142,75 @@ const _: () = assert!(
 const _: () =
     assert!(columns::STOP_X + columns::STOP_W + columns::CONTROL_GAP_W == columns::KILL_X);
 
+/// The muted blue the table's own border paints in.
+///
+/// The modal frame carries the bright team-blue accent; this calmer tone keeps
+/// the second border legible as structure rather than as a second frame
+/// shouting for attention.
+const INNER_BORDER: Color = Color::Rgb(62, 84, 118);
+
+/// Subtle band background painted on alternating table rows.
+///
+/// Sits in the same family as the teammate strip's two background tones, so
+/// the popup, the strip and the confirm dialog read as one panel.
+const BAND_BG: Color = Color::Rgb(22, 22, 30);
+/// Block-cursor background painted on the keyboard-selected teammate row.
+///
+/// The same slate blue as the Agents table's cursor, so selection reads
+/// identically in both windows; clearly lighter than [`BAND_BG`] so a cursor
+/// row never reads as a band.
+const CURSOR_BG: Color = Color::Rgb(50, 50, 90);
+
+/// Paint the block cursor over one painted table row, full inner width.
+///
+/// The cursor is the selection affordance replaced by keyboard navigation
+/// (Up/Down/PgUp/PgDn move it, Space/Del/Enter act on it), so it overrides the
+/// zebra-band: the row is restyled with one distinct background across every
+/// span, and a trailing pad fills the unpainted remainder edge to edge (the
+/// same trick [`band_line`] uses) so the cursor rectangle reads as one block.
+fn cursor_line(line: Line, width: usize) -> Line {
+    let painted: usize = line
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    let mut spans: Vec<Span> = line
+        .spans
+        .into_iter()
+        .map(|span| {
+            Span::styled(
+                span.content.to_string(),
+                span.style.bg(CURSOR_BG).add_modifier(Modifier::BOLD),
+            )
+        })
+        .collect();
+    if width > painted {
+        spans.push(Span::styled(
+            " ".repeat(width - painted),
+            Style::default().bg(CURSOR_BG),
+        ));
+    }
+    Line::from(spans).style(Style::default().bg(CURSOR_BG))
+}
+
+/// Give one painted table row the zebra-band background across the full inner
+/// width (the counterpart of the shared band helper in the Agents table).
+fn band_line(line: Line, width: usize) -> Line {
+    let painted: usize = line
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    let mut spans = line.spans;
+    if width > painted {
+        spans.push(Span::styled(
+            " ".repeat(width - painted),
+            Style::default().bg(BAND_BG),
+        ));
+    }
+    Line::from(spans).style(Style::default().bg(BAND_BG))
+}
+
 /// Whether `status` is terminal, in which case the row carries no controls.
 fn is_terminal(status: &MemberStatus) -> bool {
     matches!(
@@ -252,7 +321,8 @@ fn row_line(marker: Vec<Span<'static>>, cells: &[Cell]) -> Line<'static> {
 fn header_line() -> Line<'static> {
     let dim = Style::default()
         .fg(colors::HINT)
-        .add_modifier(Modifier::DIM);
+        .add_modifier(Modifier::DIM)
+        .add_modifier(Modifier::BOLD);
     let cells = vec![
         Cell::left("id", columns::ID_W, dim),
         Cell::left("name", columns::LABEL_W, dim),
@@ -312,18 +382,6 @@ fn control_spans(suspended: bool) -> Vec<Span<'static>> {
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
     ]
-}
-
-/// One painted row's action controls, captured in table scroll space.
-///
-/// Every painted teammate row records one entry; a terminal row records the
-/// placeholder with an empty identifier, so a click on such a row cannot
-/// resolve to a teammate at all (FR-071, NFR-011). `row` is the row's line
-/// index within the table; the renderer stores it in `Rect::y` so hit-test
-/// placement shifts directly with the paint (NFR-011).
-struct RowControl {
-    row: u16,
-    agent_id: String,
 }
 
 /// The task counts painted in one teammate row: `(claimed, done)` (FR-025).
@@ -440,38 +498,14 @@ fn counter_cells(
     ]
 }
 
-/// Translate a row-space hit rectangle into screen space inside `inner`.
-///
-/// Returns `None` when the row is scrolled out of view or the control does not
-/// fit inside the painted table, so a click can never resolve to a control the
-/// user cannot see (NFR-011).
-fn place(rect: Rect, inner: Rect, scroll: u16) -> Option<Rect> {
-    if rect.width == 0 || rect.y < scroll {
-        return None;
-    }
-    let y = inner.y + (rect.y - scroll);
-    if y >= inner.bottom() {
-        return None;
-    }
-    let x = inner.x + rect.x;
-    let width = rect.width.min(inner.right().saturating_sub(x));
-    if width == 0 || y < inner.y {
-        return None;
-    }
-    Some(Rect::new(x, y, width, 1))
-}
-
 /// Render the Teams subpanel into `area`.
 ///
 /// The first row is the dimmed header (FR-020), the second the lead row
 /// (FR-021), then one row per teammate (FR-022 through FR-025) or the empty-state
 /// hint when the team has no members (FR-026).
 pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
-    app.team_row_button_areas.clear();
-    app.team_row_button_agent_ids.clear();
-    app.team_row_kill_areas.clear();
-    app.team_row_kill_agent_ids.clear();
     app.teams_row_agent_ids.clear();
+    app.teams_teammate_agent_ids.clear();
 
     app.refresh_team_member_session_ids();
     let team_name = app
@@ -555,7 +589,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     row_keys.push("lead".to_string());
 
     // -- teammate rows (FR-022 through FR-025) -----------------------------
-    let mut controls: Vec<RowControl> = Vec::new();
+    let teammate_row_start = row_keys.len();
     for (index, member) in app.team_members.iter().enumerate() {
         let member_agent_name = member.agent_id.clone();
         let id_short = short_id(&member.agent_id);
@@ -644,22 +678,19 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             spans.push(cell.span());
         }
 
+        // The `[stop]`/`[x]` columns stay painted as status indicators: the
+        // keyboard Space/Del now act on the row, and the glyph shows what
+        // each currently means (suspended rows paint `>` = resume).
         if !is_terminal(&member.status) {
             spans.extend(control_spans(member.status == MemberStatus::Suspended));
         }
-        // Every painted teammate row records one control entry; a terminal row
-        // records the placeholder pair (FR-071, NFR-011).
-        controls.push(RowControl {
-            row: lines.len() as u16,
-            agent_id: if is_terminal(&member.status) {
-                String::new()
-            } else {
-                member.agent_id.clone()
-            },
-        });
         lines.push(Line::from(spans));
         row_keys.push(member.agent_id.clone());
     }
+    // The keyboard cursor is an ordinal over the painted teammate rows only:
+    // publish the agent ids in paint order for the cursor's Space/Del/Enter
+    // resolution and the scroll sync (FR-038).
+    app.teams_teammate_agent_ids = row_keys[teammate_row_start..].to_vec();
 
     // -- empty state (FR-026) ---------------------------------------------
     if member_count == 0 {
@@ -685,7 +716,10 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
         )
-        .border_style(Style::default().fg(Color::Blue));
+        // The muted inner border keeps the outer modal frame the visual
+        // anchor: the double border reads as chrome and content, not as two
+        // competing boxes.
+        .border_style(Style::default().fg(INNER_BORDER));
 
     let inner = block.inner(area);
     let visible = inner.height;
@@ -698,67 +732,59 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     app.teams_area = area;
     app.teams_rows_area = inner;
     let scroll = app.teams_scroll_offset.min(max_scroll);
-    app.teams_row_agent_ids = row_keys;
+    app.teams_row_agent_ids = row_keys.clone();
 
-    // Render only the visible slice, mirroring the message-window pattern.
-    let window: Vec<Line> = lines
+    // Paint the block cursor over the selected teammate row, then keep the
+    // viewport on that row: when the user pages past the edge the offset
+    // follows the cursor instead of desynchronising (FR-038).
+    let mut cursor_painted_row: Option<u16> = None;
+    if let Some(cursor) = app.teams_cursor_teammate
+        && let Some(agent_id) = app.teams_teammate_agent_ids.get(cursor)
+    {
+        if let Some(row_position) = row_keys.iter().position(|key| key == agent_id) {
+            if row_position >= scroll as usize && row_position < scroll as usize + visible as usize
+            {
+                cursor_painted_row = Some((row_position as u16).saturating_sub(scroll));
+            }
+        }
+    }
+
+    // Render only the visible slice, mirroring the message-window pattern,
+    // banding every odd data row (the header on row 0 stays clean) and
+    // continuing the band pattern over the trailing body so the table panel
+    // reads as one surface.
+    let table_width = inner.width as usize;
+    let mut window: Vec<Line> = lines
         .into_iter()
         .skip(scroll as usize)
         .take(visible as usize)
+        .enumerate()
+        .map(|(index, line)| {
+            if Some(index as u16) == cursor_painted_row {
+                return cursor_line(line, table_width);
+            }
+            if index % 2 == 1 {
+                band_line(line, table_width)
+            } else {
+                line
+            }
+        })
         .collect();
-    frame.render_widget(Paragraph::new(window).block(block), area);
-
-    // Record every control entry in screen space. A live control scrolls into
-    // a placed rectangle; a terminal-row placeholder or an out-of-view control
-    // keeps its vector position as `Rect::default()` with an empty identifier,
-    // which can never match a click - so each hit-rect vector stays
-    // index-aligned with its identifier vector and with the painted rows
-    // (FR-056, FR-071, NFR-011).
-    for control in &controls {
-        // An empty identifier marks the terminal-row placeholder: it is never
-        // placed, so its entry is the inert default pair (FR-071).
-        let live = !control.agent_id.is_empty();
-        let stop = Rect::new(
-            columns::STOP_X as u16,
-            control.row,
-            columns::STOP_W as u16,
-            1,
-        );
-        let (placed, placed_id) = (
-            if live {
-                place(stop, inner, scroll)
-            } else {
-                None
-            },
-            control.agent_id.clone(),
-        );
-        app.team_row_button_areas.push(placed.unwrap_or_default());
-        app.team_row_button_agent_ids
-            .push(placed.map(|_| placed_id).unwrap_or_default());
-        let kill = Rect::new(
-            columns::KILL_X as u16,
-            control.row,
-            columns::KILL_W as u16,
-            1,
-        );
-        let (placed, placed_id) = (
-            if live {
-                place(kill, inner, scroll)
-            } else {
-                None
-            },
-            control.agent_id.clone(),
-        );
-        app.team_row_kill_areas.push(placed.unwrap_or_default());
-        app.team_row_kill_agent_ids
-            .push(placed.map(|_| placed_id).unwrap_or_default());
+    for index in window.len()..visible as usize {
+        if index % 2 == 1 {
+            window.push(band_line(Line::default(), table_width));
+        } else {
+            window.push(Line::default());
+        }
     }
+    frame.render_widget(Paragraph::new(window).block(block), area);
 
     if max_scroll > 0 {
         let mut scrollbar_state =
             ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(colors::HINT)),
             area,
             &mut scrollbar_state,
         );

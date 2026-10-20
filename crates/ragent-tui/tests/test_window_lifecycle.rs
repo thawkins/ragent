@@ -334,23 +334,18 @@ async fn window_actions_stay_serviceable_during_a_running_turn() {
     );
     assert!(app.needs_redraw, "the open repaints (NFR-005)");
 
-    // Step 3: a `[stop]` control on the sub-agent row arms the suspend
-    // request mid-turn (non-destructive direction needs no dialog, FR-035).
+    // Step 3: keyboard cursor actions on the sub-agent row stay serviced
+    // mid-turn: Space dispatches the suspend request (non-destructive
+    // direction needs no dialog, FR-035). (The old [stop]-click trigger is
+    // retired with the row mouse.)
     render(&mut app);
-    let stop = app
-        .agent_row_button_areas
-        .first()
-        .copied()
-        .expect("the running row paints a [stop] control");
-    let task_id = app
-        .agent_row_button_task_ids
-        .first()
-        .cloned()
-        .expect("the control carries the task id");
-    assert_eq!(task_id, "a1b2c3d4");
-    let (stop_col, stop_row) = centre(stop);
     app.needs_redraw = false;
-    app.handle_mouse_event(click(stop_col, stop_row));
+    app.move_agents_cursor(1);
+    app.handle_key_event(crossterm::event::KeyEvent::new(
+        KeyCode::Char(' '),
+        KeyModifiers::NONE,
+    ))
+    .await;
     assert!(
         app.log_entries
             .iter()
@@ -375,13 +370,14 @@ async fn window_actions_stay_serviceable_during_a_running_turn() {
     );
 }
 
-/// The keyboard surface also stays serviced mid-turn: `Space` on a selected
+/// The keyboard surface also stays serviced mid-turn: `Space` on the cursor
 /// row dispatches while `is_processing` is true (TC-029; FR-061, FR-041).
 #[tokio::test]
 async fn keyboard_actions_stay_serviceable_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
     app.is_processing = true;
-    app.selected_agent_index = Some(1);
+    render(&mut app);
+    app.agents_cursor_subagent = Some(0);
 
     app.handle_key_event(crossterm::event::KeyEvent::new(
         KeyCode::Char(' '),
@@ -401,7 +397,8 @@ async fn keyboard_actions_stay_serviceable_during_a_running_turn() {
     );
 }
 
-/// A teammate window's row click also stays serviced mid-turn (TC-029
+/// A teammate row-click also stays serviced mid-turn: the Teams button and the
+/// keyboard cursor keep operating while `is_processing` is true (TC-029
 /// step 2's Teams-button half; FR-061, FR-038).
 #[test]
 fn teams_window_stays_serviceable_during_a_running_turn() {
@@ -423,16 +420,14 @@ fn teams_window_stays_serviceable_during_a_running_turn() {
         "the second click reopens it (FR-061)"
     );
 
-    // A teammate row click still focuses mid-turn: the painted rows are
-    // 0 header, 1 lead, 2 tm-001.
+    // The teammate keyboard cursor still focuses mid-turn: ordinal 0 = tm-001.
     render(&mut app);
-    let row = app.teams_rows_area.y + 2;
-    let (col, _) = centre(app.teams_rows_area);
-    app.handle_mouse_event(click(col, row));
+    app.move_teams_cursor(1);
+    app.teams_cursor_focus();
     assert_eq!(
         app.focused_teammate.as_deref(),
         Some("tm-001"),
-        "a teammate row click stays serviced mid-turn (FR-061)"
+        "a teammate focus stays serviced mid-turn (FR-061)"
     );
     assert!(
         app.is_processing,
@@ -444,32 +439,39 @@ fn teams_window_stays_serviceable_during_a_running_turn() {
 // FR-064: status-line reporting for refusals and focus transitions
 // ---------------------------------------------------------------------------
 
-/// The protected-agent refusals report to the status line while a turn
-/// streams (FR-064; the refusals themselves are T-011's FR-042/FR-044).
+/// The keyboard cursor refusals/status reporting stay live while a turn
+/// streams (FR-064; the protected-agent refusals are re-expressed by the
+/// cursor range - the cursor never reaches the primary row, so the reported
+/// text is the consumed no-op message instead, T-011's keyboard twin).
 #[tokio::test]
-async fn refusals_report_to_the_status_line_during_a_running_turn() {
+async fn cursor_reports_to_the_status_line_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
     app.is_processing = true;
-    app.selected_agent_index = Some(0); // the primary row
 
     app.handle_key_event(crossterm::event::KeyEvent::new(
-        KeyCode::Char(' '),
+        KeyCode::Char(' '), // no cursor yet: consumed no-op with its status text
         KeyModifiers::NONE,
     ))
     .await;
     assert_eq!(
-        app.status, "Cannot suspend primary agent",
-        "the refusal reports to the status line (FR-064, FR-042)"
+        app.status, "agents: selected row is gone",
+        "the window key reports to the status line (FR-064)"
     );
 
+    // Moving the cursor also reports the landed row on the status line.
     app.handle_key_event(crossterm::event::KeyEvent::new(
-        KeyCode::Char('K'),
-        KeyModifiers::SHIFT,
+        KeyCode::Down,
+        KeyModifiers::NONE,
     ))
     .await;
-    assert_eq!(
-        app.status, "Cannot kill primary agent",
-        "the refusal reports to the status line (FR-064, FR-044)"
+    assert!(
+        app.status.starts_with("agents: "),
+        "a cursor move reports the selection (FR-064), got {}",
+        app.status
+    );
+    assert!(
+        app.is_processing,
+        "the keyboard path must not disturb the running turn"
     );
 }
 
@@ -501,20 +503,18 @@ async fn focus_transitions_report_to_the_status_line() {
     );
 }
 
-/// A teammate row-click focus transition reports to the status line too
-/// (FR-064; the mouse path is FR-038).
+/// The keyboard cursor focus transition reports to the status line too
+/// (FR-064; the keyboard path is FR-038's cursor arm).
 #[test]
-fn a_row_click_focus_reports_to_the_status_line() {
+fn a_teammate_focus_reports_to_the_status_line() {
     let mut app = app_with_team();
     render(&mut app);
-    // Painted rows: 0 header, 1 lead, 2 tm-001; anchor the click on the
-    // member's own line, never the rect's vertical centre.
-    let (col, _) = centre(app.teams_rows_area);
-    let row = app.teams_rows_area.y + 2;
-    app.handle_mouse_event(click(col, row));
+
+    app.move_teams_cursor(1);
+    app.teams_cursor_focus();
 
     assert_eq!(
         app.status, "team: focused -> reviewer",
-        "the mouse focus transition reports to the status line (FR-064)"
+        "the keyboard focus transition reports to the status line (FR-064)"
     );
 }

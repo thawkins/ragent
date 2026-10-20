@@ -1955,19 +1955,24 @@ fn layout_agents_window_paints_the_tree_and_buttons() {
     assert!(screen.contains("Agents"), "the overlay title must paint");
     assert!(screen.contains("lead"), "the primary agent row must paint");
     assert!(app.active_agents_area.width > 0);
-    // Every action-capable painted row keeps a hit-rect entry; a terminal row
-    // (the completed task-3 and completed bg-2) records the inert placeholder
-    // instead of shrinking the vectors (FR-071, NFR-011).
-    assert_eq!(app.agent_row_button_areas.len(), 5);
-    assert_eq!(app.agent_row_kill_areas.len(), 5);
-    assert_eq!(app.agent_row_button_task_ids.len(), 5);
+    // The renderer publishes the cursor row maps instead of the retired
+    // hit-rect vectors: one key per painted row and the sub-agent slice for
+    // the keyboard cursor (hit-rect rework).
+    // Painted rows: header, lead, task-1, task-2, task-3 (completed), then the
+    // background heading and bg-1/bg-2.
+    assert_eq!(app.agents_row_task_ids.len(), 8);
+    assert_eq!(app.agents_row_task_ids[1], "primary");
+    assert_eq!(app.agents_row_task_ids[2], "task-1");
+    assert_eq!(app.agents_row_task_ids[3], "task-2");
+    assert_eq!(app.agents_row_task_ids[4], "task-3");
     assert_eq!(
-        app.agent_row_button_task_ids[2], "",
-        "task-3 is a placeholder"
-    );
-    assert_eq!(
-        app.agent_row_button_task_ids[4], "",
-        "bg-2 is a placeholder"
+        app.agents_subagent_task_ids,
+        vec![
+            "task-1".to_string(),
+            "task-2".to_string(),
+            "task-3".to_string(),
+        ],
+        "the cursor ordinal list names the sub-agent rows in paint order"
     );
 }
 
@@ -2020,14 +2025,19 @@ fn layout_teams_window_paints_the_lead_and_teammates() {
     assert!(screen.contains("Teams"), "the overlay title must paint");
     assert!(screen.contains("reviewer"), "teammate rows must paint");
     assert!(screen.contains("working"));
-    // Every painted teammate row keeps a control entry; the stopped one is the
-    // inert placeholder (FR-071, NFR-011). reviewer and tester are live
-    // (tester is Suspended); archivist is the stopped placeholder row.
-    assert_eq!(app.team_row_button_areas.len(), 3);
-    assert_eq!(app.team_row_kill_areas.len(), 3);
+    // The renderer publishes the cursor row maps instead of the retired
+    // hit-rect vectors: one key per painted row (header, lead, three
+    // teammates) and the teammate slice for the keyboard cursor (hit-rect
+    // rework). A stopped member still carries its key - Space/Del on it
+    // resolve (and are refused) through the member status.
+    assert_eq!(app.teams_row_agent_ids.len(), 5);
     assert_eq!(
-        app.team_row_button_agent_ids,
-        vec!["tm-001".to_string(), "tm-002".to_string(), String::new()]
+        app.teams_teammate_agent_ids,
+        vec![
+            "tm-001".to_string(),
+            "tm-002".to_string(),
+            "tm-003".to_string(),
+        ]
     );
 }
 

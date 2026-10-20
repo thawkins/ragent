@@ -211,21 +211,21 @@ fn test_primary_row_carries_marker_identity_and_live_step_count() {
     let row = row_text(&buffer, area, 1);
 
     assert!(
-        row.starts_with('*'),
+        row[columns::CONTENT_X..].starts_with('*'),
         "the primary marker is a green `*`: {row:?}"
     );
     assert_eq!(
-        cell_at(&buffer, area, 1, 0).fg,
+        cell_at(&buffer, area, 1, columns::CONTENT_X as u16).fg,
         Color::Green,
         "the primary marker must be green"
     );
     assert_eq!(
         row.find("lead"),
-        Some(columns::MARKER_W),
+        Some(columns::CONTENT_X + columns::MARKER_W),
         "the id column reads the literal `lead`: {row:?}"
     );
 
-    let name_col = (columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
+    let name_col = (columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
     let name_cell = cell_at(&buffer, area, 1, name_col);
     assert_eq!(name_cell.fg, Color::Green, "the agent name is green");
     assert!(
@@ -237,7 +237,8 @@ fn test_primary_row_carries_marker_identity_and_live_step_count() {
         "the configured agent name paints in the name column: {row:?}"
     );
 
-    let type_x = columns::MARKER_W + columns::ID_W + columns::GAP_W + columns::LABEL_W;
+    let type_x =
+        columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W + columns::LABEL_W;
     let elapsed_x = type_x + columns::TYPE_W;
     let steps_x = elapsed_x + columns::ELAPSED_W + columns::GAP_W;
     assert_eq!(
@@ -306,7 +307,7 @@ fn test_subagent_rows_indent_two_columns_per_ancestor() {
 
     let buffer = render(&mut app, 160, 44);
     let area = app.active_agents_area;
-    let label_x = (columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
+    let label_x = (columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
 
     // Depth 0 siblings: the non-last one keeps the branch open, the last one
     // closes it.
@@ -422,8 +423,8 @@ fn test_subagent_row_paints_dot_short_id_label_type_elapsed_and_steps() {
     let buffer = render(&mut app, 160, 44);
     let area = app.active_agents_area;
 
-    let id_x = columns::MARKER_W as u16;
-    let label_x = (columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
+    let id_x = (columns::CONTENT_X + columns::MARKER_W) as u16;
+    let label_x = (columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
     let type_x = label_x + columns::LABEL_W as u16;
     let elapsed_x = type_x + columns::TYPE_W as u16;
     let steps_x = elapsed_x + (columns::ELAPSED_W + columns::GAP_W) as u16;
@@ -431,11 +432,11 @@ fn test_subagent_row_paints_dot_short_id_label_type_elapsed_and_steps() {
     let bg_row = find_row(&buffer, area, "abcd1234").expect("the bg row paints the short id");
     let bg_text = row_text(&buffer, area, bg_row);
     assert!(
-        bg_text.starts_with(glyphs::ROW_DOT),
+        bg_text[columns::CONTENT_X..].starts_with(glyphs::ROW_DOT),
         "a sub-agent row starts with the status dot: {bg_text:?}"
     );
     assert_eq!(
-        fg_at(&buffer, area, bg_row, 0),
+        fg_at(&buffer, area, bg_row, columns::CONTENT_X as u16),
         Color::Yellow,
         "a running row's dot is yellow"
     );
@@ -510,7 +511,7 @@ fn test_agent_label_never_exceeds_thirty_two_columns() {
 
     let buffer = render(&mut app, 200, 50);
     let area = app.active_agents_area;
-    let label_x = columns::MARKER_W + columns::ID_W + columns::GAP_W;
+    let label_x = columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W;
     let type_x = label_x + columns::LABEL_W;
 
     // Every non-header row is checked: the label slot is exactly the documented
@@ -544,7 +545,7 @@ fn test_agent_label_never_exceeds_thirty_two_columns() {
     );
     assert_eq!(
         find_in_row(&buffer, area, row, glyphs::KILL),
-        Some(columns::KILL_X),
+        Some(columns::CONTENT_X + columns::KILL_X),
         "the control column keeps its pinned position: {text:?}"
     );
 }
@@ -664,7 +665,7 @@ fn test_row_status_colours_and_suffixes() {
 
     let buffer = render(&mut app, 160, 44);
     let area = app.active_agents_area;
-    let label_x = (columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
+    let label_x = (columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W) as u16;
 
     let running = find_row(&buffer, area, "run-0001").expect("running row paints");
     assert_eq!(
@@ -732,104 +733,25 @@ fn test_live_rows_pin_stop_and_kill_to_the_documented_columns() {
             .unwrap_or_else(|| panic!("{needle}: the [stop] control must paint: {text:?}"));
         assert_eq!(
             stop_at,
-            columns::STOP_X,
-            "{needle}: [stop] must start at column {}: {text:?}",
-            columns::STOP_X
+            columns::CONTENT_X + columns::STOP_X,
+            "{needle}: [stop] must start at column {} behind the margin: {text:?}",
+            columns::CONTENT_X + columns::STOP_X
         );
         let kill_at = find_in_row(&buffer, area, row, glyphs::KILL)
             .unwrap_or_else(|| panic!("{needle}: the [x] control must paint: {text:?}"));
         assert_eq!(
             kill_at,
-            columns::KILL_X,
+            columns::CONTENT_X + columns::KILL_X,
             "{needle}: [x] must start at column {}: {text:?}",
-            columns::KILL_X
+            columns::CONTENT_X + columns::KILL_X
         );
     }
 }
 
-/// The recorded hit rectangles sit exactly on the painted controls, in the same
-/// order as their identifier vector (FR-015, NFR-011).
-#[test]
-fn test_control_hit_rects_match_the_painted_controls() {
-    let mut app = app_with_primary();
-    app.active_tasks.push(task(
-        "run-0001",
-        "s1",
-        "s2",
-        "explore",
-        TaskStatus::Running,
-        true,
-    ));
-    app.active_tasks.push(task(
-        "done-0002",
-        "s1",
-        "s3",
-        "explore",
-        TaskStatus::Completed,
-        true,
-    ));
-    app.bg_tasks.push(bg_task("bg-0001", "sleep 30", "running"));
-    app.bg_tasks.push(bg_task("bg-0002", "true", "completed"));
-
-    let _ = render(&mut app, 160, 44);
-    let area = app.active_agents_area;
-
-    // Every action-capable painted row keeps one vector entry; terminal rows
-    // record the zero-width `Rect::default()` placeholder with an empty
-    // identifier (FR-071, NFR-011).
-    assert_eq!(app.agent_row_button_areas.len(), 4);
-    assert_eq!(app.agent_row_kill_areas.len(), 4);
-    assert_eq!(
-        app.agent_row_button_task_ids,
-        vec![
-            "run-0001".to_string(),
-            String::new(),
-            "bg-0001".to_string(),
-            String::new(),
-        ],
-        "the identifiers stay index-aligned with the painted controls; a terminal row is a placeholder"
-    );
-    assert_eq!(
-        app.agent_row_kill_task_ids, app.agent_row_button_task_ids,
-        "every [x] rect stays index-aligned with its own identifier"
-    );
-    for (i, rect) in app.agent_row_button_areas.iter().enumerate() {
-        if app.agent_row_button_task_ids[i].is_empty() {
-            assert_eq!(
-                *rect,
-                Rect::default(),
-                "a terminal row's entry is the inert placeholder (FR-071)"
-            );
-        } else {
-            assert_eq!(
-                rect.x,
-                area.x + columns::STOP_X as u16,
-                "the [stop] hit rect sits on the painted control"
-            );
-            assert_eq!(rect.width, columns::STOP_W as u16);
-        }
-    }
-    for (i, rect) in app.agent_row_kill_areas.iter().enumerate() {
-        if !app.agent_row_kill_task_ids[i].is_empty() {
-            assert_eq!(
-                rect.x,
-                area.x + columns::KILL_X as u16,
-                "the [x] hit rect sits on the painted control"
-            );
-            assert_eq!(rect.width, columns::KILL_W as u16);
-        }
-    }
-
-    // A completed task paints no controls on its row.
-    let buffer = render(&mut app, 160, 44);
-    let area = app.active_agents_area;
-    let done_row = find_row(&buffer, area, "done-0002").expect("completed row paints");
-    let done_text = row_text(&buffer, area, done_row);
-    assert!(
-        !done_text.contains(glyphs::STOP) && !done_text.contains(glyphs::KILL),
-        "a terminal row carries no action controls: {done_text:?}"
-    );
-}
+// (The old `test_control_hit_rects_match_the_painted_controls` was removed:
+// the hit-rect state vectors are gone; its replacement,
+// `test_render_publishes_row_maps_and_the_subagent_cursor_list`, pins the
+// same alignment invariant against the published cursor row maps.)
 
 /// A suspended row replaces the `[stop]` glyph with `>` without moving `[x]`
 /// (FR-015).
@@ -853,7 +775,12 @@ fn test_suspended_row_paints_the_resume_glyph_in_the_stop_column() {
         !text.contains(glyphs::STOP),
         "a suspended row drops the [stop] label: {text:?}"
     );
-    let cell = cell_at(&buffer, area, row, columns::STOP_X as u16);
+    let cell = cell_at(
+        &buffer,
+        area,
+        row,
+        (columns::CONTENT_X + columns::STOP_X) as u16,
+    );
     assert_eq!(
         cell.symbol(),
         glyphs::RESUME,
@@ -862,13 +789,96 @@ fn test_suspended_row_paints_the_resume_glyph_in_the_stop_column() {
     assert_eq!(cell.fg, Color::Green, "the resume glyph is green");
     assert_eq!(
         find_in_row(&buffer, area, row, glyphs::KILL),
-        Some(columns::KILL_X),
+        Some(columns::CONTENT_X + columns::KILL_X),
         "the [x] control stays at its pinned column: {text:?}"
     );
+}
+
+/// A no-cursor render publishes the sub-agent row map: every painted row
+/// carries its click key (empty on the header, primary and background rows,
+/// the task id on a sub-agent row), and the keyboard cursor's ordinal list is
+/// exactly the sub-agent slice of it (the old hit-rect vectors are gone -
+/// the cursor reads these vectors instead).
+#[test]
+fn test_render_publishes_row_maps_and_the_subagent_cursor_list() {
+    let mut app = app_with_primary();
+    app.active_tasks.push(task(
+        "run-0001",
+        "s1",
+        "s2",
+        "explore",
+        TaskStatus::Running,
+        true,
+    ));
+    app.active_tasks.push(task(
+        "done-0002",
+        "s1",
+        "s3",
+        "explore",
+        TaskStatus::Completed,
+        true,
+    ));
+    app.bg_tasks.push(bg_task("bg-0001", "sleep 30", "running"));
+    app.bg_tasks.push(bg_task("bg-0002", "true", "completed"));
+
+    let buffer = render(&mut app, 160, 44);
+    let area = app.active_agents_area;
+
+    // The row map is index-aligned with the painted rows: header, primary,
+    // two sub-agent rows, background heading and two background rows.
     assert_eq!(
-        app.agent_row_button_areas[0].x,
-        area.x + columns::STOP_X as u16,
-        "the resume control keeps the [stop] hit rect"
+        app.agents_row_task_ids.len(),
+        7,
+        "one row key per painted row"
+    );
+    assert_eq!(app.agents_row_task_ids[0], "", "the header opens nothing");
+    assert_eq!(
+        app.agents_row_task_ids[1], "primary",
+        "the primary row keeps its sentinel key"
+    );
+    assert_eq!(app.agents_row_task_ids[2], "run-0001");
+    assert_eq!(app.agents_row_task_ids[3], "done-0002");
+    assert_eq!(
+        app.agents_row_task_ids[4], "",
+        "the background heading opens nothing"
+    );
+    assert_eq!(
+        app.agents_row_task_ids[5], "",
+        "a background row is not cursorable"
+    );
+    assert_eq!(app.agents_row_task_ids[6], "");
+
+    // The cursor ordinal list covers sub-agent rows only, in paint order.
+    assert_eq!(
+        app.agents_subagent_task_ids,
+        vec!["run-0001".to_string(), "done-0002".to_string()],
+        "the cursor range must name the sub-agent rows in paint order"
+    );
+
+    // A rendered (but cursor-less) frame paints the controls on the live rows.
+    for needle in ["run-0001", "bg-0001"] {
+        let row = find_row(&buffer, area, needle).expect("row paints");
+        let text = row_text(&buffer, area, row);
+        assert_eq!(
+            find_in_row(&buffer, area, row, glyphs::STOP),
+            Some(columns::CONTENT_X + columns::STOP_X),
+            "{needle}: [stop] must start at column {}: {text:?}",
+            columns::CONTENT_X + columns::STOP_X
+        );
+        assert_eq!(
+            find_in_row(&buffer, area, row, glyphs::KILL),
+            Some(columns::CONTENT_X + columns::KILL_X),
+            "{needle}: [x] must start at column {}: {text:?}",
+            columns::CONTENT_X + columns::KILL_X
+        );
+    }
+
+    // A completed task paints no controls on its row.
+    let done_row = find_row(&buffer, area, "done-0002").expect("completed row paints");
+    let done_text = row_text(&buffer, area, done_row);
+    assert!(
+        !done_text.contains(glyphs::STOP) && !done_text.contains(glyphs::KILL),
+        "a terminal row carries no action controls: {done_text:?}"
     );
 }
 
@@ -910,7 +920,7 @@ fn test_background_shell_section_lists_each_task_with_controls() {
     );
     let running_text = row_text(&buffer, area, running);
     assert!(
-        running_text.starts_with(glyphs::ROW_DOT),
+        running_text[columns::CONTENT_X..].starts_with(glyphs::ROW_DOT),
         "a background row starts with the status dot: {running_text:?}"
     );
     assert!(
@@ -921,7 +931,8 @@ fn test_background_shell_section_lists_each_task_with_controls() {
         running_text.contains(glyphs::STOP) && running_text.contains(glyphs::KILL),
         "a live background row paints both controls: {running_text:?}"
     );
-    let type_x = columns::MARKER_W + columns::ID_W + columns::GAP_W + columns::LABEL_W;
+    let type_x =
+        columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W + columns::LABEL_W;
     let type_slice: String = running_text
         .chars()
         .skip(type_x)
@@ -965,7 +976,7 @@ fn test_long_background_command_truncates_within_its_column() {
         !text.contains(long_command),
         "an over-long command is never painted in full: {text:?}"
     );
-    let label_x = columns::MARKER_W + columns::ID_W + columns::GAP_W;
+    let label_x = columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W;
     let command: String = text.chars().skip(label_x).take(columns::LABEL_W).collect();
     assert!(
         long_command.starts_with(command.trim_end_matches('.')),
@@ -984,7 +995,7 @@ fn test_long_background_command_truncates_within_its_column() {
     );
     assert_eq!(
         find_in_row(&buffer, area, row, glyphs::STOP),
-        Some(columns::STOP_X),
+        Some(columns::CONTENT_X + columns::STOP_X),
         "the [stop] control keeps its pinned column: {text:?}"
     );
 }
@@ -1088,7 +1099,7 @@ fn test_multibyte_identifiers_truncate_on_a_character_boundary() {
     }
 
     // The label column is still exactly `LABEL_W` wide, so nothing split.
-    let label_x = columns::MARKER_W + columns::ID_W + columns::GAP_W;
+    let label_x = columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W;
     let row = find_row(&buffer, area, glyphs::BG_HEADING)
         .map_or(area.height - 1, |heading| heading.saturating_add(1));
     let text = row_text(&buffer, area, row);

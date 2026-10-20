@@ -20,8 +20,7 @@
 
 use std::time::Duration;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use ragent_agent::event::{Event, FinishReason};
 use ragent_agent::mcp::{McpServer, McpStatus};
@@ -89,13 +88,14 @@ fn shift_key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::SHIFT)
 }
 
-const fn left_down(col: u16, row: u16) -> MouseEvent {
-    MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: col,
-        row,
-        modifiers: KeyModifiers::empty(),
-    }
+/// Render one frame so the renderer publishes the cursor row maps the window
+/// key arms consult.
+fn render_window(app: &mut App) {
+    let backend = ratatui::backend::TestBackend::new(170, 44);
+    let mut terminal = ratatui::Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, app))
+        .expect("render frame");
 }
 
 fn task_entry(id: &str, status: TaskStatus) -> TaskEntry {
@@ -983,11 +983,13 @@ async fn space_on_a_running_task_suspends_and_on_a_suspended_task_resumes() {
         task_entry("t-suspended", TaskStatus::Suspended),
     ];
 
-    app.selected_agent_index = Some(1);
+    // Cursor ordinal 0 = t-running.
+    app.move_agents_cursor(1);
     app.handle_key_event(key(KeyCode::Char(' '))).await;
     assert_eq!(app.active_tasks.len(), 2, "suspend is fire-and-forget");
 
-    app.selected_agent_index = Some(2);
+    // Cursor ordinal 1 = t-suspended.
+    app.move_agents_cursor(1);
     app.handle_key_event(key(KeyCode::Char(' '))).await;
     assert!(app.show_agents_window, "the panel stays open");
     assert_eq!(app.active_tasks.len(), 2);
@@ -998,25 +1000,40 @@ async fn shift_k_on_a_task_row_dispatches_a_kill() {
     let mut app = new_app("s1");
     app.show_agents_window = true;
     app.active_tasks = vec![task_entry("t-kill", TaskStatus::Running)];
-    app.selected_agent_index = Some(1);
+    render_window(&mut app);
+    app.move_agents_cursor(1);
 
     app.handle_key_event(shift_key(KeyCode::Char('K'))).await;
     assert_eq!(app.active_tasks.len(), 1, "the local row is untouched");
+    app.row_action_confirm_cancel();
+    assert!(!app.row_action_confirm_open(), "Esc dismisses the dialog");
 
-    // With no selection the key is a no-op.
-    app.selected_agent_index = None;
+    // With the rows gone the cursor is stale: Del/Shift+K dispatch nothing.
+    app.active_tasks.clear();
+    app.needs_redraw = false;
+    app.status = "sentinel".to_string();
     app.handle_key_event(shift_key(KeyCode::Char('K'))).await;
-    assert_eq!(app.active_tasks.len(), 1);
+    assert_eq!(app.agents_cursor_subagent, Some(0));
+    assert_eq!(app.active_tasks.len(), 0);
+    assert!(
+        !app.row_action_confirm_open(),
+        "a stale range arms no dialog"
+    );
+    assert_eq!(
+        app.status, "agents: selected row is gone",
+        "a stale cursor reports the consumed no-op (FR-069)"
+    );
 }
 
 #[tokio::test]
-async fn agents_panel_button_click_cancels_a_background_task() {
+async fn agents_panel_background_task_survives_the_key_surface() {
+    // The row-mouse model is retired: the keyboard cursor never covers the
+    // background-shell rows (they are service-terminated, not cursorable), so
+    // a background task stays untouched by the Agents-window keys (FR-016's
+    // key-surface re-expression).
     let mut app = new_app("s1");
-    app.active_agents_area = Rect::new(0, 0, 80, 20);
-    app.agent_row_button_areas = vec![Rect::new(1, 1, 6, 1)];
-    app.agent_row_button_task_ids = vec!["bg-1".to_string()];
-    app.agent_row_kill_areas = vec![Rect::new(10, 1, 6, 1)];
-    app.agent_row_kill_task_ids = vec!["bg-1".to_string()];
+    app.show_agents_window = true;
+    app.active_tasks = vec![task_entry("t-work", TaskStatus::Running)];
     app.bg_tasks = vec![BgTaskView {
         id: "bg-1".to_string(),
         session_id: "s1".to_string(),
@@ -1025,12 +1042,19 @@ async fn agents_panel_button_click_cancels_a_background_task() {
         created_at: chrono::Utc::now(),
         completed_at: None,
     }];
+    render_window(&mut app);
 
-    app.handle_mouse_event(left_down(2, 1));
-    assert_eq!(app.bg_tasks.len(), 1, "cancel is fire-and-forget");
-
-    app.handle_mouse_event(left_down(11, 1));
-    assert_eq!(app.bg_tasks.len(), 1, "the kill column is fire-and-forget");
+    // Move the cursor down onto the sub-agent row; the background task is not
+    // part of the cursor range.
+    app.move_agents_cursor(1);
+    assert_eq!(app.agents_cursor_subagent, Some(0));
+    assert_eq!(
+        app.agents_subagent_task_ids.first().map(String::as_str),
+        Some("t-work"),
+        "the cursor range names sub-agent rows only (FR-016)"
+    );
+    assert_eq!(app.bg_tasks.len(), 1, "no cancellation was dispatched");
+    assert_eq!(app.bg_tasks[0].status, "running");
 }
 
 // ===========================================================================

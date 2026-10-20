@@ -666,7 +666,11 @@ Fix:
 ```
 
 This will prompt for confirmation, then deactivate all active teammates and
-clear the team state. Use with caution — any in-progress work will be lost.
+clear the team state. Each active teammate is shut down through the unified
+immediate-shutdown path (agent loops and poll joins aborted, the member marked
+`Stopped` on disk) before the team directory is removed, so no background write
+can recreate the directory mid-teardown. Use with caution — any in-progress
+work will be lost.
 
 ### "parse tasks.json: EOF while parsing"
 

@@ -7,14 +7,16 @@ status: accepted
 **Spec:** [SPEC.md](SPEC.md) · **Plan:** [PLAN.md](PLAN.md)
 
 This is a **manual** test plan. Every case is executed by a human in a real terminal
-session. Where a case needs a running sub-agent, a background shell task, a team, or
-mouse support, the prerequisite is listed before the steps. This document contains no
+session. Where a case needs a running sub-agent, a background shell task, or a team,
+the prerequisite is listed before the steps. This document contains no
 automated test code and no reference to any test harness.
 
-The panel is operated **both by keyboard and by mouse**. Every key press is written
-explicitly, in order, and the exact text to type into each field is given as
-**Test data**. Keys are written as `Space`, `Shift+K`, `Alt+Down`, `Alt+Up`, `Enter`,
-`Esc`, and literal characters in `backticks`. A mouse step names the button and the
+The panel is operated **keyboard-first through a block cursor**; the mouse keeps only
+the scroll and chrome surfaces (window buttons, close buttons, wheel scrolling,
+scrollbar-gutter dragging). Every key press is written explicitly, in order, and the
+exact text to type into each field is given as **Test data**. Keys are written as
+`Space`, `Del`, `Up`, `Down`, `PgUp`, `PgDn`, `Alt+Down`, `Alt+Up`, `Enter`, `Esc`,
+and literal characters in `backticks`. A mouse step names the button and the
 exact target: `left-click the Agents button beside the message input`.
 
 ## Prerequisites
@@ -23,8 +25,11 @@ exact target: `left-click the Agents button beside the message input`.
    expected version string.
 2. **Configure a model.** Cases that need a live turn require a working provider (a
    local Ollama model is fine) and a confirmed short response.
-3. **Confirm mouse support.** Run the session in a terminal that reports mouse events.
-   TC-013 is the keyboard-only case and does not require mouse reporting.
+3. **Mouse support is optional.** The windows are keyboard-first: all row interaction
+   is keyboard-owned (cursor + `Space`/`Del`/`Enter`) and scrolling has keyboard
+   bindings (PgUp/PgDn). The mouse is used only for the window buttons, the close
+   buttons, wheel scrolling and scrollbar-gutter dragging (TC-027, TC-034); TC-013 is
+   the keyboard-only case and needs no mouse reporting at all.
 4. **Prepare a scratch root.** Create `~/scratch/agentui-tests/` and run every session
    from inside it so the project `.ragent/` directory is local to the test.
 5. **Know how to produce a background shell task.** Ask the agent to run a long command,
@@ -101,11 +106,13 @@ Throughout, "status line" means the line immediately above the input area, and
 **Test data:** none
 
 **Expected results:**
-- Step 2: the popup occupies roughly 90% of the width and 70% of the height, centred.
+- Step 2: the popup occupies roughly 70% of the width and 70% of the height, centred.
 - Step 3-4: the popup stays inside the terminal rectangle; nothing is clipped off
   screen; the table area is at least one row tall.
 - Step 5: a bordered ` Close ` button sits in the bottom-right corner of the window's
-  inner area and is at most 10 columns wide and 3 rows tall.
+  inner area and is at most 10 columns wide and 3 rows tall; the key legend reads
+  `Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open` in the band
+  to its left (FR-077).
 
 ---
 
@@ -126,7 +133,8 @@ Throughout, "status line" means the line immediately above the input area, and
 - Step 2: the second line starts with a green `*`, then the literal `lead` in the id
   column, the configured agent name in bold green, the literal `primary` in the type
   column, `-` in the elapsed column, and a numeric live step count.
-- Step 3: the primary row shows no action controls.
+- Step 3: the primary row shows no action glyphs - and it never becomes the cursor row
+  (FR-033).
 
 ---
 
@@ -150,7 +158,8 @@ still running.
 - Step 3: each row shows a status dot, the last 8 characters of the task id, the agent
   name (at most 32 columns), `bg` or `fg` in the type column, a compact elapsed time and
   a live step count that increases over time.
-- Step 3: the running row is yellow and paints `[stop]` and `[x]` at the right edge.
+- Step 3: the running row is yellow and paints `[stop]` and `[x]` at the right edge
+  (status glyphs; the actions come from the cursor keys).
 - Step 4: the finished sub-agent's row is gone from the list.
 
 ---
@@ -165,8 +174,9 @@ that is also running a sub-agent.
 1. Spawn a sub-agent using the custom agent definition.
 2. Spawn a sub-agent from inside a teammate session.
 3. Open the Agents window.
-4. Suspend a running sub-agent (see TC-010), then observe its row.
-5. Kill a running sub-agent and observe the row immediately after confirming.
+4. Move the cursor onto a running sub-agent and press `Space`, then observe its row.
+5. Kill a running sub-agent (`Del` + `Yes`) and observe the row immediately after
+   confirming.
 
 **Test data:** none
 
@@ -198,142 +208,153 @@ that is also running a sub-agent.
 - Step 3: a `Background shell tasks` heading appears, followed by one row per task.
 - Step 3: each row shows a status dot, a short identifier, the command truncated to 40
   columns, the literal `bg`, a compact elapsed time, and both `[stop]` and `[x]`
-  controls.
+  status glyphs (indicators only - the section is outside the cursor, FR-037).
 
 ---
 
-### TC-008 - Clicking a row opens that agent's output view
+### TC-008 - Opening a row's output view with the cursor
 
 **Preconditions:** Agents window open with a running sub-agent.
 
 **Steps:**
-1. Left-click the primary agent row.
-2. Observe the surface that opens and its label.
-3. Close that view and reopen the Agents window.
-4. Left-click a running sub-agent row.
+1. Press `Down` to place the cursor on a running sub-agent row.
+2. Press `Enter` and observe the surface that opens and its label.
+3. Close that view (Esc or the overlay's ` Close ` button) and reopen the Agents
+   window if needed.
+4. Move the cursor to another sub-agent row and press `Enter` again.
 5. Observe the label on the opened view.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2: an output view opens for the primary session and is labelled `primary`.
-- Step 4-5: an output view opens for that task's child session, labelled with the agent
-  name and the short task id.
+- Step 2: an output view opens for that task's child session, labelled with the agent
+  name and the short task id (FR-034).
+- Step 4-5: the newly opened view labels the row under the cursor. The primary row is
+  never reachable by the cursor (FR-033), so no key opens the primary view.
 
 ---
 
-### TC-009 - Sub-agent suspend, resume and kill from the mouse
+### TC-009 - Sub-agent suspend, resume and kill on the cursor row
 
 **Preconditions:** Agents window open with a running sub-agent.
 
 **Steps:**
-1. Left-click the `[stop]` control on the running sub-agent row.
-2. Confirm the dialog if one appears, choosing `Yes`.
+1. Press `Down` to place the cursor on the running sub-agent row.
+2. Press `Space`.
 3. Observe the row and the agent's output view.
-4. Left-click the `>` control on the same row.
-5. Confirm if asked.
-6. Left-click the `[x]` control on the same row and choose `No`.
-7. Left-click `[x]` again and choose `Yes`.
-8. Observe the window.
+4. Press `Space` again.
+5. Press `Del`, read the confirmation, and dismiss it with `No` (or `Esc`).
+6. Press `Del` again and choose `Yes`.
+7. Observe the window.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2-3: a yes/no confirmation naming the task is presented first; on `Yes` the task
-  is suspended, the row turns dark grey, gains ` [||]`, and its control becomes `>`.
-- Step 4-5: the task resumes, the row returns to yellow with `[stop]`, and its step
-  count starts increasing again.
-- Step 6: choosing `No` dismisses the dialog and changes nothing.
-- Step 7-8: choosing `Yes` terminates the task; the row is marked terminating and then
+- Step 2: no dialog; the task suspends directly (FR-035): the row turns dark grey,
+  gains ` [||]`, and its control glyph becomes `>`. The status line reports the landed
+  row (FR-043).
+- Step 4: the task resumes (FR-035): the row returns to yellow with `[stop]`, and its
+  step count starts increasing again.
+- Step 5: dismissing the kill dialog (FR-036) changes nothing.
+- Step 6: choosing `Yes` terminates the task; the row is marked terminating and then
   removed. The Agents window stays open.
 
 ---
 
-### TC-010 - Keyboard suspend, resume and kill on the selected agent row
+### TC-010 - Cursor navigation, paging and key consumption
 
-**Preconditions:** Agents window open; a running sub-agent row has been selected by
-left-clicking it once.
+**Preconditions:** Agents window open with more rows than fit the viewport.
 
 **Steps:**
-1. Press `Space` with the sub-agent row selected.
-2. Confirm if prompted.
-3. Press `Space` again.
-4. Press `Shift+K`.
-5. Confirm with `Yes`.
-6. Open a text editor field (the message input) and confirm no stray space or `k` was
-   inserted at any point.
+1. Press `Down` (nothing selected yet) and read the status line.
+2. Press `Up`.
+3. Press `Up` again at the top row.
+4. Press `PgDn`, then `PgUp`.
+5. Open the message input and confirm it stayed empty throughout.
 
 **Test data:** none
 
 **Expected results:**
-- Step 1-2: the selected task suspends; the row shows the suspended styling.
-- Step 3: the task resumes.
-- Step 4-5: the task is terminated after confirmation.
-- Step 6: the input buffer contains no characters typed by `Space` or `Shift+K` — both
-  keys were consumed by the window.
+- Step 1: the cursor starts on the first row and the status line reports it
+  (`agents: <short id>`, FR-041, FR-043).
+- Step 2: the cursor moves to the last row (start-at-end on a first up-press).
+- Step 3: the cursor clamps at the last row (FR-041).
+- Step 4: the cursor pages one viewport per press, clamped, and the landed row is
+  painted (FR-042, FR-078).
+- Step 5: the input buffer contains no characters - every window key was consumed
+  (FR-055).
 
 ---
 
-### TC-011 - Primary agent is protected from Space and Shift+K
+### TC-011 - The primary row is outside the cursor
 
-**Preconditions:** Agents window open.
+**Preconditions:** Agents window open with at least one sub-agent row.
 
 **Steps:**
-1. Left-click the primary agent row so it becomes the selected row.
-2. Press `Space`.
-3. Read the status line.
-4. Press `Shift+K`.
-5. Read the status line.
-6. Confirm the primary turn is still running.
+1. Press `Up` repeatedly to drive the cursor to the first sub-agent row.
+2. Read the status line.
+3. Press `Up` once more.
+4. Read the status line; try `Del` and `Space`.
+5. Confirm the primary turn is still running and the primary row never highlights.
 
 **Test data:** none
 
 **Expected results:**
-- Step 3: the status line reads `Cannot suspend primary agent`.
-- Step 5: the status line reads `Cannot kill primary agent`.
-- Step 6: no suspension or termination occurred; the running turn is untouched and the
+- Step 2: the status line names the first sub-agent row.
+- Step 3-4: the cursor clamps at the first sub-agent row; the status line keeps naming
+  that row and no primary-refusal text appears because the primary row is simply not
+  in the cursor list (FR-033, FR-067).
+- Step 5: no suspension or termination occurred; the running turn is untouched and the
   chat continues to stream.
 
 ---
 
-### TC-012 - Background shell task controls
+### TC-012 - Background shell task rows
 
 **Preconditions:** Agents window open with at least one live background shell task.
 
 **Steps:**
-1. Left-click the `[stop]` control on the background task row.
-2. Confirm if prompted.
-3. Observe the task in the shell.
-4. Repeat with the `[x]` control on another background task, first answering `No` and
-   then `Yes`.
+1. Observe the background task row's `[stop]` and `[x]` glyphs while the task runs.
+2. Move the cursor to the first sub-agent row and press `Up` again, trying to reach
+   the background section.
+3. Wait for the background task to complete (or cancel it from the surface that
+   spawned it).
+4. Observe the row and the Agents window.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2-3: after confirmation the background task is cancelled through the background
-  task service; the process stops.
-- Step 4: `No` leaves the task running; `Yes` cancels it. In both cases the panel does
-  not block and the chat remains responsive.
+- Step 1: the glyphs paint while the task is live and disappear when it reaches a
+  terminal status.
+- Step 2: the cursor clamps at the first sub-agent row (FR-037): the background
+  section is outside the cursor, so no key can place the cursor on a background row.
+- Step 3-4: completion (or cancellation) removes or re-statuses the row through its
+  event, exactly as for sub-agent rows; the window stays responsive.
 
 ---
 
 ### TC-013 - Keyboard-only operation (no mouse reporting)
 
 **Preconditions:** A terminal session with mouse reporting unavailable. Agents window
-can be opened by mouse beforehand if needed, or is already open.
+opened beforehand or already open.
 
 **Steps:**
-1. With a sub-agent row selected, press `Space`.
-2. Press `Shift+K` and confirm with `Enter` on `Yes`.
-3. Press `Esc` while the confirmation is open.
-4. Observe the input buffer.
+1. Press `Down` to place the cursor on a sub-agent row.
+2. Press `Space` to suspend it, then `Space` again to resume.
+3. Press `Del`, read the confirmation, then press `Esc`.
+4. Press `Del` again and confirm with `Enter` on `Yes`.
+5. Press `PgDn`, then `PgUp`.
+6. Press `Enter` with the cursor on a row.
+7. Observe the input buffer.
 
 **Test data:** none
 
 **Expected results:**
-- Steps 1-2: every action is reachable without the mouse.
+- Steps 1-6: every action, including paging, is reachable without the mouse
+  (FR-041, FR-042, FR-035, FR-036, FR-034).
 - Step 3: `Esc` dismisses the confirmation without performing the action.
-- Step 4: no character from any of the consumed keys appears in the input buffer.
+- Step 7: no character from any of the consumed keys appears in the input buffer
+  (FR-055).
 
 ---
 
@@ -355,7 +376,9 @@ Agents window can also open.
 **Expected results:**
 - Step 2: a centred modal with full borders and a bold blue ` Teams ` title; the table
   title reads ` Team: <name>  (lead + 2 teammates) ` for two teammates and
-  `... (lead + 1 teammate) ` for exactly one.
+  `... (lead + 1 teammate) ` for exactly one; the key legend in the band left of
+  ` Close ` reads `Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down
+  Enter open` (FR-077).
 - Step 3-4: the Teams window closes and the Agents window opens — the two are never
   shown at once.
 - Step 5-6: the Teams window reopens and the Close button dismisses it, leaving every
@@ -381,7 +404,8 @@ Agents window can also open.
 - Step 3: the lead row starts with a green `*`, shows the short lead session id, the
   configured agent name, the literal `active` in the status column, the literal `lead`
   in the model column, an elapsed time derived from the session start, a live step
-  count, and `-` in claimed and done.
+  count, and `-` in claimed and done. The lead row is outside the cursor range
+  (FR-039).
 - Step 4: each teammate row is prefixed with a branch connector, shows the short agent
   id and a `<name>-<short id>` label, a status word, a model value, elapsed, steps,
   claimed, done, sent and recv. Zero sent/recv render as `-`; non-zero counts are
@@ -464,7 +488,8 @@ members yet.
 
 **Steps:**
 1. Observe the row directly below the status bar.
-2. Left-click a teammate row in the Teams window.
+2. Move the cursor onto a teammate row in the Teams window and press `Enter` to focus
+   it.
 3. Observe the strip.
 
 **Test data:** none
@@ -477,16 +502,16 @@ members yet.
 
 ---
 
-### TC-020 - Clicking a teammate routes input to that teammate
+### TC-020 - Focusing a teammate routes input to that teammate
 
 **Preconditions:** Active team with two teammates; Teams window open.
 
 **Steps:**
-1. Left-click the first teammate row.
-2. Observe the input border title and the status line.
+1. Press `Down` to place the cursor on the first teammate row.
+2. Press `Enter`, then observe the input border title and the status line.
 3. Type `please report your progress` into the input and press `Enter`.
 4. Observe the lead session and the teammate.
-5. Left-click the lead row.
+5. Press `Alt+Down` past the last member so focus clears.
 6. Observe the input border title and the status line.
 7. Type `hello lead` and press `Enter`.
 
@@ -494,11 +519,10 @@ members yet.
 
 **Expected results:**
 - Step 2: the input border is titled ` -> <name> (focused) ` in bold yellow; the status
-  line reads `team: focused -> <name>`; the teammate's output view is open.
+  line reads `team: focused -> <name>`; the teammate's output view is open (FR-038).
 - Step 3-4: the message is delivered to that teammate's mailbox, not the lead session;
-  the teammate responds in its own output view.
-- Step 5-6: focus clears, the border title returns to normal, and the status line reads
-  `focus: lead (you)`.
+  the teammate responds in its own output view (FR-058).
+- Step 5-6: focus clears (FR-046), the border title returns to normal.
 - Step 7: the message goes to the lead session as usual.
 
 ---
@@ -525,46 +549,48 @@ members yet.
 
 ---
 
-### TC-022 - Space and Shift+K on a focused teammate
+### TC-022 - Space and Del on the cursor teammate
 
-**Preconditions:** Teams window open; a teammate is focused.
+**Preconditions:** Teams window open; the cursor sits on a working (not suspended)
+teammate row.
 
 **Steps:**
-1. Press `Space`.
-2. Confirm if prompted.
-3. Observe the teammate row.
-4. Press `Shift+K` on another focused teammate and confirm.
-5. Verify no character leak into the input buffer.
+1. Press `Space`, read the dialog, choose `Yes`.
+2. Observe the teammate row.
+3. Move the cursor to another teammate, press `Del`, and confirm with `Yes`.
+4. Verify no character leak into the input buffer.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2-3: a request for graceful shutdown of that teammate is made and the row moves
-  through `stopping` to `stopped`.
-- Step 4: the second teammate shuts down cleanly.
-- Step 5: neither key inserted a character into the input buffer.
+- Step 1-2: the suspend confirmation arms (FR-040); on `Yes` the member suspends, the
+  row shows the suspended status word and its `[stop]` glyph becomes `>`.
+- Step 3: the shutdown confirmation arms; on `Yes` the teammate shuts down gracefully
+  and the row moves through `stopping` to `stopped`.
+- Step 4: neither key inserted a character into the input buffer (FR-055).
 
 ---
 
-### TC-023 - Teammate [stop] and [x] controls with confirmation
+### TC-023 - Teammate suspend/resume/shutdown with confirmation
 
 **Preconditions:** Teams window open with a working teammate.
 
 **Steps:**
-1. Left-click the `[stop]` control on the working teammate row.
-2. Answer `No`.
-3. Left-click `[stop]` again and answer `Yes`.
-4. Left-click `[stop]` on the now-suspended row and answer `Yes`.
-5. Left-click `[x]` on a teammate and answer `Yes`.
+1. Move the cursor onto the working teammate row, press `Space`, and answer `No`.
+2. Press `Space` again and answer `Yes`.
+3. Press `Space` on the now-suspended row (it resumes without a dialog).
+4. Press `Del` on a teammate and answer `Yes`.
 
 **Test data:** none
 
 **Expected results:**
-- Step 1-2: a yes/no confirmation naming the teammate and the suspend action appears;
-  `No` dismisses it and nothing changes.
-- Step 3: the teammate suspends and its status word becomes `suspended`.
-- Step 4: the same control resumes it and the status returns to `working` or `idle`.
-- Step 5: graceful shutdown is requested and the row progresses to `stopped`.
+- Step 1-2: a yes/no confirmation naming the teammate and the suspend action appears
+  (FR-040); `No` dismisses it and nothing changes; `Yes` suspends the teammate and its
+  status word becomes `suspended`.
+- Step 3: the suspended member resumes directly, without a dialog, and the status
+  returns to `working` or `idle` (FR-040's direct-resume direction).
+- Step 4: graceful shutdown is requested through the confirm dialog and the row
+  progresses to `stopped`.
 
 ---
 
@@ -624,7 +650,7 @@ members yet.
 
 ---
 
-### TC-027 - Scrolling a long list
+### TC-027 - Scrolling and paging a long list
 
 **Preconditions:** Agents window open with more sub-agent and background rows than fit
 in the popup (spawn enough sub-agents to overflow the table).
@@ -634,21 +660,26 @@ in the popup (spawn enough sub-agents to overflow the table).
    edge.
 2. Scroll the wheel down over the popup body.
 3. Note the newly visible rows.
-4. Left-click the `[stop]` control of a row that only became visible after scrolling.
-5. Confirm if prompted.
+4. Press `PgDn` and confirm the cursor lands on a newly visible row and the viewport
+   followed it.
+5. Click the scrollbar gutter near the bottom of the track, drag, and release.
+6. Press `Down` at the bottom row.
 
 **Test data:** none
 
 **Expected results:**
-- Step 1: a scrollbar is present because the content exceeds the viewport.
+- Step 1: a scrollbar is present because the content exceeds the viewport (FR-059).
 - Step 2-3: the rows shift and later rows become reachable; the offset clamps at the
-  maximum and does not scroll into blank space.
-- Step 4-5: the click resolves to the control painted on that cell — the action targets
-  the row the user actually clicked, not a row from the unscrolled list.
+  maximum and does not scroll into blank space (FR-076).
+- Step 4: the cursor pages one viewport and the landed row paints at the viewport edge
+  (FR-042, FR-078).
+- Step 5: the click jumps the thumb to that position and the drag moves it; release
+  ends the drag (FR-076).
+- Step 6: the cursor clamps at the last row.
 
 ---
 
-### TC-028 - Blank popup cells consume clicks; stale rows never panic
+### TC-028 - Popup clicks outside chrome are consumed; stale cursors never panic
 
 **Preconditions:** Agents window open with a table that has empty area below the last
 row.
@@ -656,19 +687,21 @@ row.
 **Steps:**
 1. Left-click a blank cell in the empty part of the popup table area.
 2. Observe the chat surface beneath.
-3. Kill a row (confirming `Yes`) and immediately left-click the space where its `[x]`
-   was.
-4. Repeat rapidly several times on different rows.
-5. Watch the process for a panic message or a crash dump.
+3. Click on a painted `[stop]`/`[x]` control cell.
+4. Kill a row (cursor `Del`, confirming `Yes`) and press `Del` again on the stale
+   ordinal.
+5. Repeat rapidly several times on different rows.
+6. Watch the process for a panic message or a crash dump.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2: the click is consumed; nothing on the surface beneath reacts (no cursor move,
-  no accidental focus, no message).
-- Step 3-4: the stale click is ignored without panicking and without mutating unrelated
-  state; no other task is affected.
-- Step 5: no panic, no crash marker, no crash dump file is produced.
+- Step 2: the click is consumed; nothing on the surface beneath reacts (FR-070).
+- Step 3: the click is consumed without effect - the control glyph is a status
+  indicator, not a button (FR-071, FR-076).
+- Step 4-5: the stale ordinal is a consumed no-op: the status line reports it and
+  nothing is dispatched; no other task is affected (FR-045, FR-069).
+- Step 6: no panic, no crash marker, no crash dump file is produced.
 
 ---
 
@@ -680,7 +713,7 @@ with background commands).
 **Steps:**
 1. While the turn is streaming, left-click the Agents button.
 2. Left-click the Teams button.
-3. Left-click a `[stop]` control, answer `Yes`.
+3. Move the cursor onto a row, press `Space` (or `Del`) and answer the dialog `Yes`.
 4. Left-click ` Close `.
 5. Observe the chat stream throughout.
 
@@ -702,15 +735,16 @@ way.
 1. Shrink the terminal to the smallest size you normally use (for example 60 columns by
    18 rows).
 2. Open each window in turn.
-3. Attempt to click ` Close ` and one `[stop]` control.
+3. Attempt to click ` Close `; check the legend band and the cursor row are still
+   readable.
 
 **Test data:** none
 
 **Expected results:**
 - Step 2: both popups stay inside the terminal rectangle, are fully framed, and their
-  titles are readable.
-- Step 3: both controls are reachable and clickable; nothing is drawn outside the
-  terminal or wrapped over the border.
+  titles are readable (NFR-010).
+- Step 3: the Close button stays clickable; the legend clips instead of wrapping; the
+  cursor still navigates and every key still reaches the window.
 
 ---
 
@@ -720,7 +754,7 @@ way.
 task.
 
 **Steps:**
-1. Let the last task finish, or kill it from the panel.
+1. Let the last task finish, or kill it from the panel (`Del` + `Yes`).
 2. Observe the window and the Agents button.
 
 **Test data:** none
@@ -731,22 +765,152 @@ task.
 
 ---
 
-### TC-032 - Selection and focus survive a window reopen
+### TC-032 - Cursor and focus survive a window reopen
 
 **Preconditions:** At least one sub-agent row and an active team with a focused
 teammate.
 
 **Steps:**
-1. Select a sub-agent row by left-clicking it, then close the Agents window with
-   ` Close `.
+1. Move the cursor onto a sub-agent row, then close the Agents window with ` Close `.
 2. Reopen the Agents window and press `Space`.
-3. Close the Teams window with a teammate focused, reopen it, and press `Alt+Down`.
+3. Close the Teams window with the cursor on a member, reopen it, and press `Alt+Down`.
 4. Observe which teammate becomes focused.
 
 **Test data:** none
 
 **Expected results:**
-- Step 2: the previously selected row is still the selected row, so `Space` acts on that
-  task.
+- Step 2: the preserved cursor ordinal still names the same task (FR-065), so `Space`
+  acts on that row; if the row vanished while the window was closed, `Space` is a
+  consumed no-op and the status line reports the stale selection (FR-045).
 - Step 4: focus resumes from the previously focused teammate rather than starting again
   from the first member.
+---
+
+### TC-033 - Agents table content margin
+
+**Preconditions:** Agents window open in a 160x44 terminal with at least one live
+sub-agent or background shell task.
+
+**Steps:**
+1. Observe the table body and the control columns.
+2. Confirm the cursor band still spans the full table width when placed on a row.
+
+**Test data:** none
+
+**Expected results:**
+- Step 1: every painted line (header, primary row, sub-agent rows, background shell
+  rows) indents five blank columns behind the table's left edge, while the
+  `[stop]`/`[x]` columns keep their documented 70/77 positions in the indented row
+  space and the scrollbar stays at the right edge.
+- Step 2: the cursor band starts at the table's left edge (not at column 5 of the row
+  text) and covers the full width, control columns included.
+
+Automated coverage: `test_agents_window_table` (positions re-derived with
+`columns::CONTENT_X`).
+
+---
+
+### TC-034 - Output view close bar and wheel ownership
+
+**Preconditions:** The output view overlay open (cursor `Enter` on an agent row or
+teammate row); the Agents window open beneath it for the wheel case.
+
+**Steps:**
+1. Observe the overlay's bottom-right corner.
+2. Click the ` Close ` button.
+3. Reopen the overlay, place the mouse over its centre, and roll the wheel up.
+4. With the overlay open, press `Up`/`Down` and then `Esc`.
+
+**Test data:** none
+
+**Expected results:**
+- Step 1: a bordered ` Close ` button sits pinned to the overlay's bottom-right corner,
+  clamped to at most 10 columns and 3 rows, with one separator row between the content
+  and the button.
+- Step 2: the overlay closes, the selected agent session and index clear with it, and
+  the Agents window beneath stays open exactly as it was.
+- Step 3: the wheel scrolls the overlay's content (the popup beneath does not move),
+  so the overlay is no longer pinned to its newest page.
+- Step 4: while the overlay is open the window cursor keys are not consumed by the
+  popup beneath; `Esc` closes the overlay through the same dismissal transition.
+
+Automated coverage: `test_output_view_close_bar` (9 tests).
+
+---
+
+### TC-035 - Block cursor movement, paging and viewport follow
+
+**Preconditions:** Agents and Teams windows each with more rows than the viewport
+(spawn enough sub-agents / teammates to overflow).
+
+**Steps:**
+1. Press `Down` with no cursor: the cursor appears on the first row.
+2. Press `Up`: the cursor appears on the last row.
+3. Press `Up`/`Down` repeatedly to reach each end and one past it.
+4. Press `PgDn` twice, then `PgUp` twice.
+5. Observe the painted cursor band and the scrollbar thumb on every step.
+6. Repeat on the Teams window.
+
+**Test data:** none
+
+**Expected results:**
+- Step 1-2: start-at-end behaviour on first press (FR-041).
+- Step 3: the cursor clamps at both ends without reporting an error.
+- Step 4: each page moves one viewport, clamped (FR-042).
+- Step 5: the cursor row always paints as a full-width reversed band, and the viewport
+  follows when the cursor leaves the visible slice (FR-078); the scrollbar thumb
+  tracks the offset.
+- Step 6: identical behaviour in the Teams window over the teammate rows.
+
+Automated coverage: `test_agents_teams_cursor` (navigation, paging, clamps,
+scroll-into-view on both windows).
+
+---
+
+### TC-036 - Row-action keys and the key legend
+
+**Preconditions:** Agents window open with a live sub-agent; the Teams window likewise.
+
+**Steps:**
+1. Read the legend band left of ` Close ` in both windows.
+2. On the Agents window: `Space` (suspend), `Space` (resume), `Del` + `Yes` (kill).
+3. On the Teams window: `Space` + `Yes` (suspend), `Space` (resume, no dialog),
+   `Del` + `Yes` (shut down), `Enter` (focus + overlay).
+4. Confirm a repeated `Del` while the dialog is open is absorbed.
+
+**Test data:** none
+
+**Expected results:**
+- Step 1: the legend reads `Up/Down select  PgUp/PgDn page  Space stop/resume  Del
+  kill  Enter open` (Agents) and `... Del shut down ...` (Teams), dim, left of Close,
+  clipped to the band width (FR-077).
+- Step 2-3: each key drives the documented action on the cursor row (FR-035, FR-036,
+  FR-038, FR-040) and is consumed (FR-055).
+- Step 4: the open dialog absorbs further row-action keys.
+
+Automated coverage: `test_agents_teams_cursor` (Space/Del/Enter actions, status
+splits, stale no-ops) + `test_row_action_confirm` (dialog answers).
+
+---
+
+### TC-037 - Mouse surface limited to scroll and chrome
+
+**Preconditions:** Agents window open.
+
+**Steps:**
+1. Left-click a painted sub-agent row body.
+2. Left-click the `[stop]`/`[x]` glyphs of a live row.
+3. Left-click the scrollbar gutter, drag, release.
+4. Wheel over the popup body.
+5. Left-click ` Close `.
+6. Confirm no text was selected in the chat beneath from any of the clicks.
+
+**Test data:** none
+
+**Expected results:**
+- Step 1-2: every click inside the popup body is consumed without effect - no cursor
+  move, no action, no focus change (FR-076, FR-070, FR-071).
+- Step 3-4: the gutter drag moves the offset and the wheel scrolls it; nothing else
+  reacts.
+- Step 5: the window closes.
+- Step 6: the chat pane is untouched; no selection or caret change occurred.

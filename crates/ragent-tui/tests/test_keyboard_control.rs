@@ -1,29 +1,27 @@
 //! Tests for the Agents/Teams window keyboard control surface (spec `agentui`
-//! T-011).
+//! T-011, keyboard-first rework).
 //!
-//! `test_row_action_confirm.rs` pins the dialog and its trigger points via the
-//! mouse and dialog internals; `test_row_action_dispatch.rs` pins the
-//! dispatches. This file pins the **keyboard surface** end to end through
-//! `App::handle_key_event`, the path a keyboard-only user drives (TC-010,
-//! TC-011, TC-013, TC-022):
+//! `test_row_action_confirm.rs` pins the dialog; `test_row_action_dispatch.rs`
+//! pins the dispatches; the hit-rect rework moved the keyboard arms from the
+//! retired `selected_agent_index` to the block cursor
+//! (`agents_cursor_subagent` / `teams_cursor_teammate`). This file pins the
+//! **keyboard surface** end to end through `App::handle_key_event`:
 //!
-//! - FR-041: `Space` on a selected sub-agent row suspends it, on a suspended
+//! - FR-041: `Space` on the cursor sub-agent row suspends it, on a suspended
 //!   row resumes it, is consumed (no space reaches the input buffer), and the
 //!   request line is attributed to the child session (NFR-008);
-//! - FR-042: `Space` on the primary row sets `Cannot suspend primary agent`
-//!   and suspends nothing;
-//! - FR-043: `Shift+K` on a selected sub-agent row confirms first and the
-//!   confirmed answer drives the real `AgentManager` registry entry to
+//! - FR-043: `Shift+K`/`Del` on the cursor sub-agent row confirms first and
+//!   the confirmed answer drives the real `AgentManager` registry entry to
 //!   `Terminating` (FR-036's keyboard twin);
-//! - FR-044: `Shift+K` on the primary row sets `Cannot kill primary agent`
-//!   and terminates nothing;
-//! - FR-045: `Space` and `Shift+K` on a focused teammate arm the graceful
-//!   shutdown dialog and the confirmed answer drives the real `TeamManager`
-//!   (the on-disk store shows `ShuttingDown`);
-//! - FR-055: with a window open both keys are consumed before the input
-//!   buffer sees them - including the no-selection and no-focus corners;
-//! - FR-067: no key path can dispatch a suspend/kill for the primary agent
-//!   or a shutdown for the lead.
+//! - FR-042/FR-044 re-expressed: the cursor range covers sub-agent rows only,
+//!   so no key path can reach the primary agent at all (FR-067);
+//! - FR-040: `Space` on the cursor teammate row confirms only the suspend
+//!   direction; `Del`/`k` arms the graceful shutdown dialog and the confirmed
+//!   answer drives the real `TeamManager` (the on-disk store shows
+//!   `ShuttingDown`);
+//! - FR-055: with a window open the window keys are consumed before the input
+//!   buffer sees them - including the no-cursor corner;
+//! - FR-067: the cursor list never names the primary agent or the lead.
 //!
 //! Real managers are bound where the dispatch must be observed end to end
 //! (`AgentManager`, `TeamManager`); every scratch artefact lives under the
@@ -52,6 +50,16 @@ const TEAM_NAME: &str = "agentui-t011-team";
 /// A plain key press.
 fn key(code: KeyCode, modifiers: KeyModifiers) -> crossterm::event::KeyEvent {
     crossterm::event::KeyEvent::new(code, modifiers)
+}
+
+/// Render one frame so the renderer publishes the cursor row maps (the window
+/// key arms consult them).
+fn render(app: &mut App) {
+    let backend = ratatui::backend::TestBackend::new(170, 44);
+    let mut terminal = ratatui::Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, app))
+        .expect("render frame");
 }
 
 /// A live sub-agent task.
@@ -162,10 +170,10 @@ fn stored_status(store_dir: &PathBuf) -> Option<MemberStatus> {
 }
 
 // ---------------------------------------------------------------------------
-// FR-041: Space on the selected sub-agent row
+// FR-041: Space on the cursor sub-agent row
 // ---------------------------------------------------------------------------
 
-/// `Space` on a selected running sub-agent row requests suspension without a
+/// `Space` on the cursor running sub-agent row requests suspension without a
 /// dialog and is consumed (TC-010 step 1: no space reaches the input buffer).
 #[tokio::test]
 async fn space_on_a_running_agent_row_requests_suspension() {
@@ -174,7 +182,8 @@ async fn space_on_a_running_agent_row_requests_suspension() {
     app.show_agents_window = true;
     app.active_tasks
         .push(task("d4e5f6a7", "explore", TaskStatus::Running));
-    app.selected_agent_index = Some(1); // the first sub-agent row
+    app.agents_cursor_subagent = Some(0); // the first sub-agent row
+    render(&mut app);
     app.input = "draft".to_string();
     app.input_cursor = 5;
 
@@ -198,7 +207,7 @@ async fn space_on_a_running_agent_row_requests_suspension() {
     assert!(app.needs_redraw, "the request line repaints (NFR-005)");
 }
 
-/// `Space` on a selected suspended sub-agent row requests resumption instead
+/// `Space` on the cursor suspended sub-agent row requests resumption instead
 /// (TC-010 step 3: the toggle's other direction).
 #[tokio::test]
 async fn space_on_a_suspended_agent_row_requests_resumption() {
@@ -207,7 +216,8 @@ async fn space_on_a_suspended_agent_row_requests_resumption() {
     app.show_agents_window = true;
     app.active_tasks
         .push(task("e5f6a7b8", "explore", TaskStatus::Suspended));
-    app.selected_agent_index = Some(1);
+    app.agents_cursor_subagent = Some(0);
+    render(&mut app);
     let baseline_input = app.input.clone();
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
@@ -228,14 +238,15 @@ async fn space_on_a_suspended_agent_row_requests_resumption() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-042: the primary agent is protected from Space
+// FR-042 / FR-044 re-expressed: the cursor range never reaches the primary
 // ---------------------------------------------------------------------------
 
-/// `Space` on the primary row refuses with the documented text and dispatches
-/// nothing: with no manager bound there is nothing to observe anyway, so the
-/// status text and the untouched input buffer are the contract (TC-011).
+/// The cursor starts on the first sub-agent row and clamps inside the row
+/// range: the primary row is not part of the cursor list, so no number of
+/// Up/Down presses can ever select it (the old primary-refusal cases are
+/// retired with the `selected_agent_index`; FR-042, FR-067).
 #[tokio::test]
-async fn space_on_the_primary_row_refuses_and_suspends_nothing() {
+async fn the_cursor_range_never_reaches_the_primary_row() {
     let mut app = support::make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
@@ -243,29 +254,45 @@ async fn space_on_the_primary_row_refuses_and_suspends_nothing() {
         task("a1b2c3d4", "explore", TaskStatus::Running),
         task("b2c3d4e5", "build", TaskStatus::Running),
     ];
-    app.selected_agent_index = Some(0); // the primary row
-    app.input = "keep".to_string();
-    app.input_cursor = 4;
+    render(&mut app);
 
-    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+    // Down from no selection lands on the first sub-agent row.
+    app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
         .await;
-
+    assert_eq!(app.agents_cursor_subagent, Some(0));
+    // Up clamps at the first sub-agent row, never past it to the primary.
+    app.handle_key_event(key(KeyCode::Up, KeyModifiers::NONE))
+        .await;
     assert_eq!(
-        app.status, "Cannot suspend primary agent",
-        "the documented refusal text (FR-042)"
+        app.agents_cursor_subagent,
+        Some(0),
+        "Up past the top clamps at the first sub-agent (FR-042)"
     );
-    assert!(!app.row_action_confirm_open());
-    assert_eq!(app.input, "keep", "no character typed (FR-055)");
+    for _ in 0..10 {
+        app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
+            .await;
+    }
+    assert_eq!(
+        app.agents_cursor_subagent,
+        Some(1),
+        "Down past the end clamps at the last sub-agent (FR-044)"
+    );
+    // The range itself names sub-agent tasks only (FR-067).
+    assert_eq!(
+        app.agents_subagent_task_ids,
+        vec!["a1b2c3d4".to_string(), "b2c3d4e5".to_string()],
+        "the primary agent is not in the cursor list (FR-067)"
+    );
 }
 
-/// `Space` on the primary row does not dispatch a suspend for any task, even
-/// with a real manager bound: the refusal short-circuits before the list is
-/// consulted (FR-067). The pump proves no spawned suspend ever fires (a
-/// fire-and-forget suspend logs only when the manager accepts, so the absence
-/// of any request line for the sibling tasks is the observable).
+/// With a real manager bound, the keyboard path never dispatches a suspend or
+/// a kill for a task other than the cursor row: the consumed keys carry only
+/// the cursor ordinal (FR-067). (The old primary-refusal-no-dispatch case,
+/// re-expressed through the range.)
 #[tokio::test]
-async fn space_on_the_primary_row_reaches_no_task() {
+async fn the_keyboard_path_dispatches_only_for_the_cursor_row() {
     let mut app = support::make_app();
+    app.show_agents_window = true;
     app.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
     app.active_tasks = vec![
@@ -288,34 +315,47 @@ async fn space_on_the_primary_row_reaches_no_task() {
         .session_processor
         .agent_manager
         .set(Arc::clone(&manager));
-    app.selected_agent_index = Some(0);
+
+    // One Down: the cursor names a1b2c3d4 only.
+    render(&mut app);
+
+    // One Down: the cursor names a1b2c3d4 only.
+    app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
+        .await;
     let baseline = app.log_entries.len();
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
 
-    assert_eq!(app.status, "Cannot suspend primary agent");
-    // Give any wrongly spawned dispatch a chance to run, then confirm it
-    // never logged a request for either task (FR-067).
+    // Give the spawned dispatch a chance to run, then confirm exactly one
+    // request line was logged - the cursor row's.
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(
-        app.log_entries.len(),
-        baseline,
-        "a primary refusal must dispatch nothing"
+    assert!(
+        log_has_attribution(
+            &app,
+            "a1b2c3d4-session",
+            "Suspend requested for task a1b2c3d4"
+        ),
+        "suspend must target the cursor row only (FR-067)"
     );
     assert!(
         !app.log_entries
             .iter()
-            .any(|e| e.message.contains("a1b2c3d4") || e.message.contains("b2c3d4e5")),
-        "no task may be named by a primary refusal path (FR-067)"
+            .any(|e| e.message.contains("b2c3d4e5")),
+        "no task but the cursor row may be named (FR-067)"
+    );
+    assert_eq!(
+        app.log_entries.len() - baseline,
+        1,
+        "one Cursor action logs exactly one request line"
     );
 }
 
 // ---------------------------------------------------------------------------
-// FR-043: Shift+K on the selected sub-agent row
+// FR-043: Shift+K / Del on the cursor sub-agent row
 // ---------------------------------------------------------------------------
 
-/// `Shift+K` on a selected sub-agent row arms the kill dialog naming the task
+/// `Shift+K` on the cursor sub-agent row arms the kill dialog naming the task
 /// and is consumed (TC-010 step 4, TC-013 step 2); the follow-up answer keys
 /// stay absorbed by the dialog (TC-013 step 3).
 #[tokio::test]
@@ -325,7 +365,8 @@ async fn shift_k_on_a_selected_agent_row_arms_the_kill_dialog() {
     app.show_agents_window = true;
     app.active_tasks
         .push(task("c3d4e5f6", "rust-coder", TaskStatus::Running));
-    app.selected_agent_index = Some(1);
+    app.agents_cursor_subagent = Some(0);
+    render(&mut app);
     app.input = "typed".to_string();
     app.input_cursor = 5;
 
@@ -381,7 +422,9 @@ async fn confirmed_keyboard_kill_terminates_through_the_manager() {
         .session_processor
         .agent_manager
         .set(Arc::clone(&manager));
-    app.selected_agent_index = Some(1);
+    app.agents_cursor_subagent = Some(0);
+
+    render(&mut app);
 
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
@@ -412,69 +455,47 @@ async fn confirmed_keyboard_kill_terminates_through_the_manager() {
         TaskStatus::Terminating,
         "the confirmed keyboard kill must drive the real manager (FR-036, FR-043)"
     );
-} // ---------------------------------------------------------------------------
-// FR-044: the primary agent is protected from Shift+K
-// ---------------------------------------------------------------------------
-
-/// `Shift+K` on the primary row refuses with the documented text, opens no
-/// dialog and dispatches nothing even with a real manager bound (TC-011
-/// steps 4-6; FR-067).
-#[tokio::test]
-async fn shift_k_on_the_primary_row_reaches_no_task() {
-    let mut app = support::make_app();
-    app.session_id = Some(LEAD_SESSION.to_string());
-    app.show_agents_window = true;
-    app.active_tasks = vec![
-        task("a1b2c3d4", "explore", TaskStatus::Running),
-        task("b2c3d4e5", "build", TaskStatus::Running),
-    ];
-    let manager = Arc::new(ragent_agent::task::AgentManager::new(
-        app.event_bus.clone(),
-        app.session_processor.clone(),
-        4,
-        300,
-    ));
-    manager
-        .seed_completed_for_test(task("a1b2c3d4", "explore", TaskStatus::Running))
-        .await;
-    manager
-        .seed_completed_for_test(task("b2c3d4e5", "build", TaskStatus::Running))
-        .await;
-    let _ = app
-        .session_processor
-        .agent_manager
-        .set(Arc::clone(&manager));
-    app.selected_agent_index = Some(0);
-    let baseline = app.log_entries.len();
-
-    app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
-        .await;
-
-    assert_eq!(
-        app.status, "Cannot kill primary agent",
-        "the documented refusal text (FR-044)"
-    );
-    assert!(
-        !app.row_action_confirm_open(),
-        "the primary row must never reach the dialog"
-    );
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(
-        app.log_entries.len(),
-        baseline,
-        "a primary kill refusal must dispatch nothing (FR-067)"
-    );
 }
 
 // ---------------------------------------------------------------------------
-// FR-045: Space and Shift+K on the focused teammate
+// FR-040: Space (suspend-confirm) and Del / k (shutdown) on the teammate
 // ---------------------------------------------------------------------------
 
-/// `Space` on a focused teammate arms the graceful-shutdown dialog naming the
-/// member and the confirmed answer drives the real `TeamManager`: the
-/// on-disk store shows `ShuttingDown` (TC-022 steps 1-3).
+/// `Space` on the cursor teammate row arms the suspend dialog naming the
+/// member (the destructive direction confirms; the old focused_teammate
+/// Space-shutdown case is retired with the focus model).
 #[tokio::test]
-async fn space_on_a_focused_teammate_shuts_it_down_through_the_manager() {
+async fn space_on_a_cursor_teammate_arms_the_suspend_dialog() {
+    let mut app = support::make_app();
+    app.session_id = Some(LEAD_SESSION.to_string());
+    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.team_members
+        .push(member("tm-001", "reviewer", MemberStatus::Working));
+    app.show_teams_window = true;
+    app.teams_cursor_teammate = Some(0);
+    app.input = "draft".to_string();
+    render(&mut app);
+    render(&mut app);
+    app.input_cursor = 5;
+
+    app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
+        .await;
+
+    assert!(app.row_action_confirm_open(), "Space confirms the suspend");
+    match app.row_action_confirm.as_ref().map(|p| &p.action) {
+        Some(ragent_tui::app::RowAction::SuspendTeammate { agent_id, name }) => {
+            assert_eq!(agent_id, "tm-001");
+            assert_eq!(name, "reviewer");
+        }
+        other => panic!("expected SuspendTeammate from Space, got {other:?}"),
+    }
+    assert_eq!(app.input, "draft", "no space reaches the buffer (FR-055)");
+}
+
+/// The confirmed suspend answer drives the real `TeamManager` - the on-disk
+/// store shows `Suspended` (the FR-040 dispatch observed from the keyboard).
+#[tokio::test]
+async fn confirmed_keyboard_suspend_suspends_through_the_manager() {
     let mut app = support::make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
@@ -482,22 +503,61 @@ async fn space_on_a_focused_teammate_shuts_it_down_through_the_manager() {
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
     let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
-    app.focused_teammate = Some("tm-001".to_string());
-    app.input = "draft".to_string();
-    app.input_cursor = 5;
+    app.teams_cursor_teammate = Some(0);
+    render(&mut app);
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
+    assert!(app.row_action_confirm_open());
+    app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
+        .await;
+    app.handle_key_event(key(KeyCode::Enter, KeyModifiers::NONE))
+        .await;
+    assert!(!app.row_action_confirm_open(), "Yes closes the dialog");
+    assert!(
+        log_has_attribution(&app, "tm-001-session", "tm-001 suspend requested"),
+        "the suspend request must be attributed to the member session (NFR-008)"
+    );
 
-    assert!(app.row_action_confirm_open(), "Space confirms the shutdown");
+    pump_until(|| stored_status(&store_dir) == Some(MemberStatus::Suspended)).await;
+    assert_eq!(
+        stored_status(&store_dir),
+        Some(MemberStatus::Suspended),
+        "the confirmed keyboard suspend must drive the real manager (FR-040)"
+    );
+    let scratch = store_dir.ancestors().nth(3).expect("scratch root");
+    let _ = std::fs::remove_dir_all(scratch);
+}
+
+/// `Del` on the cursor teammate row arms the graceful-shutdown dialog naming
+/// the member, and the confirmed answer drives the real `TeamManager`: the
+/// on-disk store shows `ShuttingDown` (TC-022's Del twin).
+#[tokio::test]
+async fn del_on_a_cursor_teammate_shuts_it_down_through_the_manager() {
+    let mut app = support::make_app();
+    app.session_id = Some(LEAD_SESSION.to_string());
+    app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
+    app.team_members
+        .push(member("tm-001", "reviewer", MemberStatus::Working));
+    app.show_teams_window = true;
+    let store_dir = bind_team_manager(&mut app, MemberStatus::Working);
+    app.teams_cursor_teammate = Some(0);
+    render(&mut app);
+    app.input = "draft".to_string();
+    app.input_cursor = 5;
+
+    app.handle_key_event(key(KeyCode::Delete, KeyModifiers::NONE))
+        .await;
+
+    assert!(app.row_action_confirm_open(), "Del confirms the shutdown");
     match app.row_action_confirm.as_ref().map(|p| &p.action) {
         Some(ragent_tui::app::RowAction::ShutdownTeammate { agent_id, name }) => {
             assert_eq!(agent_id, "tm-001");
             assert_eq!(name, "reviewer");
         }
-        other => panic!("expected ShutdownTeammate from Space, got {other:?}"),
+        other => panic!("expected ShutdownTeammate from Del, got {other:?}"),
     }
-    assert_eq!(app.input, "draft", "no space reaches the buffer (FR-055)");
+    assert_eq!(app.input, "draft", "no key reaches the buffer (FR-055)");
 
     app.handle_key_event(key(KeyCode::Left, KeyModifiers::NONE))
         .await;
@@ -519,18 +579,20 @@ async fn space_on_a_focused_teammate_shuts_it_down_through_the_manager() {
     let _ = std::fs::remove_dir_all(scratch);
 }
 
-/// `Shift+K` on a focused teammate arms the same shutdown dialog; the dialog
-/// absorbs the follow-up `Shift+K` so no second action can re-arm behind it
-/// (TC-022 step 4).
+/// `Shift+K` on the cursor teammate row arms the same shutdown dialog; the
+/// dialog absorbs the follow-up `Shift+K` so no second action can re-arm
+/// behind it (TC-022 step 4).
 #[tokio::test]
-async fn shift_k_on_a_focused_teammate_arms_the_shutdown_dialog() {
+async fn shift_k_on_a_cursor_teammate_arms_the_shutdown_dialog() {
     let mut app = support::make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
     app.team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
-    app.focused_teammate = Some("tm-001".to_string());
+    app.teams_cursor_teammate = Some(0);
+
+    render(&mut app);
 
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
@@ -554,25 +616,29 @@ async fn shift_k_on_a_focused_teammate_arms_the_shutdown_dialog() {
     assert_eq!(app.input, "", "nothing reaches the input buffer (FR-055)");
 }
 
-/// With the Teams window open but no focused teammate both keys are a
-/// consumed no-op (FR-069 stale-focus rule): the dialog never arms and the
+// ---------------------------------------------------------------------------
+// FR-055: window keys take precedence over the input buffer
+// ---------------------------------------------------------------------------
+
+/// With the Teams window open but a cursor whose member is gone, the keys are
+/// a consumed no-op (FR-069 stale-cursor rule): the dialog never arms and the
 /// input buffer stays empty.
 #[tokio::test]
-async fn teams_keys_without_a_focused_teammate_are_consumed_no_ops() {
+async fn teams_keys_without_a_live_cursor_are_consumed_no_ops() {
     let mut app = support::make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.active_team = Some(TeamConfig::new(TEAM_NAME, LEAD_SESSION));
     app.team_members
         .push(member("tm-001", "reviewer", MemberStatus::Working));
     app.show_teams_window = true;
-    app.focused_teammate = Some("tm-gone".to_string()); // a stale focus
+    app.teams_cursor_teammate = Some(3); // beyond the live rows
     app.needs_redraw = false;
 
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
     assert!(
         !app.row_action_confirm_open(),
-        "a focus whose member is gone arms nothing (FR-069)"
+        "a cursor whose member is gone arms nothing (FR-069)"
     );
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
@@ -580,13 +646,9 @@ async fn teams_keys_without_a_focused_teammate_are_consumed_no_ops() {
     assert_eq!(app.input, "", "neither key leaks a character (FR-055)");
 }
 
-// ---------------------------------------------------------------------------
-// FR-055: window keys take precedence over the input buffer
-// ---------------------------------------------------------------------------
-
-/// With the Agents window open and no selection, `Space` and `Shift+K` are
+/// With the Agents window open and no cursor yet, `Space` and `Shift+K` are
 /// still consumed by the window: nothing reaches the input buffer (the
-/// no-selection corner of FR-055; TC-013 step 4).
+/// no-cursor corner of FR-055; TC-013 step 4).
 #[tokio::test]
 async fn agent_window_keys_with_no_selection_never_touch_the_input() {
     let mut app = support::make_app();
@@ -594,7 +656,7 @@ async fn agent_window_keys_with_no_selection_never_touch_the_input() {
     app.show_agents_window = true;
     app.active_tasks
         .push(task("a1b2c3d4", "explore", TaskStatus::Running));
-    app.selected_agent_index = None;
+    app.agents_cursor_subagent = None;
     app.input = "draft".to_string();
     app.input_cursor = 5;
 
@@ -603,7 +665,7 @@ async fn agent_window_keys_with_no_selection_never_touch_the_input() {
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
 
-    assert!(!app.row_action_confirm_open(), "no selection arms nothing");
+    assert!(!app.row_action_confirm_open(), "no cursor arms nothing");
     assert_eq!(
         app.input, "draft",
         "Space and Shift+K must be consumed while the window is open (FR-055)"
@@ -611,14 +673,16 @@ async fn agent_window_keys_with_no_selection_never_touch_the_input() {
     assert_eq!(app.input_cursor, 5);
 }
 
-/// Even an out-of-range selected index is consumed without leaking and
-/// without reaching a task (a stale index must route nowhere, FR-069).
+/// A cursor beyond the live rows is a consumed no-op and dispatches nothing
+/// (a stale ordinal must route nowhere, FR-069).
 #[tokio::test]
-async fn an_out_of_range_selected_index_is_consumed_harmlessly() {
+async fn an_out_of_range_cursor_is_consumed_harmlessly() {
     let mut app = support::make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.show_agents_window = true;
-    app.selected_agent_index = Some(99); // beyond the live rows
+    app.active_tasks
+        .push(task("a1b2c3d4", "explore", TaskStatus::Running));
+    app.agents_cursor_subagent = Some(9); // beyond the live rows
     app.input = "draft".to_string();
     app.input_cursor = 5;
 
@@ -627,12 +691,12 @@ async fn an_out_of_range_selected_index_is_consumed_harmlessly() {
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
 
-    assert_eq!(app.input, "draft", "the stale index consumes both keys");
+    assert_eq!(app.input, "draft", "the stale cursor consumes both keys");
     assert!(
         !app.log_entries
             .iter()
             .any(|e| e.message.contains("requested")),
-        "a stale index must dispatch nothing (FR-069)"
+        "a stale cursor must dispatch nothing (FR-069)"
     );
 }
 
@@ -640,9 +704,9 @@ async fn an_out_of_range_selected_index_is_consumed_harmlessly() {
 // FR-067: no key path terminates the lead
 // ---------------------------------------------------------------------------
 
-/// The Teams-window key arm never names the lead: a focus whose agent id is
-/// `lead` is refused before the dialog can arm (FR-067) - both keys stay
-/// consumed no-ops.
+/// The Teams cursor list covers painted teammate rows only, so it never names
+/// the lead even when a member carries the `lead` id: every key lands on a
+/// real member row (FR-067).
 #[tokio::test]
 async fn teammate_keys_never_target_the_lead() {
     let mut app = support::make_app();
@@ -651,19 +715,37 @@ async fn teammate_keys_never_target_the_lead() {
     app.team_members
         .push(member("lead", "general", MemberStatus::Idle));
     app.show_teams_window = true;
-    app.focused_teammate = Some("lead".to_string());
 
+    // Walk the whole cursor range: every row the cursor can land on is a
+    render(&mut app);
+
+    // Walk the whole cursor range: every row the cursor can land on is a
+    // painted teammate row, and the lead row is not in the list at all.
+    for _ in 0..5 {
+        app.handle_key_event(key(KeyCode::Down, KeyModifiers::NONE))
+            .await;
+    }
+    assert_eq!(
+        app.teams_cursor_teammate,
+        Some(0),
+        "the range clamps inside the teammate rows (FR-067)"
+    );
     app.handle_key_event(key(KeyCode::Char(' '), KeyModifiers::NONE))
         .await;
     app.handle_key_event(key(KeyCode::Char('K'), KeyModifiers::SHIFT))
         .await;
 
-    assert!(
-        !app.row_action_confirm_open(),
-        "a focus on the lead must never arm a shutdown (FR-067)"
-    );
+    // Idle members arm only the suspend direction; the member carrying the
+    // literal `lead` id is a cursor row, so Space may arm its suspend dialog.
+    match app.row_action_confirm.as_ref().map(|p| &p.action) {
+        None => panic!("an idle teammate row must react to Space"),
+        Some(ragent_tui::app::RowAction::SuspendTeammate { agent_id, .. }) => {
+            assert_eq!(agent_id, "lead", "the cursor names the painted member");
+        }
+        Some(other) => panic!("expected SuspendTeammate, got {other:?}"),
+    }
     assert_eq!(
         app.input, "",
-        "neither key leaks a character into the buffer (FR-055)"
+        "no key leaks a character into the buffer (FR-055)"
     );
 }

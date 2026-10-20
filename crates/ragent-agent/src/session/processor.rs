@@ -55,8 +55,8 @@ pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
 
 /// Maximum wall-clock time a single tool call may run before the watchdog
-/// aborts it and terminates the agent run (2000 seconds).
-const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2000); // ~= 33m 20s
+/// aborts it and terminates the agent run (5000 seconds).
+const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(5000); // ~= 83m 20s
 
 /// Nudge injected when a sub-agent's loop terminates with a short text-only
 /// response after prior tool-use steps. The model often produces narration
