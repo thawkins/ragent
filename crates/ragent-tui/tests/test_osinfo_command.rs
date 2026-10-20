@@ -46,11 +46,49 @@ fn normalise(text: &str) -> BTreeSet<String> {
 /// memory; CPU frequency is also re-sampled). Free swap is included for the
 /// same reason: the kernel reclaims swap pages between the slash command's
 /// collection and the test's own, so the byte count is not stable either.
+/// The process working directory is volatile for the same reason but by a
+/// different mechanism: sibling tests chdir into a tempdir that they delete
+/// on exit, so a collection can observe a cwd that a later collection cannot
+/// re-read. Both cross-renderer tests pin cwd for their whole body instead
+/// of filtering the line out, which keeps the FR-018 equality exhaustive.
 fn is_volatile(line: &str) -> bool {
     line.contains("Uptime")
         || line.contains("Available Memory")
         || line.contains("Free Swap")
         || line.contains("Frequency")
+}
+
+/// Acquire the binary-wide env lock and pin the process cwd to a fresh
+/// tempdir for the guard's lifetime, restoring the previous cwd on drop.
+///
+/// Both `/osinfo` cross-renderer comparisons embed the working directory in
+/// the collected report; without a pinned cwd a sibling test's chdir can
+/// change the value between the test's two collections (CI: run 39358377034,
+/// `/tmp/.tmp8To00G` vs `/tmp/.tmpZr3EvD`).
+struct CwdPin {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _temp: tempfile::TempDir,
+    prev: std::path::PathBuf,
+}
+
+impl CwdPin {
+    fn acquire() -> Self {
+        let lock = crate::global_env_lock();
+        let prev = std::env::current_dir().expect("current dir");
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::env::set_current_dir(temp.path()).expect("set cwd");
+        Self {
+            _lock: lock,
+            _temp: temp,
+            prev,
+        }
+    }
+}
+
+impl Drop for CwdPin {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.prev);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +220,10 @@ async fn test_osinfo_show_renders_report_and_sets_status() {
 
 #[tokio::test]
 async fn test_osinfo_show_matches_tool_renderer() {
+    // Pin the process cwd for both collections: the report embeds the working
+    // directory, and a parallel sibling test that chdirs into a deleted
+    // tempdir must not slip in between the slash report and the tool report.
+    let _pin = CwdPin::acquire();
     let mut app = make_app();
     app.session_id = Some("s".to_string());
     app.execute_slash_command("/osinfo show").await;
@@ -215,11 +257,12 @@ async fn test_osinfo_show_matches_tool_renderer() {
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
 async fn test_osinfo_show_no_probe_matches_process_free_tool_renderer() {
-    // Both reports embed the process working directory, which is
-    // process-global; hold the binary-wide lock so a sibling test cannot
-    // chdir between the two collections (consolidated binaries share one
-    // process).
-    let _lock = crate::global_env_lock();
+    // The report embeds the process working directory, which is process-
+    // global: hold the binary-wide lock and pin cwd to this test's own
+    // tempdir so neither a sibling test nor a deleted directory can drift
+    // the value between the two collections (consolidated binaries share
+    // one process).
+    let _pin = CwdPin::acquire();
     // FR-014/FR-020: the `--no-probe` flag selects the process-free collection
     // path, so the slash report matches the tool's own `probe: false` output
     // rather than the probed default.

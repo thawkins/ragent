@@ -360,7 +360,7 @@ async fn suspend_then_resume_parks_and_continues_the_loop() -> Result<()> {
         .await
         .expect("suspend a running task");
 
-    let (entry, child_sid, frozen) = poll_until(
+    let (entry, child_sid) = poll_until(
         || {
             mgr.tasks_snapshot()
                 .now_or_never()?
@@ -368,7 +368,7 @@ async fn suspend_then_resume_parks_and_continues_the_loop() -> Result<()> {
                 .find(|e| e.id == task_id && e.status == TaskStatus::Suspended)
                 .map(|e| {
                     let child = e.child_session_id.clone();
-                    (e, child, llm_call_count(&captured))
+                    (e, child)
                 })
         },
         "entry status to reach Suspended",
@@ -378,6 +378,24 @@ async fn suspend_then_resume_parks_and_continues_the_loop() -> Result<()> {
 
     // While the flag is set, no further LLM request may be issued: wait past
     // the in-flight stage, snapshot the call count, re-check, assert frozen.
+    //
+    // The suspend request can land in the tiny window between the loop's
+    // gate check and the same iteration's LLM request (suspension takes
+    // effect between steps, so that already-committed step is allowed to
+    // run). Let that one committed request land first: poll until the call
+    // count stops moving for a full quiet window, THEN freeze and assert.
+    // Once parked, the gate itself blocks any further request, so a stable
+    // count across the window is a true freeze guarantee rather than a
+    // timing guess.
+    let mut frozen = llm_call_count(&captured);
+    for _ in 0..30 {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let now = llm_call_count(&captured);
+        if now == frozen {
+            break;
+        }
+        frozen = now;
+    }
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     assert_eq!(
         llm_call_count(&captured),

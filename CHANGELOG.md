@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.0.147] - 2026-10-20
+
+### Fixed
+
+- **Two CI flake tests are deterministic.**
+  - `ragent-tui` `/osinfo` cross-renderer tests pin the process working
+    directory. `test_osinfo_show_matches_tool_renderer` compares the
+    `/osinfo show` slash report against the `os_info` tool collect, and both
+    read the process cwd; sibling tests in the consolidated `tests/all`
+    binary chdir into `tempfile::TempDir`s that are deleted at test exit, so
+    the two collections could observe different working-directory lines.
+    The new `CwdPin` helper (shared env lock, own tempdir, restore on drop)
+    wraps both variants; the equality assertion stays exhaustive.
+  - `ragent-agent` suspend/resume counts stabilize before freezing.
+    `suspend_then_resume_parks_and_continues_the_loop` froze the LLM call
+    count the instant status reached `Suspended`, but a suspend arriving
+    between the loop's suspend gate and the same iteration's LLM request is
+    legitimate between-steps behaviour; the committed request then pushed
+    after the freeze. The test now polls until the count is quiet for 150ms
+    before freezing.
+
+### Changed
+
+- **CI workflow YAML hardening: quoted the remaining `run:` scalar containing
+  `::`** (the clippy allow-list line), preventing GitHub's workflow-file
+  parser from rejecting the file as it did for releases 1.0.142-1.0.144.
+
 ## [1.0.146] - 2026-10-20
 
 ### Fixed
