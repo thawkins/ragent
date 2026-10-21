@@ -5215,6 +5215,19 @@ async fn test_report_mcp_startup_lists_start_and_connect_lines() {
         ),
         "beta must report start then connect, each with its transport: {joined}"
     );
+    // The report closes with a blank line so the startup block is separated from
+    // whatever the stream prints next. Two newlines are required: `lines()`
+    // drops one trailing terminator, so only `\n\n` leaves an empty final row.
+    assert!(
+        joined.ends_with("\n\n"),
+        "the report must end with a blank line: {joined:?}"
+    );
+    let rows: Vec<&str> = joined.lines().collect();
+    assert_eq!(
+        rows.last().copied(),
+        Some(""),
+        "the blank separator must survive as an empty rendered row: {rows:?}"
+    );
 }
 
 /// The report is a one-shot: once it has printed, a later call appends nothing,

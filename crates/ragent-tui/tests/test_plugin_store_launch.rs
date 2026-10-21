@@ -353,10 +353,13 @@ async fn a_known_category_flag_is_applied_when_the_index_arrives() {
     let browser = app.plugin_store.as_ref().expect("panel open");
     assert_eq!(browser.query, "weather", "the query is still pre-filled");
     assert_eq!(browser.active_category(), "Web", "the category is applied");
+    let web_row = (0..browser.category_row_count())
+        .find(|&row| browser.category_row_label(row).eq_ignore_ascii_case("Web"))
+        .expect("Web row");
     assert_eq!(
         browser.category_cursor_row(),
-        2,
-        "the cursor sits on the pre-selected row (ALL, Database, Web)"
+        web_row,
+        "the cursor sits on the pre-selected row (ALL, Installed, Database, Web)"
     );
     assert!(browser.pending_category.is_none(), "the filter is consumed");
 }

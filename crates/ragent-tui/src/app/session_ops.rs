@@ -12,7 +12,7 @@ use ragent_agent::{
     message::{Message, MessagePart, Role},
     session::processor::estimate_tool_definition_bytes,
 };
-use ragent_connectors::{CatalogueBrowser, CategoryFilter};
+use ragent_connectors::{CatalogueBrowser, CataloguePane, CategoryFilter};
 use ragent_llm::provider::tool_cache::{ToolFormat, cached_tools};
 use ragent_plugins::{
     FetchLimits, StoreDirs, StoreEndpoint, StoreError, StoreIndex, StoreIndexFetcher, StoreKind,
@@ -2542,22 +2542,97 @@ impl App {
     /// Whether the connector-catalogue panel's category navigator currently
     /// holds keyboard focus.
     ///
-    /// `false` when no panel is open or the result list holds focus.
+    /// `false` when no panel is open or another pane holds focus.
     #[must_use]
     pub fn connector_catalogue_nav_focused(&self) -> bool {
         self.connector_store
             .as_ref()
-            .is_some_and(|browser| browser.nav_focused)
+            .is_some_and(|browser| browser.focus == CataloguePane::Categories)
     }
 
-    /// Transfer keyboard focus between the connector-catalogue panel's category
-    /// navigator and its result list.
+    /// Whether the connector-catalogue panel's marketplace navigator currently
+    /// holds keyboard focus.
+    ///
+    /// `false` when no panel is open or another pane holds focus.
+    #[must_use]
+    pub fn connector_catalogue_marketplace_focused(&self) -> bool {
+        self.connector_store
+            .as_ref()
+            .is_some_and(|browser| browser.focus == CataloguePane::Marketplaces)
+    }
+
+    /// Cycle focus forward through the connector-catalogue panel's three panes,
+    /// `Results` -> `Categories` -> `Marketplaces` -> `Results`.
     ///
     /// A no-op when no panel is open. The focused pane's cursor is rendered
-    /// distinctly and subsequent `Up`/`Down` route to the focused pane.
-    pub fn connector_catalogue_toggle_focus(&mut self) {
+    /// distinctly and subsequent `Up`/`Down` route to that pane.
+    pub fn connector_catalogue_focus_next(&mut self) {
         if let Some(browser) = self.connector_store.as_mut() {
-            browser.nav_focused = !browser.nav_focused;
+            browser.focus_next();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Cycle focus backward through the three panes (`BackTab`), the reverse of
+    /// [`Self::connector_catalogue_focus_next`].
+    pub fn connector_catalogue_focus_prev(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.focus_prev();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the marketplace cursor up one row while the marketplace navigator
+    /// holds focus, applying the newly highlighted marketplace.
+    pub fn connector_catalogue_marketplace_move_up(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.marketplace_move_up();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move the marketplace cursor down one row while the marketplace navigator
+    /// holds focus, applying the newly highlighted marketplace.
+    pub fn connector_catalogue_marketplace_move_down(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.marketplace_move_down();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Apply the highlighted marketplace and move keyboard focus to the result
+    /// list.
+    pub fn connector_catalogue_marketplace_confirm(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.marketplace_confirm();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the connector-catalogue panel's marketplace filter to `ALL` and
+    /// re-derive the visible results.
+    ///
+    /// A no-op when no panel is open; issues no network request and installs
+    /// nothing.
+    pub fn connector_catalogue_clear_marketplace(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut() {
+            browser.marketplace_clear();
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Clear the connector-catalogue panel's live search filter, re-deriving the
+    /// visible result set.
+    ///
+    /// Wired to the bottom search box's `[x] clear` button. An already-empty query
+    /// is a no-op (so a stray click on the button does not repaint); clearing a
+    /// non-empty query re-applies the filter and requests a redraw so the full
+    /// result set returns immediately.
+    pub fn connector_catalogue_clear_search(&mut self) {
+        if let Some(browser) = self.connector_store.as_mut()
+            && !browser.query.is_empty()
+        {
+            browser.set_query(String::new());
             self.needs_redraw = true;
         }
     }

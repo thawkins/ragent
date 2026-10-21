@@ -12,6 +12,7 @@
 use ragent_config::Config;
 
 #[test]
+#[serial_test::serial]
 fn test_merge_overlay_max_background_agents_wins() {
     let base = Config::default();
     assert_eq!(base.experimental.max_background_agents, 8);
@@ -27,6 +28,7 @@ fn test_merge_overlay_max_background_agents_wins() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_merge_overlay_background_agent_timeout_wins() {
     let base = Config::default();
     assert_eq!(base.experimental.background_agent_timeout, 3600);
@@ -42,6 +44,7 @@ fn test_merge_overlay_background_agent_timeout_wins() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_merge_default_overlay_preserves_base() {
     // An overlay that leaves the fields at their defaults must not clobber a
     // base value that was already raised by a lower-precedence config file.
@@ -57,6 +60,7 @@ fn test_merge_default_overlay_preserves_base() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_experimental_round_trips_through_config_load() {
     let temp = tempfile::tempdir().expect("temp dir");
     let ragent_dir = temp.path().join(".ragent");

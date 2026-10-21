@@ -3,7 +3,7 @@
 //! Covers the Agents button toggle with mutual exclusion (FR-028), the no-op
 //! click when the Agents window has no subject (FR-029), the Teams button
 //! toggle and its exclusion (FR-030), the no-op click when no team is active
-//! (FR-031), the Close-button dismissal that leaves task, member and input
+//! (FR-031), the `Esc` dismissal that leaves task, member and input
 //! state untouched (FR-032), and the redraw flag every mutating path sets
 //! (NFR-005).
 //!
@@ -13,7 +13,7 @@
 
 mod support;
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
@@ -254,11 +254,11 @@ fn teams_button_click_keeps_an_open_window_open_when_the_team_is_gone() {
 }
 
 // ---------------------------------------------------------------------------
-// FR-032: Close button
+// FR-032: `Esc` dismissal
 // ---------------------------------------------------------------------------
 
-#[test]
-fn agents_close_button_dismisses_the_window_and_leaves_state_untouched() {
+#[tokio::test]
+async fn agents_escape_dismisses_the_window_and_leaves_state_untouched() {
     let mut app = app_with_task();
     app.active_tasks.push(running_task("task-2"));
     app.input = "hello".to_string();
@@ -266,13 +266,10 @@ fn agents_close_button_dismisses_the_window_and_leaves_state_untouched() {
     app.show_agents_window = true;
     render(&mut app);
 
-    let (col, row) = centre(app.agents_close_button_area);
-    app.handle_mouse_event(click(col, row));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
 
-    assert!(
-        !app.show_agents_window,
-        "the Close button dismisses the window"
-    );
+    assert!(!app.show_agents_window, "Esc dismisses the window (FR-032)");
     assert!(app.needs_redraw, "dismissing requests a redraw");
     assert_eq!(
         app.active_tasks.len(),
@@ -285,20 +282,17 @@ fn agents_close_button_dismisses_the_window_and_leaves_state_untouched() {
     );
 }
 
-#[test]
-fn teams_close_button_dismisses_the_window_and_leaves_state_untouched() {
+#[tokio::test]
+async fn teams_escape_dismisses_the_window_and_leaves_state_untouched() {
     let mut app = app_with_team();
     app.input = "draft".to_string();
     app.show_teams_window = true;
     render(&mut app);
 
-    let (col, row) = centre(app.teams_close_button_area);
-    app.handle_mouse_event(click(col, row));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
 
-    assert!(
-        !app.show_teams_window,
-        "the Close button dismisses the window"
-    );
+    assert!(!app.show_teams_window, "Esc dismisses the window (FR-032)");
     assert!(app.needs_redraw, "dismissing requests a redraw");
     assert_eq!(
         app.team_members.len(),
@@ -311,21 +305,18 @@ fn teams_close_button_dismisses_the_window_and_leaves_state_untouched() {
     );
 }
 
-#[test]
-fn closing_an_already_closed_window_is_inert() {
+#[tokio::test]
+async fn escaping_an_already_closed_window_is_inert() {
     let mut app = app_with_task();
     render(&mut app);
-    // Both windows are closed, so the renderer zeroed the Close rects.
-    assert_eq!(app.agents_close_button_area, Rect::default());
-    assert_eq!(app.teams_close_button_area, Rect::default());
-
-    app.handle_mouse_event(click(0, 0));
     assert!(!app.show_agents_window);
     assert!(!app.show_teams_window);
-    assert!(
-        !app.needs_redraw,
-        "clicking a closed window's absent Close button paints nothing"
-    );
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
+    assert!(!app.show_agents_window);
+    assert!(!app.show_teams_window);
+    assert!(!app.needs_redraw, "escaping a closed window paints nothing");
 }
 
 // ---------------------------------------------------------------------------

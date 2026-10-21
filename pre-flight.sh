@@ -134,6 +134,14 @@ print_step "Team duplication guard..."
 bash "$(dirname "$0")/scripts/check-team-duplication.sh" || print_failure "Team duplication guard failed"
 bash "$(dirname "$0")/scripts/check-team-duplication.sh" --self-test || print_failure "Team duplication guard self-test failed"
 
+# Test process-global isolation guard (one test binary per crate: every
+# `tests/test_*.rs` of a crate shares one process, so an unguarded
+# `set_var`/`remove_var`/`set_current_dir` races every other test - the
+# reproduced ragent-config flake).
+print_step "Test env-isolation guard..."
+bash "$(dirname "$0")/scripts/check-test-env-isolation.sh" --self-test || print_failure "Test env-isolation guard self-test failed"
+bash "$(dirname "$0")/scripts/check-test-env-isolation.sh" || print_failure "Test env-isolation guard failed"
+
 # Silent error-suppression guard (ANTIPAT M4)
 print_step "Silent error-suppression guard..."
 bash "$(dirname "$0")/scripts/check-silent-errors.sh" --self-test || print_failure "Silent error guard self-test failed"
@@ -151,7 +159,12 @@ fi
 print_header "3. Clippy Lints"
 print_step "Running clippy lints..."
 
-if cargo clippy --workspace -- -D warnings 2>&1; then
+# Mirror the CI gate exactly: `.github/workflows/ci.yml` passes these three
+# allows, so running without them here failed on pre-existing nursery lints
+# (`redundant_pub_crate`, `used_underscore_items`, `wildcard_imports`) that CI
+# accepts.
+if cargo clippy --workspace -- -D warnings -A clippy::used_underscore_items \
+    -A clippy::redundant_pub_crate -A clippy::wildcard_imports 2>&1; then
     print_success "Clippy check passed"
 else
     print_failure "Clippy check failed"

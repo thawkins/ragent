@@ -112,6 +112,10 @@ impl Tool for TeamCreateTool {
                 "project_local": {
                     "type": "boolean",
                     "description": "If true, store team in [PROJECT]/.ragent/teams/; otherwise in ~/.ragent/teams/. Default: true"
+                },
+                "seed_only": {
+                    "type": "boolean",
+                    "description": "Apply the blueprint to an existing team instead of creating one. The team must already exist; the call never re-creates its directory. Used by `/team create`, which has created the team before seeding. Default: false"
                 }
             },
             "required": [
@@ -169,7 +173,22 @@ impl Tool for TeamCreateTool {
             .filter(|s| !s.is_empty())
             .map(ToString::to_string);
 
-        let mut store =
+        // `seed_only` applies a blueprint to a team that already exists: the
+        // caller (`/team create`) has already created it, so this call must
+        // never re-create the directory. Re-creating it after a `/team clear`
+        // or `/team forcecleanup` removed the tree resurrected the directory
+        // and its `config.json`/`mailbox`/lock file, which made the removal
+        // fail with ENOTEMPTY (CI flake in
+        // `test_slash_arms_deep::team_clear_removes_ta` and
+        // `test_slash_teams_deep::forcecleanup_confirm_removes_team`).
+        let seed_only = input
+            .get("seed_only")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        let mut store = if seed_only {
+            TeamStore::load_by_name(&name, &ctx.working_dir)?
+        } else {
             match TeamStore::create(&name, &ctx.session_id, &ctx.working_dir, project_local) {
                 Ok(store) => store,
                 Err(e) if e.to_string().contains("already exists") => {
@@ -191,7 +210,8 @@ impl Tool for TeamCreateTool {
                     }
                 }
                 Err(e) => return Err(e),
-            };
+            }
+        };
 
         // M8-T2: collect per-prompt blueprint spawn failures so the lead is
         // told which teammates failed to spawn instead of only seeing them

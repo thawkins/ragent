@@ -13,6 +13,24 @@
 // which clippy::duplicate_mod flags; hoisting it would require editing every
 // child file. See AGENTS.md ("Test Layout").
 
+/// Before consolidation each test file was its own binary, so a file-local
+/// mutex was enough. One binary per crate merges them, so every mutating test
+/// in every child file must contend on the SAME mutex; `crate::` resolves at
+/// this binary root, which is what makes that possible. See AGENTS.md
+/// ("Test Layout").
+pub fn global_env_mutex() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Acquire [`global_env_mutex`], recovering from a poisoned lock (a panicking
+/// test must not wedge every later test).
+pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    global_env_mutex()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[path = "test_catalogue_enrich.rs"]
 mod test_catalogue_enrich;
 

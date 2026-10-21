@@ -50,6 +50,14 @@ The dialog walks you through:
 2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none, OpenRouter needs `OPENROUTER_API_KEY`)
 3. **Choosing a model** from the provider's available models
 
+Every step is a list wearing the same calm-slate chrome the `/plugins` and
+`/connectors` catalogues use: an accent frame naming the step and its subject, a
+heading strip with a live count, a pinned column band, a cursor-filled zebra row
+list, and a muted key-hint footer. Each list windows around its cursor, so a list
+longer than the dialog keeps the highlighted row painted and the legend reads
+`Showing a-b of N`; a mouse wheel notch over the dialog steps the cursor exactly
+like `Up`/`Down`.
+
 The key is stored persistently in `~/.local/share/ragent/ragent.db` so you only need to
 configure once.
 
@@ -1084,7 +1092,7 @@ Manage connectors from the TUI or the CLI:
 | Command | Description |
 |---|---|
 | `/connectors list [--verbose] [--category <name>]` | List installed connectors with state, auth state, category, and bridged server/tool counts; `--category` filters the rows (`ALL` clears the filter) |
-| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser (`query` pre-fills the search field, `--category` pre-selects the filter, `--refresh` bypasses the cache; the left-hand category navigator: `Tab` moves focus to it, `Up`/`Down` apply a category row, `Enter` applies and returns, `c` clears; each row shows the id, category, marketplace it came from, and description; blank descriptions are filled from each entry's manifest off-loop; the base catalogue and every added marketplace are merged) |
+| `/connectors claude [query] [--category <name>] [--refresh]` | Open the interactive Claude connector-catalogue browser, wearing the same design language as `/plugins claude` (`query` pre-fills the search field, `--category` pre-selects the filter, `--refresh` bypasses the cache; a calm slate accent frame and structured title; a left column with a `Categories` navigator above a `Marketplace` navigator, each row labelled `Name (N)`, the category navigator listing `ALL`, `Installed`, then the catalogue's categories; a pinned dark-on-light column-heading row above zebra-banded rows whose description runs to the panel edge and whose installed rows carry a bold green `*`; a centred footer and a bottom ` search: ` box with `[x] clear`; three focusable panes cycled by `Tab`/`BackTab`, `Up`/`Down` moving the focused pane and applying a navigator row, `Enter` applying and returning, `c` clearing; click a navigator row or wheel over it, click `[x] clear` to wipe the query; blank descriptions are filled from each entry's manifest off-loop; the base catalogue and every added marketplace are merged) |
 | `/connectors add <id\|source> [--force]` | Install a catalogue id, a local directory, a local `.zip`/`.tar.gz`, or an `https://` package URL (recorded **enabled**) |
 | `/connectors remove <id>` | Uninstall a connector (refused while enabled) |
 | `/connectors enable <id>` | Enable a connector and connect its servers now |
@@ -2163,8 +2171,49 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Uncommitted (post-1.0.147)
+## Version 1.0.149
 
+- **Shared store chrome across every catalogue and setup-panel list** — the
+  calm-slate accent frame, pinned column band, zebra rows, muted key-hint footer
+  and bottom `search:` box with its `[x] clear` button became the one list
+  composition (`STORE_*`/`store_*` in `ragent-tui/src/layout.rs`, renamed from
+  the plugin-only `PLUGIN_STORE_*` names), and the `/connectors claude`
+  catalogue browser was rebuilt on it: a `Categories` navigator over a
+  `Marketplace` navigator, `Name (N)` counted rows, a bold green `*` in a
+  one-column lane on installed connectors, and `Tab`/`BackTab` cycling the
+  results and both navigators with `Up`/`Down` moving the focused pane.
+- **`/provider` and `/model` setup dialogs wear the same chrome** — the Azure
+  resource picker, the thinking-level selector and the two-pane Model Router
+  setup now window around their cursor (`Showing 12-23 of 40`) instead of
+  clipping the tail, and a wheel notch over an open setup dialog steps that
+  selector one entry and is swallowed everywhere else (the API-key and GitLab
+  forms, the loading spinner and the success card consume it; clicks, drags and
+  right-clicks keep their routing).
+- **`Installed` pseudo-category in the plugin-store navigators (spec
+  `pluginstores` FR-054)** — row 1 of the `/plugins codex` and `/plugins claude`
+  category navigator narrows the list to the plugins already in the store scan,
+  matching the plugin id rather than a declared category (so an installed
+  plugin that declares none still appears), counting as `Installed (2)`,
+  composing with the query and marketplace filters, and pre-selectable with
+  `--category installed`.
+- **Deterministic tests under one-test-binary-per-crate** — every crate's
+  `tests/all.rs` now exposes one `global_env_mutex()`/`global_env_lock()` and
+  every test that mutates or reads a process global (`set_var`, `remove_var`,
+  `set_current_dir`, `XDG_CONFIG_HOME`, `HOME`, a `static` registry) takes that
+  same guard, with `ragent-config` moving 45 more tests onto
+  `#[serial_test::serial]`. A helper that already returns the guard must not be
+  wrapped in a second acquisition (`std::sync::Mutex` is not reentrant; 74
+  `/slash` cases self-deadlocked that way). `scripts/check-test-env-isolation.sh`
+  (with `--self-test`) enforces the three rules and runs in `pre-flight.sh` and
+  CI.
+- **`/mcp` startup report ends on a blank line** — the `[mcp]
+  Starting/Connected/Failed ...` block is separated from whatever the stream
+  prints next (the report appends `"\n\n"`, because `str::lines()` drops a
+  single trailing terminator).
+- **Two `rustls` TLS advisories cleared** — `rustls-webpki` 0.103.15 -> 0.103.16
+  (RUSTSEC-2026-0382) and `webpki-root-certs` 1.0.9 -> 1.0.10
+  (RUSTSEC-2026-0383); neither is suppressed in `.cargo/audit.toml` or
+  `deny.toml`, so a re-introduction fails CI again.
 - **The Agents/Teams windows are keyboard-first (spec `agentui` T-022)** — a
   block cursor replaces mouse row clicks: `Up`/`Down` move one row,
   `PgUp`/`PgDn` page, `Space` toggles sub-agent suspend/resume, `Del`/`Shift+K`
@@ -2172,9 +2221,9 @@ parsed into the required structure (FR-005/FR-006).
   view, and clicking a row selects it. The `[stop]`/`[x]` glyphs remain as
   status indicators only; the primary agent, the lead, and background-shell
   rows are outside the cursor; stale indices degrade to safely consumed
-  no-ops. The key legend sits in each window's footer, the Agents modal is now
-  70% of the terminal width, and the output-view overlay gains a bordered
-  Close bar button bottom-right (`Esc` still closes).
+  no-ops. The key legend sits in each window's footer and ends with `Esc close`,
+  the window's only dismissal (none of the three modals carries a Close
+  button), and the Agents modal is now 70% of the terminal width.
 - **`/team forcecleanup` no longer races its own teardown** — the confirmed
   cleanup path awaits a real `shutdown_teammate` per active member before
   removing the team directory, instead of firing a detached agent loop whose
@@ -2182,9 +2231,9 @@ parsed into the required structure (FR-005/FR-006).
   CI flake).
 - **Tool watchdog raised to 5000 s** — a stalled tool call is killed after
   ~83 minutes instead of ~33, so long research/codeindex calls complete.
-- **`countreport.md`** — per-crate function-definition inventory (25,823
-  workspace-wide across `src/` + `tests/`), generated by one explore sub-agent
-  per crate with a shared ripgrep pattern.
+- **`countreport.md`** — per-crate function-definition inventory, generated by
+  one explore sub-agent per crate with a shared ripgrep pattern (25,823 at
+  v1.0.142; re-measured at 26,768 on the v1.0.149 tree).
 
 - **Agent and Team Member panel (spec `agentui`)** — the `Agents` and `Teams`
   buttons beside the message input open live control popups (sub-agent tree

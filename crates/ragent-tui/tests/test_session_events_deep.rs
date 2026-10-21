@@ -300,7 +300,7 @@ fn connector_catalogue_focus_toggle_and_nav_moves_apply_category() {
     ]);
     assert!(!app.connector_catalogue_nav_focused());
 
-    app.connector_catalogue_toggle_focus();
+    app.connector_catalogue_focus_next();
     assert!(app.connector_catalogue_nav_focused());
 
     app.connector_catalogue_category_move_down();

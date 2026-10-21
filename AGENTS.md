@@ -327,6 +327,24 @@ When reading files with the `read` tool:
   lock is preferred where the test must also *force* a value (`HOME`, the SSRF
   bypass, an API-key variable) while it runs. Never weaken an assertion or add a
   target just to regain isolation.
+- **Every crate must actually declare that lock, and every mutating test must
+  take the SAME one.** Two tests in one crate that each hold a *different*
+  private mutex — or one that is `#[serial]` while the other takes a file-local
+  mutex — do not exclude each other, and that is precisely how a
+  `set_var("RAGENT_CONFIG", …)` in one child file came to be observed by a
+  `Config::load()` in another (roughly one failure per 40 unsharded
+  `ragent-config` runs). `scripts/check-test-env-isolation.sh` enforces the
+  rule: a test that calls `set_var` / `remove_var` / `set_current_dir` must
+  carry `#[serial]`, take a `MutexGuard` (preferably `crate::global_env_lock()`),
+  or — when a shared helper already holds the lock for it — say so with a
+  `// env-isolation: <reason>` marker. A crate that mixes `#[serial]` with
+  file-local mutexes and declares no `global_env_lock` is rejected outright.
+  Do not hold `crate::global_env_lock()` twice in one test: `std::sync::Mutex`
+  is not reentrant and the second acquisition self-deadlocks the whole test
+  binary (74 `/slash` cases in `test_slash_arms_deep.rs` did exactly that by
+  taking the lock and then calling a harness that takes it). A test whose
+  helper already returns the guard must NOT take it again;
+  `scripts/check-test-env-isolation.sh` rejects the re-acquisition.
 - A `#[path]`-included source module resolves `crate::` at the **binary root**,
   not at the crate under test. When a child includes `src/foo.rs` that refers to
   `crate::bar`, re-export `bar` from `tests/all.rs` (see the shims at the top of

@@ -54,6 +54,9 @@ fn sse_config(url: String) -> McpServerConfig {
 
 /// A server that never answers must fail within the configured bound instead of
 /// hanging forever, and the error must name the bound and the retry.
+/// Serialised: it sets `RAGENT_MCP_CONNECT_TIMEOUT_SECS`, a process global every
+/// concurrent test in this binary would observe.
+#[serial_test::serial]
 #[tokio::test]
 async fn test_connect_to_unresponsive_server_times_out_within_bound() {
     let addr = black_hole_listener().await;
@@ -62,7 +65,7 @@ async fn test_connect_to_unresponsive_server_times_out_within_bound() {
     // Bound a single attempt to 1s so the test stays fast. `connect_timeout`
     // reads the variable on each call, so setting it here is observed.
     // SAFETY: `set_var` is `unsafe` in edition 2024; this test file opts in and
-    // is the only test in its process, so the mutation cannot race.
+    // `#[serial_test::serial]` keeps it the only test mutating the process env.
     unsafe {
         std::env::set_var("RAGENT_MCP_CONNECT_TIMEOUT_SECS", "1");
     }

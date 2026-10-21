@@ -111,6 +111,15 @@ fn filtered_ids(app: &App) -> Vec<String> {
         .collect()
 }
 
+/// The absolute navigator row carrying `label` (row `0` is `ALL`, row `1` is the
+/// `Installed` pseudo-category; the derived categories start at row `2`).
+fn row_of(app: &App, label: &str) -> usize {
+    let browser = browser(app);
+    (0..browser.category_row_count())
+        .find(|&row| browser.category_row_label(row).eq_ignore_ascii_case(label))
+        .unwrap_or_else(|| panic!("no navigator row for `{label}`"))
+}
+
 /// Render one frame so the navigator and result column areas are populated, and
 /// return the terminal for its geometry.
 fn render(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
@@ -134,12 +143,13 @@ async fn left_click_on_a_category_row_selects_applies_and_focuses_it() {
         "the result list starts focused"
     );
 
-    // Row 2 in the navigator is `Web` (row 0 is `ALL`, row 1 is `Utility`).
-    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 2));
+    // Click the `Web` row (row 0 is `ALL`, row 1 is `Installed`).
+    let web = row_of(&app, "Web");
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y + web as u16));
 
     // The click moves the cursor to `Web`, applies it, and focuses the navigator
     // (FR-011).
-    assert_eq!(browser(&app).category_cursor_row(), 2);
+    assert_eq!(browser(&app).category_cursor_row(), web);
     assert_eq!(browser(&app).active_category(), "Web");
     assert!(
         app.plugin_store_nav_focused(),
@@ -154,7 +164,8 @@ async fn left_click_on_the_all_row_restores_the_full_set() {
     render(&mut app, 100, 30);
     let nav = app.plugin_store_nav_area;
 
-    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 2)); // Web
+    let web = row_of(&app, "Web");
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y + web as u16));
     assert_eq!(filtered_ids(&app), ["codex-weather"]);
 
     app.handle_mouse_event(left_click(nav.x + 1, nav.y)); // ALL
@@ -204,7 +215,8 @@ async fn left_click_on_a_result_row_under_a_category_keeps_that_category() {
     let result = app.plugin_store_result_area;
 
     // Select `Utility` first, so two rows survive (`codex-time`, `codex-shell`).
-    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 1));
+    let utility = row_of(&app, "Utility");
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y + utility as u16));
     assert_eq!(browser(&app).active_category(), "Utility");
 
     app.handle_mouse_event(left_click(result.x + 1, result.y + 1));
@@ -245,15 +257,16 @@ async fn left_click_on_a_scrolled_navigator_selects_the_visible_row() {
     render(&mut app, 100, 30);
     let nav = app.plugin_store_nav_area;
 
-    // Scroll the viewport down four rows, then click its top row. The click maps
-    // through the scroll offset, so it selects absolute row 4: `Cat03` (row 0 is
-    // `ALL`, row 1 is `Cat00`, ...) (FR-011, FR-012).
+    // Scroll the viewport down six rows, then click its top row. The click maps
+    // through the scroll offset, so it selects absolute row 6, whose label is read
+    // back from the navigator rather than hard-coded (FR-011, FR-012).
     app.handle_mouse_event(wheel_down(nav.x + 1, nav.y + 1)); // scroll -> 3
     app.handle_mouse_event(wheel_down(nav.x + 1, nav.y + 1)); // scroll -> 6
+    let expected = browser(&app).category_row_label(6).to_string();
     app.handle_mouse_event(left_click(nav.x + 1, nav.y));
 
     assert_eq!(browser(&app).category_cursor_row(), 6);
-    assert_eq!(browser(&app).active_category(), "Cat05");
+    assert_eq!(browser(&app).active_category(), expected);
     assert!(app.plugin_store_nav_focused());
 }
 

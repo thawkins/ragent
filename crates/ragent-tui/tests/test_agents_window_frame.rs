@@ -1,8 +1,9 @@
 //! Tests for the Agents window frame (spec `agentui` T-002).
 //!
-//! Covers the frame geometry (FR-006), the clamped Close button (FR-007), the
-//! table-area arithmetic (FR-008) and the guarantee that every popup rectangle
-//! stays inside the terminal rectangle at any size (NFR-010). Every case drives
+//! Covers the frame geometry (FR-006), the footer key legend carrying the `Esc`
+//! dismissal (FR-007), the table-area arithmetic above that footer (FR-008) and
+//! the guarantee that every popup rectangle stays inside the terminal rectangle
+//! at any size (NFR-010). Every case drives
 //! the real public render entry point through a ratatui `TestBackend` and reads
 //! the painted buffer back, so no renderer logic is re-implemented here
 //! (NFR-001, NFR-012).
@@ -148,7 +149,7 @@ fn test_agents_modal_paints_borders_and_bold_cyan_title() {
 }
 
 /// The modal is cleared beneath, so chat text cannot show through the popup
-/// body: the separator row between the table and the Close button is blank.
+/// body: no cell inside the inner area carries the underlay's text.
 #[test]
 fn test_agents_modal_clears_the_underlay() {
     let mut app = make_app();
@@ -162,99 +163,101 @@ fn test_agents_modal_clears_the_underlay() {
     let buffer = render(&mut app, 120, 40);
 
     let content = app.active_agents_area;
-    let close = app.agents_close_button_area;
-    let separator_row = close.y.saturating_sub(1);
-    assert!(
-        separator_row >= content.y,
-        "the separator row must sit below the content area (content {content:?}, close {close:?})"
-    );
-
-    let text = row_text(&buffer, separator_row, close);
-    assert!(
-        text.trim().is_empty(),
-        "the separator row must be cleared, got {text:?}"
-    );
+    for y in content.y..content.bottom() {
+        let text = row_text(&buffer, y, content);
+        assert!(
+            !text.contains("UNDERLAY-"),
+            "row {y} shows the cleared underlay: {text:?}"
+        );
+    }
 }
 
-// -- FR-007: Close button ----------------------------------------------------
+// -- FR-007: footer key legend ------------------------------------------------
 
-/// The Close button is pinned to the bottom-right of the inner area and clamped
-/// to at most 10 columns and 3 rows (FR-007).
+/// The footer legend is the modal's last inner row, spanning the full inner
+/// width so the hints have the whole panel to lay out in (FR-007, FR-077).
 #[test]
-fn test_agents_close_button_is_bottom_right_and_clamped() {
+fn test_agents_legend_is_the_bottom_inner_row() {
     for (width, height) in [(120u16, 40u16), (160, 44), (60, 20), (34, 14)] {
         let mut app = make_app();
         let _ = render(&mut app, width, height);
 
         let modal = expected_modal(width, height);
-        // Inner area: the modal minus its one-cell border on each side.
-        let inner = Rect::new(
-            modal.x + 1,
-            modal.y + 1,
-            modal.width.saturating_sub(2),
-            modal.height.saturating_sub(2),
+        let (_, content, legend) = ragent_tui::layout::window_frame_testable(
+            ragent_tui::layout::agents_window_percent_w(),
+            ragent_tui::layout::agents_window_percent_h(),
+            Rect::new(0, 0, width, height),
         );
-        let close = app.agents_close_button_area;
 
-        assert!(
-            close.width <= 10,
-            "at {width}x{height}: close width {} exceeds 10",
-            close.width
-        );
-        assert!(
-            close.height <= 3,
-            "at {width}x{height}: close height {} exceeds 3",
-            close.height
+        assert_eq!(
+            legend.y,
+            modal.bottom().saturating_sub(2),
+            "at {width}x{height}: the legend must be the last inner row"
         );
         assert_eq!(
-            close.width,
-            10.min(inner.width),
-            "at {width}x{height}: close must fill its clamped width"
+            legend.height, 1,
+            "at {width}x{height}: the legend band is one row tall"
         );
         assert_eq!(
-            close.height,
-            3.min(inner.height),
-            "at {width}x{height}: close must fill its clamped height"
+            legend.width,
+            modal.width.saturating_sub(2),
+            "at {width}x{height}: the legend must span the inner width"
         );
         assert_eq!(
-            close.right(),
-            inner.right(),
-            "at {width}x{height}: close must align to the inner right edge"
-        );
-        assert_eq!(
-            close.bottom(),
-            inner.bottom(),
-            "at {width}x{height}: close must align to the inner bottom edge"
+            content.bottom(),
+            legend.y,
+            "at {width}x{height}: the table ends where the legend band begins"
         );
     }
 }
 
-/// The Close button paints its bordered ` Close ` label (FR-007).
+/// The legend names the dismissal key, and the window paints no ` Close `
+/// button anywhere in its inner area (FR-007).
 #[test]
-fn test_agents_close_button_paints_its_label() {
+fn test_agents_legend_names_the_escape_key_and_no_close_button_paints() {
     let mut app = make_app();
     let buffer = render(&mut app, 120, 40);
-    let close = app.agents_close_button_area;
+    let (_, content, legend) = ragent_tui::layout::window_frame_testable(
+        ragent_tui::layout::agents_window_percent_w(),
+        ragent_tui::layout::agents_window_percent_h(),
+        Rect::new(0, 0, 120, 40),
+    );
 
-    let style = find_text_style(&buffer, close, "Close").expect("the Close label must paint");
+    let legend_text = row_text(&buffer, legend.y, legend);
     assert!(
-        style.fg.is_some(),
-        "the Close label must carry a foreground colour, style: {style:?}"
+        legend_text.contains("Esc close"),
+        "the legend names the dismissal key: {legend_text:?}"
     );
-    let corner = buffer.cell((close.x, close.y)).expect("close corner");
+    for key in ["Up/Down", "PgUp/PgDn", "Space", "Del kill", "Enter open"] {
+        assert!(
+            legend_text.contains(key),
+            "the legend lists `{key}`: {legend_text:?}"
+        );
+    }
+    let style = find_text_style(&buffer, legend, "Esc close").expect("legend must paint");
     assert_eq!(
-        corner.symbol(),
-        "\u{250c}",
-        "the Close button must be bordered (FR-007)"
+        style.fg,
+        Some(Color::DarkGray),
+        "the legend is dim, style: {style:?}"
     );
+
+    // No ` Close ` label survives anywhere inside the modal, and the footer row
+    // is the only place a stray one could hide.
+    for y in content.y..content.bottom() {
+        let text = row_text(&buffer, y, content);
+        assert!(
+            !text.contains("Close"),
+            "row {y} must not paint a Close button: {text:?}"
+        );
+    }
 }
 
 // -- FR-008: content area ----------------------------------------------------
 
-/// The table area is the inner area minus the Close button height and one
-/// separating row, spanning the full inner width (FR-008).
+/// The table area is the inner area minus the one-row legend band, spanning the
+/// full inner width (FR-008).
 #[test]
-fn test_agents_content_area_excludes_close_and_separator() {
+fn test_agents_content_area_excludes_the_legend_band() {
     for (width, height) in [(120u16, 40u16), (160, 44), (80, 24)] {
         let mut app = make_app();
         let _ = render(&mut app, width, height);
@@ -267,7 +270,6 @@ fn test_agents_content_area_excludes_close_and_separator() {
             modal.height.saturating_sub(2),
         );
         let content = app.active_agents_area;
-        let close = app.agents_close_button_area;
 
         assert_eq!(
             content.x, inner.x,
@@ -283,27 +285,26 @@ fn test_agents_content_area_excludes_close_and_separator() {
         );
         assert_eq!(
             content.height,
-            inner.height - close.height - 1,
-            "at {width}x{height}: content height must be inner - close - separator"
-        );
-        assert_eq!(
-            content.bottom() + 1,
-            close.y,
-            "at {width}x{height}: exactly one separator row sits above the Close button"
+            inner.height - 1,
+            "at {width}x{height}: content height must be the inner height minus the legend row"
         );
     }
 }
 
-/// The content area is clamped to a minimum height of one row (FR-008), even
-/// when the modal is too short to hold the Close button and a separator.
+/// The content area never drops below one row (FR-008), even when the modal is
+/// too short to hold the legend band.
 #[test]
 fn test_agents_content_area_clamps_to_one_row() {
-    for (width, height) in [(30u16, 8u16), (30, 6), (24, 5)] {
+    for (width, height) in [(30u16, 8u16), (30, 6), (24, 5), (10, 4), (4, 3)] {
         let mut app = make_app();
         let _ = render(&mut app, width, height);
+
+        let modal = expected_modal(width, height);
+        let inner_h = modal.height.saturating_sub(2);
+        let want = inner_h.saturating_sub(1).max(1).min(inner_h);
         assert_eq!(
-            app.active_agents_area.height, 1,
-            "at {width}x{height}: the table area must clamp to one row"
+            app.active_agents_area.height, want,
+            "at {width}x{height}: the table area must be the inner height minus the legend row, clamped to at least one row"
         );
     }
 }
@@ -335,19 +336,15 @@ fn test_agents_frame_rects_stay_inside_the_terminal() {
             "at {width}x{height}: modal {modal:?} escapes the terminal {screen:?}"
         );
 
-        for (name, rect) in [
-            ("close", app.agents_close_button_area),
-            ("content", app.active_agents_area),
-        ] {
-            assert!(
-                rect.right() <= screen.right() && rect.bottom() <= screen.bottom(),
-                "at {width}x{height}: {name} {rect:?} escapes the terminal {screen:?}"
-            );
-            assert!(
-                rect.right() <= modal.right() && rect.bottom() <= modal.bottom(),
-                "at {width}x{height}: {name} {rect:?} escapes the modal {modal:?}"
-            );
-        }
+        let content = app.active_agents_area;
+        assert!(
+            content.right() <= screen.right() && content.bottom() <= screen.bottom(),
+            "at {width}x{height}: content {content:?} escapes the terminal {screen:?}"
+        );
+        assert!(
+            content.right() <= modal.right() && content.bottom() <= modal.bottom(),
+            "at {width}x{height}: content {content:?} escapes the modal {modal:?}"
+        );
 
         assert_eq!(
             buffer.area, screen,
@@ -356,18 +353,22 @@ fn test_agents_frame_rects_stay_inside_the_terminal() {
     }
 }
 
-/// At a normal terminal size the table area and the Close button never overlap,
-/// so a row click can never resolve to the Close button (FR-007, FR-008).
+/// At a normal terminal size the table area never overlaps the footer legend
+/// band, so the legend cannot overwrite a data row (FR-007, FR-008).
 #[test]
-fn test_agents_content_and_close_do_not_overlap_when_there_is_room() {
+fn test_agents_content_and_legend_do_not_overlap_when_there_is_room() {
     for (width, height) in [(120u16, 40u16), (160, 44), (80, 24), (40, 12)] {
         let mut app = make_app();
         let _ = render(&mut app, width, height);
         let content = app.active_agents_area;
-        let close = app.agents_close_button_area;
+        let (_, _, legend) = ragent_tui::layout::window_frame_testable(
+            ragent_tui::layout::agents_window_percent_w(),
+            ragent_tui::layout::agents_window_percent_h(),
+            Rect::new(0, 0, width, height),
+        );
         assert!(
-            content.bottom() <= close.y,
-            "at {width}x{height}: content {content:?} must end above close {close:?}"
+            content.bottom() <= legend.y,
+            "at {width}x{height}: content {content:?} must end above the legend {legend:?}"
         );
     }
 }

@@ -10,7 +10,7 @@
 //! left-click on a result row moves the result cursor and leaves the category
 //! alone, and every mouse path installs nothing.
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -55,6 +55,11 @@ fn descriptor(id: &str, category: &str) -> ConnectorDescriptor {
     }
 }
 
+/// A key event with no modifiers.
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::empty())
+}
+
 fn mouse(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind,
@@ -70,8 +75,8 @@ fn left_click(col: u16, row: u16) -> MouseEvent {
 
 /// An app with the panel open and the fixture entries loaded. The distinct
 /// categories are `developer`, `productivity`, and `communication` (sorted
-/// case-insensitively), so the navigator rows are `ALL` (0), `communication`
-/// (1), `developer` (2), `productivity` (3).
+/// case-insensitively), so the navigator rows are `ALL` (0), `Installed` (1),
+/// `communication` (2), `developer` (3), `productivity` (4).
 fn open() -> App {
     let mut app = support::make_app();
     app.open_connector_catalogue("", CategoryFilter::all(), false);
@@ -114,13 +119,13 @@ async fn left_click_on_a_category_row_selects_applies_and_focuses_it() {
         "the result list starts focused"
     );
 
-    // Row 2 in the navigator is `developer` (row 0 is `ALL`).
-    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 2));
+    // Row 3 in the navigator is `developer` (row 0 is `ALL`, row 1 `Installed`).
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 3));
 
     let browser = browser(&app);
     assert_eq!(
         browser.category_cursor_row(),
-        2,
+        3,
         "the cursor moved to the row"
     );
     assert_eq!(
@@ -141,7 +146,7 @@ async fn left_click_on_the_all_row_restores_the_full_set() {
     render(&mut app, 110, 30);
     let nav = app.connector_store_nav_area;
 
-    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 2)); // developer
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y + 3)); // developer
     assert_eq!(browser(&app).filtered.len(), 1);
 
     app.handle_mouse_event(left_click(nav.x + 1, nav.y)); // ALL
@@ -233,5 +238,158 @@ async fn a_wheel_on_the_pinned_heading_row_is_inert() {
         browser(&app).cursor,
         0,
         "the heading wheel does not move the result cursor"
+    );
+}
+
+// -- The marketplace navigator: click, wheel, and focus ----------------------
+
+/// A catalogue descriptor attributed to a marketplace.
+fn attributed(id: &str, marketplace: &str) -> ConnectorDescriptor {
+    let mut entry = descriptor(id, "developer");
+    entry.marketplace = marketplace.to_string();
+    entry
+}
+
+/// A catalogue of three entries attributed to two marketplaces, so the
+/// marketplace navigator has rows `ALL` (0), `acme` (1), `official` (2).
+fn open_with_marketplaces() -> App {
+    let mut app = support::make_app();
+    app.open_connector_catalogue("", CategoryFilter::all(), false);
+    let browser = app.connector_store.as_mut().expect("panel open");
+    browser.set_entries(
+        vec![
+            attributed("community-one", "acme"),
+            attributed("community-two", "acme"),
+            attributed("official-one", "official"),
+        ],
+        0,
+    );
+    app
+}
+
+#[tokio::test]
+async fn left_click_on_a_marketplace_row_selects_applies_and_focuses_it() {
+    let mut app = open_with_marketplaces();
+    render(&mut app, 130, 30);
+    let marketplace = app.connector_store_marketplace_area;
+    assert!(
+        marketplace.height > 0,
+        "the marketplace navigator area is recorded"
+    );
+    assert!(
+        !app.connector_catalogue_marketplace_focused(),
+        "the result list starts focused"
+    );
+
+    // Row 1 of the marketplace navigator is `acme`.
+    app.handle_mouse_event(left_click(marketplace.x + 1, marketplace.y + 1));
+
+    let browser = browser(&app);
+    assert_eq!(browser.marketplace_cursor_row(), 1, "the cursor moved");
+    assert_eq!(browser.active_marketplace(), "acme", "the filter applied");
+    assert_eq!(browser.filtered.len(), 2, "the result set narrowed");
+    assert!(
+        app.connector_catalogue_marketplace_focused(),
+        "the click focuses the marketplace pane"
+    );
+}
+
+#[tokio::test]
+async fn a_wheel_over_the_marketplace_navigator_scrolls_without_filtering() {
+    let mut app = open_with_marketplaces();
+    render(&mut app, 130, 30);
+    let marketplace = app.connector_store_marketplace_area;
+
+    app.handle_mouse_event(mouse(
+        MouseEventKind::ScrollDown,
+        marketplace.x + 1,
+        marketplace.y,
+    ));
+
+    let browser = browser(&app);
+    assert_eq!(
+        browser.active_marketplace(),
+        "ALL",
+        "the wheel selects nothing"
+    );
+    assert_eq!(
+        browser.marketplace_cursor_row(),
+        0,
+        "the cursor did not move"
+    );
+}
+
+#[tokio::test]
+async fn a_click_on_a_navigator_title_band_is_inert() {
+    // The cached navigator areas exclude the title band above each pane, so a click
+    // on the band maps to no row.
+    let mut app = open_with_marketplaces();
+    render(&mut app, 130, 30);
+    let nav = app.connector_store_nav_area;
+    let marketplace = app.connector_store_marketplace_area;
+
+    app.handle_mouse_event(left_click(nav.x + 1, nav.y - 1));
+    app.handle_mouse_event(left_click(marketplace.x + 1, marketplace.y - 1));
+
+    let browser = browser(&app);
+    assert_eq!(browser.active_category(), "ALL");
+    assert_eq!(browser.active_marketplace(), "ALL");
+    assert!(
+        !app.connector_catalogue_nav_focused() && !app.connector_catalogue_marketplace_focused(),
+        "a band click focuses nothing"
+    );
+}
+
+#[tokio::test]
+async fn tab_cycles_focus_through_the_three_panes() {
+    // `Tab` walks Results -> Categories -> Marketplaces -> Results and `BackTab`
+    // walks it back, exactly as the plugin-store panel does.
+    let mut app = open_with_marketplaces();
+    render(&mut app, 130, 30);
+
+    assert!(!app.connector_catalogue_nav_focused());
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(app.connector_catalogue_nav_focused(), "Tab -> Categories");
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(
+        app.connector_catalogue_marketplace_focused(),
+        "Tab -> Marketplaces"
+    );
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Tab)).await;
+    assert!(
+        !app.connector_catalogue_nav_focused() && !app.connector_catalogue_marketplace_focused(),
+        "Tab -> Results"
+    );
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::BackTab)).await;
+    assert!(
+        app.connector_catalogue_marketplace_focused(),
+        "BackTab -> Marketplaces"
+    );
+}
+
+#[tokio::test]
+async fn c_clears_the_focused_navigators_filter() {
+    // `c` is pane-scoped: over the navigator it clears the category, over the
+    // marketplace navigator it clears the marketplace, and both leave the other
+    // filter alone.
+    let mut app = open_with_marketplaces();
+    render(&mut app, 130, 30);
+    // Apply both filters directly so the assertions isolate the clear key.
+    {
+        let browser = app.connector_store.as_mut().expect("panel open");
+        assert!(browser.category_select_row(2)); // `acme` is not a category; use `developer`
+        assert!(browser.marketplace_select_row(1)); // acme
+    }
+    // Focus the marketplace pane and clear only that filter.
+    app.connector_catalogue_focus_next();
+    app.connector_catalogue_focus_next();
+    assert!(app.connector_catalogue_marketplace_focused());
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Char('c'))).await;
+    let browser = app.connector_store.as_ref().expect("panel open");
+    assert_eq!(browser.active_marketplace(), "ALL", "marketplace cleared");
+    assert_eq!(
+        browser.active_category(),
+        "developer",
+        "the category filter is untouched"
     );
 }

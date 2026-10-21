@@ -1837,6 +1837,19 @@ impl StorePane {
     }
 }
 
+/// The `Installed` pseudo-category row of the plugin-store category navigator
+/// (spec `pluginstores` FR-054).
+///
+/// It is not a store category: selecting it filters the result list to the
+/// plugins already present in the store scan
+/// ([`PluginStoreBrowser::installed`]) rather than matching an entry's declared
+/// `category` field, so a plugin that declares no category at all still appears
+/// under it. The row is pinned directly after the `ALL` sentinel (navigator row
+/// one) so the installed plugins are always one keypress away, and the name is
+/// reserved: an entry whose declared `category` is this label never forms a
+/// second row.
+pub const INSTALLED_CATEGORY: &str = "Installed";
+
 /// The load state of a plugin-store browser (spec `pluginstores` T-004;
 /// FR-013, FR-016, FR-017).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2072,11 +2085,21 @@ impl PluginStoreBrowser {
         let needle = self.query.to_lowercase();
         let category = self.categories.filter().clone();
         let marketplace = self.marketplaces.filter().clone();
+        // The `Installed` pseudo-category is matched against the store scan
+        // rather than a declared category field, so an installed plugin shows up
+        // under it whatever category it declares - or none at all (FR-054).
+        let installed_only = is_installed_row_label(category.label());
         self.all
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry_matches(entry, &needle))
-            .filter(|(_, entry)| category.matches_category(entry.category.as_deref()))
+            .filter(|(_, entry)| {
+                if installed_only {
+                    self.installed.contains(&entry.id)
+                } else {
+                    category.matches_category(entry.category.as_deref())
+                }
+            })
             .filter(|(_, entry)| marketplace.matches_category(marketplace_of(entry)))
             .map(|(index, _)| index)
             .collect()
@@ -2247,24 +2270,29 @@ impl PluginStoreBrowser {
 
     /// Re-derive the distinct category set from [`Self::all`], keeping the active
     /// category only while the new index still declares it (spec `catnav` FR-001,
-    /// FR-018, FR-027).
+    /// FR-018, FR-027; `pluginstores` FR-054).
     ///
     /// The set is the sorted, case-insensitive distinct non-blank categories
     /// present in the loaded entries ([`CategoryFilterState::from_categories`]),
-    /// with `ALL` implicit and always first. An index that declares no category
-    /// therefore still renders `ALL` only (FR-018). A category no entry declares is
-    /// dropped and the selection falls back to `ALL`, so the navigator never shows a
-    /// row that selects nothing, and the cursor is placed on the surviving
-    /// selection's row.
+    /// with `ALL` implicit and always first and the `Installed` pseudo-category
+    /// pinned second. An index that declares no category therefore still renders the
+    /// `ALL` and `Installed` rows (FR-018). A category no entry declares is dropped
+    /// and the selection falls back to `ALL`, so the navigator never shows a row that
+    /// selects nothing, and the cursor is placed on the surviving selection's row.
+    /// The reserved [`INSTALLED_CATEGORY`] name never forms a derived row, and an
+    /// index re-fetch keeps the pseudo-category selected when it was selected before.
     ///
     /// Only the declared `category` field forms a row: an entry's `tags` are search
     /// terms, never navigator rows, so a single plugin with a long `keywords` list
     /// cannot flood the navigator (spec `catnav` FR-021 withdrawn).
     fn rebuild_categories(&mut self) {
         let previous = self.categories.filter().label().to_string();
-        let categories = CategoryFilterState::from_categories(
-            self.all.iter().filter_map(|e| e.category.as_deref()),
-        );
+        let previous_was_installed = is_installed_row_label(&previous);
+        let categories = CategoryFilterState::from_categories(self.all.iter().filter_map(|e| {
+            e.category
+                .as_deref()
+                .filter(|category| !is_installed_row_label(category))
+        }));
         self.categories = categories;
         // The boolean is informational; the side effect (falling back to `ALL`
         // when the category is no longer declared) is what matters here, and the
@@ -2272,6 +2300,12 @@ impl PluginStoreBrowser {
         // FR-027).
         // INTENTIONAL: the boolean is informational; the drop is deliberate.
         let _ = self.categories.select_when_known(&previous);
+        // The `Installed` pseudo-category is never a derived row, so a re-fetch
+        // must re-select it explicitly rather than falling back to `ALL`
+        // (FR-054).
+        if previous_was_installed {
+            self.categories.select_by_name(INSTALLED_CATEGORY);
+        }
         self.category_cursor = self.category_row_of(self.categories.filter().label());
         self.category_scroll = 0;
     }
@@ -2343,36 +2377,48 @@ impl PluginStoreBrowser {
         self.categories.filter().label()
     }
 
-    /// The number of navigator rows: the `ALL` sentinel plus each derived category
-    /// (spec `catnav` FR-001).
+    /// The number of navigator rows: the `ALL` sentinel, the `Installed`
+    /// pseudo-category, then each derived category (spec `catnav` FR-001;
+    /// `pluginstores` FR-054).
     #[must_use]
     pub fn category_row_count(&self) -> usize {
-        1 + self.categories.categories().len()
+        2 + self.categories.categories().len()
     }
 
-    /// The label of navigator row `row`: `ALL` for row `0`, else the sorted
-    /// category at that row; an out-of-range row reads as `ALL` so a renderer or a
-    /// mouse hit test can never index past the set (spec `catnav` FR-001, FR-027).
+    /// The label of navigator row `row`: `ALL` for row `0`, `Installed` for row
+    /// `1`, else the sorted category at that row; an out-of-range row reads as
+    /// `ALL` so a renderer or a mouse hit test can never index past the set
+    /// (spec `catnav` FR-001, FR-027; `pluginstores` FR-054).
     #[must_use]
     pub fn category_row_label(&self, row: usize) -> &str {
         match row
-            .checked_sub(1)
+            .checked_sub(2)
             .and_then(|index| self.categories.categories().get(index))
         {
             Some(label) => label.as_str(),
+            None if row == 1 => INSTALLED_CATEGORY,
             None => ALL_CATEGORY,
         }
     }
 
     /// How many loaded entries the category named `label` holds (spec `pluginstores`
-    /// FR-053).
+    /// FR-053, FR-054).
     ///
-    /// The `ALL` sentinel counts every entry; a category with no entry (or an
-    /// unknown label) counts `0`. The count composes the shared
-    /// [`CategoryFilter::matches_category`] predicate, so it always agrees with the
-    /// result set selecting that row would show.
+    /// The `ALL` sentinel counts every entry; the `Installed` pseudo-category
+    /// counts the loaded entries whose id is in the store scan, independent of the
+    /// category they declare; a category with no entry (or an unknown label) counts
+    /// `0`. The count composes the same predicates
+    /// [`Self::matching_indices`] applies, so it always agrees with the result set
+    /// selecting that row would show.
     #[must_use]
     pub fn category_entry_count(&self, label: &str) -> usize {
+        if is_installed_row_label(label) {
+            return self
+                .all
+                .iter()
+                .filter(|entry| self.installed.contains(&entry.id))
+                .count();
+        }
         let filter = CategoryFilter::of(label);
         self.all
             .iter()
@@ -2382,11 +2428,11 @@ impl PluginStoreBrowser {
 
     /// The string rendered for navigator row `row`: the base
     /// [`Self::category_row_label`] with the row's entry count appended as ` (N)`
-    /// (spec `pluginstores` FR-053).
+    /// (spec `pluginstores` FR-053, FR-054).
     ///
     /// A still-loading index, or one that declares no category, still renders the
-    /// `ALL (0)` row so the navigator shows a count in every state (FR-016,
-    /// FR-018).
+    /// `ALL (0)` and `Installed (0)` rows so the navigator shows a count in every
+    /// state (FR-016, FR-018).
     #[must_use]
     pub fn category_row_display(&self, row: usize) -> String {
         let label = self.category_row_label(row);
@@ -2539,18 +2585,22 @@ impl PluginStoreBrowser {
         self.category_scroll = self.category_scroll.min(rows.saturating_sub(viewport));
     }
 
-    /// The navigator row carrying `label`: row `0` for the `ALL` sentinel, else the
-    /// sorted position plus one; an unknown label reads as `ALL` (spec `catnav`
-    /// FR-001, FR-027).
+    /// The navigator row carrying `label`: row `0` for the `ALL` sentinel, row `1`
+    /// for the `Installed` pseudo-category, else the sorted position plus two; an
+    /// unknown label reads as `ALL` (spec `catnav` FR-001, FR-027; `pluginstores`
+    /// FR-054).
     fn category_row_of(&self, label: &str) -> usize {
         if label.eq_ignore_ascii_case(ALL_CATEGORY) {
             return 0;
+        }
+        if is_installed_row_label(label) {
+            return 1;
         }
         self.categories
             .categories()
             .iter()
             .position(|category| category.eq_ignore_ascii_case(label))
-            .map_or(0, |index| index + 1)
+            .map_or(0, |index| index + 2)
     }
 
     // -- Marketplace navigator (spec `pluginstores` FR-052) --------------------
@@ -2746,9 +2796,15 @@ impl PluginStoreBrowser {
     /// Replace the derived installed-plugin-id set (T-007, FR-005).
     ///
     /// The caller derives the set from the store scan ([`ragent_plugins::store`])
-    /// so the browser keeps no second install registry (A5).
+    /// so the browser keeps no second install registry (A5). When the `Installed`
+    /// pseudo-category is the active filter, the result list is re-derived from the
+    /// new scan so a just-installed plugin appears (or a removed one disappears)
+    /// without the user re-selecting the row (FR-054).
     pub fn set_installed(&mut self, installed: BTreeSet<String>) {
         self.installed = installed;
+        if is_installed_row_label(self.categories.filter().label()) {
+            self.apply_filter();
+        }
     }
 
     /// Whether `id` is present in the store scan (FR-005).
@@ -2775,6 +2831,15 @@ fn entry_matches(entry: &StoreEntry, needle_lower: &str) -> bool {
             .tags
             .iter()
             .any(|tag| tag.to_lowercase().contains(needle_lower))
+}
+
+/// Whether `label` names the `Installed` pseudo-category row rather than a store
+/// category (spec `pluginstores` FR-054).
+///
+/// The comparison is case-insensitive so a `--category installed` launch and a
+/// declared `installed` category both resolve to the one pinned row.
+fn is_installed_row_label(label: &str) -> bool {
+    label.trim().eq_ignore_ascii_case(INSTALLED_CATEGORY)
 }
 
 /// The marketplace label an entry is attributed to for filtering (FR-052).
@@ -2876,6 +2941,16 @@ pub struct App {
     pub git_branch: Option<String>,
     /// Provider setup dialog state, if the dialog is open.
     pub provider_setup: Option<ProviderSetupStep>,
+    /// Cached area of the open provider/model setup dialog (set during render).
+    ///
+    /// A wheel notch inside this rect moves the dialog's own cursor, so no
+    /// selector can hide its entries off the bottom edge: the provider, model,
+    /// router-model, Azure-resource, thinking-level, agent and router panes all
+    /// window around the cursor. A notch outside it is swallowed while the
+    /// dialog is open rather than scrolling the pane behind the modal. Kept in
+    /// [`Rect::default`] while no dialog is showing, so a closed dialog can
+    /// never receive a wheel event.
+    pub provider_setup_area: Rect,
     /// Currently configured provider, if any.
     pub configured_provider: Option<ConfiguredProvider>,
     /// Provider registry for querying available models.
@@ -3183,17 +3258,40 @@ pub struct App {
     /// column (set during render).
     ///
     /// Recomputed from the panel body every frame so a terminal resize re-derives
-    /// it; tests and mouse hit-testing read it back to locate the navigator.
-    /// Kept in [`Rect::default`] while no panel is open.
+    /// it; tests and mouse hit-testing read it back to locate the navigator. The
+    /// area is the rows *below* the navigator's reversed-video title band, so a
+    /// click or wheel on the band is inert. Kept in [`Rect::default`] while no
+    /// panel is open.
     pub connector_store_nav_area: Rect,
+    /// Cached area of the connector-catalogue panel's marketplace-navigator rows
+    /// in the lower half of the left column (set during render).
+    ///
+    /// Recomputed from the panel body every frame; like
+    /// [`Self::connector_store_nav_area`] it excludes the title band above it.
+    /// Kept in [`Rect::default`] while no panel is open.
+    pub connector_store_marketplace_area: Rect,
     /// Cached area of the connector-catalogue panel's result-list column (set
     /// during render).
     ///
-    /// Recomputed from the panel body every frame alongside the navigator; kept
+    /// Recomputed from the panel body every frame alongside the navigators; kept
     /// in [`Rect::default`] while no panel is open. Anchored on the scrolling
     /// list *below* the pinned column-heading row, so mouse hit-testing treats a
     /// click or wheel on the heading as inert.
     pub connector_store_result_area: Rect,
+    /// Cached area of the connector-catalogue panel's bottom search box (set
+    /// during render).
+    ///
+    /// The panel's own search filter is typed into it while any pane holds focus,
+    /// and the live query is painted there rather than in the title alone. Kept in
+    /// [`Rect::default`] while no panel is open.
+    pub connector_store_search_area: Rect,
+    /// Cached area of the connector-catalogue panel's search-box clear button (set
+    /// during render).
+    ///
+    /// Recomputed from [`Self::connector_store_search_area`] every frame and
+    /// painted at the search box's right edge; a left-click inside it clears the
+    /// search filter. [`Rect::default`] while no panel is open.
+    pub connector_store_clear_area: Rect,
     /// The `/backend` switcher panel state, present while it is open
     /// (spec `openhands` FR-008). `None` when no panel is showing; while it is
     /// `Some` the panel swallows every keystroke and locks the input field.
@@ -3405,14 +3503,6 @@ pub struct App {
     pub show_agents_window: bool,
     /// Whether the Teams popup window is visible.
     pub show_teams_window: bool,
-    /// Cached click target for Agents popup close button.
-    pub agents_close_button_area: Rect,
-    /// Cached click target for Teams popup close button.
-    pub teams_close_button_area: Rect,
-    /// Cached click target for the output view overlay's Close bar button
-    /// (spec `agentui` FR-075). Zeroed wherever the overlay area is reset, so
-    /// a hidden surface cannot receive a click.
-    pub output_view_close_button_area: Rect,
     /// MCP server display list for `/mcp` and `/plugins list`: the configured
     /// `mcp` section plus every server an enabled plugin bridges (ids
     /// `<plugin-id>.<server>`), with the live status and tool list adopted from
@@ -4354,6 +4444,12 @@ impl App {
         // shared client, which the append below would otherwise conflict with).
         drop(guard);
         if !lines.is_empty() {
+            // A trailing blank line separates the startup report from whatever
+            // the stream prints next. Two newlines are needed: `str::lines()`
+            // drops a single trailing terminator, so one `\n` would add no row
+            // at all and only `\n\n` yields the empty final row that renders as
+            // the blank line.
+            lines.push_str("\n\n");
             self.append_assistant_text(&lines);
             // Latch only a non-empty report: a run with no configured server
             // leaves the latch clear so a server added mid-session is still

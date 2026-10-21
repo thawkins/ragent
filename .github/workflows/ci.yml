@@ -129,6 +129,10 @@ jobs:
         run: bash scripts/check-inline-tests.sh --self-test
       - name: Verify no genuine inline #[cfg(test)] module in crates/ or src/
         run: bash scripts/check-inline-tests.sh
+      - name: Verify self-test fails on an unguarded process-global mutation
+        run: bash scripts/check-test-env-isolation.sh --self-test
+      - name: Verify every mutating test takes shared crate-wide isolation
+        run: bash scripts/check-test-env-isolation.sh
       - name: Verify self-test fails on a seeded silent error drop
         run: bash scripts/check-silent-errors.sh --self-test
       - name: Verify no new silent error suppression (ANTIPAT M4)

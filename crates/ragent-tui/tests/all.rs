@@ -267,8 +267,8 @@ mod test_new_command;
 mod test_osinfo_command;
 #[path = "test_osinfo_registration.rs"]
 mod test_osinfo_registration;
-#[path = "test_output_view_close_bar.rs"]
-mod test_output_view_close_bar;
+#[path = "test_output_view_footer.rs"]
+mod test_output_view_footer;
 #[path = "test_output_view_live_steps.rs"]
 mod test_output_view_live_steps;
 #[path = "test_perf_message_cache.rs"]
@@ -305,6 +305,8 @@ mod test_plugin_store_fetch;
 mod test_plugin_store_filter;
 #[path = "test_plugin_store_install.rs"]
 mod test_plugin_store_install;
+#[path = "test_plugin_store_installed_category.rs"]
+mod test_plugin_store_installed_category;
 #[path = "test_plugin_store_launch.rs"]
 mod test_plugin_store_launch;
 #[path = "test_plugin_store_marketplaces.rs"]
@@ -383,6 +385,10 @@ mod test_session_models_state_deep;
 mod test_session_ops_more;
 #[path = "test_session_resume.rs"]
 mod test_session_resume;
+#[path = "test_setup_dialog_chrome.rs"]
+mod test_setup_dialog_chrome;
+#[path = "test_setup_selector_scroll.rs"]
+mod test_setup_selector_scroll;
 #[path = "test_shorten_middle.rs"]
 mod test_shorten_middle;
 #[path = "test_skill_command.rs"]

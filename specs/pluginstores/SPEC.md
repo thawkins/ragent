@@ -42,17 +42,19 @@ turns that into: type the command, type a few letters, press `ENTER`.
 
 ```text
 +-- Codex Plugin Store ---- search: weather ----------- 12 of 340 --+
-|  ALL  |  > codex-weather  1.2.0  Codex      Weather lookups for the agent |
+|  ALL  |    codex-weather  1.2.0  Codex      Weather lookups for the agent |
 |  Web  |    codex-time     0.9.1  community  Time and timezone helpers     |
-| Tools |    codex-shell    2.0.0  Codex      [installed] Shell wrappers    |
+| Tools |  * codex-shell    2.0.0  Codex      Shell wrappers                 |
 |       |                                                                 |
 | Up/Down move  Enter install  Esc close                                  |
 | search: weather|                                         [x] clear      |
 +-------------------------------------------------------------------------+
 ```
 
-The `>` block cursor marks the highlighted row; an already-installed row is painted in
-the installed colour and carries an `[installed]` marker (FR-011, FR-012). Each result
+The `>` block cursor marks the highlighted row; the column between that gutter and the
+plugin id is the **installed lane**, where an installed row carries a `*` marker in the
+installed colour and every other row carries a blank so the columns stay aligned
+(FR-005). Each result
 row names the **marketplace it came from** (the added marketplace's configured name, or
 the store label for the base endpoint) in its own column, so a merged multi-marketplace
 panel shows each source at a glance (FR-048).
@@ -90,8 +92,9 @@ panel shows each source at a glance (FR-048).
 - **A7 - Ambiguity in "installed plugins shown with a block cursor in a different
   colour".** This is read as: the highlighted row always carries a block cursor; when
   the highlighted (or any) row is already installed it is painted in the *installed*
-  colour rather than the default result colour, and carries an `[installed]` marker.
-  Recorded as Open Question 1 for a reviewer to overturn.
+  colour rather than the default result colour, and carries a `*` marker in the
+  one-column installed lane at the left of the row. Recorded as Open Question 1 for a
+  reviewer to overturn.
 
 ## Definitions
 
@@ -156,23 +159,53 @@ active category and marketplace), a search-query field, a scrollable
 result list, a footer listing the available keys, a left-hand navigator column split into
 the category and marketplace navigators (FR-052), and a search box along the bottom
 edge of the inner area (FR-051). The panel shall frame itself with the same Unicode
-box-drawing borders every other panel uses. Each navigator shall carry a
+box-drawing borders every other panel uses, drawn in the panel's own calm slate-blue
+accent rather than a saturated hue, so the cursor colours stay the brightest elements on
+the panel. Each navigator shall carry a
 one-row header directly above its `ALL` entry naming the navigation type (`Categories`
 over the category navigator and `Marketplace` over the marketplace navigator), painted in
-reversed video (black foreground on a white background) as a distinct header band, and the
+reversed video (black foreground on a white background) as a distinct header band running
+the full width of its pane, and the
 row area beneath that header shall be the navigator's hit-test area so a click or wheel on
 the header row is inert. The panel
 width shall clamp to at most 140 terminal columns (a third wider than the original 100)
 so the added marketplace column is comfortably visible, and each result row shall render
-the plugin id, version, the **marketplace the entry came from**, and the description,
-with the marketplace and description columns sharing the flexible remainder. A version
+the plugin id, version, the **marketplace the entry came from**, and the description.
+The marketplace column keeps its ceiling and the description takes the rest of the
+flexible remainder as the row's **last** column, so the description renders straight up to
+the panel's inner right edge and any surplus its doubled field still holds is clipped by
+the row rather than pushing another column off the row. A version
 the index did not declare and enrichment did not fill renders an explicit `-` marker
 rather than a blank cell (FR-049).
+The result list shall be easy to scan across those four columns: the pinned
+column-heading row shall be padded to the full result width so it reads as a header
+strip; alternating result rows shall carry a subtle dark band so the eye can follow one
+row from the id to the description; the version and marketplace cells shall be painted in
+a muted tone while the id and description keep the reading colour; every row shall carry a
+two-column leading gutter that holds a `>` marker on the row under the cursor so the
+cursor is visible even where a background-only highlight washes out, followed by a
+one-column installed lane (FR-005) that every row paints so the id, version, marketplace
+and description columns stay aligned whether or not the row is installed; and each row's
+trailing padding shall carry the row's own background so a band and the cursor background
+both reach the column's right edge. The footer hint row and the bottom search box shall be
+painted on a distinct chrome background so the panel's operating furniture reads as a
+strip beneath the result table, and the search box's `search:` label and its `[x] clear`
+button shall be painted in the panel accent, the button dimming to the muted tone while
+the query is empty. All of this is presentation only: no colour, band, or marker carries
+state that the browser does not already hold, and the navigators' row text stays flush with
+their pane's left edge so the counted labels remain greppable.
 
 **FR-005** - The system shall render the highlighted result row with a **block cursor**
 (a background-filled, full-width row) and shall render every result whose plugin id is
-already present in the store scan in a distinct **installed colour** with an
-`[installed]` marker.
+already present in the store scan in a distinct **installed colour** with a marker in a
+one-column **installed lane** at the left of the row, between the cursor gutter and the id
+column, painted as a single `*` glyph in bold green. The lane keeps the description's full
+width intact, and every row whose plugin is not installed shall paint a single blank in it,
+so the id, version, marketplace and description columns stay aligned. The
+block cursor's row shall also carry its `>` gutter marker
+(FR-004) so the selection survives a terminal whose background-only highlight is
+indistinguishable, and the marker itself shall be the row's saturated
+green accent while the id and description keep the installed colour.
 
 **FR-006** - The system shall install a selected result by passing its install source to
 the existing plugin install entry point with `force = false`, and shall report the
@@ -377,7 +410,7 @@ guards.
 1. **Installed-row presentation.** "Installed plugins shown with a block cursor in a
    different colour" admits two readings: (a) installed rows carry a distinct colour and
    the cursor is separate, or (b) the cursor itself changes colour when it sits on an
-   installed row. A7 selects (a) with an `[installed]` marker. Confirm.
+   installed row. A7 selects (a) with a one-column `*` installed-lane marker. Confirm.
 2. **Default endpoints.** This spec assumes the store endpoints are configured or
    supplied by the build. If ragent should ship a compiled default per store, that URL
    must be fixed before T-002.
@@ -578,6 +611,21 @@ index shall render `ALL (0)`. A blank marketplace is never a row, so its count i
 ever subsumed by `ALL`. Counting shall issue no network request, install nothing, and
 execute no plugin JavaScript.
 
+**FR-054** - The category navigator shall present an `Installed` pseudo-category as
+navigator row `1`, directly after the `ALL` sentinel and before any derived store
+category, in both the Codex and the Claude browse panels. The row shall not be derived
+from an entry's `category` field: selecting it shall filter the result list to the loaded
+entries whose id is present in the store scan
+([`PluginStoreBrowser::installed`](crates/ragent-tui/src/app/state.rs)), so a plugin that
+declares no category at all is still listed under it. The row shall be present in every
+state, including a still-loading browser and an index that declares no category, and its
+counted label (`Installed (<N>)`) shall count the loaded entries the scan matches. The row
+shall compose with the search query and the marketplace filter exactly as a store category
+does, and selecting it shall issue no network request, install nothing, and execute no
+plugin JavaScript (FR-014, FR-024, FR-025). The label is reserved: an entry declaring a
+category of that name shall not add a second row. A refreshed scan shall re-derive an
+already-selected pseudo-category, and an index re-fetch shall keep it selected.
+
 ### Default store browser functional tests
 
 **FR-032** - The system shall provide automated tests that verify the store browser is
@@ -652,8 +700,8 @@ exported from `ragent_plugins::store_index`). Render it as a per-row column in t
 plugin-store browse panel and widen the panel from a 100- to a 140-column ceiling
 (`crates/ragent-tui/src/layout.rs`), splitting the flexible remainder between the
 marketplace and description columns (`plugin_store_flex_widths`) so the fixed id/version
-columns and the trailing `[installed]` marker are never pushed off the row (FR-004,
-FR-048). Covered by `crates/ragent-plugins/tests/test_store_index.rs`
+columns are never pushed off the row; the description is the row's last column and takes
+whatever the marketplace leaves (FR-004, FR-048). Covered by `crates/ragent-plugins/tests/test_store_index.rs`
 (`marketplace_name_for`), `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs`
 (fetch attribution) and `crates/ragent-tui/tests/test_plugin_store_panel.rs` (render).
 

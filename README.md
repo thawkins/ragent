@@ -52,59 +52,65 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   drivable headless browser is present, taking the count to 149 — spec `openhands`
   FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
   are:
- 
-![ragent tool session](assets/screens/ragentsession.png) 
 
-  - **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
-    move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`
-    alias, get_env, the PDF pair (`pdf_read`, `pdf_write`), the structured-memory
-    trio (`memory_store`, `memory_recall`, `memory_forget`), plus
-    `conversation_search` and `session_search`. Read-only tools require `file:read`;
-    mutating tools require `file:write`
-  - **Bash** (3) — bash, bash_reset and the `run_code` alias. Bash carries 7-layer
-    security: safe-command whitelist, banned commands, denied patterns,
-    directory-escape prevention, syntax validation, obfuscation detection, and user
-    allowlist/denylist
-    - **Bang commands** — prefix any prompt with `!` (e.g. `! ls -la`) to run a
-      shell command directly; the output is sent to the model for review and
-      error resolution
-  - **Shell** (1) — open (cross-platform file/URL reveal)
-  - **Web** (5) — webfetch, websearch, mf_fetch, mf_search, mf_crawl
-    (`mf_search` runs the keyless DuckDuckGo, Brave, OpenAlex and Wikipedia backends
-    in parallel, plus LangSearch / Tavily / Perplexity / Exa when configured)
-  - **Code intelligence** (10) — codeindex_search, codeindex_symbols,
-    codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex,
-    codeindex_explain, codeindex_path, codeindex_communities, codeindex_godnodes
-    (read-only, hardwired always-allowed)
-  - **Git** (18) — git_status, git_log, git_diff, git_branch, git_show, git_remote,
-    git_tag, git_add, git_reset, git_checkout, git_commit, git_stash, git_cherry_pick,
-    git_push, git_pull, git_fetch, git_clone, git_merge
-  - **GitHub** (11) and **GitLab** (19) — issues, PRs/MRs, pipelines, jobs, and CI/CD
-  - **Teams** (19) — the full team lifecycle, shared tasks, mailbox messaging, and
-    coordination surface
-  - **Agent** (4) — new_agent, cancel_agent, list_agents, wait_agents
-  - **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
-  - **Task** (4) — task_create, task_update, task_get, task_list
-  - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
-  - **Plan** (2) — plan_enter, plan_exit
-  - **None** (8) — calculator, think, agent_complete, ragent_info (running version,
-    build time, git commit, compiler, plus this instance's pid, uptime, memory and
-    thread count), os_info (read-only host report: OS identity and Linux
-    distribution, CPU, graphics adapters and graphics-API versions, physical
-    hardware, memory, uptime, and process environment; also `/osinfo show`),
-    tool_info and commands_info (registry and slash-command dumps)
-  - One each: **model** (model_info), **network** (http_request), **system**
-    (mf_version, mf_cache_clear), **skill** (skill_manage), **storage** (initiative),
-    **ask_user** (ask_user)
-  - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,
-    plus the dynamically registered per-server bridge tools
+![ragent tool session](assets/screens/ragentsession.png)
+
+- **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
+  move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`
+  alias, get_env, the PDF pair (`pdf_read`, `pdf_write`), the structured-memory
+  trio (`memory_store`, `memory_recall`, `memory_forget`), plus
+  `conversation_search` and `session_search`. Read-only tools require `file:read`;
+  mutating tools require `file:write`
+- **Bash** (3) — bash, bash_reset and the `run_code` alias. Bash carries 7-layer
+  security: safe-command whitelist, banned commands, denied patterns,
+  directory-escape prevention, syntax validation, obfuscation detection, and user
+  allowlist/denylist
+  - **Bang commands** — prefix any prompt with `!` (e.g. `! ls -la`) to run a
+    shell command directly; the output is sent to the model for review and
+    error resolution
+- **Shell** (1) — open (cross-platform file/URL reveal)
+- **Web** (5) — webfetch, websearch, mf_fetch, mf_search, mf_crawl
+  (`mf_search` runs the keyless DuckDuckGo, Brave, OpenAlex and Wikipedia backends
+  in parallel, plus LangSearch / Tavily / Perplexity / Exa when configured)
+- **Code intelligence** (10) — codeindex_search, codeindex_symbols,
+  codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex,
+  codeindex_explain, codeindex_path, codeindex_communities, codeindex_godnodes
+  (read-only, hardwired always-allowed)
+- **Git** (18) — git_status, git_log, git_diff, git_branch, git_show, git_remote,
+  git_tag, git_add, git_reset, git_checkout, git_commit, git_stash, git_cherry_pick,
+  git_push, git_pull, git_fetch, git_clone, git_merge
+- **GitHub** (11) and **GitLab** (19) — issues, PRs/MRs, pipelines, jobs, and CI/CD
+- **Teams** (19) — the full team lifecycle, shared tasks, mailbox messaging, and
+  coordination surface
+- **Agent** (4) — new_agent, cancel_agent, list_agents, wait_agents
+- **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
+- **Task** (4) — task_create, task_update, task_get, task_list
+- **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
+- **Plan** (2) — plan_enter, plan_exit
+- **None** (8) — calculator, think, agent_complete, ragent_info (running version,
+  build time, git commit, compiler, plus this instance's pid, uptime, memory and
+  thread count), os_info (read-only host report: OS identity and Linux
+  distribution, CPU, graphics adapters and graphics-API versions, physical
+  hardware, memory, uptime, and process environment; also `/osinfo show`),
+  tool_info and commands_info (registry and slash-command dumps)
+- One each: **model** (model_info), **network** (http_request), **system**
+  (mf_version, mf_cache_clear), **skill** (skill_manage), **storage** (initiative),
+  **ask_user** (ask_user)
+- **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,
+  plus the dynamically registered per-server bridge tools
 - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
   slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
   highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
   a live permission countdown timer (120-second timeout with EXPIRED state), and a
   message input queue (`Alt+Q` menu / `/queue`) that keeps the input field editable
   while the agent executes; side panels for context (`Alt+C`), memory (`Alt+M`),
-  telemetry (`Alt+O`) and tasks (`Alt+T`)
+  telemetry (`Alt+O`) and tasks (`Alt+T`). Every list-bearing `/provider` and
+  `/model` step shares one list composition with the plugin and connector
+  catalogues - accent frame, heading count, pinned column band, zebra rows, muted
+  key-hint footer - and windows around its cursor (`Showing a-b of N`) so a long
+  provider, model, thinking-level, Azure-resource or router-bucket list never clips
+  away the highlighted row; a mouse notch over an open setup dialog steps the
+  cursor exactly like `Up`/`Down` and is swallowed elsewhere
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
 - **Session management** — persistent conversation history stored in SQLite;
   list, resume, export-archive, and import sessions
@@ -159,7 +165,8 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   confirmation modal, `Enter` opens the row's output view, and clicking a row
   selects it (the `[stop]`/`[x]` glyphs are status indicators only); windows
   scroll with the wheel, re-status live from sub-agent and team events, and
-  closure is available via the bottom-right Close bar button or `Esc`;
+  closure is `Esc` (no window carries a Close button - the footer legend names
+  the key);
   suspension is cooperative - the parked sub-agent finishes its in-flight
   LLM call or tool before idling (spec `agentui`)
 - **Prompt inspector** — `/prompt` renders the assembled system prompt an agent
@@ -257,7 +264,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `ALL` plus the distinct values the fetched index declares, operated by
   keyboard (`Tab`/`BackTab` cycle focus, `Up`/`Down` move-and-apply, `Enter` apply,
   `c` clear the focused navigator) and mouse (click
-  a row, wheel to scroll); every navigator row appends the number of plugins under that
+  a row, wheel to scroll); the category navigator additionally carries an
+  `Installed` pseudo-category in row 1, directly below `ALL`, which filters the
+  results to the plugins already in the store scan (matching the plugin id, so an
+  installed plugin that declares no category still shows) and composes with the
+  query and marketplace filters; every navigator row appends the number of plugins under that
   value as `Name (N)` (the `ALL` row counts the whole index, derived from the full
   fetched index so the count is stable as a query or filter narrows the list); the
   search query, category, and marketplace filters compose
@@ -265,8 +276,12 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   with `--category <name>`; each result row shows the plugin id, version, the
   **marketplace it came
   from** (the added marketplace's name, or the store label for the base endpoint), and
-  its description, and the panel widens up to a 140-column ceiling so the marketplace
-  column has room; the result list is sorted alphabetically by plugin id
+  its description, the description taking every column the marketplace leaves so it
+  runs to the panel's edge and is clipped there (the panel widens up to a 140-column
+  ceiling so the marketplace column has room); a row already installed carries a bold
+  green `*` in a one-column lane beside the `>` cursor gutter (every other row paints
+  a blank there, keeping the columns aligned); the result list is sorted
+  alphabetically by plugin id
   (case-insensitive) and a query or category filter narrows the already-sorted set. A
   search box sits along the panel's bottom edge with the live filter field on the left
   and a click-to-clear `[x] clear` button on the right, so the active query can be wiped
@@ -304,24 +319,34 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `disconnect <id>`, `auth <id>`, `test <id>`, `stores [--check]`,
   `marketplace show|claude list|add|remove`, `help`) in the TUI and the
   `ragent connectors <sub>` CLI. `/connectors claude` opens an interactive,
-  off-the-event-loop catalogue browser (filter by query and category, browse,
-  install with one key; a fixed dark-on-light column-heading row (`Id`, `Category`,
-  `Marketplace`, `Description`) is pinned above the results and never scrolls; each
-  row shows the connector id, its category, the **marketplace it came from** (or `-`
-  for a local install) and its description; every connector list (`list`, `claude`,
-  `search`) is sorted alphabetically by connector id (case-insensitive) and a
-  category filter narrows the already-sorted rows; a left-hand category navigator lists
-  `ALL` plus the catalogue's distinct categories,
-  operated by keyboard (`Tab` focus, `Up`/`Down` move, `Enter` apply, `c` clear) and
-  mouse (click a row, wheel to scroll); the panel merges the base catalogue endpoint
-  and every marketplace added with `/connectors marketplace claude add`, resolves
-  each entry's blank description from its own repository manifest off-loop with a
-  `loading details...` title hint, and the two panels read the same way),
+  off-the-event-loop catalogue browser wearing the same design language as
+  `/plugins claude` (filter by query, category, and marketplace; browse; install with
+  one key): a calm slate accent frame and a structured title line; a left column
+  split into a `Categories` navigator above a `Marketplace` navigator, each under a
+  reversed-video title band with every row labelled `Name (N)`; a fixed
+  dark-on-light column-heading row (`Id`, `Category`, `Marketplace`, `Description`)
+  pinned above the zebra-banded results; each row shows the connector id, its
+  category, the **marketplace it came from** (or `-` for a local install) and its
+  description running to the panel's right edge, with a bold green `*` in a
+  one-column lane on an installed connector; a centred footer of key hints and a
+  bottom `search:` box with a clickable `[x] clear` button. Every connector list
+  (`list`, `claude`, `search`) is sorted alphabetically by connector id
+  (case-insensitive) and the filters narrow the already-sorted rows; the category
+  navigator lists `ALL`, an `Installed` pseudo-category, then the catalogue's
+  distinct categories, operated by keyboard (`Tab`/`BackTab` cycle the results and the
+  two navigators, `Up`/`Down` move the focused pane, `Enter` applies, `c` clears) and
+  mouse (click a row in either navigator, wheel to scroll, click `[x] clear`); the
+  panel merges the base catalogue endpoint and every marketplace added with
+  `/connectors marketplace claude add`, and resolves each entry's blank description
+  from its own repository manifest off-loop with a `loading details...` title hint),
   `/connectors test <id>` runs an isolated connect-and-invoke harness
   that never touches the live session, and `/connectors stores [--check]`
   reports each catalogue endpoint and its provenance. Connectors install
   enabled; `enable` connects their servers now in a running session.
   `connectors.enabled: false` makes the subsystem inert
+
+![ragent connectors claude](assets/screens/ragentconnectorsclaude.png)
+
 - **Automation service** — named, schedulable or webhook-triggered agent runs
   with durable run history and execution-backend confinement (spec `openhands`
   FR-013, FR-014, FR-018, FR-033). A public webhook ingress (`POST /auto/<id>`)
@@ -363,6 +388,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   one step toward the front and `Del` removes it
 - **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
   mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
+
+![ragent swarm](assets/screens/ragentswarm.png)
+
+![ragent team](assets/screens/ragentteam.png)
+
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
   permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
 - **Config error reporting** — actionable JSON parse diagnostics showing file path,

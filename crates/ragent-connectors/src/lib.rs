@@ -65,8 +65,9 @@ pub use bridge::{
     BridgePlan, BridgeRefusal, BridgedServer, RefusedServer, resolve_servers, scanned_bridge,
 };
 pub use browse::{
-    ALL_CATEGORY, CatalogueBrowseStatus, CatalogueBrowser, CategoryFilter, CategoryFilterState,
-    browse_install_report, build_categories, entry_matches,
+    ALL_CATEGORY, CatalogueBrowseStatus, CatalogueBrowser, CataloguePane, CategoryFilter,
+    CategoryFilterState, INSTALLED_CATEGORY, browse_install_report, build_categories,
+    entry_matches, is_installed_row_label,
 };
 pub use commands::{
     AuthOutcome, AuthOutcomeError, CatalogueDescriptors, ConnectorArgError, ConnectorCommand,

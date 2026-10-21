@@ -292,7 +292,9 @@ fn select_when_known_refuses_an_unknown_category_and_changes_no_state() {
 
 use std::collections::BTreeSet;
 
-use ragent_connectors::{CatalogueBrowseStatus, CatalogueBrowser, browse_install_report};
+use ragent_connectors::{
+    CatalogueBrowseStatus, CatalogueBrowser, CataloguePane, browse_install_report,
+};
 
 #[test]
 fn a_new_browser_starts_loading_and_empty() {
@@ -504,4 +506,160 @@ fn a_category_filter_narrows_the_already_sorted_set() {
         vec!["alpha", "zeta"],
         "rows stay alphabetically sorted under a category filter"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The navigator state shared with the plugin-store panel
+// ---------------------------------------------------------------------------
+
+/// A descriptor with `id`, `category`, and `marketplace`.
+fn attributed(id: &str, category: &str, marketplace: &str) -> ConnectorDescriptor {
+    let mut entry = descriptor(id, category);
+    entry.marketplace = marketplace.to_string();
+    entry
+}
+
+#[test]
+fn category_rows_pin_all_then_installed_then_the_sorted_categories() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_installed(BTreeSet::from(["github".to_string()]));
+    browser.set_entries(
+        vec![
+            attributed("github", "developer", "acme"),
+            attributed("slack", "communication", "acme"),
+        ],
+        0,
+    );
+
+    assert_eq!(browser.category_row_count(), 4, "ALL, Installed, then two");
+    assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
+    assert_eq!(browser.category_row_label(2), "communication");
+    assert_eq!(browser.category_row_label(3), "developer");
+}
+
+#[test]
+fn category_row_displays_carry_their_entry_counts() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_installed(BTreeSet::from(["github".to_string()]));
+    browser.set_entries(
+        vec![
+            attributed("github", "developer", "acme"),
+            attributed("slack", "communication", "acme"),
+        ],
+        0,
+    );
+
+    assert_eq!(browser.category_row_display(0), "ALL (2)");
+    assert_eq!(browser.category_row_display(1), "Installed (1)");
+    assert_eq!(browser.category_row_display(3), "developer (1)");
+}
+
+#[test]
+fn selecting_the_installed_row_filters_to_the_store_scan() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_installed(BTreeSet::from(["local-thing".to_string()]));
+    browser.set_entries(
+        vec![
+            attributed("github", "developer", "acme"),
+            attributed("local-thing", "", "acme"),
+        ],
+        0,
+    );
+
+    assert!(browser.category_select_row(1));
+    assert_eq!(browser.selected_category_label(), "Installed");
+    assert_eq!(browser.filtered.len(), 1);
+    assert_eq!(browser.all[browser.filtered[0]].id.as_str(), "local-thing");
+}
+
+#[test]
+fn a_declared_installed_category_never_forms_a_second_row() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(vec![attributed("odd", "installed", "acme")], 0);
+    assert_eq!(browser.category_row_count(), 2, "ALL and Installed only");
+}
+
+#[test]
+fn the_marketplace_navigator_derives_and_applies_its_rows() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(
+        vec![
+            attributed("community-one", "developer", "acme"),
+            attributed("community-two", "developer", "acme"),
+            attributed("official-one", "developer", "official"),
+        ],
+        0,
+    );
+
+    assert_eq!(browser.marketplace_row_count(), 3, "ALL, acme, official");
+    assert_eq!(browser.marketplace_row_label(0), "ALL");
+    assert_eq!(browser.marketplace_row_label(1), "acme");
+    assert_eq!(browser.marketplace_row_display(1), "acme (2)");
+
+    assert!(browser.marketplace_select_row(1));
+    assert_eq!(browser.active_marketplace(), "acme");
+    assert_eq!(browser.filtered.len(), 2);
+
+    browser.marketplace_clear();
+    assert_eq!(browser.active_marketplace(), "ALL");
+    assert_eq!(browser.filtered.len(), 3);
+}
+
+#[test]
+fn the_query_category_and_marketplace_filters_compose() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(
+        vec![
+            attributed("community-one", "developer", "acme"),
+            attributed("community-two", "developer", "official"),
+            attributed("official-one", "communication", "official"),
+        ],
+        0,
+    );
+    assert!(browser.category_select_row(3)); // developer
+    assert!(browser.marketplace_select_row(1)); // acme
+    assert_eq!(
+        browser.filtered.len(),
+        1,
+        "only community-one matches all three"
+    );
+    assert_eq!(
+        browser.all[browser.filtered[0]].id.as_str(),
+        "community-one"
+    );
+
+    browser.set_query("official".to_string());
+    assert!(
+        browser.filtered.is_empty(),
+        "the query and both filters compose"
+    );
+}
+
+#[test]
+fn focus_cycles_through_the_three_panes() {
+    let mut browser = CatalogueBrowser::new("", false);
+    assert_eq!(browser.focus, CataloguePane::Results);
+    browser.focus_next();
+    assert_eq!(browser.focus, CataloguePane::Categories);
+    browser.focus_next();
+    assert_eq!(browser.focus, CataloguePane::Marketplaces);
+    browser.focus_next();
+    assert_eq!(browser.focus, CataloguePane::Results);
+    browser.focus_prev();
+    assert_eq!(browser.focus, CataloguePane::Marketplaces);
+}
+
+#[test]
+fn confirming_either_navigator_returns_focus_to_the_results() {
+    let mut browser = CatalogueBrowser::new("", false);
+    browser.set_entries(vec![attributed("github", "developer", "acme")], 0);
+    browser.focus_next();
+    browser.category_confirm();
+    assert_eq!(browser.focus, CataloguePane::Results);
+
+    browser.focus_next();
+    browser.focus_next();
+    browser.marketplace_confirm();
+    assert_eq!(browser.focus, CataloguePane::Results);
 }

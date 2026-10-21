@@ -1396,7 +1396,12 @@ fn connector_catalogue_rows_installed_marker_and_install_notice() {
     let terminal = render(&mut app, 120, 40);
     let text = painted(&terminal);
     assert!(text.contains("google-drive"));
-    assert!(text.contains("[installed]"));
+    // The installed marker is the `*` painted in the one-column lane between the
+    // cursor gutter and the id column, mirroring the plugin-store rows.
+    assert!(
+        text.lines().any(|line| line.contains('*')),
+        "an installed row carries the lane marker: {text:?}"
+    );
     assert!(text.contains("installed google-drive"));
     assert!(text.contains("loading details"));
 }

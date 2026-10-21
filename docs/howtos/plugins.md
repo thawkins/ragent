@@ -816,11 +816,17 @@ whole store.
 
 ### 9.1 The category navigator
 
-Both panels carry a left-hand **category navigator**: `ALL` first, then the
-distinct non-empty categories the fetched index declares (sorted
-case-insensitively). An entry's `tags` are query-search terms only and never form
-a navigator row (FR-021 withdrawn), so a plugin carrying a long `keywords` list
-adds a single category row at most. It is driven by keyboard and mouse:
+Both panels carry a left-hand **category navigator**: `ALL` first, then an
+`Installed` pseudo-category, then the distinct non-empty categories the fetched
+index declares (sorted case-insensitively). `Installed` is not a store category:
+it matches a plugin's id against the store scan, so selecting it lists the
+plugins you already have - including any that declare no category at all - and
+it is always one keypress below `ALL`. It composes with the search query and the
+marketplace filter like any other row, and its counted label
+(`Installed (2)`) counts the loaded entries the scan matches. An entry's `tags`
+are query-search terms only and never form a navigator row (FR-021 withdrawn), so
+a plugin carrying a long `keywords` list adds a single category row at most. It
+is driven by keyboard and mouse:
 
 | Input | Effect |
 | ----- | ------ |
@@ -848,11 +854,13 @@ Each result row renders four columns: the plugin **id**, its **version**, the
 names the added marketplace an entry was fetched from (the `name` it was added
 under), or the store label (`Codex`/`Claude`) for the store's base endpoint, so
 a merged multi-marketplace panel shows each row's source at a glance. The panel
-widens up to a 140-column ceiling (a third wider than before) and the
-marketplace and description columns share the flexible remainder, so a longer
-marketplace name is shown when the terminal has room and clipped gracefully
-(without pushing the fixed columns or the `[installed]` marker off the row)
-when it does not.
+widens up to a 140-column ceiling (a third wider than before); the marketplace
+column keeps its ceiling and the description takes the rest of the flexible
+remainder as the row's last column, so it renders right up to the panel's inner
+edge and any surplus is clipped there rather than pushing another column off the
+row. A row already installed carries a bold green `*` in a one-column lane
+between the `>` cursor gutter and the id column, and every other row paints a
+blank there, so the columns stay aligned.
 
 A fixed column-heading row (`Id`, `Version`, `Marketplace`, `Description`) sits
 directly above the result list and never scrolls with the rows. It uses the same

@@ -44,8 +44,10 @@ mod col {
     pub const ID: usize = columns::MARKER_W;
     /// First column of the label cell.
     pub const LABEL: usize = step(ID, columns::ID_W);
+    /// First column of the agent-type cell.
+    pub const AGENT_TYPE: usize = step(LABEL, columns::LABEL_W);
     /// First column of the status cell.
-    pub const STATUS: usize = step(LABEL, columns::LABEL_W);
+    pub const STATUS: usize = step(AGENT_TYPE, columns::AGENT_TYPE_W);
     /// First column of the model cell.
     pub const MODEL: usize = step(STATUS, columns::STATUS_W);
     /// First column of the elapsed cell.

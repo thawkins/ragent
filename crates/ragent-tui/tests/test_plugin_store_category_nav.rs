@@ -62,6 +62,26 @@ fn browser(app: &App) -> &ragent_tui::app::PluginStoreBrowser {
     app.plugin_store.as_ref().expect("panel open")
 }
 
+/// Press `Down` over the focused category navigator until `label` is active.
+///
+/// Row `0` is `ALL`, row `1` is the `Installed` pseudo-category (`pluginstores`
+/// FR-054), and the derived categories start at row `2`, so a test that wants a
+/// named category presses Down to it rather than counting the fixed offset.
+async fn down_to(app: &mut App, label: &str) {
+    for _ in 0..app
+        .plugin_store
+        .as_ref()
+        .expect("panel open")
+        .category_row_count()
+    {
+        if browser(app).active_category().eq_ignore_ascii_case(label) {
+            return;
+        }
+        handle_key(app, key(KeyCode::Down)).await;
+    }
+    panic!("never reached category `{label}`");
+}
+
 /// The filtered ids, in order.
 fn filtered_ids(app: &App) -> Vec<String> {
     let browser = browser(app);
@@ -138,22 +158,21 @@ async fn while_the_navigator_is_focused_up_and_down_move_the_category_cursor() {
     handle_key(&mut app, key(KeyCode::Down)).await;
 
     // `Down` over the navigator moves the category cursor, not the result cursor,
-    // and applies the highlighted category on the same keypress (FR-007, FR-017).
+    // and applies the highlighted row on the same keypress (FR-007, FR-017). The
+    // first row below `ALL` is the `Installed` pseudo-category (FR-054).
     assert_eq!(browser(&app).category_cursor_row(), 1);
-    assert_eq!(browser(&app).active_category(), "Utility");
+    assert_eq!(browser(&app).active_category(), "Installed");
     assert_eq!(browser(&app).cursor, 0, "the result cursor is not moved");
 
-    handle_key(&mut app, key(KeyCode::Down)).await;
-    assert_eq!(browser(&app).category_cursor_row(), 2);
+    down_to(&mut app, "Web").await;
     assert_eq!(browser(&app).active_category(), "Web");
 
     handle_key(&mut app, key(KeyCode::Up)).await;
     assert_eq!(
-        browser(&app).category_cursor_row(),
-        1,
+        browser(&app).active_category(),
+        "Utility",
         "Up steps back (FR-008)"
     );
-    assert_eq!(browser(&app).active_category(), "Utility");
 }
 
 // -- Applying a category narrows the result set (FR-007, FR-008) --------------
@@ -163,20 +182,26 @@ async fn moving_the_category_cursor_applies_the_category_and_narrows_results() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
 
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Utility").await;
     // `Utility` folds the `Utility`/`utility` spellings into one exact,
     // case-insensitive match, so both survive (FR-007) in alphabetical order.
     assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Web").await;
     assert_eq!(
         filtered_ids(&app),
         ["codex-weather"],
         "`Web` selects one row"
     );
 
+    // Up twice steps back through `Utility` to the `Installed` pseudo-category,
+    // which lists only the plugins already in the store scan (none here), and then
+    // `c` restores `ALL` (FR-054, FR-015).
     handle_key(&mut app, key(KeyCode::Up)).await;
     handle_key(&mut app, key(KeyCode::Up)).await;
+    assert_eq!(browser(&app).active_category(), "Installed");
+    assert!(filtered_ids(&app).is_empty(), "nothing is installed here");
+    handle_key(&mut app, key(KeyCode::Char('c'))).await;
     // Back to `ALL`: every entry, including the uncategorised one, returns
     // alphabetically by id (FR-050).
     assert_eq!(browser(&app).active_category(), "ALL");
@@ -196,10 +221,11 @@ async fn the_category_cursor_clamps_at_both_ends_without_wrapping() {
     assert_eq!(browser(&app).category_cursor_row(), 0);
 
     // Down past the last row stays on the last category.
-    for _ in 0..5 {
+    for _ in 0..8 {
         handle_key(&mut app, key(KeyCode::Down)).await;
     }
-    assert_eq!(browser(&app).category_cursor_row(), 2);
+    let last = browser(&app).category_row_count() - 1;
+    assert_eq!(browser(&app).category_cursor_row(), last);
     assert_eq!(browser(&app).active_category(), "Web");
 }
 
@@ -209,7 +235,7 @@ async fn the_category_cursor_clamps_at_both_ends_without_wrapping() {
 async fn enter_over_the_navigator_applies_the_category_and_focuses_the_result_list() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Utility").await;
 
     handle_key(&mut app, key(KeyCode::Enter)).await;
 
@@ -230,14 +256,19 @@ async fn enter_over_the_navigator_applies_the_category_and_focuses_the_result_li
 async fn after_enter_over_the_navigator_up_and_down_route_to_the_result_list() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Utility").await;
+    let row = browser(&app).category_cursor_row();
     handle_key(&mut app, key(KeyCode::Enter)).await;
 
     // Focus is now the result list, so `Down` moves the result cursor and leaves
     // the category (FR-009, FR-010).
     handle_key(&mut app, key(KeyCode::Down)).await;
 
-    assert_eq!(browser(&app).category_cursor_row(), 1, "category unchanged");
+    assert_eq!(
+        browser(&app).category_cursor_row(),
+        row,
+        "category unchanged"
+    );
     assert_eq!(browser(&app).active_category(), "Utility");
     assert_eq!(browser(&app).cursor, 1, "the result cursor advanced");
 }
@@ -262,7 +293,7 @@ async fn enter_on_the_result_list_still_starts_an_install() {
 async fn the_clear_key_sets_the_category_to_all_and_restores_the_full_set() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Utility").await;
     assert_eq!(filtered_ids(&app), ["codex-shell", "codex-time"]);
 
     handle_key(&mut app, key(KeyCode::Char('c'))).await;
@@ -289,7 +320,7 @@ async fn the_clear_key_sets_the_category_to_all_and_restores_the_full_set() {
 async fn the_clear_key_clears_the_category_while_the_result_list_is_focused() {
     let mut app = open();
     handle_key(&mut app, key(KeyCode::Tab)).await;
-    handle_key(&mut app, key(KeyCode::Down)).await;
+    down_to(&mut app, "Utility").await;
     // Two more Tabs return focus to the result list (category -> marketplace ->
     // results), so the clear key must fall back to clearing the category (FR-015).
     handle_key(&mut app, key(KeyCode::Tab)).await;

@@ -1,6 +1,6 @@
 //! Tests for the Teams window frame (spec `agentui` T-004).
 //!
-//! Covers the modal geometry (FR-017), the clamped Close button and its
+//! Covers the modal geometry (FR-017), the footer key legend carrying the `Esc`
 //! dismissal (FR-018), the ` Team: <name>  (lead + <n> teammate) ` table title
 //! (FR-019), the twelve-column dimmed header (FR-020) and the guarantee that
 //! every popup rectangle stays inside the terminal rectangle (NFR-010).
@@ -11,7 +11,7 @@
 
 mod support;
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -208,8 +208,7 @@ fn test_teams_modal_paints_borders_and_bold_blue_title() {
 }
 
 /// The modal is cleared beneath, so chat text cannot show through the popup
-/// body: the separator row between the table and the Close button is blank
-/// (FR-017).
+/// body (FR-017).
 #[test]
 fn test_teams_modal_clears_the_underlay() {
     let mut app = open_teams(2);
@@ -222,110 +221,110 @@ fn test_teams_modal_clears_the_underlay() {
     let buffer = render(&mut app, 120, 40);
 
     let content = app.teams_area;
-    let close = app.teams_close_button_area;
-    let separator_row = close.y.saturating_sub(1);
-    assert!(
-        separator_row >= content.y,
-        "the separator row must sit below the content area (content {content:?}, close {close:?})"
-    );
-
-    let text = row_text(&buffer, separator_row, close);
-    assert!(
-        text.trim().is_empty(),
-        "the separator row must be cleared, got {text:?}"
-    );
-}
-
-// -- FR-018: Close button ---------------------------------------------------
-
-/// The Close button is pinned to the bottom-right of the inner area and clamped
-/// to at most 10 columns and 3 rows (FR-018).
-#[test]
-fn test_teams_close_button_is_bottom_right_and_clamped() {
-    for (width, height) in [(120u16, 40u16), (160, 44), (60, 20), (34, 14)] {
-        let mut app = open_teams(1);
-        let _ = render(&mut app, width, height);
-
-        let inner = expected_inner(width, height);
-        let close = app.teams_close_button_area;
-
+    for y in content.y..content.bottom() {
+        let text = row_text(&buffer, y, content);
         assert!(
-            close.width <= 10,
-            "at {width}x{height}: close width {} exceeds 10",
-            close.width
-        );
-        assert!(
-            close.height <= 3,
-            "at {width}x{height}: close height {} exceeds 3",
-            close.height
-        );
-        assert_eq!(
-            close.width,
-            10.min(inner.width),
-            "at {width}x{height}: close must fill its clamped width"
-        );
-        assert_eq!(
-            close.height,
-            3.min(inner.height),
-            "at {width}x{height}: close must fill its clamped height"
-        );
-        assert_eq!(
-            close.right(),
-            inner.right(),
-            "at {width}x{height}: close must align to the inner right edge"
-        );
-        assert_eq!(
-            close.bottom(),
-            inner.bottom(),
-            "at {width}x{height}: close must align to the inner bottom edge"
+            !text.contains("UNDERLAY-"),
+            "row {y} shows the cleared underlay: {text:?}"
         );
     }
 }
 
-/// The Close button paints its bordered ` Close ` label (FR-018).
-#[test]
-fn test_teams_close_button_paints_its_label() {
-    let mut app = open_teams(1);
-    let buffer = render(&mut app, 120, 40);
-    let close = app.teams_close_button_area;
+// -- FR-018: footer key legend ----------------------------------------------
 
-    let style = find_text_style(&buffer, close, "Close").expect("the Close label must paint");
-    assert!(
-        style.fg.is_some(),
-        "the Close label must carry a foreground colour, style: {style:?}"
-    );
-    let corner = buffer.cell((close.x, close.y)).expect("close corner");
-    assert_eq!(
-        corner.symbol(),
-        "\u{250c}",
-        "the Close button must be bordered (FR-018)"
-    );
+/// The footer legend is the modal's last inner row, spanning the full inner
+/// width (FR-018, FR-077).
+#[test]
+fn test_teams_legend_is_the_bottom_inner_row() {
+    for (width, height) in [(120u16, 40u16), (160, 44), (60, 20), (34, 14)] {
+        let mut app = open_teams(1);
+        let _ = render(&mut app, width, height);
+
+        let modal = expected_modal(width, height);
+        let (_, content, legend) = ragent_tui::layout::window_frame_testable(
+            ragent_tui::layout::teams_window_percent_w(),
+            ragent_tui::layout::teams_window_percent_h(),
+            Rect::new(0, 0, width, height),
+        );
+
+        assert_eq!(
+            legend.y,
+            modal.bottom().saturating_sub(2),
+            "at {width}x{height}: the legend must be the last inner row"
+        );
+        assert_eq!(
+            legend.height, 1,
+            "at {width}x{height}: the legend band is one row tall"
+        );
+        assert_eq!(
+            legend.width,
+            modal.width.saturating_sub(2),
+            "at {width}x{height}: the legend must span the inner width"
+        );
+        assert_eq!(
+            content.bottom(),
+            legend.y,
+            "at {width}x{height}: the table ends where the legend band begins"
+        );
+    }
 }
 
-/// Clicking the Close button dismisses the Teams window and leaves the team
-/// and its members untouched (FR-018).
+/// The legend names the dismissal key and the Teams wording, and the window
+/// paints no ` Close ` button anywhere in its inner area (FR-018).
 #[test]
-fn test_teams_close_button_click_dismisses_the_window() {
+fn test_teams_legend_names_the_escape_key_and_no_close_button_paints() {
+    let mut app = open_teams(1);
+    let buffer = render(&mut app, 120, 40);
+    let (_, content, legend) = ragent_tui::layout::window_frame_testable(
+        ragent_tui::layout::teams_window_percent_w(),
+        ragent_tui::layout::teams_window_percent_h(),
+        Rect::new(0, 0, 120, 40),
+    );
+
+    let legend_text = row_text(&buffer, legend.y, legend);
+    for key in [
+        "Up/Down",
+        "PgUp/PgDn",
+        "Space",
+        "Del shut down",
+        "Enter open",
+        "Esc close",
+    ] {
+        assert!(
+            legend_text.contains(key),
+            "the legend lists `{key}`: {legend_text:?}"
+        );
+    }
+    let style = find_text_style(&buffer, legend, "Esc close").expect("legend must paint");
+    assert_eq!(
+        style.fg,
+        Some(Color::DarkGray),
+        "the legend is dim, style: {style:?}"
+    );
+
+    for y in content.y..content.bottom() {
+        let text = row_text(&buffer, y, content);
+        assert!(
+            !text.contains("Close"),
+            "row {y} must not paint a Close button: {text:?}"
+        );
+    }
+}
+
+/// `Esc` dismisses the Teams window and leaves the team and its members
+/// untouched (FR-018, FR-032).
+#[tokio::test]
+async fn test_teams_escape_dismisses_the_window() {
     let mut app = open_teams(2);
     let _ = render(&mut app, 120, 40);
-
-    let close = app.teams_close_button_area;
-    assert!(
-        close.width > 0 && close.height > 0,
-        "the Close button must have a clickable area, got {close:?}"
-    );
     assert!(app.show_teams_window, "the window starts open");
 
-    app.handle_mouse_event(MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: close.x + close.width / 2,
-        row: close.y + close.height / 2,
-        modifiers: KeyModifiers::empty(),
-    });
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()))
+        .await;
 
     assert!(
         !app.show_teams_window,
-        "clicking Close must dismiss the Teams window (FR-018)"
+        "Esc must dismiss the Teams window (FR-018)"
     );
     assert_eq!(
         app.team_members.len(),
@@ -435,19 +434,15 @@ fn test_teams_frame_rects_stay_inside_the_terminal() {
             "at {width}x{height}: modal {modal:?} escapes the terminal {screen:?}"
         );
 
-        for (name, rect) in [
-            ("close", app.teams_close_button_area),
-            ("content", app.teams_area),
-        ] {
-            assert!(
-                rect.right() <= screen.right() && rect.bottom() <= screen.bottom(),
-                "at {width}x{height}: {name} {rect:?} escapes the terminal {screen:?}"
-            );
-            assert!(
-                rect.right() <= modal.right() && rect.bottom() <= modal.bottom(),
-                "at {width}x{height}: {name} {rect:?} escapes the modal {modal:?}"
-            );
-        }
+        let content = app.teams_area;
+        assert!(
+            content.right() <= screen.right() && content.bottom() <= screen.bottom(),
+            "at {width}x{height}: content {content:?} escapes the terminal {screen:?}"
+        );
+        assert!(
+            content.right() <= modal.right() && content.bottom() <= modal.bottom(),
+            "at {width}x{height}: content {content:?} escapes the modal {modal:?}"
+        );
 
         assert_eq!(
             buffer.area, screen,
@@ -456,18 +451,21 @@ fn test_teams_frame_rects_stay_inside_the_terminal() {
     }
 }
 
-/// The table area is the inner area minus the Close button height and one
-/// separating row, and never overlaps the Close button when there is room
-/// (FR-018, NFR-010).
+/// The table area is the inner area minus the one-row legend band, and never
+/// overlaps it when there is room (FR-018, NFR-010).
 #[test]
-fn test_teams_content_area_excludes_close_and_separator() {
+fn test_teams_content_area_excludes_the_legend_band() {
     for (width, height) in [(120u16, 40u16), (160, 44), (80, 24), (40, 12)] {
         let mut app = open_teams(2);
         let _ = render(&mut app, width, height);
 
         let inner = expected_inner(width, height);
         let content = app.teams_area;
-        let close = app.teams_close_button_area;
+        let (_, _, legend) = ragent_tui::layout::window_frame_testable(
+            ragent_tui::layout::teams_window_percent_w(),
+            ragent_tui::layout::teams_window_percent_h(),
+            Rect::new(0, 0, width, height),
+        );
 
         assert_eq!(
             content.x, inner.x,
@@ -483,12 +481,12 @@ fn test_teams_content_area_excludes_close_and_separator() {
         );
         assert_eq!(
             content.height,
-            inner.height - close.height - 1,
-            "at {width}x{height}: content height must be inner - close - separator"
+            inner.height - 1,
+            "at {width}x{height}: content height must be the inner height minus the legend row"
         );
         assert!(
-            content.bottom() <= close.y,
-            "at {width}x{height}: content {content:?} must end above close {close:?}"
+            content.bottom() <= legend.y,
+            "at {width}x{height}: content {content:?} must end above the legend {legend:?}"
         );
     }
 }

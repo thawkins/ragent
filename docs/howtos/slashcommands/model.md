@@ -68,6 +68,59 @@ Prints the three-row subcommand table shown above.
 ```
 Not a supported form - prints `Usage: /model [show]` in the status bar.
 
+## Dialog layout
+
+The pickers share one composition (the same calm-slate chrome the plugin and
+connector catalogue panels wear):
+
+```
+┌ Select Model  Anthropic ────────────────────────────────────┐
+│2 models                                        Enter selects│
+│  Model               Context   Cost        Thinking   Features│
+│> Claude Sonnet 4        200K   Premium 1x  Auto/...   R,V,T   │
+│  Claude Haiku 3.5       200K   Low 0.2x     Auto/...   R,V,T   │
+│  ^/v navigate  Enter select  Esc cancel  |  R reasoning ...  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- The frame title names the step and the provider; the heading strip below it
+  carries the model count on the left and the confirm key on the right.
+- A pinned black-on-grey band labels each column above the rows, so the columns
+  stay identified while the list scrolls.
+- The selected row is a filled accent bar; the model name leads in white and the
+  supporting facts (context window, cost, thinking levels, feature flags) step
+  back into a muted tone. `Context` and `Cost` are right-aligned so digits line up.
+- The footer spells out the terse feature codes (`R reasoning`, `V vision`,
+  `T tools`) and, when the list is windowed, leads with `Showing a-b of N` so a
+  clipped list is never mistaken for the whole set.
+
+The router tier picker (`/provider router` -> assign a model) uses the same table
+and the same footer legend, with `Enter assign` in place of `Enter select`.
+
+## Scrolling
+
+Every selector in the provider/model dialogs windows around its cursor, so a list
+longer than the dialog always keeps the highlighted row on screen and moves the
+painted slice one entry at a time as you navigate:
+
+- the provider picker, the model picker and the router tier picker;
+- the thinking-level selector (each level is two lines tall, so it windows two
+  lines at a time);
+- the Azure resource picker;
+- the router setup's provider palette (its block title states the window,
+  `Providers (*) 11-20 of 30`) and each tier bucket (windowed by the selected
+  model's own group of lines, so its retained properties stay with it).
+
+Whenever the list is clipped the legend (or the block title) says
+`Showing a-b of N`.
+
+The mouse wheel scrolls the same way: with a setup dialog open, one notch over it
+moves the cursor one entry (identical to `Up`/`Down`, because it goes through the
+same handler), and a notch anywhere else is swallowed, so the chat and side panels
+behind the modal never scroll under it. Non-list steps (the API-key and GitLab
+forms, the loading spinner, the success card) swallow the notch rather than treating
+it as a keystroke.
+
 ## Output
 
 - Bare form: no chat text; the TUI switches to a model-discovery status and then

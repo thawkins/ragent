@@ -12,7 +12,6 @@ mod support;
 use support::TempTree;
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
 use ragent_config::ConnectorsConfig;
 use ragent_connectors::{
@@ -23,10 +22,13 @@ use ragent_connectors::{
     subcommand_of,
 };
 
-/// Serialise cwd-mutating tests in this binary.
-fn cwd_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+/// The process-wide cwd/env lock of this test binary (see `tests/all.rs`).
+///
+/// One binary per crate means a file-local mutex only serialises the children
+/// that happen to share this file, so every mutating test must contend on the
+/// crate-wide lock instead. See AGENTS.md ("Test Layout").
+fn cwd_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    crate::global_env_lock()
 }
 
 /// RAII cwd guard so a temp working directory is restored on drop.
@@ -432,7 +434,7 @@ fn add_report_surfaces_the_credential_requirement_without_a_secret() {
 
 #[test]
 fn store_and_config_resolves_project_store_and_config() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("store-config");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
 
@@ -449,7 +451,7 @@ fn store_and_config_resolves_project_store_and_config() {
 #[test]
 fn help_renders_usage_without_config_or_store() {
     // `help` performs no config/store access and creates no files (FR-017).
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("help-no-files");
     let report = run_connector_subcommand(tree.path(), "help", "").expect("help renders");
     assert!(report.contains("command reference"));
@@ -461,7 +463,7 @@ fn help_renders_usage_without_config_or_store() {
 
 #[test]
 fn unknown_subcommand_returns_none() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("unknown-none");
     assert!(run_connector_subcommand(tree.path(), "bogus", "x").is_none());
 }
@@ -471,7 +473,7 @@ fn management_subcommands_fall_through_until_wired() {
     // The parser recognises `list` and friends, but their report bodies arrive
     // with T-011/T-013; until then the dispatcher returns `None` so the caller
     // renders the usage block.
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("mgmt-fallthrough");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
     assert!(run_connector_subcommand(tree.path(), "list", "").is_none());
@@ -480,7 +482,7 @@ fn management_subcommands_fall_through_until_wired() {
 
 #[test]
 fn malformed_arguments_render_an_err_row_changing_no_state() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("malformed-args");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
 
@@ -495,7 +497,7 @@ fn malformed_arguments_render_an_err_row_changing_no_state() {
 
 #[test]
 fn stores_report_is_attributed_ascii_and_offline_without_check() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("stores-report");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
 
@@ -511,7 +513,7 @@ fn stores_report_is_attributed_ascii_and_offline_without_check() {
 
 #[test]
 fn disabled_subsystem_reports_for_every_non_help_subcommand() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("disabled-switch");
     write_connectors_config(&tree, r#"{ "enabled": false }"#);
 
@@ -540,7 +542,7 @@ fn disabled_subsystem_reports_for_every_non_help_subcommand() {
 
 #[test]
 fn marketplace_reports_stay_available_while_the_subsystem_is_disabled() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("disabled-marketplace");
     write_connectors_config(&tree, r#"{ "enabled": false }"#);
 
@@ -571,7 +573,7 @@ fn marketplace_reports_stay_available_while_the_subsystem_is_disabled() {
 
 #[test]
 fn add_local_directory_installs_enabled_and_reports_ok() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("add-local");
     write_connectors_config(&tree, r#"{ "enabled": true }"#);
 
@@ -606,7 +608,7 @@ fn add_local_directory_installs_enabled_and_reports_ok() {
 
 #[test]
 fn store_and_config_defaults_when_no_block_is_present() {
-    let _lock = cwd_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = cwd_test_lock();
     let (_guard, tree) = enter_temp_dir("defaults");
     // No ragent.json at all: the compiled defaults apply (enabled).
     let (_, config): (_, ConnectorsConfig) = store_and_config(tree.path());

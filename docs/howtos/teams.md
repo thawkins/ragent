@@ -222,6 +222,11 @@ The `context` parameter is critical — it tells every auto-spawned teammate **e
 
 If the team already exists, `team_create` gracefully recovers and re-applies the blueprint.
 
+The TUI's `/team create` creates the team itself and then seeds the blueprint with
+`seed_only: true`, which applies the blueprint to the existing team and never creates
+(or re-creates) its directory. That keeps a seeding call from resurrecting a team
+directory that a concurrent `/team clear` or `/team forcecleanup` has just removed.
+
 ### 6.2 Wait for teammates
 
 After `team_create` spawns all teammates, call `team_wait` immediately:

@@ -12,7 +12,7 @@ the prerequisite is listed before the steps. This document contains no
 automated test code and no reference to any test harness.
 
 The panel is operated **keyboard-first through a block cursor**; the mouse keeps only
-the scroll and chrome surfaces (window buttons, close buttons, wheel scrolling,
+the scroll and chrome surfaces (window buttons, wheel scrolling,
 scrollbar-gutter dragging). Every key press is written explicitly, in order, and the
 exact text to type into each field is given as **Test data**. Keys are written as
 `Space`, `Del`, `Up`, `Down`, `PgUp`, `PgDn`, `Alt+Down`, `Alt+Up`, `Enter`, `Esc`,
@@ -101,7 +101,7 @@ Throughout, "status line" means the line immediately above the input area, and
    terminal height.
 3. Resize the terminal to roughly 80 columns by 24 rows.
 4. Re-open the window if it closed.
-5. Locate the ` Close ` button.
+5. Locate the footer key legend.
 
 **Test data:** none
 
@@ -109,10 +109,9 @@ Throughout, "status line" means the line immediately above the input area, and
 - Step 2: the popup occupies roughly 70% of the width and 70% of the height, centred.
 - Step 3-4: the popup stays inside the terminal rectangle; nothing is clipped off
   screen; the table area is at least one row tall.
-- Step 5: a bordered ` Close ` button sits in the bottom-right corner of the window's
-  inner area and is at most 10 columns wide and 3 rows tall; the key legend reads
-  `Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open` in the band
-  to its left (FR-077).
+- Step 5: the dim key legend runs along the window's bottom inner row and reads
+  `Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close`
+  (FR-077); no ` Close ` button is painted anywhere in the window.
 
 ---
 
@@ -219,8 +218,7 @@ that is also running a sub-agent.
 **Steps:**
 1. Press `Down` to place the cursor on a running sub-agent row.
 2. Press `Enter` and observe the surface that opens and its label.
-3. Close that view (Esc or the overlay's ` Close ` button) and reopen the Agents
-   window if needed.
+3. Close that view with `Esc` and reopen the Agents window if needed.
 4. Move the cursor to another sub-agent row and press `Enter` again.
 5. Observe the label on the opened view.
 
@@ -369,19 +367,19 @@ Agents window can also open.
 3. Left-click the Agents button without closing the Teams window.
 4. Observe which window is on screen.
 5. Left-click the Teams button again.
-6. Left-click the ` Close ` button.
+6. Press `Esc`.
 
 **Test data:** none
 
 **Expected results:**
 - Step 2: a centred modal with full borders and a bold blue ` Teams ` title; the table
   title reads ` Team: <name>  (lead + 2 teammates) ` for two teammates and
-  `... (lead + 1 teammate) ` for exactly one; the key legend in the band left of
-  ` Close ` reads `Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down
-  Enter open` (FR-077).
+  `... (lead + 1 teammate) ` for exactly one; the footer key legend reads
+  `Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open
+  Esc close` (FR-077).
 - Step 3-4: the Teams window closes and the Agents window opens — the two are never
   shown at once.
-- Step 5-6: the Teams window reopens and the Close button dismisses it, leaving every
+- Step 5-6: the Teams window reopens and `Esc` dismisses it, leaving every
   member and the input unchanged.
 
 ---
@@ -714,7 +712,7 @@ with background commands).
 1. While the turn is streaming, left-click the Agents button.
 2. Left-click the Teams button.
 3. Move the cursor onto a row, press `Space` (or `Del`) and answer the dialog `Yes`.
-4. Left-click ` Close `.
+4. Press `Esc`.
 5. Observe the chat stream throughout.
 
 **Test data:** none
@@ -735,15 +733,15 @@ way.
 1. Shrink the terminal to the smallest size you normally use (for example 60 columns by
    18 rows).
 2. Open each window in turn.
-3. Attempt to click ` Close `; check the legend band and the cursor row are still
-   readable.
+3. Press `Esc`; reopen the window and check the footer legend and the cursor row are
+   still readable.
 
 **Test data:** none
 
 **Expected results:**
 - Step 2: both popups stay inside the terminal rectangle, are fully framed, and their
   titles are readable (NFR-010).
-- Step 3: the Close button stays clickable; the legend clips instead of wrapping; the
+- Step 3: `Esc` still dismisses the window; the legend clips instead of wrapping; the
   cursor still navigates and every key still reaches the window.
 
 ---
@@ -771,9 +769,9 @@ task.
 teammate.
 
 **Steps:**
-1. Move the cursor onto a sub-agent row, then close the Agents window with ` Close `.
+1. Move the cursor onto a sub-agent row, then close the Agents window with `Esc`.
 2. Reopen the Agents window and press `Space`.
-3. Close the Teams window with the cursor on a member, reopen it, and press `Alt+Down`.
+3. Close the Teams window with `Esc`, reopen it, and press `Alt+Down`.
 4. Observe which teammate becomes focused.
 
 **Test data:** none
@@ -810,23 +808,23 @@ Automated coverage: `test_agents_window_table` (positions re-derived with
 
 ---
 
-### TC-034 - Output view close bar and wheel ownership
+### TC-034 - Output view footer legend and wheel ownership
 
 **Preconditions:** The output view overlay open (cursor `Enter` on an agent row or
 teammate row); the Agents window open beneath it for the wheel case.
 
 **Steps:**
 1. Observe the overlay's bottom-right corner.
-2. Click the ` Close ` button.
+2. Press `Esc`.
 3. Reopen the overlay, place the mouse over its centre, and roll the wheel up.
 4. With the overlay open, press `Up`/`Down` and then `Esc`.
 
 **Test data:** none
 
 **Expected results:**
-- Step 1: a bordered ` Close ` button sits pinned to the overlay's bottom-right corner,
-  clamped to at most 10 columns and 3 rows, with one separator row between the content
-  and the button.
+- Step 1: the dim footer legend runs along the overlay's bottom inner row and ends with
+  `Esc close`; no ` Close ` button is painted, and the content area stops one row above
+  the footer band.
 - Step 2: the overlay closes, the selected agent session and index clear with it, and
   the Agents window beneath stays open exactly as it was.
 - Step 3: the wheel scrolls the overlay's content (the popup beneath does not move),
@@ -834,7 +832,7 @@ teammate row); the Agents window open beneath it for the wheel case.
 - Step 4: while the overlay is open the window cursor keys are not consumed by the
   popup beneath; `Esc` closes the overlay through the same dismissal transition.
 
-Automated coverage: `test_output_view_close_bar` (9 tests).
+Automated coverage: `test_output_view_footer` (8 tests).
 
 ---
 
@@ -872,7 +870,7 @@ scroll-into-view on both windows).
 **Preconditions:** Agents window open with a live sub-agent; the Teams window likewise.
 
 **Steps:**
-1. Read the legend band left of ` Close ` in both windows.
+1. Read the footer legend along the bottom inner row of both windows.
 2. On the Agents window: `Space` (suspend), `Space` (resume), `Del` + `Yes` (kill).
 3. On the Teams window: `Space` + `Yes` (suspend), `Space` (resume, no dialog),
    `Del` + `Yes` (shut down), `Enter` (focus + overlay).
@@ -882,8 +880,8 @@ scroll-into-view on both windows).
 
 **Expected results:**
 - Step 1: the legend reads `Up/Down select  PgUp/PgDn page  Space stop/resume  Del
-  kill  Enter open` (Agents) and `... Del shut down ...` (Teams), dim, left of Close,
-  clipped to the band width (FR-077).
+  kill  Enter open  Esc close` (Agents) and `... Del shut down ... Esc close` (Teams),
+  dim, on the window's last inner row, clipped to that row's width (FR-077).
 - Step 2-3: each key drives the documented action on the cursor row (FR-035, FR-036,
   FR-038, FR-040) and is consumed (FR-055).
 - Step 4: the open dialog absorbs further row-action keys.
@@ -902,7 +900,7 @@ splits, stale no-ops) + `test_row_action_confirm` (dialog answers).
 2. Left-click the `[stop]`/`[x]` glyphs of a live row.
 3. Left-click the scrollbar gutter, drag, release.
 4. Wheel over the popup body.
-5. Left-click ` Close `.
+5. Press `Esc`.
 6. Confirm no text was selected in the chat beneath from any of the clicks.
 
 **Test data:** none

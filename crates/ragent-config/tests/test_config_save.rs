@@ -57,6 +57,7 @@ fn parse_backup_name(name: &str) -> Option<BackupComponents> {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_creates_saves_directory_and_timestamped_file() {
     // FR-003: backup lands in `saves/` with a `ragent.json.<date>.<time>` name.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -99,6 +100,7 @@ fn test_backup_creates_saves_directory_and_timestamped_file() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_preserves_content_byte_for_byte() {
     // FR-003: the backup is a faithful copy of the source.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -112,6 +114,7 @@ fn test_backup_preserves_content_byte_for_byte() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_does_not_overwrite_existing_backups() {
     // FR-011: two saves produce two distinct files.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -155,6 +158,7 @@ fn test_backup_does_not_overwrite_existing_backups() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_errors_when_no_global_config_exists() {
     // FR-003: backing up a non-existent config is an error, not an empty file.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -173,6 +177,7 @@ fn test_backup_errors_when_no_global_config_exists() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_global_config_path_helpers_resolve_consistently() {
     // FR-001: global_config_dir / global_config_path produce the canonical path.
     let dir = Config::global_config_dir();
@@ -187,6 +192,7 @@ fn test_global_config_path_helpers_resolve_consistently() {
 // -- Naming format (FR-003) ---------------------------------------------
 
 #[test]
+#[serial_test::serial]
 fn test_backup_name_strictly_matches_pattern() {
     // FR-003: the backup name must be exactly ragent.json.YYYY-MM-DD.HH-MM-SS
     // with every component a zero-padded integer.
@@ -216,6 +222,7 @@ fn test_backup_name_strictly_matches_pattern() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_name_uses_hyphens_in_time_not_colons() {
     // FR-003: the time portion uses hyphens (HH-MM-SS) so the file name is
     // legal on Windows NTFS where colons are forbidden in file names.
@@ -254,6 +261,7 @@ fn test_backup_name_uses_hyphens_in_time_not_colons() {
 // -- Directory creation (FR-003) ----------------------------------------
 
 #[test]
+#[serial_test::serial]
 fn test_backup_creates_saves_dir_when_absent() {
     // FR-003: the `saves/` subdirectory is created when it does not exist.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -280,6 +288,7 @@ fn test_backup_creates_saves_dir_when_absent() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_reuses_existing_saves_dir_without_clearing() {
     // FR-003: when `saves/` already exists with prior content, a new backup is
     // added alongside the existing files - the directory is never wiped.
@@ -311,6 +320,7 @@ fn test_backup_reuses_existing_saves_dir_without_clearing() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_always_lands_in_saves_subfolder() {
     // FR-003: the backup never lands directly in the config dir - it is always
     // nested inside `saves/`, even on the very first save.
@@ -346,6 +356,7 @@ fn test_backup_always_lands_in_saves_subfolder() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_restore_global_config_rejects_missing_backup() {
     // FR-012 / restore: restoring a non-existent backup is an error, never a
     // silent write.
@@ -366,6 +377,7 @@ fn test_restore_global_config_rejects_missing_backup() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_restore_global_config_rejects_invalid_json_backup() {
     // FR-012 / restore: refuse to restore a backup that is not valid JSON.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -389,6 +401,7 @@ fn test_restore_global_config_rejects_invalid_json_backup() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_restore_global_config_by_bare_file_name() {
     // restore should accept a bare backup file name and resolve it under saves/.
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -410,6 +423,7 @@ fn test_restore_global_config_by_bare_file_name() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_restore_global_config_does_not_overwrite_non_global_target() {
     // FR-012: even if an absolute path is passed, the destination is always the
     // global ragent.json inside the supplied config directory.
@@ -427,6 +441,7 @@ fn test_restore_global_config_does_not_overwrite_non_global_target() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_backup_restore_round_trip_preserves_config() {
     // T-010: a complete save -> list -> restore lifecycle. Back up an original
     // config, overwrite the global file, then restore the backup and verify the

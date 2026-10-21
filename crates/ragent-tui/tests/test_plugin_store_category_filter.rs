@@ -6,8 +6,12 @@
 //! They pin the category-filter model behind the navigator: the derived distinct
 //! category set, the query-plus-category composition, the `Up`/`Down` cursor move
 //! applying on the same call, clear-to-`ALL`, the result cursor reset on a category
-//! change, the `ALL`-only navigator for a category-less index, and the drop of a
-//! category the new index no longer declares.
+//! change, the `ALL` + `Installed`-only navigator for a category-less index, and the
+//! drop of a category the new index no longer declares.
+//!
+//! Navigator row `0` is the `ALL` sentinel, row `1` is the `Installed`
+//! pseudo-category (`pluginstores` FR-054), and the derived categories start at
+//! row `2`.
 
 use ragent_plugins::{StoreEntry, StoreKind};
 use ragent_tui::app::{PluginStoreBrowser, PluginStoreStatus};
@@ -54,6 +58,19 @@ fn category_rows(browser: &PluginStoreBrowser) -> Vec<&str> {
         .collect()
 }
 
+/// The absolute navigator row carrying `label` (row `0` is `ALL`).
+fn row_of(browser: &PluginStoreBrowser, label: &str) -> usize {
+    (0..browser.category_row_count())
+        .find(|&row| browser.category_row_label(row).eq_ignore_ascii_case(label))
+        .unwrap_or_else(|| panic!("no navigator row for `{label}`"))
+}
+
+/// Select the navigator row carrying `label`.
+fn select(browser: &mut PluginStoreBrowser, label: &str) {
+    let row = row_of(browser, label);
+    assert!(browser.category_select_row(row), "row {row} selectable");
+}
+
 /// Four entries across two categories (`Web` and the two `Utility`/`utility`
 /// spellings) plus one uncategorised entry. The distinct rows fold the two
 /// `Utility` spellings into one and sort as `ALL`, `Utility`, `Web`. The result
@@ -88,8 +105,17 @@ fn the_category_set_is_distinct_case_insensitive_and_sorted_with_all_implied() {
     // `Utility` and `utility` fold into one row keeping the first spelling; the
     // set is sorted case-insensitively; `ALL` is implicit rather than listed.
     assert_eq!(category_rows(&browser), ["Utility", "Web"]);
-    assert_eq!(browser.category_row_count(), 3, "ALL + Utility + Web");
+    assert_eq!(
+        browser.category_row_count(),
+        4,
+        "ALL + Installed + Utility + Web"
+    );
     assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(
+        browser.category_row_label(1),
+        "Installed",
+        "the Installed pseudo-category is pinned second (FR-054)"
+    );
     assert_eq!(browser.active_category(), "ALL");
 }
 
@@ -111,10 +137,13 @@ fn each_navigator_row_shows_the_count_of_entries_under_it() {
         "unknown is zero"
     );
 
-    // The rendered row display appends the count to the base label.
+    // The rendered row display appends the count to the base label; nothing is
+    // installed in this fixture, so the pseudo-category counts zero (FR-054).
+    assert_eq!(browser.category_entry_count("Installed"), 0);
     assert_eq!(browser.category_row_display(0), "ALL (4)");
-    assert_eq!(browser.category_row_display(1), "Utility (2)");
-    assert_eq!(browser.category_row_display(2), "Web (1)");
+    assert_eq!(browser.category_row_display(1), "Installed (0)");
+    assert_eq!(browser.category_row_display(2), "Utility (2)");
+    assert_eq!(browser.category_row_display(3), "Web (1)");
 }
 
 #[test]
@@ -154,7 +183,7 @@ fn the_query_and_the_category_compose() {
     let mut browser = loaded(sample());
     assert_eq!(filtered_ids(&browser), ["alpha", "beta", "delta", "gamma"]);
 
-    assert!(browser.category_move_down(), "move onto `Utility`");
+    select(&mut browser, "Utility");
     assert_eq!(browser.active_category(), "Utility");
     assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
 
@@ -183,7 +212,7 @@ fn all_matches_every_entry_including_the_uncategorised_one() {
 #[test]
 fn a_category_with_no_query_match_yields_an_empty_set() {
     let mut browser = loaded(sample());
-    assert!(browser.category_move_down()); // `Utility`
+    select(&mut browser, "Utility");
     for c in "alpha".chars() {
         browser.push_char(c); // only `alpha` (in `Web`) matches `alpha`
     }
@@ -204,11 +233,19 @@ fn move_down_applies_the_new_category_on_the_same_call() {
 
     assert!(browser.category_move_down());
     assert_eq!(browser.category_cursor_row(), 1);
+    assert_eq!(
+        browser.active_category(),
+        "Installed",
+        "the Installed pseudo-category follows ALL (FR-054)"
+    );
+
+    assert!(browser.category_move_down());
+    assert_eq!(browser.category_cursor_row(), 2);
     assert_eq!(browser.active_category(), "Utility");
     assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
 
     assert!(browser.category_move_down());
-    assert_eq!(browser.category_cursor_row(), 2);
+    assert_eq!(browser.category_cursor_row(), 3);
     assert_eq!(browser.active_category(), "Web");
     assert_eq!(filtered_ids(&browser), ["alpha"]);
 }
@@ -216,12 +253,12 @@ fn move_down_applies_the_new_category_on_the_same_call() {
 #[test]
 fn move_up_applies_the_new_category_on_the_same_call() {
     let mut browser = loaded(sample());
-    assert!(browser.category_move_down());
-    assert!(browser.category_move_down());
+    let web = row_of(&browser, "Web");
+    assert!(browser.category_select_row(web));
     assert_eq!(browser.active_category(), "Web");
 
     assert!(browser.category_move_up());
-    assert_eq!(browser.category_cursor_row(), 1);
+    assert_eq!(browser.category_cursor_row(), web - 1);
     assert_eq!(browser.active_category(), "Utility");
     assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
 }
@@ -236,10 +273,12 @@ fn the_category_cursor_clamps_at_both_ends_without_moving() {
     assert_eq!(browser.active_category(), "ALL");
 
     // Down past the last row is a no-op and reports it.
-    assert!(browser.category_move_down());
-    assert!(browser.category_move_down());
+    let last = browser.category_row_count() - 1;
+    while browser.category_cursor_row() < last {
+        assert!(browser.category_move_down());
+    }
     assert!(!browser.category_move_down());
-    assert_eq!(browser.category_cursor_row(), 2);
+    assert_eq!(browser.category_cursor_row(), last);
     assert_eq!(browser.active_category(), "Web");
 }
 
@@ -275,7 +314,7 @@ fn selecting_an_out_of_range_row_changes_nothing() {
 #[test]
 fn clear_sets_all_and_restores_the_full_set() {
     let mut browser = loaded(sample());
-    assert!(browser.category_move_down()); // `Utility`
+    select(&mut browser, "Utility");
     assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
 
     browser.category_clear();
@@ -294,7 +333,7 @@ fn changing_the_category_resets_the_result_cursor_and_scroll() {
     browser.move_down();
     assert_eq!(browser.cursor, 2, "the result cursor started at row 2");
 
-    assert!(browser.category_move_down()); // `Utility`
+    select(&mut browser, "Utility");
 
     // A category change re-derives from the full index and clamps the result
     // cursor to the first survivor without any re-fetch (FR-014).
@@ -310,7 +349,7 @@ fn changing_the_category_resets_the_result_cursor_and_scroll() {
 #[test]
 fn clear_resets_the_result_cursor_to_the_first_survivor() {
     let mut browser = loaded(sample());
-    assert!(browser.category_move_down()); // `Utility`
+    select(&mut browser, "Utility");
     browser.move_down();
     assert_eq!(browser.cursor, 1);
 
@@ -320,28 +359,37 @@ fn clear_resets_the_result_cursor_to_the_first_survivor() {
     assert_eq!(browser.scroll, 0);
 }
 
-// -- No categories yields an ALL-only navigator (FR-018, A7) -----------------
+// -- No categories yields an ALL + Installed navigator (FR-018, A7, FR-054) ---
 
 #[test]
-fn an_index_with_no_categories_yields_an_all_only_navigator() {
+fn an_index_with_no_categories_yields_an_all_and_installed_navigator() {
     let mut browser = loaded(vec![entry("beta", None), entry("alpha", None)]);
 
-    assert_eq!(browser.category_row_count(), 1, "ALL only");
+    assert_eq!(browser.category_row_count(), 2, "ALL and Installed only");
     assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
     assert_eq!(category_rows(&browser).len(), 0);
-    assert!(!browser.category_move_down(), "no row below ALL");
+    assert!(browser.category_move_down(), "DOWN from ALL is Installed");
+    assert!(!browser.category_move_down(), "no row below Installed");
 
-    // Browsing still works normally (A7) and the set is sorted by id (FR-050).
+    // `Installed` matches only ids in the store scan, which is empty here, so the
+    // result set is empty and no panic occurs (FR-054).
+    assert_eq!(filtered_ids(&browser), Vec::<&str>::new());
+
+    // Browsing still works normally under `ALL` (A7) and the set is sorted by id
+    // (FR-050).
+    browser.category_clear();
     assert_eq!(filtered_ids(&browser), ["alpha", "beta"]);
 }
 
 #[test]
-fn an_empty_index_yields_an_all_only_navigator() {
+fn an_empty_index_yields_an_all_and_installed_navigator() {
     let browser = loaded(Vec::new());
 
     assert_eq!(browser.status, PluginStoreStatus::Empty);
-    assert_eq!(browser.category_row_count(), 1);
+    assert_eq!(browser.category_row_count(), 2);
     assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
     assert_eq!(browser.filtered.len(), 0);
 }
 
@@ -350,7 +398,7 @@ fn an_empty_index_yields_an_all_only_navigator() {
 #[test]
 fn a_category_the_new_index_no_longer_declares_is_dropped_to_all() {
     let mut browser = loaded(sample());
-    assert!(browser.category_select_row(2)); // `Web`
+    select(&mut browser, "Web");
     assert_eq!(browser.active_category(), "Web");
 
     // Re-fetch with an index that no longer declares `Web`.
@@ -368,7 +416,7 @@ fn a_category_the_new_index_no_longer_declares_is_dropped_to_all() {
 #[test]
 fn a_category_the_new_index_still_declares_is_retained() {
     let mut browser = loaded(sample());
-    assert!(browser.category_select_row(1)); // `Utility`
+    select(&mut browser, "Utility");
     assert_eq!(browser.active_category(), "Utility");
 
     // Re-fetch with an index that still declares `Utility`.
@@ -440,7 +488,7 @@ fn the_category_marketplace_and_query_filters_compose() {
     assert_eq!(filtered_ids(&browser), ["beta", "gamma"]);
 
     // Narrow by `Web` within `codex`: only `gamma` is both `codex` and `Web`.
-    assert!(browser.category_select_row(2)); // `Web`
+    select(&mut browser, "Web");
     assert_eq!(browser.active_category(), "Web");
     assert_eq!(filtered_ids(&browser), ["gamma"]);
 

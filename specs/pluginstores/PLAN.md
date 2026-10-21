@@ -48,9 +48,9 @@ turn keeps animating (FR-016, FR-026); until it lands the panel renders a loadin
 
 ```text
 +-- Codex Plugin Store ---- search: weather ----------- 12 of 340 --+
-|  > codex-weather   1.2.0   Weather lookups for the agent          |
-|    codex-time      0.9.1   Time and timezone helpers              |
-|    codex-shell     2.0.0   [installed] Shell command wrappers     |
+|  > codex-weather   1.2.0   Codex      Weather lookups for the agent |
+|    codex-time      0.9.1   community  Time and timezone helpers     |
+|  * codex-shell     2.0.0   Codex      Shell command wrappers        |
 |                                                                   |
 | Up/Down move  Enter install  Esc close                            |
 +-------------------------------------------------------------------+
@@ -58,7 +58,8 @@ turn keeps animating (FR-016, FR-026); until it lands the panel renders a loadin
 
 The highlighted row is painted with a full-row block cursor via
 `List::highlight_style`; rows whose id is in the installed set use the installed colour
-and an `[installed]` marker (FR-005). Only ASCII glyphs are used (FR-004).
+and a `*` marker in the one-column installed lane between the cursor gutter and the id
+column (FR-005). Only ASCII glyphs are used (FR-004).
 
 ## Requirement Coverage Map
 
@@ -123,7 +124,7 @@ and an `[installed]` marker (FR-005). Only ASCII glyphs are used (FR-004).
 | T-003 | Implement store-index fetch: HTTPS-only, timeout, byte cap, JSON parse, per-entry validation, no execution | FR-003, FR-013, FR-016, FR-023, FR-024, FR-025 | M | Critical | completed | T-002 |
 | T-004 | Add `PluginStoreBrowser` state and launch/close API on `App` (query, results, cursor, status) plus key routing and input lock | FR-002, FR-007, FR-009, FR-012, FR-015, FR-020 | M | Critical | completed | T-002 |
 | T-005 | Implement search filtering, cursor clamp, and scrolling logic (pure, unit-testable) | FR-008, FR-010, FR-017, FR-022 | M | High | completed | T-004 |
-| T-006 | Render `render_plugin_store_panel`: block cursor via `List::highlight_style`, installed colour + `[installed]`, empty/error/loading states, resize handling | FR-004, FR-005, FR-011, FR-017, FR-018 | M | Critical | completed | T-004, T-005 |
+| T-006 | Render `render_plugin_store_panel`: block cursor via `List::highlight_style`, installed colour + installed-lane marker, empty/error/loading states, resize handling | FR-004, FR-005, FR-011, FR-017, FR-018 | M | Critical | completed | T-004, T-005 |
 | T-007 | Derive the installed set from the store scan and wire key routing for the modal into `input.rs` | FR-005, FR-015 | S | High | completed | T-004 |
 | T-008 | Wire the off-loop fetch: spawn, deliver a TUI message, update panel status without blocking the event loop | FR-007, FR-013, FR-016, FR-026 | M | Critical | completed | T-003, T-004 |
 | T-009 | Wire `ENTER` install: call `ragent_plugins::add(force=false)`, handle `AddOutcome`/`AddError`, re-derive installed set, guard double-install | FR-006, FR-011, FR-014, FR-022, FR-024, FR-025, FR-026 | M | Critical | completed | T-003, T-007, T-008 |
@@ -201,8 +202,8 @@ store (FR-022). Empty result set yields the empty state (FR-017).
 on `render_queue_show_panel`: bordered Magenta block, title with store name and
 `n of m`, ASCII-only body, footer key hints. Use ratatui `List` with `highlight_style`
 for the full-row block cursor - a per-item pre-styled span does **not** paint the row
-background. Installed rows (id in the installed set) use the installed colour and an
-`[installed]` marker (FR-005). Render `Loading` / `Failed(reason)` / empty states in the
+background. Installed rows (id in the installed set) use the installed colour and a `*` marker in
+the one-column installed lane (FR-005). Render `Loading` / `Failed(reason)` / empty states in the
 body (FR-013, FR-017). Wire into `render()` beside the queue modal, storing
 `plugin_store_area` and re-deriving on resize (FR-018).
 
@@ -336,7 +337,7 @@ offline and without touching the real store or installing anything (NFR-003).
 | A blocking fetch stalling the event loop | All fetch/install work runs off-loop and returns via a message (T-008, T-009). |
 | Untrusted store data panicking the TUI | Every parse/format path returns `Result`/`Option`; malformed entries are skipped and counted (FR-025). |
 | Store-supplied source bypassing install guards | The browser calls the existing `add`, which owns the guards; no new download path is introduced (FR-024). |
-| Installed-colour ambiguity | Recorded as Open Question 1; implemented as A7 with an `[installed]` marker. |
+| Installed-colour ambiguity | Recorded as Open Question 1; implemented as A7 with a `*` installed-lane marker. |
 | A compiled default endpoint drifting or being duplicated | Declared once as named constants in the registry module (T-014, NFR-001); resolved from config-with-fallback at each launch (T-015, NFR-002). |
 | An absent `plugins.stores` block failing launch | Resolution falls back to the compiled default and never errors on absence (T-016, FR-030). |
 | Default-endpoint tests depending on live store access | An injectable fetch seam serves a fixture index offline so the tests stay deterministic (T-019, FR-037, NFR-003). |
@@ -409,7 +410,8 @@ resolved URL) or the store label for the base endpoint, and
 `render_plugin_store_panel` renders the marketplace as a per-row column and widens the
 panel from a 100- to a 140-column ceiling; `plugin_store_flex_widths` splits the flexible
 remainder between the marketplace and description columns so the fixed id/version columns
-and the trailing `[installed]` marker are never clipped (FR-004, FR-048). Tests:
+are never clipped; the description is the row's last column and takes whatever the
+marketplace leaves (FR-004, FR-048). Tests:
 `crates/ragent-plugins/tests/test_store_index.rs` (`marketplace_name_for`),
 `crates/ragent-tui/tests/test_plugin_store_marketplaces.rs` (fetch attribution) and
 `crates/ragent-tui/tests/test_plugin_store_panel.rs` (render).
@@ -520,3 +522,51 @@ click or wheel on a header row is inert. Tests: new
 `each_navigator_has_a_reversed_video_title_above_its_all_row` case in
 `crates/ragent-tui/tests/test_plugin_store_panel.rs`, plus the existing mouse and
 acceptance cases that pin the row-area hit-testing.
+
+### T-035 - Readability pass on the browse panel
+
+Make the browser easier to read at a glance without changing any behaviour (spec
+`pluginstores` FR-004, FR-005).
+
+In `render_plugin_store_panel` (`crates/ragent-tui/src/layout.rs`): paint the panel border in
+a calm slate-blue accent (`STORE_ACCENT`) instead of the saturated magenta, so the
+cyan navigator cursor and magenta result cursor stay the brightest elements; pad the
+navigator header bands and the pinned column-heading row to their full widths so both read
+as header strips; split each result row into styled spans so the id and description keep the
+reading colour while the version and marketplace step back into a muted tone
+(`store_muted_style`) and the marketplace sits in the panel accent; give every row a
+two-column gutter holding `>` on the cursor row, followed by a one-column installed lane
+(`STORE_INSTALLED_MARKER`, a bold green `*`) that every row paints - the marker or a
+blank - so the columns stay aligned; move the installed marker into that lane and drop the
+description's own width ceiling so it takes every remaining column as the row's last
+column, clipping at the row's right edge; pad
+each row to the result width with the row's own style so a zebra band
+(`STORE_BAND_BG`, applied to alternate rows via `ListItem::style`) and the cursor
+background both reach the right edge; and paint the footer and search rows on a chrome
+background (`STORE_CHROME_BG`) with the `search:` label and `[x] clear` button in the
+accent, the button dimming while the query is empty. Rewrite `plugin_store_title` to return
+a styled `Line` (store badge, accent counts, muted labels, yellow skipped count) while
+keeping the same words so the title stays greppable. Tests: new
+`the_cursor_row_carries_a_gutter_marker` and `alternate_result_rows_carry_a_band_background`
+cases in `crates/ragent-tui/tests/test_plugin_store_panel.rs`; the existing panel, mouse,
+keyboard, and acceptance suites pin the unchanged behaviour.
+
+### T-036 - `Installed` pseudo-category in the category navigator
+
+Add an `Installed` pseudo-category as the second category-navigator row, so the installed
+plugins are one keypress away in both panels (spec `pluginstores` FR-054).
+
+In `crates/ragent-tui/src/app/state.rs`: add the `INSTALLED_CATEGORY` constant and the
+`is_installed_row_label` helper; make `category_row_count` and `category_row_label` place
+the pseudo-category at row `1` (the derived categories move to `2..`); make
+`category_row_of` resolve the same name to row `1`; teach `matching_indices` and
+`category_entry_count` to match the pseudo-category against `self.installed` (the store
+scan) instead of `entry.category`, so an installed plugin with no category at all is
+listed; filter the reserved name out of `rebuild_categories`, re-select it after a re-fetch
+(it is never a derived row), and re-derive the result list from a refreshed scan when it is
+active. No renderer, key-route, or mouse-hit-test change is needed: they already read the
+row count, row label, and row display accessors. Tests: new
+`crates/ragent-tui/tests/test_plugin_store_installed_category.rs` (pinning the pinned row,
+the scan-based match, the reserved name, re-fetch survival, and the painted row), plus the
+existing category-filter, keyboard, mouse, launch, and acceptance suites re-based on the
+new row offsets.

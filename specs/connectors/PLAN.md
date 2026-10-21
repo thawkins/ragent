@@ -631,3 +631,46 @@ so their order cannot drift.
 **Verify:** `sort_connectors`/`compare_connector_ids` order by id (case-insensitive, byte
 tiebreak); the browser and both text reports render alphabetically whether filtered or not;
 the existing browse/list/search tests updated for the sorted first row.
+
+### T-028 - Bring the browse panel onto the plugin-store design language
+
+Rework `render_connector_catalogue_panel` (`crates/ragent-tui/src/layout.rs`) onto the exact
+design language the plugin-store panels already ship (FR-047), sharing helpers rather than
+copying them:
+
+- Rename the shared chrome constants and helpers in `layout.rs` from the
+  `PLUGIN_STORE_*`/`plugin_store_*` names to neutral `STORE_*`/`store_*` names (`STORE_ACCENT`,
+  `STORE_CHROME_BG`, `STORE_BAND_BG`, `STORE_NAV_MIN`/`MAX`, `STORE_RESULT_MIN`,
+  `STORE_NAV_GAP`, `STORE_CATEGORY_TITLE`, `STORE_MARKETPLACE_TITLE`, `STORE_SEARCH_LABEL`,
+  `STORE_CLEAR_LABEL`, `STORE_SEARCH_MIN`, `STORE_INSTALLED_MARKER`, `store_nav_width`,
+  `store_flex_widths`, `store_muted_style`), and generalise `render_plugin_store_search_box`
+  into `render_store_search_box(frame, query, ...)` so both panels paint one bottom strip.
+- Frame the connector panel with `STORE_ACCENT` and cap it at 140x41, exactly as the plugin
+  panel; render a structured (`Line<'_>` of spans) title naming the catalogue badge, the
+  counts, and the `search`/`category`/`marketplace` values.
+- Split the left column into the category navigator (top half) and the marketplace navigator
+  (bottom half), each under a reversed-video title band reserved out of its pane so the
+  cached hit-test area excludes it.
+- Rebuild the result rows on the shared template: `> ` cursor gutter, one-column installed
+  lane carrying `*` in bold green, fixed id/category columns, the marketplace in the accent
+  colour (blank rendering as `-`), and the description taking every remaining column,
+  padded to the full width and zebra-banded on alternate rows.
+- Move the footer up one row and paint it on the chrome band; add the bottom search box and
+  cache the clear-button area.
+
+State (`crates/ragent-connectors/src/browse.rs`) gains the pieces the renderer needs: a
+three-variant `CataloguePane` focus enum replacing the `nav_focused` boolean, an `Installed`
+pseudo-category row (`INSTALLED_CATEGORY`, `is_installed_row_label`) pinned after `ALL`, per-row
+entry counts (`category_entry_count`/`category_row_display`, mirrored for the marketplace
+navigator), and a full marketplace navigator (`marketplaces` `CategoryFilterState` plus its
+cursor/scroll/viewport and the select/move/clear/confirm verbs). `apply_filter` composes the
+query, category, and marketplace predicates, with the `Installed` row matched against the
+store scan rather than a declared category.
+
+The TUI routes the new panes: `connector_store_marketplace_area`, `connector_store_search_area`,
+and `connector_store_clear_area` hit rects, `Tab`/`BackTab` focus cycling, pane-scoped
+`Up`/`Down`/`Enter`/`c`, and marketplace click/wheel plus the clear-button click.
+
+**Verify:** `cargo test -p ragent-tui --test all test_connector_catalogue` and
+`cargo test -p ragent-connectors --test all` pass; `cargo fmt --check` and `cargo clippy` are
+clean.

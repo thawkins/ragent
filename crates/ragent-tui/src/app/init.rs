@@ -218,6 +218,7 @@ impl App {
             shell_cwd: None,
             git_branch,
             provider_setup: None,
+            provider_setup_area: Rect::default(),
             configured_provider,
             provider_registry,
             selected_model,
@@ -279,7 +280,10 @@ impl App {
             connector_enrich_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             connector_store_area: Rect::default(),
             connector_store_nav_area: Rect::default(),
+            connector_store_marketplace_area: Rect::default(),
             connector_store_result_area: Rect::default(),
+            connector_store_search_area: Rect::default(),
+            connector_store_clear_area: Rect::default(),
             backend_panel: None,
             backend_panel_area: Rect::default(),
             active_backend: app_config
@@ -359,9 +363,6 @@ impl App {
             teams_button_area: Rect::default(),
             show_agents_window: false,
             show_teams_window: false,
-            agents_close_button_area: Rect::default(),
-            teams_close_button_area: Rect::default(),
-            output_view_close_button_area: Rect::default(),
             mcp_servers: crate::app::slash::mcp_display_servers(
                 &[],
                 &app_config.mcp,

@@ -82,6 +82,8 @@ pub mod columns {
     pub const GAP_W: usize = 1;
     /// Width of the `<name>-<short id>` label column (FR-022).
     pub const LABEL_W: usize = 31;
+    /// Width of the agent-type column (FR-022a).
+    pub const AGENT_TYPE_W: usize = 16;
     /// Width of the status-word column (FR-021, FR-023).
     pub const STATUS_W: usize = 10;
     /// Width of the model column, the point a `<provider>/<model>` string is
@@ -103,11 +105,11 @@ pub mod columns {
     /// from each other.
     pub const CONTROL_GAP_W: usize = 2;
     /// First column of the `[stop]` control.
-    pub const STOP_X: usize = 115;
+    pub const STOP_X: usize = 132;
     /// Width of the `[stop]` control column.
     pub const STOP_W: usize = 6;
     /// First column of the `[x]` control.
-    pub const KILL_X: usize = 123;
+    pub const KILL_X: usize = 140;
     /// Width of the `[x]` control column.
     pub const KILL_W: usize = 4;
 }
@@ -118,6 +120,8 @@ const _: () = assert!(
         + columns::ID_W
         + columns::GAP_W
         + columns::LABEL_W
+        + columns::GAP_W
+        + columns::AGENT_TYPE_W
         + columns::GAP_W
         + columns::STATUS_W
         + columns::GAP_W
@@ -326,6 +330,7 @@ fn header_line() -> Line<'static> {
     let cells = vec![
         Cell::left("id", columns::ID_W, dim),
         Cell::left("name", columns::LABEL_W, dim),
+        Cell::left("agent type", columns::AGENT_TYPE_W, dim),
         Cell::left("status", columns::STATUS_W, dim),
         Cell::left("model", columns::MODEL_W, dim),
         Cell::right("elapsed", columns::ELAPSED_W, dim),
@@ -556,6 +561,11 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(lead).add_modifier(Modifier::BOLD),
             ),
             Cell::left(
+                clip(&app.agent_name, columns::AGENT_TYPE_W),
+                columns::AGENT_TYPE_W,
+                Style::default().fg(lead),
+            ),
+            Cell::left(
                 glyphs::LEAD_STATUS,
                 columns::STATUS_W,
                 Style::default().fg(lead),
@@ -644,6 +654,13 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::left(id_short, columns::ID_W, Style::default().fg(Color::Cyan)).span(),
             Span::styled(" ".repeat(columns::GAP_W), Style::default()),
             Cell::left(label, columns::LABEL_W, name_style).span(),
+            Span::styled(" ".repeat(columns::GAP_W), Style::default()),
+            Cell::left(
+                clip(&member.agent_type, columns::AGENT_TYPE_W),
+                columns::AGENT_TYPE_W,
+                Style::default().fg(Color::White),
+            )
+            .span(),
             Span::styled(" ".repeat(columns::GAP_W), Style::default()),
             Cell::left(
                 member.status.display_label(),

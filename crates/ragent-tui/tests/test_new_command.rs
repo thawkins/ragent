@@ -17,9 +17,12 @@ mod support;
 /// lock (a panicking sibling) must not cascade into unrelated failures, so
 /// the guard ignores poison.
 
-/// Acquire the cwd lock, ignoring a poisoned sibling test.
+/// The process-wide cwd/env lock of this test binary (see `tests/all.rs`).
+///
+/// `std::sync::Mutex` is NOT reentrant: hold this at most once per test. The
+/// nested `EnvGuard`s below deliberately do not take it again - `in_empty_cwd`
+/// already holds it for the whole test body.
 #[allow(clippy::await_holding_lock)]
-/// The process-wide cwd/env lock (see `tests/all.rs`).
 fn cwd_lock() -> MutexGuard<'static, ()> {
     crate::global_env_lock()
 }
@@ -244,6 +247,10 @@ async fn test_new_scaffolds_project_foreground() {
     .await;
 }
 
+// env-isolation: `in_empty_cwd` holds this binary's crate-wide env lock
+// (`crate::global_env_lock`) for the whole test body; the nested `EnvGuard` only
+// saves and restores HOME/GITHUB_TOKEN/GITLAB_* and must NOT take it again
+// (`std::sync::Mutex` is not reentrant).
 #[tokio::test]
 async fn test_new_github_hosting_without_token_fails_contained() {
     in_empty_cwd(async |dir| {
@@ -318,6 +325,10 @@ async fn test_new_github_hosting_without_token_fails_contained() {
     .await;
 }
 
+// env-isolation: `in_empty_cwd` holds this binary's crate-wide env lock
+// (`crate::global_env_lock`) for the whole test body; the nested `EnvGuard` only
+// saves and restores HOME/GITHUB_TOKEN/GITLAB_* and must NOT take it again
+// (`std::sync::Mutex` is not reentrant).
 #[tokio::test]
 async fn test_new_gitlab_hosting_without_token_fails_contained() {
     in_empty_cwd(async |dir| {
@@ -390,6 +401,10 @@ async fn test_new_gitlab_hosting_without_token_fails_contained() {
 
 // ---------------------------------------------------- FR-007 overlays ---
 
+// env-isolation: `in_empty_cwd` holds this binary's crate-wide env lock
+// (`crate::global_env_lock`) for the whole test body; the nested `EnvGuard` only
+// saves and restores HOME/GITHUB_TOKEN/GITLAB_* and must NOT take it again
+// (`std::sync::Mutex` is not reentrant).
 #[tokio::test]
 async fn test_new_known_stack_layers_dependency_and_snippet() {
     in_empty_cwd(async |dir| {
@@ -592,6 +607,10 @@ async fn test_new_guard_refusal_is_synchronous_without_streaming() {
     .await;
 }
 
+// env-isolation: `in_empty_cwd` holds this binary's crate-wide env lock
+// (`crate::global_env_lock`) for the whole test body; the nested `EnvGuard` only
+// saves and restores HOME/GITHUB_TOKEN/GITLAB_* and must NOT take it again
+// (`std::sync::Mutex` is not reentrant).
 #[tokio::test]
 async fn test_new_remote_failure_streams_contained_summary() {
     in_empty_cwd(async |dir| {

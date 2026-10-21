@@ -341,22 +341,26 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
     // While the connector-catalogue browse panel (`/connectors claude`) is open
     // it owns the keyboard exactly as the plugin-store panel does. The panel has
-    // two focusable panes: the left category navigator and the result list.
-    // `Tab` transfers focus between them; `Up`/`Down` move the focused pane's
-    // cursor and, for the navigator, apply the highlighted category immediately;
-    // `ENTER` over the navigator applies the highlighted category and focuses the
-    // result list without installing anything, while `ENTER` over the result
-    // list keeps the existing install behaviour; `c` clears the active category
-    // to `ALL`; `Backspace` and `Esc` edit the query (and `Esc` on an empty
+    // three focusable panes: the category navigator (top of the left column), the
+    // marketplace navigator (bottom of the left column), and the result list.
+    // `Tab`/`BackTab` cycle focus through them; `Up`/`Down` move the focused
+    // pane's cursor and, for either navigator, apply the highlighted filter
+    // immediately; `ENTER` over a navigator applies its filter and returns focus
+    // to the result list without installing anything, while `ENTER` over the
+    // result list keeps the install behaviour; `c` clears the focused navigator's
+    // filter to `ALL`; `Backspace` and `Esc` edit the query (and `Esc` on an empty
     // query dismisses the panel), and printable characters type into the panel's
     // own search field. Every other key is swallowed and the input field stays
     // locked.
     if app.connector_store.is_some() {
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => app.connector_catalogue_toggle_focus(),
+            KeyCode::Tab => app.connector_catalogue_focus_next(),
+            KeyCode::BackTab => app.connector_catalogue_focus_prev(),
             KeyCode::Up => {
                 if app.connector_catalogue_nav_focused() {
                     app.connector_catalogue_category_move_up();
+                } else if app.connector_catalogue_marketplace_focused() {
+                    app.connector_catalogue_marketplace_move_up();
                 } else {
                     app.connector_catalogue_move_up();
                 }
@@ -364,6 +368,8 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Down => {
                 if app.connector_catalogue_nav_focused() {
                     app.connector_catalogue_category_move_down();
+                } else if app.connector_catalogue_marketplace_focused() {
+                    app.connector_catalogue_marketplace_move_down();
                 } else {
                     app.connector_catalogue_move_down();
                 }
@@ -371,12 +377,18 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Enter => {
                 if app.connector_catalogue_nav_focused() {
                     app.connector_catalogue_category_confirm();
+                } else if app.connector_catalogue_marketplace_focused() {
+                    app.connector_catalogue_marketplace_confirm();
                 } else {
                     app.connector_catalogue_install_selected();
                 }
             }
             KeyCode::Char('c') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.connector_catalogue_clear_category();
+                if app.connector_catalogue_marketplace_focused() {
+                    app.connector_catalogue_clear_marketplace();
+                } else {
+                    app.connector_catalogue_clear_category();
+                }
             }
             KeyCode::Backspace | KeyCode::Esc => {
                 app.connector_catalogue_edit_or_close();
@@ -1231,7 +1243,13 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 }
 
 /// Handle key events inside the provider setup dialog.
-fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
+///
+/// `pub(crate)` so the mouse router can drive the same cursor movement from a
+/// wheel notch: every list-bearing setup selector (provider, model, router
+/// model, Azure resource, thinking level, agent, router panes) then scrolls
+/// through exactly one code path, so the wheel and `Up`/`Down` can never
+/// disagree about the cursor or the clamped window.
+pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
     // Escape always closes non-router setup dialogs. Router dialogs handle Esc
     // internally so that the model picker can cancel back to the cluster panel
     // without discarding the whole flow.

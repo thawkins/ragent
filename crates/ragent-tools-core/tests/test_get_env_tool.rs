@@ -43,7 +43,13 @@ async fn read(name: &str) -> String {
 }
 
 #[tokio::test]
+// `await_holding_lock` is intentional: the guard must stay held across the
+// `await` so the variable it sets is still set when the tool reads it, and the
+// crate-wide lock is what keeps sibling tests in this binary from clearing it.
+#[allow(clippy::await_holding_lock)]
 async fn test_value_shaped_secret_redacted_even_with_innocuous_name() {
+    // Serialised: this binary's crate-wide env lock (see `tests/all.rs`).
+    let _env_guard = crate::global_env_lock();
     // The variable name carries none of KEY/SECRET/TOKEN/PASSWORD, but the
     // value is a key-shaped credential - it must still be masked.
     set_var(
@@ -62,7 +68,13 @@ async fn test_value_shaped_secret_redacted_even_with_innocuous_name() {
 }
 
 #[tokio::test]
+// `await_holding_lock` is intentional: the guard must stay held across the
+// `await` so the variable it sets is still set when the tool reads it, and the
+// crate-wide lock is what keeps sibling tests in this binary from clearing it.
+#[allow(clippy::await_holding_lock)]
 async fn test_sensitive_name_is_fully_redacted() {
+    // Serialised: this binary's crate-wide env lock (see `tests/all.rs`).
+    let _env_guard = crate::global_env_lock();
     set_var("RAGENT_TEST_MY_API_KEY", "short");
     let content = read("RAGENT_TEST_MY_API_KEY").await;
     assert!(
@@ -72,7 +84,13 @@ async fn test_sensitive_name_is_fully_redacted() {
 }
 
 #[tokio::test]
+// `await_holding_lock` is intentional: the guard must stay held across the
+// `await` so the variable it sets is still set when the tool reads it, and the
+// crate-wide lock is what keeps sibling tests in this binary from clearing it.
+#[allow(clippy::await_holding_lock)]
 async fn test_innocuous_name_and_value_returned_verbatim() {
+    // Serialised: this binary's crate-wide env lock (see `tests/all.rs`).
+    let _env_guard = crate::global_env_lock();
     set_var("RAGENT_TEST_PLAIN_VALUE", "hello world");
     let content = read("RAGENT_TEST_PLAIN_VALUE").await;
     assert_eq!(content, "RAGENT_TEST_PLAIN_VALUE=hello world");

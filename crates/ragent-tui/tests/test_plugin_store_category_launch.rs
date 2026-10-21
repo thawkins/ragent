@@ -43,6 +43,14 @@ fn filtered_ids(browser: &PluginStoreBrowser) -> Vec<&str> {
         .collect()
 }
 
+/// The absolute navigator row carrying `label` (row `0` is `ALL`, row `1` is the
+/// `Installed` pseudo-category; the derived categories start at row `2`).
+fn row_of(browser: &PluginStoreBrowser, label: &str) -> usize {
+    (0..browser.category_row_count())
+        .find(|&row| browser.category_row_label(row).eq_ignore_ascii_case(label))
+        .unwrap_or_else(|| panic!("no navigator row for `{label}`"))
+}
+
 /// The derived navigator rows (without the implicit `ALL`), in navigator order.
 fn category_rows(browser: &PluginStoreBrowser) -> Vec<&str> {
     browser
@@ -79,8 +87,8 @@ fn a_known_launch_category_is_applied_once_the_index_lands() {
     assert_eq!(browser.active_category(), "Web");
     assert_eq!(
         browser.category_cursor_row(),
-        2,
-        "the cursor sits on the pre-selected row (ALL, Database, Web)"
+        row_of(&browser, "Web"),
+        "the cursor sits on the pre-selected row (ALL, Installed, Database, Web)"
     );
     assert_eq!(filtered_ids(&browser), ["a"]);
     assert!(browser.pending_category.is_none(), "the filter is consumed");
@@ -130,6 +138,25 @@ fn an_all_launch_category_holds_no_filter_and_is_a_noop() {
     );
 }
 
+#[test]
+fn an_installed_launch_category_applies_the_installed_pseudo_filter() {
+    // `--category installed` names the pinned pseudo-category (FR-054) instead of a
+    // store category, so it is accepted as soon as the index lands.
+    let mut browser = PluginStoreBrowser::new(StoreKind::Codex, "", false);
+    browser.set_pending_category(CategoryFilter::of("installed"));
+    browser.set_entries(vec![
+        entry("a", Some("Web"), &[]),
+        entry("b", Some("Database"), &[]),
+    ]);
+    browser.set_installed(std::iter::once("b".to_string()).collect());
+    browser.apply_pending_category();
+
+    assert_eq!(browser.active_category(), "Installed");
+    assert_eq!(browser.category_cursor_row(), 1, "the pinned pseudo row");
+    assert_eq!(filtered_ids(&browser), ["b"], "only installed plugins show");
+    assert!(browser.last_install.is_none(), "no refusal is reported");
+}
+
 // -- A withdrawn FR-021: tags never form navigator rows ----------------------
 
 #[test]
@@ -145,8 +172,8 @@ fn tags_of_categorised_entries_do_not_add_navigator_rows() {
     assert_eq!(category_rows(&browser), ["Database", "Web"]);
     assert_eq!(
         browser.category_row_count(),
-        3,
-        "ALL plus the two declared categories"
+        4,
+        "ALL, Installed, plus the two declared categories"
     );
 }
 
@@ -165,7 +192,8 @@ fn a_tag_never_selects_a_category() {
         !browser.categories.categories().iter().any(|c| c == "http"),
         "a tag is not a navigator row"
     );
-    assert!(browser.category_select_row(1)); // `Database`
+    let database = row_of(&browser, "Database");
+    assert!(browser.category_select_row(database));
     assert_eq!(browser.active_category(), "Database");
     assert_eq!(
         filtered_ids(&browser),
@@ -175,27 +203,30 @@ fn a_tag_never_selects_a_category() {
 }
 
 #[test]
-fn an_uncategorised_index_with_tags_stays_all_only() {
+fn an_uncategorised_index_with_tags_browses_normally() {
     let mut browser = loaded(vec![
         entry("b", None, &["beta"]),
         entry("a", None, &["alpha"]),
     ]);
 
-    // With no declared category the navigator is ALL only, so it still browses
-    // normally rather than becoming a tag menu (FR-018, A7) and sorted by id (FR-050).
-    assert_eq!(browser.category_row_count(), 1);
+    // With no declared category the navigator carries only `ALL` and the
+    // `Installed` pseudo-category, so it still browses normally rather than
+    // becoming a tag menu (FR-018, A7, FR-054) and sorted by id (FR-050).
+    assert_eq!(browser.category_row_count(), 2);
     assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
     assert_eq!(category_rows(&browser).len(), 0);
-    assert!(!browser.category_move_down(), "no row below ALL");
+    assert!(!browser.category_select_row(2), "no row below Installed");
     assert_eq!(filtered_ids(&browser), ["a", "b"]);
 }
 
 #[test]
 fn a_category_survives_a_re_fetch_that_keeps_it() {
     let mut browser = loaded(vec![entry("a", Some("Web"), &["http"])]);
-    // `Web` is the only non-`ALL` row: the `http` tag adds none.
+    // `Web` is the only derived row: the `http` tag adds none.
     assert_eq!(category_rows(&browser), ["Web"]);
-    assert!(browser.category_select_row(1)); // `Web`
+    let web = row_of(&browser, "Web");
+    assert!(browser.category_select_row(web));
     assert_eq!(browser.active_category(), "Web");
 
     // Re-fetch with the same category: the selection survives (FR-003, FR-027).

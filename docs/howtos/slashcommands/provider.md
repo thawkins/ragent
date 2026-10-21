@@ -46,6 +46,17 @@ Any other argument prints a one-line usage reminder in the chat:
   seeded with the concrete providers so tiers can be assigned to them.
 - `/provider help` prints a four-row subcommand table into the chat.
 
+## Scrolling
+
+Every list in the provider dialogs windows around its cursor, so a long list never
+hides the highlighted row: `Up`/`Down` move the painted slice one entry at a time
+and a clipped list says so (`Showing a-b of N`, or a window in the pane title such
+as `Providers (*) 11-20 of 30`). The router setup's provider palette and each tier
+bucket scroll the same way, the bucket window following the selected model's own
+group of lines so its properties stay with it. The mouse wheel over an open setup
+dialog moves the cursor one entry per notch and is swallowed anywhere else, so the
+chat behind the modal never scrolls.
+
 ## Examples
 
 ```
@@ -74,6 +85,36 @@ Prints the subcommand table with status line `provider: help`.
 /provider models
 ```
 Unknown subcommand - prints the usage reminder line.
+
+## Dialog layout
+
+Every step of provider setup shares one composition (the calm-slate chrome the
+plugin and connector catalogue panels wear):
+
+```
+┌ Provider Setup ─────────────────────────────────────────────┐
+│Select a Provider                          2 of 14 configured  │
+│Provider                Id             Kind     Status        │
+│Ollama (Local)          ollama         [local]                │
+│Anthropic (Claude)      anthropic                  [ok]       │
+│          ^/v navigate  Enter select  Esc cancel               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- The frame title names the step and, where there is one, its subject (the provider
+  name in `Enter API Key`, the provider and target tier in the router assignment).
+- The heading strip carries the step name on the left and a live count on the right
+  (`N of 14 configured`, `N configured`, `N available  * = in use`).
+- Steps that are lists carry a pinned black-on-grey column band above the rows, so
+  the columns stay identified while the list scrolls: provider name / id / kind
+  (`[local]`) / status (`[ok]` when a credential is stored).
+- The selected row is a filled accent bar, rows alternate a near-black stripe, and
+  the key-hint footer is muted. `Provider Reset` keeps its yellow warning frame and
+  yellow cursor bar.
+- `Switch Provider` (`/model` with several configured providers) names where each
+  key came from (`stored`, `env`, `auto`) beside its `[ok]`.
+- The model list steps out of the API-key dialog is the shared model picker; see
+  `/model` for its column layout.
 
 ## Output
 

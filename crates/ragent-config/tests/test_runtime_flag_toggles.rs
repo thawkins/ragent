@@ -64,6 +64,7 @@ fn read_project_config() -> serde_json::Value {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_runtime_flag_new_defaults_and_setters() {
     let flag = RuntimeFlag::new("edit_log", false);
     assert!(!flag.is_enabled());

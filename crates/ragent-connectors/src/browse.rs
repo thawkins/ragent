@@ -39,6 +39,69 @@ use crate::descriptor::ConnectorDescriptor;
 /// default filter whenever no specific category has been selected.
 pub const ALL_CATEGORY: &str = "ALL";
 
+/// The `Installed` pseudo-category row of the connector-browser category
+/// navigator.
+///
+/// It is not a catalogue category: selecting it filters the result list to the
+/// connectors already present in the store scan ([`CatalogueBrowser::installed`])
+/// rather than matching a descriptor's declared `category` field, so a connector
+/// that declares no category at all still appears under it. The row is pinned
+/// directly after the [`ALL_CATEGORY`] sentinel (navigator row one) so the
+/// installed connectors are always one keypress away, and the name is reserved:
+/// a descriptor whose declared `category` is this label never forms a second row.
+pub const INSTALLED_CATEGORY: &str = "Installed";
+
+/// Which of the connector-browser panel's three panes holds keyboard focus.
+///
+/// The panel has a result list and a left column split vertically into the
+/// category navigator (top) and the marketplace navigator (bottom). `Tab`/
+/// `BackTab` cycle through the three panes in this order; `Up`/`Down`, `Enter`,
+/// and the clear key route to whichever pane is focused. Mirrors the plugin-store
+/// panel's `StorePane` so the two panels read the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CataloguePane {
+    /// The result list; the initial focus.
+    #[default]
+    Results,
+    /// The category navigator in the upper half of the left column.
+    Categories,
+    /// The marketplace navigator in the lower half of the left column.
+    Marketplaces,
+}
+
+impl CataloguePane {
+    /// The next pane in the `Tab` cycle (`Results` -> `Categories` ->
+    /// `Marketplaces` -> `Results`).
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Results => Self::Categories,
+            Self::Categories => Self::Marketplaces,
+            Self::Marketplaces => Self::Results,
+        }
+    }
+
+    /// The previous pane in the `BackTab` cycle (the reverse of [`Self::next`]).
+    #[must_use]
+    pub const fn previous(self) -> Self {
+        match self {
+            Self::Results => Self::Marketplaces,
+            Self::Categories => Self::Results,
+            Self::Marketplaces => Self::Categories,
+        }
+    }
+}
+
+/// Whether `label` names the [`INSTALLED_CATEGORY`] pseudo-category row rather
+/// than a catalogue category.
+///
+/// The comparison is case-insensitive so a `--category installed` launch and a
+/// declared `installed` category both resolve to the one pinned row.
+#[must_use]
+pub fn is_installed_row_label(label: &str) -> bool {
+    label.trim().eq_ignore_ascii_case(INSTALLED_CATEGORY)
+}
+
 /// A connector-browser category filter (FR-039, FR-040).
 ///
 /// Either the [`ALL_CATEGORY`] sentinel (no filter) or one category name. The
@@ -426,9 +489,10 @@ pub struct CatalogueBrowser {
     /// The most recent install result shown in the panel footer.
     pub last_install: Option<String>,
     /// Block-cursor position within the navigator's rows. Row `0` is the `ALL`
-    /// sentinel; rows `1..=categories().len()` are the derived categories in
-    /// sorted order. Kept in sync with the active category by
-    /// [`Self::category_select_row`] and [`Self::apply_category_cursor`].
+    /// sentinel, row `1` the [`INSTALLED_CATEGORY`] pseudo-category, and rows
+    /// `2..` the derived categories in sorted order. Kept in sync with the active
+    /// category by [`Self::category_select_row`] and
+    /// [`Self::apply_category_cursor`].
     pub category_cursor: usize,
     /// Index of the first navigator row shown in the navigator viewport.
     ///
@@ -441,13 +505,29 @@ pub struct CatalogueBrowser {
     /// category cursor visible after a move and to clamp the wheel scroll; a
     /// `0` (before the first render) parks the scroll at the top.
     pub category_viewport: usize,
-    /// Whether the category navigator holds keyboard focus.
+    /// Which of the panel's three panes holds keyboard focus.
     ///
-    /// `false` - the result list focused - is the initial state; the focus key
-    /// (`Tab`) toggles it. `Up`/`Down` route to whichever pane holds focus and
-    /// the focused pane's cursor is rendered distinctly; the search query is
-    /// edited by printable characters in either state.
-    pub nav_focused: bool,
+    /// [`CataloguePane::Results`] - the result list focused - is the initial
+    /// state; `Tab`/`BackTab` cycle through the three panes. `Up`/`Down` route to
+    /// whichever pane holds focus and the focused pane's cursor is rendered
+    /// distinctly; the search query is edited by printable characters in any
+    /// state.
+    pub focus: CataloguePane,
+    /// The marketplace filter and its derived distinct-marketplace set.
+    ///
+    /// Shares [`CategoryFilterState`] with the category navigator - the `ALL`
+    /// sentinel, a sorted case-insensitive distinct set, and an exact
+    /// case-insensitive predicate - so the two navigators behave identically.
+    pub marketplaces: CategoryFilterState,
+    /// Block-cursor position within the marketplace navigator's rows. Row `0` is
+    /// the `ALL` sentinel; rows `1..` are the derived marketplaces in sorted
+    /// order.
+    pub marketplace_cursor: usize,
+    /// Index of the first marketplace row shown in its viewport.
+    pub marketplace_scroll: usize,
+    /// Height in rows of the marketplace navigator viewport, recorded by the
+    /// renderer on every frame.
+    pub marketplace_viewport: usize,
     /// A category filter requested when the panel was opened, held until the
     /// catalogue lands and its real category set is known (FR-041).
     ///
@@ -498,7 +578,11 @@ impl CatalogueBrowser {
             category_cursor: 0,
             category_scroll: 0,
             category_viewport: 0,
-            nav_focused: false,
+            focus: CataloguePane::Results,
+            marketplaces: CategoryFilterState::new(),
+            marketplace_cursor: 0,
+            marketplace_scroll: 0,
+            marketplace_viewport: 0,
             pending_category: None,
             enriching: false,
         };
@@ -589,16 +673,48 @@ impl CatalogueBrowser {
             CatalogueBrowseStatus::Ready
         };
         let previous = self.categories.filter().label().to_string();
-        self.categories =
-            CategoryFilterState::from_descriptors(std::iter::empty(), self.all.iter());
+        let previous_was_installed = is_installed_row_label(&previous);
+        self.categories = CategoryFilterState::from_categories(
+            self.all
+                .iter()
+                .map(|entry| entry.category.as_str())
+                .filter(|category| !is_installed_row_label(category)),
+        );
         // Keep a still-declared category selected across the refresh; a category
         // no entry declares falls back to `ALL` so the navigator never shows a
         // row that selects nothing, and the cursor is placed on the surviving
         // selection's row.
         // INTENTIONAL: a category that no entry declares falls back to `ALL`; the miss is benign.
         let _ = self.categories.select_when_known(&previous);
+        // The `Installed` pseudo-category is never a derived row, so a re-fetch
+        // must re-select it explicitly rather than falling back to `ALL`.
+        if previous_was_installed {
+            self.categories.select_by_name(INSTALLED_CATEGORY);
+        }
+        self.rebuild_marketplaces();
         self.sync_category_cursor_from_filter();
         self.apply_filter();
+    }
+
+    /// Re-derive the distinct marketplace set from [`Self::all`], keeping the
+    /// active marketplace only while the new catalogue still declares it.
+    ///
+    /// The set is the sorted, case-insensitive distinct non-blank marketplace
+    /// labels present in the loaded entries, with `ALL` implicit and always first.
+    /// A marketplace no entry declares is dropped and the selection falls back to
+    /// `ALL`, so the navigator never shows a row that selects nothing.
+    fn rebuild_marketplaces(&mut self) {
+        let previous = self.marketplaces.filter().label().to_string();
+        self.marketplaces = CategoryFilterState::from_categories(
+            self.all
+                .iter()
+                .map(|entry| entry.marketplace.as_str())
+                .filter(|label| !label.trim().is_empty()),
+        );
+        // INTENTIONAL: a marketplace that no longer resolves falls back to `ALL`.
+        let _ = self.marketplaces.select_when_known(&previous);
+        self.marketplace_cursor = self.marketplace_row_of(self.marketplaces.filter().label());
+        self.marketplace_scroll = 0;
     }
 
     /// Place the category cursor on the row of the currently selected filter,
@@ -619,25 +735,61 @@ impl CatalogueBrowser {
         self.categories.filter().label()
     }
 
-    /// The number of navigator rows: the `ALL` sentinel plus each derived
-    /// category.
+    /// The number of navigator rows: the `ALL` sentinel, the `Installed`
+    /// pseudo-category, then each derived category.
     #[must_use]
     pub fn category_row_count(&self) -> usize {
-        1 + self.categories.categories().len()
+        2 + self.categories.categories().len()
     }
 
-    /// The label of navigator row `row`: `ALL` for row `0`, else the sorted
-    /// category at that row; an out-of-range row reads as `ALL` so a renderer or
-    /// a mouse hit test can never index past the set.
+    /// The label of navigator row `row`: `ALL` for row `0`, `Installed` for row
+    /// `1`, else the sorted category at that row; an out-of-range row reads as
+    /// `ALL` so a renderer or a mouse hit test can never index past the set.
     #[must_use]
     pub fn category_row_label(&self, row: usize) -> &str {
         match row
-            .checked_sub(1)
+            .checked_sub(2)
             .and_then(|index| self.categories.categories().get(index))
         {
             Some(label) => label.as_str(),
+            None if row == 1 => INSTALLED_CATEGORY,
             None => ALL_CATEGORY,
         }
+    }
+
+    /// How many loaded entries the category named `label` holds.
+    ///
+    /// The `ALL` sentinel counts every entry; the `Installed` pseudo-category
+    /// counts the loaded entries whose id is in the store scan, independent of the
+    /// category they declare; a category with no entry (or an unknown label) counts
+    /// `0`. The count composes the same predicates [`Self::apply_filter`] applies,
+    /// so it always agrees with the result set selecting that row would show.
+    #[must_use]
+    pub fn category_entry_count(&self, label: &str) -> usize {
+        if is_installed_row_label(label) {
+            return self
+                .all
+                .iter()
+                .filter(|entry| self.installed.contains(entry.id.as_str()))
+                .count();
+        }
+        let filter = CategoryFilter::of(label);
+        self.all
+            .iter()
+            .filter(|entry| filter.matches_category(Some(entry.category.as_str())))
+            .count()
+    }
+
+    /// The string rendered for navigator row `row`: the base
+    /// [`Self::category_row_label`] with the row's entry count appended as ` (N)`.
+    ///
+    /// A still-loading catalogue, or one that declares no category, still renders
+    /// the `ALL (0)` and `Installed (0)` rows so the navigator shows a count in
+    /// every state.
+    #[must_use]
+    pub fn category_row_display(&self, row: usize) -> String {
+        let label = self.category_row_label(row);
+        format!("{label} ({})", self.category_entry_count(label))
     }
 
     /// The navigator row currently under the category cursor, clamped to the row
@@ -739,13 +891,193 @@ impl CatalogueBrowser {
     /// list.
     ///
     /// This is the navigator's `ENTER`: it re-applies the highlighted category
-    /// (idempotent when the cursor did not move) and clears
-    /// [`Self::nav_focused`], so the next `Up`/`Down` routes to the result list.
-    /// It installs nothing, so `ENTER` over the navigator can never write to the
-    /// store.
+    /// (idempotent when the cursor did not move) and moves focus to
+    /// [`CataloguePane::Results`], so the next `Up`/`Down` routes to the result
+    /// list. It installs nothing, so `ENTER` over the navigator can never write to
+    /// the store.
     pub fn category_confirm(&mut self) {
         self.apply_category_cursor();
-        self.nav_focused = false;
+        self.focus = CataloguePane::Results;
+    }
+
+    // -- Marketplace navigator -------------------------------------------------
+
+    /// The active marketplace label (`ALL` when unfiltered).
+    #[must_use]
+    pub fn active_marketplace(&self) -> &str {
+        self.marketplaces.filter().label()
+    }
+
+    /// The number of marketplace navigator rows: the `ALL` sentinel plus each
+    /// derived marketplace.
+    #[must_use]
+    pub fn marketplace_row_count(&self) -> usize {
+        1 + self.marketplaces.categories().len()
+    }
+
+    /// The label of marketplace row `row`: `ALL` for row `0`, else the sorted
+    /// marketplace at that row; an out-of-range row reads as `ALL`.
+    #[must_use]
+    pub fn marketplace_row_label(&self, row: usize) -> &str {
+        match row
+            .checked_sub(1)
+            .and_then(|index| self.marketplaces.categories().get(index))
+        {
+            Some(label) => label.as_str(),
+            None => ALL_CATEGORY,
+        }
+    }
+
+    /// How many loaded entries the marketplace named `label` holds.
+    ///
+    /// The `ALL` sentinel counts every entry; a blank label degrades to `ALL`
+    /// through [`CategoryFilter::of`], so passing a row label always counts the
+    /// entries that row would show.
+    #[must_use]
+    pub fn marketplace_entry_count(&self, label: &str) -> usize {
+        let filter = CategoryFilter::of(label);
+        self.all
+            .iter()
+            .filter(|entry| filter.matches_category(marketplace_of(entry)))
+            .count()
+    }
+
+    /// The string rendered for marketplace navigator row `row`: the base
+    /// [`Self::marketplace_row_label`] with the row's entry count appended as
+    /// ` (N)`.
+    #[must_use]
+    pub fn marketplace_row_display(&self, row: usize) -> String {
+        let label = self.marketplace_row_label(row);
+        format!("{label} ({})", self.marketplace_entry_count(label))
+    }
+
+    /// The marketplace row currently under the marketplace cursor, clamped to the
+    /// row count.
+    #[must_use]
+    pub fn marketplace_cursor_row(&self) -> usize {
+        self.marketplace_cursor
+            .min(self.marketplace_row_count().saturating_sub(1))
+    }
+
+    /// Move the marketplace cursor up one row and apply the newly highlighted
+    /// marketplace on the same keypress. Returns whether the cursor moved.
+    pub fn marketplace_move_up(&mut self) -> bool {
+        if self.marketplace_cursor == 0 {
+            return false;
+        }
+        self.marketplace_cursor -= 1;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Move the marketplace cursor down one row and apply the newly highlighted
+    /// marketplace on the same keypress. Returns whether the cursor moved.
+    pub fn marketplace_move_down(&mut self) -> bool {
+        if self.marketplace_cursor + 1 >= self.marketplace_row_count() {
+            return false;
+        }
+        self.marketplace_cursor += 1;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Select marketplace row `row` and apply it. Returns `false` when `row` is
+    /// out of range, leaving the selection unchanged.
+    pub fn marketplace_select_row(&mut self, row: usize) -> bool {
+        if row >= self.marketplace_row_count() {
+            return false;
+        }
+        self.marketplace_cursor = row;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+        true
+    }
+
+    /// Move the marketplace viewport by `delta` rows without touching the
+    /// marketplace cursor or the active marketplace.
+    pub fn marketplace_scroll_by(&mut self, delta: i16) {
+        let rows = self.marketplace_row_count();
+        if rows == 0 {
+            self.marketplace_scroll = 0;
+            return;
+        }
+        let max = rows - 1;
+        let next = if delta.is_negative() {
+            self.marketplace_scroll
+                .saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.marketplace_scroll.saturating_add(delta as usize)
+        };
+        self.marketplace_scroll = next.min(max);
+    }
+
+    /// Clear the marketplace filter to `ALL` and re-derive the results.
+    pub fn marketplace_clear(&mut self) {
+        self.marketplace_cursor = 0;
+        self.apply_marketplace_cursor();
+        self.ensure_marketplace_visible(self.marketplace_viewport);
+    }
+
+    /// Apply the marketplace under the cursor and hand focus back to the result
+    /// list.
+    ///
+    /// The marketplace navigator's `ENTER`: it re-applies the highlighted
+    /// marketplace and moves focus to [`CataloguePane::Results`], installing
+    /// nothing.
+    pub fn marketplace_confirm(&mut self) {
+        self.apply_marketplace_cursor();
+        self.focus = CataloguePane::Results;
+    }
+
+    /// Apply the marketplace at the current cursor row to the result set.
+    fn apply_marketplace_cursor(&mut self) {
+        let row = self.marketplace_cursor_row();
+        self.marketplace_cursor = row;
+        let label = self.marketplace_row_label(row).to_string();
+        self.marketplaces.select_by_name(&label);
+        self.apply_filter();
+    }
+
+    /// Adjust [`Self::marketplace_scroll`] so the marketplace cursor stays inside
+    /// a viewport of `viewport` rows.
+    pub fn ensure_marketplace_visible(&mut self, viewport: usize) {
+        let rows = self.marketplace_row_count();
+        if viewport == 0 || rows == 0 {
+            self.marketplace_scroll = 0;
+            return;
+        }
+        let cursor = self.marketplace_cursor.min(rows - 1);
+        if cursor < self.marketplace_scroll {
+            self.marketplace_scroll = cursor;
+        } else if cursor >= self.marketplace_scroll + viewport {
+            self.marketplace_scroll = cursor + 1 - viewport;
+        }
+        self.marketplace_scroll = self.marketplace_scroll.min(rows.saturating_sub(viewport));
+    }
+
+    /// The marketplace row carrying `label`: row `0` for the `ALL` sentinel, else
+    /// the sorted position plus one; an unknown label reads as `ALL`.
+    fn marketplace_row_of(&self, label: &str) -> usize {
+        if label.eq_ignore_ascii_case(ALL_CATEGORY) {
+            return 0;
+        }
+        self.marketplaces
+            .categories()
+            .iter()
+            .position(|known| known.eq_ignore_ascii_case(label))
+            .map_or(0, |index| index + 1)
+    }
+
+    /// Transfer keyboard focus to the next pane in the `Tab` cycle.
+    pub fn focus_next(&mut self) {
+        self.focus = self.focus.next();
+    }
+
+    /// Transfer keyboard focus to the previous pane in the `BackTab` cycle.
+    pub fn focus_prev(&mut self) {
+        self.focus = self.focus.previous();
     }
 
     /// Select a category by name without validating it against the known set.
@@ -793,11 +1125,14 @@ impl CatalogueBrowser {
         if label.eq_ignore_ascii_case(ALL_CATEGORY) {
             return 0;
         }
+        if is_installed_row_label(label) {
+            return 1;
+        }
         self.categories
             .categories()
             .iter()
             .position(|category| category.eq_ignore_ascii_case(label))
-            .map_or(0, |index| index + 1)
+            .map_or(0, |index| index + 2)
     }
 
     /// Record a failed fetch for inline rendering.
@@ -964,16 +1299,40 @@ impl CatalogueBrowser {
     /// description, category, and tags; an empty query matches every entry.
     fn apply_filter(&mut self) {
         let needle = self.query.to_lowercase();
+        let category = self.categories.filter().clone();
+        let marketplace = self.marketplaces.filter().clone();
+        // The `Installed` pseudo-category is matched against the store scan rather
+        // than a declared category field, so an installed connector shows up under
+        // it whatever category it declares - or none at all.
+        let installed_only = is_installed_row_label(category.label());
         self.filtered = self
             .all
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry_matches(entry, &needle))
-            .filter(|(_, entry)| self.categories.matches(entry))
+            .filter(|(_, entry)| {
+                if installed_only {
+                    self.installed.contains(entry.id.as_str())
+                } else {
+                    category.matches_category(Some(entry.category.as_str()))
+                }
+            })
+            .filter(|(_, entry)| marketplace.matches_category(marketplace_of(entry)))
             .map(|(index, _)| index)
             .collect();
         self.cursor = 0;
     }
+}
+
+/// The marketplace label an entry is attributed to for filtering.
+///
+/// The `marketplace` field is set at fetch time to the display name of the
+/// marketplace the row came from; `None` is returned for a blank label, so the
+/// shared [`CategoryFilter::matches_category`] predicate treats it as visible only
+/// under `ALL`, exactly as an uncategorised entry behaves for the category filter.
+fn marketplace_of(entry: &ConnectorDescriptor) -> Option<&str> {
+    let label = entry.marketplace.trim();
+    if label.is_empty() { None } else { Some(label) }
 }
 
 /// The shared case-insensitive substring match over a descriptor's searchable

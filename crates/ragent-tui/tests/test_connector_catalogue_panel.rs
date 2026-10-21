@@ -5,7 +5,7 @@
 //! `TestBackend` and read the painted buffer back, so no catalogue endpoint is
 //! contacted: the browser state is filled directly.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
@@ -90,6 +90,16 @@ fn render(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
         .draw(|frame| layout::render(frame, app))
         .expect("draw");
     terminal
+}
+
+/// A left-click mouse event at `(col, row)`.
+fn left_click(col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: KeyModifiers::empty(),
+    }
 }
 
 /// Read one painted row between `x0` (inclusive) and `x1` (exclusive).
@@ -197,7 +207,9 @@ fn the_footer_lists_the_available_keys() {
     let mut app = open(sample(), &[], 0);
     let terminal = render(&mut app, 100, 30);
     let rows = panel_rows(&terminal, &app);
-    let footer = rows.last().expect("footer row");
+    // The panel's last inner row is the bottom search box; the footer key hints
+    // sit on the row above it.
+    let footer = rows.get(rows.len().saturating_sub(2)).expect("footer row");
     assert!(
         footer.contains("Enter select/install"),
         "footer: {footer:?}"
@@ -283,17 +295,30 @@ fn an_installed_row_carries_an_installed_marker() {
 
     let row = find_row(&terminal, &app, "github").expect("row painted");
     let text = result_row_text(&terminal, &app, row);
+    // The installed marker sits in the one-column lane between the two-column
+    // cursor gutter and the id column, so it is the first glyph after the gutter.
+    let lane = text.trim_start_matches('>').trim_start();
     assert!(
-        text.contains("[installed]"),
+        lane.starts_with('*'),
         "installed row carries the marker: {text:?}"
     );
+    assert!(
+        lane[1..].trim_start().starts_with("github"),
+        "the id column follows the marker: {text:?}"
+    );
 
-    // A row that is not installed carries no marker.
+    // A row that is not installed paints a blank in the lane, so the columns stay
+    // aligned.
     let other = find_row(&terminal, &app, "slack").expect("row painted");
     let other_text = result_row_text(&terminal, &app, other);
     assert!(
-        !other_text.contains("[installed]"),
+        !other_text.contains('*'),
         "uninstalled row carries no marker: {other_text:?}"
+    );
+    let other_lane = other_text.trim_start_matches('>').trim_start();
+    assert!(
+        other_lane.starts_with("slack"),
+        "the lane is blank on an uninstalled row: {other_text:?}"
     );
 }
 
@@ -539,9 +564,19 @@ async fn tab_routes_up_down_to_the_category_navigator() {
         assert_eq!(browser.cursor, 1, "Down moved the result cursor");
         assert_eq!(browser.selected_category_label(), "ALL");
     }
-    // Tab hands focus to the navigator: Down applies the first category row on
-    // the same keypress.
+    // Tab hands focus to the navigator: Down applies the highlighted category on
+    // the same keypress. Navigator row 1 is the `Installed` pseudo-category, so
+    // the first declared category (`communication`) is row 2.
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Tab)).await;
+    ragent_tui::input::handle_key(&mut app, key(KeyCode::Down)).await;
+    assert_eq!(
+        app.connector_store
+            .as_ref()
+            .expect("panel open")
+            .selected_category_label(),
+        "Installed",
+        "row 1 is the Installed pseudo-category"
+    );
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Down)).await;
     {
         let browser = app.connector_store.as_ref().expect("panel open");
@@ -556,8 +591,9 @@ async fn tab_routes_up_down_to_the_category_navigator() {
     ragent_tui::input::handle_key(&mut app, key(KeyCode::Enter)).await;
     {
         let browser = app.connector_store.as_ref().expect("panel open");
-        assert!(
-            !browser.nav_focused,
+        assert_eq!(
+            browser.focus,
+            ragent_connectors::CataloguePane::Results,
             "Enter over the navigator returns focus to the results"
         );
         assert_eq!(
@@ -742,5 +778,330 @@ fn the_column_headings_stay_pinned_when_the_rows_scroll() {
     assert!(
         !top.contains("Category"),
         "no column heading scrolled into the list body: {top:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The navigator column: title bands, entry counts, and the Installed row
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_navigator_column_carries_two_titled_panes() {
+    // The left column is split into the category navigator (top) and the
+    // marketplace navigator (bottom), each under a reversed-video title band,
+    // mirroring the plugin-store panel.
+    let mut app = open(vec![attributed("community-one", "acme")], &[], 0);
+    let terminal = render(&mut app, 120, 30);
+    let nav = app.connector_store_nav_area;
+    let marketplace = app.connector_store_marketplace_area;
+
+    assert!(nav.height > 0, "the category navigator area is recorded");
+    assert!(
+        marketplace.height > 0,
+        "the marketplace navigator area is recorded"
+    );
+    assert!(
+        marketplace.y > nav.y,
+        "the marketplace navigator sits below the category navigator"
+    );
+
+    // The title band is the row directly above each pane's row area.
+    let category_band = row_text(&terminal, nav.y - 1, nav.x, nav.x + nav.width);
+    assert!(
+        category_band.contains("Categories"),
+        "the category navigator is titled: {category_band:?}"
+    );
+    let marketplace_band = row_text(
+        &terminal,
+        marketplace.y - 1,
+        marketplace.x,
+        marketplace.x + marketplace.width,
+    );
+    assert!(
+        marketplace_band.contains("Marketplace"),
+        "the marketplace navigator is titled: {marketplace_band:?}"
+    );
+
+    // Both bands are painted reversed video - dark text on a light background.
+    let buffer = terminal.backend().buffer();
+    let band_cell = &buffer[(nav.x, nav.y - 1)];
+    assert_eq!(band_cell.fg, Color::Black, "the band text is dark");
+    assert_eq!(band_cell.bg, Color::White, "the band background is light");
+}
+
+#[test]
+fn the_navigator_rows_carry_their_entry_counts() {
+    // Every navigator row is labelled `Name (N)`, so the size of each filter is
+    // visible before selecting it. `ALL` counts everything and `Installed` counts
+    // only the store-scan hits.
+    let mut app = open(sample(), &["github"], 0);
+    let terminal = render(&mut app, 120, 30);
+    let nav = app.connector_store_nav_area;
+
+    let rows: Vec<String> = (nav.y..nav.y + nav.height)
+        .map(|y| row_text(&terminal, y, nav.x, nav.x + nav.width))
+        .collect();
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("ALL (3)"),
+        "the ALL row is counted: {joined:?}"
+    );
+    assert!(
+        joined.contains("Installed (1)"),
+        "the Installed row counts the store scan: {joined:?}"
+    );
+    assert!(
+        joined.contains("developer (1)"),
+        "a declared category is counted: {joined:?}"
+    );
+}
+
+#[test]
+fn the_installed_pseudo_category_filters_to_the_store_scan() {
+    // Selecting the `Installed` row shows only the connectors present in the store
+    // scan, whatever category they declare - including one that declares none.
+    let mut uncategorised = descriptor("local-thing", "");
+    uncategorised.marketplace = String::new();
+    let mut app = open(
+        vec![
+            descriptor("github", "developer"),
+            descriptor("slack", "communication"),
+            uncategorised,
+        ],
+        &["local-thing"],
+        0,
+    );
+    let browser = app.connector_store.as_mut().expect("panel open");
+    // Row 1 is the `Installed` pseudo-category.
+    assert_eq!(browser.category_row_label(1), "Installed");
+    assert!(browser.category_select_row(1));
+    assert_eq!(
+        browser.filtered.len(),
+        1,
+        "only the installed connector survives the filter"
+    );
+    assert_eq!(browser.all[browser.filtered[0]].id.as_str(), "local-thing");
+}
+
+#[test]
+fn a_declared_category_named_installed_never_forms_a_second_row() {
+    // The `Installed` name is reserved: a catalogue that declares a category
+    // spelled `installed` collapses onto the one pinned pseudo-category row.
+    let app = open(vec![descriptor("odd", "installed")], &[], 0);
+    let browser = app.connector_store.as_ref().expect("panel open");
+    // `ALL` and the pinned `Installed` row, and nothing more.
+    assert_eq!(browser.category_row_count(), 2);
+    assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
+}
+
+#[test]
+fn the_marketplace_navigator_filters_the_result_rows() {
+    // The lower navigator applies a marketplace filter on selection, composing with
+    // the query and the category.
+    let mut app = open(
+        vec![
+            attributed("community-one", "acme"),
+            attributed("community-two", "acme"),
+            attributed("official-one", "official"),
+        ],
+        &[],
+        0,
+    );
+    let terminal = render(&mut app, 140, 30);
+    let marketplace = app.connector_store_marketplace_area;
+
+    // Row 1 of the marketplace navigator is the first derived marketplace (`acme`).
+    let rows: Vec<String> = (marketplace.y..marketplace.y + marketplace.height)
+        .map(|y| {
+            row_text(
+                &terminal,
+                y,
+                marketplace.x,
+                marketplace.x + marketplace.width,
+            )
+        })
+        .collect();
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("acme (2)"),
+        "marketplace counted: {joined:?}"
+    );
+
+    let browser = app.connector_store.as_mut().expect("panel open");
+    assert!(browser.marketplace_select_row(1));
+    assert_eq!(browser.active_marketplace(), "acme");
+    assert_eq!(browser.filtered.len(), 2, "only acme rows survive");
+
+    // Clearing the marketplace filter restores the full set, leaving the category
+    // untouched.
+    let browser = app.connector_store.as_mut().expect("panel open");
+    browser.marketplace_clear();
+    assert_eq!(browser.active_marketplace(), "ALL");
+    assert_eq!(browser.filtered.len(), 3);
+}
+
+// ---------------------------------------------------------------------------
+// The bottom search box and its clear button
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_search_box_sits_on_the_bottom_edge_with_a_clear_button() {
+    // The panel's last inner row carries the live search box: the `search:` label,
+    // the editable field, and the right-aligned `[x] clear` button; the footer key
+    // hints move up one row to make space.
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 120, 30);
+    let area = app.connector_store_area;
+
+    let search = app.connector_store_search_area;
+    assert!(search.width > 0, "the search-box area is recorded");
+    assert_eq!(
+        search.y,
+        area.y + area.height - 2,
+        "the search box is the last inner row, beneath the footer"
+    );
+
+    let row = row_text(&terminal, search.y, search.x, search.x + search.width);
+    assert!(
+        row.contains("search:"),
+        "the box carries the search label: {row:?}"
+    );
+    assert!(
+        row.contains("[x] clear"),
+        "the box carries the clear button: {row:?}"
+    );
+
+    let clear = app.connector_store_clear_area;
+    assert!(clear.width > 0, "the clear-button area is recorded");
+    assert_eq!(
+        clear.x + clear.width,
+        search.x + search.width,
+        "the clear button is right-aligned in the box"
+    );
+}
+
+#[test]
+fn the_search_box_field_reflects_the_live_query_and_clears_on_click() {
+    let mut app = open(sample(), &[], 0);
+    app.connector_store
+        .as_mut()
+        .expect("panel open")
+        .set_query("git".to_string());
+    let terminal = render(&mut app, 120, 30);
+
+    let search = app.connector_store_search_area;
+    let row = row_text(&terminal, search.y, search.x, search.x + search.width);
+    assert!(
+        row.contains("search: git"),
+        "the box mirrors the query: {row:?}"
+    );
+    assert_eq!(
+        app.connector_store
+            .as_ref()
+            .expect("panel open")
+            .filtered
+            .len(),
+        1,
+        "the query narrowed the list"
+    );
+
+    // A left-click inside the clear button wipes the query through the real mouse
+    // router and restores the full result set.
+    let clear = app.connector_store_clear_area;
+    app.handle_mouse_event(left_click(clear.x, clear.y));
+    assert_eq!(
+        app.connector_store.as_ref().expect("panel open").query,
+        "",
+        "the click cleared the search query"
+    );
+    assert_eq!(
+        app.connector_store
+            .as_ref()
+            .expect("panel open")
+            .filtered
+            .len(),
+        3,
+        "the full set returned"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The row template: accent columns, the zebra band, and full-edge description
+// ---------------------------------------------------------------------------
+
+#[test]
+fn alternate_result_rows_carry_a_band_background_reaching_the_right_edge() {
+    // Consecutive rows alternate a near-black band so a wide row can be followed
+    // across all four columns. The cursor rests on the first row, so its own
+    // highlight masks the band there; the banding alternates over the rows beneath.
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 160, 30);
+    let list = app.connector_store_result_area;
+    let buffer = terminal.backend().buffer();
+    let band = Color::Rgb(22, 22, 30);
+
+    // The second filtered row (index 1) is banded, the third (index 2) is not.
+    assert_eq!(
+        buffer[(list.x + 1, list.y + 1)].bg,
+        band,
+        "the second row carries the band"
+    );
+    assert_ne!(
+        buffer[(list.x + 1, list.y + 2)].bg,
+        band,
+        "the third row is unbanded"
+    );
+    // The band reaches the column's right edge rather than stopping after the last
+    // glyph.
+    assert_eq!(
+        buffer[(list.x + list.width - 1, list.y + 1)].bg,
+        band,
+        "the band spans the whole row"
+    );
+}
+
+#[test]
+fn the_result_row_extends_the_description_to_the_panel_edge() {
+    // The description is the row's last column and takes every column the other
+    // three leave, so a long one runs to the panel's inner right edge and is
+    // clipped there rather than pushing a column off the row.
+    let long = "x".repeat(300);
+    let mut entry = descriptor("long-desc", "developer");
+    entry.description = long;
+    let mut app = open(vec![entry], &[], 0);
+    let terminal = render(&mut app, 160, 30);
+    let list = app.connector_store_result_area;
+    let buffer = terminal.backend().buffer();
+
+    // Every cell of the description row is painted: the last column of the list is
+    // not a bare blank in the interior of the row.
+    let row: String = (list.x..list.x + list.width)
+        .map(|x| buffer[(x, list.y)].symbol().to_string())
+        .collect();
+    assert_eq!(
+        row.trim_end().chars().count(),
+        list.width as usize,
+        "the row is painted to the column's right edge: {row:?}"
+    );
+    assert!(
+        row.contains("long-desc"),
+        "the id column survives the long description: {row:?}"
+    );
+}
+
+#[test]
+fn the_connector_panel_uses_the_store_accent_frame() {
+    // The panel frame is the calm slate accent shared with the plugin-store panel,
+    // not a saturated colour, so the cursor colours stay the brightest thing on
+    // screen.
+    let mut app = open(sample(), &[], 0);
+    let terminal = render(&mut app, 120, 30);
+    let area = app.connector_store_area;
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(area.x, area.y)].fg,
+        Color::Rgb(112, 148, 204),
+        "the border carries the store accent"
     );
 }

@@ -22,8 +22,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Table, Wrap,
+        Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
 
@@ -48,6 +48,7 @@ use crate::widgets::message_widget::{
     render_agent_notice_lines, scrub_narrated_toolcalls, tool_inline_diff, tool_input_summary,
     tool_result_summary,
 };
+use ragent_connectors::CataloguePane;
 
 /// Padding applied to each side of a content-sized table column.
 const COLUMN_PADDING_CHARS: usize = 1;
@@ -58,10 +59,13 @@ const MODEL_PICKER_HEADERS: [&str; 5] = ["Model", "Context", "Cost", "Thinking",
 /// Default spacing between table columns (matches `Table::column_spacing`).
 const MODEL_PICKER_COLUMN_SPACING: usize = 1;
 
-/// Maximum terminal columns reserved for a plugin-store row description before
-/// it is truncated (spec `pluginstores` FR-004). 75 rather than 60 so the
-/// description absorbs the 10 columns the marketplace column gave up.
-const PLUGIN_STORE_DESC_MAX: u16 = 75;
+/// The one-column lane at the left of every plugin-store result row that marks
+/// an installed entry (spec `pluginstores` FR-005).
+///
+/// The marker sits between the cursor gutter and the id column, so it never
+/// competes with the description for horizontal room. Rows whose plugin is not
+/// installed paint a single blank in the lane, keeping every column aligned.
+const STORE_INSTALLED_MARKER: &str = "*";
 
 /// Fixed terminal columns reserved for a plugin-store row's plugin-id column
 /// (spec `pluginstores` FR-004). Wider than the original 22 so the id column
@@ -90,45 +94,45 @@ const PLUGIN_STORE_HEADING_DESCRIPTION: &str = "Description";
 
 /// Narrowest terminal columns the plugin-store category navigator is drawn in
 /// (spec `catnav` FR-020).
-const PLUGIN_STORE_NAV_MIN: u16 = 12;
+const STORE_NAV_MIN: u16 = 12;
 
 /// Widest terminal columns the plugin-store category navigator is drawn in
 /// (spec `catnav` FR-020).
-const PLUGIN_STORE_NAV_MAX: u16 = 26;
+const STORE_NAV_MAX: u16 = 26;
 
 /// Terminal columns always reserved for the plugin-store result column, so the
 /// navigator can never squeeze the result list below a readable width
 /// (spec `catnav` FR-020).
-const PLUGIN_STORE_RESULT_MIN: u16 = 27;
+const STORE_RESULT_MIN: u16 = 27;
 
 /// Blank separator columns between the plugin-store category navigator and the
 /// result column (spec `catnav` FR-001).
-const PLUGIN_STORE_NAV_GAP: u16 = 1;
+const STORE_NAV_GAP: u16 = 1;
 
 /// The title painted on the row directly above the plugin-store category
 /// navigator's `ALL` entry, naming the navigation type (spec `pluginstores`
 /// FR-004). Rendered in reversed video (black on white).
-const PLUGIN_STORE_CATEGORY_TITLE: &str = "Categories";
+const STORE_CATEGORY_TITLE: &str = "Categories";
 
 /// The title painted on the row directly above the plugin-store marketplace
 /// navigator's `ALL` entry, naming the navigation type (spec `pluginstores`
 /// FR-004). Rendered in reversed video (black on white).
-const PLUGIN_STORE_MARKETPLACE_TITLE: &str = "Marketplace";
+const STORE_MARKETPLACE_TITLE: &str = "Marketplace";
 
 /// The label painted at the left edge of the plugin-store bottom search box
 /// (spec `pluginstores` FR-004).
-const PLUGIN_STORE_SEARCH_LABEL: &str = " search: ";
+const STORE_SEARCH_LABEL: &str = " search: ";
 
 /// The clear button painted at the right edge of the plugin-store bottom search
 /// box (spec `pluginstores` FR-004). A left-click inside the button clears the
 /// live search filter; the text is also the hit affordance, so click-to-clear is
 /// discoverable.
-const PLUGIN_STORE_CLEAR_LABEL: &str = "[x] clear";
+const STORE_CLEAR_LABEL: &str = "[x] clear";
 
 /// Narrowest terminal columns the plugin-store search box's editable field is
 /// given, so the label and the clear button never squeeze it below a usable
 /// width on a small terminal (spec `pluginstores` FR-004).
-const PLUGIN_STORE_SEARCH_MIN: u16 = 6;
+const STORE_SEARCH_MIN: u16 = 6;
 
 /// Largest number of terminal rows the plugin-store browser overlay occupies
 /// before it stops growing and stays centred on a tall terminal (spec
@@ -136,40 +140,88 @@ const PLUGIN_STORE_SEARCH_MIN: u16 = 6;
 /// shows roughly 70% more result rows on a full-height screen.
 const PLUGIN_STORE_MAX_HEIGHT: u16 = 41;
 
-/// Maximum terminal columns reserved for a connector-catalogue row description
-/// before it is truncated (spec `connectors`).
+/// The plugin-store accent colour: a slate blue used for the panel border, the
+/// store badge in the title, the marketplace column, and the search-box chrome.
 ///
-/// Wider than [`PLUGIN_STORE_DESC_MAX`] because the connector-catalogue panel is
-/// wider, and clamped against the live result-column width at draw time: the
-/// category navigator takes a share of the body, so an unclamped 90-column
-/// description would spill past the result column's edge.
-const CONNECTOR_CATALOGUE_DESC_MAX: u16 = 90;
+/// Deliberately calm: the panel is a reading surface, so the chrome recedes and
+/// the cursor colours (cyan for a navigator, magenta for a result row) stay the
+/// brightest thing on screen (spec `pluginstores` FR-004, FR-005).
+const STORE_ACCENT: Color = Color::Rgb(112, 148, 204);
 
-/// Maximum terminal columns reserved for a connector-catalogue row name (id)
-/// before it is truncated (spec `connectors`).
-const CONNECTOR_CATALOGUE_NAME_MAX: usize = 26;
+/// The background painted across the plugin-store chrome bands (the footer hint
+/// row and the search box), so the panel's operating furniture reads as a
+/// distinct strip beneath the result table (spec `pluginstores` FR-004).
+const STORE_CHROME_BG: Color = Color::Rgb(30, 32, 44);
 
-/// Maximum terminal columns reserved for a connector-catalogue row category
-/// before it is truncated (spec `connectors`).
-const CONNECTOR_CATALOGUE_CATEGORY_MAX: u16 = 22;
+/// A near-black stripe painted on alternating plugin-store result rows, so the
+/// eye can follow one row across the id, version, marketplace and description
+/// columns on a wide panel.
+const STORE_BAND_BG: Color = Color::Rgb(22, 22, 30);
+
+/// Fixed terminal columns reserved for a connector-catalogue row's connector-id
+/// column (spec `connectors` FR-045).
+///
+/// Matches [`PLUGIN_STORE_ID_MAX`] so the two catalogue browsers lay their rows out
+/// identically on the same terminal.
+const CONNECTOR_CATALOGUE_ID_MAX: usize = 24;
+
+/// Fixed terminal columns reserved for a connector-catalogue row's category column
+/// (spec `connectors` FR-045): wide enough for the common category names, and the
+/// description takes every remaining column.
+const CONNECTOR_CATALOGUE_CATEGORY_MAX: u16 = 18;
 
 /// Ceiling on the terminal columns reserved for a connector-catalogue row's
-/// marketplace column before it is truncated (spec `connectors` FR-043).
+/// marketplace column before it is truncated (spec `connectors` FR-043, FR-045).
 ///
 /// Mirrors [`PLUGIN_STORE_MARKETPLACE_MAX`]: wide enough for common marketplace
 /// labels, and any space the description does not use moves to the marketplace.
 const CONNECTOR_CATALOGUE_MARKETPLACE_MAX: u16 = 21;
 
-/// The pinned column-heading labels of the connector-catalogue result list.
+/// The pinned column-heading labels of the connector-catalogue result list
+/// (FR-045).
 ///
-/// Each label renders directly above its column; a label longer than its column
-/// is clipped by the row template, so the headings never push a value off the
-/// row. The two leading spaces mirror the `> ` row prefix so the labels align
-/// with the values beneath (mirrors [`PLUGIN_STORE_HEADING_ID`]).
+/// Each label renders directly above its column; a label longer than its column is
+/// clipped by the row template, so the headings never push a value off the row. The
+/// three leading spaces mirror the `> ` cursor gutter plus the one-column installed
+/// lane, so the labels align with the values beneath (mirrors
+/// [`PLUGIN_STORE_HEADING_ID`]).
 const CONNECTOR_CATALOGUE_HEADING_ID: &str = "Id";
 const CONNECTOR_CATALOGUE_HEADING_CATEGORY: &str = "Category";
 const CONNECTOR_CATALOGUE_HEADING_MARKETPLACE: &str = "Marketplace";
 const CONNECTOR_CATALOGUE_HEADING_DESCRIPTION: &str = "Description";
+
+/// The accent colour of the provider/model setup dialogs (`/provider`, `/model`,
+/// `/provider router`).
+///
+/// Shares [`STORE_ACCENT`] so every list-bearing overlay in the TUI wears one calm
+/// slate chrome: the frame, the cursor bar, and the secondary facts in the heading
+/// band. The cursor bar stays the brightest thing on the dialog.
+const SETUP_ACCENT: Color = STORE_ACCENT;
+
+/// Foreground of the reversed-video heading band pinned above a setup dialog's
+/// list (the same treatment the plugin and connector catalogues give their column
+/// headings, so all three overlays head their tables alike).
+const SETUP_BAND_FG: Color = Color::Black;
+
+/// Background of that heading band.
+const SETUP_BAND_BG: Color = Color::Gray;
+
+/// The near-black stripe painted on alternating setup-dialog rows, so the eye can
+/// follow one entry across the name, description and status lanes.
+const SETUP_ZEBRA_BG: Color = STORE_BAND_BG;
+
+/// Terminal columns reserved at the right of a provider-setup row for the
+/// `[local]` badge lane, so the badges of adjacent rows line up.
+const PROVIDER_BADGE_WIDTH: usize = 7;
+
+/// Terminal columns reserved for a provider-setup row's provider-id column
+/// (`generic_openai`, `azure_resource` and friends all fit).
+const PROVIDER_ID_MAX: usize = 14;
+
+/// Terminal columns reserved at the right of a provider-setup row for the
+/// credential-status lane (`[ok]` when a key is stored, `*` for the active
+/// provider in the reset dialog).
+const PROVIDER_STATUS_WIDTH: usize = 5;
 
 /// PERF-042: minimum interval between re-renders of a message whose cache
 /// group is already populated while it is being streamed.
@@ -197,7 +249,11 @@ fn model_picker_entry_cells(entry: &ModelPickerEntry, selected: bool) -> Vec<Str
     };
 
     // Format cost: display tier (Free, Low, Medium, etc.) and multiplier.
-    let cost_str = format!("{} * {}", entry.cost_tier, entry.cost_multiplier);
+    let cost_str = if entry.cost_multiplier.is_empty() {
+        entry.cost_tier.clone()
+    } else {
+        format!("{} {}", entry.cost_tier, entry.cost_multiplier)
+    };
     let thinking_str = App::format_thinking_levels(&entry.thinking_levels);
 
     // Format features.
@@ -289,6 +345,36 @@ fn content_sized_columns(cells: &[Vec<String>]) -> Vec<Constraint> {
         .collect()
 }
 
+/// The pinned column-heading band of a model-picker dialog.
+///
+/// Each label is padded to the width measured for its column (see
+/// [`content_sized_columns`]) and joined with the same [`MODEL_PICKER_COLUMN_SPACING`]
+/// the rows use, so every label sits directly over the values beneath it. The two
+/// leading spaces mirror the `> ` cursor gutter carried inside the model-name cell,
+/// so `Model` starts over the name rather than over the cursor.
+fn model_picker_heading_band(widths: &[usize]) -> String {
+    let mut band = String::from("  ");
+    for (col, label) in MODEL_PICKER_HEADERS.iter().enumerate() {
+        let width = widths
+            .get(col)
+            .copied()
+            .unwrap_or(label.chars().count() + 2);
+        // The first column already carries the gutter inside its measured width.
+        let padded = match col {
+            0 => format!("{label:<pad$}", pad = width.saturating_sub(2)),
+            // Context and cost are numeric columns: their heading right-aligns over
+            // the right-aligned digits beneath it.
+            1 | 2 => format!("{label:>width$}"),
+            _ => format!("{label:<width$}"),
+        };
+        band.push_str(&padded);
+        if col + 1 < MODEL_PICKER_HEADERS.len() {
+            band.push_str(&" ".repeat(MODEL_PICKER_COLUMN_SPACING));
+        }
+    }
+    band
+}
+
 /// Render the full TUI chat screen.
 ///
 /// # Examples
@@ -374,7 +460,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.connector_store_area = Rect::default();
         app.connector_store_nav_area = Rect::default();
+        app.connector_store_marketplace_area = Rect::default();
         app.connector_store_result_area = Rect::default();
+        app.connector_store_search_area = Rect::default();
+        app.connector_store_clear_area = Rect::default();
     }
     // `/backend` switcher panel (spec `openhands` FR-008) - drawn last so it sits
     // above every other overlay while it owns the keyboard.
@@ -522,38 +611,29 @@ fn render_backend_panel(frame: &mut Frame, app: &mut App) {
 
 /// Render the connector-catalogue browse panel (`/connectors claude`).
 ///
-/// Modelled on [`render_plugin_store_panel`]: a bordered, titled modal overlay
-/// presenting a title line with the catalogue name, the current search query,
-/// the active category, and the visible/total result count; a fixed
-/// column-heading row above a scrollable result list; and a footer of key hints.
+/// A bordered, titled modal overlay carrying the same design language as the
+/// plugin-store panel ([`render_plugin_store_panel`]), so the two catalogue
+/// browsers read as one family: a slate accent frame, a structured title line,
+/// a left column split into the category navigator (top) and the marketplace
+/// navigator (bottom) - each under a reversed-video title band - a result column
+/// with a pinned dark-on-light column-heading row above a zebra-banded list, a
+/// centred footer of key hints, and a bottom-edge search box with a click-to-clear
+/// button.
 ///
-/// The result column carries a pinned column-heading row (`Id`, `Category`,
-/// `Marketplace`, `Description`) painted dark-on-light directly above the list,
-/// outside the list's own scroll, so the headings stay visible while the rows
-/// scroll beneath them.
+/// The highlighted result row carries the block cursor (a full-row background
+/// applied through [`ratatui::widgets::List::highlight_style`]). A row whose
+/// connector id is in the derived installed set paints a `*` in the one-column
+/// installed lane between the cursor gutter and the id column, in the installed
+/// colour, independent of the cursor.
 ///
-/// The highlighted result row carries the block cursor: a full-row background
-/// applied through [`ratatui::widgets::List::highlight_style`]. A row whose
-/// connector id is in the derived installed set is painted in the installed
-/// colour and carries an `[installed]` marker, independent of the cursor.
-///
-/// The body renders an explicit state line rather than a blank list when there
-/// is nothing to show: a loading row while the fetch is in flight, an inline
-/// error row naming the cause when it failed, and a `no matching connectors`
-/// line when the catalogue, the query, or the category yields no results.
+/// The body renders an explicit state line rather than a blank list when there is
+/// nothing to show: a loading row while the fetch is in flight, an inline error
+/// row naming the cause when it failed, and a `no matching connectors` line when
+/// the catalogue, the query, or a filter yields no results.
 ///
 /// The panel area is recomputed from `Frame::area` every frame, so a terminal
-/// resize re-derives a centred, fully visible modal; it is stored back in
-/// [`App::connector_store_area`] for tests and hit-testing.
-///
-/// The body is split into the left category navigator and the result column:
-/// `ALL` first, then the distinct categories the catalogue declares, with the
-/// active category in the active-category colour and a block cursor on the
-/// category row under the category cursor. The navigator stays visible and
-/// operable while the fetch is loading or the result set is empty. The
-/// navigator area and the scrolling list area (below the pinned heading) are
-/// recomputed from the current frame and stored back in
-/// [`App::connector_store_nav_area`] and [`App::connector_store_result_area`].
+/// resize re-derives a centred, fully visible modal; every hit-test area is stored
+/// back on [`App`] for the mouse router.
 fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     use ratatui::widgets::{List, ListItem, ListState};
 
@@ -562,62 +642,98 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     }
 
     let screen = frame.area();
+    // Size the panel to the screen with a margin, so it stays centred and fully
+    // visible as the terminal changes size. The 140-column ceiling and the row
+    // budget match the plugin-store panel exactly, so the two browsers are the
+    // same shape on the same terminal.
     let width = screen
         .width
         .saturating_sub(4)
-        .clamp(30, 150)
+        .clamp(30, 140)
         .min(screen.width);
     let height = screen
         .height
         .saturating_sub(2)
-        .clamp(8, 24)
+        .clamp(8, PLUGIN_STORE_MAX_HEIGHT)
         .min(screen.height);
     let area = centered_rect_fixed(width, height, screen);
     frame.render_widget(Clear, area);
     app.connector_store_area = area;
 
-    // The title names the catalogue, the search field, the counts, and the
-    // active category; it needs only an immutable read of the browser.
+    // The title names the catalogue, the search field, the counts, and the active
+    // filters; it needs only an immutable read of the browser.
     let title = match app.connector_store.as_ref() {
         Some(browser) => connector_catalogue_title(browser),
         // The early return above guarantees `Some`, but read defensively so no
         // path can panic if that guard ever drifts.
-        None => String::new(),
+        None => Line::default(),
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .border_style(Style::default().fg(Color::Magenta));
+        .title(title)
+        .border_style(Style::default().fg(STORE_ACCENT));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Reserve the last inner row for the footer key hints and the row above it for
+    // the bottom search box; the body takes what remains.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
     let body_area = chunks[0];
     let footer_area = chunks[1];
+    let search_area = chunks[2];
+    app.connector_store_search_area = search_area;
 
-    // Split the body into the left category navigator and the result column. The
+    // Split the body into the left navigator column and the result column. The
     // navigator width is recomputed from the current frame every draw, so a
     // terminal resize re-derives it and the column stays fully visible.
-    let nav_width = plugin_store_nav_width(body_area.width);
+    let nav_width = store_nav_width(body_area.width);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(nav_width),
-            Constraint::Length(PLUGIN_STORE_NAV_GAP),
+            Constraint::Length(STORE_NAV_GAP),
             Constraint::Min(0),
         ])
         .split(body_area);
     let nav_area = columns[0];
     let result_area = columns[2];
-    app.connector_store_nav_area = nav_area;
+    // The left navigator column is split vertically into the category navigator
+    // (top half) and the marketplace navigator (bottom half); each pane owns a full
+    // viewport so both stay usable side by side in one column.
+    let nav_panes = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(nav_area);
+    let category_area = nav_panes[0];
+    let marketplace_area = nav_panes[1];
+
+    // Each navigator carries a one-row title above its `ALL` entry naming the
+    // navigation type, painted in reversed video. Reserve that row out of each pane
+    // so the rows beneath still scroll inside what remains; the cached hit-test
+    // areas are the row areas below the title, so a click or wheel on a title row is
+    // inert and never mis-mapped onto the `ALL` row.
+    let category_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(category_area);
+    let category_title_area = category_chunks[0];
+    let category_rows_area = category_chunks[1];
+    let marketplace_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(marketplace_area);
+    let marketplace_title_area = marketplace_chunks[0];
+    let marketplace_rows_area = marketplace_chunks[1];
+    app.connector_store_nav_area = category_rows_area;
+    app.connector_store_marketplace_area = marketplace_rows_area;
+
     // The result column splits vertically into a fixed column-heading row (always
     // painted, never scrolled) and the scrolling result list beneath it. The
     // headings are drawn outside the `List`, so the list's own scroll keeps rows
@@ -633,20 +749,26 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     // wheel on the heading row is inert.
     app.connector_store_result_area = list_area;
 
+    // Row text colours. The id and description carry the reading colour; the
+    // category and marketplace columns step back - the category to a muted tone,
+    // the marketplace to the panel accent - so a horizontally busy row still leads
+    // the eye with its name and its purpose.
     let normal_style = Style::default().fg(Color::White);
     let active_style = Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
     let installed_style = Style::default().fg(Color::Green);
-    let dim_style = Style::default().fg(Color::DarkGray);
+    let muted_style = store_muted_style();
+    let tag_style = Style::default().fg(STORE_ACCENT);
+    let dim_style = Style::default().fg(theme::colors::HINT);
 
     let Some(browser) = app.connector_store.as_mut() else {
         return;
     };
     // Focus distinction: the pane that holds keyboard focus paints its cursor in
-    // its filled colour; the other pane's cursor is dimmed, so which pane owns
-    // `Up`/`Down` is visible at a glance. The navigator cursor keeps its own
-    // colour independent of the result cursor.
+    // its filled colour; the other panes' cursors are dimmed, so which pane owns
+    // `Up`/`Down` is visible at a glance. The two navigators share one focused
+    // colour and the result cursor keeps its own colour, independent of them.
     let focused_result_cursor = Style::default()
         .fg(Color::Black)
         .bg(Color::Magenta)
@@ -656,93 +778,120 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
         .bg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
     let unfocused_cursor = Style::default().fg(Color::White).bg(Color::DarkGray);
-    let nav_focused = browser.nav_focused;
-    let nav_cursor_style = if nav_focused {
+    let nav_cursor_style = if browser.focus == CataloguePane::Categories {
         focused_nav_cursor
     } else {
         unfocused_cursor
     };
-    let cursor_style = if nav_focused {
-        unfocused_cursor
+    let marketplace_cursor_style = if browser.focus == CataloguePane::Marketplaces {
+        focused_nav_cursor
     } else {
-        focused_result_cursor
+        unfocused_cursor
     };
-
-    // The category navigator: `ALL` first, then the derived categories.
+    let cursor_style = if browser.focus == CataloguePane::Results {
+        focused_result_cursor
+    } else {
+        unfocused_cursor
+    };
+    // The header band above each navigator's `ALL` entry names the navigation type.
+    // It is painted reversed video - black on white - so it reads as a distinct
+    // header, and is padded to the column width so the band runs edge to edge
+    // instead of stopping dead after the label.
+    let title_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let nav_band = |label: &'static str, width: u16| {
+        let text = format!(" {label}");
+        let pad = (width as usize).saturating_sub(text.chars().count());
+        Line::from(Span::styled(
+            format!("{text}{}", " ".repeat(pad)),
+            title_style,
+        ))
+    };
+    frame.render_widget(
+        Paragraph::new(nav_band(STORE_CATEGORY_TITLE, category_title_area.width)),
+        category_title_area,
+    );
+    frame.render_widget(
+        Paragraph::new(nav_band(
+            STORE_MARKETPLACE_TITLE,
+            marketplace_title_area.width,
+        )),
+        marketplace_title_area,
+    );
+    // The category navigator: `ALL`, the `Installed` pseudo-category, then the
+    // derived categories, each with its entry count.
     render_connector_catalogue_navigator(
         frame,
         browser,
-        nav_area,
+        category_rows_area,
         nav_cursor_style,
         active_style,
         normal_style,
     );
+    // The marketplace navigator: `ALL` first, then the derived marketplaces.
+    render_connector_marketplace_navigator(
+        frame,
+        browser,
+        marketplace_rows_area,
+        marketplace_cursor_style,
+        active_style,
+        normal_style,
+    );
 
-    // The body: result rows, or one explicit state line. The navigator stays
-    // visible beside either case.
-    //
-    // The row layout is fixed-priority over the shared result column: the id
-    // field shrinks first (its right-hand padding can yield without cutting a
-    // visible glyph), then the description keeps at least DESC_MIN columns; the
-    // category column is last to clip, so a longer-than-usual category name is
-    // truncated rather than squeezing the description below its readable floor.
-    let row_budget = result_area.width as usize;
-    const MARKER: &str = " [installed]";
-    const DESC_MIN: usize = 20;
-    let name_width = CONNECTOR_CATALOGUE_NAME_MAX
-        .min(row_budget / 3)
-        .max(6)
-        .min(row_budget / 2);
-    let category_width = (CONNECTOR_CATALOGUE_CATEGORY_MAX as usize)
-        .min(row_budget.saturating_sub(2 + name_width + 1 + DESC_MIN + MARKER.len()))
-        .max(6);
-    let marketplace_width = (CONNECTOR_CATALOGUE_MARKETPLACE_MAX as usize)
-        .min(
-            row_budget
-                .saturating_sub(2 + name_width + 1 + category_width + 1 + DESC_MIN + MARKER.len()),
-        )
-        .max(6);
-    let desc_budget = row_budget
-        .saturating_sub(
-            2 + name_width + 1 + category_width + 1 + marketplace_width + 1 + MARKER.len(),
-        )
-        .min(CONNECTOR_CATALOGUE_DESC_MAX as usize);
+    // The body: result rows, or one explicit state line. The navigators stay
+    // visible above either case. The id and category columns are fixed-width; the
+    // marketplace keeps its ceiling and the description takes every remaining
+    // column, so as the row's last column it renders straight up to the panel's
+    // inner right edge and a longer description is clipped there by the row area.
+    let id_width = CONNECTOR_CATALOGUE_ID_MAX;
+    let category_width = CONNECTOR_CATALOGUE_CATEGORY_MAX as usize;
+    let (marketplace_width, desc_width) =
+        connector_flex_widths(result_area.width as usize, id_width, category_width);
 
     match connector_catalogue_body(browser) {
-        PluginStoreBody::Rows => {
+        StoreBody::Rows => {
             let visible = browser.filtered.len();
             // The pinned column-heading row: the same column template as a result
-            // row so each label sits exactly above its column, painted once above
-            // the list so it never scrolls. The dark-on-light style distinguishes
-            // it from both the normal and installed row colours.
+            // row so each label sits exactly above its column. The dark-on-light
+            // style distinguishes it from both the normal and installed row colours,
+            // and the band is padded to the full result width so it reads as a header
+            // strip rather than a label floating over the rows.
             let heading_style = Style::default()
                 .fg(Color::Black)
                 .bg(Color::Gray)
                 .add_modifier(Modifier::BOLD);
-            let heading = format!(
-                "  {CONNECTOR_CATALOGUE_HEADING_ID:<name_width$} {CONNECTOR_CATALOGUE_HEADING_CATEGORY:<category_width$} {CONNECTOR_CATALOGUE_HEADING_MARKETPLACE:<marketplace_width$} {CONNECTOR_CATALOGUE_HEADING_DESCRIPTION:<desc_budget$}",
+            let heading_text = format!(
+                "   {CONNECTOR_CATALOGUE_HEADING_ID:<id_width$} {CONNECTOR_CATALOGUE_HEADING_CATEGORY:<category_width$} {CONNECTOR_CATALOGUE_HEADING_MARKETPLACE:<marketplace_width$} {CONNECTOR_CATALOGUE_HEADING_DESCRIPTION:<desc_width$}",
             );
+            let heading_pad =
+                (result_area.width as usize).saturating_sub(heading_text.chars().count());
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(heading, heading_style))),
+                Paragraph::new(Line::from(Span::styled(
+                    format!("{heading_text}{}", " ".repeat(heading_pad)),
+                    heading_style,
+                ))),
                 heading_area,
             );
+            // The block cursor's position, clamped into the filtered set; the list's
+            // own scroll keeps it visible beneath the pinned heading row. It is
+            // resolved before the rows are built so each row can paint the cursor
+            // gutter marker itself.
+            let selected = browser.cursor.min(visible.saturating_sub(1));
             let items: Vec<ListItem> = browser
                 .filtered
                 .iter()
-                .map(|&index| {
+                .enumerate()
+                .map(|(row_index, &index)| {
                     let entry = &browser.all[index];
-                    let id = entry.id.as_str();
-                    let marker = if browser.is_installed(id) {
-                        MARKER
-                    } else {
-                        ""
-                    };
-                    let style = if browser.is_installed(id) {
+                    let installed = browser.is_installed(entry.id.as_str());
+                    let base_style = if installed {
                         installed_style
                     } else {
                         normal_style
                     };
-                    let name_field = truncate_bytes_no_ellipsis(id, name_width);
+                    let id_field = truncate_bytes_no_ellipsis(entry.id.as_str(), id_width);
                     let category_field =
                         truncate_bytes_no_ellipsis(&entry.category, category_width);
                     let marketplace_field = if entry.marketplace.trim().is_empty() {
@@ -750,14 +899,56 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
                     } else {
                         truncate_bytes_no_ellipsis(&entry.marketplace, marketplace_width)
                     };
-                    let desc_field = truncate_bytes_no_ellipsis(&entry.description, desc_budget);
-                    let row = format!(
-                        "> {name_field:<name_width$} {category_field:<category_width$} {marketplace_field:<marketplace_width$} {desc_field}{marker}",
-                    );
-                    ListItem::new(Line::from(Span::styled(row, style)))
+                    let desc_field = truncate_bytes_no_ellipsis(&entry.description, desc_width);
+                    // The two-column gutter mirrors the heading's leading indent and
+                    // carries a `>` only on the row under the cursor, so the cursor is
+                    // visible even where a background-only highlight washes out. It is
+                    // followed by the one-column installed lane, which every row paints
+                    // - the marker or a blank - so the columns stay aligned whether or
+                    // not the row is installed.
+                    let gutter = if row_index == selected { "> " } else { "  " };
+                    let installed_span = if installed {
+                        Span::styled(
+                            STORE_INSTALLED_MARKER.to_string(),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        Span::styled(" ".to_string(), base_style)
+                    };
+                    let mut spans = vec![
+                        Span::styled(gutter.to_string(), base_style),
+                        installed_span,
+                        Span::styled(format!("{id_field:<id_width$} "), base_style),
+                        Span::styled(format!("{category_field:<category_width$} "), muted_style),
+                        Span::styled(
+                            format!("{marketplace_field:<marketplace_width$} "),
+                            tag_style,
+                        ),
+                        Span::styled(desc_field, base_style),
+                    ];
+                    // Pad the row to the full result width: the trailing run carries
+                    // the row's own style, so a zebra band (and the cursor background
+                    // the list paints over it) reaches the column's right edge instead
+                    // of stopping after the last glyph.
+                    let painted: usize =
+                        spans.iter().map(|span| span.content.chars().count()).sum();
+                    let pad = (result_area.width as usize).saturating_sub(painted);
+                    if pad > 0 {
+                        spans.push(Span::styled(" ".repeat(pad), base_style));
+                    }
+                    // Alternate rows carry a near-black stripe so the eye can follow
+                    // one row across the id, category, marketplace and description
+                    // columns on a wide panel.
+                    let item = ListItem::new(Line::from(spans));
+                    if row_index % 2 == 1 {
+                        item.style(Style::default().bg(STORE_BAND_BG))
+                    } else {
+                        item
+                    }
                 })
                 .collect();
-            let selected = browser.cursor.min(visible.saturating_sub(1));
             let list = List::new(items)
                 .highlight_style(cursor_style)
                 .highlight_symbol("");
@@ -765,11 +956,11 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
             state.select(Some(selected));
             frame.render_stateful_widget(list, list_area, &mut state);
         }
-        PluginStoreBody::Line(text, style) => {
-            // Wrap rather than clip: with the navigator sharing the body, the
+        StoreBody::Line(text, style) => {
+            // Wrap rather than clip: with the navigators sharing the body, the
             // result column is narrower, and a long state line (a failed fetch
-            // naming its cause) must stay fully readable instead of being
-            // silently truncated at the column edge.
+            // naming its cause) must stay fully readable instead of being silently
+            // truncated at the column edge.
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, style)))
                     .block(Block::default())
@@ -784,20 +975,29 @@ fn render_connector_catalogue_panel(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(footer)
             .alignment(Alignment::Center)
+            .style(Style::default().bg(STORE_CHROME_BG))
             .wrap(Wrap { trim: true }),
         footer_area,
     );
+
+    // The bottom-edge search box: the live filter field on the left and the
+    // click-to-clear button on the right. The box reflects the browser's query
+    // exactly, so typing and the button stay in step without any extra state; the
+    // button is inert while the query is already empty.
+    app.connector_store_clear_area =
+        render_store_search_box(frame, &browser.query, search_area, normal_style, dim_style);
 }
 
 /// Render the connector-catalogue category navigator into `area`.
 ///
-/// The rows are the `ALL` sentinel first and then the derived, sorted distinct
-/// categories. The row under the category cursor carries a block cursor through
-/// [`ratatui::widgets::List::highlight_style`], independent of the result-list
-/// cursor; the active category is painted in the active-category colour. A
-/// still-loading or category-less catalogue yields an `ALL`-only navigator. The
-/// navigator viewport height is recorded on the browser so the handlers clamp a
-/// wheel scroll; the scroll offset is otherwise left exactly as the wheel set
+/// The rows are the `ALL` sentinel, the `Installed` pseudo-category, then the
+/// derived, sorted distinct categories, each labelled `Name (N)` with its entry
+/// count in the panel accent. The row under the category cursor carries a block
+/// cursor through [`ratatui::widgets::List::highlight_style`], independent of the
+/// result-list cursor; the active category is painted in the active-category
+/// colour. A still-loading catalogue yields an `ALL`-only navigator with counts.
+/// The navigator viewport height is recorded on the browser so the handlers clamp
+/// a wheel scroll; the scroll offset is otherwise left exactly as the wheel set
 /// it, so scrolling away from the cursor sticks.
 fn render_connector_catalogue_navigator(
     frame: &mut Frame,
@@ -813,15 +1013,16 @@ fn render_connector_catalogue_navigator(
         return;
     }
 
-    // Record the navigator viewport height so the key and mouse handlers clamp
-    // the wheel scroll and keep the category cursor visible. The per-frame
-    // visibility sync is *not* done here: a wheel scroll deliberately moves the
-    // viewport away from the cursor, and a render-time re-sync would undo it.
-    // The move and clear handlers keep the cursor visible instead.
+    // Record the navigator viewport height so the key and mouse handlers clamp the
+    // wheel scroll and keep the cursor visible. The per-frame visibility sync is
+    // *not* done here: a wheel scroll deliberately moves the viewport away from the
+    // cursor, and a render-time re-sync would undo it.
     browser.category_viewport = area.height as usize;
 
     let rows = browser.category_row_count();
     let active = browser.active_category().to_string();
+    let selected = browser.category_cursor_row();
+    let count_style = Style::default().fg(STORE_ACCENT);
     let items: Vec<ListItem> = (0..rows)
         .map(|row| {
             let label = browser.category_row_label(row);
@@ -830,11 +1031,22 @@ fn render_connector_catalogue_navigator(
             } else {
                 normal_style
             };
-            ListItem::new(Line::from(Span::styled(label.to_string(), style)))
+            // Each row shows the category name with its entry count, so the size of
+            // each category is visible before selecting it. The count is painted in
+            // the panel accent so the name stays the reading element.
+            let display = browser.category_row_display(row);
+            // The label is a prefix of the display text, so its byte length is a
+            // valid split point and the count suffix keeps its own accent style.
+            let split = label.len().min(display.len());
+            let (name, count) = display.split_at(split);
+            ListItem::new(Line::from(vec![
+                Span::styled(" ".to_string(), style),
+                Span::styled(name.to_string(), style),
+                Span::styled(count.to_string(), count_style),
+            ]))
         })
         .collect();
 
-    let selected = browser.category_cursor_row();
     let list = List::new(items)
         .highlight_style(cursor_style)
         .highlight_symbol("");
@@ -844,50 +1056,160 @@ fn render_connector_catalogue_navigator(
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+/// Render the connector-catalogue marketplace navigator into `area`.
+///
+/// Mirrors [`render_connector_catalogue_navigator`]: the rows are the `ALL`
+/// sentinel first and then the derived, sorted distinct marketplaces, each
+/// labelled `Name (N)`. The row under the marketplace cursor carries a block
+/// cursor, independent of the category and result cursors; the active marketplace
+/// is painted in the active-category colour. The viewport height is recorded on the
+/// browser so the handlers clamp a wheel scroll.
+fn render_connector_marketplace_navigator(
+    frame: &mut Frame,
+    browser: &mut ragent_connectors::CatalogueBrowser,
+    area: Rect,
+    cursor_style: Style,
+    active_style: Style,
+    normal_style: Style,
+) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    browser.marketplace_viewport = area.height as usize;
+
+    let rows = browser.marketplace_row_count();
+    let active = browser.active_marketplace().to_string();
+    let selected = browser.marketplace_cursor_row();
+    let count_style = Style::default().fg(STORE_ACCENT);
+    let items: Vec<ListItem> = (0..rows)
+        .map(|row| {
+            let label = browser.marketplace_row_label(row);
+            let style = if label.eq_ignore_ascii_case(&active) {
+                active_style
+            } else {
+                normal_style
+            };
+            let display = browser.marketplace_row_display(row);
+            let split = label.len().min(display.len());
+            let (name, count) = display.split_at(split);
+            ListItem::new(Line::from(vec![
+                Span::styled(" ".to_string(), style),
+                Span::styled(name.to_string(), style),
+                Span::styled(count.to_string(), count_style),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_style(cursor_style)
+        .highlight_symbol("");
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    *state.offset_mut() = browser.marketplace_scroll.min(rows.saturating_sub(1));
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// The marketplace and description column widths for one connector-catalogue
+/// result row of `row_width` columns.
+///
+/// The id and category columns are fixed at `id_width` and `category_width`; the
+/// cursor gutter, the one-column installed lane ([`STORE_INSTALLED_MARKER`]), and
+/// the three single-space separators are fixed overhead. The marketplace is capped
+/// by [`CONNECTOR_CATALOGUE_MARKETPLACE_MAX`] and takes at most half of what
+/// remains, and the description is given **every other column**: it is the row's
+/// last column, so it renders right up to the panel's inner right edge, and a long
+/// description is clipped there rather than pushing the id, category or marketplace
+/// columns off the row. Mirrors [`store_flex_widths`].
+fn connector_flex_widths(
+    row_width: usize,
+    id_width: usize,
+    category_width: usize,
+) -> (usize, usize) {
+    // `> ` (2) + installed lane (1) + id + sep (1) + category + sep (1) +
+    // marketplace + sep (1) + description.
+    let fixed = 2 + STORE_INSTALLED_MARKER.len() + id_width + 1 + category_width + 1 + 1;
+    let available = row_width.saturating_sub(fixed);
+    let marketplace = (available / 2).min(CONNECTOR_CATALOGUE_MARKETPLACE_MAX as usize);
+    (marketplace, available.saturating_sub(marketplace))
+}
+
 /// The panel title line for the connector-catalogue browser.
 ///
-/// Names the catalogue, the live search field, the active category, the
-/// visible/total counts, and - when the parser skipped any malformed entries -
-/// the skipped count, so a partial result set is visible at a glance rather than
+/// A single line of styled spans rather than one flat string, exactly as
+/// [`plugin_store_title`], so the catalogue name reads as a badge, the counts as
+/// the primary fact, the active filters as labelled values, and any parser skip or
+/// in-flight enrichment as a trailing note that is visible at a glance rather than
 /// silently short.
-fn connector_catalogue_title(browser: &ragent_connectors::CatalogueBrowser) -> String {
-    let total = browser.all.len();
-    let visible = browser.filtered.len();
-    let mut title = format!(
-        " Claude Connectors -- search: {} -- {} of {} -- category {}",
-        browser.query,
-        visible,
-        total,
-        browser.selected_category_label(),
-    );
+fn connector_catalogue_title(browser: &ragent_connectors::CatalogueBrowser) -> Line<'static> {
+    let muted = store_muted_style();
+    let accent = Style::default()
+        .fg(STORE_ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let badge = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let value = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+
+    let mut spans = vec![
+        Span::styled(" Claude Connectors ", badge),
+        Span::styled(
+            format!(" {} of {} ", browser.filtered.len(), browser.all.len()),
+            accent,
+        ),
+        Span::styled(" search: ", muted),
+        Span::styled(
+            if browser.query.is_empty() {
+                "-".to_string()
+            } else {
+                browser.query.clone()
+            },
+            if browser.query.is_empty() {
+                muted
+            } else {
+                value
+            },
+        ),
+        Span::styled(" category ", muted),
+        Span::styled(browser.selected_category_label().to_string(), value),
+        Span::styled(" marketplace ", muted),
+        Span::styled(browser.active_marketplace().to_string(), value),
+    ];
     if browser.skipped > 0 {
-        title.push_str(&format!(" -- {} skipped", browser.skipped));
+        spans.push(Span::styled(
+            format!("  {} skipped ", browser.skipped),
+            Style::default().fg(Color::Yellow),
+        ));
     }
     if browser.enriching {
-        title.push_str(" -- loading details...");
+        spans.push(Span::styled(" loading details... ", muted));
     }
-    title.push(' ');
-    title
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 /// Decide what the connector-catalogue panel body should show.
-fn connector_catalogue_body(browser: &ragent_connectors::CatalogueBrowser) -> PluginStoreBody {
+fn connector_catalogue_body(browser: &ragent_connectors::CatalogueBrowser) -> StoreBody {
     use crate::app::ConnectorBrowseStatus;
 
     match &browser.status {
-        ConnectorBrowseStatus::Loading => PluginStoreBody::Line(
+        ConnectorBrowseStatus::Loading => StoreBody::Line(
             "loading connector catalogue...".to_string(),
             Style::default().fg(Color::Cyan),
         ),
-        ConnectorBrowseStatus::Failed(reason) => PluginStoreBody::Line(
+        ConnectorBrowseStatus::Failed(reason) => StoreBody::Line(
             format!("catalogue failed: {reason}"),
             Style::default().fg(Color::Red),
         ),
         ConnectorBrowseStatus::Empty | ConnectorBrowseStatus::Ready => {
             if browser.has_results() {
-                PluginStoreBody::Rows
+                StoreBody::Rows
             } else {
-                PluginStoreBody::Line(
+                StoreBody::Line(
                     connector_catalogue_empty_line(browser),
                     Style::default().fg(Color::DarkGray),
                 )
@@ -1184,8 +1506,9 @@ fn render_queue_show_panel(frame: &mut Frame, app: &mut App) {
 /// whole row after the item spans are drawn, so the background spans every cell
 /// (the leading `> ` marker included) rather than only the text span. A row whose
 /// plugin id is in the derived installed set ([`PluginStoreBrowser::is_installed`])
-/// is painted in the installed colour and carries an `[installed]` marker,
-/// independent of the cursor (FR-005, A7).
+/// is painted in the installed colour and carries the installed marker
+/// ([`STORE_INSTALLED_MARKER`]) in the one-column lane between the cursor
+/// gutter and the id column, independent of the cursor (FR-005, A7).
 ///
 /// The body renders an explicit state line rather than a blank list when there is
 /// nothing to show (FR-017): a loading row while the fetch is in flight (FR-016),
@@ -1239,17 +1562,16 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
         Some(browser) => plugin_store_title(browser),
         // The early return above guarantees `Some`, but read defensively so no
         // path can panic if that guard ever drifts.
-        None => String::new(),
+        None => Line::default(),
     };
+    // A calm slate-blue frame rather than the saturated magenta of the older
+    // build: the border is chrome, and the cyan/magenta cursor colours must stay
+    // the brightest thing on the panel so the eye lands on the cursor (FR-004,
+    // FR-005).
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .border_style(Style::default().fg(Color::Magenta));
+        .title(title)
+        .border_style(Style::default().fg(STORE_ACCENT));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -1272,12 +1594,12 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     // navigator width is recomputed from the current frame every draw, so a
     // terminal resize re-derives it and the column stays fully visible
     // (spec `catnav` FR-020).
-    let nav_width = plugin_store_nav_width(body_area.width);
+    let nav_width = store_nav_width(body_area.width);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(nav_width),
-            Constraint::Length(PLUGIN_STORE_NAV_GAP),
+            Constraint::Length(STORE_NAV_GAP),
             Constraint::Min(0),
         ])
         .split(body_area);
@@ -1328,12 +1650,17 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     // wheel on the heading row is inert.
     app.plugin_store_result_area = list_area;
 
+    // Row text colours. The id and description carry the reading colour;
+    // the version and marketplace columns step back into a muted tone so a
+    // horizontally busy row still leads the eye with its name and its purpose.
     let normal_style = Style::default().fg(Color::White);
     let active_style = Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
     let installed_style = Style::default().fg(Color::Green);
-    let dim_style = Style::default().fg(Color::DarkGray);
+    let muted_style = store_muted_style();
+    let tag_style = Style::default().fg(STORE_ACCENT);
+    let dim_style = Style::default().fg(theme::colors::HINT);
 
     let Some(browser) = app.plugin_store.as_mut() else {
         return;
@@ -1367,25 +1694,31 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     } else {
         unfocused_cursor
     };
-    // The reversed-video title above each navigator's `ALL` entry names the
-    // navigation type (FR-004). Black on white, matching the pinned result
-    // column-heading row's dark-on-light treatment.
+    // The header band above each navigator's `ALL` entry names the navigation
+    // type (FR-004). It is painted reversed video - black on white - so it reads
+    // as a distinct header, and is padded to the column width so the band runs
+    // edge to edge instead of stopping dead after the label.
     let title_style = Style::default()
         .fg(Color::Black)
         .bg(Color::White)
         .add_modifier(Modifier::BOLD);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            PLUGIN_STORE_CATEGORY_TITLE,
+    let nav_band = |label: &'static str, width: u16| {
+        let text = format!(" {label}");
+        let pad = (width as usize).saturating_sub(text.chars().count());
+        Line::from(Span::styled(
+            format!("{text}{}", " ".repeat(pad)),
             title_style,
-        ))),
+        ))
+    };
+    frame.render_widget(
+        Paragraph::new(nav_band(STORE_CATEGORY_TITLE, category_title_area.width)),
         category_title_area,
     );
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            PLUGIN_STORE_MARKETPLACE_TITLE,
-            title_style,
-        ))),
+        Paragraph::new(nav_band(
+            STORE_MARKETPLACE_TITLE,
+            marketplace_title_area.width,
+        )),
         marketplace_title_area,
     );
     // The category navigator: `ALL` first, then the derived categories (FR-001).
@@ -1411,42 +1744,59 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     // FR-019). The navigator stays visible above either case.
     let body = plugin_store_body(browser);
     match body {
-        PluginStoreBody::Rows => {
+        StoreBody::Rows => {
             let visible = browser.filtered.len();
-            // The id and version columns are fixed-width; the marketplace and
-            // description columns share the flexible remainder, so a wider panel shows
-            // a longer marketplace name (and a longer description) while a narrow one
-            // clips gracefully (FR-018, FR-048).
+            // The id and version columns are fixed-width; the marketplace column
+            // keeps its ceiling and the description takes every remaining column. As
+            // the row's last column it renders straight up to the panel's inner right
+            // edge, and a description longer than that room is clipped there by the
+            // row area rather than pushing another column off the row (FR-018,
+            // FR-048).
             let id_width = PLUGIN_STORE_ID_MAX;
             let version_width = PLUGIN_STORE_VERSION_MAX;
             let (marketplace_width, desc_width) =
-                plugin_store_flex_widths(result_area.width as usize, id_width, version_width);
+                store_flex_widths(result_area.width as usize, id_width, version_width);
             // The fixed column-heading row: the same column template as a result
             // row so each label sits exactly above its column, painted once above
             // the list so it never scrolls. The dark-on-light style distinguishes
-            // it from both the normal and installed row colours (FR-004).
+            // it from both the normal and installed row colours (FR-004), and the
+            // band is padded to the full result width so it reads as a header strip
+            // rather than a label floating over the rows. A description heading
+            // wider than the room left in the row is clipped by the row area,
+            // exactly as its values are.
             let heading_style = Style::default()
                 .fg(Color::Black)
                 .bg(Color::Gray)
                 .add_modifier(Modifier::BOLD);
-            let heading = format!(
-                "  {PLUGIN_STORE_HEADING_ID:<id_width$} {PLUGIN_STORE_HEADING_VERSION:<version_width$} {PLUGIN_STORE_HEADING_MARKETPLACE:<marketplace_width$} {PLUGIN_STORE_HEADING_DESCRIPTION:<desc_width$}",
+            let heading_text = format!(
+                "   {PLUGIN_STORE_HEADING_ID:<id_width$} {PLUGIN_STORE_HEADING_VERSION:<version_width$} {PLUGIN_STORE_HEADING_MARKETPLACE:<marketplace_width$} {PLUGIN_STORE_HEADING_DESCRIPTION:<desc_width$}",
             );
+            let heading_pad =
+                (result_area.width as usize).saturating_sub(heading_text.chars().count());
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(heading, heading_style))),
+                Paragraph::new(Line::from(Span::styled(
+                    format!("{heading_text}{}", " ".repeat(heading_pad)),
+                    heading_style,
+                ))),
                 heading_area,
             );
+            // The block cursor's position, clamped into the filtered set; the list's
+            // own scroll keeps it visible (FR-010) beneath the pinned heading row.
+            // It is resolved before the rows are built so each row can paint the
+            // cursor gutter marker itself.
+            let selected = browser.cursor.min(visible.saturating_sub(1));
             let items: Vec<ListItem> = browser
                 .filtered
                 .iter()
-                .map(|&index| {
+                .enumerate()
+                .map(|(row_index, &index)| {
                     let entry = &browser.all[index];
-                    let marker = if browser.is_installed(&entry.id) {
-                        " [installed]"
-                    } else {
-                        ""
-                    };
-                    let style = if browser.is_installed(&entry.id) {
+                    let installed = browser.is_installed(&entry.id);
+                    // The id and description carry the reading colour; the version
+                    // and marketplace step back into a muted tone so a wide row still
+                    // leads with the plugin's name and what it does, and the
+                    // installed marker is the one saturated green accent.
+                    let base_style = if installed {
                         installed_style
                     } else {
                         normal_style
@@ -1457,16 +1807,56 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
                     let marketplace_field =
                         truncate_bytes_no_ellipsis(&entry.marketplace, marketplace_width);
                     let desc_field = truncate_bytes_no_ellipsis(&entry.description, desc_width);
-                    let row = format!(
-                        "> {id_field:<id_width$} {version_field:<version_width$} {marketplace_field:<marketplace_width$} {desc_field}{marker}",
-                    );
-                    ListItem::new(Line::from(Span::styled(row, style)))
+                    // The two-column gutter mirrors the heading's leading indent and
+                    // carries a `>` only on the row under the cursor, so the cursor is
+                    // visible even where a background-only highlight washes out. It is
+                    // followed by the one-column installed lane, which every row paints
+                    // - the marker or a blank - so the columns stay aligned whether or
+                    // not the row is installed.
+                    let gutter = if row_index == selected { "> " } else { "  " };
+                    let installed_span = if installed {
+                        Span::styled(
+                            STORE_INSTALLED_MARKER.to_string(),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        Span::styled(" ".to_string(), base_style)
+                    };
+                    let mut spans = vec![
+                        Span::styled(gutter.to_string(), base_style),
+                        installed_span,
+                        Span::styled(format!("{id_field:<id_width$} "), base_style),
+                        Span::styled(format!("{version_field:<version_width$} "), muted_style),
+                        Span::styled(
+                            format!("{marketplace_field:<marketplace_width$} "),
+                            tag_style,
+                        ),
+                        Span::styled(desc_field, base_style),
+                    ];
+                    // Pad the row to the full result width: the trailing run carries
+                    // the row's own style, so a zebra band (and the cursor background
+                    // the list paints over it) reaches the column's right edge instead
+                    // of stopping after the last glyph. A description wider than that
+                    // edge paints nothing past it - the row area clips the surplus.
+                    let painted: usize =
+                        spans.iter().map(|span| span.content.chars().count()).sum();
+                    let pad = (result_area.width as usize).saturating_sub(painted);
+                    if pad > 0 {
+                        spans.push(Span::styled(" ".repeat(pad), base_style));
+                    }
+                    // Alternate rows carry a near-black stripe so the eye can follow
+                    // one row across the id, version, marketplace and description
+                    // columns on a wide panel.
+                    let item = ListItem::new(Line::from(spans));
+                    if row_index % 2 == 1 {
+                        item.style(Style::default().bg(STORE_BAND_BG))
+                    } else {
+                        item
+                    }
                 })
                 .collect();
-            // Keep the block cursor within the filtered set. The list's own
-            // scroll keeps the selected row visible (FR-010) beneath the pinned
-            // heading row.
-            let selected = browser.cursor.min(visible.saturating_sub(1));
             let list = List::new(items)
                 .highlight_style(cursor_style)
                 .highlight_symbol("");
@@ -1474,11 +1864,12 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
             state.select(Some(selected));
             frame.render_stateful_widget(list, list_area, &mut state);
         }
-        PluginStoreBody::Line(text, style) => {
+        StoreBody::Line(text, style) => {
             // Wrap rather than clip: with the navigator sharing the body, the
             // result column is narrower, and a long state line (a failed fetch
             // naming its cause, FR-013) must stay fully readable instead of being
-            // silently truncated at the column edge.
+            // silently truncated at the column edge. The line starts at the column's
+            // first cell, so the whole width is available to the wrap.
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, style)))
                     .block(Block::default())
@@ -1493,6 +1884,7 @@ fn render_plugin_store_panel(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(footer)
             .alignment(Alignment::Center)
+            .style(Style::default().bg(STORE_CHROME_BG))
             .wrap(Wrap { trim: true }),
         footer_area,
     );
@@ -1524,6 +1916,27 @@ fn render_plugin_store_search_box(
     field_style: Style,
     dim_style: Style,
 ) -> Rect {
+    render_store_search_box(frame, &browser.query, area, field_style, dim_style)
+}
+
+/// Render a bottom-edge catalogue search box for `query` into `area`.
+///
+/// The one implementation shared by the plugin-store and connector-catalogue
+/// panels, so their bottom strips cannot drift apart. The row is split into a
+/// leading `search:` label, the editable filter field (the live query, with a
+/// caret glyph standing in for the cursor), and a right-aligned `[x] clear`
+/// button. The field mirrors `query` byte-for-byte so the box and the result
+/// filter cannot drift; a query wider than the field is clipped from the left, so
+/// the most recently typed characters stay visible. The painted clear-button area
+/// is returned so the caller can cache it for click hit-testing;
+/// [`Rect::default`] is returned when the row is too narrow to hold the button.
+fn render_store_search_box(
+    frame: &mut Frame,
+    query: &str,
+    area: Rect,
+    field_style: Style,
+    dim_style: Style,
+) -> Rect {
     if area.width == 0 || area.height == 0 {
         return Rect::default();
     }
@@ -1532,20 +1945,25 @@ fn render_plugin_store_search_box(
     // enough to hold it), then the label, leaving the field what remains. The
     // button is dropped entirely on an extremely narrow row rather than squeezing
     // the field away, so the field always keeps at least its minimum width.
-    let clear_len = PLUGIN_STORE_CLEAR_LABEL.chars().count() as u16;
-    let has_clear = area.width >= clear_len + PLUGIN_STORE_SEARCH_MIN;
+    let clear_len = STORE_CLEAR_LABEL.chars().count() as u16;
+    let has_clear = area.width >= clear_len + STORE_SEARCH_MIN;
     let button_width = if has_clear { clear_len } else { 0 };
     let field_width = area
         .width
-        .saturating_sub(PLUGIN_STORE_SEARCH_LABEL.len() as u16)
+        .saturating_sub(STORE_SEARCH_LABEL.len() as u16)
         .saturating_sub(button_width)
-        .max(PLUGIN_STORE_SEARCH_MIN.min(area.width));
+        .max(STORE_SEARCH_MIN.min(area.width));
 
     // Paint the label, the editable field, and the clear button as one row of
     // spans. The field's text is the query clipped to the field width from the
     // left; the caret follows it so the typing position is visible.
-    let label_span = Span::styled(PLUGIN_STORE_SEARCH_LABEL, dim_style);
-    let mut field = browser.query.clone();
+    let label_span = Span::styled(
+        STORE_SEARCH_LABEL,
+        Style::default()
+            .fg(STORE_ACCENT)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut field = query.to_string();
     let field_cols = field_width as usize;
     if field.chars().count() >= field_cols {
         // Keep the tail, so the newest characters are on screen.
@@ -1559,16 +1977,26 @@ fn render_plugin_store_search_box(
     let caret = if used < field_cols { "|" } else { "" };
     field_text.push_str(caret);
     let pad = field_cols.saturating_sub(field_text.chars().count());
+    let field_style = if query.is_empty() {
+        // An empty field reads as a prompt rather than as typed content.
+        store_muted_style()
+    } else {
+        field_style
+    };
     let field_span = Span::styled(format!("{field_text}{}", " ".repeat(pad)), field_style);
 
     let mut spans = vec![label_span, field_span];
     let clear_area = if has_clear {
-        let button_style = if browser.query.is_empty() {
+        let button_style = if query.is_empty() {
             dim_style
         } else {
-            field_style
+            // The button lights up in the accent colour as soon as there is
+            // something to clear, so its affordance tracks the filter state.
+            Style::default()
+                .fg(STORE_ACCENT)
+                .add_modifier(Modifier::BOLD)
         };
-        spans.push(Span::styled(PLUGIN_STORE_CLEAR_LABEL, button_style));
+        spans.push(Span::styled(STORE_CLEAR_LABEL, button_style));
         // The button is right-aligned: its painted columns are the last
         // `clear_len` of the row.
         Rect {
@@ -1581,7 +2009,12 @@ fn render_plugin_store_search_box(
         Rect::default()
     };
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    // The row carries the chrome background so the search box reads as a distinct
+    // strip along the panel's bottom edge rather than loose text on the body.
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(STORE_CHROME_BG)),
+        area,
+    );
     clear_area
 }
 
@@ -1589,13 +2022,13 @@ fn render_plugin_store_search_box(
 /// FR-020).
 ///
 /// A third of the body, clamped to a readable range, and always narrow enough
-/// that the result column keeps at least [`PLUGIN_STORE_RESULT_MIN`] columns
+/// that the result column keeps at least [`STORE_RESULT_MIN`] columns
 /// plus the separator. A narrow terminal therefore shrinks the navigator rather
 /// than clipping the result list.
-fn plugin_store_nav_width(body_width: u16) -> u16 {
-    let max_nav = body_width.saturating_sub(PLUGIN_STORE_NAV_GAP + PLUGIN_STORE_RESULT_MIN);
+fn store_nav_width(body_width: u16) -> u16 {
+    let max_nav = body_width.saturating_sub(STORE_NAV_GAP + STORE_RESULT_MIN);
     (body_width / 3)
-        .clamp(PLUGIN_STORE_NAV_MIN, PLUGIN_STORE_NAV_MAX)
+        .clamp(STORE_NAV_MIN, STORE_NAV_MAX)
         .min(max_nav)
 }
 
@@ -1616,36 +2049,23 @@ fn version_display(version: &str) -> &str {
 /// of `row_width` columns (spec `pluginstores` FR-004, FR-048).
 ///
 /// The id and version columns are fixed at `id_width` and `version_width`; the
-/// leading `> ` marker, the four single-space separators, and the `[installed]`
-/// marker are fixed overhead. The marketplace and description columns then split
-/// what remains: the marketplace takes at most half (and at most
-/// [`PLUGIN_STORE_MARKETPLACE_MAX`]), the description at most
-/// [`PLUGIN_STORE_DESC_MAX`], and any allowance the description does not use is
-/// handed to the marketplace so a long marketplace name is shown in full whenever
-/// the row has room. The two widths always sum to no more than the available space,
-/// so the description and the trailing `[installed]` marker are never pushed past
-/// the column edge on a narrow panel.
-fn plugin_store_flex_widths(
-    row_width: usize,
-    id_width: usize,
-    version_width: usize,
-) -> (usize, usize) {
-    const MARKER: &str = " [installed]";
-    // `> ` (2) + id + sep (1) + version + sep (1) + marketplace + sep (1) +
-    // description + marker.
-    let fixed = 2 + id_width + 1 + version_width + 1 + 1 + MARKER.len();
+/// cursor gutter, the one-column installed lane
+/// ([`STORE_INSTALLED_MARKER`]), and the three single-space separators are
+/// fixed overhead. The marketplace is capped by
+/// [`PLUGIN_STORE_MARKETPLACE_MAX`] and takes at most half of what remains, and the
+/// description is given **every other column**: it is the row's last column, so it
+/// renders right up to the panel's inner right edge, and a long description is
+/// clipped there rather than pushing the id, version or marketplace columns off the
+/// row (FR-018).
+fn store_flex_widths(row_width: usize, id_width: usize, version_width: usize) -> (usize, usize) {
+    // `> ` (2) + installed lane (1) + id + sep (1) + version + sep (1) +
+    // marketplace + sep (1) + description.
+    let fixed = 2 + STORE_INSTALLED_MARKER.len() + id_width + 1 + version_width + 1 + 1;
     let available = row_width.saturating_sub(fixed);
     // The marketplace is a short label: it takes at most half the flexible space
-    // (and at most its ceiling), so the description keeps room to breathe.
+    // (and at most its ceiling), and the description takes the rest.
     let marketplace = (available / 2).min(PLUGIN_STORE_MARKETPLACE_MAX);
-    let desc = available
-        .saturating_sub(marketplace)
-        .min(PLUGIN_STORE_DESC_MAX as usize);
-    // Hand whatever the description did not use back to the marketplace.
-    let marketplace = available
-        .saturating_sub(desc)
-        .min(PLUGIN_STORE_MARKETPLACE_MAX);
-    (marketplace, desc)
+    (marketplace, available.saturating_sub(marketplace))
 }
 
 /// Render the plugin-store category navigator into `area` (spec `catnav` FR-001,
@@ -1682,6 +2102,8 @@ fn render_plugin_store_navigator(
 
     let rows = browser.category_row_count();
     let active = browser.active_category().to_string();
+    let selected = browser.category_cursor_row();
+    let count_style = Style::default().fg(STORE_ACCENT);
     let items: Vec<ListItem> = (0..rows)
         .map(|row| {
             let label = browser.category_row_label(row);
@@ -1691,15 +2113,21 @@ fn render_plugin_store_navigator(
                 normal_style
             };
             // Each row shows the category name with its entry count (FR-053), so the
-            // size of each category is visible before selecting it.
-            ListItem::new(Line::from(Span::styled(
-                browser.category_row_display(row),
-                style,
-            )))
+            // size of each category is visible before selecting it. The count is
+            // painted in the panel accent so the name stays the reading element.
+            let display = browser.category_row_display(row);
+            // The label is a prefix of the display text, so its byte length is a
+            // valid split point and the count suffix keeps its own accent style.
+            let split = label.len().min(display.len());
+            let (name, count) = display.split_at(split);
+            ListItem::new(Line::from(vec![
+                Span::styled(" ".to_string(), style),
+                Span::styled(name.to_string(), style),
+                Span::styled(count.to_string(), count_style),
+            ]))
         })
         .collect();
 
-    let selected = browser.category_cursor_row();
     let list = List::new(items)
         .highlight_style(cursor_style)
         .highlight_symbol("");
@@ -1739,6 +2167,8 @@ fn render_plugin_store_marketplace_navigator(
 
     let rows = browser.marketplace_row_count();
     let active = browser.active_marketplace().to_string();
+    let selected = browser.marketplace_cursor_row();
+    let count_style = Style::default().fg(STORE_ACCENT);
     let items: Vec<ListItem> = (0..rows)
         .map(|row| {
             let label = browser.marketplace_row_label(row);
@@ -1748,15 +2178,18 @@ fn render_plugin_store_marketplace_navigator(
                 normal_style
             };
             // Each row shows the marketplace name with its entry count (FR-053),
-            // mirroring the category navigator.
-            ListItem::new(Line::from(Span::styled(
-                browser.marketplace_row_display(row),
-                style,
-            )))
+            // mirroring the category navigator: the count in the panel accent.
+            let display = browser.marketplace_row_display(row);
+            let split = label.len().min(display.len());
+            let (name, count) = display.split_at(split);
+            ListItem::new(Line::from(vec![
+                Span::styled(" ".to_string(), style),
+                Span::styled(name.to_string(), style),
+                Span::styled(count.to_string(), count_style),
+            ]))
         })
         .collect();
 
-    let selected = browser.marketplace_cursor_row();
     let list = List::new(items)
         .highlight_style(cursor_style)
         .highlight_symbol("");
@@ -1768,42 +2201,91 @@ fn render_plugin_store_marketplace_navigator(
 
 /// The body content of the plugin-store panel: either the result rows or a
 /// single explicit state line (FR-013, FR-016, FR-017).
-enum PluginStoreBody {
+enum StoreBody {
     /// The filtered set is non-empty; draw the result rows.
     Rows,
     /// Render `text` in `style` as the body (loading / error / empty states).
     Line(String, Style),
 }
 
-/// The panel title line for `browser` (FR-004, FR-005, FR-013, FR-016, FR-025).
+/// The muted style used for the plugin-store's secondary text: a row's version
+/// and marketplace columns, the title's separators, and an empty search field.
 ///
-/// Names the store, the live search field, the visible/total counts, the active
+/// A cool light grey rather than `Color::DarkGray`, which is too dim to read on
+/// the chrome bands the panel now paints (theme `colors::HINT` is the same
+/// accessible tone; this variant carries a slight blue cast so it belongs to the
+/// panel's slate accent family).
+fn store_muted_style() -> Style {
+    Style::default().fg(Color::Rgb(150, 155, 170))
+}
+
+/// The panel title for `browser` (FR-004, FR-005, FR-013, FR-016, FR-025).
+///
+/// A single line of styled spans rather than one flat string, so the store name
+/// reads as a badge, the counts as the primary fact, the active filters in the
+/// panel accent, and the secondary hints in the muted tone:
+///
+/// ```text
+///  Codex Plugin Store  3 of 3  search:    category ALL   marketplace ALL
+/// ```
+///
+/// It names the store, the live search field, the visible/total counts, the active
 /// category (spec `catnav` FR-005), the active marketplace (spec `pluginstores`
-/// FR-052), and - when the parser skipped any malformed
-/// entries - the skipped count, so a partial result set is visible at a glance
-/// rather than silently short (FR-025). While the off-loop manifest enrichment is
-/// still running a `loading details...` hint is appended, so a still-blank
-/// version/description reads as pending rather than missing (FR-048).
-fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
-    let total = browser.all.len();
-    let visible = browser.filtered.len();
-    let mut title = format!(
-        " {} Plugin Store -- search: {} -- {} of {} -- category {} -- marketplace {}",
-        browser.kind.label(),
-        browser.query,
-        visible,
-        total,
-        browser.active_category(),
-        browser.active_marketplace(),
-    );
+/// FR-052), and - when the parser skipped any malformed entries - the skipped
+/// count, so a partial result set is visible at a glance rather than silently
+/// short (FR-025). While the off-loop manifest enrichment is still running a
+/// `loading details...` hint is appended, so a still-blank version/description
+/// reads as pending rather than missing (FR-048). The rendered text stays the same
+/// words the flat version used, so the title remains greppable in tests and logs.
+fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> Line<'static> {
+    let muted = store_muted_style();
+    let accent = Style::default()
+        .fg(STORE_ACCENT)
+        .add_modifier(Modifier::BOLD);
+    let value = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+
+    let mut spans = vec![
+        Span::styled(
+            format!(" {} Plugin Store ", browser.kind.label()),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {} of {} ", browser.filtered.len(), browser.all.len()),
+            accent,
+        ),
+        Span::styled(" search: ", muted),
+        Span::styled(
+            if browser.query.is_empty() {
+                "-".to_string()
+            } else {
+                browser.query.clone()
+            },
+            if browser.query.is_empty() {
+                muted
+            } else {
+                value
+            },
+        ),
+        Span::styled(" category ", muted),
+        Span::styled(browser.active_category().to_string(), value),
+        Span::styled(" marketplace ", muted),
+        Span::styled(browser.active_marketplace().to_string(), value),
+    ];
     if browser.skipped > 0 {
-        title.push_str(&format!(" -- {} skipped", browser.skipped));
+        spans.push(Span::styled(
+            format!("  {} skipped ", browser.skipped),
+            Style::default().fg(Color::Yellow),
+        ));
     }
     if browser.enriching {
-        title.push_str(" -- loading details...");
+        spans.push(Span::styled(" loading details... ", muted));
     }
-    title.push(' ');
-    title
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 /// Decide what the plugin-store panel body should show for `browser`
@@ -1814,23 +2296,23 @@ fn plugin_store_title(browser: &crate::app::PluginStoreBrowser) -> String {
 /// unsatisfied list also names the skipped-malformed-entry count when the parser
 /// dropped any entries, so a partial result is reported rather than hidden
 /// (FR-025).
-fn plugin_store_body(browser: &crate::app::PluginStoreBrowser) -> PluginStoreBody {
+fn plugin_store_body(browser: &crate::app::PluginStoreBrowser) -> StoreBody {
     use crate::app::PluginStoreStatus;
 
     match &browser.status {
-        PluginStoreStatus::Loading => PluginStoreBody::Line(
+        PluginStoreStatus::Loading => StoreBody::Line(
             "loading store index...".to_string(),
             Style::default().fg(Color::Cyan),
         ),
-        PluginStoreStatus::Failed(reason) => PluginStoreBody::Line(
+        PluginStoreStatus::Failed(reason) => StoreBody::Line(
             format!("store index failed: {reason}"),
             Style::default().fg(Color::Red),
         ),
         PluginStoreStatus::Empty | PluginStoreStatus::Ready => {
             if browser.has_results() {
-                PluginStoreBody::Rows
+                StoreBody::Rows
             } else {
-                PluginStoreBody::Line(
+                StoreBody::Line(
                     plugin_store_empty_line(browser),
                     Style::default().fg(Color::DarkGray),
                 )
@@ -2363,11 +2845,226 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
     }
 }
 
+/// The accent style of a provider/model setup dialog: its frame, its titles and
+/// its cursor.
+///
+/// Deliberately calm slate, not saturated cyan, so the dialog reads as chrome and
+/// the filled cursor bar is the brightest thing on the panel (mirrors the plugin
+/// and connector catalogue chrome).
+fn setup_accent_style() -> Style {
+    Style::default()
+        .fg(SETUP_ACCENT)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Muted style for a setup dialog's secondary text: captions, key hints, and the
+/// columns that carry supporting facts rather than the entry's name.
+fn setup_muted_style() -> Style {
+    Style::default().fg(theme::colors::HINT)
+}
+
+/// The reversed-video section band pinned above a setup dialog's list (black on
+/// grey), padded with `width` so it runs edge to edge like the plugin and
+/// connector catalogue column headings.
+///
+/// `label` is painted exactly as given, so the caller controls the column alignment
+/// and the band sits directly over the values beneath it.
+fn setup_band(label: &str, width: u16) -> Line<'static> {
+    let pad = (width as usize).saturating_sub(label.chars().count());
+    Line::from(Span::styled(
+        format!("{label}{}", " ".repeat(pad)),
+        Style::default()
+            .fg(SETUP_BAND_FG)
+            .bg(SETUP_BAND_BG)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// The framed block every setup dialog shares: a slate accent border carrying
+/// `title`, with the accent applied to the title text as well.
+fn setup_block(title: Line<'static>) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(SETUP_ACCENT))
+}
+
+/// The one-line key-hint footer shared by the setup dialogs, centred inside
+/// `area` and painted in the muted tone.
+fn render_setup_hint(frame: &mut Frame, area: Rect, hint: &str) {
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            hint.to_string(),
+            setup_muted_style(),
+        )))
+        .alignment(Alignment::Center),
+        area,
+    );
+}
+
+/// Compose one setup-dialog heading strip: `left` spans at the column's left edge,
+/// `right` in the muted tone flush to its right edge, with the gap padded between.
+///
+/// `width` is the dialog's inner width, so the strip always spans the full column.
+fn setup_heading(left: Vec<Span<'static>>, right: &str, width: u16) -> Line<'static> {
+    let painted: usize = left
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>()
+        + right.chars().count();
+    let mut spans = left;
+    spans.push(Span::raw(
+        " ".repeat((width as usize).saturating_sub(painted).max(1)),
+    ));
+    if !right.is_empty() {
+        spans.push(Span::styled(right.to_string(), setup_muted_style()));
+    }
+    Line::from(spans)
+}
+
+/// The filled cursor bar every setup-dialog list paints on its selected row.
+fn setup_cursor_style() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(SETUP_ACCENT)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Pad `line` with trailing spaces to `width` so a zebra stripe (or the cursor bar)
+/// reaches the dialog's inner right edge instead of stopping after the last glyph.
+fn setup_pad_line(mut line: Line<'static>, width: u16) -> Line<'static> {
+    let painted = line.width();
+    let pad = (width as usize).saturating_sub(painted);
+    if pad > 0 {
+        line.spans.push(Span::raw(" ".repeat(pad)));
+    }
+    line
+}
+
+/// First row of the window that keeps `selected` visible in `visible` rows of a
+/// `total`-row list.
+///
+/// Every setup selector uses this one rule, so the painted window, the scroll
+/// legend and the cursor can never disagree: the window only starts moving once
+/// the cursor reaches its bottom row, and it then follows the cursor one row at
+/// a time.
+fn setup_window_start(selected: usize, visible: usize, total: usize) -> usize {
+    let visible = visible.max(1).min(total.max(1));
+    if selected >= visible {
+        (selected + 1).saturating_sub(visible)
+    } else {
+        0
+    }
+}
+
+/// First row of a stateless scroll window that shows the row span `start..end`
+/// inside a viewport of `height` rows.
+///
+/// The two-pane router setup keeps no scroll state (the cursor is the only
+/// state), so its panes recompute the offset every frame from the selected
+/// entry's own line span: an entry taller than the viewport shows from its first
+/// line rather than being pushed off the top.
+fn setup_scroll_to_show(start: usize, end: usize, height: usize) -> usize {
+    if height == 0 {
+        return 0;
+    }
+    let end = end.max(start.saturating_add(1));
+    if end <= height {
+        0
+    } else {
+        (end - height).min(start)
+    }
+}
+
+/// Render the shared setup-dialog list shape: a framed block, a heading strip, an
+/// optional pinned column band, the scrolling cursor list, and a key-hint footer.
+///
+/// `rows` are the pre-built entry lines (already padded to the dialog width by the
+/// caller via [`setup_pad_line`]); `selected` is the cursor index. Every list-bearing
+/// setup step shares this composition so the pickers cannot drift apart visually.
+/// When `scroll_hint` is set the legend replaces the key hint on the last inner row
+/// (the legend also states the key bindings, so nothing is lost).
+#[allow(clippy::too_many_arguments)]
+fn render_setup_list(
+    frame: &mut Frame,
+    area: Rect,
+    title: Line<'static>,
+    heading: Line<'static>,
+    hint: &str,
+    band: Option<Line<'static>>,
+    rows: Vec<Line<'static>>,
+    selected: usize,
+    scroll_hint: Option<String>,
+) {
+    let block = setup_block(title);
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let band_rows = u16::from(band.is_some());
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(band_rows),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    frame.render_widget(Paragraph::new(heading), chunks[0]);
+    if let Some(band) = band {
+        frame.render_widget(Paragraph::new(band), chunks[1]);
+    }
+
+    let items: Vec<ListItem> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let item = ListItem::new(line);
+            if index % 2 == 1 {
+                item.style(Style::default().bg(SETUP_ZEBRA_BG))
+            } else {
+                item
+            }
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    let list = List::new(items)
+        .highlight_style(setup_cursor_style())
+        .highlight_symbol("");
+    frame.render_stateful_widget(list, chunks[2], &mut state);
+
+    match scroll_hint {
+        Some(legend) => frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                legend,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center),
+            chunks[3],
+        ),
+        None => render_setup_hint(frame, chunks[3], hint),
+    }
+}
+
 fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
     // Use a taller, capped dialog so longer provider/model lists fit without
     // clipping on typical terminal sizes.  80% height up to 30 rows gives the
     // provider picker enough room to show most entries.
-    let area = centered_rect_max(60, 80, 80, 30, frame.area());
+    //
+    // The rect is recorded before the step is borrowed so the mouse router knows
+    // where the dialog is painted: a wheel notch inside it scrolls the dialog's
+    // own list and a notch outside it is swallowed (FR-011).
+    app.provider_setup_area = centered_rect_max(60, 80, 80, 30, frame.area());
+    let area = app.provider_setup_area;
     frame.render_widget(Clear, area);
 
     let Some(step) = app.provider_setup.as_ref() else {
@@ -2385,166 +3082,136 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             let spinner =
                 ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][(elapsed as usize) % 10];
             let lines: Vec<Line<'_>> = vec![
+                Line::from(""),
                 Line::from(Span::styled(
                     format!("Loading models for {}", provider_name),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    setup_accent_style(),
                 )),
                 Line::from(""),
-                Line::from(Span::styled(
-                    format!("{} Fetching model list...", spinner),
-                    Style::default().fg(Color::Yellow),
-                )),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{} Fetching model list...", spinner),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(format!("  {}s", elapsed), setup_muted_style()),
+                ]),
                 Line::from(""),
-                Line::from(Span::styled(
-                    "Esc cancel",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Line::from(Span::styled("Esc cancel", setup_muted_style())),
             ];
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" {} ", provider_id))
-                .border_style(Style::default().fg(Color::Cyan));
+            let block = setup_block(Line::from(vec![
+                Span::styled(" Loading Models ", setup_accent_style()),
+                Span::styled(format!(" {} ", provider_id), setup_muted_style()),
+            ]));
             let paragraph = Paragraph::new(lines)
                 .block(block)
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::SelectProvider { selected, .. } => {
-            // Split the dialog area into header, scrollable provider list, and footer.
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Provider Setup ")
-                .border_style(Style::default().fg(Color::Cyan));
+            // One calm column: a heading strip naming the step, a pinned
+            // reversed-video band naming the row columns, the scrolling provider
+            // list, and a key-hint footer. The provider with stored credentials
+            // carries `[ok]` in the status lane; a local provider carries `[local]`
+            // in the badge lane.
+            let block = setup_block(Line::from(Span::styled(
+                " Provider Setup ",
+                setup_accent_style(),
+            )));
             let inner = block.inner(area);
-
-            // Determine which providers have saved credentials so we can show a [ok] tick.
+            // Which providers already have saved credentials, so the status lane
+            // can show `[ok]` rather than a blank.
             let configured_ids: std::collections::HashSet<String> =
                 App::get_configured_providers(&app.storage)
                     .into_iter()
                     .map(|p| p.id)
                     .collect();
+            let configured_count = PROVIDER_LIST
+                .iter()
+                .filter(|(pid, _)| configured_ids.contains(*pid))
+                .count();
 
-            // Build provider entry lines.
-            let mut provider_lines: Vec<Line<'_>> = Vec::with_capacity(PROVIDER_LIST.len());
-            for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
-                let (indicator, style) = if i == *selected {
-                    (
-                        "> ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
+            // Column geometry: the name column takes every column the fixed right
+            // lanes leave, so a long provider name is the thing that gets the room.
+            let right_lanes = PROVIDER_BADGE_WIDTH + PROVIDER_STATUS_WIDTH + PROVIDER_ID_MAX + 3;
+            let name_width = (inner.width as usize)
+                .saturating_sub(2 + right_lanes)
+                .max(8);
+
+            let name_style = Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD);
+            let id_style = setup_muted_style();
+            let badge_style = Style::default().fg(Color::Yellow);
+            let ok_style = Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD);
+
+            let rows: Vec<Line<'static>> = PROVIDER_LIST
+                .iter()
+                .map(|(pid, pname)| {
+                    let name_field = truncate_bytes_no_ellipsis(pname, name_width);
+                    let id_field = truncate_bytes_no_ellipsis(pid, PROVIDER_ID_MAX);
+                    let badge = if *pid == "ollama" { "[local]" } else { "" };
+                    let status = if configured_ids.contains(*pid) {
+                        "[ok]"
+                    } else {
+                        ""
+                    };
+                    let line = Line::from(vec![
+                        Span::styled(format!("{name_field:<name_width$} "), name_style),
+                        Span::styled(format!("{id_field:<PROVIDER_ID_MAX$} "), id_style),
+                        Span::styled(format!("{badge:<PROVIDER_BADGE_WIDTH$} "), badge_style),
+                        Span::styled(format!("{status:<PROVIDER_STATUS_WIDTH$}"), ok_style),
+                    ]);
+                    setup_pad_line(line, inner.width)
+                })
+                .collect();
+
+            // The scroll legend keeps the `more above` / `more below` counts explicit
+            // (with the key bindings folded in) so a clipped list never looks whole. The
+            // window is computed with the same bottom-anchored rule `List` uses, so the
+            // legend describes exactly the rows that are painted.
+            let band_rows = 1u16;
+            let list_rows = inner.height.saturating_sub(1 + band_rows + 1) as usize;
+            let total = rows.len();
+            let scroll_hint = if total > list_rows && list_rows > 0 {
+                let offset = if *selected >= list_rows {
+                    (*selected + 1).saturating_sub(list_rows)
                 } else {
-                    ("  ", Style::default().fg(Color::White))
+                    0
                 };
-                let tick = if configured_ids.contains(*pid) {
-                    " [ok]"
-                } else {
-                    ""
-                };
-                let badge = if *pid == "ollama" { " [local]" } else { "" };
-                provider_lines.push(Line::from(vec![
-                    Span::styled(indicator, style),
-                    Span::styled(*pname, style),
-                    Span::styled(badge, Style::default().fg(Color::Yellow)),
-                    Span::styled(tick, Style::default().fg(Color::Green)),
-                ]));
-            }
-
-            // Fixed header and footer consume 4 inner rows (2 header + 2 footer).
-            const HEADER_ROWS: u16 = 2;
-            const FOOTER_ROWS: u16 = 2;
-            let provider_area_height = inner.height.saturating_sub(HEADER_ROWS + FOOTER_ROWS);
-            let needs_scroll = provider_lines.len() > provider_area_height as usize;
-
-            // Compute a scroll offset that keeps the selected provider visible.
-            let max_offset = provider_lines
-                .len()
-                .saturating_sub(provider_area_height as usize);
-            let half = (provider_area_height as usize) / 2;
-            let scroll_offset = if *selected < half {
-                0
-            } else {
-                (*selected - half).min(max_offset)
-            };
-
-            let visible_providers = if provider_area_height == 0 {
-                &provider_lines[..0]
-            } else {
-                let end = (scroll_offset + provider_area_height as usize).min(provider_lines.len());
-                &provider_lines[scroll_offset..end]
-            };
-
-            // Header text.
-            let header_lines = vec![
-                Line::from(Span::styled(
-                    "Select a Provider",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
-
-            // Strong scrolling indicators: explicit arrows when clipped, with the
-            // current position shown, so users always know the list is scrollable.
-            let footer_lines = if needs_scroll {
-                let total = provider_lines.len();
-                let visible_start = scroll_offset + 1;
-                let visible_end = (scroll_offset + visible_providers.len()).min(total);
-                let scroll_hint = format!(
-                    "^ {} more above - {}-{} of {} v {} more below",
-                    scroll_offset,
-                    visible_start,
+                let visible_end = (offset + list_rows).min(total);
+                Some(format!(
+                    "^ {} more above  |  {}-{} of {}  |  v {} more below  |  ^/v navigate  Enter select  Esc cancel",
+                    offset,
+                    offset + 1,
                     visible_end,
                     total,
                     total.saturating_sub(visible_end)
-                );
-                vec![
-                    Line::from(Span::styled(
-                        "^/v navigate  Enter select  Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    Line::from(Span::styled(
-                        scroll_hint,
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                ]
+                ))
             } else {
-                vec![
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "^/v navigate  Enter select  Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                ]
-            }; // Layout: header, provider list, footer.
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(HEADER_ROWS),
-                    Constraint::Min(0),
-                    Constraint::Length(FOOTER_ROWS),
-                ])
-                .split(inner);
+                None
+            };
 
-            frame.render_widget(Clear, area);
-            frame.render_widget(block, area);
-            frame.render_widget(
-                Paragraph::new(header_lines).alignment(Alignment::Center),
-                chunks[0],
+            let heading = setup_heading(
+                vec![Span::styled("Select a Provider", setup_accent_style())],
+                &format!("{} of {} configured", configured_count, PROVIDER_LIST.len()),
+                inner.width,
             );
-            frame.render_widget(
-                Paragraph::new(visible_providers.to_vec()).alignment(Alignment::Center),
-                chunks[1],
+            let band_text = format!(
+                "{:<name_width$} {:<PROVIDER_ID_MAX$} {:<PROVIDER_BADGE_WIDTH$} {}",
+                "Provider", "Id", "Kind", "Status"
             );
-            frame.render_widget(
-                Paragraph::new(footer_lines).alignment(Alignment::Center),
-                chunks[2],
+            render_setup_list(
+                frame,
+                area,
+                Line::from(Span::styled(" Provider Setup ", setup_accent_style())),
+                heading,
+                "^/v navigate  Enter select  Esc cancel",
+                Some(setup_band(&band_text, inner.width)),
+                rows,
+                *selected,
+                scroll_hint,
             );
         }
         ProviderSetupStep::EnterKey {
@@ -2558,17 +3225,19 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
         } => {
             // Wider dialog so the full API key (>= 48 chars) is visible.
             let area = centered_rect_max(80, 80, 100, 30, frame.area());
+            app.provider_setup_area = area;
             frame.render_widget(Clear, area);
 
             let mut lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
                     format!("Configure {}", provider_name),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    setup_accent_style(),
                 )),
                 Line::from(""),
-                Line::from("Enter your API key:"),
+                Line::from(Span::styled(
+                    "Enter your API key:",
+                    Style::default().fg(Color::White),
+                )),
                 Line::from(""),
             ];
 
@@ -2584,7 +3253,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             lines.push(Line::from(vec![
                 Span::styled(
                     if *active_field == 0 { "> " } else { "  " },
-                    Style::default().fg(Color::Cyan),
+                    setup_accent_style(),
                 ),
                 Span::styled(
                     with_cursor_marker(&key_text, key_cursor_display),
@@ -2594,9 +3263,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
 
             if provider_id == "generic_openai" || provider_id == "azure_foundry" {
                 lines.push(Line::from(""));
-                lines.push(Line::from(
+                lines.push(Line::from(Span::styled(
                     "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
-                ));
+                    Style::default().fg(Color::White),
+                )));
                 let ep_text = endpoint_field.text();
                 let endpoint_cursor_display = if *active_field == 1 {
                     endpoint_field.cursor()
@@ -2606,7 +3276,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 lines.push(Line::from(vec![
                     Span::styled(
                         if *active_field == 1 { "> " } else { "  " },
-                        Style::default().fg(Color::Cyan),
+                        setup_accent_style(),
                     ),
                     Span::styled(
                         if ep_text.is_empty() {
@@ -2619,7 +3289,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 ]));
                 lines.push(Line::from(Span::styled(
                     "Tab switches between API key and endpoint fields",
-                    Style::default().fg(Color::DarkGray),
+                    setup_muted_style(),
                 )));
             }
             if let Some(err) = error {
@@ -2633,13 +3303,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Enter confirm  Esc cancel",
-                Style::default().fg(Color::DarkGray),
+                setup_muted_style(),
             )));
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Enter API Key ")
-                .border_style(Style::default().fg(Color::Cyan));
+            let block = setup_block(Line::from(vec![
+                Span::styled(" Enter API Key ", setup_accent_style()),
+                Span::styled(format!(" {} ", provider_name), setup_muted_style()),
+            ]));
 
             let paragraph = Paragraph::new(lines)
                 .block(block)
@@ -2659,12 +3329,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             };
 
             let lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    header,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
+                Line::from(Span::styled(header, setup_accent_style())),
                 Line::from(""),
                 Line::from("Visit the URL below and enter the code:"),
                 Line::from(""),
@@ -2676,7 +3341,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::raw("Code: "),
+                    Span::styled("Code: ", setup_muted_style()),
                     Span::styled(
                         user_code.as_str(),
                         Style::default()
@@ -2687,19 +3352,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 Line::from(""),
                 Line::from(Span::styled(
                     "Waiting for authorisation...",
-                    Style::default().fg(Color::DarkGray),
+                    setup_muted_style(),
                 )),
                 Line::from(""),
-                Line::from(Span::styled(
-                    "c copy code  Esc cancel",
-                    Style::default().fg(Color::DarkGray),
-                )),
+                Line::from(Span::styled("c copy code  Esc cancel", setup_muted_style())),
             ];
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .border_style(Style::default().fg(Color::Cyan));
+            let block = setup_block(Line::from(Span::styled(title, setup_accent_style())));
 
             let paragraph = Paragraph::new(lines)
                 .block(block)
@@ -2716,11 +3375,22 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             // widest cell in each column (see `content_sized_columns`), and
             // the dialog is just wide enough to hold the full row. The cap
             // (`centered_rect_max`) also clamps to the terminal, so small
-            // terminals still fit.
+            // terminals still fit. An empty model list has no columns to
+            // measure, so it keeps a readable fixed width for its notice.
             let cells = model_picker_cells(models, *selected);
-            let inner_w = model_picker_inner_width(&cells) as u16;
-            let area = centered_rect_max(100, 80, inner_w.saturating_add(2), 30, frame.area());
+            let area = if models.is_empty() {
+                centered_rect_max(80, 80, 68, 30, frame.area())
+            } else {
+                let inner_w = model_picker_inner_width(&cells) as u16;
+                centered_rect_max(100, 80, inner_w.saturating_add(2), 30, frame.area())
+            };
+            app.provider_setup_area = area;
             frame.render_widget(Clear, area);
+
+            let title = setup_block(Line::from(vec![
+                Span::styled(" Select Model ", setup_accent_style()),
+                Span::styled(format!(" {} ", provider_name), setup_muted_style()),
+            ]));
 
             if models.is_empty() {
                 let paragraph = Paragraph::new(vec![
@@ -2730,186 +3400,230 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         Style::default().fg(Color::Yellow),
                     )),
                     Line::from(""),
-                    Line::from("Check provider setup, authentication, or model discovery."),
-                    Line::from(""),
                     Line::from(Span::styled(
-                        "Esc cancel",
-                        Style::default().fg(Color::DarkGray),
+                        "Check provider setup, authentication, or model discovery.",
+                        setup_muted_style(),
                     )),
+                    Line::from(""),
+                    Line::from(Span::styled("Esc cancel", setup_muted_style())),
                 ])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(format!(" Select Model - {} ", provider_name))
-                        .border_style(Style::default().fg(Color::Cyan)),
-                )
+                .block(title)
                 .alignment(Alignment::Center);
                 frame.render_widget(paragraph, area);
                 return;
             }
 
-            // Create header row
-            let header = Row::new(MODEL_PICKER_HEADERS).style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Cyan),
-            );
+            // Three inner bands: the pinned column heading, the scrolling model
+            // list, and one footer row carrying the key hints and the window
+            // position. The heading lives outside the table so it never scrolls.
+            let inner = title.inner(area);
 
-            // Calculate visible rows based on available height
-            let header_height = 3; // Header + border lines
-            let footer_height = 3; // Footer hint + spacing
-            let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
-            let visible = available_rows.max(1).min(models.len());
-            let start = if *selected >= visible {
-                (*selected + 1).saturating_sub(visible)
-            } else {
-                0
-            };
+            // Measure the columns exactly as `content_sized_columns` will, so the
+            // heading labels sit over their own column.
+            let columns = content_sized_columns(&cells);
+            let widths: Vec<usize> = columns
+                .iter()
+                .map(|c| match c {
+                    Constraint::Length(w) | Constraint::Min(w) => *w as usize,
+                    _ => 0,
+                })
+                .collect();
+
+            // The pinned heading band: dark-on-light like the catalogue column
+            // headings, each label over its column and the trailing space padded so
+            // the band runs to the dialog's inner right edge.
+            let band_text = model_picker_heading_band(&widths);
+
+            // Window the list so the cursor stays visible.
+            let list_rows = inner.height.saturating_sub(3) as usize;
+            let visible = list_rows.max(1).min(models.len());
+            let start = setup_window_start(*selected, visible, models.len());
             let end = (start + visible).min(models.len());
 
-            let rows: Vec<Row> = cells
+            // Row palette: the name leads in white, the supporting facts step back
+            // into the muted tone so a wide row still leads with the model name.
+            // Every cell is padded to its measured column width, so the columns stay
+            // aligned down the list and under the heading band.
+            let rows: Vec<Line<'static>> = cells
                 .iter()
                 .enumerate()
                 .skip(start)
                 .take(end - start)
-                .map(|(i, row_cells)| {
-                    let is_selected = i == *selected;
-                    let style = if is_selected {
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::White)
-                    };
-                    Row::new(row_cells.clone()).style(style)
+                .map(|(_, row_cells)| {
+                    let mut spans: Vec<Span<'static>> = Vec::with_capacity(row_cells.len());
+                    for (col, value) in row_cells.iter().enumerate() {
+                        let width = widths
+                            .get(col)
+                            .copied()
+                            .unwrap_or_else(|| value.chars().count());
+                        // The context-window and cost columns are numeric: right
+                        // align them so their digits line up down the table.
+                        let field = if col == 1 || col == 2 {
+                            format!("{value:>width$}")
+                        } else {
+                            format!("{value:<width$}")
+                        };
+                        let style = if col == 0 {
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            setup_muted_style()
+                        };
+                        spans.push(Span::styled(field, style));
+                        if col + 1 < row_cells.len() {
+                            spans.push(Span::raw(" ".repeat(MODEL_PICKER_COLUMN_SPACING)));
+                        }
+                    }
+                    setup_pad_line(Line::from(spans), inner.width)
                 })
                 .collect();
 
-            let table = Table::new(rows, content_sized_columns(&cells))
-                .header(header)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(format!(" Select Model - {} ", provider_name))
-                        .border_style(Style::default().fg(Color::Cyan)),
-                );
-
-            frame.render_widget(table, area);
-
-            // Render footer hint at the bottom of the area
-            if area.height > 2 {
-                let hint = Span::styled(
-                    "^/v navigate  Enter select  Esc cancel",
-                    Style::default().fg(Color::DarkGray),
-                );
-                let hint_line = Line::from(hint);
-                let hint_area = Rect::new(
-                    area.x + 2,
-                    area.y + area.height - 2,
-                    area.width.saturating_sub(4),
-                    1,
-                );
-                frame.render_widget(Paragraph::new(hint_line), hint_area);
+            // The footer carries the window position (when the list is clipped), the
+            // key hints, and the feature legend. `Showing` leads so a clipped window
+            // says so even when a narrow dialog truncates the tail.
+            let mut legend = String::new();
+            if models.len() > visible {
+                legend.push_str(&format!(
+                    "Showing {}-{} of {}  |  ",
+                    start + 1,
+                    end,
+                    models.len()
+                ));
             }
+            legend.push_str("^/v navigate  Enter select  Esc cancel");
+            legend.push_str("  |  R reasoning  V vision  T tools");
 
-            // Render "showing X of Y" if needed
-            if models.len() > visible && area.height > 4 {
-                let showing = Span::styled(
-                    format!("Showing {}-{} of {}", start + 1, end, models.len()),
-                    Style::default().fg(Color::DarkGray),
-                );
-                let showing_line = Line::from(showing);
-                let showing_area = Rect::new(
-                    area.x + 2,
-                    area.y + area.height - 3,
-                    area.width.saturating_sub(4),
-                    1,
-                );
-                frame.render_widget(
-                    Paragraph::new(showing_line).alignment(Alignment::Right),
-                    showing_area,
-                );
-            }
+            render_setup_list(
+                frame,
+                area,
+                Line::from(vec![
+                    Span::styled(" Select Model ", setup_accent_style()),
+                    Span::styled(format!(" {} ", provider_name), setup_muted_style()),
+                ]),
+                setup_heading(
+                    vec![Span::styled(
+                        format!("{} models", models.len()),
+                        setup_accent_style(),
+                    )],
+                    "Enter selects",
+                    inner.width,
+                ),
+                &legend,
+                Some(setup_band(&band_text, inner.width)),
+                rows,
+                (*selected).saturating_sub(start),
+                None,
+            );
         }
         ProviderSetupStep::SelectAzureResource {
             entries,
             selected,
             error,
         } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    "Select Azure Resource",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
+            let block = setup_block(Line::from(Span::styled(
+                " Select Azure Resource ",
+                setup_accent_style(),
+            )));
+            let inner = block.inner(area);
+            frame.render_widget(Clear, area);
+            frame.render_widget(block, area);
+            if inner.width == 0 || inner.height == 0 {
+                return;
+            }
+
+            let mut header: Vec<Line<'static>> = vec![
+                Line::from(Span::styled("Select Azure Resource", setup_accent_style())),
                 Line::from(""),
             ];
+            let mut rows: Vec<Line<'static>> = Vec::new();
 
             if let Some(err) = error {
-                lines.push(Line::from(Span::styled(
-                    err.as_str(),
+                header.push(Line::from(Span::styled(
+                    err.clone(),
                     Style::default().fg(Color::Yellow),
                 )));
-                lines.push(Line::from(""));
+                header.push(Line::from(""));
             } else if entries.is_empty() {
-                lines.push(Line::from(Span::styled(
+                header.push(Line::from(Span::styled(
                     "No resources found.",
                     Style::default().fg(Color::Yellow),
                 )));
-                lines.push(Line::from(""));
-                lines.push(Line::from(
+                header.push(Line::from(""));
+                header.push(Line::from(Span::styled(
                     "Place an azureresources.json file in ~/.config/ragent/ or .ragent/",
-                ));
+                    setup_muted_style(),
+                )));
             } else {
                 for (i, entry) in entries.iter().enumerate() {
                     let (indicator, style) = if i == *selected {
                         (
                             "> ",
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(Color::Black)
+                                .bg(SETUP_ACCENT)
                                 .add_modifier(Modifier::BOLD),
                         )
                     } else {
                         ("  ", Style::default().fg(Color::White))
                     };
-                    lines.push(Line::from(vec![
-                        Span::styled(indicator, style),
+                    rows.push(Line::from(vec![
+                        Span::styled(indicator, setup_accent_style()),
                         Span::styled(entry.name.clone(), style),
                     ]));
                 }
             }
 
+            // One blank row plus the key-hint footer are pinned below the
+            // scrolling window, so a long resource list scrolls under a fixed
+            // legend instead of clipping the cursor off the bottom edge.
+            let reserved = 2usize;
+            let body = (inner.height as usize).saturating_sub(reserved);
+            let visible = body.saturating_sub(header.len()).max(1);
+            let start = setup_window_start(*selected, visible, rows.len());
+            let end = (start + visible).min(rows.len());
+
+            let mut lines = header;
+            lines.extend(rows[start..end].iter().cloned());
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "^/v to move, Enter to select, Esc to cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Select Azure Resource ")
-                .border_style(Style::default().fg(Color::Cyan));
+            let mut legend = String::new();
+            if rows.len() > visible {
+                legend.push_str(&format!(
+                    "Showing {}-{} of {}  |  ",
+                    start + 1,
+                    end,
+                    rows.len()
+                ));
+            }
+            legend.push_str("^/v to move, Enter to select, Esc to cancel");
+            lines.push(Line::from(Span::styled(legend, setup_muted_style())));
 
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+            let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
+            frame.render_widget(paragraph, inner);
         }
         ProviderSetupStep::SelectThinkingLevel {
             model, selected, ..
         } => {
-            let lines: Vec<Line<'_>> = model
+            // Each level is a cursor row carrying its name plus a muted one-line
+            // description, so the tradeoff between depths is readable without
+            // opening a help page.
+            let level_lines: Vec<Vec<Line<'static>>> = model
                 .thinking_levels
                 .iter()
                 .enumerate()
-                .flat_map(|(i, level)| {
-                    let style = if i == *selected {
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
+                .map(|(i, level)| {
+                    let selected_row = i == *selected;
+                    let cursor_style = Style::default()
+                        .fg(Color::Black)
+                        .bg(SETUP_ACCENT)
+                        .add_modifier(Modifier::BOLD);
+                    let name_style = if selected_row {
+                        cursor_style
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
                     };
                     let label = match level {
                         ThinkingLevel::Auto => "Auto",
@@ -2926,49 +3640,64 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         ThinkingLevel::High => "Use the deepest reasoning budget",
                     };
                     vec![
-                        Line::from(vec![
-                            Span::styled(if i == *selected { "> " } else { "  " }, style),
-                            Span::styled(label, style),
-                        ]),
-                        Line::from(Span::styled(
-                            format!("    {}", desc),
-                            Style::default().fg(Color::DarkGray),
-                        )),
+                        Line::from(Span::styled(format!(" {label}"), name_style)),
+                        Line::from(Span::styled(format!("   {}", desc), setup_muted_style())),
                     ]
                 })
                 .collect();
 
-            let mut content = vec![
+            let block = setup_block(Line::from(vec![
+                Span::styled(" Select Thinking Level ", setup_accent_style()),
+                Span::styled(format!(" {} ", model.name), setup_muted_style()),
+            ]));
+            let inner = block.inner(area);
+            frame.render_widget(Clear, area);
+            frame.render_widget(block, area);
+            if inner.width == 0 || inner.height == 0 {
+                return;
+            }
+
+            // The heading, the blank spacer and the key-hint footer are pinned;
+            // only the level rows scroll, each two lines tall, so a custom level
+            // set longer than the dialog keeps its cursor on screen.
+            let reserved = 4usize;
+            let body = (inner.height as usize).saturating_sub(reserved);
+            let visible_rows = (body / 2).max(1);
+            let start = setup_window_start(*selected, visible_rows, level_lines.len());
+            let end = (start + visible_rows).min(level_lines.len());
+
+            let mut content: Vec<Line<'static>> = vec![
                 Line::from(Span::styled(
                     format!("Select thinking for {}", model.name),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    setup_accent_style(),
                 )),
                 Line::from(""),
             ];
-            content.extend(lines);
+            for level in &level_lines[start..end] {
+                content.extend(level.iter().cloned());
+            }
             content.push(Line::from(""));
-            content.push(Line::from(Span::styled(
-                "^/v navigate  Enter select  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Select Thinking Level ")
-                .border_style(Style::default().fg(Color::Cyan));
-            frame.render_widget(
-                Paragraph::new(content)
-                    .block(block)
-                    .alignment(Alignment::Left),
-                area,
-            );
+            let mut legend = String::new();
+            if level_lines.len() > visible_rows {
+                legend.push_str(&format!(
+                    "Showing {}-{} of {}  |  ",
+                    start + 1,
+                    end,
+                    level_lines.len()
+                ));
+            }
+            legend.push_str("^/v navigate  Enter select  Esc cancel");
+            content.push(Line::from(Span::styled(legend, setup_muted_style())));
+
+            frame.render_widget(Paragraph::new(content).alignment(Alignment::Left), inner);
         }
         ProviderSetupStep::Done {
             provider_name,
             model_name,
         } => {
+            // Success reads as a single confirmation card: a green `[ok]` headline,
+            // the provider and its model named plainly, and one muted prompt.
             let mut lines = vec![
                 Line::from(""),
                 Line::from(Span::styled(
@@ -2978,22 +3707,33 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
-                Line::from(format!("{} is now ready to use.", provider_name)),
+                Line::from(vec![
+                    Span::styled(provider_name.clone(), setup_accent_style()),
+                    Span::styled(" is now ready to use.", Style::default().fg(Color::White)),
+                ]),
             ];
 
             if let Some(model) = model_name {
-                lines.push(Line::from(format!("Model: {}", model)));
+                lines.push(Line::from(vec![
+                    Span::styled("Model: ", setup_muted_style()),
+                    Span::styled(model.clone(), Style::default().fg(Color::White)),
+                ]));
             }
 
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Press any key to continue",
-                Style::default().fg(Color::DarkGray),
+                setup_muted_style(),
             )));
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(" Success ")
+                .title(Span::styled(
+                    " Success ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ))
                 .border_style(Style::default().fg(Color::Green));
 
             let paragraph = Paragraph::new(lines)
@@ -3002,207 +3742,232 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::SelectAgent { agents, selected } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    "Select an Agent",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
-
-            for (i, (name, desc, is_custom)) in agents.iter().enumerate() {
-                let is_current = i == app.current_agent_index;
-                let (indicator, style) = if i == *selected {
-                    (
-                        "> ",
+            // Agent rows: the name leads in white with the cursor bar on the selected
+            // row, `[custom]` marks a project/user-defined agent, `*` marks the agent
+            // currently in use, and the description trails in the muted tone.
+            let inner_width = area.width.saturating_sub(2);
+            let rows: Vec<Line<'static>> = agents
+                .iter()
+                .enumerate()
+                .map(|(i, (name, desc, is_custom))| {
+                    let mut spans = vec![Span::styled(
+                        name.clone(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(Color::White)
                             .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    ("  ", Style::default().fg(Color::White))
-                };
-                let current_marker = if is_current { " *" } else { "" };
-                let mut spans = vec![
-                    Span::styled(indicator, style),
-                    Span::styled(name.as_str(), style),
-                ];
-                if *is_custom {
-                    spans.push(Span::styled(
-                        " [custom]",
-                        Style::default().fg(Color::Yellow),
-                    ));
-                }
-                spans.push(Span::styled(
-                    format!("  {}{}", desc, current_marker),
-                    Style::default().fg(Color::DarkGray),
-                ));
-                lines.push(Line::from(spans));
-            }
+                    )];
+                    if *is_custom {
+                        spans.push(Span::styled(
+                            " [custom]",
+                            Style::default().fg(Color::Yellow),
+                        ));
+                    }
+                    if i == app.current_agent_index {
+                        spans.push(Span::styled(
+                            " *",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
+                    spans.push(Span::styled(format!("  {desc}"), setup_muted_style()));
+                    setup_pad_line(Line::from(spans), inner_width)
+                })
+                .collect();
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
+            render_setup_list(
+                frame,
+                area,
+                Line::from(Span::styled(" Select Agent ", setup_accent_style())),
+                setup_heading(
+                    vec![Span::styled("Select an Agent", setup_accent_style())],
+                    &format!("{} available  * = in use", agents.len()),
+                    inner_width,
+                ),
                 "^/v navigate  Enter select  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Select Agent ")
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Left);
-            frame.render_widget(paragraph, area);
+                None,
+                rows,
+                *selected,
+                None,
+            );
         }
         // Renderer for the configured-provider picker (used by `/model`).
         ProviderSetupStep::SelectConfiguredProvider {
             providers,
             selected,
         } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    " Switch Provider ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
+            // Only configured providers are listed, so every row carries `[ok]`; the
+            // key source is named in the muted trailing lane so it is clear where the
+            // credential came from.
+            let inner_width = area.width.saturating_sub(2);
+            let rows: Vec<Line<'static>> = providers
+                .iter()
+                .map(|prov| {
+                    let source = match prov.source {
+                        crate::app::ProviderSource::EnvVar => "env",
+                        crate::app::ProviderSource::Database => "stored",
+                        crate::app::ProviderSource::AutoDiscovered => "auto",
+                    };
+                    let line = Line::from(vec![
+                        Span::styled(
+                            prov.name.clone(),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " [ok]",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {source}"), setup_muted_style()),
+                    ]);
+                    setup_pad_line(line, inner_width)
+                })
+                .collect();
 
-            for (i, prov) in providers.iter().enumerate() {
-                let (indicator, style) = if i == *selected {
-                    (
-                        "> ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    ("  ", Style::default().fg(Color::White))
-                };
-                let checkmark = " [ok]";
-                lines.push(Line::from(vec![
-                    Span::styled(indicator, style),
-                    Span::styled(format!("{}", prov.name), style),
-                    Span::styled(checkmark, Style::default().fg(Color::Green)),
-                ]));
-            }
-
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
+            render_setup_list(
+                frame,
+                area,
+                Line::from(Span::styled(" Switch Provider ", setup_accent_style())),
+                setup_heading(
+                    vec![Span::styled("Switch Provider", setup_accent_style())],
+                    &format!("{} configured", providers.len()),
+                    inner_width,
+                ),
                 "^/v navigate  Enter select  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Switch Provider ")
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+                None,
+                rows,
+                *selected,
+                None,
+            );
         }
         ProviderSetupStep::ShowProviderConfig {
             providers,
             selected,
         } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    " Show Provider Configuration ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
+            // The config view lists the same providers without the credential lanes: it
+            // is a browse-only step, so the muted id names the provider behind the label.
+            let inner_width = area.width.saturating_sub(2);
+            let rows: Vec<Line<'static>> = providers
+                .iter()
+                .map(|prov| {
+                    let line = Line::from(vec![
+                        Span::styled(
+                            prov.name.clone(),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {}", prov.id), setup_muted_style()),
+                    ]);
+                    setup_pad_line(line, inner_width)
+                })
+                .collect();
 
-            for (i, prov) in providers.iter().enumerate() {
-                let (indicator, style) = if i == *selected {
-                    (
-                        "> ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    ("  ", Style::default().fg(Color::White))
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(indicator, style),
-                    Span::styled(format!("{}", prov.name), style),
-                ]));
-            }
-
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
+            render_setup_list(
+                frame,
+                area,
+                Line::from(Span::styled(" Provider Config ", setup_accent_style())),
+                setup_heading(
+                    vec![Span::styled(
+                        "Show Provider Configuration",
+                        setup_accent_style(),
+                    )],
+                    &format!("{} configured", providers.len()),
+                    inner_width,
+                ),
                 "^/v navigate  Enter show config  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Provider Config ")
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+                None,
+                rows,
+                *selected,
+                None,
+            );
         }
         ProviderSetupStep::ResetProvider { selected } => {
+            // Destructive step: the frame, the cursor and the heading stay yellow so the
+            // dialog reads as a warning rather than a neutral picker, while the row
+            // layout (name / kind / active lanes, zebra, cursor bar) matches the other
+            // setup lists.
             let active_id = app.configured_provider.as_ref().map(|p| p.id.as_str());
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    "Reset Provider Credentials",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
-
-            for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
-                let is_active = active_id == Some(*pid);
-                let (indicator, style) = if i == *selected {
-                    (
-                        "> ",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    ("  ", Style::default().fg(Color::White))
-                };
-                let active_marker = if is_active { " *" } else { "" };
-                let badge = if *pid == "ollama" { " [local]" } else { "" };
-                lines.push(Line::from(vec![
-                    Span::styled(indicator, style),
-                    Span::styled(*pname, style),
-                    Span::styled(badge, Style::default().fg(Color::Yellow)),
-                    Span::styled(active_marker, Style::default().fg(Color::Green)),
-                ]));
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "^/v navigate  Enter reset  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
-
+            let danger = Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD);
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(" Provider Reset ")
+                .title(Span::styled(" Provider Reset ", danger))
                 .border_style(Style::default().fg(Color::Yellow));
+            let inner = block.inner(area);
+            frame.render_widget(Clear, area);
+            frame.render_widget(block, area);
+            if inner.width == 0 || inner.height == 0 {
+                return;
+            }
 
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
+                .split(inner);
+            frame.render_widget(
+                Paragraph::new(setup_heading(
+                    vec![Span::styled("Reset Provider Credentials", danger)],
+                    "* = active provider",
+                    inner.width,
+                )),
+                chunks[0],
+            );
+            let items: Vec<ListItem> = PROVIDER_LIST
+                .iter()
+                .enumerate()
+                .map(|(index, (pid, pname))| {
+                    let active_marker = if active_id == Some(*pid) { "*" } else { "" };
+                    let badge = if *pid == "ollama" { "[local]" } else { "" };
+                    let line = Line::from(vec![
+                        Span::styled(
+                            pname.to_string(),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  {:<PROVIDER_BADGE_WIDTH$} ", badge),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::styled(
+                            format!("{active_marker:<PROVIDER_STATUS_WIDTH$}"),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+                    let line = setup_pad_line(line, inner.width);
+                    let item = ListItem::new(line);
+                    if index % 2 == 1 {
+                        item.style(Style::default().bg(SETUP_ZEBRA_BG))
+                    } else {
+                        item
+                    }
+                })
+                .collect();
+            let mut state = ListState::default();
+            if !items.is_empty() {
+                state.select(Some((*selected).min(items.len() - 1)));
+            }
+            let list = List::new(items)
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("");
+            frame.render_stateful_widget(list, chunks[1], &mut state);
+            render_setup_hint(frame, chunks[2], "^/v navigate  Enter reset  Esc cancel");
         }
 
         // -- GitLab setup form --------------------------------------------
@@ -3216,6 +3981,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
         } => {
             // Wider dialog so the full token (>= 48 chars) is visible.
             let area = centered_rect_max(80, 80, 100, 30, frame.area());
+            app.provider_setup_area = area;
             frame.render_widget(Clear, area);
 
             let mut lines: Vec<Line<'_>> = vec![
@@ -3437,6 +4203,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             error,
         } => {
             let area = centered_rect(80, 80, frame.area());
+            app.provider_setup_area = area;
             frame.render_widget(Clear, area);
 
             let block = Block::default()
@@ -3454,20 +4221,14 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 .split(inner);
 
             // -- Left pane: multi-select provider list --
-            let left_block = Block::default()
-                .borders(Borders::ALL)
-                .title(if *left_pane_focused {
-                    " Providers (*) "
-                } else {
-                    " Providers "
-                })
-                .border_style(if *left_pane_focused {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                });
-            let _left_inner = left_block.inner(chunks[0]);
+            //
+            // The list is windowed around the cursor: a cluster palette longer
+            // than the pane scrolls one line at a time so the highlighted
+            // provider is always painted, and the block title states the window
+            // position whenever the list is clipped.
+            let left_inner_height = chunks[0].height.saturating_sub(2) as usize;
             let mut provider_lines: Vec<Line<'_>> = Vec::new();
+            let mut left_start = 0usize;
             if providers.is_empty() {
                 provider_lines.push(Line::from(Span::styled(
                     "No concrete providers configured.",
@@ -3479,8 +4240,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     Style::default().fg(Color::DarkGray),
                 )));
             } else {
-                for (i, p) in providers.iter().enumerate() {
-                    let is_selected = i == *selected_provider_index;
+                let rows = providers.len();
+                left_start = setup_window_start(*selected_provider_index, left_inner_height, rows);
+                let visible = left_inner_height.max(1).min(rows);
+                let end = (left_start + visible).min(rows);
+                for (i, p) in providers[left_start..end].iter().enumerate() {
+                    let absolute = left_start + i;
+                    let is_selected = absolute == *selected_provider_index;
                     let in_cluster = selected_provider_ids.contains(&p.id);
                     let tick = if in_cluster { "[x]" } else { "[ ]" };
                     let (indicator, style) = if is_selected && *left_pane_focused {
@@ -3505,6 +4271,28 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     ]));
                 }
             }
+            let left_title = if providers.len() > left_inner_height && !providers.is_empty() {
+                let visible = left_inner_height.max(1);
+                format!(
+                    " Providers{} {}-{} of {} ",
+                    if *left_pane_focused { " (*)" } else { "" },
+                    left_start + 1,
+                    (left_start + visible).min(providers.len()),
+                    providers.len()
+                )
+            } else if *left_pane_focused {
+                " Providers (*) ".to_string()
+            } else {
+                " Providers ".to_string()
+            };
+            let left_block = Block::default()
+                .borders(Borders::ALL)
+                .title(left_title)
+                .border_style(if *left_pane_focused {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                });
             let left_para = Paragraph::new(provider_lines)
                 .block(left_block)
                 .wrap(Wrap { trim: false });
@@ -3572,9 +4360,16 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     } else {
                         Style::default().fg(Color::DarkGray)
                     });
-                let _bucket_inner = bucket_block.inner(bucket_chunks[idx]);
+                let bucket_inner = bucket_block.inner(bucket_chunks[idx]);
+                let bucket_height = bucket_inner.height as usize;
 
-                let mut bucket_lines: Vec<Line<'_>> = Vec::new();
+                // Each assigned model paints two or three lines (name, retained
+                // properties, cost estimate). The span of the selected model is
+                // recorded so the pane can scroll to keep it wholly visible: a
+                // bucket holding more models than rows then follows the cursor
+                // instead of clipping its tail off the bottom edge.
+                let mut entry_spans: Vec<(usize, usize)> = Vec::new();
+                let mut bucket_lines: Vec<Line<'static>> = Vec::new();
                 if models.is_empty() {
                     bucket_lines.push(Line::from(Span::styled(
                         "empty",
@@ -3582,6 +4377,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     )));
                 } else {
                     for (midx, entry) in models.iter().enumerate() {
+                        let span_start = bucket_lines.len();
                         let is_selected =
                             midx == *active_bucket_index && is_active && !left_pane_focused;
                         let style = if is_selected {
@@ -3661,11 +4457,22 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                                 Style::default().fg(Color::DarkGray),
                             )));
                         }
+                        entry_spans.push((span_start, bucket_lines.len()));
                     }
                 }
+                let (span_start, span_end) = entry_spans
+                    .get((*active_bucket_index).min(entry_spans.len().saturating_sub(1)))
+                    .copied()
+                    .unwrap_or((0, 0));
+                let scroll = if is_active && !left_pane_focused {
+                    setup_scroll_to_show(span_start, span_end, bucket_height)
+                } else {
+                    0
+                };
                 let bucket_para = Paragraph::new(bucket_lines)
                     .block(bucket_block)
-                    .wrap(Wrap { trim: false });
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll as u16, 0));
                 frame.render_widget(bucket_para, bucket_chunks[idx]);
             }
 
@@ -3710,19 +4517,19 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 let inner_w = model_picker_inner_width(&cells) as u16;
                 centered_rect_max(100, 78, inner_w.saturating_add(2), 30, frame.area())
             };
+            app.provider_setup_area = area;
             frame.render_widget(Clear, area);
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(format!(
-                    " Assign model for {} -> {} ",
-                    provider_name, target_tier
-                ))
-                .border_style(Style::default().fg(Color::Cyan));
-            let inner = block.inner(area);
-            frame.render_widget(block.clone(), area);
-
             if models.is_empty() {
+                let block = setup_block(Line::from(vec![
+                    Span::styled(" Assign model for ", setup_accent_style()),
+                    Span::styled(provider_name.clone(), Style::default().fg(Color::White)),
+                    Span::styled(" -> ", setup_muted_style()),
+                    Span::styled(target_tier.to_string(), setup_accent_style()),
+                    Span::raw(" "),
+                ]));
+                let inner = block.inner(area);
+                frame.render_widget(block, area);
                 let paragraph = Paragraph::new(vec![
                     Line::from(""),
                     Line::from(Span::styled(
@@ -3730,91 +4537,101 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         Style::default().fg(Color::Yellow),
                     )),
                     Line::from(""),
-                    Line::from(Span::styled(
-                        "Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    )),
+                    Line::from(Span::styled("Esc cancel", setup_muted_style())),
                 ])
                 .alignment(Alignment::Center);
                 frame.render_widget(paragraph, inner);
             } else {
-                // Render the same rich model-properties table used by the
-                // standard model picker so users can compare context window,
-                // cost, thinking levels, and feature flags before assigning a
-                // model to a router tier bucket.
-                let header = Row::new(MODEL_PICKER_HEADERS).style(
-                    Style::default()
-                        .add_modifier(Modifier::BOLD)
-                        .fg(Color::Cyan),
-                );
+                let inner = setup_block(Line::default()).inner(area);
+                // The same rich model-properties table the standard model picker uses,
+                // so context window, cost, thinking levels and feature flags can be
+                // compared before a model is assigned to a router tier bucket.
+                let cells = model_picker_cells(models, *selected);
+                let columns = content_sized_columns(&cells);
+                let widths: Vec<usize> = columns
+                    .iter()
+                    .map(|c| match c {
+                        Constraint::Length(w) | Constraint::Min(w) => *w as usize,
+                        _ => 0,
+                    })
+                    .collect();
 
-                let header_height = 3;
-                let footer_height = 3;
-                let available_rows =
-                    inner.height.saturating_sub(header_height + footer_height) as usize;
-                let visible = available_rows.max(1).min(models.len());
-                let start = if *selected >= visible {
-                    (*selected + 1).saturating_sub(visible)
-                } else {
-                    0
-                };
+                let band_text = model_picker_heading_band(&widths);
+
+                let list_rows = inner.height.saturating_sub(3) as usize;
+                let visible = list_rows.max(1).min(models.len());
+                let start = setup_window_start(*selected, visible, models.len());
                 let end = (start + visible).min(models.len());
 
-                let cells = model_picker_cells(models, *selected);
-                let rows: Vec<Row> = cells
+                let rows: Vec<Line<'static>> = cells
                     .iter()
                     .enumerate()
                     .skip(start)
                     .take(end - start)
-                    .map(|(i, row_cells)| {
-                        let is_selected = i == *selected;
-                        let style = if is_selected {
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(Color::White)
-                        };
-                        Row::new(row_cells.clone()).style(style)
+                    .map(|(_, row_cells)| {
+                        let mut spans: Vec<Span<'static>> = Vec::with_capacity(row_cells.len());
+                        for (col, value) in row_cells.iter().enumerate() {
+                            let width = widths
+                                .get(col)
+                                .copied()
+                                .unwrap_or_else(|| value.chars().count());
+                            let field = if col == 1 || col == 2 {
+                                format!("{value:>width$}")
+                            } else {
+                                format!("{value:<width$}")
+                            };
+                            let style = if col == 0 {
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                setup_muted_style()
+                            };
+                            spans.push(Span::styled(field, style));
+                            if col + 1 < row_cells.len() {
+                                spans.push(Span::raw(" ".repeat(MODEL_PICKER_COLUMN_SPACING)));
+                            }
+                        }
+                        setup_pad_line(Line::from(spans), inner.width)
                     })
                     .collect();
 
-                let table = Table::new(rows, content_sized_columns(&cells))
-                    .header(header)
-                    .block(block);
-                frame.render_widget(table, area);
-
-                // Footer hint.
-                if inner.height > 1 {
-                    let hint = Span::styled(
-                        "^/v navigate  Enter assign  Esc cancel",
-                        Style::default().fg(Color::DarkGray),
-                    );
-                    let hint_area = Rect::new(
-                        inner.x,
-                        inner.y + inner.height.saturating_sub(1),
-                        inner.width,
-                        1,
-                    );
-                    frame.render_widget(Paragraph::new(Line::from(hint)), hint_area);
+                let mut legend = String::new();
+                if models.len() > visible {
+                    legend.push_str(&format!(
+                        "Showing {}-{} of {}  |  ",
+                        start + 1,
+                        end,
+                        models.len()
+                    ));
                 }
+                legend.push_str("^/v navigate  Enter assign  Esc cancel");
+                legend.push_str("  |  R reasoning  V vision  T tools");
 
-                if models.len() > visible && inner.height > 2 {
-                    let showing = Span::styled(
-                        format!("Showing {}-{} of {}", start + 1, end, models.len()),
-                        Style::default().fg(Color::DarkGray),
-                    );
-                    let showing_area = Rect::new(
-                        inner.x,
-                        inner.y + inner.height.saturating_sub(2),
+                render_setup_list(
+                    frame,
+                    area,
+                    Line::from(vec![
+                        Span::styled(" Assign model for ", setup_accent_style()),
+                        Span::styled(provider_name.clone(), Style::default().fg(Color::White)),
+                        Span::styled(" -> ", setup_muted_style()),
+                        Span::styled(target_tier.to_string(), setup_accent_style()),
+                        Span::raw(" "),
+                    ]),
+                    setup_heading(
+                        vec![Span::styled(
+                            format!("{} models", models.len()),
+                            setup_accent_style(),
+                        )],
+                        "Enter assigns to the tier",
                         inner.width,
-                        1,
-                    );
-                    frame.render_widget(
-                        Paragraph::new(Line::from(showing)).alignment(Alignment::Right),
-                        showing_area,
-                    );
-                }
+                    ),
+                    &legend,
+                    Some(setup_band(&band_text, inner.width)),
+                    rows,
+                    (*selected).saturating_sub(start),
+                    None,
+                );
             }
         }
     }
@@ -5260,6 +6077,8 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Provider setup dialog overlay (if active, e.g. via /provider command)
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
+    } else {
+        app.provider_setup_area = Rect::default();
     }
 
     // /loop setup dialog overlay (spec `agentloop` T-014)
@@ -5301,13 +6120,9 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
 
     if app.show_agents_window {
         render_agents_window_overlay(frame, app);
-    } else {
-        app.agents_close_button_area = Rect::default();
     }
     if app.show_teams_window {
         render_teams_window_overlay(frame, app);
-    } else {
-        app.teams_close_button_area = Rect::default();
     }
 
     // Internal-LLM chat overlay (rendered above everything except output view).
@@ -5324,7 +6139,6 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_output_view_overlay(frame, app);
     } else {
         app.output_view_area = Rect::default();
-        app.output_view_close_button_area = Rect::default();
     }
     // Research markdown viewer overlay (above output view).
     if app.research_view.is_some() {
@@ -6699,10 +7513,9 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
-    // The overlay reuses the modal window frame: same border treatment, minus
-    // a bottom-right Close bar button (FR-074, FR-075) like the Agents and
-    // Teams popups. The content shrinks accordingly and scroll math is based
-    // on the content inner width, so nothing else changes.
+    // The overlay reuses the shared modal window frame for its border and its
+    // footer band, but carries no Close button: `Esc` (or a click outside the
+    // overlay) dismisses it, and the footer row restates the scrolling keys.
     let geo = window_frame(
         OUTPUT_WINDOW_PERCENT_W,
         OUTPUT_WINDOW_PERCENT_H,
@@ -6710,7 +7523,6 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
     );
     let area = geo.area;
     app.output_view_area = area;
-    app.output_view_close_button_area = geo.close;
     frame.render_widget(Clear, area);
 
     let Some(view) = app.output_view.as_mut() else {
@@ -6901,9 +7713,13 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         );
     }
 
-    // The Close bar button (FR-075), painted after the scrollbar so a clipped
-    // right edge cannot paint through it.
-    render_window_close_button(frame, geo.close);
+    // The footer restates the scroll keys; `Esc` dismisses the overlay, so the
+    // line is the only affordance it needs.
+    render_window_key_legend(
+        frame,
+        "PgUp/PgDn scroll  Ctrl+PgUp/PgDn jump  Esc close",
+        geo.legend,
+    );
 }
 
 /// Terminal-width percentage the Agents popup occupies (spec `agentui` FR-006).
@@ -6933,92 +7749,75 @@ const OUTPUT_WINDOW_PERCENT_W: u16 = 90;
 /// [`OUTPUT_WINDOW_PERCENT_W`]).
 const OUTPUT_WINDOW_PERCENT_H: u16 = 70;
 
-/// Maximum terminal columns a popup Close button occupies (spec `agentui` FR-007,
-/// FR-018).
-const WINDOW_CLOSE_MAX_WIDTH: u16 = 10;
+/// Terminal rows reserved at the bottom of a popup for the FR-077 key legend.
+///
+/// The legend band is the modal's last inner row. The content area above it
+/// never paints that row, so the key hints read as a distinct footer strip
+/// rather than competing with the table's last data row.
+const WINDOW_LEGEND_ROWS: u16 = 1;
 
-/// Maximum terminal rows a popup Close button occupies (spec `agentui` FR-007,
-/// FR-018).
-const WINDOW_CLOSE_MAX_HEIGHT: u16 = 3;
+/// The Agents window's FR-077 key legend.
+///
+/// `Esc close` is the only dismissal the window offers: the modal has no Close
+/// button, so the legend names the key a user needs to get out.
+const AGENTS_WINDOW_LEGEND: &str =
+    "Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close";
 
-/// Terminal rows reserved between a popup's content area and its Close button
-/// (spec `agentui` FR-008).
-const WINDOW_CLOSE_SEPARATOR_ROWS: u16 = 1;
+/// The Teams window's FR-077 key legend (same bindings, `Del shut down`).
+const TEAMS_WINDOW_LEGEND: &str =
+    "Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Esc close";
 
 /// The computed rectangles of a bordered popup-window frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowFrame {
     /// The bordered modal rectangle.
     area: Rect,
-    /// The bordered Close button, pinned to the bottom-right of the inner area.
-    close: Rect,
-    /// The scrollable content (table) area.
+    /// The scrollable content (table) area: the inner area above the legend band.
     content: Rect,
-}
-
-impl WindowFrame {
-    /// The band of rows between the content area's bottom and the Close
-    /// button's top - the separator row the content deliberately does not
-    /// paint - extended left to the inner border so a key legend has room to
-    /// the Close button's left.
-    fn legend_area(&self) -> Rect {
-        let y = self.content.bottom();
-        let height = self
-            .close
-            .y
-            .saturating_sub(y)
-            .max(1)
-            .min(self.area.bottom().saturating_sub(y).max(1));
-        let width = self.close.x.saturating_sub(self.area.x + 1);
-        Rect::new(self.area.x + 1, y, width, height)
-    }
+    /// The bottom inner row carrying the FR-077 key legend.
+    legend: Rect,
 }
 
 /// Compute the frame rectangles for a centred popup window.
 ///
 /// The modal is centred at `percent_w` x `percent_h` of `screen` and clamped to
 /// the terminal rectangle, so it stays fully visible at any size (NFR-010). The
-/// Close button is clamped to at most [`WINDOW_CLOSE_MAX_WIDTH`] columns and
-/// [`WINDOW_CLOSE_MAX_HEIGHT`] rows and pinned to the bottom-right of the inner
-/// area so it always fits (FR-007). The content area is the inner area minus the
-/// Close button height and one separating row, clamped to a minimum height of
-/// one row (FR-008) and to the inner area so it can never paint outside the
-/// frame (NFR-010).
+/// content area is the inner area minus the [`WINDOW_LEGEND_ROWS`] footer band,
+/// clamped to a minimum height of one row (FR-008) and to the inner area so it
+/// can never paint outside the frame (NFR-010). The footer band spans the full
+/// inner width so the key legend has the whole panel to lay its hints out in.
 fn window_frame(percent_w: u16, percent_h: u16, screen: Rect) -> WindowFrame {
     let area = centered_rect(percent_w, percent_h, screen).intersection(screen);
     let inner = Block::default().borders(Borders::ALL).inner(area);
 
-    let close_w = WINDOW_CLOSE_MAX_WIDTH.min(inner.width);
-    let close_h = WINDOW_CLOSE_MAX_HEIGHT.min(inner.height);
-    let close = Rect::new(
-        inner.right().saturating_sub(close_w),
-        inner.bottom().saturating_sub(close_h),
-        close_w,
-        close_h,
-    );
-
     let content_h = inner
         .height
-        .saturating_sub(close_h.saturating_add(WINDOW_CLOSE_SEPARATOR_ROWS))
+        .saturating_sub(WINDOW_LEGEND_ROWS)
         .max(1)
         .min(inner.height);
     let content = Rect::new(inner.x, inner.y, inner.width, content_h);
+    let legend = Rect::new(
+        inner.x,
+        inner.bottom().saturating_sub(WINDOW_LEGEND_ROWS),
+        inner.width,
+        WINDOW_LEGEND_ROWS.min(inner.height),
+    );
 
     WindowFrame {
         area,
-        close,
         content,
+        legend,
     }
 }
 
 /// Testable wrapper for the private [`window_frame`] geometry helper.
 ///
-/// Returns `(modal, close, content)` so the popup-frame arithmetic can be
+/// Returns `(modal, content, legend)` so the popup-frame arithmetic can be
 /// asserted offline without a live terminal (spec `agentui` NFR-001).
 #[doc(hidden)]
 pub fn window_frame_testable(percent_w: u16, percent_h: u16, screen: Rect) -> (Rect, Rect, Rect) {
     let geo = window_frame(percent_w, percent_h, screen);
-    (geo.area, geo.close, geo.content)
+    (geo.area, geo.content, geo.legend)
 }
 
 /// The percentage width the Agents popup occupies (spec `agentui` FR-006).
@@ -7065,46 +7864,21 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
         .border_style(Style::default().fg(Color::Cyan));
     frame.render_widget(block, geo.area);
 
-    app.agents_close_button_area = geo.close;
     app.active_agents_area = geo.content;
     render_active_agents_subpanel(frame, app, geo.content);
 
-    render_window_key_legend(
-        frame,
-        "Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open",
-        geo.legend_area(),
-    );
-    render_window_close_button(frame, geo.close);
+    render_window_key_legend(frame, AGENTS_WINDOW_LEGEND, geo.legend);
 }
 
-/// Paint the bordered ` Close ` button shared by both modal windows.
+/// Paint the popup's key legend, dim, along the footer band beneath the table
+/// (spec `agentui` FR-077).
 ///
-/// The caller supplies the clamped button rectangle from [`window_frame`], so
-/// the label always fits (spec `agentui` FR-007, FR-018).
-fn render_window_close_button(frame: &mut Frame, area: Rect) {
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Close ",
-            // Bright text inside the quiet border so the one control every
-            // user looks for is never the dimmest thing on the panel.
-            Style::default().fg(Color::White),
-        )))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
-        .alignment(Alignment::Center),
-        area,
-    );
-}
-
-/// Paint the popup's key legend, dim, along the bottom status band to the
-/// left of the Close button (spec `agentui` keyboard contract). The band sits
-/// in the separator row the content area deliberately leaves unpainted, so
-/// the legend never competes with the table rows; the text is clipped to the
-/// available width, and on a very narrow terminal an empty rect paints
-/// nothing.
+/// The band is the modal's last inner row, which the content area deliberately
+/// leaves unpainted, so the legend never competes with the table rows. The
+/// legend is the window's only dismissal affordance - `Esc close` sits at the
+/// end of every hint line - because neither popup carries a Close button. The
+/// text is clipped to the available width, and on a very narrow terminal an
+/// empty rect paints nothing.
 fn render_window_key_legend(frame: &mut Frame, text: &str, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -7132,16 +7906,10 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
         .border_style(Style::default().fg(Color::Blue));
     frame.render_widget(block, geo.area);
 
-    app.teams_close_button_area = geo.close;
     app.teams_area = geo.content;
     crate::layout_teams::render_teams_subpanel(frame, app, geo.content);
 
-    render_window_key_legend(
-        frame,
-        "Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open",
-        geo.legend_area(),
-    );
-    render_window_close_button(frame, geo.close);
+    render_window_key_legend(frame, TEAMS_WINDOW_LEGEND, geo.legend);
 }
 
 /// Render a single message into formatted lines (FR-003, FR-006).

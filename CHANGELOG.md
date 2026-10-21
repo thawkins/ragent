@@ -1,5 +1,307 @@
 # Changelog
 
+## [1.0.149] - 2026-10-21
+
+Release 1.0.149: the shared store chrome across every catalogue and setup-panel
+list, the `Esc`-only modal dismissal, and a deterministic test suite. The
+`/connectors claude` browse panel now wears the same design language as the
+`/plugins codex` and `/plugins claude` panels, the `/provider` and `/model` setup
+dialogs are restyled around their calm-slate list chrome, and the Agents, Teams
+and output-view modals drop their Close button in favour of `Esc`.
+
+### Added
+
+- **The `/plugins codex` and `/plugins claude` category navigators now carry an
+  `Installed` pseudo-category directly below `ALL` (spec `pluginstores` FR-054).**
+  Selecting it narrows the result list to the plugins already present in the store
+  scan, so a quick "what have I got installed?" is one keypress (`Down`, `Down`) away
+  in both panels. It is not a store category: it matches the plugin id against the
+  scan rather than an entry's declared `category`, so an installed plugin that
+  declares no category at all still appears under it - the one thing no category row
+  can show. It composes with the search query and the marketplace filter exactly like
+  any other row (all three must match), carries the same counted label
+  (`Installed (2)`, counting the loaded entries the scan matches), is present while
+  the index is still loading and on an index that declares no category at all, and a
+  refreshed scan re-derives it so a just-installed plugin appears without re-selecting
+  the row. The name is reserved - an entry declaring an `Installed` category never
+  adds a second row - and `--category installed` pre-selects it. Selecting it issues
+  no network request, installs nothing, and runs no plugin JavaScript. The derived
+  store categories keep their order and move down one row; every renderer, key route,
+  and mouse hit test reads the row accessors, so nothing else changed.
+
+### Changed
+
+- **The `/provider` and `/model` setup dialogs are rebuilt on the catalogue list chrome
+  (spec `agentui`).** Every list-bearing step of `ProviderSetupStep` (`SelectProvider`,
+  `SelectModel`, `SelectRouterModel`, `SelectAgent`, `SelectConfiguredProvider`,
+  `ShowProviderConfig`, `ResetProvider`) now shares one composition instead of six
+  hand-rolled ones: a slate accent frame (`SETUP_ACCENT`, the same `STORE_ACCENT` the
+  plugin/connector catalogues use) whose title names the step and its subject, a
+  heading strip with the step name on the left and a live count on the right, a pinned
+  reversed-video column band (black on grey) whose labels sit over their own columns,
+  a cursor-filled zebra-striped row list, and a muted key-hint footer. Behaviour is
+  unchanged: every key, Esc-cancel path, `[ok]` credential marker, `[local]` badge,
+  `[custom]`/`*` agent markers, `Showing`/scroll legends and empty-state notices are
+  preserved, and the masked API-key field still masks.
+  - `SelectProvider` gains real columns: a provider-name column that absorbs the width
+    the fixed lanes leave, a muted provider-id column, a `Kind` lane (`[local]`), and a
+    `Status` lane (`[ok]` when a credential is stored), with the heading reporting
+    `N of 14 configured`. The scroll legend keeps its explicit `more above`/`more below`
+    counts and folds the key bindings into the same row.
+  - `SelectModel` and `SelectRouterModel` replace their `Table` with the same list, so
+    the cursor is a filled bar rather than a cyan row, the name leads in white and the
+    supporting facts step back into the muted tone. `Context` and `Cost` are
+    right-aligned with right-aligned headings so their digits line up; the cost cell
+    reads `Premium 1x` (the `*` separator is gone). The footer spells out the terse
+    `R`/`V`/`T` feature codes as `R reasoning  V vision  T tools`, and `Showing` now
+    leads the footer so a narrow dialog cannot truncate it away.
+  - `SelectConfiguredProvider` names where each key came from (`stored` / `env` /
+    `auto`) beside its `[ok]`; `ShowProviderConfig` names each provider's id;
+    `ResetProvider` keeps its yellow warning frame and cursor bar while adopting the
+    row layout, with `* = active provider` in the heading.
+  - `SelectThinkingLevel`, `LoadingModels`, `EnterKey`, the GitHub device flow,
+    `SelectAzureResource` and the `Done` card move onto the shared accent/muted styles;
+    the model-loading dialog now shows a live elapsed-second counter and names the
+    provider in its frame title.
+  - New `crates/ragent-tui/tests/test_setup_dialog_chrome.rs` (14 cases) pins the
+    heading counts, the column alignment, the feature legend, the `Showing` ordering,
+    the credential-source lanes, the preserved markers, the yellow reset frame and the
+    masked key; the full `ragent-tui` suite (3640) is green.
+
+- **No modal carries a Close button any more; `Esc` closes and the footer legend says
+  so (spec `agentui` FR-007, FR-018, FR-032, FR-074, FR-077).** The Agents, Teams and
+  output-view overlays lose the bordered ` Close ` bar pinned to the inner bottom-right
+  corner, and the shared frame helper becomes simpler with it: `window_frame` now
+  derives just the modal rect, the content area and a one-row footer band
+  (`WINDOW_LEGEND_ROWS`), replacing `WINDOW_CLOSE_MAX_WIDTH`/`_HEIGHT`,
+  `WINDOW_CLOSE_SEPARATOR_ROWS` and `WindowFrame::legend_area`. The FR-077 key legend
+  moves from the separator band left of the button onto that footer row, spanning the
+  full inner width, and each legend now **ends with `Esc close`** so the dismissal is
+  discoverable without a painted control:
+  - Agents: `Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close`
+  - Teams: the same, with `Del shut down`
+  - output view: `PgUp/PgDn scroll  Ctrl+PgUp/PgDn jump  Esc close`
+
+  `Esc` was already the Agents window's `CancelAgent` path; the two window key arms now
+  consume `Esc` explicitly (before the input editor's `CancelAgent` arm, which would
+  otherwise stop a running turn) and call `close_agents_window` / `close_teams_window`,
+  leaving every task, member and input value untouched. The output view keeps its
+  existing `close_output_view` transition. `App` loses `agents_close_button_area`,
+  `teams_close_button_area` and `output_view_close_button_area`, the mouse router loses
+  the three hit tests, and the renderer no longer zeroes them when a window hides.
+  Tests: `test_agents_window_frame` / `test_teams_window_frame` re-derive the geometry
+  around the legend band and assert no ` Close ` label paints; `test_output_view_close_bar`
+  is replaced by `test_output_view_footer`; `test_window_routing`, `test_window_lifecycle`,
+  `test_row_click_destinations` and `test_teams_tui` drive dismissal through `Esc`. The
+  full `ragent-tui` suite is green (3626 passed).
+- **The `/connectors claude` browse panel is rebuilt on the plugin-store design
+  language (spec `connectors` FR-047).** The two catalogue browsers now read as one
+  family, so a user learns one and reads both:
+  - the frame carries the shared calm slate accent (`STORE_ACCENT`) instead of
+    saturated magenta, so the cyan navigator cursor and magenta result cursor stay
+    the brightest elements on screen;
+  - the title is a structured `Line` rather than a flat string: the catalogue name
+    as a bold badge, the visible/total counts in the accent colour, and the active
+    `search`, `category`, and `marketplace` filters as labelled values (a blank query
+    rendering as `-`), followed by any parser-skip count in yellow and the
+    `loading details...` enrichment hint in the muted tone;
+  - the left column is split vertically into a `Categories` navigator above a
+    `Marketplace` navigator, each under a one-row reversed-video title band padded to
+    the column width and excluded from the cached hit-test area, so a click or wheel
+    on a band is inert;
+  - every navigator row is labelled `Name (N)` with its entry count in the accent
+    colour, so the size of each filter is visible before selecting it;
+  - the category navigator pins an `Installed` pseudo-category directly below `ALL`
+    (spec `connectors` FR-047, mirroring `pluginstores` FR-054): it filters the result
+    list to the connectors already in the store scan - matching the connector id
+    against the scan, not an entry's declared `category` - so an installed connector
+    that declares no category still appears under it, and the reserved name never
+    forms a second row;
+  - result rows are rebuilt on the shared template: a two-column `> ` cursor gutter,
+    a one-column installed lane carrying a bold green `*` (a blank on every other row,
+    keeping the columns aligned), fixed id and category columns, the marketplace in
+    the accent colour with `-` for a blank, and the description taking every remaining
+    column so it runs to the panel's inner right edge and is clipped there; each row
+    is padded to the full width and alternate rows carry a near-black band
+    (`STORE_BAND_BG`) so the eye can follow one row across all four columns;
+  - the footer key hints move onto a chrome band (`STORE_CHROME_BG`) and the bottom
+    inner row carries a live search box: the ` search: ` label in the accent colour,
+    the editable field mirroring the browser's query with a `|` caret and clipping a
+    wider query from the left, and a right-aligned clickable `[x] clear` button that
+    dims while the query is empty;
+  - the panel is capped at 140 columns and 41 rows, matching the plugin panels'
+    geometry.
+
+  Three panes are now focusable (`Results` initial, then `Categories`, then
+  `Marketplaces`), cycled forward by `Tab` and backward by `BackTab`, with only the
+  focused pane's cursor filled. `Up`/`Down` move the focused pane's cursor and apply a
+  navigator selection immediately; `Enter` over either navigator applies its filter
+  and returns focus to the result list without installing anything; `c` clears the
+  focused navigator's filter to `ALL`. The mouse routes marketplace row clicks, its
+  wheel, and the clear-button click. The shared chrome constants and helpers in
+  `layout.rs` are renamed from the `PLUGIN_STORE_*`/`plugin_store_*` names to neutral
+  `STORE_*`/`store_*` names (the plugin panel is unchanged in behaviour), the search
+  box is generalised into one `render_store_search_box`, and `CatalogueBrowser` gains
+  the `CataloguePane` focus enum (replacing the `nav_focused` boolean), the
+  `Installed` row helpers, the per-row entry counts, and a full marketplace navigator
+  whose predicate composes with the query and category in `apply_filter`. Tests: the
+  connector catalogue suites grow to 54 cases (the accent frame, two titled navigator
+  panes, `Name (N)` counts, the `Installed` pseudo-category, the marketplace
+  navigator, the bottom search box and its clear button, the zebra band reaching the
+  right edge, and the description-to-edge row template) plus 8 new
+  `ragent-connectors` browser-state cases; the full `ragent-tui` (3628) and
+  `ragent-connectors` (369) suites are green.
+- **The plugin-store browse panels (`/plugins codex`, `/plugins claude`) are
+  easier to read (spec `pluginstores` FR-004, FR-005, T-035).** The panel is now
+  framed in a calm slate-blue accent (`PLUGIN_STORE_ACCENT`) rather than saturated
+  magenta, so the cyan navigator cursor and magenta result cursor stay the
+  brightest elements on screen. The navigator header bands and the pinned
+  column-heading row are padded to their full widths so both read as header
+  strips. Result rows are split into styled spans: the id and description keep the
+  reading colour, the version and marketplace step back into a muted tone
+  (`plugin_store_muted_style`) and the marketplace is drawn in the panel accent.
+  An installed row is marked with a bold green `*` in a new one-column lane
+  between the `>` cursor gutter and the id column, and every other row paints a
+  blank there so the columns stay aligned; dropping the marker from the end of
+  the row and removing the description's own width ceiling
+  (`PLUGIN_STORE_DESC_MAX`) lets the description take every remaining column as
+  the row's last column, so it now shows up to 48 characters on a 140-column
+  terminal (was 37) and anything longer is clipped at the panel's inner edge
+  rather than pushing the marketplace off the row. Every row still carries the
+  two-column gutter with `>` on the cursor row (so the cursor survives a
+  background-only highlight) and its trailing padding carries the row's own
+  background, so the new zebra band (`PLUGIN_STORE_BAND_BG` on alternate rows)
+  and the cursor background both reach the column's right edge. The footer hint
+  row and the search box are painted on a chrome background
+  (`PLUGIN_STORE_CHROME_BG`), with the `search:` label and `[x] clear` button in
+  the panel accent (the button dimming while the query is empty). Navigator rows
+  lost the `> ` prefix that made them look misaligned against their header band
+  and keep their counted labels (`ALL (6)`, `Web (2)`) flush; the count is
+  painted in the accent. The title is
+  now a styled `Line` (store badge, accent counts, muted labels, yellow skipped
+  count) carrying the same words as before, so it remains greppable. Behaviour is
+  untouched: no key, mouse, filter, install, or hit-test path changed. Tests: new
+  `the_cursor_row_carries_a_gutter_marker`,
+  `alternate_result_rows_carry_a_band_background` and
+  `the_description_runs_to_the_panel_edge_and_is_clipped_there` cases in
+  `crates/ragent-tui/tests/test_plugin_store_panel.rs`, with the 237-case
+  plugin-store suite and the full 3603-case `ragent-tui` suite green. (The shared
+  chrome constants and helpers named `PLUGIN_STORE_*`/`plugin_store_*` in that
+  release are the current `STORE_*`/`store_*` ones - see the `connectors` FR-047
+  entry above, which renamed them so both catalogue panels share one set.)
+
+### Fixed
+
+- **Flaky integration-test failures caused by process-global races under
+  one-test-binary-per-crate.** Each crate builds a single `all` test binary from its
+  whole `tests/` tree, so every `tests/test_*.rs` file now shares one process; an
+  isolated `std::env::set_var` / `remove_var` / `set_current_dir` in one child file is
+  observed by every concurrently running test in the others. Reproduced at roughly one
+  failure per 40 unsharded `cargo test -p ragent-config --test all` runs
+  (`test_experimental_flags::test_experimental_round_trips_through_config_load` panicked
+  reading the real global config instead of its temp file) because nine child files took
+  `#[serial_test::serial]` - a per-*target* lock - while other mutating tests took
+  per-file `OnceLock` mutexes, so the two groups never excluded each other.
+  - `ragent-config`: 45 more tests that mutate an env var or read env-dependent config
+    state now take `#[serial_test::serial]`, so every test touching
+    `RAGENT_CONFIG`/`RAGENT_CONFIG_CONTENT`/`XDG_CONFIG_HOME`/cwd or calling
+    `Config::load`/`global_config_path` contends on the one lock `serial_test` gives this
+    binary. Verified with 200 consecutive unsharded runs, 0 failures (was 1 in 40).
+  - `ragent-connectors` and `ragent-tools-core` gain the crate-wide
+    `global_env_mutex()`/`global_env_lock()` in their `tests/all.rs`; the connector
+    cwd tests delegate to it instead of a file-local mutex, the connector marketplace
+    XDG helper holds it, and the three `get_env` env-mutating tests hold it.
+  - `ragent-agent` gains the same crate-wide lock (its plugin-bridge XDG tests delegate
+    to it, and the MCP connect-timeout test is now `#[serial]`); `ragent-llm`'s live
+    Ollama Cloud discovery test takes `crate::global_env_lock()` instead of a bare
+    `remove_var`.
+  - Two tests in `ragent-tui` (the two `/spec reverse` cases that call
+    `slash_support::enter_project`) and the 74 `/slash` cases in
+    `test_slash_arms_deep.rs` took `crate::global_env_lock()` *and* called a harness
+    that takes it too. `std::sync::Mutex` is not reentrant, so the second acquisition
+    self-deadlocked and `cargo test -p ragent-tui --test all` hung indefinitely; the
+    harness already holds the lock for the whole body, so the redundant acquisition is
+    gone.
+  - New `scripts/check-test-env-isolation.sh` (with `--self-test`) enforces three
+    rules: a test that mutates a process global must carry `#[serial]`, hold a
+    `MutexGuard` (its own or the guard a harness returns to it), or say so with a
+    `// env-isolation: <reason>` marker; a crate must not mix `#[serial]` with
+    file-local mutexes while declaring no `global_env_lock`; and no test may take
+    `global_env_lock()` and then call a helper that takes it too. Wired into
+    `pre-flight.sh` and `.github/workflows/ci.yml`, and the rules are written down in
+    `AGENTS.md` ("Test Layout").
+- **`/team create` no longer resurrects a team directory that was removed.**
+  `test_slash_arms_deep::team_clear_removes_ta` and
+  `test_slash_teams_deep::forcecleanup_confirm_removes_team` failed intermittently with
+  `Os { code: 39, kind: DirectoryNotEmpty }`: `/team create <blueprint> <name>` handed
+  the blueprint seeding to a detached `std::thread`, and that thread re-entered
+  `team_create` -> `TeamStore::create`. Any call still in flight (or merely scheduled)
+  after a `/team clear` / `/team forcecleanup` removed the tree re-created the
+  directory together with its `config.json`, `mailbox/` and lock file, so the removal
+  failed with `ENOTEMPTY` or the directory came back.
+  - `team_create` gains a `seed_only` parameter: it applies the blueprint to a team
+    that already exists and never creates one (`/team create` has created it before
+    seeding), so no write can re-populate a removed tree.
+  - `/team create` also skips the seeding thread entirely when the named blueprint is
+    not installed, since there is nothing to seed.
+  - Two `ragent-agent` tests pin the new contract
+    (`team_create_seed_only_refuses_to_create_a_team`,
+    `team_create_seed_only_seeds_an_existing_team`).
+- **Silent-error guard reads a multi-line `// INTENTIONAL:` marker again.**
+  `crates/ragent-tui/src/app/slash.rs` was flagged with 2 masked sites against a
+  baseline of 1 because the `// INTENTIONAL: <reason>` justification for
+  `let _ = tm.shutdown_teammate(..)` sat three lines above the statement (the guard
+  only inspects the same line, the line directly above, and a comment directly below,
+  for a multi-line `let _ = <obj>`). The marker now sits directly above the drop, so
+  the guard sees one masked site and CI's Security guards job passes.
+- **The MCP startup report is followed by one blank line.** `App::report_mcp_startup`
+  now appends `"\n\n"` rather than `"\n"` when the report is non-empty. The transcript
+  renderer walks `text.lines()`, which drops a single trailing terminator, so one
+  extra newline added no rendered row at all; two yield exactly the one empty final
+  row the report needs, separating `[mcp] Starting/Connected/Failed ...` from whatever
+  the stream prints next. The latch semantics are untouched (a run with no configured
+  server still leaves the latch clear), and `test_report_mcp_startup_lists_start_and_connect_lines`
+  asserts the report ends `"\n\n"` and paints one trailing empty row.
+- **Every model/provider selector now scrolls instead of clipping its tail.** Three
+  list-bearing setup steps painted their rows statically, so a long list hid its
+  cursor past the bottom edge: the Azure
+  resource picker, the thinking-level selector and the two-pane Model Router setup
+  (both the provider palette and each tier bucket). They now share the windowing
+  rule the model pickers already used (`setup_window_start`), so the painted slice
+  follows the cursor one row at a time and a clipped list says so
+  (`Showing 12-23 of 40  |  ...`). The router buckets window by the selected
+  model's own two-or-three-line group (`setup_scroll_to_show`), so its retained
+  properties scroll with it rather than being cut in half, and the provider pane
+  states its window in the block title (`Providers (*) 11-20 of 30`).
+- **A wheel notch over an open provider/model setup dialog now scrolls that
+  dialog and nothing else.** `App` gains `provider_setup_area`, recorded by every
+  setup-dialog render arm and zeroed when the dialog closes, and the mouse router
+  intercepts wheel events while `provider_setup` is open: a notch inside the rect
+  steps the selector's cursor through the same `handle_provider_setup_key` path
+  the keyboard uses (one notch = one entry, window and legend in step), and a notch
+  outside it is swallowed so the chat, log or side panels behind the modal never
+  scroll under an anchored overlay. Steps without a list (the API-key and GitLab
+  forms, the loading spinner, the success card - which closes on any key) swallow
+  the notch instead of treating it as a keystroke, and clicks, drags and
+  right-clicks keep their existing routing so the paste menu still works.
+- New `crates/ragent-tui/tests/test_setup_selector_scroll.rs` (7 cases) drives the
+  real render entry point at terminal sizes small enough to clip, asserting the
+  selected Azure deployment, thinking level, router provider and router bucket
+  model are painted, that the first row has scrolled away, that `Showing` states
+  the window, that a notch over the picker steps the cursor both ways, that a notch
+  outside it leaves `scroll_offset` untouched, and that a notch over the success
+  card does not dismiss it. The full `ragent-tui` suite (3647) is green.
+
+### Security
+
+- **Two `rustls` TLS advisories cleared by dependency bumps** (`cargo audit` and
+  `cargo deny check` now pass with no suppression needed):
+  `rustls-webpki` 0.103.15 -> 0.103.16 (RUSTSEC-2026-0382, certificate
+  verification could accept distrusted intermediates) and `webpki-root-certs`
+  1.0.9 -> 1.0.10 (RUSTSEC-2026-0383, bundled roots trusted distrusted emSign
+  intermediates). Both are transitive via `rustls`; neither advisory is added to
+  `.cargo/audit.toml` or `deny.toml`, so a re-introduction fails CI again.
+
 ## [1.0.148] - 2026-10-20
 
 Release 1.0.148: the `agentui` keyboard-first

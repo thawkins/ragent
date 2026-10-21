@@ -5861,9 +5861,30 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 ));
                                 self.status = format!("team: {}", name);
 
-                                // If blueprint provided, invoke the team_create tool to apply seeding asynchronously
+                                // If the blueprint is installed, invoke the
+                                // `team_create` tool to apply its seeding.
+                                //
+                                // `/team create` has already created the team
+                                // above, so the seeding call is issued with
+                                // `seed_only`: it applies the blueprint to the
+                                // existing team instead of re-creating it. A
+                                // re-creating call that ran after the team
+                                // directory was removed (a `/team clear` or
+                                // `/team forcecleanup` racing this detached
+                                // thread) resurrected the tree, so the removal
+                                // failed with ENOTEMPTY or the directory came
+                                // back (CI flake in
+                                // `test_slash_arms_deep::team_clear_removes_ta`
+                                // and
+                                // `test_slash_teams_deep::forcecleanup_confirm_removes_team`).
+                                // A blueprint that is not installed has nothing
+                                // to seed, so the thread is not started at all.
                                 let bp = blueprint.clone();
-                                if !bp.is_empty() {
+                                let blueprint_installed =
+                                    blueprints::list_installed_blueprints(&working_dir)
+                                        .iter()
+                                        .any(|installed| installed.name == bp);
+                                if !bp.is_empty() && blueprint_installed {
                                     let session_processor = self.session_processor.clone();
                                     let event_bus = self.event_bus.clone();
                                     let storage = self.storage.clone();
@@ -5896,6 +5917,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         let input = serde_json::json!({
                                                             "name": name_clone,
                                                             "project_local": true,
+                                                            "seed_only": true,
                                                             "blueprint": bp,
                                                         });
                                                         let ctx = ragent_agent::tool::ToolContext {
@@ -6506,10 +6528,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         if m.status != MemberStatus::Stopped {
                                             if let Some(tm) = manager.as_ref() {
                                                 let agent_id = m.agent_id.clone();
-                                                // INTENTIONAL: fallible best-effort shutdown; the
-                                                // directory removal below is the authoritative
+                                                // The directory removal below is the authoritative
                                                 // teardown, and a member with no live handle is
                                                 // still marked Stopped on disk by the call.
+                                                // INTENTIONAL: fallible best-effort shutdown
                                                 let _ =
                                                     tm.shutdown_teammate(&agent_id, false).await;
                                             }

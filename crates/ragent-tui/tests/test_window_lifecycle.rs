@@ -156,13 +156,12 @@ async fn the_last_subagent_completion_closes_the_agents_window() {
         "the auto-close must request a repaint (NFR-005)"
     );
 
-    // The next frame paints the chat without the Agents window and zeroes the
-    // close-button area, so no stale button stays clickable (TC-031 step 2).
+    // The next frame paints the chat without the Agents window and leaves no
+    // stale hit rect behind (TC-031 step 2).
     render(&mut app);
-    assert_eq!(
-        app.agents_close_button_area,
-        Rect::default(),
-        "a closed window leaves no close button hit rect"
+    assert!(
+        !app.show_agents_window,
+        "a closed window stays closed across a repaint"
     );
 }
 
@@ -315,8 +314,9 @@ fn an_already_closed_or_occupied_window_is_untouched_by_the_auto_close() {
 // ---------------------------------------------------------------------------
 
 /// With `is_processing` true (a turn streaming), the Agents button toggle, the
-/// Close button and a row `[stop]` control all stay serviced through the real
-/// mouse router (TC-029 steps 1-4; FR-061).
+/// With `is_processing` true (a turn streaming), the Agents button toggle, the
+/// `Esc` dismissal and a row `[stop]` control all stay serviced through the real
+/// key/mouse router (TC-029 steps 1-4; FR-061).
 #[tokio::test]
 async fn window_actions_stay_serviceable_during_a_running_turn() {
     let mut app = app_with_window(vec![task("a1b2c3d4", "explore", TaskStatus::Running)]);
@@ -355,12 +355,15 @@ async fn window_actions_stay_serviceable_during_a_running_turn() {
     );
     assert!(app.needs_redraw, "the request repaints (NFR-005)");
 
-    // Step 4: the Close button dismisses the window mid-turn.
-    let (close_col, close_row) = centre(app.agents_close_button_area);
-    app.handle_mouse_event(click(close_col, close_row));
+    // Step 4: `Esc` dismisses the window mid-turn.
+    app.handle_key_event(crossterm::event::KeyEvent::new(
+        KeyCode::Esc,
+        KeyModifiers::NONE,
+    ))
+    .await;
     assert!(
         !app.show_agents_window,
-        "the Close button dismisses the window mid-turn (FR-061)"
+        "Esc dismisses the window mid-turn (FR-061)"
     );
 
     // The streaming state is untouched by every panel action above.

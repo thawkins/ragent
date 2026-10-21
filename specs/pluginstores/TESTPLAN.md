@@ -171,7 +171,7 @@ index (`<CODEX_URL>`) so the panel has content.
   visible.
 - At the top and bottom of the set the cursor clamps and does not wrap.
 
-### TC-004 - Installed entries render in the installed colour with `[installed]`
+### TC-004 - Installed entries render in the installed colour with the installed-lane marker
 
 **Requirement:** FR-005
 
@@ -180,16 +180,18 @@ with the fixture index loaded.
 
 **Steps:**
 1. Locate the `codex-weather` row in the list.
-2. Read its foreground/background colour and any trailing marker.
+2. Read its foreground/background colour and the marker in its leading installed lane.
 3. Move the block cursor onto the `codex-weather` row.
 4. Compare with a not-installed row (for example `codex-time`).
 
 **Test data:** none (read-only observation).
 
 **Expected results:**
-- The `codex-weather` row is painted in the distinct installed colour and carries an
-  `[installed]` marker (FR-005).
-- Not-installed rows use the default result colour and no marker.
+- The `codex-weather` row is painted in the distinct installed colour and carries a `*`
+  marker in the one-column installed lane between the `>` gutter and the id column
+  (FR-005).
+- Not-installed rows use the default result colour and paint a blank in that lane, so both
+  rows start their id column in the same cell.
 - The block cursor remains a full-width background fill on whichever row is highlighted,
   whether installed or not (FR-005).
 
@@ -213,7 +215,8 @@ points at a valid fixture.
 **Expected results:**
 - Step 2 progress is shown while the install runs (FR-011).
 - Step 3 the message window reports the installed plugin id and dialect (FR-006).
-- Step 4 the row now renders in the installed colour with `[installed]` (FR-011).
+- Step 4 the row now renders in the installed colour with the `*` installed-lane marker
+  (FR-011).
 - Step 5/6 the second `ENTER` reports "already installed" and performs no write
   (FR-014).
 
@@ -790,3 +793,72 @@ Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
 areas (`App::plugin_store_nav_area` / `App::plugin_store_marketplace_area`) are pinned to
 the row area below the header by the existing mouse tests
 (`crates/ragent-tui/tests/test_plugin_store_category_mouse.rs`) and the acceptance walk.
+
+## T-035 - Readability pass on the browse panel
+
+**Preconditions:** a store index with several entries across at least two marketplaces,
+one entry already installed, and a 120x30 or larger terminal.
+
+**Steps:**
+1. Open the browse panel and confirm the border, title, header bands, and result rows
+   paint; the result list shows the gutter, the muted version/marketplace cells, and the
+   alternating band.
+2. Press `Down` and confirm the `>` gutter marker and the block cursor move together.
+3. Type into the search field and confirm the `[x] clear` button brightens in the accent
+   colour; clear it and confirm the button dims again.
+4. Resize the terminal to 100x18 and confirm nothing is clipped or panics.
+
+**Expected results:**
+- The cursor row carries both the block cursor background and the `>` gutter marker; no
+  other row carries either (FR-004, FR-005).
+- Alternate rows carry the band background from the column's left edge to its right edge;
+  the cursor row's background also reaches that right edge.
+- The version and marketplace cells are painted in the muted tone, the marketplace in the
+  panel accent, and an installed row's `*` marker in bold green in the one-column lane
+  between the `>` gutter and the id column; a not-installed row paints a blank there, so
+  both rows start their id column in the same cell.
+- A description longer than the room left in the row is clipped at the panel's inner right
+  edge instead of pushing the marketplace column off the row.
+- The title, footer, and search-box text is unchanged as words, so the existing title
+  assertions still pass, and the body stays ASCII inside the Unicode border.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_panel.rs`
+(`the_cursor_row_carries_a_gutter_marker`,
+`alternate_result_rows_carry_a_band_background`,
+`an_installed_row_uses_the_installed_colour_and_marker`), with the existing panel, mouse,
+keyboard, and acceptance suites pinning the unchanged behaviour.
+
+## TC-036 - The `Installed` pseudo-category
+
+**Prerequisites:** a configured plugin store index, at least two plugins installed
+(`/plugins add ...` or pre-staged under `.ragent/plugins/`), and a 120x40 terminal.
+
+**Test data:** the ids of the plugins you installed, for example `codex-weather`.
+
+**Steps:**
+1. Run `/plugins codex` and look at the left-hand category navigator without touching any
+   key.
+2. Note the labels, then press `Down` once so the block cursor lands on the second row.
+3. Press `Down` twice more to reach a named category, then `Up` twice to return to the
+   pseudo-category.
+4. Type the first three characters of one installed plugin's id into the search field,
+   then clear it with `Backspace`.
+5. Press `/plugins claude` and repeat step 1.
+
+**Expected results:**
+- The navigator reads `ALL (N)`, then `Installed (M)`, then the store categories sorted
+  case-insensitively; `M` counts the loaded entries whose id is in the store scan, so it
+  excludes installed plugins the fetched index does not list.
+- The second row is the `Installed` pseudo-category and `Down` onto it narrows the result
+  list to the installed plugins only. An installed plugin that declares no category at all
+  is listed here even though no category row contains it.
+- The result list stays narrow while typing and returns to the full installed set when the
+  query is cleared; the pseudo-category composes with the marketplace filter the same way.
+- The row is present, counted `Installed (0)`, above every store category - and above an
+  `Installed`-named store category if the index declares one (the name is reserved, so only
+  one such row exists).
+- Both panels show the same row in the same position, and selecting it installs nothing.
+
+Covered offline by `crates/ragent-tui/tests/test_plugin_store_installed_category.rs`, with
+the existing category-filter, keyboard, mouse, launch, and acceptance suites pinning the
+row offsets (FR-054).

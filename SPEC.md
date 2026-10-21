@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.147</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.149</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-10-20
+          <strong>Date:</strong> 2026-10-21
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,8 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.147, with the uncommitted `agentui` keyboard-first
-rework on top). The core architecture, tool system,
+Ragent is in **beta** (v1.0.149). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -743,16 +742,16 @@ graph TD
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
 
-Per-crate `fn`-definition counts (lexical lower bounds from `countreport.md`,
-cross-checked by deterministic ripgrep, uncommitted 2026-10-20 tree):
-`ragent-tui` 5,871 · `ragent-agent` 4,532 · `ragent-tools-extended` 2,889 ·
-`ragent-research` 2,418 · `ragent-llm` 1,082 · `ragent-codeindex` 1,041 ·
-`ragent-plugins` 974 · `ragent-specs` 962 · `ragent-tools-vcs` 940 ·
-`ragent-connectors` 850 · `ragent-tools-core` 834 · `ragent-config` 749 ·
-`ragent-storage` 579 · `ragent-types` 579 · `ragent-telemetry` 522 ·
-`ragent-bench` 377 · `ragent-server` 351 · root `ragent` binary 159 ·
-`ragent-surface` 114 — 25,823 workspace-wide (8,588 in `src/`, 17,235 in
-`tests/`, 67% test code).
+Per-crate `fn`-definition counts (lexical lower bounds, re-measured 2026-10-21;
+the v1.0.142 `countreport.md` inventory records 25,823 on its tree):
+`ragent-tui` 6,054 · `ragent-agent` 4,630 · `ragent-tools-extended` 2,956 ·
+`ragent-research` 2,513 · `ragent-codeindex` 1,130 · `ragent-llm` 1,102 ·
+`ragent-tools-core` 1,001 · `ragent-plugins` 991 · `ragent-specs` 981 ·
+`ragent-tools-vcs` 941 · `ragent-connectors` 907 · `ragent-config` 787 ·
+`ragent-types` 590 · `ragent-storage` 585 · `ragent-telemetry` 550 ·
+`ragent-bench` 412 · `ragent-server` 363 · root `ragent` binary 159 ·
+`ragent-surface` 114 — 26,768 workspace-wide (8,985 in `src/`, 17,667 in
+`tests/`, 66% test code).
 
 ### 2.3 Event Bus Flow
 
@@ -1997,7 +1996,7 @@ graph LR
     App --> Log[Log Widget]
     App --> Input[Input Widget]
     App --> Status[Status Bar]
-    App --> Windows[Agents / Teams Windows + Output View Close Bar]
+    App --> Windows[Agents / Teams Windows + Output View Legend]
     App --> Dialogs[Permission / Question Dialogs]
     EventBus --> App
 ```
@@ -2022,6 +2021,14 @@ counts the whole index (FR-053). The active category and marketplace are
 shown in the panel title (`-- category <name> -- marketplace <name>`) and painted in a
 distinct colour; the row under each navigator's cursor carries a block cursor
 independent of the result-list cursor.
+
+The category navigator additionally carries an **`Installed` pseudo-category** in
+row 1, directly below `ALL` and above the index's own categories (spec `pluginstores`
+FR-054). Selecting it narrows the results to the plugins already present in the store
+scan, matched on the plugin id rather than on a declared category, so an installed
+plugin that declares no category still appears; the row's `Name (N)` count is the
+number of loaded entries the scan matches. It composes with the query and marketplace
+filters like any other navigator row, and `c` clears back to `ALL`.
 
 The panel has three focusable panes and is fully operable by keyboard: `Tab`/`BackTab`
 cycle focus forward/backward through the result list, the category navigator, and the
@@ -2059,7 +2066,9 @@ resolved URL), or the store label (`Codex`/`Claude`) for the store's base endpoi
 merged multi-marketplace panel shows each row's source (FR-048). The marketplace and
 description columns share the flexible remainder, so a longer marketplace name is shown
 in full when the terminal has room and clipped without pushing the fixed id/version
-columns or the trailing `[installed]` marker off the row when it does not.
+columns or the one-column installed lane off the row when it does not. That lane sits
+beside the `> ` cursor gutter and carries a bold green `*` on a row already installed;
+every other row paints a blank there so the columns stay aligned.
 
 The panel's bottom inner row carries a **search box** (FR-051): a leading `search:` label,
 the live filter field, and a right-aligned `[x] clear` button. The field mirrors the
@@ -3904,20 +3913,28 @@ connected after startup reports a real count (T-008).
 
 ### 19C.7 Catalogue browser (`/connectors claude`)
 
-A modal overlay in `crates/ragent-tui/src/layout.rs`, modelled on the
-plugin-store panel: a title line (catalogue name, query, active category, and
-visible/total result count; a `loading details...` hint is appended while the
-manifest-description enrichment is still running), a scrollable result list with
-the block cursor on the highlighted row, each row showing the connector id, its
-category, the marketplace it came from (or `-` for a local install) and its
-description, an `[installed]` marker and distinct colour on already-installed
-connectors, and a footer of key hints. The catalogue fetch and
-the `ENTER` install both run **off the event loop** on a blocking worker and
+A modal overlay in `crates/ragent-tui/src/layout.rs`, wearing the same design
+language as the plugin-store panel (spec `connectors` FR-047): a calm slate accent
+frame capped at 140x41; a structured title line (catalogue name badge, accent
+counts, and the active `search`/`category`/`marketplace` filters; a
+`loading details...` hint is appended while the manifest-description enrichment is
+still running); a left column split into a `Categories` navigator above a
+`Marketplace` navigator, each under a reversed-video title band with every row
+labelled `Name (N)`; a pinned dark-on-light column-heading row above zebra-banded
+result rows carrying a `> ` cursor gutter, a one-column bold-green `*` lane on an
+installed connector, the id and category columns, the marketplace in the accent
+colour (or `-`), and a description running to the panel's right edge; a centred
+footer of key hints; and a bottom ` search: ` box with a clickable `[x] clear`
+button. The category navigator lists `ALL`, an `Installed` pseudo-category matched
+against the store scan, then the catalogue's declared categories. Three panes are
+focusable (`Results` initial, then the two navigators, cycled by `Tab`/`BackTab`
+with only the focused pane's cursor filled); `Up`/`Down` move the focused pane and
+apply a navigator row, `ENTER` over a navigator applies and returns focus to the
+results, `c` clears the focused navigator's filter to `ALL`, and `Backspace`/`Esc`
+edit the query (`Esc` on an empty query dismisses the panel). The catalogue fetch
+and the `ENTER` install both run **off the event loop** on a blocking worker and
 deposit their result for the UI thread to drain, so the fetch never blocks the
-loop or an agent turn. While open the panel owns the keyboard (`Up`/`Down` move
-the cursor, `ENTER` installs, `c` cycles the category filter through the
-catalogue's declared categories and back to `ALL`, `Backspace`/`Esc` edit the
-query, and `Esc` on an empty query dismisses the panel). The launch parser
+loop or an agent turn. The launch parser
 removes both `--refresh` and `--category <name>` from the query tokens (so a
 pre-filled query may contain spaces) and validates the category against the
 categories the fetched catalogue actually declares, falling back to an
@@ -4477,8 +4494,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| Uncommitted | 2026-10-20 | **Keyboard-first Agents/Teams windows (spec `agentui` T-021/T-022).** Both popups move from mouse row clicks to a block cursor: `Up`/`Down` move one row, `PgUp`/`PgDn` page, `Space` toggles sub-agent suspend/resume and `Del`/`Shift+K` arms the kill/shutdown confirmation, `Enter` opens the cursor row's output view, and clicking a row selects it (the `[stop]`/`[x]` glyphs remain as status indicators only; primary/lead and background-shell rows are outside the cursor; stale indices degrade to consumed no-ops). A bordered Close bar button lands bottom-right of the output-view overlay (FR-074/FR-075), the FR-077 key legend sits in each window's footer, the Agents modal narrows to 70% width (the narrowest centred width that keeps the pinned control columns inside the table), and cursor/scroll row maps stay index-aligned through scroll and window reopen (FR-056/FR-065). **`/team forcecleanup` shutdown race fixed:** the fire-and-forget `tokio::spawn` of `spawn_teammate(.., "shutdown", ..)` (a wasted LLM loop that also re-created `config.json` inside the directory being deleted, failing `remove_dir_all` with `ENOTEMPTY`) is replaced by an awaited per-member `tm.shutdown_teammate` loop before the directory removal. **Tool watchdog timeout raised 2000 s -> 5000 s** (`TOOL_WATCHDOG_TIMEOUT` in `processor.rs`; `docs/howtos/reactagent.md` follows). **New `countreport.md`:** per-crate `fn`-definition inventory (25,823 workspace-wide across 8,588 `src/` + 17,235 `tests/` definitions; `ragent-tui` the largest at 5,871), counted with a shared line-anchored ripgrep pattern by one `explore` sub-agent per crate and cross-checked deterministically. |
-| Uncommitted | 2026-10-18 | **Agent and Team Member panel (spec `agentui`, T-001..T-020).** The `Agents` and `Teams` buttons open live control popups (sub-agent tree with `[stop]`/`[x]` columns and a background-shell section; teammate rows with focus markers, canonical `MemberStatus::display_label()` status words, model column, counters) plus a one-row teammate strip under the status bar. Row actions (sub-agent kill, background-shell cancel, teammate suspend/shutdown) are gated by a Yes/No confirmation modal dispatched off the render thread; `Space`/`Shift+K` keyboard control works with primary-agent protection and window-key precedence; `Alt+Down`/`Alt+Up` cycle focus; both tables scroll with clamped offsets, vertical scrollbars, and the wheel, with an index-aligned hit-rect lifecycle; a 1500 ms registry reconciliation safety net plus full sub-agent/team event plumbing keep the rows live (`SubagentSuspended`/`SubagentResumed` re-status rows and the Agents window auto-closes when its list empties). **Cooperative sub-agent suspension (agentui FR-035):** `AgentManager` gains `suspend_flags` and real `suspend_task`/`resume_task` (Running->Suspended / Suspended->Running, idempotent, publishing `SubagentSuspended`/`SubagentResumed`), and the agent loop parks at a new inter-step safe point while the flag is set (200 ms poll, cancel-flag break); sessions without a manager entry skip the gate. **Text-format tool-call recovery widened:** the F9 pass moves into `loop_steps` (so every caller's text/reasoning parts are saved blanked), scans the reasoning channel as a second surface with per-surface `AgentNotice`s, and gains three dialects - plain `<toolcall>`, a slash-dropped close-tag variant (two identical tags), and the underscore `tool_call` pair; the message widget scrubs narrated tool-call markup and one-line tool-call JSON from the transcript (`scrub_narrated_toolcalls`). **`/yolo on|off|status` are real subcommands and YOLO persists under `--config`:** the handler dispatches on the subcommand instead of always toggling, and `ragent --config <file>` registers the file with the new `Config::set_config_write_target` so runtime-flag writes (`yolo`, `edit_log`, `activity_log`) and `save_to_source` land in the loaded file. **A spec with only `SPEC.md` is discoverable** (`discover_specs`/`read_spec` no longer require `PLAN.md`; `write_spec` skips empty plans; `/spec update` omits the existing-plan block when there is none). **Plugin-store and connector-catalogue panels draw Unicode box-drawing borders** (spec `pluginstores`/`catnav` FR-004 ASCII-only requirement reversed; `PLUGIN_STORE_ASCII_BORDER` deleted). **SEC-ragent-team-003:** lead-authored mailbox messages (`team_shutdown_teammate`, lead-to-teammate chat) carry the lead session id via `with_sender_session`. **Windows-safe path-alias containment:** `ragent-tools-core`'s `is_alias_within` uses the `same-file` crate (`same_file::is_same_file`) instead of the unstable `windows_by_handle` metadata field. 58 spec directories on disk; new consolidated suites `test_task_suspend_resume`, `test_config_write_target`, `test_think_narration_scrub`, and 20 agentui suites. |
+| v1.0.149 | 2026-10-21 | **The `/provider` and `/model` setup dialogs are rebuilt on the catalogue list chrome, `/connectors claude` adopts the same design language, and the test suite gains a process-global isolation guard (specs `agentui`, `connectors` FR-047, `pluginstores` FR-054).** Every list-bearing `ProviderSetupStep` (provider, model, router-tier model, agent, configured-provider, provider-config and reset steps) now shares one composition: a slate accent frame titled with the step and subject, a heading strip with a live count, a pinned reversed-video column band, a cursor-filled zebra row list, and a muted key-hint footer; `SelectProvider` gains provider-name/provider-id/`Kind`/`Status` columns, `SelectModel`/`SelectRouterModel` right-align `Context` and `Cost` and spell out the `R`/`V`/`T` legend, and every selector windows around its cursor (the thinking-level list two lines at a time) so a list longer than the dialog keeps the highlighted row painted with `Showing a-b of N` in the legend. A mouse notch over an open setup dialog steps the cursor through the same `handle_provider_setup_key` path and is swallowed elsewhere. The `/connectors claude` browser drops its bespoke layout for the shared `STORE_*` chrome (renamed from `PLUGIN_STORE_*` and now used by both panels), gains a `Categories` navigator above a `Marketplace` navigator with `Name (N)` rows and an `Installed` pseudo-category, three focusable panes (`CataloguePane::Results`/`Categories`/`Marketplaces`), a pinned column-heading row, a one-column bold-green installed lane, and a bottom search box with `[x] clear`; the plugin-store navigators gain the same `Installed` pseudo-category (FR-054). `scripts/check-test-env-isolation.sh` (with `--self-test`) enforces test env isolation across the per-crate `tests/all.rs` binaries, wired into `pre-flight.sh` and CI. `rustls-webpki` 0.103.16 and `webpki-root-certs` 1.0.10 clear RUSTSEC-2026-0382/0383 with no suppression added. Tests: `test_setup_dialog_chrome` (14), `test_setup_selector_scroll` (7), `test_plugin_store_installed_category`, the 54-case connector-catalogue set, and the reworked window/footer suites; `cargo test --workspace` 14,418 passed / 0 failed / 22 ignored, `cargo fmt --check`, clippy, `cargo audit` and `cargo deny check` all clean. **Also released in this version:** the `Esc`-only modal dismissal - the Agents, Teams and output-view overlays lose the bordered ` Close ` bar, `window_frame` derives a one-row legend band instead, and every FR-077 legend ends with `Esc close` (FR-007, FR-018, FR-032, FR-074, FR-077); the keyboard-first Agents/Teams block cursor with the `/team forcecleanup` shutdown race fix (`seed_only` seeding, awaited per-member shutdown) and the 5000 s `TOOL_WATCHDOG_TIMEOUT` (FR-033..FR-046, FR-065, FR-069..FR-070); and the Agent and Team Member panel (FR-006..FR-026) with cooperative sub-agent suspension (FR-035), the widened text-format tool-call recovery (three more dialects plus reasoning-channel scanning), `/yolo on|off|status` with the `--config` write target, the discoverable `SPEC.md`-only spec directory, SEC-ragent-team-003, and the `same-file` Windows path-alias containment. |
 | v1.0.141 | 2026-10-18 | Version bump. Session screenshot renamed to `assets/screens/ragentsession.png` and re-embedded in the README. |
 | v1.0.140 | 2026-10-18 | Version bump. README screenshot additions: `ragentmcpstartup.png` and the session image. |
 | v1.0.139 | 2026-10-18 | Status bar names the active execution backend in full (`Backend:<name>`, fixed cyan via `colors::BACKEND`); README gains screenshots of the provider, model, MCP-discover and plugin-selector panels; sandbox-backends how-to and status-bar assertions follow. |
@@ -5120,7 +5136,7 @@ graph LR
     App --> Log[Log Widget]
     App --> Input[Input Widget]
     App --> Status[Status Bar]
-    App --> Windows[Agents / Teams Windows + Output View Close Bar]
+    App --> Windows[Agents / Teams Windows + Output View Legend]
     App --> Dialogs[Permission / Question Dialogs]
     EventBus --> App
 ```

@@ -21,6 +21,7 @@ fn remove_var(name: &str) {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_read_credential_env_trims_and_rejects_blank() {
     set_var("RAGENT_TEST_CRED_WS", "  token-value  ");
     assert_eq!(
@@ -36,6 +37,7 @@ fn test_read_credential_env_trims_and_rejects_blank() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_first_credential_env_precedence_and_blank_skip() {
     set_var("RAGENT_TEST_CRED_PRIMARY", "   ");
     set_var("RAGENT_TEST_CRED_SECONDARY", "secondary-token");
@@ -48,6 +50,7 @@ fn test_first_credential_env_precedence_and_blank_skip() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_provider_credential_env_vars_known_ids() {
     assert_eq!(
         provider_credential_env_vars("anthropic"),
@@ -64,6 +67,7 @@ fn test_provider_credential_env_vars_known_ids() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_provider_credential_env_reads_first_non_blank() {
     set_var("RAGENT_TEST_PROV_KEY", "provider-key-123");
     // Reuse a known id shape via first_credential_env directly to avoid

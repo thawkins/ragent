@@ -1372,8 +1372,9 @@ fn connector_catalogue_mouse_clicks_navigator_and_results() {
     let results = app.connector_store_result_area;
 
     app.handle_mouse_event(mouse(MouseEventKind::Down(MouseButton::Left), nav.x, nav.y));
-    assert!(
-        app.connector_store.as_ref().expect("open").nav_focused,
+    assert_eq!(
+        app.connector_store.as_ref().expect("open").focus,
+        ragent_connectors::CataloguePane::Categories,
         "a navigator click focuses the category column"
     );
     app.handle_mouse_event(mouse(MouseEventKind::ScrollDown, nav.x, nav.y));

@@ -23,7 +23,7 @@
 
 mod support;
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -35,16 +35,6 @@ use support::make_app;
 
 /// The lead session id every Agents case uses.
 const LEAD_SESSION: &str = "lead-session-0001";
-
-/// A left-button press at `(col, row)` (still used for the close-button path).
-const fn click(col: u16, row: u16) -> MouseEvent {
-    MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: col,
-        row,
-        modifiers: KeyModifiers::empty(),
-    }
-}
 
 /// A sub-agent [`TaskEntry`] with `agent`'s label and a session id derived from
 /// the task id.
@@ -401,8 +391,8 @@ fn a_stale_teammate_cursor_ordinal_reports_the_no_op() {
 // FR-065: cursor and focus survive a close/reopen
 // ---------------------------------------------------------------------------
 
-#[test]
-fn agents_cursor_survives_a_close_and_reopen() {
+#[tokio::test]
+async fn agents_cursor_survives_a_close_and_reopen() {
     let mut app = make_app();
     app.session_id = Some(LEAD_SESSION.to_string());
     app.agent_name = "general".to_string();
@@ -416,13 +406,10 @@ fn agents_cursor_survives_a_close_and_reopen() {
     let selected = app.agents_cursor_subagent;
     assert_eq!(selected, Some(0), "the cursor selects the sub-agent row");
 
-    // Close the window with its Close button (TC-032 step 1: the click path a
-    // real user takes).
-    let (close_col, close_row) = (
-        app.agents_close_button_area.x + app.agents_close_button_area.width / 2,
-        app.agents_close_button_area.y + app.agents_close_button_area.height / 2,
-    );
-    app.handle_mouse_event(click(close_col, close_row));
+    // Close the window with `Esc` (TC-032 step 1: the key path a real user
+    // takes, since the modal carries no Close button).
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await;
     assert!(!app.show_agents_window);
     assert_eq!(
         app.agents_cursor_subagent, selected,
@@ -451,8 +438,8 @@ fn agents_cursor_survives_a_close_and_reopen() {
     );
 }
 
-#[test]
-fn teams_focus_survives_a_close_and_reopen() {
+#[tokio::test]
+async fn teams_focus_survives_a_close_and_reopen() {
     let mut app = app_with_team();
     render(&mut app);
 
@@ -465,13 +452,15 @@ fn teams_focus_survives_a_close_and_reopen() {
         "Enter focuses the teammate"
     );
 
-    // Close with the Close button, then reopen (TC-032 step 3).
-    let (close_col, close_row) = (
-        app.teams_close_button_area.x + app.teams_close_button_area.width / 2,
-        app.teams_close_button_area.y + app.teams_close_button_area.height / 2,
-    );
-    app.handle_mouse_event(click(close_col, close_row));
+    // Close with `Esc`, then reopen (TC-032 step 3). Focusing a teammate opens
+    // its output view, which is the topmost surface, so the first `Esc` closes
+    // the overlay and the second dismisses the Teams window beneath it.
+    for _ in 0..2 {
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+    }
     assert!(!app.show_teams_window);
+    assert!(app.output_view.is_none(), "the overlay closed first");
     assert_eq!(
         app.focused_teammate.as_deref(),
         Some("tm-001"),

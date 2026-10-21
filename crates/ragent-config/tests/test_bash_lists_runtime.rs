@@ -52,6 +52,7 @@ impl Drop for Sandbox {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_bash_lists_default_and_debug() {
     let lists = BashLists::default();
     assert_eq!(lists.allowlist, Vec::<String>::new());

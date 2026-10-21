@@ -1,29 +1,30 @@
-//! Tests for the output view overlay's close bar and wheel routing
+//! Tests for the output view overlay's footer legend and wheel routing
 //! (spec `agentui` T-021: FR-074, FR-075).
 //!
-//! FR-074 pins the overlay's frame geometry: a 90x70 centred modal built by
-//! the shared `window_frame` helper, with a bordered ` Close ` bar button in
-//! the bottom-right of the inner area (clamped to at most 10 columns and 3
-//! rows, exactly like the Agents and Teams close buttons) and the content
-//! computed as the inner area minus the button height and one separating row.
+//! FR-074 pins the overlay's frame geometry: a 90x70 centred modal built by the
+//! shared `window_frame` helper, with a one-row key legend along its bottom
+//! inner row and the content computed as the inner area minus that band. The
+//! overlay carries **no** Close button - `Esc` and a click outside the overlay
+//! are its dismissal paths - so the footer is the only affordance it paints.
 //!
-//! FR-075 pins the dismissal and wheel behaviour: clicking that button closes
-//! the overlay leaving every other value untouched (same state the `Esc` and
-//! outside-click paths establish), and a wheel event over the overlay scrolls
-//! the overlay even when the Agents popup is open beneath it - the overlay is
-//! the topmost surface, so its wheel arms precede the popup arms.
+//! FR-075 pins the dismissal and wheel behaviour: `Esc` closes
+//! the overlay leaving every other value untouched, a click outside it closes it
+//! too, and a wheel event over the overlay scrolls the overlay even when the
+//! Agents popup is open beneath it - the overlay is the topmost surface, so its
+//! wheel arms precede the popup arms.
 //!
-//! Every case drives the real render entry point / mouse router through a
-//! ratatui `TestBackend`, so the assertions exercise the exact path a real
+//! Every case drives the real render entry point / key and mouse router through
+//! a ratatui `TestBackend`, so the assertions exercise the exact path a real
 //! event takes (NFR-001). All state is synthetic and in-memory; nothing is
 //! written into the repository (NFR-012).
 
 mod support;
 
-use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::{Terminal, layout::Rect};
+use ratatui::{layout::Rect, style::Color};
 
 use ragent_tui::app::{OutputViewState, OutputViewTarget};
 
@@ -96,139 +97,97 @@ fn render_overlay_over_agents(app: &mut AppT, width: u16, height: u16) -> Buffer
     terminal.backend().buffer().clone()
 }
 
-/// The screen row of `buffer` containing `needle`, if any.
-fn row_containing(buffer: &Buffer, needle: &str) -> Option<u16> {
-    (0..buffer.area.height).find(|&y| {
-        let row: String = (0..buffer.area.width)
-            .filter_map(|x| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
-            .collect();
-        row.contains(needle)
-    })
+/// The full text of screen row `y`.
+fn row_text(buffer: &Buffer, y: u16) -> String {
+    (0..buffer.area.width)
+        .filter_map(|x| buffer.cell((x, y)).map(|c| c.symbol().to_string()))
+        .collect()
+}
+
+/// The overlay's footer legend band: the last inner row of the modal.
+fn legend_area(app: &AppT) -> Rect {
+    let area = app.output_view_area;
+    Rect::new(
+        area.x + 1,
+        area.y + area.height.saturating_sub(2),
+        area.width.saturating_sub(2),
+        1,
+    )
 }
 
 // ---------------------------------------------------------------------------
-// FR-074: output overlay close-bar geometry
+// FR-074: output overlay frame and footer legend
 // ---------------------------------------------------------------------------
 
-/// The overlay reuses the modal frame: a Close bar button in the bottom-right
-/// of the inner area, clamped to at most 10 columns and 3 rows (FR-074).
+/// The overlay's content stops one row above the inner bottom, leaving the
+/// footer band for the key legend (FR-074).
 #[test]
-fn test_output_view_close_button_is_bottom_right_and_clamped() {
+fn test_output_view_footer_band_is_the_last_inner_row() {
     for (width, height) in [(120u16, 40u16), (160, 44), (60, 20)] {
         let mut app = app_with_output_view();
         render_overlay_over_agents(&mut app, width, height);
 
         let area = app.output_view_area;
-        // Inner area: the modal minus its one-cell border on each side.
-        let inner = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
-        );
-        let close = app.output_view_close_button_area;
-
-        assert!(
-            close.width <= 10,
-            "at {width}x{height}: close width {} exceeds 10",
-            close.width
+        let legend = legend_area(&app);
+        assert_eq!(
+            legend.y,
+            area.y + area.height.saturating_sub(2),
+            "at {width}x{height}: the footer band is the last inner row"
         );
         assert!(
-            close.height <= 3,
-            "at {width}x{height}: close height {} exceeds 3",
-            close.height
-        );
-        assert_eq!(
-            close.width,
-            10.min(inner.width),
-            "at {width}x{height}: close must fill its clamped width"
-        );
-        assert_eq!(
-            close.height,
-            3.min(inner.height),
-            "at {width}x{height}: close must fill its clamped height"
-        );
-        assert_eq!(
-            close.right(),
-            inner.right(),
-            "at {width}x{height}: close must align to the inner right edge"
-        );
-        assert_eq!(
-            close.bottom(),
-            inner.bottom(),
-            "at {width}x{height}: close must align to the inner bottom edge"
-        );
-        assert!(
-            close.width > 0 && close.height > 0,
-            "at {width}x{height}: close must be a real rect, not a default placeholder"
+            legend.y < area.bottom(),
+            "at {width}x{height}: the footer stays inside the modal"
         );
     }
 }
 
-/// The overlay paints the bordered ` Close ` label inside its button rect, and
-/// the button sits over the overlay's border area, not outside it (FR-074).
+/// The footer names the dismissal key and the scroll keys, painted dim, and the
+/// overlay paints no ` Close ` label anywhere inside its frame (FR-074).
 #[test]
-fn test_output_view_close_button_paints_the_label() {
+fn test_output_view_footer_names_escape_and_no_close_button_paints() {
     let mut app = app_with_output_view();
     let buffer = render_overlay_over_agents(&mut app, 160, 44);
+    let legend = legend_area(&app);
 
-    let close_row = row_containing(&buffer, " Close ").expect("the Close label paints");
-    let close = app.output_view_close_button_area;
-    assert!(
-        (close.y..close.y + close.height).contains(&close_row),
-        "the ` Close ` label paints within the recorded button rect: row {close_row}, rect {close:?}"
+    let text = row_text(&buffer, legend.y);
+    for key in ["PgUp/PgDn scroll", "Ctrl+PgUp/PgDn jump", "Esc close"] {
+        assert!(text.contains(key), "the footer lists `{key}`: {text:?}");
+    }
+
+    assert_eq!(
+        buffer.cell((legend.x, legend.y)).and_then(|c| c.style().fg),
+        Some(Color::DarkGray),
+        "the footer legend paints in the dim hint colour"
     );
-}
 
-/// The content area never extends into the button's rows: the last content row
-/// sits above the separator row above the button (FR-074).
-#[test]
-fn test_output_view_content_excludes_the_close_bar() {
-    let mut app = app_with_output_view();
-    render_overlay_over_agents(&mut app, 160, 44);
-
+    // No ` Close ` label survives: scan every row inside the modal.
     let area = app.output_view_area;
-    let inner_bottom = area.y + area.height - 1;
-    let close_top = app.output_view_close_button_area.y;
-    assert!(
-        close_top + app.output_view_close_button_area.height - 1 < inner_bottom,
-        "the button must live inside the inner area"
-    );
-    // The content height equals the inner minus button minus separator, so the
-    // button top must be at least 2 rows (separator + gap) above the inner
-    // bottom's content start - verified exactly by the frame arithmetic:
-    // content.height = inner.height - close.height - 1, clamped >= 1.
-    let inner_h = area.height.saturating_sub(2);
-    let content_h = inner_h
-        .saturating_sub(app.output_view_close_button_area.height + 1)
-        .max(1);
-    // No stored content rect exists, so assert via geometry: the button's top
-    // minus inner top equals content height + 1 separator row, or the clamp
-    // bottomed out at a 1-row content (button top anywhere in the inner area).
-    assert!(
-        app.output_view_close_button_area.y - (area.y + 1)
-            >= content_h.saturating_sub(1).min(inner_h.saturating_sub(1)),
-        "the button must sit at or below the content area"
-    );
+    for y in area.y..area.bottom() {
+        let row = row_text(&buffer, y);
+        assert!(
+            !row.contains(" Close "),
+            "row {y} must not paint a Close button: {row:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
 // FR-075: dismissal
 // ---------------------------------------------------------------------------
 
-/// Clicking the overlay's own Close button closes the overlay and clears the
-/// selection identity with it (FR-075).
-#[test]
-fn test_output_view_close_button_click_closes_the_overlay() {
+/// `Esc` closes the overlay and clears the selection identity with it
+/// (FR-075).
+#[tokio::test]
+async fn test_output_view_escape_closes_the_overlay() {
     let mut app = app_with_output_view();
     app.selected_agent_session_id = Some("s1".to_string());
     app.selected_agent_index = Some(0);
     render_overlay_over_agents(&mut app, 160, 44);
 
-    let (col, row) = centre(app.output_view_close_button_area);
-    app.handle_mouse_event(click(col, row));
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()))
+        .await;
 
-    assert!(app.output_view.is_none(), "the Close click closes the view");
+    assert!(app.output_view.is_none(), "Esc closes the view");
     assert!(
         app.selected_agent_session_id.is_none(),
         "the selection identity clears with the view (FR-075)"
@@ -239,15 +198,15 @@ fn test_output_view_close_button_click_closes_the_overlay() {
     );
 }
 
-/// A click inside the overlay body outside its button is still consumed -
-/// the overlay never closes itself and never lets the click through (FR-075).
+/// A click inside the overlay body is consumed - the overlay never lets the
+/// click through to the chat beneath it (FR-075).
 #[test]
-fn test_output_view_body_click_outside_close_button_is_consumed() {
+fn test_output_view_body_click_is_consumed() {
     let mut app = app_with_output_view();
     render_overlay_over_agents(&mut app, 160, 44);
 
     let area = app.output_view_area;
-    // The overlay's top-left body, far from the bottom-right button.
+    // The overlay's top-left body.
     app.handle_mouse_event(click(area.x + 3, area.y + 3));
     assert!(
         app.output_view.is_some(),

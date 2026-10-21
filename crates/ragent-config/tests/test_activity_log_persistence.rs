@@ -56,6 +56,7 @@ impl Drop for EnvGuard {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_activity_log_defaults_to_true() {
     // When deserialised from JSON with the field absent, `#[serde(default =
     // "default_true")]` yields `true`. Since ANTIPAT M-7 the explicit
@@ -143,6 +144,7 @@ fn test_activity_log_persist_helper_updates_config_file() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_activity_log_false_is_serialized() {
     let mut config = Config::default();
     config.activity_log = false;
@@ -151,6 +153,7 @@ fn test_activity_log_false_is_serialized() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_activity_log_true_is_serialized() {
     let mut config = Config::default();
     config.activity_log = true;
@@ -159,6 +162,7 @@ fn test_activity_log_true_is_serialized() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_activity_log_merge_overlay_takes_precedence() {
     // Regression: `activity_log` was missing from `Config::merge`, so the
     // merged value always stayed at the derived-`Default` of `false` even

@@ -68,6 +68,7 @@ impl Drop for EnvGuard {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_locale_candidates_expands_tags() {
     assert_eq!(
         ragent_config::i18n::locale_candidates("fr_FR.UTF-8"),

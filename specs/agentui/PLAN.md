@@ -17,9 +17,9 @@ five layers:
 
 1. **Frame and chrome (`crates/ragent-tui/src/layout.rs`)** — the two mutually
    exclusive centred modals (`render_agents_window_overlay`,
-   `render_teams_window_overlay`), their `Clear` underlay, borders, titles, key legends
-   and clamped
-   close buttons; the input-side button column (`draw_input_side_buttons`); and the
+   `render_teams_window_overlay`), their `Clear` underlay, borders, titles, footer key
+   legends and content areas; the input-side button column (`draw_input_side_buttons`);
+   and the
    single-row teammate strip (`render_teammate_strip`) (FR-001..FR-008, FR-017..FR-019,
    FR-027, FR-066, FR-077, NFR-010).
 
@@ -43,10 +43,10 @@ five layers:
    `crates/ragent-tui/src/app/input_handler.rs`,
    `crates/ragent-tui/src/input.rs`)** — the cursor helpers (`move_*_cursor`,
    `page_*_cursor`, the `*_cursor_*` actions) driven by the
-   `Up`/`Down`/`PgUp`/`PgDn`/`Space`/`Del`/`Enter` window arms with their precedence
+   `Up`/`Down`/`PgUp`/`PgDn`/`Space`/`Del`/`Enter`/`Esc` window arms with their precedence
    over the input editor, `Alt+Up` / `Alt+Down`
    focus cycling, the retained mouse surface (wheel scrolling, scrollbar-gutter
-   dragging, button/close-button hit-tests, consume arms for everything else over a
+   dragging, button hit-tests, consume arms for everything else over a
    popup), and the destructive-action
    confirmation modal (FR-028..FR-046, FR-055..FR-059, FR-067..FR-071, FR-076..FR-078).
 
@@ -57,9 +57,11 @@ five layers:
    FR-072, NFR-007, NFR-008).
 
 6. **Window chrome (`crates/ragent-tui/src/layout.rs`, shared frame)** — `window_frame`
-   derives the modal rect, the clamped Close button and the content area for both
-   popups and the output overlay; `legend_area` carves the separator band to the
-   Close button's left and `render_window_key_legend` paints the FR-077 legend there.
+   derives the modal rect, the content area and the one-row footer band
+   (`WINDOW_LEGEND_ROWS`) for both popups and the output overlay;
+   `render_window_key_legend` paints the FR-077 legend into that band, which ends with
+   `Esc close` because none of the three windows carries a Close button.
+   `window_frame_testable` exposes `(modal, content, legend)` for the geometry tests.
 
 ### Panel layout
 
@@ -72,7 +74,7 @@ five layers:
 | o 99887766         `- reviewer [T]       bg             9s       0  [stop]  [x]|
 |  Background shell tasks                                                        |
 | o cc112233   cargo build --release       bg          1m02s       -  [stop]  [x]|
-| Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open   Close |
+| Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close |
 +--------------------------------------------------------------------------------+
 
 +- Teams ------------------------------------------------------------------------+
@@ -81,7 +83,7 @@ five layers:
 | > |- e5f6a7b8 reviewer-e5f6a7b8               working    anthropic/claude     1m41s| <-- cursor
 |  `- 99887766 tester-99887766                 idle       (inherited)            58s|
 |  Team: alpha  (lead + 2 teammates)                                             |
-| Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Close|
+| Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Esc close|
 +--------------------------------------------------------------------------------+
 ```
 
@@ -144,12 +146,12 @@ block cursor - movement and paging keep the cursor row painted by adjusting the 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
 |----|-------|-------------|--------|----------|--------|--------------|
 | T-001 | Input-side button column: Agents / Teams buttons, live counts, dimmed and active styles | FR-001, FR-002, FR-003, FR-004, FR-005, NFR-004 | M | Critical | completed | — |
-| T-002 | Agents window frame: centred 70% x 70% modal, cleared underlay, cyan bold title, clamped Close button, table area arithmetic | FR-006, FR-007, FR-008, NFR-010 | S | Critical | completed | — |
+| T-002 | Agents window frame: centred 70% x 70% modal, cleared underlay, cyan bold title, footer `Esc close` legend, table area arithmetic | FR-006, FR-007, FR-008, NFR-010 | S | Critical | completed | — |
 | T-003 | Agents table body: header, primary row, ancestor-indented sub-agent tree, row content, `[C]`/`[T]` badges, status styling, `[stop]`/`[x]` columns, background shell section | FR-009, FR-010, FR-011, FR-012, FR-013, FR-014, FR-015, FR-016, FR-062, NFR-003, NFR-004 | L | Critical | completed | T-002 |
-| T-004 | Teams window frame: modal geometry, blue bold title, Close button, `Team: <name> (lead + N)` table title, twelve-column header | FR-017, FR-018, FR-019, FR-020, NFR-010 | S | Critical | completed | — |
+| T-004 | Teams window frame: modal geometry, blue bold title, footer `Esc close` legend, `Team: <name> (lead + N)` table title, twelve-column header | FR-017, FR-018, FR-019, FR-020, NFR-010 | S | Critical | completed | — |
 | T-005 | Teams table body: lead row, teammate rows with focus marker, status vocabulary, model column with global-model suppression, claimed/done/sent/recv counters, empty state | FR-021, FR-022, FR-023, FR-024, FR-025, FR-026, NFR-009, NFR-004 | L | Critical | completed | T-004 |
 | T-006 | Teammate strip below the status bar: one pill per teammate, status icon, 16-column name, focused highlight, `Alt+^v:cycle` hint, omitted when no members | FR-027, FR-066 | S | High | completed | T-005 |
-| T-007 | Window open/close routing: button toggles with mutual exclusion, no-op clicks when the subject is absent, Close-button dismissal, redraw signalling | FR-028, FR-029, FR-030, FR-031, FR-032, NFR-005 | M | Critical | completed | T-001, T-002, T-004 |
+| T-007 | Window open/close routing: button toggles with mutual exclusion, no-op clicks when the subject is absent, `Esc` dismissal, redraw signalling | FR-028, FR-029, FR-030, FR-031, FR-032, NFR-005 | M | Critical | completed | T-001, T-002, T-004 |
 | T-008 | Keyboard row destinations: cursor Enter opens sub-agent/teammate output views with routing and status text, lead/primary exclusion, cursor retention across a reopen | FR-033, FR-034, FR-038, FR-039, FR-058, FR-064, FR-065 | M | High | completed | T-003, T-005 |
 | T-009 | Destructive-action confirmation modal: yes/no dialog for sub-agent kill, background-shell cancel, teammate shutdown and teammate suspend, with keyboard answering | FR-036, FR-037, FR-040, FR-069, FR-070, NFR-005 | M | High | completed | T-007 |
 | T-010 | Row action dispatch: suspend/resume toggle, kill, background-service cancel, teammate shutdown, all dispatched off the render thread with warn-level attribution on failure | FR-035, FR-036, FR-037, FR-040, FR-068, NFR-008 | M | Critical | completed | T-009 |
@@ -182,10 +184,10 @@ must be character-safe (NFR-004).
 ### T-002 - Agents window frame
 
 Centred overlay at 70% width and 70% height, `Clear` painted beneath, full borders,
-` Agents ` title in bold cyan (FR-006). A bordered ` Close ` button sits in the
-bottom-right of the inner area clamped to at most 10 columns and 3 rows (FR-007), with
-the key legend painted in the separator band to its left (FR-077). The
-table area is the inner area minus the close height and one separator row, clamped to a
+` Agents ` title in bold cyan (FR-006). The FR-077 key legend occupies the modal's
+bottom inner row and ends with `Esc close`, which is the window's only dismissal
+(FR-007); the window carries no Close button. The
+table area is the inner area minus that legend row, clamped to a
 minimum of 1 row (FR-008), and the whole rect is clamped to the terminal rectangle
 (NFR-010).
 
@@ -213,9 +215,8 @@ Structural glyphs are declared once in the module
 
 ### T-004 - Teams window frame
 
-Same modal treatment with a bold blue ` Teams ` title (FR-017), a clamped Close button
-that dismisses the window (FR-018), the key legend in the separator band left of Close
-(FR-077), the table title
+Same modal treatment with a bold blue ` Teams ` title (FR-017), the `Esc close` footer
+legend (FR-018, FR-077), the table title
 ` Team: <name>  (lead + <n> teammate) ` with the `teammates` plural when the count is
 not exactly one (FR-019), and the twelve-column dim header (`id`, `name`, `status`,
 `model`, `elapsed`, `steps`, `claimed`, `done`, `sent`, `recv`, `[stop]`, `[x]`)
@@ -252,8 +253,9 @@ team has no members so no blank line is reserved (FR-066).
 
 Left-click on Agents toggles the window when its subject exists and closes Teams when
 opening (FR-028); with nothing to show the click is a no-op and the window keeps its
-state (FR-029). The Teams button mirrors this (FR-030, FR-031). The Close button closes
-its window and leaves every task, member and input value untouched (FR-032). Every one
+state (FR-029). The Teams button mirrors this (FR-030, FR-031). `Esc` closes the window
+that owns the keyboard and leaves every task, member and input value untouched (FR-032).
+Every one
 of these paths sets the redraw flag (NFR-005).
 
 ### T-008 - Keyboard row destinations
@@ -568,7 +570,7 @@ in DFS paint order, the primary excluded) and the aligned `agents_row_task_ids` 
 `teams_area`, FR-057). The scroll path recomputes the visible slice plus the cursor
 map each frame, so an offset change can never desynchronise the ordinal from the
 painted row (FR-056, FR-059). The mouse router in `input_handler.rs` consumes every
-click inside a popup that is not the scrollbar gutter or a button/close button
+click inside a popup that is not the scrollbar gutter or a window button
 (FR-069, FR-070, FR-071, NFR-006), verified by
 `tests/test_hit_rect_lifecycle.rs` plus the alignment assertions in
 `test_agents_window_table.rs`, `test_teams_window_table.rs`, `test_misc_modules_deep.rs`,
@@ -638,9 +640,9 @@ pinned on every new path: each auto-close, refusal and focus transition sets
 Verified by `tests/test_window_lifecycle.rs` (12 new tests, registered as one
 more `#[path]` module in `tests/all.rs`): the last completion / cancellation /
 kill / background completion closes the window on the turn with a redraw and
-the next frame zeroes the close-button hit rect, a row remaining keeps it
+the next frame leaves the window closed, a row remaining keeps it
 open, the reconciliation merge closes it, the closed/occupied no-op corners,
-mid-turn toggle + cursor `Space` dispatch + Close (TC-029), mid-turn keyboard
+mid-turn toggle + cursor `Space` dispatch + `Esc` (TC-029), mid-turn keyboard
 suspend, mid-turn Teams toggle + row focus, the Alt-focus transition and
 focus-cleared notices. Verify:
 `cargo test -p ragent-tui --test all test_window_lifecycle::` = 12 pass; full
@@ -736,12 +738,12 @@ TC-028 popup clicks and stale rows -> `test_hit_rect_lifecycle` + stale-cursor n
 gates the panel arms and the turn is never disturbed); TC-031 auto-close -> the five
 FR-063 tests in `test_window_lifecycle`; TC-032 cursor/focus persistence ->
 `test_row_click_destinations` FR-065 pair; TC-033 margin -> `test_agents_window_table`
-(CONTENT_X re-derivation); TC-034 overlay close bar/wheel -> `test_output_view_close_bar`;
+(CONTENT_X re-derivation); TC-034 overlay footer legend/wheel -> `test_output_view_footer`;
 TC-035 cursor nav/viewport -> `test_agents_teams_cursor`; TC-036 row-action keys +
 legend -> `test_agents_teams_cursor` + `test_row_action_confirm`; TC-037 mouse surface
 -> `test_row_click_destinations` + `test_window_scroll_wheel`. Acceptance criteria
 1-21 all close:
-1 (button counts), 2 (toggle + exclusion), 3 (frame + Close + legend), 4 (table
+1 (button counts), 2 (toggle + exclusion), 3 (frame + `Esc close` legend), 4 (table
 structure),
 5 (row fields and badges), 6 (live/terminal control glyphs), 7 (cursor Enter output
 views), 8 (Space suspend/kill confirm), 9 (Up/Down/PgUp/PgDn cursor + key
@@ -763,7 +765,7 @@ consolidated suite drives through the real `App` render/key/mouse/event surfaces
 (now keyboard-first after T-022; the mouse surface is wheel + scrollbar drag + buttons);
 human-in-the-terminal confirmation remains available via specs/agentui/TESTPLAN.md.
 
-### T-021 - Agents margin, output view close bar and wheel ownership
+### T-021 - Agents margin, output view footer legend and wheel ownership
 
 1. **Agents table content indent (FR-073).** `columns::CONTENT_X = 5` indents every
    painted Agents table line (header, primary row, sub-agent tree, background shell
@@ -772,15 +774,14 @@ human-in-the-terminal confirmation remains available via specs/agentui/TESTPLAN.
    glyphs stay at 70/77 in the indented row space and paint at
    `area.x + 5 + column` on screen (they are click-less status indicators under
    FR-076).
-2. **Output view close bar (FR-074).** `render_output_view_overlay` switches from a raw
-   `centered_rect(90, 70)` to the shared `window_frame(90, 70, ..)` helper, records
-   `output_view_close_button_area`, paints `render_window_close_button` after the
-   scrollbar, and derives scroll geometry from the frame's content rect (inner minus
-   button height minus one separator row), so the overlay gains the same bottom-right
-   ` Close ` bar as the Agents and Teams popups.
+2. **Output view footer legend (FR-074).** `render_output_view_overlay` switches from a
+   raw `centered_rect(90, 70)` to the shared `window_frame(90, 70, ..)` helper, paints
+   the scroll-key legend into the frame's footer band, and derives scroll geometry from
+   the frame's content rect (inner minus the legend row), so the overlay gains the same
+   footer strip as the Agents and Teams popups and carries no Close button.
 3. **Dismissal unification (FR-075).** New `App::close_output_view` clears the overlay
-   and the selected agent session/index in one step; the Esc arm in `input.rs`, the
-   outside-click arm in `input_handler.rs` and the new close-button hit-test all call
+   and the selected agent session/index in one step; the Esc arm in `input.rs` and the
+   outside-click arm in `input_handler.rs` both call
    it, and it sets `needs_redraw`.
 4. **Wheel ownership (FR-075).** The output overlay's wheel arms move ahead of the
    Agents/Teams popup arms in the mouse router: a wheel over the overlay scrolls the
@@ -788,10 +789,10 @@ human-in-the-terminal confirmation remains available via specs/agentui/TESTPLAN.
    "overlay locked to the newest page" bug report; a wheel outside the overlay still
    drives the popup underneath.
 
-**Status:** Completed. `test_output_view_close_bar` (9 tests: bottom-right/clamped
-button, painted label, content excludes the bar, button click and idempotent dismissal,
-body-click consume, wheel-over-overlay scrolls while Agents is open, popup beneath
-untouched, popup wheel regression) plus the re-derived `test_agents_window_table` (14)
+**Status:** Completed. `test_output_view_footer` (8 tests: footer band is the last
+inner row, footer names `Esc close` and no ` Close ` label paints, `Esc` and idempotent
+dismissal, body-click consume, wheel-over-overlay scrolls while Agents is open, popup
+beneath untouched, popup wheel regression) plus the re-derived `test_agents_window_table` (14)
 and the `test_hit_rect_lifecycle` shift test run green; full
 `cargo test -p ragent-tui --test all` = 3582 passed / 0 failed
 (target/temp/tui_agentsmargin_full.log); `cargo fmt` clean; `cargo check --workspace`
@@ -802,8 +803,8 @@ clean; clippy shows only the pre-existing pub(crate)-in-private-module warnings
 
 1. **Mouse row/control clicks retired (FR-076, FR-070, FR-071).** The mouse router
    keeps: the output-overlay and popup wheel scroll arms, the scrollbar-gutter
-   click/drag/release arms for the two popup scrollbars, the `Agents`/`Teams` button
-   and close-button hit-tests, and the input-side button column. Clicks inside a popup
+   click/drag/release arms for the two popup scrollbars, and the `Agents`/`Teams`
+   button hit-tests. Clicks inside a popup
    body or on a painted `[stop]`/`[x]` cell are consumed without effect; the row and
    per-row button hit-rect bookkeeping (`agent_row_button_areas`,
    `agent_row_kill_areas`, `team_row_button_areas`, ...) is gone from `state.rs` and
@@ -846,12 +847,12 @@ destinations), `test_row_action_dispatch.rs` (Space/Del paths), `test_row_action
 (gutter drag), `test_hit_rect_lifecycle.rs`, `test_window_lifecycle.rs`,
 `test_agents_window_frame.rs`, `test_agents_window_table.rs`, `test_teams_window_table.rs`,
 `test_input_handler_more.rs`, `test_misc_modules_deep.rs`, `test_text_selection.rs`,
-`test_event_swarm_research_deep.rs`. New `tests/test_output_view_close_bar.rs` covers
-the T-021 close bar. Focused runs green: `test_agents_teams_cursor::` 14/14,
+`test_event_swarm_research_deep.rs`. New `tests/test_output_view_footer.rs` covers
+the T-021 footer legend. Focused runs green: `test_agents_teams_cursor::` 14/14,
 `test_row_click_destinations::` 13/13, `test_keyboard_control::` 13/13,
 `test_window_scroll_wheel::` 15/15, `test_row_action_confirm::` 19/19,
 `test_row_action_dispatch::` 8/8,
-`test_output_view_close_bar::` 9/9, `test_hit_rect_lifecycle::` 10/10,
+`test_output_view_footer::` 8/8, `test_hit_rect_lifecycle::` 10/10,
 `test_agents_window_table::` 14/14, `test_teams_window_table::` 16/16;
 `cargo check -p ragent-tui` clean; `cargo fmt --check` clean; clippy shows only the
 pre-existing pub(crate)-in-private-module noise.

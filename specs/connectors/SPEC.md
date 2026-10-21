@@ -560,8 +560,9 @@ column-heading row above the scrolling result list, naming each result column
 a result row so each label sits directly above the values in its column. The
 heading row shall be painted dark-on-light (dark foreground, light background) to
 distinguish it from the normal and installed row colours, shall be drawn outside
-the list's own scroll so it stays visible while the rows scroll beneath it, and
-shall never be reachable by the result cursor, a click, or a wheel.
+the list's own scroll so it stays visible while the rows scroll beneath it, shall
+be padded to the full result-column width so it reads as a header strip, and shall
+never be reachable by the result cursor, a click, or a wheel.
 
 **FR-046** — The system shall render every connector list in ascending alphabetical
 order of connector id, case-insensitively with a byte-wise tiebreak, on every surface:
@@ -570,6 +571,57 @@ the `/connectors claude` browse panel, the `/connectors list` report, and the
 fetch, scan, or filter order, and shall hold while a category filter is active - a filter
 narrows the already-sorted set and the survivors keep their alphabetical order. One
 comparator shall be shared by all three surfaces so they cannot disagree about the order.
+
+**FR-047** — The `/connectors claude` browse panel shall present the same design
+language as the `/plugins codex` and `/plugins claude` panels, so a user learns one
+catalogue browser and reads both:
+
+- The panel frame shall carry the shared calm slate accent rather than a saturated
+  colour, so the cyan navigator cursor and magenta result cursor remain the
+  brightest elements on screen.
+- The title line shall be structured rather than a flat string: the catalogue name
+  as a bold badge, the visible/total counts in the accent colour, and the active
+  `search`, `category`, and `marketplace` filters as labelled values (a blank query
+  rendering as `-` in the muted tone), followed by any parser-skip count in yellow
+  and the `loading details...` enrichment hint in the muted tone.
+- The body shall be split into a left navigator column and a result column. The left
+  column shall be split vertically into the category navigator (upper half) and the
+  marketplace navigator (lower half), each carrying a one-row reversed-video title
+  band (`Categories`, `Marketplace`) padded to the column width and excluded from
+  the cached hit-test area so a click or wheel on a band is inert.
+- Each navigator row shall be labelled `Name (N)` with its entry count painted in the
+  accent colour, so the size of each filter is visible before selecting it. Both
+  navigators shall list `ALL` first, and both shall stay visible and operable while
+  the fetch is loading or the result set is empty.
+- The category navigator shall additionally pin an `Installed` pseudo-category
+  directly after `ALL` (navigator row one), filtering the result list to the
+  connectors already present in the store scan - matching the plugin id against the
+  scan, not an entry's declared `category` field - so an installed connector that
+  declares no category still appears under it. The `Installed` name shall be
+  reserved: a catalogue entry declaring that category shall never form a second row.
+- Three panes shall be focusable (`Results` initial, then `Categories`, then
+  `Marketplaces`), cycled forward by `Tab` and backward by `BackTab`. The focused
+  pane's cursor shall be painted in its filled colour and the unfocused panes' cursors
+  dimmed, so which pane owns `Up`/`Down` is visible at a glance. `Up`/`Down` shall move
+  the focused pane's cursor and apply a navigator selection immediately; `Enter` over
+  either navigator shall apply its filter and return focus to the result list without
+  installing anything; `c` shall clear the focused navigator's filter to `ALL`.
+- The result rows shall use the shared template: a two-column cursor gutter carrying
+  `>` only on the row under the cursor, a one-column installed lane carrying `*` in
+  bold green on an installed row and a blank otherwise (so the columns stay aligned),
+  the fixed-width id and category columns, the marketplace column in the accent colour
+  (a blank marketplace rendering as `-`), and the description taking every remaining
+  column so it runs to the panel's inner right edge and is clipped there. Each row
+  shall be padded to the full result width and alternate rows shall carry a near-black
+  band, so the eye can follow one row across all four columns.
+- The footer key hints shall sit on a full-width chrome band, and the bottom inner row
+  shall carry a live search box: the ` search: ` label in the accent colour, the
+  editable filter field mirroring the browser's query with a `|` caret and clipping a
+  wider query from the left, and a right-aligned `[x] clear` button that clears the
+  filter on a left-click and is dimmed while the query is already empty.
+- The panel shall be sized to the terminal with a margin, capped at 140 columns and 41
+  rows, so it stays centred and fully visible across resizes and matches the plugin
+  panels' geometry.
 
 ## Non-Functional Requirements
 

@@ -65,6 +65,7 @@ fn globset(patterns: &[&str]) -> GlobSet {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_get_builtin_lists_allowlist_empty_denylist_populated() {
     let (allow, deny) = dir_lists::get_builtin_lists();
     assert!(
@@ -86,6 +87,7 @@ fn test_get_builtin_lists_allowlist_empty_denylist_populated() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_compiled_dir_lists_is_allowed_and_is_denied() {
     let compiled = CompiledDirLists {
         allowlist: globset(&["src/**", "*.rs"]),
@@ -100,6 +102,7 @@ fn test_compiled_dir_lists_is_allowed_and_is_denied() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_dir_lists_derives_and_default() {
     let lists = DirLists::default();
     assert_eq!(lists.allowlist, Vec::<String>::new());
@@ -117,6 +120,7 @@ fn test_dir_lists_derives_and_default() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_merged_dir_lists_appends_builtins_dedup_and_keeps_roots() {
     let mut cfg = Config::default();
     // One user entry duplicates a built-in; the other is unique.
@@ -149,6 +153,7 @@ fn test_merged_dir_lists_appends_builtins_dedup_and_keeps_roots() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_builtin_only_dir_lists_has_no_user_entries() {
     let lists = dir_lists::builtin_only_dir_lists();
     assert_eq!(lists.allowlist, Vec::<String>::new());

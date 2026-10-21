@@ -886,6 +886,43 @@ load and a category filter keeps the sorted order), and
 `crates/ragent-connectors/tests/test_connector_management.rs` (the `list` and `search`
 reports render rows alphabetically, filtered or not).
 
+### TC-030 - The browse panel matches the plugin-store design language
+
+**Requirement:** FR-047
+
+**Preconditions:** TUI running; a catalogue fixture whose entries declare more than one
+category and more than one marketplace, with at least one connector already installed.
+
+**Steps:**
+1. Run `/connectors claude` at 140x40 and read the panel frame, title line, left column, result
+   rows, footer, and last inner row.
+2. Read the category navigator's rows and compare with `/plugins claude` opened on the same
+   terminal.
+3. Press `Tab` three times, then `BackTab` once, watching which cursor is filled and which is
+   dimmed.
+4. Click the search box's `[x] clear` button after typing a query.
+
+**Expected results:**
+- Step 1 shows a calm slate accent frame (not a saturated colour); a structured title line
+  with the catalogue name as a bold badge, the visible/total counts in the accent colour, and
+  `search`/`category`/`marketplace` labelled values; a left column split into a `Categories`
+  pane above a `Marketplace` pane, each under a reversed-video title band; zebra-banded result
+  rows whose description column runs to the panel's right edge; a centred footer on a chrome
+  band; and a bottom ` search: ` box with a right-aligned `[x] clear` button.
+- Step 2 shows every navigator row labelled `Name (N)`, with `ALL` first and `Installed`
+  pinned directly below it in both panels.
+- Step 3 cycles focus Results -> Categories -> Marketplaces -> Results (and back), with only
+  the focused pane's cursor filled.
+- Step 4 wipes the query and restores the full result set.
+
+Covered offline by `crates/ragent-tui/tests/test_connector_catalogue_panel.rs` (accent frame,
+two titled navigator panes, `Name (N)` counts, the `Installed` pseudo-category, the bottom
+search box and its clear button, the zebra band reaching the right edge, and the
+description-to-edge row template) and
+`crates/ragent-tui/tests/test_connector_catalogue_mouse.rs` (marketplace click/wheel/focus,
+the inert title bands, and the three-pane `Tab`/`BackTab` cycle), with the pure state
+asserted by `crates/ragent-connectors/tests/test_connector_browse.rs`.
+
 ## Cleanup
 
 1. Disable every enabled connector: for each id shown by `/connectors list` (or

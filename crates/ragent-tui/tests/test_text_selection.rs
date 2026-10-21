@@ -367,22 +367,6 @@ fn test_clicking_disabled_buttons_does_not_open_windows() {
 }
 
 #[test]
-fn test_clicking_close_button_closes_windows() {
-    let mut app = make_app();
-    app.show_agents_window = true;
-    app.show_teams_window = true;
-    app.agents_close_button_area = Rect::new(90, 30, 10, 3);
-    app.teams_close_button_area = Rect::new(90, 34, 10, 3);
-
-    app.handle_mouse_event(mouse_down(91, 31));
-    assert!(!app.show_agents_window);
-    assert!(app.show_teams_window);
-
-    app.handle_mouse_event(mouse_down(91, 35));
-    assert!(!app.show_teams_window);
-}
-
-#[test]
 fn test_output_view_can_load_messages_for_non_current_session() {
     let mut app = make_app();
     app.session_id = Some("lead-s1".to_string());

@@ -1067,8 +1067,8 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
         "should show teams popup title: {text}"
     );
     assert!(
-        text.contains("Close"),
-        "should show close button label: {text}"
+        text.contains("Esc close"),
+        "should show the footer key legend naming the dismissal: {text}"
     );
     assert!(
         text.contains("lead + 1 teammate"),

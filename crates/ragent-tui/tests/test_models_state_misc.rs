@@ -109,6 +109,11 @@ fn snapshot() -> ContextPartitionSnapshot {
 
 #[test]
 fn theme_mode_from_str_and_display_name() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(ThemeMode::from_str("default"), Some(ThemeMode::Default));
     assert_eq!(ThemeMode::from_str("DEFAULT"), Some(ThemeMode::Default));
     assert_eq!(
@@ -131,6 +136,11 @@ fn theme_mode_from_str_and_display_name() {
 
 #[test]
 fn theme_typography_helpers_run() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let _ = theme::heading();
     let _ = theme::emphasis();
     let _ = theme::muted();
@@ -145,6 +155,11 @@ fn theme_typography_helpers_run() {
 
 #[test]
 fn theme_colour_constants_and_palettes_are_distinct() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(theme::status::SUCCESS, Color::Green);
     assert_eq!(theme::status::ERROR, Color::Red);
     assert_eq!(theme::status::WARNING, Color::Yellow);
@@ -165,6 +180,11 @@ fn theme_colour_constants_and_palettes_are_distinct() {
 
 #[test]
 fn theme_focus_and_accessibility_constants() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(theme::focus::SELECTED, "▸ ");
     assert_eq!(theme::focus::UNSELECTED, "  ");
     assert_ne!(theme::focus::FOCUSED, "");
@@ -186,6 +206,11 @@ fn theme_focus_and_accessibility_constants() {
 
 #[test]
 fn theme_spacing_icon_and_layout_constants() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(theme::SPACING_XS, 1);
     assert_eq!(theme::SPACING_SM, 2);
     assert_eq!(theme::SPACING_MD, 4);
@@ -217,6 +242,11 @@ fn theme_spacing_icon_and_layout_constants() {
 
 #[test]
 fn theme_spinner_frame_wraps_and_clamps_interval() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(
         theme::accessibility::spinner_frame(0, 80),
         theme::accessibility::SPINNER_FRAMES[0]
@@ -232,6 +262,11 @@ fn theme_spinner_frame_wraps_and_clamps_interval() {
 
 #[test]
 fn theme_progress_bar_variants() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let empty = theme::accessibility::progress_bar(0.0, 4);
     assert_eq!(empty, "[░░░░]");
     let half = theme::accessibility::progress_bar(0.5, 4);
@@ -251,6 +286,11 @@ fn theme_progress_bar_variants() {
 
 #[test]
 fn theme_loading_frame_rotates() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(theme::LOADING_FRAMES.len(), 4);
     assert_eq!(theme::loading_frame(0, 250), theme::LOADING_FRAMES[0]);
     assert_eq!(theme::loading_frame(250, 250), theme::LOADING_FRAMES[1]);
@@ -259,6 +299,11 @@ fn theme_loading_frame_rotates() {
 
 #[test]
 fn theme_status_category_all_methods() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     for category in [
         StatusCategory::Info,
         StatusCategory::Success,
@@ -284,6 +329,11 @@ fn theme_status_category_all_methods() {
 
 #[test]
 fn theme_status_message_constructors_and_accessors() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let m = StatusMessage::new("base", StatusCategory::Info);
     assert!(m.formatted().contains("base"));
     assert_eq!(m.style(), StatusCategory::Info.style());
@@ -299,6 +349,11 @@ fn theme_status_message_constructors_and_accessors() {
 
 #[test]
 fn theme_status_history_push_evict_recent_filter_clear() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut history = StatusHistory::with_capacity(3);
     assert!(history.is_empty());
     assert_eq!(history.len(), 0);
@@ -336,6 +391,11 @@ fn theme_status_history_push_evict_recent_filter_clear() {
 
 #[test]
 fn button_variant_background_colours_cover_all_variants() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     for variant in [
         ButtonVariant::Primary,
         ButtonVariant::Secondary,
@@ -359,6 +419,11 @@ fn button_variant_background_colours_cover_all_variants() {
 
 #[test]
 fn button_state_colours_and_padding() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let enabled = Button::new("Go", ButtonVariant::Primary);
     let active = Button::new("Go", ButtonVariant::Primary).with_state(ButtonState::Active);
     let disabled = Button::new("Go", ButtonVariant::Primary).with_state(ButtonState::Disabled);
@@ -387,6 +452,11 @@ fn button_state_colours_and_padding() {
 
 #[test]
 fn button_dimensions_and_builders() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let plain = Button::new("OK", ButtonVariant::Primary);
     assert_eq!(plain.total_width(), 6); // 2 chars + 2*2 padding
     assert_eq!(plain.total_height(), 3); // height 1 + 2*1 padding
@@ -413,6 +483,11 @@ fn button_dimensions_and_builders() {
 
 #[test]
 fn button_styled_label_variants() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let plain = Button::new("OK", ButtonVariant::Primary);
     assert_eq!(plain.styled_label().spans.len(), 1);
 
@@ -445,6 +520,11 @@ fn button_styled_label_variants() {
 
 #[test]
 fn button_bar_layout_helpers() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let empty = ButtonBar::new();
     assert_eq!(empty.total_width(), 0);
     assert_eq!(empty.max_height(), 1);
@@ -473,6 +553,11 @@ fn button_bar_layout_helpers() {
 
 #[test]
 fn button_bar_render_to_frame_all_alignments() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     for alignment in [Alignment::Left, Alignment::Center, Alignment::Right] {
         let bar = ButtonBar::with_buttons(vec![
             Button::new("OK", ButtonVariant::Primary),
@@ -529,6 +614,11 @@ fn button_bar_render_to_frame_all_alignments() {
 
 #[test]
 fn button_render_content_clips_to_the_area() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     // An unbordered, over-wide label takes the `content_width >= area.width`
     // branch and is clipped at the right edge.
     let long = Button::new("VeryLongLabel", ButtonVariant::Success).bordered(false);
@@ -543,6 +633,11 @@ fn button_render_content_clips_to_the_area() {
 
 #[test]
 fn button_render_widget_bordered_and_plain() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let area = Rect::new(0, 0, 12, 3);
     let button = Button::with_shortcut("Go", 'g', ButtonVariant::Primary);
     let mut buf = Buffer::empty(area);
@@ -568,6 +663,11 @@ fn button_render_widget_bordered_and_plain() {
 
 #[test]
 fn button_render_widget_degenerate_areas() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     // A too-small bordered area falls through to the direct content path.
     let button = Button::new("OK", ButtonVariant::Danger);
     let area = Rect::new(0, 0, 3, 1);
@@ -586,6 +686,11 @@ fn button_render_widget_degenerate_areas() {
 
 #[test]
 fn state_context_partition_snapshot_maths() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let snap = snapshot();
     assert_eq!(snap.total_tokens(), 750); // 100 + 200 + 50 + 400
     assert_eq!(snap.remaining_tokens(), Some(250));
@@ -614,6 +719,11 @@ fn state_context_partition_snapshot_maths() {
 
 #[test]
 fn state_resolve_default_index_clamps() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(resolve_default_index(3, Some(1)), 1);
     assert_eq!(resolve_default_index(3, Some(9)), 2);
     assert_eq!(resolve_default_index(3, None), 0);
@@ -632,6 +742,11 @@ fn state_resolve_default_index_clamps() {
 
 #[test]
 fn state_role_mode_all_methods() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     for (mode, label) in [
         (RoleMode::Architect, "architect"),
         (RoleMode::Coder, "coder"),
@@ -653,6 +768,11 @@ fn state_role_mode_all_methods() {
 
 #[test]
 fn state_store_pane_cycles_both_ways() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(StorePane::default(), StorePane::Results);
     assert_eq!(StorePane::Results.next(), StorePane::Categories);
     assert_eq!(StorePane::Categories.next(), StorePane::Marketplaces);
@@ -665,6 +785,11 @@ fn state_store_pane_cycles_both_ways() {
 
 #[test]
 fn state_text_selection_normalized_orders_endpoints() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let reversed = TextSelection {
         pane: SelectionPane::Messages,
         anchor: (10, 5),
@@ -690,6 +815,11 @@ fn state_text_selection_normalized_orders_endpoints() {
 
 #[test]
 fn state_scroll_view_states() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut out = OutputViewState {
         target: OutputViewTarget::Session {
             session_id: "s".to_string(),
@@ -759,6 +889,11 @@ fn state_scroll_view_states() {
 
 #[test]
 fn state_is_image_path_and_percent_decode() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     use ragent_tui::app::{is_image_path, percent_decode_path};
     assert!(is_image_path(std::path::Path::new("a.PNG")));
     assert!(is_image_path(std::path::Path::new("a.jpeg")));
@@ -786,6 +921,11 @@ fn state_is_image_path_and_percent_decode() {
 
 #[test]
 fn state_atomic_config_update_reads_parses_and_reports_errors() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("ragent.json");
     std::fs::write(&path, r#"{"a":1}"#).expect("seed");
@@ -822,6 +962,11 @@ fn state_atomic_config_update_reads_parses_and_reports_errors() {
 
 #[test]
 fn state_log_level_equality() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     assert_eq!(LogLevel::Info, LogLevel::Info);
     assert_ne!(LogLevel::Tool, LogLevel::Warn);
     assert_ne!(LogLevel::Warn, LogLevel::Error);
@@ -829,6 +974,11 @@ fn state_log_level_equality() {
 
 #[test]
 fn state_plugin_browser_query_and_filter() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Codex, "", false);
     assert_eq!(browser.kind, ragent_plugins::StoreKind::Codex);
     assert_eq!(browser.status, PluginStoreStatus::Loading);
@@ -867,6 +1017,11 @@ fn state_plugin_browser_query_and_filter() {
 
 #[test]
 fn state_plugin_browser_prefill_and_status_transitions() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Claude, "cal", true);
     assert_eq!(browser.query, "cal");
     assert!(browser.refresh);
@@ -886,6 +1041,11 @@ fn state_plugin_browser_prefill_and_status_transitions() {
 
 #[test]
 fn state_plugin_browser_installed_set() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Codex, "", false);
     let mut installed = std::collections::BTreeSet::new();
     installed.insert("weather".to_string());
@@ -896,6 +1056,11 @@ fn state_plugin_browser_installed_set() {
 
 #[test]
 fn state_plugin_browser_manifest_enrichment() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Codex, "", false);
     browser.set_entries(vec![entry("weather"), entry("filled")]);
 
@@ -944,6 +1109,11 @@ fn state_plugin_browser_manifest_enrichment() {
 
 #[test]
 fn state_plugin_browser_category_navigator() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Codex, "", false);
     let mut weather = entry("weather");
     weather.category = Some("Utilities".to_string());
@@ -951,21 +1121,26 @@ fn state_plugin_browser_category_navigator() {
     cal.category = Some("Productivity".to_string());
     browser.set_entries(vec![weather, cal]);
 
-    // Row 0 is ALL; the rest are the sorted categories.
-    assert_eq!(browser.category_row_count(), 3);
+    // Row 0 is ALL, row 1 is the Installed pseudo-category (pluginstores FR-054),
+    // and the rest are the sorted categories.
+    assert_eq!(browser.category_row_count(), 4);
     assert_eq!(browser.category_row_label(0), "ALL");
+    assert_eq!(browser.category_row_label(1), "Installed");
     assert_eq!(browser.category_row_display(0), "ALL (2)");
+    assert_eq!(browser.category_row_display(1), "Installed (0)");
     assert_eq!(browser.active_category(), "ALL");
     assert_eq!(browser.category_cursor_row(), 0);
 
     assert!(browser.category_move_down());
     assert_eq!(browser.category_cursor_row(), 1);
+    assert_eq!(browser.active_category(), "Installed");
+    assert!(browser.category_move_down());
     assert!(browser.category_move_down());
     assert!(!browser.category_move_down()); // clamped at the last row
     assert!(browser.category_move_up());
 
-    // Confirm applies the highlighted row as the active filter.
-    assert!(browser.category_select_row(1));
+    // Confirm applies the highlighted row (`Productivity`) as the active filter.
+    assert!(browser.category_select_row(3));
     browser.category_confirm();
     assert_ne!(browser.active_category(), "ALL");
     assert_eq!(browser.filtered.len(), 1);
@@ -1008,6 +1183,11 @@ fn state_plugin_browser_category_navigator() {
 
 #[test]
 fn state_plugin_browser_marketplace_navigator() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut browser = PluginStoreBrowser::new(ragent_plugins::StoreKind::Claude, "", false);
     let mut native = entry("a");
     native.marketplace = "Official".to_string();
@@ -1043,6 +1223,11 @@ fn state_plugin_browser_marketplace_navigator() {
 
 #[test]
 fn state_plugins_list_state_builder() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let state = ragent_tui::app::plugins_list_state(dir.path(), false, &BTreeMap::new());
     assert!(!state.verbose);
@@ -1053,6 +1238,11 @@ fn state_plugins_list_state_builder() {
 
 #[test]
 fn state_plugin_commands_for_surface_is_listable() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let cmds = ragent_tui::app::plugin_commands_for_surface(dir.path());
     // With no plugins present this is an empty list, but the call must return.
@@ -1065,6 +1255,11 @@ fn state_plugin_commands_for_surface_is_listable() {
 
 #[test]
 fn state_housekeeping_gate_and_interval() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     // Fresh app has jobs_last_poll at construction time; force it stale.
     app.jobs_last_poll = now()
@@ -1083,6 +1278,11 @@ fn state_housekeeping_gate_and_interval() {
 
 #[test]
 fn state_periodic_redraw_and_animation_latches() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     app.model_loading_state = Some(ModelLoadingState {
         provider_id: "ollama".to_string(),
@@ -1124,6 +1324,11 @@ fn state_periodic_redraw_and_animation_latches() {
 
 #[test]
 fn state_poll_stale_spinners_reaps_expired_latches() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     app.status = "busy".to_string();
 
@@ -1164,6 +1369,11 @@ fn state_poll_stale_spinners_reaps_expired_latches() {
 
 #[test]
 fn state_poll_question_expiry_answers_past_deadline() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     app.question_queue.push_back(QuestionRequest {
         id: "q1".to_string(),
@@ -1197,6 +1407,11 @@ fn state_poll_question_expiry_answers_past_deadline() {
 
 #[test]
 fn state_poll_run_cost_banner_expiry() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     app.run_cost_banner = Some("$1.23".to_string());
     app.run_cost_banner_at = Some(now());
@@ -1212,6 +1427,11 @@ fn state_poll_run_cost_banner_expiry() {
 
 #[test]
 fn state_arm_and_poll_status_expiry_branches() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
 
     // [wait] statuses are never auto-armed.
@@ -1255,6 +1475,11 @@ fn state_arm_and_poll_status_expiry_branches() {
 
 #[test]
 fn state_apply_registry_reconciliation_merges_both_ways() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     // Track a stale entry that the registry reports as completed.
     app.active_tasks
@@ -1273,6 +1498,11 @@ fn state_apply_registry_reconciliation_merges_both_ways() {
 
 #[test]
 fn state_poll_active_tasks_reconcile_without_runtime() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     // Force the periodic trigger to fire.
     app.active_tasks_reconcile_last = now().checked_sub(Duration::from_secs(5)).expect("clock");
@@ -1292,6 +1522,11 @@ fn state_poll_active_tasks_reconcile_without_runtime() {
 
 #[test]
 fn state_set_tui_event_lag_counter() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(7));
     app.set_tui_event_lag_counter(counter.clone());
@@ -1304,6 +1539,11 @@ fn state_set_tui_event_lag_counter() {
 
 #[test]
 fn state_mcp_helpers_without_client() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let app = support::make_app();
     // No shared MCP client is attached, so settling reports true.
     assert!(app.mcp_servers_settled(&app.session_processor));
@@ -1311,6 +1551,11 @@ fn state_mcp_helpers_without_client() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_mcp_async_helpers_no_client() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     let processor = app.session_processor.clone();
     // Both are non-blocking no-ops with no shared client attached.
@@ -1322,6 +1567,11 @@ async fn state_mcp_async_helpers_no_client() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_history_load_save_and_flush() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("history.txt");
     let mut app = support::make_app();
@@ -1364,6 +1614,11 @@ async fn state_history_load_save_and_flush() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cron_scheduler_start_stop_and_drop() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let app = support::make_app();
     let workdir = tempfile::tempdir().expect("tempdir");
     let handle = ragent_tui::app::cron::start_cron_scheduler(
@@ -1383,6 +1638,11 @@ async fn cron_scheduler_start_stop_and_drop() {
 
 #[test]
 fn models_render_markdown_unconditionally_renders_markdown() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     // Plain runtime text is sanitised and passed through with no prefix gate.
     let plain = app.render_markdown_unconditionally("just some text");
@@ -1400,6 +1660,11 @@ fn models_render_markdown_unconditionally_renders_markdown() {
 
 #[test]
 fn models_render_markdown_unconditionally_bypasses_research_progress() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     let text = "[research] Research Progress\n\nsome progress";
     let rendered = app.render_markdown_unconditionally(text);
@@ -1412,6 +1677,11 @@ fn models_render_markdown_unconditionally_bypasses_research_progress() {
 
 #[test]
 fn reverse_usage_and_invalid_repo_and_depth() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     // Empty and `help` both render the usage message.
     ragent_tui::app::reverse_command_for_tests(&mut app, "");
@@ -1456,6 +1726,14 @@ fn reverse_usage_and_invalid_repo_and_depth() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reverse_github_no_token_reports_and_stops() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    // `slash_support::enter_project` already takes this binary's crate-wide
+    // env lock for the whole body (bound to `_guard`), so this test must NOT
+    // take it again: `std::sync::Mutex` is not reentrant and a second
+    // acquisition on the same thread self-deadlocks.
     // The no-token gate is reached synchronously, but the reverse path's
     // fetch stage calls `tokio::spawn` on its way out; drive the command from a
     // Tokio runtime context so that spawn has a reactor (see
@@ -1509,6 +1787,14 @@ mod slash_support;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reverse_spec_scaffold_refusal_reports_and_continues() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    // `slash_support::enter_project` already takes this binary's crate-wide
+    // env lock for the whole body (bound to `_guard`), so this test must NOT
+    // take it again: `std::sync::Mutex` is not reentrant and a second
+    // acquisition on the same thread self-deadlocks.
     // Isolated cwd + XDG_CONFIG_HOME (the guard restores both on drop).
     let (_guard, _env, temp) = slash_support::enter_project(r#"{ "defaultAgent": "general" }"#);
     // Keep the GitHub token resolution offline for the fetch stage that follows.
@@ -1554,6 +1840,11 @@ async fn reverse_spec_scaffold_refusal_reports_and_continues() {
 // other tests assume.
 #[test]
 fn state_message_append_is_readable() {
+    // Every test in this file is gated on the binary-wide cwd/env lock: the
+    // `/slash` arms and the GitHub/GitLab credential chains read `cwd`,
+    // `XDG_CONFIG_HOME`, `PATH` and the token env vars, all process-global
+    // under one-binary-per-crate (AGENTS.md "Test Layout").
+    let _cwd_guard = crate::global_env_lock();
     let mut app = support::make_app();
     app.session_id = Some("s".to_string());
     app.messages

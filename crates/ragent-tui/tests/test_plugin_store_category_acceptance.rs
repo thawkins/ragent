@@ -284,11 +284,18 @@ async fn tc_002_down_up_move_the_cursor_and_apply_on_the_same_press() {
     handle_key(&mut app, key(KeyCode::Tab)).await; // focus the navigator
     assert!(app.plugin_store_nav_focused());
 
+    // Down lands on the `Installed` pseudo-category, pinned directly below `ALL`
+    // (FR-054), and applies it on the same keypress (A4, FR-007). Nothing is
+    // installed in this fixture store, so its result set is empty.
+    handle_key(&mut app, key(KeyCode::Down)).await;
+    assert_eq!(browser(&app).active_category(), "Installed");
+    assert!(filtered_ids(&app).is_empty(), "nothing is installed");
+    assert_eq!(browser(&app).all.len(), total, "no re-fetch on filter");
+
     // Down lands on `Database` and applies it on the same keypress (A4, FR-007).
     handle_key(&mut app, key(KeyCode::Down)).await;
     assert_eq!(browser(&app).active_category(), "Database");
     assert_eq!(filtered_ids(&app), ["codex-db"]);
-    assert_eq!(browser(&app).all.len(), total, "no re-fetch on filter");
 
     // Down again advances to `Language`.
     handle_key(&mut app, key(KeyCode::Down)).await;
@@ -299,7 +306,10 @@ async fn tc_002_down_up_move_the_cursor_and_apply_on_the_same_press() {
     handle_key(&mut app, key(KeyCode::Up)).await;
     assert_eq!(browser(&app).active_category(), "Database");
 
-    // Up clamps at `ALL` and does not wrap (FR-007, FR-008).
+    // Up twice more clamps at `ALL` through the `Installed` pseudo-category and
+    // does not wrap (FR-007, FR-008, FR-054).
+    handle_key(&mut app, key(KeyCode::Up)).await;
+    assert_eq!(browser(&app).active_category(), "Installed");
     handle_key(&mut app, key(KeyCode::Up)).await;
     assert_eq!(browser(&app).active_category(), "ALL");
     assert_eq!(filtered_ids(&app).len(), total, "ALL restores the full set");
@@ -488,7 +498,7 @@ async fn tc_007_focus_transfer_and_enter_applies_without_installing() {
 }
 
 // ---------------------------------------------------------------------------
-// TC-008 - Loading state shows an ALL-only navigator (FR-016)
+// TC-008 - Loading state shows an ALL + Installed navigator (FR-016, FR-054)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -500,10 +510,11 @@ fn tc_008_loading_state_shows_an_all_only_navigator() {
 
     assert_eq!(
         browser(&app).category_row_count(),
-        1,
-        "ALL only while loading"
+        2,
+        "ALL and Installed while loading"
     );
     assert_eq!(browser(&app).category_row_label(0), "ALL");
+    assert_eq!(browser(&app).category_row_label(1), "Installed");
     let area = app.plugin_store_area;
     let body = (area.y + 1..area.y + area.height - 1)
         .map(|y| {
@@ -523,7 +534,7 @@ fn tc_008_loading_state_shows_an_all_only_navigator() {
 }
 
 // ---------------------------------------------------------------------------
-// TC-009 - A store with no categories browses with ALL only (AC7, FR-018)
+// TC-009 - A store with no categories browses with ALL + Installed (AC7, FR-018)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -536,14 +547,14 @@ async fn tc_009_a_category_less_index_browses_normally_with_all_only() {
     )
     .await;
 
-    assert_eq!(browser(&app).category_row_count(), 1, "ALL only");
+    assert_eq!(browser(&app).category_row_count(), 2, "ALL and Installed");
     assert_eq!(category_rows(&app).len(), 0);
     assert!(
         !app.plugin_store
             .as_mut()
             .expect("panel open")
-            .category_move_down(),
-        "no row below ALL"
+            .category_select_row(2),
+        "no row below Installed"
     );
     assert_eq!(browser(&app).all.len(), 6, "every entry still browses");
 
@@ -597,9 +608,9 @@ async fn tc_011_error_state_keeps_the_navigator_visible_and_does_not_panic() {
     let malformed = br#"{ "store": "codex", "plugins": ["#.to_vec();
     open_fixture(&mut app, StoreKind::Codex, malformed).await;
 
-    // The malformed index renders the inline failure line and an ALL-only
+    // The malformed index renders the inline failure line and an ALL + Installed
     // navigator; the process neither panics nor exits (FR-026).
-    assert_eq!(browser(&app).category_row_count(), 1);
+    assert_eq!(browser(&app).category_row_count(), 2);
     let terminal = render(&mut app, 120, 40);
     let area = app.plugin_store_area;
     let body = (area.y + 1..area.y + area.height - 1)

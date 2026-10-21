@@ -297,17 +297,18 @@ fn test_window_scroll_wheel_scrolls_the_rendered_agents_table_end_to_end() {
     assert!(app.needs_redraw);
 
     let scrolled = render_agents(&mut app, 160, 14);
-    // task-02 sits below the fold at offset 0 (visible rows start at task-00
-    // under a 14-row popup); one wheel-up brings it into the viewport.
+    // The content area of a 14-row popup paints the header, the primary row and
+    // five sub-agent rows, so task-05 is the first row below the fold at offset
+    // 0; one wheel-up brings it into the viewport.
     assert!(
-        row_containing(&first, 14, "task-02").is_none(),
-        "task-02 must be under the fold before the wheel"
+        row_containing(&first, 14, "task-05").is_none(),
+        "task-05 must be under the fold before the wheel"
     );
     let painted =
-        row_containing(&scrolled, 14, "task-02").expect("the wheel must bring task-02 into view");
+        row_containing(&scrolled, 14, "task-05").expect("the wheel must bring task-05 into view");
     assert!(
         painted >= area.y && painted < area.y + area.height,
-        "task-02 must paint inside the table, not elsewhere"
+        "task-04 must paint inside the table, not elsewhere"
     );
 
     // Wheel up the rest of the way: the offset clamps at the rendered
@@ -391,18 +392,19 @@ fn test_window_scroll_wheel_scrolls_the_rendered_teams_table_end_to_end() {
     assert_eq!(app.teams_scroll_offset, STEP);
 
     let scrolled = render_teams(&mut app, 170, 14);
-    // member-02 sits below the fold at offset 0 (the viewport opens on the
-    // lead and the first members); one wheel-up brings it into the viewport.
-    // The label paints as `<name>-<short id>` (FR-022).
+    // The content area paints the table title, the header, the lead row and
+    // three teammate rows, so member-04 sits below the fold at offset 0; one
+    // wheel-up brings it into the viewport. The label paints as
+    // `<name>-<short id>` (FR-022).
     assert!(
-        row_containing(&pre, 14, "member-02").is_none(),
-        "12 members with a header and lead overflow the viewport"
+        row_containing(&pre, 14, "member-04").is_none(),
+        "12 members with a title, header and lead overflow the viewport"
     );
-    let painted = row_containing(&scrolled, 14, "member-02")
-        .expect("the wheel must bring member-02 into view");
+    let painted = row_containing(&scrolled, 14, "member-04")
+        .expect("the wheel must bring member-04 into view");
     assert!(
         painted >= rows_area.y && painted < rows_area.y + rows_area.height,
-        "member-02 must paint inside the table, not elsewhere"
+        "member-04 must paint inside the table, not elsewhere"
     );
 
     for _ in 0..12 {

@@ -60,6 +60,9 @@ completion sentinel, an empty-id `initialized` event:
 [mcp] Failed to connect to mcp server <id> via <transport>: <reason>
 ```
 
+The report ends with one blank line, separating it visually from whatever the
+stream prints next.
+
 Every connect failure path records the server as `McpStatus::Failed { error }`
 before returning, so a server rejected by config validation (e.g. a stdio entry
 with no `command`) or otherwise failing before a transport is attempted is

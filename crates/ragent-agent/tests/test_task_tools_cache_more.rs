@@ -373,6 +373,87 @@ async fn team_create_records_failed_blueprint_spawns() {
     assert!(out.content.contains("failed"), "{}", out.content);
 }
 
+/// `seed_only` must never create a team directory: `/team create` has already
+/// created the team, and a re-creating seed that ran after a `/team clear` or
+/// `/team forcecleanup` removed the tree resurrected it, so removal failed with
+/// ENOTEMPTY (CI flake in `test_slash_arms_deep::team_clear_removes_ta` and
+/// `test_slash_teams_deep::forcecleanup_confirm_removes_team`).
+#[tokio::test]
+async fn team_create_seed_only_refuses_to_create_a_team() {
+    let ws = workspace();
+    let bp_dir = ws.path().join(".ragent/blueprints/teams/seedbp2");
+    std::fs::create_dir_all(&bp_dir).expect("blueprint dir");
+    std::fs::write(bp_dir.join("spawn-prompts.json"), json!([]).to_string())
+        .expect("write spawn-prompts.json");
+
+    let ctx = ctx_in(ws.path(), Arc::new(EventBus::new(16)));
+    let err = team_create_tool()
+        .execute(
+            json!({
+                "blueprint": "seedbp2",
+                "context": "x",
+                "name": "never-created",
+                "seed_only": true,
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("seed_only must not create the team");
+    assert!(
+        err.to_string().contains("not found"),
+        "the error names the missing team: {err}"
+    );
+    assert!(
+        !ws.path().join(".ragent/teams/never-created").exists(),
+        "seed_only must leave no team directory behind"
+    );
+}
+
+/// `seed_only` applies the blueprint to a team that already exists.
+#[tokio::test]
+async fn team_create_seed_only_seeds_an_existing_team() {
+    let ws = workspace();
+    let bp_dir = ws.path().join(".ragent/blueprints/teams/seedbp3");
+    std::fs::create_dir_all(&bp_dir).expect("blueprint dir");
+    std::fs::write(
+        bp_dir.join("task-seed.json"),
+        json!([{ "title": "seeded task", "description": "from the seed" }]).to_string(),
+    )
+    .expect("write task-seed.json");
+
+    let bus = Arc::new(EventBus::new(16));
+    // `/team create` already created the team; the seed applies to it.
+    ragent_agent::team::TeamStore::create("seeded-team", "sess-more", ws.path(), true)
+        .expect("create team");
+
+    let out = team_create_tool()
+        .execute(
+            json!({
+                "blueprint": "seedbp3",
+                "context": "x",
+                "name": "seeded-team",
+                "seed_only": true,
+            }),
+            &ctx_in(ws.path(), bus),
+        )
+        .await
+        .expect("seed_only against an existing team succeeds");
+    assert!(
+        out.content.contains("created successfully"),
+        "{}",
+        out.content
+    );
+    let tasks = ragent_agent::team::TaskStore::open(&ws.path().join(".ragent/teams/seeded-team"))
+        .expect("task store")
+        .read()
+        .expect("read tasks");
+    assert!(
+        tasks.tasks.iter().any(|t| t.title == "seeded task"),
+        "the seeded task must exist: {:?}",
+        tasks.tasks.iter().map(|t| &t.title).collect::<Vec<_>>()
+    );
+}
+
 // ===========================================================================
 // session/cache.rs: SystemPromptCache component coverage
 // ===========================================================================

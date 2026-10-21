@@ -56,6 +56,7 @@ impl Drop for Sandbox {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_scope_project_config_path_is_relative() {
     let path = Scope::Project.config_path().expect("project path");
     assert_eq!(path, PathBuf::from(".ragent").join("ragent.json"));
@@ -75,6 +76,7 @@ fn test_scope_global_config_path_uses_xdg() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_scope_derives() {
     assert_eq!(Scope::Project, Scope::Project);
     assert_ne!(Scope::Project, Scope::Global);

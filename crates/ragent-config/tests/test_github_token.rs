@@ -17,6 +17,7 @@ use ragent_config::github::{
 // ---------------------------------------------------------------- pure logic ---
 
 #[test]
+#[serial_test::serial]
 fn test_is_app_token_classifies_prefixes() {
     assert!(is_app_token("ghu_user_to_server"));
     assert!(is_app_token("ghs_server_to_server"));
@@ -27,6 +28,7 @@ fn test_is_app_token_classifies_prefixes() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_choose_token_viable_stored_wins_over_gh() {
     // A repo-capable stored token is used as-is; the CLI credential is ignored.
     assert_eq!(
@@ -36,6 +38,7 @@ fn test_choose_token_viable_stored_wins_over_gh() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_choose_token_app_token_defers_to_gh() {
     // A GitHub App token cannot create repositories, so the `gh` credential
     // (repo scope) wins when it is present.
@@ -50,6 +53,7 @@ fn test_choose_token_app_token_defers_to_gh() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_choose_token_app_token_without_gh_is_kept() {
     // No `gh` credential: keep the app token so read-only GitHub tooling
     // (issues, PRs, /spec reverse) still authenticates.
@@ -60,6 +64,7 @@ fn test_choose_token_app_token_without_gh_is_kept() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_choose_token_uses_gh_when_no_stored_token() {
     assert_eq!(
         choose_token(None, Some("gho_gh".to_owned())),

@@ -52,6 +52,7 @@ impl Drop for EnvGuard {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_yolo_defaults_to_false() {
     let config = Config::default();
     assert!(!config.yolo);
@@ -114,6 +115,7 @@ fn test_yolo_persist_helper_updates_global_config_file() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_yolo_false_is_serialized() {
     let mut config = Config::default();
     config.yolo = false;
@@ -122,6 +124,7 @@ fn test_yolo_false_is_serialized() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_yolo_true_is_serialized() {
     let mut config = Config::default();
     config.yolo = true;

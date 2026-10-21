@@ -59,7 +59,7 @@ and the full column set of the Teams table (FR-020).
 | o 99887766         `- reviewer [T]       bg             9s       0  [stop]  [x]|
 |  Background shell tasks                                                        |
 | o cc112233   cargo build --release       bg          1m02s       -  [stop]  [x]|
-| Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Close |
+| Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close |
 +--------------------------------------------------------------------------------+
 ```
 
@@ -77,7 +77,7 @@ as a full-width reversed band (`CURSOR_BG`), indicated here with `<-- cursor`.
 | > |- e5f6a7b8 reviewer-e5f6a7b8               working    anthropic/claude     1m41s  <-- cursor
 |  `- 99887766 tester-99887766                 idle       (inherited)            58s
 |  Team: alpha  (lead + 2 teammates)
-| Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Close
+| Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Esc close
 +---------------------------------------------------------------------------------+
 ```
 
@@ -91,12 +91,12 @@ FR-077 legend with the Teams wording (`Del shut down`).
 ### Scope
 
 **In scope:** the Agents and Teams buttons; both popup windows and their geometry,
-titles, headers, close buttons and content areas; the primary, sub-agent, background
+titles, headers, footer legends and content areas; the primary, sub-agent, background
 shell, lead and teammate row layouts; row badges and status colouring; the `[stop]`,
 `>`, and `[x]` control glyphs; the keyboard block cursor and its bindings
-(`Up`/`Down`, `PgUp`/`PgDn`, `Space`, `Del`, `Enter`); the key legend band; the
-retained mouse surfaces (wheel scrolling, scrollbar-gutter dragging, the window and
-close buttons); the teammate strip; teammate focus and its
+(`Up`/`Down`, `PgUp`/`PgDn`, `Space`, `Del`, `Enter`, `Esc`); the key legend band; the
+retained mouse surfaces (wheel scrolling, scrollbar-gutter dragging, the window
+buttons); the teammate strip; teammate focus and its
 input routing; `Alt+Down` / `Alt+Up` cycling; the event handlers that keep rows live;
 the registry reconciliation safety net; scrolling and scrollbars; and the tests for all
 of the above.
@@ -163,10 +163,11 @@ carry into the plan stage.
   beyond the highlight: `Enter` on a non-empty input sends to that teammate's mailbox,
   and the input border title changes to `-> <name> (focused)`.
 - **A7 - Keyboard-first, mouse second.** Every row action has a keyboard binding
-  (`Space`, `Del`, `Enter`, arrows, PgUp/PgDn); the mouse retains only the surfaces
-  keyboards cannot do naturally - wheel scrolling, scrollbar-gutter dragging, the two
-  input-side window buttons and the window/output close buttons. No mouse row click or
-  control click exists.
+  (`Space`, `Del`, `Enter`, arrows, PgUp/PgDn), and `Esc` dismisses an open window; the
+  mouse retains only the surfaces
+  keyboards cannot do naturally - wheel scrolling, scrollbar-gutter dragging and the two
+  input-side window buttons. No mouse row click or
+  control click exists, and neither popup nor the output view carries a Close button.
 - **A8 - Ambiguity in "all its functionality".** Read as: the two popup windows, the
   teammate strip, the two buttons beside the input, the row content, the keyboard
   cursor control surface and the retained mouse surfaces, teammate focus and its input
@@ -198,9 +199,9 @@ carry into the plan stage.
 
 - **Window renderers.** `crates/ragent-tui/src/layout.rs`:
   `render_agents_window_overlay` (70 x 70 centred modal via `window_frame`, `Clear`
-  widget, cyan `Agents` title, key legend, `Close` button),
+  widget, cyan `Agents` title, footer key legend),
   `render_teams_window_overlay` (90 x 70, blue `Teams` title), `window_frame`,
-  `render_window_close_button`, `render_window_key_legend`, `draw_input_side_buttons`,
+  `window_frame_testable`, `render_window_key_legend`, `draw_input_side_buttons`,
   `render_teammate_strip`.
 - **Table renderers.** `crates/ragent-tui/src/layout_active_agents.rs`
   (`render_active_agents_subpanel`, `build_task_rows`, `cursor_line`) and
@@ -208,7 +209,6 @@ carry into the plan stage.
   `count_cell`, `cursor_line`).
 - **State.** `crates/ragent-tui/src/app/state.rs`: `show_agents_window`,
   `show_teams_window`, `agents_button_area`, `teams_button_area`,
-  `agents_close_button_area`, `teams_close_button_area`, `output_view_close_button_area`,
   `active_agents_area`, `teams_area`, `teams_rows_area`,
   `active_agents_scroll_offset`, `active_agents_max_scroll`,
   `teams_scroll_offset`, `teams_max_scroll`, `agents_cursor_subagent`,
@@ -223,8 +223,8 @@ carry into the plan stage.
   `Alt+Up` / `Alt+Down` focus cycling.
 - **Mouse handling.** `crates/ragent-tui/src/app/input_handler.rs`: wheel scroll arms
   over the popup bodies, scrollbar-gutter drag start/drag/release
-  (`ScrollbarDragPane::AgentsWindow` / `TeamsWindow`), the Agents/Teams button and
-  close-button hit-tests, and the consume arms that retire every other click inside a
+  (`ScrollbarDragPane::AgentsWindow` / `TeamsWindow`), the Agents/Teams button
+  hit-tests, and the consume arms that retire every other click inside a
   popup (FR-070, FR-076).
 - **Actions.** `crates/ragent-tui/src/app/event_handler.rs`: `suspend_agent_task`,
   `resume_agent_task`, `kill_agent_task`, `cancel_bg_task` (dialog re-resolution path),
@@ -271,13 +271,13 @@ truncated, and it narrows the input field rather than the reverse.
 
 `The ragent TUI shall render the Agents window as a centred modal overlay occupying 70 percent of the terminal width and 70 percent of the terminal height, cleared beneath, framed with full box-drawing borders, and titled " Agents " in bold cyan.`
 
-### FR-007 - Agents window close button
+### FR-007 - Agents window footer legend
 
-`The ragent TUI shall render a bordered " Close " button in the bottom-right corner of the Agents window inner area, clamped to at most 10 columns and 3 rows so it always fits, and shall render the FR-077 key legend in the separator band to the Close button's left.`
+`The ragent TUI shall render the FR-077 key legend along the Agents window's bottom inner row, spanning the full inner width, clipped to that width, and ending with " Esc close " so the window's dismissal key is always named; the window shall carry no Close button.`
 
 ### FR-008 - Agents window content area
 
-`The ragent TUI shall compute the Agents window table area as the inner area minus the close-button height and one separating row, and shall clamp that table area to a minimum height of 1 row.`
+`The ragent TUI shall compute the Agents window table area as the inner area minus the FR-077 legend row, and shall clamp that table area to a minimum height of 1 row.`
 
 `The content area should be scrollable so that large numbers of agents or team memberes can be accessed by scrolling.`
 
@@ -321,9 +321,9 @@ on the cursor row (FR-035, FR-036, FR-034).
 
 `The ragent TUI shall render the Teams window as a centred modal overlay occupying 90 percent of the terminal width and 70 percent of the terminal height, cleared beneath, framed with full box-drawing borders, and titled " Teams " in bold blue.`
 
-### FR-018 - Teams window close button
+### FR-018 - Teams window footer legend
 
-`The ragent TUI shall render a bordered " Close " button in the bottom-right corner of the Teams window inner area, clamped to at most 10 columns and 3 rows, shall dismiss the window when that button is clicked, and shall render the FR-077 key legend in the separator band to the Close button's left.`
+`The ragent TUI shall render the FR-077 key legend along the Teams window's bottom inner row, spanning the full inner width, clipped to that width, and ending with " Esc close "; pressing Esc shall dismiss the window, and the window shall carry no Close button.`
 
 ### FR-019 - Teams window title
 
@@ -381,9 +381,9 @@ on the cursor row (FR-035, FR-036, FR-034).
 
 `If the user left-clicks the Teams button while no team is active, the ragent TUI shall perform no action and shall leave the Teams window in its current open or closed state.`
 
-### FR-032 - Close button click
+### FR-032 - Escape key dismissal
 
-`When the user left-clicks the close button of an open window, the ragent TUI shall close that window and leave every task, member, and input value unchanged.`
+`When the user presses Esc while an open window owns the keyboard, the ragent TUI shall close that window and leave every task, member, and input value unchanged.`
 
 ### FR-033 - The primary row is not selectable
 
@@ -501,8 +501,8 @@ case the removed row's cursor ordinal becomes stale and is treated per FR-045.
 
 `While a table's scroll offset is non-zero, the ragent TUI shall re-derive the painted row slice and its ordered identifier vector from the full row list plus the offset, so the cursor resolves to the row painted at its ordinal on every frame.`
 
-The retired per-button hit-rect shift no longer exists: only the window buttons and
-the close buttons carry `Rect` targets, and none of those scroll with the table.
+The retired per-button hit-rect shift no longer exists: only the window buttons carry
+`Rect` targets, and neither scrolls with the table.
 
 ### FR-057 - Areas are cleared when a panel is hidden
 
@@ -566,7 +566,7 @@ selection surface that could name them.
 
 ### FR-069 - No panic on a stale cursor or index
 
-`If a cursor ordinal, selected index or close-button rect no longer matches a live task or member, the ragent TUI shall ignore the action without panicking and without mutating unrelated state.`
+`If a cursor ordinal or selected index no longer matches a live task or member, the ragent TUI shall ignore the action without panicking and without mutating unrelated state.`
 
 ### FR-070 - Popup clicks outside an interactive control are consumed
 
@@ -578,7 +578,7 @@ popup's own area is claimed.
 
 ### FR-071 - Only chrome carries click targets
 
-`If a Rect target inside either popup would map to a table row or a table control cell, the ragent TUI shall not record it; only the window buttons, the close buttons and the scrollbar gutter resolve clicks, so a retired control cell can never resolve to a live task or member.`
+`If a Rect target inside either popup would map to a table row or a table control cell, the ragent TUI shall not record it; only the window buttons and the scrollbar gutter resolve clicks, so a retired control cell can never resolve to a live task or member.`
 
 ### FR-072 - No duplicate rows
 
@@ -592,24 +592,24 @@ The FR-015 `[stop]` and `[x]` control glyphs (columns 70 and 77) are painted beh
 margin, so a live row paints them at `table.x + 5 + 70` and `table.x + 5 + 77` on
 screen. The glyphs are click-less status indicators (FR-037, FR-076).
 
-### FR-074 - Output view close bar
+### FR-074 - Output view footer legend
 
-`The ragent TUI shall render the output view overlay with a bordered " Close " button in the bottom-right corner of its inner area, clamped to at most 10 columns and 3 rows, and shall compute the overlay content area as the inner area minus the button height and one separating row, reusing the window frame helper the Agents and Teams popups share.`
+`The ragent TUI shall render the output view overlay with the FR-077 key legend along its bottom inner row, spanning the full inner width and ending with " Esc close ", shall compute the overlay content area as the inner area minus that legend row, reusing the window frame helper the Agents and Teams popups share, and shall carry no Close button.`
 
 ### FR-075 - Output view dismissal and wheel ownership
 
-`The ragent TUI shall close the output view overlay through one state transition that clears the overlay together with the selected agent session and index, shared by the Esc key, a click outside the overlay and the FR-074 Close button. Closing an already-closed overlay is a no-op. While the overlay is open, a mouse wheel over it scrolls the overlay even though the Agents or Teams window lies beneath it, because the overlay is the topmost surface, and the popup beneath must not scroll from that event.`
+`The ragent TUI shall close the output view overlay through one state transition that clears the overlay together with the selected agent session and index, shared by the Esc key and a click outside the overlay. Closing an already-closed overlay is a no-op. While the overlay is open, a mouse wheel over it scrolls the overlay even though the Agents or Teams window lies beneath it, because the overlay is the topmost surface, and the popup beneath must not scroll from that event.`
 
 ### FR-076 - Mouse input is limited to scroll and chrome
 
-`The ragent TUI shall accept mouse input on the Agents and Teams windows only for wheel scrolling over the table bodies, scrollbar-gutter dragging on the two popup scrollbars, the input-side Agents and Teams buttons, the window Close buttons and the output view Close button; every other mouse event over the popups shall be consumed without effect.`
+`The ragent TUI shall accept mouse input on the Agents and Teams windows only for wheel scrolling over the table bodies, scrollbar-gutter dragging on the two popup scrollbars, and the input-side Agents and Teams buttons; every other mouse event over the popups shall be consumed without effect.`
 
 In particular no left-click selects a row, toggles a control or opens an output view:
 all row interaction is keyboard-owned (FR-034, FR-035, FR-036, FR-038, FR-040).
 
 ### FR-077 - Window key legend
 
-`While the Agents or Teams window is open, the ragent TUI shall render a dim key legend in the separator band to the left of the window's Close button listing the cursor bindings (movement, paging, stop/resume, kill/shut-down and open), clipped to the available width and painted empty when that width is zero.`
+`While the Agents, Teams or output view window is open, the ragent TUI shall render a dim key legend along the window's bottom inner row listing the cursor and scrolling bindings (movement, paging, stop/resume, kill/shut-down, open and close), clipped to the available width and painted empty when that width is zero.`
 
 ### FR-078 - Scroll follows the cursor
 
@@ -672,13 +672,13 @@ keyboards cannot do naturally:
 
 | Surface           | Keys                                                                                     | Mouse                                                                 |
 | ----------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Window open/close | the window buttons stay click-only (no key binding)                                        | click the same button, or the Close button                              |
+| Window open/close | the window buttons stay click-only; `Esc` closes the open window (FR-032)             | click the same button                                                   |
 | Row selection     | `Up` / `Down` move the block cursor; `PgUp` / `PgDn` page one viewport (FR-041, FR-042)    | none (FR-076); wheel scroll and scrollbar-gutter drag remain            |
 | Sub-agent action  | `Space` = suspend/resume (FR-035), `Del` = kill confirm (FR-036), `Enter` = open (FR-034)  | none (FR-076)                                                           |
 | Teammate action   | `Space` = resume / suspend-confirm (FR-040), `Del` = shutdown confirm, `Enter` = focus (FR-038) | none (FR-076)                                                      |
 | Teammate focus    | `Alt+Down` / `Alt+Up` cycle (FR-046)                                                       | none (FR-076)                                                           |
 | Scrolling         | the cursor drags the viewport with it (FR-078); PgUp/PgDn page                              | wheel over the popup body; scrollbar-gutter thumb drag (FR-059)         |
-| Legend            | rendered in the separator band left of Close (FR-077)                                       | -                                                                       |
+| Legend            | rendered along the window's bottom inner row (FR-077)                                      | -                                                                       |
 
 Both windows are mutually exclusive (A1). While a window is open its cursor keys are
 consumed before the input editor sees them (FR-055), so no key can leak a character.
@@ -704,8 +704,8 @@ cursor-visible state can never disagree (FR-056, FR-078).
    counts, and are dimmed when their subject does not exist.
 2. Left-clicking the Agents button opens the Agents window; clicking it again closes it;
    opening it closes the Teams window; the same holds in the reverse direction for Teams.
-3. The Agents window is a bordered, centred modal titled `Agents` with a working `Close`
-   button in its bottom-right corner.
+3. The Agents window is a bordered, centred modal titled `Agents` with a footer key
+   legend naming `Esc close`; `Esc` dismisses it.
 4. The Agents table shows a header row, a `*` primary row, tree-indented sub-agent rows
    and a background shell task section when such tasks exist.
 5. A sub-agent row shows the short identifier, the agent label, `bg`/`fg`, elapsed time,
@@ -721,7 +721,8 @@ cursor-visible state can never disagree (FR-056, FR-078).
    `PgUp`/`PgDn` page one viewport (FR-042); every window action key is consumed by the
    window (FR-055).
 10. The Teams window is a bordered, centred modal titled `Teams`, titled
-    `Team: <name>  (lead + N teammate(s))` on its table, with a working close button.
+    `Team: <name>  (lead + N teammate(s))` on its table, with a footer key legend
+    naming `Esc close`.
 11. The Teams table shows the documented columns, a `*` lead row with `active` and `lead`
     values, and one row per teammate with status word, model column, elapsed, steps,
     claimed, done, sent and recv values.
@@ -746,12 +747,12 @@ cursor-visible state can never disagree (FR-056, FR-078).
     map with them (FR-056), the offset is clamped to the computed maximum, and a
     scrollbar appears when the content exceeds the viewport (FR-059); wheel scrolling and
     scrollbar-gutter dragging move the offset (FR-076), cursor paging drags the viewport
-    along (FR-078), and the legend band left of each window's Close button lists the
-    cursor keys (FR-077).
+    along (FR-078), and the legend band along each window's bottom inner row lists the
+    cursor keys and the `Esc` dismissal (FR-077).
 20. No panel action blocks the render loop, panics on a stale row, or terminates the
     primary agent or team lead.
-21. Except for the scrollbar gutter, the window buttons and the close buttons, a click
-    over an open popup is consumed without effect (FR-070, FR-076).
+21. Except for the scrollbar gutter and the window buttons, a click over an open popup
+    is consumed without effect (FR-070, FR-076).
 
 ## Open Questions
 

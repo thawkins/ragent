@@ -93,25 +93,27 @@ fn full_row(terminal: &Terminal<TestBackend>, y: u16) -> String {
     row_text(terminal, y, 0, width)
 }
 
-/// Background colour of the first non-space glyph on painted panel row `y`.
+/// Background colour of the first non-space glyph on result row `y`.
+///
+/// The scan is scoped to the result column (`plugin_store_result_area`), not the
+/// whole panel inner row: the left navigator column starts every row with a
+/// category label, so a panel-wide scan would report that label instead of the
+/// result row the caller is asking about.
 fn first_glyph_bg(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> Color {
-    let area = app.plugin_store_area;
+    let area = app.plugin_store_result_area;
     let buffer = terminal.backend().buffer();
-    let x0 = area.x + 1;
-    let x1 = area.x + area.width.saturating_sub(1);
-    (x0..x1)
+    (area.x..area.x + area.width)
         .find(|&x| buffer[(x, y)].symbol() != " ")
         .map(|x| buffer[(x, y)].bg)
         .unwrap_or(Color::Reset)
 }
 
-/// Foreground colour of the first non-space glyph on painted panel row `y`.
+/// Foreground colour of the first non-space glyph on result row `y`, scoped to the
+/// result column for the same reason as [`first_glyph_bg`].
 fn first_glyph_fg(terminal: &Terminal<TestBackend>, app: &App, y: u16) -> Color {
-    let area = app.plugin_store_area;
+    let area = app.plugin_store_result_area;
     let buffer = terminal.backend().buffer();
-    let x0 = area.x + 1;
-    let x1 = area.x + area.width.saturating_sub(1);
-    (x0..x1)
+    (area.x..area.x + area.width)
         .find(|&x| buffer[(x, y)].symbol() != " ")
         .map(|x| buffer[(x, y)].fg)
         .unwrap_or(Color::Reset)
@@ -441,9 +443,15 @@ fn an_installed_row_uses_the_installed_colour_and_marker() {
     let x0 = area.x + 1;
     let x1 = area.x + area.width.saturating_sub(1);
     let text = row_text(&terminal, installed, x0, x1);
-    assert!(
-        text.contains("[installed]"),
-        "installed row carries the marker: {text:?}"
+    // The marker sits in the one-column lane between the `>` gutter and the id
+    // column, so it never competes with the description for horizontal room
+    // (FR-005).
+    let result = app.plugin_store_result_area;
+    let marker_x = result.x + 2;
+    assert_eq!(
+        row_text(&terminal, installed, marker_x, marker_x + 1),
+        "*",
+        "installed row carries the marker in its leading lane: {text:?}"
     );
     assert_eq!(
         first_glyph_fg(&terminal, &app, installed),
@@ -452,12 +460,25 @@ fn an_installed_row_uses_the_installed_colour_and_marker() {
     );
 
     // A not-installed row away from the block cursor is painted in the normal
-    // colour and has no marker.
+    // colour and carries a blank in the marker lane, so the id, version,
+    // marketplace and description columns stay aligned with the installed rows.
     let plain = find_row(&terminal, &app, "codex-time").expect("plain row painted");
     assert_eq!(first_glyph_fg(&terminal, &app, plain), Color::White);
-    assert!(
-        !row_text(&terminal, plain, x0, x1).contains("[installed]"),
-        "a not-installed row omits the marker"
+    assert_eq!(
+        row_text(&terminal, plain, marker_x, marker_x + 1),
+        " ",
+        "a not-installed row leaves the marker lane blank"
+    );
+    // Both rows start their id column in the same cell.
+    let installed_id = row_text(&terminal, installed, result.x, result.x + result.width)
+        .find("codex-weather")
+        .expect("installed id painted");
+    let plain_id = row_text(&terminal, plain, result.x, result.x + result.width)
+        .find("codex-time")
+        .expect("plain id painted");
+    assert_eq!(
+        installed_id, plain_id,
+        "the marker lane keeps the id column aligned"
     );
 }
 
@@ -487,6 +508,53 @@ fn each_row_shows_the_marketplace_it_came_from() {
     assert!(
         text.contains("community"),
         "a different marketplace is named on its own row: {text:?}"
+    );
+}
+
+#[test]
+fn the_description_runs_to_the_panel_edge_and_is_clipped_there() {
+    // The description is the row's last column: it renders right up to the result
+    // column's right edge and a description longer than that room is clipped there,
+    // instead of pushing the id, version or marketplace columns off the row
+    // (FR-004, FR-018, FR-048).
+    let mut entries = sample();
+    entries[0].description = "d".repeat(400);
+    entries[0].marketplace = "zeta".to_string();
+    let mut app = open(StoreKind::Codex, entries, &[]);
+    let terminal = render(&mut app, 140, 30);
+
+    let row = find_row(&terminal, &app, "codex-weather").expect("row painted");
+    let result = app.plugin_store_result_area;
+    let text = row_text(&terminal, row, result.x, result.x + result.width);
+    assert!(
+        text.contains("codex-weather") && text.contains("1.0.0") && text.contains("zeta"),
+        "the fixed columns and the marketplace still render: {text:?}"
+    );
+    assert!(
+        text.ends_with('d'),
+        "the description fills every cell up to the column edge: {text:?}"
+    );
+    // Everything after the marketplace column is description, so the description
+    // owns the whole trailing remainder of the row - more columns than the previous
+    // fixed ceiling allowed.
+    let cells: Vec<char> = text.chars().collect();
+    let desc_start = cells
+        .iter()
+        .rposition(|&c| c != 'd')
+        .map(|i| i + 1)
+        .expect("the row is not all description");
+    assert!(
+        cells[desc_start..].iter().all(|&c| c == 'd'),
+        "the description owns the whole trailing remainder: {text:?}"
+    );
+    let marketplace_cell = text.find("zeta").expect("marketplace painted");
+    assert!(
+        desc_start > marketplace_cell,
+        "the description follows the marketplace column: {text:?}"
+    );
+    assert!(
+        cells.len() - desc_start >= 45,
+        "the description is given the row's remaining columns: {text:?}"
     );
 }
 
@@ -836,5 +904,63 @@ fn the_search_box_clear_button_clears_the_filter_on_click() {
             .len(),
         3,
         "the full result set is restored after clearing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Readability - the cursor gutter and the zebra band
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_cursor_row_carries_a_gutter_marker() {
+    // A `>` in the two-column gutter marks the row under the cursor, so the cursor
+    // stays visible even where a background-only highlight washes out (FR-005), and
+    // every other row keeps the blank gutter so the columns stay aligned.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 120, 30);
+    let result = app.plugin_store_result_area;
+
+    // The alphabetically first row (`codex-shell`) holds the cursor at open.
+    let selected = find_row(&terminal, &app, "codex-shell").expect("cursor row painted");
+    let gutter = row_text(&terminal, selected, result.x, result.x + 2);
+    assert_eq!(gutter, "> ", "the cursor row carries the gutter marker");
+
+    let other = find_row(&terminal, &app, "codex-time").expect("other row painted");
+    let gutter = row_text(&terminal, other, result.x, result.x + 2);
+    assert_eq!(gutter, "  ", "an unselected row leaves the gutter blank");
+}
+
+#[test]
+fn alternate_result_rows_carry_a_band_background() {
+    // Consecutive rows alternate a near-black band so a wide row can be followed
+    // across its id, version, marketplace and description columns.
+    let mut app = open(StoreKind::Codex, sample(), &[]);
+    let terminal = render(&mut app, 120, 30);
+    let result = app.plugin_store_result_area;
+    let buffer = terminal.backend().buffer();
+
+    // The cursor rests on the first row, so its own highlight masks the band there;
+    // the banding alternates over the rows beneath it.
+    let band = Color::Rgb(22, 22, 30);
+    let second = result.y + 1;
+    let third = result.y + 2;
+    assert_eq!(
+        buffer[(result.x + 3, second)].bg,
+        band,
+        "the second row carries the band"
+    );
+    assert_ne!(
+        buffer[(result.x + 3, third)].bg,
+        band,
+        "the third row is unbanded"
+    );
+
+    // The band reaches the column's right edge rather than stopping after the last
+    // glyph, so the row reads as one stripe.
+    let right_edge = result.x + result.width - 1;
+    assert_eq!(
+        buffer[(right_edge, second)].bg,
+        band,
+        "the band spans the whole row"
     );
 }

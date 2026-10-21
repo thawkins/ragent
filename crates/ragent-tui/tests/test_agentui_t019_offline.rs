@@ -806,13 +806,16 @@ fn test_t019_teams_frame_is_bounded_to_the_two_documented_reads() {
         + teams_columns::ID_W
         + teams_columns::GAP_W
         + teams_columns::LABEL_W
+        + teams_columns::GAP_W
+        + teams_columns::AGENT_TYPE_W
+        + teams_columns::GAP_W
         + teams_columns::STATUS_W
+        + teams_columns::GAP_W
         + teams_columns::MODEL_W
+        + teams_columns::GAP_W
         + teams_columns::ELAPSED_W
-        + 1
         + teams_columns::GAP_W
         + teams_columns::STEPS_W
-        + 1
         + teams_columns::GAP_W;
     let claimed: String = (0..teams_columns::CLAIMED_W + 2)
         .filter_map(|o| buf1.cell((content.x + (claimed_x + o) as u16, member_y)))
@@ -833,7 +836,11 @@ fn test_t019_teams_frame_is_bounded_to_the_two_documented_reads() {
         + teams_columns::ID_W
         + teams_columns::GAP_W
         + teams_columns::LABEL_W
+        + teams_columns::GAP_W
+        + teams_columns::AGENT_TYPE_W
+        + teams_columns::GAP_W
         + teams_columns::STATUS_W
+        + teams_columns::GAP_W
         + teams_columns::MODEL_W;
     let elapsed: String = (0..teams_columns::ELAPSED_W + 3)
         .filter_map(|o| buf1.cell((content.x + (elapsed_x + o) as u16, lead_y)))

@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::MutexGuard;
 
 use ragent_agent::plugin::plugin_mcp_servers;
 use ragent_agent::skill::effective_skill_dirs;
@@ -19,12 +19,12 @@ use ragent_config::{McpServerConfig, McpTransport};
 
 static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// Serialises the tests that set `XDG_CONFIG_HOME`.
+/// Serialises the tests that set `XDG_CONFIG_HOME` against every other
+/// env-mutating test in this binary. Delegates to the crate-wide lock in
+/// `tests/all.rs` (a file-local mutex would only serialise this file's
+/// children, which is exactly the bug one-binary-per-crate introduced).
 fn env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    crate::global_env_lock()
 }
 
 /// Restores `XDG_CONFIG_HOME` on drop.

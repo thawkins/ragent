@@ -4,8 +4,37 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (uncommitted, post-1.0.147)
+## Highlights (v1.0.149)
 
+- **One store chrome for every catalogue and setup-panel list** — the
+  `/connectors claude` browser is rebuilt on the same design language as
+  `/plugins codex` and `/plugins claude`: the calm slate accent frame, a
+  `Categories` navigator above a `Marketplace` navigator (each row labelled
+  `Name (N)`), a pinned column-heading row, a cursor gutter plus a one-column
+  lane carrying a bold green `*` on an installed entry, zebra-banded rows whose
+  description runs to the panel's inner edge and is clipped there, a muted
+  key-hint footer, and a bottom `search:` box with a click-to-clear `[x] clear`
+  button. `Tab`/`BackTab` cycle the results and the two navigators, `Up`/`Down`
+  move the focused pane, `Enter` applies, `c` clears. The shared constants are
+  the `STORE_*`/`store_*` ones in `layout.rs`, renamed from the plugin-only
+  `PLUGIN_STORE_*` set now that both panels use them.
+- **`/provider` and `/model` setup dialogs** — every list-bearing step shares
+  that same composition: accent frame titled with the step, heading strip with
+  a live count, reversed-video column band, cursor-filled zebra rows, muted
+  key-hint footer. The Azure resource picker, thinking-level selector and both
+  Model Router panes now window around their cursor instead of clipping the
+  tail (`Showing 12-23 of 40` in the legend, and the router's retained
+  properties scroll with the selected model's own row group). A mouse notch
+  over an open setup dialog steps that selector one entry and is swallowed
+  everywhere else, so the chat and side panels behind the modal never move.
+- **`Installed` pseudo-category in the plugin store** — row 1 of the
+  `/plugins codex` and `/plugins claude` category navigator (spec `pluginstores`
+  FR-054) filters to the plugins already in the store scan, matched by id so a
+  plugin that declares no category still shows. It counts as `Installed (2)`,
+  composes with the query and marketplace filters, and `--category installed`
+  pre-selects it.
+- **`/mcp` startup report ends on a blank line** — the `[mcp] Starting/Connected/
+  Failed ...` block is separated from whatever the stream prints next.
 - **Keyboard-first Agents/Teams windows (spec `agentui` T-022)** — a block
   cursor replaces mouse row clicks: `Up`/`Down` move one row, `PgUp`/`PgDn`
   page, `Space` toggles sub-agent suspend/resume, `Del`/`Shift+K` arms the
@@ -14,9 +43,10 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   the hit-rect rework); the `[stop]`/`[x]` glyphs are status indicators only;
   the primary agent, the lead, and background-shell rows are outside the
   cursor; and a stale index degrades to a safely consumed no-op rather than
-  acting on the wrong row. The FR-077 key legend sits in each window's footer,
-  the Agents modal is 70% of the terminal width, and the output-view overlay
-  gains a bordered Close bar button bottom-right (`Esc` still closes).
+  acting on the wrong row. The FR-077 key legend sits in each window's footer
+  and ends with `Esc close`, the only dismissal any of the three modals offers -
+  no Close button is painted - and the Agents modal is 70% of the terminal
+  width.
 - **`/team forcecleanup` is race-free** — the confirmed cleanup awaits a real
   `shutdown_teammate` per active member before removing the team directory,
   instead of spawning a detached "shutdown" agent loop whose config writes
@@ -885,6 +915,19 @@ files can consume context window.
    require a key, such as local Ollama.)
 5. Choose a model from the provider's discovered model list.
 6. Press `Enter` to confirm.
+
+Every list in these dialogs (provider, model, router tier, thinking level, Azure
+resource, router provider/bucket) wears the same calm-slate chrome as the
+`/plugins` and `/connectors` catalogues: an accent frame titled with the step and
+its subject, a heading strip with a live count on the left and the confirm key on
+the right, a pinned column band, a cursor-filled zebra row list, and a muted
+key-hint footer. Each list **windows around its cursor**, so a list longer than
+the dialog always keeps the highlighted row painted and the legend reads
+`Showing a-b of N`; the thinking-level list windows two lines at a time because
+each level is two lines tall. A mouse wheel notch over an open dialog steps the
+cursor one entry exactly like `Up`/`Down` (same handler), and a notch anywhere
+else is swallowed so the chat and side panels behind the modal never scroll under
+it.
 
 If a provider is already configured, `/model` jumps straight to that provider's
 model list instead of asking you to pick a provider again. Use `/model show` to

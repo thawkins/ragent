@@ -75,19 +75,30 @@ survives a restart.
 `/connectors claude [query] [--category <name>] [--refresh]` opens an interactive
 catalogue browser:
 
-- a title line with the catalogue name, the current query, the active category,
-  and the visible/total result count; a `loading details...` hint is appended
-  while the per-entry manifest description enrichment is still running;
+The panel is the interactive peer of `/plugins claude` and wears the same design
+language, so the two catalogue browsers read as one family:
+
+- a calm slate accent frame, and a structured title line naming the catalogue, the
+  visible/total result counts, and the active `search`, `category`, and `marketplace`
+  filters; a `loading details...` hint is appended while the per-entry manifest
+  description enrichment is still running;
+- a left column split into a `Categories` navigator above a `Marketplace` navigator,
+  each under a reversed-video title band, with every row labelled `Name (N)` so the
+  size of each filter is visible before selecting it;
 - a fixed column-heading row (`Id`, `Category`, `Marketplace`, `Description`)
   pinned directly above the results and painted dark-on-light; it never scrolls
   with the rows and a click or wheel on it is inert;
 - a scrollable list of results, sorted alphabetically by connector id
   (case-insensitive), with the block cursor on the highlighted row; each row shows
   the connector id, its category, the marketplace it came from (or `-` when it came
-  from a local install), and its description; a category filter narrows the
-  already-sorted list, so the visible rows always stay alphabetical;
-- an `[installed]` marker and distinct colour on connectors you already have;
-- a footer of key hints.
+  from a local install), and its description - the description takes every remaining
+  column and runs to the panel's right edge; a category or marketplace filter
+  narrows the already-sorted list, so the visible rows always stay alphabetical;
+- a bold green `*` in a one-column lane beside the cursor gutter on connectors you
+  already have, and a near-black band on alternate rows so a wide row can be
+  followed across all four columns;
+- a centred footer of key hints, and a bottom ` search: ` box with a clickable
+  `[x] clear` button.
 
 An optional `query` pre-fills the search field and `--category <name>`
 pre-selects the category filter; a category the catalogue does not declare is
@@ -102,14 +113,17 @@ reported as a warning in the message window rather than blinding the panel.
 
 While the panel is open it owns the keyboard: `Up`/`Down` move the cursor,
 `ENTER` installs the highlighted result, `Backspace` and `Esc` edit the query
-(and `Esc` on an empty query dismisses the panel). A left-hand category
-navigator lists `ALL` plus the categories the catalogue declares: `Tab` moves
-focus between it and the result list, `Up`/`Down` over the navigator apply the
-highlighted category immediately, `ENTER` over the navigator applies and hands
-focus back to the results, and `c` clears the filter back to `ALL`. The mouse
-works too: click a category row to apply it, wheel over the navigator to scroll
-it. The catalogue fetch runs off the event loop, so the UI keeps animating
-while it loads.
+(and `Esc` on an empty query dismisses the panel). The category navigator lists
+`ALL`, an `Installed` pseudo-category, then the categories the catalogue declares;
+the marketplace navigator lists `ALL` then the marketplaces the fetched entries
+came from. Three panes are focusable - the result list, then the two navigators -
+and `Tab`/`BackTab` cycle through them, with only the focused pane's cursor filled.
+`Up`/`Down` over a navigator apply the highlighted filter immediately, `ENTER` over
+a navigator applies it and hands focus back to the results, and `c` clears the
+focused navigator's filter back to `ALL`. The mouse works too: click a row in either
+navigator to apply it, wheel over a navigator to scroll it, and click `[x] clear`
+in the search box to wipe the query. The catalogue fetch runs off the event loop,
+so the UI keeps animating while it loads.
 
 `/connectors marketplace show` lists each marketplace configured for the Claude
 catalogue (the base endpoint plus every added marketplace, tagged

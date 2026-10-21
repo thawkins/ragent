@@ -19,6 +19,7 @@ use crate::app::state::{
     App, ContextAction, ContextMenuState, LogLevel, ProviderSetupStep, ScrollbarDragPane,
     SelectionPane, StorePane, TextSelection,
 };
+use ragent_connectors::CataloguePane;
 
 // Helpers
 use crate::app::helpers::short_session_id;
@@ -159,12 +160,22 @@ impl App {
     /// but outside both columns is swallowed, so nothing behind the panel reacts.
     fn handle_connector_catalogue_mouse(&mut self, event: MouseEvent) {
         let nav_area = self.connector_store_nav_area;
+        let marketplace_area = self.connector_store_marketplace_area;
         let result_area = self.connector_store_result_area;
+        let clear_area = self.connector_store_clear_area;
         let pos = (event.column, event.row).into();
         let in_nav = nav_area.contains(pos);
+        let in_marketplace = marketplace_area.contains(pos);
         let in_results = result_area.contains(pos);
+        let in_clear = clear_area.contains(pos);
 
         match event.kind {
+            // A left-click on the search box's `[x] clear` button clears the live
+            // filter. Checked before the generic result/navigator cases so the
+            // button, painted in the bottom row, is never mis-attributed.
+            MouseEventKind::Down(MouseButton::Left) if in_clear => {
+                self.connector_catalogue_clear_search();
+            }
             MouseEventKind::Down(MouseButton::Left) if in_nav => {
                 let row = event.row.saturating_sub(nav_area.y) as usize;
                 if let Some(browser) = self.connector_store.as_mut() {
@@ -173,7 +184,18 @@ impl App {
                     // category is refused by `category_select_row`.
                     let target = browser.category_scroll.saturating_add(row);
                     browser.category_select_row(target);
-                    browser.nav_focused = true;
+                    browser.focus = CataloguePane::Categories;
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::Down(MouseButton::Left) if in_marketplace => {
+                let row = event.row.saturating_sub(marketplace_area.y) as usize;
+                if let Some(browser) = self.connector_store.as_mut() {
+                    // Same viewport-to-absolute mapping as the category navigator,
+                    // with the marketplace scroll offset.
+                    let target = browser.marketplace_scroll.saturating_add(row);
+                    browser.marketplace_select_row(target);
+                    browser.focus = CataloguePane::Marketplaces;
                 }
                 self.needs_redraw = true;
             }
@@ -181,11 +203,12 @@ impl App {
                 let row = event.row.saturating_sub(result_area.y) as usize;
                 if let Some(browser) = self.connector_store.as_mut() {
                     // The result list scrolls as its cursor moves; an out-of-range
-                    // row is ignored. The active category is left unchanged.
+                    // row is ignored. The active filters are left unchanged.
                     let target = browser.cursor.saturating_add(row);
                     if target < browser.filtered.len() {
                         browser.cursor = target;
                     }
+                    browser.focus = CataloguePane::Results;
                 }
                 self.needs_redraw = true;
             }
@@ -198,6 +221,18 @@ impl App {
             MouseEventKind::ScrollUp if in_nav => {
                 if let Some(browser) = self.connector_store.as_mut() {
                     browser.category_scroll_by(-(SCROLL_STEP_LINES as i16));
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollDown if in_marketplace => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.marketplace_scroll_by(SCROLL_STEP_LINES as i16);
+                }
+                self.needs_redraw = true;
+            }
+            MouseEventKind::ScrollUp if in_marketplace => {
+                if let Some(browser) = self.connector_store.as_mut() {
+                    browser.marketplace_scroll_by(-(SCROLL_STEP_LINES as i16));
                 }
                 self.needs_redraw = true;
             }
@@ -334,6 +369,61 @@ impl App {
         }
     }
 
+    /// Route a wheel notch to the open provider/model setup dialog.
+    ///
+    /// A notch over the dialog moves its cursor through the same key handler the
+    /// keyboard uses ([`crate::input::handle_provider_setup_key`]), so one notch
+    /// scrolls a selector by exactly one entry and the window, legend and cursor
+    /// stay in step. A notch outside the dialog is swallowed while it is open:
+    /// the modal owns the wheel, so nothing behind it scrolls under an anchored
+    /// overlay.
+    ///
+    /// Only wheel events are intercepted - clicks, drags and right-clicks keep
+    /// their existing routing, because the API-key and GitLab forms rely on the
+    /// right-click paste menu.
+    ///
+    /// # Arguments
+    /// - `event` - the mouse event to inspect.
+    ///
+    /// # Returns
+    /// `true` when the event was a wheel notch, whether or not it landed on the
+    /// dialog; `false` for every other mouse event so normal routing continues.
+    fn handle_provider_setup_mouse(&mut self, event: MouseEvent) -> bool {
+        let code = match event.kind {
+            MouseEventKind::ScrollUp => KeyCode::Up,
+            MouseEventKind::ScrollDown => KeyCode::Down,
+            _ => return false,
+        };
+        // Only the list-bearing selectors react to a notch. A form, a spinner or
+        // the success card would otherwise treat the notch as "any key" and
+        // dismiss itself (`Done` closes on any key), so those steps swallow it.
+        let steppable = matches!(
+            self.provider_setup,
+            Some(
+                ProviderSetupStep::SelectProvider { .. }
+                    | ProviderSetupStep::SelectModel { .. }
+                    | ProviderSetupStep::SelectRouterModel { .. }
+                    | ProviderSetupStep::SelectAzureResource { .. }
+                    | ProviderSetupStep::SelectThinkingLevel { .. }
+                    | ProviderSetupStep::SelectAgent { .. }
+                    | ProviderSetupStep::SelectConfiguredProvider { .. }
+                    | ProviderSetupStep::ShowProviderConfig { .. }
+                    | ProviderSetupStep::ResetProvider { .. }
+                    | ProviderSetupStep::SetupRouter { .. }
+            )
+        );
+        if steppable
+            && self
+                .provider_setup_area
+                .contains((event.column, event.row).into())
+        {
+            let key = KeyEvent::new(code, KeyModifiers::empty());
+            input::handle_provider_setup_key(self, key);
+            self.needs_redraw = true;
+        }
+        true
+    }
+
     /// Dispatch a mouse event to the appropriate UI region, updating the input
     /// buffer / cursor / scroll / context menu as needed. Asserts UI
     /// invariants and logs the transition for diagnostics.
@@ -392,6 +482,15 @@ impl App {
         // toggle (e.g. Alt+T) dismissed - the render pass zeroes those
         // areas, and a stale reference would trip assert_ui_invariants.
         self.prune_stale_selection();
+        // While a provider/model setup dialog is open, a wheel notch belongs to
+        // the dialog: over the dialog it moves the list's cursor, outside it the
+        // notch is swallowed, so the panes behind the modal never scroll under it.
+        // Every other mouse gesture keeps its normal routing.
+        if self.provider_setup.is_some() && self.handle_provider_setup_mouse(event) {
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("mouse-provider-setup", &before_input, before_cursor);
+            return;
+        }
         // If context menu is open, intercept clicks.
         if self.context_menu.is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = event.kind {
@@ -559,21 +658,6 @@ impl App {
                 }
                 if self.teams_button_area.contains(pos.into()) {
                     self.toggle_teams_window();
-                    return;
-                }
-                if self.agents_close_button_area.contains(pos.into()) {
-                    self.close_agents_window();
-                    return;
-                }
-                if self.teams_close_button_area.contains(pos.into()) {
-                    self.close_teams_window();
-                    return;
-                }
-                // The output overlay's Close bar button (FR-075). Checked with
-                // the other close buttons so it runs before the inside-click
-                // consume arm below.
-                if self.output_view_close_button_area.contains(pos.into()) {
-                    self.close_output_view();
                     return;
                 }
                 // Scrollbar-gutter drag for the two popup tables: a click on
@@ -1174,6 +1258,12 @@ impl App {
                     self.agents_cursor_kill();
                     true
                 }
+                // `Esc` is the window's only dismissal: the modal carries no
+                // Close button, so the footer legend ends with `Esc close`.
+                KeyCode::Esc => {
+                    self.close_agents_window();
+                    true
+                }
                 _ => false,
             };
             if consumed {
@@ -1214,6 +1304,12 @@ impl App {
                 }
                 KeyCode::Char('K') | KeyCode::Char('k') => {
                     self.teams_cursor_shutdown();
+                    true
+                }
+                // Mirror the Agents window: `Esc` dismisses, since there is no
+                // Close button to click.
+                KeyCode::Esc => {
+                    self.close_teams_window();
                     true
                 }
                 _ => false,
