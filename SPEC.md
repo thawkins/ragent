@@ -126,7 +126,7 @@ below documents the current state of all subsystems.
   long-lived `podman`/`docker` sandbox per session and dispatches each tool call
   into it with `<runtime> exec`; the workspace is a container-named volume, never
   a host bind mount, so a sandboxed tool cannot read or write the host working
-  directory (§19D). `bash` is gated by the host 7-layer validator, a file/search
+  directory (§19D). `Bash` is gated by the host 7-layer validator, a file/search
   subset is translated to confined sandbox scripts, and every other tool is
   refused with no host fallback (FR-031). Runtime detection probes `PATH` with
   `podman` as the default (FR-026); a provisioning failure fails the turn rather
@@ -909,8 +909,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 |------|---------|
 | `apply_patch` | Apply a Codex-style patch with add/delete/update and file moves |
 | `read` | Read file contents with line-range support |
-| `write` / `create` | Create or overwrite a file |
-| `edit` | Replace one exact string occurrence; optional `collapse_whitespace` relaxes matching (whitespace-run collapse + `\t`/`\n`/`\r`/`\\` escape decoding) |
+| `Write` / `create` | Create or overwrite a file |
+| `Edit` | Replace one exact string occurrence; optional `collapse_whitespace` relaxes matching (whitespace-run collapse + `\t`/`\n`/`\r`/`\\` escape decoding) |
 | `multiedit` | Apply multiple edits atomically across one or more files; each edit honours its own `collapse_whitespace` flag |
 | `patch` | Apply a unified diff |
 | `rm` | Delete a single file |
@@ -920,7 +920,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `append_to_file` | Append text to the end of a file |
 | `file_info` | File/directory metadata |
 | `diff_files` | Unified diff between files or strings |
-| `glob` | Find files matching a glob pattern |
+| `Glob` | Find files matching a glob pattern |
 | `list` | List directory contents |
 
 #### File Operation Aliases
@@ -928,8 +928,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Alias | Maps to |
 |-------|---------|
 | `read_file` | `read` |
-| `write_file` | `write` |
-| `update_file` | `write` |
+| `write_file` | `Write` |
+| `update_file` | `Write` |
 | `delete_file` | `rm` |
 | `apply_patch` | `patch` |
 | `multiedit` | `multi_edit` (legacy parameter normalisation) |
@@ -938,8 +938,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-| `bash` | Run a shell command with 7-layer safety |
-| `run_code` | Alias for `bash`; accepts `code`/`command` |
+| `Bash` | Run a shell command with 7-layer safety |
+| `run_code` | Alias for `Bash`; accepts `code`/`command` |
 | `bash_reset` | Reset persistent shell state |
 | `calculator` | Evaluate mathematical expressions |
 | `open` | Open/reveal files, folders, or URLs in the desktop environment |
@@ -948,17 +948,17 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-| `ask_user` | Ask the user a question (text or multiple-choice, with an optional default used on timeout) |
+| `AskUserQuestion` | Ask the user a question (text or multiple-choice, with an optional default used on timeout) |
 | `think` | Record a reasoning note |
 
 #### Task Management Tools (4)
 
 | Tool | Purpose |
 |------|---------|
-| `task_create` | Create a session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies |
-| `task_update` | Update a task's status (pending, in_progress, completed), subject, owner, metadata, or dependencies; auto-evaluates blocked tasks on completion |
-| `task_get` | Retrieve the full record of a single task by ID |
-| `task_list` | List all session tasks, optionally filtered by status |
+| `TaskCreate` | Create a session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies |
+| `TaskUpdate` | Update a task's status (pending, in_progress, completed), subject, owner, metadata, or dependencies; auto-evaluates blocked tasks on completion |
+| `TaskGet` | Retrieve the full record of a single task by ID |
+| `TaskList` | List all session tasks, optionally filtered by status |
 
 #### Utility Tools (6)
 
@@ -975,9 +975,9 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| File operations | `read`, `write`/`create`/`update_file`, `edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 18 |
-| Shell / execution | `bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
-| Search | `grep`, `codeindex_*` | 6 |
+| File operations | `read`, `Write`/`create`/`update_file`, `Edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `Glob`, `list` | 18 |
+| Shell / execution | `Bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
+| Search | `Grep`, `codeindex_*` | 6 |
 | Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (+ `mf_screenshot`, engine-gated per FR-029) | 8 |
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
@@ -987,11 +987,11 @@ has a JSON schema, a permission category, and an async `execute` method.
 | VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
 | PDF | `pdf_read/write` | 2 |
 | MCP | `mcp_tool` | 1 |
-| Planning | `plan_enter`, `plan_exit` | 2 |
+| Planning | `EnterPlanMode`, `ExitPlanMode` | 2 |
 | Background tasks | `bg` | 1 |
-| Initiatives / skills | `initiative`, `skill_manage` | 2 |
-| Interactive | `ask_user`, `think` | 2 |
-| Task management | `task_create`, `task_update`, `task_get`, `task_list` | 4 |
+| Initiatives / skills | `initiative`, `Skill` | 2 |
+| Interactive | `AskUserQuestion`, `think` | 2 |
+| Task management | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` | 4 |
 | Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` | 6 |
 
 #### Team Tools (19)
@@ -1033,7 +1033,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Tool | Purpose |
 |------|---------|
 | `initiative` | Create, checkpoint, list, and close durable project-scoped goals with milestones. |
-| `skill_manage` | List, read, load, and reload skill packs at runtime. |
+| `Skill` | List, read, load, and reload skill packs at runtime. |
 
 ### 3.3 Agent System
 
@@ -1309,7 +1309,7 @@ Built-in default rules include:
 | Default | Action |
 |---------|--------|
 | `read` | allow |
-| `edit`, `bash`, `web`, `plan_enter` | ask |
+| `Edit`, `Bash`, `web`, `EnterPlanMode` | ask |
 | `todo` | allow |
 
 ### 4.5 File Path Guards
@@ -1337,7 +1337,7 @@ Milestone MS-05 work can migrate stragglers onto it.
 | Team-name slugify (`slugify_team_name`) | `ragent-agent::team::store` | blueprint/timestamp-derived names are slugified before use so generation can never produce an invalid name |
 | `is_safe_git_argument` | `ragent-plugins::add` | a `git+` ref or subpath that is not `[A-Za-z0-9._/-]+`, begins with `-`, or contains `..`; `git_run` also passes `--` before every positional |
 | `sanitize_declared_id` / `confined_dest_dir` | `ragent-plugins::manifest` / `add` | a manifest `id` that is not a single `Component::Normal` matching `[A-Za-z0-9._-]+` (no separators, no `..`, not absolute) |
-| `check_path_within_allowed_roots_cached` | `ragent-tools-core` | a `multi_edit` target outside the workspace — the same containment check `edit`/`read`/`write` already applied |
+| `check_path_within_allowed_roots_cached` | `ragent-tools-core` | a `multi_edit` target outside the workspace — the same containment check `Edit`/`read`/`Write` already applied |
 
 Two further Critical classes are handled in place rather than by a helper:
 
@@ -1345,7 +1345,7 @@ Two further Critical classes are handled in place rather than by a helper:
   or `spawn-prompts.json` is dispatched through `dispatch_seed_tool`, which consults
   the session permission checker: a category that is not explicitly `Allow` (or
   `Ask`-with-no-checker) refuses the seed and reports why, so a repository-supplied
-  blueprint can no longer reach `bash`/`write`/`rm` unpermissioned.
+  blueprint can no longer reach `Bash`/`Write`/`rm` unpermissioned.
 - **`multi_edit` containment** — see the table row above; the check runs for every
   edit in the batch before any file is read or written, so a mixed batch is atomic
   and writes nothing.
@@ -1526,7 +1526,7 @@ containment gaps found by the 18-crate audit.
 | `git::reject_option_like` on every operand | `ragent-tools-vcs::git` | `git_checkout` branch/source, every `git_cherry_pick` commit, every `git_add` path, and `git_remote` name/url — all 18 git tools now reject a leading-dash operand |
 | `GitHubClient::validate_repo_segment` | `ragent-tools-vcs::github` | an `owner`/`repo` that is not `[A-Za-z0-9._~-]+`, so it cannot escape the request path |
 | `resolve_url` for `fetch_readme` | `ragent-tools-vcs::github` | a hardcoded `api.github.com`, which previously ignored a configured GitHub Enterprise `base_url` and sent the Bearer token to the public origin |
-| `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
+| `check_path_within_allowed_roots_cached` in every file tool | `ragent-tools-core` | `diff_files`, `file_info`, `Glob`, `open`, and `apply_patch` previously checked `working_dir` only, so a whitelisted `allowed_roots` entry was rejected for the same path every other tool accepted (FUNC-068, ANTIPAT F-06) |
 | `masterfetch::http::read_body_capped` / `read_bytes_capped` | `ragent-tools-extended` | an unbounded response body from search/robots/youtube reads (16 MiB ceiling; 512 KiB for small text bodies) |
 | `write_govcreate_spec` target-folder containment | `ragent-specs::commands` | a `target-folder` that climbs out of the invoking root, checked lexically *before* any directory is created (ANTIPAT H-1) |
 | `merged_dir_lists_for` / `builtin_only_dir_lists` | `ragent-config::dir_lists` | a config-load failure that previously returned an empty denylist, silently dropping the mandatory built-in system-directory protection (ANTIPAT H-3) |
@@ -2573,7 +2573,7 @@ When an agent turn writes files inside the active spec's directory
 (`specs/<id>/`) and the session has an active spec, tasks in the `in_progress`
 state are automatically advanced to `completed` with a completion timestamp.
 The heuristic is guarded by `writes_in_spec_dir`: only file-writing tools
-(`write`, `edit`, `multiedit`, `patch`, `apply_patch`, `create`,
+(`Write`, `Edit`, `multiedit`, `patch`, `apply_patch`, `create`,
 `append_to_file`) whose resolved target path sits inside the spec directory
 count. Writes elsewhere in the workspace (docs, scratch files, snapshots)
 never complete spec tasks, preventing unrelated edits from silently corrupting
@@ -2647,7 +2647,7 @@ A research session runs in phases:
    rejected as an explicit `FetchFailed` event carrying the real reason —
    placeholder error text never enters the research corpus as a source
    body.
-3. **Local** — scan project files with `glob`/`grep`/`read`. Each captured
+3. **Local** — scan project files with `Glob`/`Grep`/`read`. Each captured
    file produces an excerpt showing the matching lines plus one line of
    context on either side, and a `relevance` note that names the matched
    keyword(s) and the first matching line.
@@ -3270,7 +3270,7 @@ description repeats the requirement so it is visible in the tool
 reference as well.
 
 A separate "Deliverable Enforcement (FILE-WRITE TASKS)" section requires a
-sub-agent whose prompt names a file to call `write`/`create` and verify the
+sub-agent whose prompt names a file to call `Write`/`create` and verify the
 file BEFORE `agent_complete`; an `agent_complete` whose promised file was
 never written is a failed run. Every completed sub-agent run (detached or
 not) also persists its FULL output to `log/subagents/<task-id>.md`, and the
@@ -3751,9 +3751,9 @@ so the agent stays aware of long-term goals across turns and sessions.
 
 Registered under the `storage:write` permission category.
 
-### 19B.2 Skill Management Tool (`skill_manage`)
+### 19B.2 Skill Management Tool (`Skill`)
 
-The `skill_manage` tool exposes runtime control of the skill registry
+The `Skill` tool exposes runtime control of the skill registry
 (SPEC §12) without requiring a session restart.
 
 Actions:
@@ -4021,9 +4021,9 @@ each tool call into it with `<runtime> exec`:
   volume, never a host bind mount**, so a sandboxed tool cannot read or write the
   host working directory. The descriptor's `workspace` field names the
   container-side mount point when it is an absolute path (default `/projects`).
-- **Dispatch.** `bash` is validated by the host 7-layer validator before it runs
-  (FR-002, FR-037); a file/search subset (`read`, `write`, `create`,
-  `append_file`, `rm`, `mkdir`, `list`, `glob`, `grep`) is translated to confined
+- **Dispatch.** `Bash` is validated by the host 7-layer validator before it runs
+  (FR-002, FR-037); a file/search subset (`read`, `Write`, `create`,
+  `append_file`, `rm`, `mkdir`, `list`, `Glob`, `Grep`) is translated to confined
   sandbox `exec` scripts; every other tool is refused with no host fallback
   (FR-031).
 - **Fail without fallback (FR-031).** A provisioning failure (missing runtime,
@@ -4210,7 +4210,7 @@ that fail on any host, with or without a container runtime.
   it is allowed (assumption A1).
 - **Sandbox bash is gated by the canonical host validator (FR-002, FR-037).**
   `ContainerBackend::execute_tool` calls
-  `ragent_tools_core::bash::validate_shell_command` on every `bash` call before
+  `ragent_tools_core::bash::validate_shell_command` on every `Bash` call before
   it provisions or touches a container, so a banned tool, a denied command name,
   a denied pattern, a directory escape, or an obfuscated command is rejected with
   the tool never executing on the host. The refusal precedes provisioning, so it
@@ -4499,10 +4499,10 @@ The review, the measurement method and the per-crate rollout record live in
 | v1.0.140 | 2026-10-18 | Version bump. README screenshot additions: `ragentmcpstartup.png` and the session image. |
 | v1.0.139 | 2026-10-18 | Status bar names the active execution backend in full (`Backend:<name>`, fixed cyan via `colors::BACKEND`); README gains screenshots of the provider, model, MCP-discover and plugin-selector panels; sandbox-backends how-to and status-bar assertions follow. |
 | v1.0.138 | 2026-10-18 | **Test-binary consolidation (§21.4): every crate builds one integration-test target.** Setting `autotests = false` plus a single `[[test]] name = "all"` (`tests/all.rs`) that `#[path]`-includes each former top-level `tests/test_*.rs` file cuts the workspace from ~948 integration binaries to **19** (one per crate plus the root package) - the test-name sets are verified identical to the pre-change sets for all 19. Each `tests/all.rs` also defines one binary-wide, poison-tolerant `global_env_mutex()`/`global_env_lock()`, and every test that mutates or observes a process-global contends on it; `ragent-research` moved its `crate::document`/`crate::source` shims to `tests/all_prelude.rs`, `ragent-telemetry` uses the explicit `ragent_telemetry::TelemetryError` path, and `ragent-agent`/`ragent-tools-core` re-export the crate paths their `#[path]`-included sources import. CI's remaining `--test <name>` invocations were converted to the filter form `--test all <module::>`. **Tests no longer write into the repository:** the research vault root is explicit `AppState::research_root` state (production `<working dir>/research`; tests use `target/temp/ragent-server-research/` via the new `tests/research_sandbox.rs`), `session::history::set_subagent_log_root` redirects diverted `wait_agents` batches, and `ragent_tui::app::set_log_root_override` / `use_scratch_log_root_for_tests` redirect TUI log-window spools - all three are `#[doc(hidden)]` `OnceLock` setters so shipped defaults are unchanged. **Build:** incremental compilation is disabled workspace-wide (`.cargo/config.toml` `[build] incremental = false`, plus `[profile.dev]` and a new `[profile.test]` with `debug = "line-tables-only"`), since the `sccache` wrapper cannot cache incremental artifacts; `BUILDSTATS.md` records the measured per-step cost (release 7m 37s / 1.80 GiB, debug 2m 41s / 2.40 GiB, full test 9m 12s / 14.92 GiB, coverage 9m 58s / 15.82 GiB; 13,862 passed, 0 failed, 16 ignored across 40 reporting targets; workspace line coverage re-measured at 86.58%). **Coverage:** 17 new `ragent-tui` deep-coverage suites (642 tests, ~16.1k lines) exercise the slash dispatch arms, event swarm/research paths, input editing, layout/scroll maths, schedule helpers, message-widget summaries and session/model state. **Repo hygiene:** `examples/` is deleted (agent profiles now live in `.ragent/agents/`, team blueprints in `.ragent/blueprints/teams/` - `code-review`, `parallel-feature`, `debate`), `.ragent/Instructions/` joins the `.gitignore` exception list so the per-language instruction packs are tracked, and `AGENTS.md`/`AGENTS-LANGUAGE.md` gain the "Test Layout" contract with `docs/reports/testconsolidation-review.md` as the review record. Verification: `cargo check --workspace` clean, `cargo audit` clean (1338 advisories loaded, 866 crate dependencies scanned, no new findings). |
-| v1.0.137 | 2026-10-17 | Test-coverage and documentation release (tests only, no production logic changed). The rebuilt `README.md` opens with a captured TUI screenshot and a feature list re-verified against the tree (15 registry providers, 148 tools across 21 categories, 17 built-in agents, 14 tree-sitter grammars / 50 language ids), and the accumulated release highlights list (about 830 lines) is replaced with a pointer to `CHANGELOG.md`; `AGENTS-RUST.md` is renamed to `AGENTS-LANGUAGE.md`. The `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) are suppressed with a documented reason (no upgrade path; the affected extraction APIs are never called). Added ~80 new `tests/` suites - roughly 80 under `crates/ragent-agent/tests/` plus suites across `ragent-surface`, `ragent-types`, `ragent-telemetry`, `ragent-storage`, `ragent-codeindex`, `ragent-config`, `ragent-research`, `ragent-tools-vcs`, `ragent-bench`, `ragent-server`, `ragent-tools-core`, `ragent-tools-extended`, `ragent-llm`, and `ragent-tui` - and a set of inline test files in crates that already used that convention, taking 13 of the 18 crates to >=85% line coverage (workspace 69.8% -> 73.9%). `ragent-agent` 65.1% -> 85.6%, `ragent-tui` 54.1% -> 75.0%. Three `pub(crate)` items in `ragent-tools-vcs` (`run_status`, `filter_log_text`, GitLab `make_client`/`detect_project`/`detect`) were widened to `pub` so their helpers could be exercised directly. Adds `serial_test` as a `ragent-agent` dev-dependency and marks the inline perf tests `#[serial_test::serial]` (the `perf::tests` mutate process-global profiling atomics and raced under the multi-threaded `cargo llvm-cov` run). Fixes three coverage-test defects: `test_mcp_discover_panel.rs` could leak a test-binary MCP server into the developer's real `~/.config/ragent/ragent.json` (runs now pin `XDG_CONFIG_HOME` at a throwaway `target/temp/xdg-*` dir), a `glob` test asserted the wrong walk-path shape (matches are reported relative to the containing directory), and a `gitlab` README-fallback test stubbed the wrong body shape (the `file_path` fallback fetches through the JSON `get()` path, so the wiremock body must be `set_body_json`). `cargo check` clean; `cargo audit` reports the pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) unchanged by this work. |
+| v1.0.137 | 2026-10-17 | Test-coverage and documentation release (tests only, no production logic changed). The rebuilt `README.md` opens with a captured TUI screenshot and a feature list re-verified against the tree (15 registry providers, 148 tools across 21 categories, 17 built-in agents, 14 tree-sitter grammars / 50 language ids), and the accumulated release highlights list (about 830 lines) is replaced with a pointer to `CHANGELOG.md`; `AGENTS-RUST.md` is renamed to `AGENTS-LANGUAGE.md`. The `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) are suppressed with a documented reason (no upgrade path; the affected extraction APIs are never called). Added ~80 new `tests/` suites - roughly 80 under `crates/ragent-agent/tests/` plus suites across `ragent-surface`, `ragent-types`, `ragent-telemetry`, `ragent-storage`, `ragent-codeindex`, `ragent-config`, `ragent-research`, `ragent-tools-vcs`, `ragent-bench`, `ragent-server`, `ragent-tools-core`, `ragent-tools-extended`, `ragent-llm`, and `ragent-tui` - and a set of inline test files in crates that already used that convention, taking 13 of the 18 crates to >=85% line coverage (workspace 69.8% -> 73.9%). `ragent-agent` 65.1% -> 85.6%, `ragent-tui` 54.1% -> 75.0%. Three `pub(crate)` items in `ragent-tools-vcs` (`run_status`, `filter_log_text`, GitLab `make_client`/`detect_project`/`detect`) were widened to `pub` so their helpers could be exercised directly. Adds `serial_test` as a `ragent-agent` dev-dependency and marks the inline perf tests `#[serial_test::serial]` (the `perf::tests` mutate process-global profiling atomics and raced under the multi-threaded `cargo llvm-cov` run). Fixes three coverage-test defects: `test_mcp_discover_panel.rs` could leak a test-binary MCP server into the developer's real `~/.config/ragent/ragent.json` (runs now pin `XDG_CONFIG_HOME` at a throwaway `target/temp/xdg-*` dir), a `Glob` test asserted the wrong walk-path shape (matches are reported relative to the containing directory), and a `gitlab` README-fallback test stubbed the wrong body shape (the `file_path` fallback fetches through the JSON `get()` path, so the wiremock body must be `set_body_json`). `cargo check` clean; `cargo audit` reports the pre-existing `zip 7.2.0` advisories (RUSTSEC-2026-0367/0368/0369) unchanged by this work. |
 | v1.0.136 | 2026-10-16 | Interactive `/plugins list` panel (spec `plugins` FR-009, FR-030). `/plugins list [--verbose]` opens a `/mcp discover`-style overlay: the plugin table is pinned at the top (a fixed column heading and separator above a scrollable block-cursor list) and the capability blocks (contributions, unsupported capabilities, errors, totals summary, and - verbose - telemetry) are listed at the end of the same scrollable body. `Up`/`Down` (or `k`/`j`), `Home`/`End`, and `Esc` operate it and `Space` toggles the highlighted plugin's enabled state (enable/disable, persisted through the shared control path, with the row tinted yellow when enabled and the outcome shown on a feedback line, re-resolving the session's plugin-contributed slash commands); a scrollbar appears when the body overflows. The panel resolves live MCP tool counts exactly as the text report did, so the `MCP` / `MCP Tools` columns stay accurate; `/plugins list --mcp` and the disabled-subsystem notice stay text reports. One discovery path is shared with the CLI: `ragent_plugins::control` gains `build_list_view` / `PluginListView` (with a per-row `PluginListRow` id/enabled list) and `ragent_plugins::surface` gains `run_plugin_list_view`, and `render_list_with_mcp_tools` is now `build_list_view(...).render()`. New test `crates/ragent-tui/tests/test_plugins_list_panel.rs` (7 cases). |
-| v1.0.135 | 2026-10-15 | Security-hardening pass closing the critical/high band of `docs/reports/security-audit.md` (a fresh workspace-wide read-only audit: 4 critical, 15 high, 34 medium, 29 low). **Untrusted project config (SEC-001/002/005):** `Config::merge_project` now drops a project overlay's `mcp` servers (spawned as subprocesses with no permission prompt), its `acp` section (agents spawned verbatim with attacker `command`/`env`/`cwd`, plus the editor-facing server), and every provider's `api` block (which redirects the credential and prompt stream); rejected keys log at `warn!`. **Benchmark argv (SEC-003):** `validate_fixture_command` validates the whole argv against a deny-list of eval/stdin entry points (`-c`, `-e`, `-r`, `--eval[=…]`, `-m`, `-`, `/dev/stdin`, `go run`) so an allowlisted interpreter cannot evaluate inline fixture text. **Connector boundary (SEC-009/071):** a `stdio` `command` is allowlisted (no shell/launcher, absolute path must name a known runtime) and an `env` credential must be namespaced to the connector id. **Symlink defeat (SEC-006/018/027/028/059):** new `ragent_types::guard::{reject_symlink_components, reject_symlink_escape, open_owner_only}`; `contained_join` canonicalises the deepest existing ancestor; applied to the specs writer, config/credential temp files, the updater, the crash marker/panic report/stderr spool (`O_NOFOLLOW` + atomic replace), askpass, and the TUI image source; `list`/`glob` skip a symlinked directory. **Bounded HTTP I/O (SEC-014/032/033/036/042/065/066):** connect/whole-request timeouts, capped redirect chains, and 8 MiB streaming read caps in the MCP HTTP client, masterfetch fetcher, GitHub client, and open-access lookup; the SSRF guard re-runs per redirect hop; the GitHub client refuses a cross-origin URL and streams byte-capped downloads. **Verified update (SEC-043):** `download_and_replace` requires a SHA-256 (`RAGENT_UPDATE_SHA256` or `ReleaseInfo::sha256`) and refuses an unverified artifact. **Header allow-list (SEC-035):** `http_request` accepts only `accept`/`accept-language`/`content-type`/`user-agent`. **Bounded sinks (SEC-031):** plugin host-call sinks cap entries (1000) and entry length (16 KiB). **Telemetry (SEC-052/053/055):** `tool.name` shape-checked (64, `[A-Za-z0-9_.-]`), else exported as `unknown`; the OTLP endpoint is parsed once with `url`. **Owner-only writes (SEC-022/027/076):** secret temp files and the askpass response are `0o600`; the crash marker read is capped (64 KiB). Adds `ragent --version`/`-V` (answered before any side effect) and the shared `strutil::{is_http_url, bearer_auth_header, path_file_name, HTML2TEXT_WIDTH}`, `sanitize::is_secret_json_key`, and `ragent_surface::store::{read_ledger_bytes, quarantine_corrupt_ledger}` helpers, routed through every call site; `deny.toml` drops the stale `Unicode-DFS-2016`/`OpenSSL` license entries. `cargo check --workspace` clean; `cargo audit` reports no new advisories. |
-| v1.0.134 | 2026-10-14 | `/simplify all` quality pass over the changed working tree, on top of the v1.0.133 delta. The 18th crate `ragent-surface` gains four shared modules: `config_splice` (`write_atomic_json`, a temp-file + `File::create` + `write_all` + `sync_all` + rename write so the payload is durable before the rename can expose it), `marketplace` (the one marketplace-source resolution shared by the `/plugins marketplace` and `/connectors marketplace` command families), `net` (the `https`-only redirect policy and endpoint validator), and `scan` (the generic store-scan failure type). The plugin/connector `marketplace_ops` writers delegate to `write_atomic_json` and the plugin `store_fetch::https_only_redirects` wrapper is deleted. The four hand-copied redacting `Debug` impls in `ragent-config` collapse into one `macro_rules! redacted_debug_impl!`; `sanitize::redact_json_value` routes through the borrow-or-own `redact_secrets_cow`; `check_path_within_allowed_roots_cached` takes a fast path when `dirs.allowed_roots` is empty; `Config::load`'s M-025 cache key reads `XDG_CONFIG_HOME` through `read_env`; the `masterfetch` `langsearch_key` read shares the env-reading `pick` closure; and the TUI de-duplicates the question-expiry helpers (`utils::now_unix_ms`, `QuestionRequest::resolved_default_index`, `state::resolve_default_index`, `strutil::format_mmss`) and removes the `unreachable!()` panic from the expiry poll. Also lands the `/mcp config` discovery-location report (§19.4.3, `McpClient::discover_locations`) and the `ask_user` `default`/fallback option with the 120-second inactivity timeout (FR-045). |
+| v1.0.135 | 2026-10-15 | Security-hardening pass closing the critical/high band of `docs/reports/security-audit.md` (a fresh workspace-wide read-only audit: 4 critical, 15 high, 34 medium, 29 low). **Untrusted project config (SEC-001/002/005):** `Config::merge_project` now drops a project overlay's `mcp` servers (spawned as subprocesses with no permission prompt), its `acp` section (agents spawned verbatim with attacker `command`/`env`/`cwd`, plus the editor-facing server), and every provider's `api` block (which redirects the credential and prompt stream); rejected keys log at `warn!`. **Benchmark argv (SEC-003):** `validate_fixture_command` validates the whole argv against a deny-list of eval/stdin entry points (`-c`, `-e`, `-r`, `--eval[=…]`, `-m`, `-`, `/dev/stdin`, `go run`) so an allowlisted interpreter cannot evaluate inline fixture text. **Connector boundary (SEC-009/071):** a `stdio` `command` is allowlisted (no shell/launcher, absolute path must name a known runtime) and an `env` credential must be namespaced to the connector id. **Symlink defeat (SEC-006/018/027/028/059):** new `ragent_types::guard::{reject_symlink_components, reject_symlink_escape, open_owner_only}`; `contained_join` canonicalises the deepest existing ancestor; applied to the specs writer, config/credential temp files, the updater, the crash marker/panic report/stderr spool (`O_NOFOLLOW` + atomic replace), askpass, and the TUI image source; `list`/`Glob` skip a symlinked directory. **Bounded HTTP I/O (SEC-014/032/033/036/042/065/066):** connect/whole-request timeouts, capped redirect chains, and 8 MiB streaming read caps in the MCP HTTP client, masterfetch fetcher, GitHub client, and open-access lookup; the SSRF guard re-runs per redirect hop; the GitHub client refuses a cross-origin URL and streams byte-capped downloads. **Verified update (SEC-043):** `download_and_replace` requires a SHA-256 (`RAGENT_UPDATE_SHA256` or `ReleaseInfo::sha256`) and refuses an unverified artifact. **Header allow-list (SEC-035):** `http_request` accepts only `accept`/`accept-language`/`content-type`/`user-agent`. **Bounded sinks (SEC-031):** plugin host-call sinks cap entries (1000) and entry length (16 KiB). **Telemetry (SEC-052/053/055):** `tool.name` shape-checked (64, `[A-Za-z0-9_.-]`), else exported as `unknown`; the OTLP endpoint is parsed once with `url`. **Owner-only writes (SEC-022/027/076):** secret temp files and the askpass response are `0o600`; the crash marker read is capped (64 KiB). Adds `ragent --version`/`-V` (answered before any side effect) and the shared `strutil::{is_http_url, bearer_auth_header, path_file_name, HTML2TEXT_WIDTH}`, `sanitize::is_secret_json_key`, and `ragent_surface::store::{read_ledger_bytes, quarantine_corrupt_ledger}` helpers, routed through every call site; `deny.toml` drops the stale `Unicode-DFS-2016`/`OpenSSL` license entries. `cargo check --workspace` clean; `cargo audit` reports no new advisories. |
+| v1.0.134 | 2026-10-14 | `/simplify all` quality pass over the changed working tree, on top of the v1.0.133 delta. The 18th crate `ragent-surface` gains four shared modules: `config_splice` (`write_atomic_json`, a temp-file + `File::create` + `write_all` + `sync_all` + rename write so the payload is durable before the rename can expose it), `marketplace` (the one marketplace-source resolution shared by the `/plugins marketplace` and `/connectors marketplace` command families), `net` (the `https`-only redirect policy and endpoint validator), and `scan` (the generic store-scan failure type). The plugin/connector `marketplace_ops` writers delegate to `write_atomic_json` and the plugin `store_fetch::https_only_redirects` wrapper is deleted. The four hand-copied redacting `Debug` impls in `ragent-config` collapse into one `macro_rules! redacted_debug_impl!`; `sanitize::redact_json_value` routes through the borrow-or-own `redact_secrets_cow`; `check_path_within_allowed_roots_cached` takes a fast path when `dirs.allowed_roots` is empty; `Config::load`'s M-025 cache key reads `XDG_CONFIG_HOME` through `read_env`; the `masterfetch` `langsearch_key` read shares the env-reading `pick` closure; and the TUI de-duplicates the question-expiry helpers (`utils::now_unix_ms`, `QuestionRequest::resolved_default_index`, `state::resolve_default_index`, `strutil::format_mmss`) and removes the `unreachable!()` panic from the expiry poll. Also lands the `/mcp config` discovery-location report (§19.4.3, `McpClient::discover_locations`) and the `AskUserQuestion` `default`/fallback option with the 120-second inactivity timeout (FR-045). |
 | v1.0.133 | 2026-10-12 | Plugin-store browse-panel refinements and a `git+` install fix (spec `pluginstores` FR-004, FR-051; `plugins` FR-024). Each navigator on the `/plugins` browse panel now carries a one-row reversed-video header (`Categories` over the category navigator, `Marketplace` over the marketplace navigator) directly above its `ALL` row, and the navigator's cached hit-test area is now the row area below the header, so a click or wheel on a header row is inert and never mis-mapped onto `ALL`. A bottom-edge search box with a live filter field and a click-to-clear `[x] clear` button was already introduced with the three-pane navigator work. Separately, `git_clone_stage` in `ragent-plugins` ran `git checkout -- FETCH_HEAD`; the `--` separator made `git checkout` treat `FETCH_HEAD` as a *pathspec* file filter rather than a commit-ish, so every install from a `git+<url>#<ref>` source naming a non-default ref (for example the `/plugins claude` store's `git+https://github.com/mongodb/agent-skills#main:plugins/mongodb`) aborted after the fetch. The checkout is now `git checkout FETCH_HEAD`; `FETCH_HEAD` is a name ragent supplies itself and the ref that filled it is already validated to not begin with `-`, so no option can be injected. Covered by the new `add_checks_out_a_non_default_ref` case in `test_store_git_source.rs`. |
 | v1.0.132 | 2026-10-12 | Merged connector/plugin marketplace browsers and alphabetical catalogue ordering (spec `pluginstores` FR-047..FR-050, `connectors` FR-042..FR-046). The `/plugins codex\|claude` and `/connectors claude` browse panels each merge their store's base endpoint with every additional marketplace registered through the new `/plugins marketplace` / `/connectors marketplace` sub-subcommand families (`show`, `<store> list\|add <source> [--force]\|remove <name>`), recorded in the user-global `plugins.stores.marketplaces` / `connectors.stores.marketplaces` arrays by an atomic config splice. Each result row shows the plugin/connector id, its version (plugin store), the marketplace it came from, and its description; the connector panel pins a dark-on-light column-heading row above its scrolling list, and both panels resolve each entry's blank description (and, for the plugin store, its version) from the entry's own repository manifest off the event loop via a bounded thread pool with an injectable `ManifestSource` seam (`ragent_plugins::store_enrich`, `ragent_connectors::catalogue_enrich`). Every connector and plugin-store list is sorted in ascending alphabetical order of id, case-insensitively with a byte-wise tiebreak (`compare_connector_ids` / `compare_store_ids`), applied before any query or category filter. The plugin-store category navigator no longer derives rows from entry `tags`/`keywords` (`catnav` FR-021 withdrawn). Registry fixes: the `/events` SSE connection cap builds on stable Rust (`compare_exchange_weak` loop replacing `AtomicUsize::try_update`); connectors install enabled; `catnav` FR-021 withdrawn retaining its number. |
 | v1.0.131 | 2026-10-10 | OpenHands-parity release. The pluggable execution backends (`local`/`docker`/`podman`/`remote`, §19D) with a health-visible registry and TUI `/backend` switcher, sandbox secret injection resolved from the encrypted store at spawn time, the ACP client plus the feature-gated ACP server (§19E), the OpenAI-compatible inbound surface (`/v1/chat/completions`, `/v1/models`) with a generated OpenAPI 3.1 contract at `/openapi.json` and HTTP MCP transport, the automation service (webhook ingress `POST /auto/{id}`, scheduler, durable run history, backend confinement, §19F), AgentSkills (`.agents/skills/`) discovery, and the opt-in LLM security analyzer (`/security`) now ship as a tagged release. The 7-layer bash validation, path containment, and permission system are unchanged and gate every new surface. Registry fixes: the fast-path schema tests assert the crate's exported `SCHEMA_VERSION` (now 2, the `automation_runs` table); `PluginStoreBrowser::set_index` keeps document order; the `mask_key` doctest expects `[REDACTED]`; `machine_output` routes tracing to stderr for the report subcommands so machine-readable stdout stays clean; and the unused `ragent-storage` dependency is dropped from `ragent-tools-extended`. |
@@ -4518,7 +4518,7 @@ The review, the measurement method and the per-crate rollout record live in
 | v1.0.118 | 2026-09-25 | Durable, global MCP server enable/disable state: whether an MCP server is started is now a persisted choice (`<global state dir>/mcp_state.json`, a shared `McpEnableLedger`) rather than an implicit effect of being listed in `ragent.json`. A server id absent from the ledger is enabled; `mcp.<id>.disabled: true` always wins; a disabled server is registered with `McpStatus::Disabled` and no child process is spawned. `/mcp connect <id>` enables and connects live (registering tools immediately) and `/mcp disconnect <id>` disables and disconnects live, both persisting globally; `McpToolWrapper::execute` refuses a disabled server's tools. `/mcp` lists plugin-contributed servers (built from the merged `plugin_mcp_servers` set) with `enabled yes/no` and `tools: N`; `/plugins list` gains `MCP` / `MCP Tools` columns and an `mcp [...]` contributions line (`?` when a count is unknown, never `0`), and `/plugins list --mcp` keeps the full per-server tool inventory with registry names. Plugin `mcpServers` entries (inline or the Claude `"mcpServers": "./mcp.json"` file reference) are bridged as `<plugin-id>.<server>` and connected by default. `/tools` now lists visibility-disabled tools (`Visible Tools (N total, M disabled)` + a `Disabled by visibility` section) via the new `ToolRegistry::hidden_definitions()` / `hidden()`, and the slash-output extractor keeps every fenced block. A `/simplify` code-quality pass follows (dead `plugin_contributed_mcp_servers` and `McpEnableLedger::enabled_servers` removed, `McpEnableLedger::to_map` added, single config load in `set_mcp_server_enabled`, `impl Display for McpStatus`). |
 | v1.0.117 | 2026-09-25 | `/spec reverse --folder` now scaffolds and hosts the target project: the parsed scaffold request and `--folder` are handed straight to the reverse handler (not re-rendered through the `/reverse` text grammar that does not carry them), the shared `archdoc::run_govcreate_scaffold` engine runs before the async fetch, and a chained `--create <name>` writes the spec into `<folder>/specs/<name>/` via the new `/spec create --folder` flag. A `/spec reverse` invocation whose first argument is a flag, or whose flag tail is invalid (missing `--type`, unregistered `--language`, duplicate/empty value, `--github` with `--gitlab`), now reports the specific cause instead of the bare usage line; `next_value` rejects empty or `--`-prefixed values. The scaffolder gains `webapp` as a first-class registered `--type` value for `/new`, `/spec reverse`, and `/spec govcreate` (tiny dependency-free HTTP-server starter for `rust`/`python`/`go`/`typescript`/`javascript`, manifest-only elsewhere). The vendored `lopdf` crate carries crate-level allowances (matching `vendor/pdf-extract`) so the dead-code lint and `cargo-machete` are green. All verification checks pass: `cargo check --workspace`, `cargo-machete`, `cargo check --tests --workspace`, `cargo test --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, and `cargo deny check`. |
 | v1.0.116 | 2026-09-23 | Maintenance release over the v1.0.115 tree: agent and plugin updates plus a code-quality pass. The four content-sized TUI modal renderers (queue menu, queue show panel, plugin-store panel, queue clear confirmation) now share one `centered_rect_fixed(width, height, area)` helper in `ragent-tui/src/utils.rs` (byte-for-byte identical geometry); `persist_task_output` in `ragent-agent/src/task/mod.rs` streams the header plus the reply body straight into a `BufWriter<File>` then renames, halving peak memory while the full untruncated sub-agent report is written, with identical on-disk bytes. `cargo check --workspace`, the dead-code lint and reason checks, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all -- --check`, `cargo audit`, `cargo deny check`, and the full `cargo test --workspace` suite all pass. |
-| v1.0.115 | 2026-09-23 | Detached fire-and-forget sub-agents (spec `spawnagent`, FR-001..FR-005): the TUI `/spawn <agent> <prompt...>` slash command and the matching `new_agent` `detached: true` parameter launch a background sub-agent that **nothing ever waits on** — it runs concurrently and shows in the Agents panel / event log, but is excluded from `list_agents` and `running_background_count`, cannot be awaited via `wait_agents` (with or without `task_ids`), is untouched by `team_wait`, and its completion is reaped by `drain_completed` without injecting anything into the parent chat while `tasks_snapshot` still shows it; `TaskEntry.detached` (serde default `false`) and `AgentManager::spawn_detached` share one `spawn_background_mode` implementation with `spawn_background`, and a second `/spawn` while one is still registering is refused. Follow-up fixes (FR-004a/b/c): every completed sub-agent run (detached or not) now persists its FULL output to `log/subagents/<task-id>.md` under the parent session's working directory (atomic temp-file + rename) and records the path on `TaskEntry.output_file`; the session loop records its terminal `MessageEnd` reason into `SessionProcessor::last_message_end_reason` and the completion event maps it to the real loop `finish_reason` (`stop`/`truncation`/`length`/`cancelled`/`error`) so a provider-side cut is flagged as TRUNCATED in the Agents panel instead of looking like a healthy finish; and the Subagent system prompt gained a *Deliverable Enforcement* section requiring a file-writing sub-agent to call `write` before `agent_complete`. Also: `/new` stack overlay now strips the base `fn main` so a generated binary declares exactly one entry point (FR-007); the research gather log moved to the singular `log/research/`; and a `/simplify` + `/rust-hygiene` pair consolidates the plugin bridge filters, the scaffold remote helpers, and the TUI queue-clear dialog helpers, keeping `cargo fmt`, `clippy -D warnings`, the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green. |
+| v1.0.115 | 2026-09-23 | Detached fire-and-forget sub-agents (spec `spawnagent`, FR-001..FR-005): the TUI `/spawn <agent> <prompt...>` slash command and the matching `new_agent` `detached: true` parameter launch a background sub-agent that **nothing ever waits on** — it runs concurrently and shows in the Agents panel / event log, but is excluded from `list_agents` and `running_background_count`, cannot be awaited via `wait_agents` (with or without `task_ids`), is untouched by `team_wait`, and its completion is reaped by `drain_completed` without injecting anything into the parent chat while `tasks_snapshot` still shows it; `TaskEntry.detached` (serde default `false`) and `AgentManager::spawn_detached` share one `spawn_background_mode` implementation with `spawn_background`, and a second `/spawn` while one is still registering is refused. Follow-up fixes (FR-004a/b/c): every completed sub-agent run (detached or not) now persists its FULL output to `log/subagents/<task-id>.md` under the parent session's working directory (atomic temp-file + rename) and records the path on `TaskEntry.output_file`; the session loop records its terminal `MessageEnd` reason into `SessionProcessor::last_message_end_reason` and the completion event maps it to the real loop `finish_reason` (`stop`/`truncation`/`length`/`cancelled`/`error`) so a provider-side cut is flagged as TRUNCATED in the Agents panel instead of looking like a healthy finish; and the Subagent system prompt gained a *Deliverable Enforcement* section requiring a file-writing sub-agent to call `Write` before `agent_complete`. Also: `/new` stack overlay now strips the base `fn main` so a generated binary declares exactly one entry point (FR-007); the research gather log moved to the singular `log/research/`; and a `/simplify` + `/rust-hygiene` pair consolidates the plugin bridge filters, the scaffold remote helpers, and the TUI queue-clear dialog helpers, keeping `cargo fmt`, `clippy -D warnings`, the dead-code lint and reason checks, `cargo audit`, and `cargo deny` green. |
 | v1.0.114 | 2026-09-22 | Missing plugin components: the plugin system now bridges every non-tool surface for both Codex- and Claude-dialect plugins — skills, MCP servers, slash commands, agents, and hooks (T-021..T-023, T-026), including the full Claude `hooks.json` declaration surface and a blocking Stop continuation bounded to three continuations; the descriptor recognises the nested `.codex-plugin/plugin.json` (T-024) and resolves a directory shipping both nested manifests to the Claude dialect (T-025); `/plugins list` counts and details skills/agents/hooks (FR-009) and `/plugins add` installs a plugin **enabled** (FR-007). Also: `/new --github` resolves the GitHub token through the shared `ragent_config::github` chain (`GITHUB_TOKEN` -> `~/.config/ragent/github_token` -> `gh` CLI) with an app-token downgrade (FR-008); a slash command submitted while the agent runs is queued and drains at the next turn boundary (inputqueue FR-017 amendment); the new read-only `ragent_info` tool reports the running version, build time, git commit, and compiler (168 -> 169 tools); and a `/simplify all` pass applies seven verified code-quality fixes across `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/` with no behaviour change (three further proposed refactors rejected as adding complexity). |
 | v1.0.113 | 2026-09-21 | Message input queue (spec `inputqueue`, `specs/inputqueue/`, T-001..T-027 complete): the TUI message-window input field stays editable while the primary agent executes — each `Enter` appends the submission to a bounded FIFO queue (default 32, `input_queue_capacity` config clamped `1..=99`) instead of rejecting it, a two-digit zero-padded counter renders before the `> ` prompt, and the oldest entry runs at each turn boundary (drain on `MessageEnd`/`AgentError`, deferred by the shared guard while processing/compacting). Control surfaces: the four-row `Alt+Q` queue-control menu (`Next` / `Stop`/`Resume` / `Clear` / `Show`, navigated with `Up`/`Down`/`Enter`; `Yes`/`No` clear-confirmation dialog defaulting to `No`; the `Show` row opens a scrollable queue-entry panel where `Enter` moves an entry toward the front and `Del` removes it — FR-038..FR-043, NFR-012) and the `/queue [list\|clear\|next\|help]` slash command. FR-017 was amended so a slash command (`/…`) is queued the same way and runs at the next turn boundary (a synchronous command leaves the boundary free, so consecutive queued commands run back-to-back; at capacity it is rejected and restored to the field), while only bang commands (`!…`) and teammate-targeted sends keep their busy refusal; the queue is in-memory only and never persisted (NFR-005). Layout change: side panels move from a 50/50 to a 60/40 messages/panel split. 19 new test files (234 new test attributes); `test_busy_send_guard.rs` rewritten. A `/simplify all` quality pass over the diff and the HEAD~3 plugins/research/config work follows (de-duplication, dead-code removal, per-frame allocation removal; no behaviour change). Docs: `TUI-QUICKSTART.md` §4, `docs/howtos/tutorial.md`, new `docs/howtos/slashcommands/queue.md`, and `docs/howtos/config.md` §7.38 `input_queue_capacity`. Followed by a full-workspace CI hygiene pass: the non-existent `clippy::assert_is_empty` allow removed from 244 files and `cargo clippy --all-targets -D warnings` made clean. (Uncommitted follow-up on the same tree: **Claude plugin hooks** — the `hooks.json` file and the group `{matcher, hooks: [...]}` shape are now read (T-026, FR-033), a plugin hook receives `CLAUDE_PLUGIN_ROOT` and the Claude event JSON on stdin, a `PostToolUse` `additionalContext` is folded into the tool result, and a blocking Stop hook feeds findings back to the model before the turn ends (bounded to three continuations); `/plugins list` counts and details skills/agents/hooks (FR-009); `/plugins add` installs a plugin **enabled** (FR-007); a multi-target directory shipping both nested manifests resolves to the Claude dialect instead of being refused as ambiguous (T-025); the GitHub credential chain gains a `gh` CLI fallback with an app-token downgrade so `/new --github` can create a hosting repository when the stored token is a GitHub App token (FR-008); the new read-only `ragent_info` tool reports the running version, build time, git commit, and compiler (168 -> 169 tools); and a `/simplify all` pass applies seven code-quality fixes across `ragent-agent`, `ragent-plugins`, `ragent-tui`, and `src/` with no behaviour change (three further proposed refactors were rejected as adding complexity).) |
 | v1.0.109 | 2026-09-18 | Final phase of the `/simplify all` pass over v1.0.106..v1.0.108: dead `utf8_prefix_len` helper removed from the LLM HTTP client (superseded by the FUNC-033 `Utf8Error::error_len()`-driven flush), `config_agents_dir` collapsed into `global_agents_dir`, `extract_http_status` parses the three status digits byte-wise without an intermediate `String`, and all eight `ragent-research` `SourceVault` poisoned-lock sites now share one `lock_conn()` helper carrying a dedicated `SourceVaultError::LockPoisoned` variant (no behaviour change). (Uncommitted follow-up on the same tree: PERF-042 throttle-tail paint fix in `should_render` + `test_pending_message_cache_group_forces_safety_paint`, dependency/advisory hygiene drops, and the new `plugins` spec draft in `specs/plugins/` — sandboxed JavaScript plugin runtime loading Codex/Claude manifests + six-subcommand `/plugins` family, spec only.) |
@@ -4551,7 +4551,7 @@ The review, the measurement method and the per-crate rollout record live in
 | v1.0.20 | 2026-08-09 | LLM-callable cron tools (`cron_add`/`cron_remove`/`cron_list`/`cron_enable`/`cron_disable`); `/cron` slash-command enhancements; natural-language timestamp parsing; sub-agent model resolution fix |
 | v1.0.19 | 2026-08-09 | Cron capability added (`/cron` slash command with scheduler, execution logging, and guards) |
 | v1.0.18 | 2026-08-08 | Perplexity Sonar backend for `mf_search`; edit-log per-tool success/failure analysis |
-| v1.0.17 | 2026-08-08 | `collapse_whitespace` matching for `edit`/`multi_edit`; persistent edit-log toggle (Alt+E); model-independent context-compaction trigger; per-turn "compression skipped" guard |
+| v1.0.17 | 2026-08-08 | `collapse_whitespace` matching for `Edit`/`multi_edit`; persistent edit-log toggle (Alt+E); model-independent context-compaction trigger; per-turn "compression skipped" guard |
 | v0.1.0-beta.28 | 2026-08-01 | Fixed GitHub release workflow permissions (`contents: write`); reverted `check-and-test` to debug builds and added swap/timeout to avoid OOM; `memory_store` now returns a clear `stored` result |
 | v0.1.0-beta.27 | 2026-08-01 | CI runner optimisation: `ubuntu-latest-4-cores`, disabled debuginfo, free-disk-space cleanup |
 | v0.1.0-beta.26 | 2026-08-01 | Version bump |
@@ -4563,7 +4563,7 @@ The review, the measurement method and the per-crate rollout record live in
 | v0.1.0-beta.20 | 2026-07-29 | Research `--from-file` local-document seeding; control-character sanitisation; `html2text` panic catch-up |
 | v0.1.0-beta.19 | 2026-07-28 | Clean trailing newlines on startup messages |
 | v0.1.0-beta.18 | 2026-07-28 | Startup blocking fixed: MCP, code-index, provider health checks run in background; `/startup` timings; first keystroke after cost banner not swallowed; code-index WAL mode and direct `file_id` queries |
-| v0.1.0-beta.17 | 2026-07-27 | `@<path>` instruction-file includes; `open` tool completion; durable `initiative` and `skill_manage` tools |
+| v0.1.0-beta.17 | 2026-07-27 | `@<path>` instruction-file includes; `open` tool completion; durable `initiative` and `Skill` tools |
 | v0.1.0-beta.16 | 2026-07-26 | `conversation_search` and `session_search` tools; message FTS5 and optional embeddings |
 | v0.1.0-beta.15 | 2026-07-25 | `browser` tool with CDP automation (14 actions) |
 | v0.1.0-beta.14 | 2026-07-24 | `apply_patch` Codex-style patch tool; TUI read-tool header fixes |
@@ -4576,10 +4576,10 @@ The review, the measurement method and the per-crate rollout record live in
 | v0.1.0-alpha.130 | 2026-07-04 | TODO side panel (Alt+T); agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks); MockLlmClient criterion benchmarks; `/perf` TUI alias |
 | v0.1.0-alpha.129 | 2026-07-04 | Compression made permanent (removed `compression`/`compression-ml` feature flags); context-compression pipeline always compiled in |
 | v0.1.0-alpha.128 | 2026-07-04 | Eliminated all 279 compiler warnings across build, tests, benches, and examples |
-| v0.1.0-alpha.116 | 2026-06-23 | Agent-loop persistence/performance fixes; COMMSPLAN team unification, mailbox delivery semantics, unified whitespace-tolerant `edit`/`multiedit`/`memory_replace` matcher, swarm retry backoff |
+| v0.1.0-alpha.116 | 2026-06-23 | Agent-loop persistence/performance fixes; COMMSPLAN team unification, mailbox delivery semantics, unified whitespace-tolerant `Edit`/`multiedit`/`memory_replace` matcher, swarm retry backoff |
 | v0.1.0-alpha.113 | 2026-06-20 | Research-system TUI integration wired real gatherers and completion reporting; improved keyword matching and table rendering; corrected spec status to `in_progress` |
 | v0.1.0-alpha.112 | 2026-06-20 | Corrected research-system spec status from `implemented` to `draft` |
-| v0.1.0-alpha.111 | 2026-06-20 | `ask_user` promoted to standalone event-driven tool with multiple-choice `options`; removed standalone `question` tool |
+| v0.1.0-alpha.111 | 2026-06-20 | `AskUserQuestion` promoted to standalone event-driven tool with multiple-choice `options`; removed standalone `question` tool |
 | v0.1.0-alpha.110 | 2026-06-20 | Removed internal LLM subsystem (Candle, LiteRT-LM, `/internal-llm` commands, `internal_llm` feature) |
 | v0.1.0-alpha.109 | 2026-06-16 | In-process Foundry Local backend, `in_process` provider option, task tool family guidance |
 | v0.1.0-alpha.108 | 2026-06-15 | Foundry Local internal-LLM backend; fixed empty SSE stream by polling `/models/loaded` |
@@ -4641,7 +4641,7 @@ All documentation markdown files are located in `docs/` except for these root fi
   - M2: Single-source team implementation — team runtime (7 modules) and 20 team tools are native to `ragent-agent`; `ragent-team` was a thin re-export shim, **folded into `ragent-agent` in v1.0.121 (ANTIPAT M7.8)**. CI guard `scripts/check-team-duplication.sh`
   - M3: `team_wait` liveness fixes, `team_idle` publishes `TeammateIdle`, unified shutdown path with `immediate` parameter
   - M4: Mailbox peek/ack at-least-once semantics, `team_assign_task` notifications, `team_broadcast` per-recipient results, `team_message` recipient validation, `team_read_messages` snake_case schema
-- Unified whitespace-tolerant replacement matcher — `edit`, `multiedit`, and `memory_replace` now share `ragent_tools_core::replace`, tolerating CRLF, trailing/leading whitespace, collapsed whitespace, blank-line edges, and final-newline mismatches
+- Unified whitespace-tolerant replacement matcher — `Edit`, `multiedit`, and `memory_replace` now share `ragent_tools_core::replace`, tolerating CRLF, trailing/leading whitespace, collapsed whitespace, blank-line edges, and final-newline mismatches
 - Swarm teammate retry backoff — exponential with jitter (`1 s, 2 s, 4 s, 8 s` capped at 30 s)
 - Microsoft Foundry Local provider integration — first-class TUI support, `[local]` badge, health checks, config merging (`auto_start`, `device`, `models_path`)
 - Microsoft Foundry Local internal-LLM backend (`FoundryLocalExecutor`) and in-process backend (`FoundryLocalInProcClient`)
@@ -4652,7 +4652,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - xAI Grok provider — `xai` provider for the xAI Grok API
 - Research System — `/research` slash commands, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, spec linkage via `--from-research` and `research:` lines in `PLAN.md`
 - `ragent-research` crate — `ResearchName`, `Source`, `ResearchStatus`, `ResearchItem`, web/local gatherers, plan-dep parser
-- `ask_user` standalone tool — event-driven question prompts with optional multiple-choice `options`
+- `AskUserQuestion` standalone tool — event-driven question prompts with optional multiple-choice `options`
 - `/spec impl` and `/spec implement` slash commands
 - YOLO mode persistence — saved to `ragent.json` and restored on startup
 - `compression` config block in `ragent.json`
@@ -4662,12 +4662,12 @@ All documentation markdown files are located in `docs/` except for these root fi
 
 ### Removed
 - Internal LLM subsystem — Candle GGUF, LiteRT-LM, `/internal-llm` slash commands, `InternalLlmConfig`, `internal_llm` Cargo feature, and all related tests/docs
-- Standalone `question` tool (functionality moved into `ask_user`)
+- Standalone `question` tool (functionality moved into `AskUserQuestion`)
 
 ### Changed
-- `ask_user` promoted from alias to standalone event-driven tool; permission auto-approval key renamed from `question` to `ask_user`
+- `AskUserQuestion` promoted from alias to standalone event-driven tool; permission auto-approval key renamed from `question` to `AskUserQuestion`
 - `multiedit` now resolves every edit against original content, detects byte-range overlap, and applies non-overlapping edits highest-end-offset-first so JSON order no longer matters
-- `edit` / `multiedit` / `memory_replace` diagnostics now report edit index, file, last matching pass, and a best-effort closest-line hint
+- `Edit` / `multiedit` / `memory_replace` diagnostics now report edit index, file, last matching pass, and a best-effort closest-line hint
 - Relative indentation preservation — `reindent_with` now uses the common leading whitespace of all matched file lines and leaves blank lines untouched
 - `team_read_messages` now peeks unread messages and acknowledges only after building `ToolOutput` (at-least-once delivery)
 - `team_broadcast` reports per-recipient `succeeded`/`failed` arrays instead of aborting on first failure
@@ -4850,14 +4850,14 @@ still override per run with the corresponding flags.
 - **Autopilot & router fixes** — Autopilot auto-continue suppressed after `agent_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
 - **Startup responsiveness** — MCP server connections, code-index open/watcher/reindex, and provider health checks moved to background tasks; `/startup` slash command shows per-stage timing; first printable keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
 - **Code-index performance** — SQLite `WAL` mode, `synchronous = NORMAL`, `temp_store = MEMORY`; direct `file_id` symbol queries; reindex chunk yield reduced to 1 ms; per-phase timing logs (beta.18)
-- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `skill_manage` runtime skill control; six `mf_*` MasterFetch tools (beta.12–beta.17)
+- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `Skill` runtime skill control; six `mf_*` MasterFetch tools (beta.12–beta.17)
 - **Cost accounting** — `Event::RunCostSummary` published per turn; persisted to SQLite `run_cost_summaries`; TUI banner overlay; `--include-cost` session export flag; HTTP SSE `run_cost_summary` event (beta.12)
 - **Telemetry & operator tools** — OpenTelemetry metrics export, `/telemetry` slash family, ALT-O telemetry panel, `sudo` askpass broker, `askpass` environment wiring (beta.2–beta.5)
 - **Instruction-file includes** — `@<path>` directive with cycle detection, depth cap, escape sequences, and path containment checks (beta.17)
 
 ### Changed (beta.2–beta.28)
 - Provider registry now exposes 13 IDs including `router`; `foundry_local` is no longer a standalone registry entry (its functionality is accessed via the router/backend configuration)
-- Tool count grew to ~150 registered tools across 18 categories, including aliases for commonly hallucinated names (`update_file`, `run_code`, `ask_user`, `multiedit`)
+- Tool count grew to ~150 registered tools across 18 categories, including aliases for commonly hallucinated names (`update_file`, `run_code`, `AskUserQuestion`, `multiedit`)
 - Web-search stack now prefers the multi-engine `mf_search` tool (DuckDuckGo, Brave, Tavily, LangSearch) over legacy `websearch`
 - `.deb` and `.rpm` packaging temporarily disabled in CI while build paths are reviewed (beta.24–beta.25)
 
@@ -5543,7 +5543,7 @@ When an agent turn writes files inside the active spec's directory
 (`specs/<id>/`) and the session has an active spec, tasks in the `in_progress`
 state are automatically advanced to `completed` with a completion timestamp.
 The heuristic is guarded by `writes_in_spec_dir`: only file-writing tools
-(`write`, `edit`, `multiedit`, `patch`, `apply_patch`, `create`,
+(`Write`, `Edit`, `multiedit`, `patch`, `apply_patch`, `create`,
 `append_to_file`) whose resolved target path sits inside the spec directory
 count. Writes elsewhere in the workspace (docs, scratch files, snapshots)
 never complete spec tasks, preventing unrelated edits from silently corrupting
@@ -5607,7 +5607,7 @@ A research session runs in phases:
    rejected as an explicit `FetchFailed` event carrying the real reason —
    placeholder error text never enters the research corpus as a source
    body.
-3. **Local** — scan project files with `glob`/`grep`/`read`. Each captured
+3. **Local** — scan project files with `Glob`/`Grep`/`read`. Each captured
    file produces an excerpt showing the matching lines plus one line of
    context on either side, and a `relevance` note that names the matched
    keyword(s) and the first matching line.

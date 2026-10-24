@@ -73,7 +73,7 @@ Plan with explicit scope constraints in the description:
 
 ## Related
 
-- `plan_enter` - the underlying sub-agent delegation used by `/plan`
+- `EnterPlanMode` - the underlying sub-agent delegation used by `/plan`
 - `/mode architect` - switch role mode without delegating
 - `/agent` - switch the session's agent entirely
 - `/loop` - goal-driven loop execution for carrying a plan out

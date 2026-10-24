@@ -45,11 +45,11 @@ async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
     app.handle_event(Event::ToolCallStart {
         session_id: "child-sess-1".to_string(),
         call_id: "call-1".to_string(),
-        tool: "grep".to_string(),
+        tool: "Grep".to_string(),
     })
     .await;
 
-    let lines = tool_call_lines(&app.log_entries, "tool call: grep");
+    let lines = tool_call_lines(&app.log_entries, "tool call: Grep");
     assert_eq!(lines.len(), 1, "exactly one tool-call log line: {lines:?}");
     assert!(
         lines[0].contains("[explore-a1b2c3d4] "),
@@ -57,7 +57,7 @@ async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
         lines[0]
     );
     assert!(
-        lines[0].contains("[2.1] tool call: grep"),
+        lines[0].contains("[2.1] tool call: Grep"),
         "line should carry the loop step/substep tag: {}",
         lines[0]
     );
@@ -92,7 +92,7 @@ async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
         app.event_bus.increment_tool_calls("child-sess-2");
     }
     app.event_bus.set_step("child-sess-2", 1);
-    for (i, tool) in ["read", "grep"].iter().enumerate() {
+    for (i, tool) in ["read", "Grep"].iter().enumerate() {
         app.handle_event(Event::ToolCallStart {
             session_id: "child-sess-2".to_string(),
             call_id: format!("call-a{i}"),
@@ -104,7 +104,7 @@ async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
     app.handle_event(Event::ToolCallStart {
         session_id: "child-sess-2".to_string(),
         call_id: "call-a2".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
     })
     .await;
 
@@ -117,11 +117,11 @@ async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
         "one log line per tool call so the panel step count is auditable: {lines:?}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("[1.2] tool call: grep")),
+        lines.iter().any(|l| l.contains("[1.2] tool call: Grep")),
         "parallel calls in one step get sequential substeps: {lines:?}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("[2.1] tool call: bash")),
+        lines.iter().any(|l| l.contains("[2.1] tool call: Bash")),
         "a new loop step resets the substep counter: {lines:?}"
     );
 }
@@ -169,13 +169,13 @@ async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
     app.handle_event(Event::ToolCallStart {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b2".to_string(),
-        tool: "write".to_string(),
+        tool: "Write".to_string(),
     })
     .await;
     app.handle_event(Event::ToolCallEnd {
         session_id: "child-sess-3".to_string(),
         call_id: "call-b2".to_string(),
-        tool: "write".to_string(),
+        tool: "Write".to_string(),
         error: Some("denied".to_string()),
         duration_ms: 5,
     })
@@ -183,12 +183,12 @@ async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
     let failed: Vec<_> = app
         .log_entries
         .iter()
-        .filter(|e| e.level == LogLevel::Error && e.message.contains("tool write failed"))
+        .filter(|e| e.level == LogLevel::Error && e.message.contains("tool Write failed"))
         .map(|e| e.message.as_str())
         .collect();
     assert_eq!(failed.len(), 1, "exactly one failure line: {failed:?}");
     assert!(
-        failed[0].contains("[plan-11223344] [1.2] tool write failed: denied (5ms)"),
+        failed[0].contains("[plan-11223344] [1.2] tool Write failed: denied (5ms)"),
         "failure line should carry agent tag and step tag: {}",
         failed[0]
     );
@@ -229,7 +229,7 @@ async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
             },
             ToolCallBatchEntry {
                 call_id: "call-c2".to_string(),
-                tool: "grep".to_string(),
+                tool: "Grep".to_string(),
                 args: "{}".to_string(),
                 error: None,
                 duration_ms: 11,
@@ -253,7 +253,7 @@ async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
         "first call gets substep 1: {lines:?}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("[1.2] tool call: grep")),
+        lines.iter().any(|l| l.contains("[1.2] tool call: Grep")),
         "second call gets substep 2: {lines:?}"
     );
 }

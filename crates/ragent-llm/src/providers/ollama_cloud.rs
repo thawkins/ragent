@@ -393,7 +393,9 @@ impl OllamaCloudClient {
                                 // image so a non-vision model is not rejected for
                                 // historical image attachments.
                             }
-                            ContentPart::ToolUse { .. } | ContentPart::ToolResult { .. } => {}
+                            ContentPart::ToolUse { .. }
+                            | ContentPart::ToolResult { .. }
+                            | ContentPart::Reasoning { .. } => {}
                         }
                     }
                     (texts.join("\n"), imgs)
@@ -440,16 +442,19 @@ impl OllamaCloudClient {
                             if let ContentPart::ToolResult {
                                 tool_use_id,
                                 content,
+                                is_error,
                             } = result
                             {
                                 // Native Ollama /api/chat format: tool results use `name`, not `tool_call_id`.
+                                // FR-014: the shape has no error flag, so the
+                                // content carries the `ERROR: ` prefix.
                                 let name = tool_id_to_name
                                     .get(tool_use_id)
                                     .map_or("", std::string::String::as_str);
                                 messages.push(json!({
                                     "role": "tool",
                                     "name": name,
-                                    "content": content
+                                    "content": crate::provider::wire::encode::error_marked(content, *is_error)
                                 }));
                             }
                         }

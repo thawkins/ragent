@@ -411,8 +411,8 @@ fn test_noop_recorder_methods_never_panic() {
     session.record_agent_loop(1000.0, 5);
 
     let perm = PermissionRecorder::disabled();
-    perm.record_approved("bash");
-    perm.record_denied("bash");
+    perm.record_approved("Bash");
+    perm.record_denied("Bash");
 
     let comp = CompressionRecorder::disabled();
     comp.record_compression(1000, 500, 0.5);

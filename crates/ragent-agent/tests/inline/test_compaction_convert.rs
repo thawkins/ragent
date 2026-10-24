@@ -44,6 +44,7 @@ fn tool_result(id: &str, content: &str) -> ChatMessage {
         content: ChatContent::Parts(vec![ContentPart::ToolResult {
             tool_use_id: id.to_string(),
             content: content.into(),
+            is_error: false,
         }]),
     }
 }
@@ -162,7 +163,7 @@ fn test_messages_to_chat_messages_emits_tool_result_followup() {
     assert!(has_tool_use, "assistant message must carry the ToolUse");
     let has_tool_result = matches!(&chat[1].content, ChatContent::Parts(parts) if parts
         .iter()
-        .any(|p| matches!(p, ContentPart::ToolResult { tool_use_id, content } if tool_use_id == "call_9" && &**content == "/home/user")));
+        .any(|p| matches!(p, ContentPart::ToolResult { tool_use_id, content, .. } if tool_use_id == "call_9" && &**content == "/home/user")));
     assert!(
         has_tool_result,
         "follow-up user message must carry the ToolResult"
@@ -219,6 +220,7 @@ fn test_many_tool_calls_pair_in_one_pass() {
             content: ChatContent::Parts(vec![ContentPart::ToolResult {
                 tool_use_id: format!("call-{i}"),
                 content: format!("contents of file {i}").into(),
+                is_error: false,
             }]),
         });
     }

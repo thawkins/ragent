@@ -79,7 +79,7 @@ Unknown subcommand prints a correction instead of a prompt:
 - Report modes: `primary` renders the interactive-agent prompt; `subagent`
   renders the Subagent-mode prompt. Subagent mode gates the Sub-Agent
   Completion Protocol (MANDATORY - HARD REQUIREMENT) section and excludes
-  interactive tools (for example `ask_user`) from the tool reference.
+  interactive tools (for example `AskUserQuestion`) from the tool reference.
 - The report is the rendered system prompt: agent instructions, project
   guidelines (`AGENTS.md`), tool reference, and mode-specific sections, all
   resolved against the live session (selected model, registered tools, working

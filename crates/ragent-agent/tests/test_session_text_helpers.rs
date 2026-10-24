@@ -149,21 +149,21 @@ fn test_blank_name_is_not_a_call() {
 fn test_multiple_markup_blocks_recovered_in_order() {
     let text = format!(
         "{OPEN}{{\"name\":\"read\",\"arguments\":{{}}}}{CLOSE} and \
-         {OPEN}{{\"name\":\"grep\",\"arguments\":{{}}}}{CLOSE} and \
+         {OPEN}{{\"name\":\"Grep\",\"arguments\":{{}}}}{CLOSE} and \
          {OPEN}{{\"name\":\"think\",\"arguments\":{{}}}}{CLOSE}"
     );
     let calls = extract_text_tool_calls(&text);
     let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, vec!["read", "grep", "think"]);
+    assert_eq!(names, vec!["read", "Grep", "think"]);
 }
 
 #[test]
 fn test_function_calls_wrapper_dialect() {
-    let text = "<function_calls>\n<function=bash>\n<parameter=command>\nls\n\
+    let text = "<function_calls>\n<function=Bash>\n<parameter=command>\nls\n\
                 </parameter>\n</function>\n</function_calls>";
     let calls = extract_text_tool_calls(text);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "bash");
+    assert_eq!(calls[0].name, "Bash");
     let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
     assert_eq!(args["command"], "ls");
 }

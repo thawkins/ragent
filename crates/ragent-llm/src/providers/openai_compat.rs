@@ -135,7 +135,9 @@ pub fn build_openai_messages(request: &ChatRequest, spec: &OpenAiCompatSpec) -> 
                             "type": "image_url",
                             "image_url": { "url": url }
                         })),
-                        ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
+                        ContentPart::ToolResult { .. }
+                        | ContentPart::ToolUse { .. }
+                        | ContentPart::Reasoning { .. } => None,
                     })
                     .collect();
                 let single_text = !spec.strict_single_text_collapse
@@ -187,12 +189,15 @@ pub fn build_openai_messages(request: &ChatRequest, spec: &OpenAiCompatSpec) -> 
                         if let ContentPart::ToolResult {
                             tool_use_id,
                             content,
+                            is_error,
                         } = result
                         {
+                            // FR-014: `role:"tool"` has no error flag, so the
+                            // content carries the `ERROR: ` prefix.
                             let mut tool_msg = json!({
                                 "role": "tool",
                                 "tool_call_id": tool_use_id,
-                                "content": content
+                                "content": crate::provider::wire::encode::error_marked(content, *is_error)
                             });
                             if let Some(name) = tool_id_to_name
                                 .as_ref()

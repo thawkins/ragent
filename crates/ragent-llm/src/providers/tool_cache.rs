@@ -2,23 +2,31 @@
 //!
 //! Providers build their request bodies from a session's ~111 [`ToolDefinition`]s
 //! on *every* LLM call. The tool definitions only change when the tool registry
-//! is invalidated (new tools registered, permissions change visibility), so
+//! is invalidated (new tools registered, the tool set changes), so
 //! re-serialising them each turn is pure overhead.
 //!
-//! The serialised shape is provider-specific - OpenAI-compatible
-//! (`{"type":"function","function":{...}}`), Anthropic
-//! (`{"name","description","input_schema"}`), Gemini
-//! (`{"name","description","parameters"}`), Bedrock (`{"toolSpec"}`) - so the
-//! cache is keyed by a combination of the *format* the caller passes in and a
-//! content fingerprint of the tool definitions. A process-global [`OnceLock`]
-//! cache is used (rather than a field on `ChatRequest`) to keep the public
-//! `LlmClient::chat` signature and `ragent-types` structs unchanged.
+//! The serialised shape is provider-specific and is derived in exactly one
+//! place - [`encode_tools`] in [`crate::provider::wire::encode`] - from the
+//! family's declared [`ToolWireProfile`]. This module adds the caching on top:
+//! the cache is keyed by the [`ToolFormat`] the caller passes in and a content
+//! fingerprint of the tool definitions, so a hit returns the very same `Arc` a
+//! miss would have built (FR-003). A process-global [`OnceLock`] cache is used
+//! (rather than a field on `ChatRequest`) to keep the public `LlmClient::chat`
+//! signature and `ragent-types` structs unchanged.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use ragent_types::ToolDefinition;
+
+use crate::provider::wire::ToolEnvelope;
+use crate::provider::wire::ToolWireProfile;
+pub use crate::provider::wire::encode::CachedTools;
+use crate::provider::wire::encode::{HF_TOOL_PREFIX, encode_tools};
+use crate::provider::wire::profile_table::{
+    ANTHROPIC_MESSAGES, BEDROCK_CONVERSE, GEMINI, OPENAI_CHAT, OPENAI_RESPONSES,
+};
 
 /// The provider-specific serialised shape of a tool list.
 ///
@@ -29,6 +37,11 @@ use ragent_types::ToolDefinition;
 /// - Anthropic: `{"name","description","input_schema"}`
 /// - Gemini: `{"name","description","parameters"}`
 /// - Bedrock: `{"toolSpec":{name,description,inputSchema:{json:...}}}`
+/// - OpenAI Responses: the flattened function shape (no nested `function`)
+///
+/// The enum is only a *cache key* and a name for a shape; the shape itself comes
+/// from [`ToolFormat::format_profile`], so this type cannot drift from the
+/// encoder's envelope (FR-003).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ToolFormat {
     /// OpenAI function-call wire format.
@@ -43,75 +56,61 @@ pub enum ToolFormat {
     /// prefixes every tool name with `t_` (see `huggingface.rs`), so it needs
     /// its own serialised entries.
     HuggingFace,
+    /// OpenAI Responses API: the flattened function shape (no nested
+    /// `function` object), so it needs its own serialised entries.
+    OpenAiResponses,
 }
 
-const HF_TOOL_PREFIX: &str = "t_";
+impl ToolFormat {
+    /// Every format the cache can key, for coverage assertions that must be
+    /// total over the enum (FR-003).
+    pub const ALL: &[ToolFormat] = &[
+        ToolFormat::OpenAi,
+        ToolFormat::Anthropic,
+        ToolFormat::Gemini,
+        ToolFormat::Bedrock,
+        ToolFormat::HuggingFace,
+        ToolFormat::OpenAiResponses,
+    ];
+
+    /// The declared wire profile this cache key encodes with.
+    ///
+    /// HuggingFace is an OpenAI-shaped family that rewrites names, so it shares
+    /// [`OPENAI_CHAT`] and adds [`ToolFormat::name_prefix`] rather than a sixth
+    /// envelope that differs only in a string.
+    pub const fn format_profile(self) -> ToolWireProfile {
+        match self {
+            ToolFormat::OpenAi | ToolFormat::HuggingFace => OPENAI_CHAT,
+            ToolFormat::Anthropic => ANTHROPIC_MESSAGES,
+            ToolFormat::Gemini => GEMINI,
+            ToolFormat::Bedrock => BEDROCK_CONVERSE,
+            ToolFormat::OpenAiResponses => OPENAI_RESPONSES,
+        }
+    }
+
+    /// The name rewrite this family applies inside its envelope, if any.
+    pub const fn name_prefix(self) -> Option<&'static str> {
+        match self {
+            ToolFormat::HuggingFace => Some(HF_TOOL_PREFIX),
+            ToolFormat::OpenAi
+            | ToolFormat::Anthropic
+            | ToolFormat::Gemini
+            | ToolFormat::Bedrock
+            | ToolFormat::OpenAiResponses => None,
+        }
+    }
+
+    /// The wire envelope this format resolves to (the profile table's own
+    /// vocabulary, so the cache and the encoder cannot disagree about the
+    /// mapping).
+    pub const fn tool_envelope(self) -> ToolEnvelope {
+        self.format_profile().tool_envelope
+    }
+}
 
 /// Cache entry key. `format` disambiguates the provider-specific JSON shape;
 /// `fingerprint` identifies the exact tool-definition set that was serialised.
 type CacheKey = (ToolFormat, u64);
-
-/// The cached serialised tool-list bytes plus the size the caller should
-/// report for request-size accounting.
-pub struct CachedTools {
-    /// The full serialised JSON `Vec` that the caller can `.extend_from_slice`
-    /// into a pre-sized request-body buffer, or pass to `RequestBuilder::body`.
-    pub bytes: Vec<u8>,
-    /// The pre-serialised byte length of the tool-list fragment, used by
-    /// request-size estimation to avoid re-serialising the definitions.
-    pub byte_len: usize,
-    /// Byte offset of the inner tool list/array that should be assigned to the
-    /// request body (inclusive).
-    payload_start: usize,
-    /// Byte offset immediately after the inner tool list/array (exclusive).
-    payload_end: usize,
-}
-
-impl CachedTools {
-    /// Parse the inner tool-list payload (the slice between `payload_start`
-    /// and `payload_end`) back into a [`serde_json::Value`].
-    ///
-    /// The bytes were produced by `serde_json::to_writer` in the cache
-    /// builders, so a parse failure can only mean data corruption; the
-    /// fallback returns the empty-tolerant `Value::Null` rather than panicking
-    /// mid-request (the caller treats a missing tool list as "no tools").
-    fn payload_value(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
-            .unwrap_or(serde_json::Value::Null)
-    }
-
-    /// Extract the inner tool-list array for OpenAI-compatible providers.
-    ///
-    /// The cached wrapper is `{"tools":[...]}`, so the payload is the `[...]`
-    /// array.
-    pub fn openai_tools_array(&self) -> serde_json::Value {
-        self.payload_value()
-    }
-
-    /// Extract the inner tool-list array for Anthropic-format providers.
-    ///
-    /// The cached wrapper is `{"tools":[...]}` with `input_schema` items, so
-    /// the payload is the `[...]` array.
-    pub fn anthropic_tools_array(&self) -> serde_json::Value {
-        self.payload_value()
-    }
-
-    /// Extract the Gemini `tools` array (`[{"functionDeclarations":[...]}]`).
-    ///
-    /// The cached wrapper is `{"tools":[{"functionDeclarations":[...]}]}`, so
-    /// the payload is the `[{"functionDeclarations":[...]}]` array.
-    pub fn gemini_tools_array(&self) -> serde_json::Value {
-        self.payload_value()
-    }
-
-    /// Extract the Bedrock Converse `toolConfig` field value (`{"tools": [...]}`).
-    ///
-    /// The cached wrapper is `{"tools":[...]}` (each item a `toolSpec` object)
-    /// and the caller assigns it directly to `body["toolConfig"]`.
-    pub fn bedrock_tool_config_object(&self) -> serde_json::Value {
-        self.payload_value()
-    }
-}
 
 static TOOL_CACHE: OnceLock<Mutex<HashMap<CacheKey, Arc<CachedTools>>>> = OnceLock::new();
 
@@ -135,6 +134,9 @@ fn fingerprint(tools: &[ToolDefinition]) -> u64 {
 /// Get the cached serialised tool list for `format` + `tools`, or serialise and
 /// store it on a miss. The returned [`CachedTools`] is shared (via `Arc`) so
 /// every turn reuses the same buffer instead of re-allocating.
+///
+/// The bytes always come from [`encode_tools`], so a hit is byte-identical to a
+/// miss by construction rather than by two implementations agreeing (FR-003).
 pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedTools> {
     let key = (format, fingerprint(tools));
     let cached = cache()
@@ -146,13 +148,7 @@ pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedT
         return hit;
     }
     // Serialise outside the lock so concurrent misses don't contend.
-    let built = match format {
-        ToolFormat::OpenAi => build_openai(tools),
-        ToolFormat::Anthropic => build_anthropic(tools),
-        ToolFormat::Gemini => build_gemini(tools),
-        ToolFormat::Bedrock => build_bedrock(tools),
-        ToolFormat::HuggingFace => build_huggingface(tools),
-    };
+    let built = encode_tools(format.format_profile(), format.name_prefix(), tools);
     let entry = Arc::new(built);
     let mut guard = cache()
         .lock()
@@ -171,177 +167,6 @@ pub fn invalidate_tool_cache() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clear();
-}
-
-fn build_openai(tools: &[ToolDefinition]) -> CachedTools {
-    let mut buf = Vec::with_capacity(tools.len() * 128);
-    buf.extend_from_slice(br#"{"tools":["#);
-    let payload_start = buf.len() - 1; // index of '['
-    for (i, t) in tools.iter().enumerate() {
-        push_tool(
-            &mut buf,
-            i,
-            &serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters
-                }
-            }),
-        );
-    }
-    buf.push(b']');
-    buf.push(b'}');
-    let payload_end = buf.len() - 1; // exclusive index after ']'
-    let byte_len = payload_end - payload_start;
-    CachedTools {
-        bytes: buf,
-        byte_len,
-        payload_start,
-        payload_end,
-    }
-}
-
-fn build_anthropic(tools: &[ToolDefinition]) -> CachedTools {
-    let mut buf = Vec::with_capacity(tools.len() * 128);
-    buf.extend_from_slice(br#"{"tools":["#);
-    let payload_start = buf.len() - 1; // index of '['
-    for (i, t) in tools.iter().enumerate() {
-        push_tool(
-            &mut buf,
-            i,
-            &serde_json::json!({
-                "name": t.name,
-                "description": t.description,
-                "input_schema": t.parameters
-            }),
-        );
-    }
-    buf.push(b']');
-    buf.push(b'}');
-    let payload_end = buf.len() - 1; // exclusive index after ']'
-    let byte_len = payload_end - payload_start;
-    CachedTools {
-        bytes: buf,
-        byte_len,
-        payload_start,
-        payload_end,
-    }
-}
-
-fn build_gemini(tools: &[ToolDefinition]) -> CachedTools {
-    let mut buf = Vec::with_capacity(tools.len() * 256);
-    buf.extend_from_slice(br#"{"tools":["#);
-    // The array to assign to `body["tools"]` starts at the '[' after
-    // `{"tools":` (index 9) and ends before the final '}'.
-    let payload_start = 9;
-    for (i, t) in tools.iter().enumerate() {
-        push_tool(
-            &mut buf,
-            i,
-            &serde_json::json!({
-                "functionDeclarations": [{
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters
-                }]
-            }),
-        );
-    }
-    buf.push(b']');
-    buf.push(b'}');
-    let payload_end = buf.len() - 1; // exclusive index after ']'
-    let byte_len = payload_end - payload_start;
-    CachedTools {
-        bytes: buf,
-        byte_len,
-        payload_start,
-        payload_end,
-    }
-}
-
-fn build_bedrock(tools: &[ToolDefinition]) -> CachedTools {
-    // Converse API toolConfig field value:
-    // {"tools":[{"toolSpec":{name,description,inputSchema:{json:...}}}]}
-    let mut buf = Vec::with_capacity(tools.len() * 128);
-    buf.extend_from_slice(br#"{"tools":["#);
-    for (i, t) in tools.iter().enumerate() {
-        push_tool(
-            &mut buf,
-            i,
-            &serde_json::json!({
-                "toolSpec": {
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": {
-                        "json": t.parameters
-                    }
-                }
-            }),
-        );
-    }
-    buf.push(b']');
-    buf.push(b'}');
-    let byte_len = buf.len();
-    CachedTools {
-        bytes: buf,
-        byte_len,
-        payload_start: 0,
-        payload_end: byte_len,
-    }
-}
-
-fn build_huggingface(tools: &[ToolDefinition]) -> CachedTools {
-    let mut buf = Vec::with_capacity(tools.len() * 128);
-    buf.extend_from_slice(br#"{"tools":["#);
-    let payload_start = buf.len() - 1; // index of '['
-    for (i, t) in tools.iter().enumerate() {
-        push_tool(
-            &mut buf,
-            i,
-            &serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": format!("{HF_TOOL_PREFIX}{}", t.name),
-                    "description": t.description,
-                    "parameters": t.parameters
-                }
-            }),
-        );
-    }
-    buf.push(b']');
-    buf.push(b'}');
-    let payload_end = buf.len() - 1; // exclusive index after ']'
-    let byte_len = payload_end - payload_start;
-    CachedTools {
-        bytes: buf,
-        byte_len,
-        payload_start,
-        payload_end,
-    }
-}
-
-/// Append one serialised tool object to `buf`, inserting the separating comma
-/// for every entry after the first.
-///
-/// A `serde_json::Value` built from `ToolDefinition` (strings, numbers, and
-/// nested schema objects) always serialises; if serialisation ever failed the
-/// writer would have left `item` empty, and an empty tool object makes the
-/// whole request body invalid JSON. Rather than panic mid-request, an empty
-/// serialisation is logged and the entry skipped (the provider then sees one
-/// fewer tool rather than a corrupt body).
-fn push_tool(buf: &mut Vec<u8>, index: usize, tool: &serde_json::Value) {
-    if index > 0 {
-        buf.push(b',');
-    }
-    let mut item = Vec::with_capacity(128);
-    match serde_json::to_writer(&mut item, tool) {
-        Ok(()) => buf.extend_from_slice(&item),
-        Err(e) => {
-            tracing::warn!("tool-definition serialisation failed, skipping entry: {e}");
-        }
-    }
 }
 
 /// Extract tool-call arguments from an OpenAI-style `function` object,

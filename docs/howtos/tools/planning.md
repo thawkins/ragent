@@ -4,8 +4,8 @@ Delegate read-only analytical work to the plan agent.
 
 | Tool | Description |
 |------|-------------|
-| `plan_enter` | Delegate to the plan agent for read-only analysis. |
-| `plan_exit` | Exit plan mode. |
+| `EnterPlanMode` | Delegate to the plan agent for read-only analysis. |
+| `ExitPlanMode` | Exit plan mode. |
 
 **Visibility switch:** `plan`.
 

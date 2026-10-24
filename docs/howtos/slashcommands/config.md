@@ -131,7 +131,7 @@ From: /config help
   `defaults < global config < project config < env file < RAGENT_CONFIG_CONTENT`.
   Every row names the source that supplied the winning value.
 - **Union fields** - the merged-map fields `permission`, `instructions`,
-  `skill_dirs`, `hooks`, `bash`, `hidden_tools`, `yolo`, `edit_log`, `sdd`,
+  `skill_dirs`, `hooks`, `Bash`, `hidden_tools`, `yolo`, `edit_log`, `sdd`,
   `piegap`, and `experimental` are labelled `global + project (union)` when a
   value is set in both layers.
 - **Secret redaction** - keys matching `*_api_key` / `*_key`, plus the

@@ -68,6 +68,7 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                         ContentPart::ToolResult {
                             tool_use_id,
                             content,
+                            ..
                         } => {
                             // Pair with the recorded assistant ToolUse for this
                             // id (single hash lookup; PERF-037). A part that
@@ -95,6 +96,12 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                                     text: format!("[tool result {tool_use_id}]: {content}"),
                                 });
                             }
+                        }
+                        // A chat-message reasoning part has no signature record
+                        // on this path; the reasoning text is preserved so the
+                        // message round trip does not drop it.
+                        ContentPart::Reasoning { text, .. } => {
+                            parts.push(MessagePart::Reasoning { text: text.clone() });
                         }
                         ContentPart::ImageUrl { url } => {
                             // Parse the mime type from a `data:` URI; plain
@@ -178,6 +185,8 @@ pub(crate) fn messages_to_chat_messages(messages: &[Message]) -> Vec<LlmChatMess
                     tool_results.push(ContentPart::ToolResult {
                         tool_use_id: call_id.clone(),
                         content: content.into(),
+                        // FR-014/T-017: from the recorded status.
+                        is_error: state.status.is_error(),
                     });
                 }
             }

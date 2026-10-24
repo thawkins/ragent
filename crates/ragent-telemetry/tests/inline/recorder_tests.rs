@@ -761,7 +761,7 @@ fn test_coordinator_recorder_record_timeout() {
 fn test_disabled_permission_recorder_is_noop() {
     let rec = PermissionRecorder::disabled();
     assert!(!rec.is_enabled());
-    rec.record_approved("bash");
+    rec.record_approved("Bash");
     rec.record_denied("edit");
 }
 
@@ -773,8 +773,8 @@ fn test_permission_recorder_record_approved_increments_counter() {
         registry: Some(registry),
     };
 
-    rec.record_approved("bash");
-    rec.record_approved("bash");
+    rec.record_approved("Bash");
+    rec.record_approved("Bash");
     rec.record_approved("edit");
 
     rt.block_on(async {
@@ -805,7 +805,7 @@ fn test_permission_recorder_record_denied_increments_counter() {
         registry: Some(registry),
     };
 
-    rec.record_denied("bash");
+    rec.record_denied("Bash");
     rec.record_denied("edit");
     rec.record_denied("edit");
 
@@ -837,7 +837,7 @@ fn test_permission_recorder_attributes_include_tool_name() {
         registry: Some(registry),
     };
 
-    rec.record_approved("bash");
+    rec.record_approved("Bash");
     rec.record_denied("edit");
 
     rt.block_on(async {
@@ -863,7 +863,7 @@ fn test_permission_recorder_attributes_include_tool_name() {
             })
             .any(|dp| {
                 dp.attributes()
-                    .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "bash")
+                    .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "Bash")
             })
     });
     assert!(

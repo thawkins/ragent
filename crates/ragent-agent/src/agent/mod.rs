@@ -2993,14 +2993,14 @@ fn build_system_prompt_with_storage_inner(
                \"write a file called REPORT.md\", \"save findings to X\"), \
                that file is the PRIMARY deliverable - it takes precedence \
                over narration.\n\n\
-               - You MUST call `write` (or `create`) for the requested file \
+               - You MUST call `Write` (or `create`) for the requested file \
                  BEFORE calling `agent_complete`. An `agent_complete` whose \
                  promised file was never written is a FAILED run, not a \
                  completed one.\n\
                - After writing, verify the file exists (a quick `read` of \
                  the first lines, or `file_info`) so you catch silent write \
                  failures.\n\
-               - The `write`/`create` tool paths are relative to the \
+               - The `Write`/`create` tool paths are relative to the \
                  working directory given in this prompt - do not invent \
                  absolute paths elsewhere.\n\
                - Put both the file content AND a short pointer (\"full \
@@ -3058,12 +3058,12 @@ fn build_system_prompt_with_storage_inner(
         "\n## Editing Files\n\
          \n\
          Choose the right tool for the change:\n\
-         - `edit` - one surgical replacement in one file (default choice).\n\
+         - `Edit` - one surgical replacement in one file (default choice).\n\
          - `multi_edit` - several replacements across one or more files, applied\n\
             atomically (all-or-nothing).\n\
          - `patch`/`apply_patch` - changes that add, remove, or rearrange whole\n\
             lines, or multi-file diff-style edits.\n\
-         - `write`/`create` - new files, or full-file rewrites when the file is\n\
+         - `Write`/`create` - new files, or full-file rewrites when the file is\n\
             small and the change is extensive.\n\
          \n\
          Workflow (do this every time):\n\
@@ -3086,12 +3086,12 @@ fn build_system_prompt_with_storage_inner(
             matches exactly once.\n\
          - **Retry cap**: at most 2 failed retries with the same needle. If it\n\
             still fails, re-read the file fresh, rebuild from the current text, or\n\
-            switch to `write` (full rewrite) / `patch`. Never loop on a failing\n\
+            switch to `Write` (full rewrite) / `patch`. Never loop on a failing\n\
             needle.\n\
          - **Stale file**: if the file changed since you read it, the edit is\n\
             rejected - re-read first, then retry. This protects concurrent edits.\n\
          \n\
-         When using the `edit` tool:\n\
+         When using the `Edit` tool:\n\
          - Required parameters: `file_path`, `old_string`, `new_string`. Prefer the\n\
             canonical names; legacy `path`/`old_str`/`new_str` still work but are\n\
             deprecated.\n\
@@ -3107,7 +3107,7 @@ fn build_system_prompt_with_storage_inner(
             writing - use it when the needle is long, the match is uncertain, or\n\
             you want to verify before committing.\n\
          - Empty `old_string` + non-existent `file_path` creates the file; for a\n\
-            new file prefer `create`/`write`. Empty `new_string` deletes the\n\
+            new file prefer `create`/`Write`. Empty `new_string` deletes the\n\
             matched text.\n\
          - The file's line endings are matched and preserved (a CRLF span stays\n\
             CRLF after replacement).\n\
@@ -3121,7 +3121,7 @@ fn build_system_prompt_with_storage_inner(
             block good ones.\n\
          - Same-file edits are overlap-checked (overlapping spans are rejected)\n\
             and applied highest-offset-first, so input order does not matter.\n\
-         - Each edit is exact-match-once with the same failure recovery as `edit`\n\
+         - Each edit is exact-match-once with the same failure recovery as `Edit`\n\
             above; a failing edit index is named in the error.\n\
          ",
     );
@@ -3142,8 +3142,8 @@ fn build_system_prompt_with_storage_inner(
          | Tool | Required | Common optional | Notes |\n\
          |------|----------|-----------------|-------|\n\
          | `read` | none | `start_line`, `num_lines` (preferred), `end_line` (absolute) | For files >100 lines read in sections. |\n\
-         | `write`/`create` | `path`, `content` | - | `create` is preferred for new files. |\n\
-         | `edit` | `file_path`, `old_string`, `new_string` | `dry_run`, `collapse_whitespace` | Read first; verbatim needle; 3-5 unique context lines; match exactly once; on failure rebuild from the error's near-miss snippet. |\n\
+         | `Write`/`create` | `path`, `content` | - | `create` is preferred for new files. |\n\
+         | `Edit` | `file_path`, `old_string`, `new_string` | `dry_run`, `collapse_whitespace` | Read first; verbatim needle; 3-5 unique context lines; match exactly once; on failure rebuild from the error's near-miss snippet. |\n\
          | `multi_edit` | `edits[]` with `file_path`, `old_string`, `new_string` | per-edit `collapse_whitespace` | Atomic rollback if any edit fails; failing index named in the error. |\n\
          | `patch` | `patch` (unified diff text) | `path` | For multi-file unified diff patches. |\n\
          | `apply_patch` | `patch` (Codex-style) | `path` | Supports `*** Add File:` / `*** Update File:` / `*** Delete File:`. |\n\
@@ -3152,7 +3152,7 @@ fn build_system_prompt_with_storage_inner(
          | `copy_file` | `source`, `destination` | - | Creates parent directories as needed. |\n\
          | `rm` | `path` | - | Deletes a single file. No wildcards. |\n\
          | `make_directory` | `path` | - | Equivalent to `mkdir -p`. |\n\
-         | `glob` | `pattern` | `path` | Find files matching a glob. |\n\
+         | `Glob` | `pattern` | `path` | Find files matching a glob. |\n\
          | `list` | none | `path`, `depth` | Directory tree listing. |\n\
          | `file_info` | `path` | - | Metadata: size, mtime, type. |\n\n",
     );
@@ -3199,12 +3199,12 @@ fn build_system_prompt_with_storage_inner(
 
     // -------------------------------------------------------------------
     // ask_user guidance - keep in sync with the tool schema. The old
-    // standalone `question` tool was removed; `ask_user` is the only
+    // standalone `question` tool was removed; `AskUserQuestion` is the only
     // interactive-question tool.
     // -------------------------------------------------------------------
     prompt.push_str(
         "## AskUser Tool\n\n\
-         - `ask_user` required parameter: `question` (string). Optional: `options` (array of \
+         - `AskUserQuestion` required parameter: `question` (string). Optional: `options` (array of \
            strings). When `options` is provided the user picks one; otherwise they type free text.\
            \n\
          - Optional `default` (string) names the option pre-selected in the dialog and used \
@@ -3212,7 +3212,7 @@ fn build_system_prompt_with_storage_inner(
            otherwise the first option is used (an option containing \"recommended\" is preferred \
            when present).\
            \n\
-         - Use `ask_user` for clarification, prioritisation, or confirmation before proceeding.\
+         - Use `AskUserQuestion` for clarification, prioritisation, or confirmation before proceeding.\
            \n\n",
     );
 

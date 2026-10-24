@@ -724,7 +724,7 @@ When an agent turn writes files into the active spec's own directory
 (`specs/<id>/`) and the session has an active spec, any task currently marked
 `in_progress` is automatically advanced to `completed` (with its completion
 timestamp recorded). This heuristic is deliberately guarded by
-`writes_in_spec_dir`: file-writing tools (`write`, `edit`, `multiedit`,
+`writes_in_spec_dir`: file-writing tools (`Write`, `Edit`, `multiedit`,
 `patch`, `apply_patch`, `create`, `append_to_file`) whose target path resolves
 OUTSIDE the spec directory (docs, scratch files, snapshots) never complete
 spec tasks, so editing unrelated files cannot silently corrupt `PLAN.md`. To

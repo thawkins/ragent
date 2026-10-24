@@ -479,7 +479,7 @@ impl App {
             return;
         }
         // Self-heal any selection/menu anchored on a panel that a recent
-        // toggle (e.g. Alt+T) dismissed - the render pass zeroes those
+        // toggle (e.g. Alt+I) dismissed - the render pass zeroes those
         // areas, and a stale reference would trip assert_ui_invariants.
         self.prune_stale_selection();
         // While a provider/model setup dialog is open, a wheel notch belongs to
@@ -1588,7 +1588,7 @@ impl App {
                     self.needs_redraw = true;
                 }
                 InputAction::ToggleTasksPanel => {
-                    // Toggle the TASKS side panel visibility (Alt+T). Implements
+                    // Toggle the TASKS side panel visibility (Alt+I). Implements
                     // FR-002 (toggle) and FR-003 (mutual exclusion of side
                     // panels - only one of log/profile/tasks is visible at a
                     // time, matching the `/log` and `/profile` slash commands

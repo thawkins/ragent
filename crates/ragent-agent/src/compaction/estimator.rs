@@ -140,6 +140,7 @@ pub fn estimate_message_tokens(message: &ChatMessage) -> usize {
                         ..
                     } => bytes += tool_use_id.len() + content.len(),
                     ContentPart::ImageUrl { url } => bytes += url.len(),
+                    ContentPart::Reasoning { text, .. } => bytes += text.len(),
                 }
             }
         }
@@ -312,6 +313,7 @@ fn message_content_bytes(message: &ChatMessage) -> usize {
                         ..
                     } => bytes += tool_use_id.len() + content.len(),
                     ContentPart::ImageUrl { url } => bytes += url.len(),
+                    ContentPart::Reasoning { text, .. } => bytes += text.len(),
                 }
             }
         }

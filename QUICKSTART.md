@@ -817,13 +817,13 @@ The AI agent can use these tools during a session:
 | Tool       | Description                                    | Permission      |
 |------------|------------------------------------------------|-----------------|
 | `read`     | Read file contents                             | `file:read`     |
-| `write`    | Create or overwrite files                      | `file:write`    |
-| `edit`     | Apply surgical text replacements               | `file:write`    |
-| `bash`     | Execute shell commands (120s timeout)           | `bash:execute`  |
-| `grep`     | Search file contents with regex                | `file:read`     |
-| `glob`     | Find files by name pattern                     | `file:read`     |
+| `Write`    | Create or overwrite files                      | `file:write`    |
+| `Edit`     | Apply surgical text replacements               | `file:write`    |
+| `Bash`     | Execute shell commands (120s timeout)           | `bash:execute`  |
+| `Grep`     | Search file contents with regex                | `file:read`     |
+| `Glob`     | Find files by name pattern                     | `file:read`     |
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
-| `ask_user` | Ask the user a clarifying question; accepts an optional `default` option used if the dialog times out | `ask_user`      |
+| `AskUserQuestion` | Ask the user a clarifying question; accepts an optional `default` option used if the dialog times out | `AskUserQuestion`      |
 | `ragent_info`| Report ragent version, build time, and execution details | `none`          |
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
@@ -1358,7 +1358,7 @@ REST+SSE and mirrors its events locally.
 ```
 
 The container workspace is a **named volume, never a host bind mount**, so a
-sandboxed tool cannot read or write the host working directory; `bash` is still
+sandboxed tool cannot read or write the host working directory; `Bash` is still
 gated by the full 7-layer host validator, and a provisioning failure fails the
 turn instead of falling back to the host. Configure backends under the
 `execution_backend` / `backends` keys (see the example `ragent.json` above).
@@ -2341,7 +2341,7 @@ parsed into the required structure (FR-005/FR-006).
   multi-threaded `cargo llvm-cov` run). Coverage runs now pin `XDG_CONFIG_HOME` at
   a throwaway `target/temp/xdg-*` directory so no test can observe or mutate the
   developer's real `~/.config/ragent/ragent.json` (the `/mcp discover` toggle
-  persists an MCP server entry there). Two coverage tests were corrected: a `glob`
+  persists an MCP server entry there). Two coverage tests were corrected: a `Glob`
   test asserted the wrong walk-path shape (matches are reported relative to the
   containing directory), and a `gitlab` README-fallback test stubbed the wrong body
   shape (the `file_path` fallback fetches through the JSON `get()` path, so the
@@ -2389,7 +2389,7 @@ parsed into the required structure (FR-005/FR-006).
   found at each location (an absent directory is marked `(missing)`), and a second table
   of the individual servers discovered (id, origin location, and launch command). The
   underlying scan is unchanged; it is now reported per location.
-- **`ask_user` default option with an inactivity timeout** — the `ask_user` tool accepts
+- **`AskUserQuestion` default option with an inactivity timeout** — the `AskUserQuestion` tool accepts
   an optional `default` (string) parameter naming the option pre-selected in the
   multiple-choice dialog and used automatically when the user leaves the dialog untouched.
   The TUI times a multiple-choice question out after 120 seconds of inactivity, answers

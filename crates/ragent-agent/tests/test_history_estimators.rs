@@ -77,6 +77,7 @@ fn estimate_request_bytes_counts_parts() {
             ContentPart::ToolResult {
                 tool_use_id: "call_1".to_string(),
                 content: "result".into(),
+                is_error: false,
             },
             ContentPart::ImageUrl {
                 url: "https://x/y.png".to_string(),

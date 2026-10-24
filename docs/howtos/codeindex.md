@@ -138,7 +138,7 @@ permission system entirely. Read tools use the `codeindex:read` permission
 category; `codeindex_reindex` uses `codeindex:write`.
 
 When the index is not active, every tool returns a fallback message
-suggesting `grep` or `glob` as alternatives.
+suggesting `Grep` or `Glob` as alternatives.
 
 ### 4.1 codeindex_status
 
@@ -579,14 +579,14 @@ The agent receives the following instruction in its system prompt when
 the code index is active:
 
 > **MANDATORY — You MUST use codeindex tools instead of grep for code
-> symbol queries.** When the index is active, `grep` is the WRONG choice
+> symbol queries.** When the index is active, `Grep` is the WRONG choice
 > for finding functions, types, structs, enums, traits, or any named code
 > entity. The index is faster, returns structured results with
 > file/line/signature, and understands symbol kinds.
 
 This instruction shapes the agent's tool-selection behaviour: for any
 query about a named code entity, the agent reaches for `codeindex_search`
-or `codeindex_symbols` rather than `grep`.
+or `codeindex_symbols` rather than `Grep`.
 
 ---
 
@@ -601,13 +601,13 @@ or `codeindex_symbols` rather than `grep`.
 | "List all functions in file B" | `codeindex_symbols` with `file_path` |
 | "Is the index working?" | `codeindex_status` |
 | "Re-index after bulk edits" | `codeindex_reindex` |
-| Find TODO/FIXME comments | `grep` |
-| Search config files or markdown | `grep` |
-| Search for arbitrary text patterns | `grep` |
+| Find TODO/FIXME comments | `Grep` |
+| Search config files or markdown | `Grep` |
+| Search for arbitrary text patterns | `Grep` |
 
 **Rule of thumb:** If you are looking for a named code entity (function,
 type, variable, import), use codeindex. If you are searching for a text
-pattern that is NOT a code symbol, use `grep`.
+pattern that is NOT a code symbol, use `Grep`.
 
 ---
 

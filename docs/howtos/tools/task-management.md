@@ -5,10 +5,10 @@ state computed from `blocked_by` dependencies — it cannot be set directly.
 
 | Tool | Description |
 |------|-------------|
-| `task_create` | Create a session-scoped task. |
-| `task_update` | Update task status, subject, or dependencies. |
-| `task_get` | Retrieve a single task by ID. |
-| `task_list` | List all session tasks. |
+| `TaskCreate` | Create a session-scoped task. |
+| `TaskUpdate` | Update task status, subject, or dependencies. |
+| `TaskGet` | Retrieve a single task by ID. |
+| `TaskList` | List all session tasks. |
 
 ---
 

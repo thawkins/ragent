@@ -6,12 +6,12 @@ instead — the codeindex is faster and returns structured results.
 
 | Tool | Description |
 |------|-------------|
-| `grep` | Search file contents for a regex pattern (ripgrep). |
+| `Grep` | Search file contents for a regex pattern (ripgrep). |
 
 **Use cases:** finding TODO/FIXME comments, matching text in config files and
 markdown, locating log fragments.
 
-**System instruction:** "Use `grep` for arbitrary text and pattern matching.
+**System instruction:** "Use `Grep` for arbitrary text and pattern matching.
 Use codeindex tools for code symbol queries."
 
 ---

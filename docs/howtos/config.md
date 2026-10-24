@@ -551,12 +551,12 @@ last-match-wins using glob patterns.
 | Name | Permission variant | Description |
 | ---- | ------------------ | ----------- |
 | `read` / `file:read` | `Read` | Read access to files/resources. |
-| `edit` / `write` / `file:write` | `Edit` | Write/edit access. |
+| `Edit` / `Write` / `file:write` | `Edit` | Write/edit access. |
 | `bash` / `execute` | `Bash` | Shell command execution. |
 | `web` / `fetch` | `Web` | Network/web access. |
 | `question` | `Question` | Interactive question to user. |
-| `plan_enter` / `plan` | `PlanEnter` | Enter planning phase. |
-| `plan_exit` | `PlanExit` | Exit planning phase. |
+| `EnterPlanMode` / `plan` | `PlanEnter` | Enter planning phase. |
+| `ExitPlanMode` | `PlanExit` | Exit planning phase. |
 | `task` | `Task` | Create/modify task items. |
 | `external_directory` | `ExternalDirectory` | Access dirs outside project root. |
 | `doom_loop` | `DoomLoop` | Detect/break infinite loops. |
@@ -710,7 +710,7 @@ Type: `Vec<Value>`. Default: `[]`. Merged (append) across config layers.
 
 ---
 
-### 7.12 `bash`
+### 7.12 `Bash`
 
 User-defined bash command allowlist and denylist additions.
 
@@ -802,7 +802,7 @@ system-prompt listings. Hidden tools remain registered and executable.
 | `gitlab` | `false` | 19 GitLab tools (issues, MRs, pipelines, jobs) |
 | `teams` | `false` | 20 team coordination tools |
 | `agents` | `false` | `cancel_agent`, `list_agents`, `new_agent`, `agent_complete`, `wait_agents` |
-| `plan` | `false` | `plan_enter`, `plan_exit` |
+| `plan` | `false` | `EnterPlanMode`, `ExitPlanMode` |
 | `codeindex` | `true` | `codeindex_search`, `codeindex_status`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_reindex` |
 | `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (plus `mf_screenshot` only when a drivable headless browser engine is present; spec `openhands` FR-029) |
 
@@ -1107,7 +1107,7 @@ and path with a forced backtrace, so a privileged flag flip is attributable.
 
 ### 7.22 `edit_log`
 
-Edit-operation logging for `edit` and `multi_edit` tools.
+Edit-operation logging for `Edit` and `multi_edit` tools.
 
 ```json
 { "edit_log": false }

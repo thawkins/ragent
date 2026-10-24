@@ -919,13 +919,13 @@ fn test_left_click_outside_file_menu_closes_popup() {
         "outside click should dismiss popup"
     );
 }
-// ---------- Regression: Alt+T dismisses log panel, stale selection panics ----------
+// ---------- Regression: Alt+I dismisses log panel, stale selection panics ----------
 
 /// Reproduces the panic from `log/panics/panic-20260823-235726-277415.log`:
 /// "selection pane Log has no active area".
 ///
 /// Sequence: the log panel is visible with a text selection anchored on it,
-/// then a side-panel toggle (Alt+T -> `ToggleTasksPanel`) dismisses the log
+/// then a side-panel toggle (Alt+I -> `ToggleTasksPanel`) dismisses the log
 /// panel (`show_log = false`). The render pass zeroes `log_area`, but the
 /// `text_selection` still references `SelectionPane::Log`. The next mouse
 /// event used to trip `assert_ui_invariants`. The fix
@@ -985,7 +985,7 @@ fn test_prune_stale_selection_clears_menu_and_selection() {
         items: vec![(ContextAction::Copy, false)],
     });
 
-    // Dismiss both panels (e.g. user opens tasks panel via Alt+T).
+    // Dismiss both panels (e.g. user opens tasks panel via Alt+I).
     app.show_log = false;
     app.show_memory = false;
     app.log_area = Rect::default();

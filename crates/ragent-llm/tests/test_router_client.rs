@@ -466,6 +466,7 @@ async fn test_router_continuation_reuses_cached_model_without_reclassifying() {
         content: ChatContent::Parts(vec![ragent_llm::llm::ContentPart::ToolResult {
             tool_use_id: "tool-1".to_string(),
             content: "result of the tool".into(),
+            is_error: false,
         }]),
     };
     let mut messages = vec![ChatMessage {

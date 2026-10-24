@@ -50,20 +50,20 @@ Dev-dependencies: tempfile, filetime.
 - **apply_patch** — `ApplyPatchTool` (`apply_patch`) — Codex-style patch parser.
 - **copy_file** — `CopyFileTool` (`copy_file`).
 - **create** — `CreateTool` (`create`).
-- **edit** — `EditTool` (`edit`) — 3-lane match cascade.
+- **edit** — `EditTool` (`Edit`) — 3-lane match cascade.
 - **multiedit** — `MultiEditTool` (`multiedit`) — Atomic batch edits.
 - **patch** — `PatchTool` (`patch`) — Unified-diff.
 - **read** — `ReadTool` (`read`) — LRU-cached file reader.
-- **write** — `WriteTool` (`write`).
+- **write** — `WriteTool` (`Write`).
 - **rm** — `RmTool` (`rm`).
 - **mkdir** — `MakeDirTool` (`make_directory`).
 - **move_file** — `MoveFileTool` (`move_file`).
 - **file_info** — `FileInfoTool` (`file_info`).
 - **diff** — `DiffFilesTool` (`diff_files`).
-- **glob** — `GlobTool` (`glob`) — Rayon-parallel walk.
-- **grep** — `GrepTool` (`grep`) — ripgrep library.
+- **glob** — `GlobTool` (`Glob`) — Rayon-parallel walk.
+- **grep** — `GrepTool` (`Grep`) — ripgrep library.
 - **list** — `ListTool` (`list`).
-- **bash** — `BashTool` (`bash`) — 7-layer security, persistent shell state.
+- **bash** — `BashTool` (`Bash`) — 7-layer security, persistent shell state.
 - **bash_reset** — `BashResetTool` (`bash_reset`).
 - **bg** — `BackgroundCommand` — background shell task lifecycle.
 - **open** — `OpenTool` (`open`).

@@ -7,9 +7,9 @@ working-directory root.
 | Tool | Description |
 |------|-------------|
 | `read` | Read file contents with optional line range. |
-| `write` | Create or overwrite a file. |
+| `Write` | Create or overwrite a file. |
 | `create` | Create a new file (preferred for new files). |
-| `edit` | Replace one exact text occurrence in a file. |
+| `Edit` | Replace one exact text occurrence in a file. |
 | `multi_edit` | Apply multiple surgical edits atomically across files. |
 | `multiedit` | Deprecated alias for `multi_edit`. |
 | `apply_patch` | Apply a Codex-style patch (`*** Begin Patch`). |
@@ -21,17 +21,17 @@ working-directory root.
 | `make_directory` | Create a directory (`mkdir -p`). |
 | `file_info` | Return metadata for a file or directory. |
 | `diff_files` | Unified diff between two files or strings. |
-| `glob` | Find files matching a glob pattern. |
+| `Glob` | Find files matching a glob pattern. |
 | `list` | List directory contents in a tree. |
-| `update_file` | Alias for `write` (overwrite existing file). |
+| `update_file` | Alias for `Write` (overwrite existing file). |
 
 **Use cases:** scaffolding projects, editing source, comparing files.
 
-**System instruction:** "Use `edit` for single surgical replacements.
+**System instruction:** "Use `Edit` for single surgical replacements.
 `old_string` must match exactly once. Use `multi_edit` for changes across
 multiple files."
 
-**Fallback matching (`edit`/`multi_edit`):** when byte-for-byte matching
+**Fallback matching (`Edit`/`multi_edit`):** when byte-for-byte matching
 fails, a fallback cascade retries with whitespace-flexible and
 indent-normalised matching. A whitespace run may only fold across a line
 boundary when both the needle run and the matched file run contain a newline,
@@ -88,7 +88,7 @@ write path="src/new.rs" content="fn main() {}\n"
 ## create
 
 Create a new file with the given content; creates parent directories. Truncates
-and overwrites if the file already exists — use `edit` for surgical changes to
+and overwrites if the file already exists — use `Edit` for surgical changes to
 existing files.
 
 **Arguments**
@@ -334,7 +334,7 @@ List directory contents in a tree-like format, directories first.
 
 ## update_file
 
-Alias for the canonical `write` tool: overwrite an existing file with new
+Alias for the canonical `Write` tool: overwrite an existing file with new
 contents.
 
 **Arguments**

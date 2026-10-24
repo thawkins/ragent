@@ -112,6 +112,15 @@ pub fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Character budget for the command echoed in a bash tool-call header.
+///
+/// Bash is the one tool whose argument *is* the action, so its inline summary
+/// gets a wider budget than the 120 characters the other tools use: a
+/// 250-character preview keeps a realistic `cd ... && cargo test ... | tail`
+/// line readable instead of clipping it to its first clause. `run_code` shares
+/// this arm because it canonicalises to `bash`.
+pub const BASH_COMMAND_PREVIEW_CHARS: usize = 250;
+
 fn truncate_json_strings(value: &serde_json::Value, max_len: usize) -> serde_json::Value {
     match value {
         serde_json::Value::String(s) => serde_json::Value::String(truncate_str(s, max_len)),
@@ -511,10 +520,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "bash" => {
             // Aliases may send code/cmd instead of command. Replace newlines
             // with " ; " so multiline commands display on a single line.
+            // Bash gets the wider preview budget: the command IS the action, so
+            // a clipped `cd ... && cargo build | tail` hides which step ran.
             get_str(&["command", "code", "cmd"])
                 .as_deref()
                 .map(|s| s.replace('\n', " ; "))
-                .map(|s| format!("$ {}", trunc120(&s)))
+                .map(|s| format!("$ {}", truncate_str(&s, BASH_COMMAND_PREVIEW_CHARS)))
                 .unwrap_or_else(|| "bash".to_string())
         }
 

@@ -55,6 +55,16 @@ pub enum RagentError {
     #[error("lock poisoned: {0}")]
     LockPoisoned(String),
 
+    /// A canonical content construct cannot be carried on the provider's wire
+    /// format (FR-018). The request was not issued.
+    #[error("wire loss: provider '{provider}' cannot carry construct '{construct}'")]
+    WireLoss {
+        /// The construct that has no slot on the wire (e.g. `ImageUrl`, `ToolUse`).
+        construct: String,
+        /// The provider whose wire format has no slot for it.
+        provider: String,
+    },
+
     /// Generic I/O error.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

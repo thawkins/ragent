@@ -274,6 +274,7 @@ fn test_anthropic_build_request_body_parts_and_images() {
                 ContentPart::ToolResult {
                     tool_use_id: "t1".to_string(),
                     content: Arc::from("done"),
+                    is_error: false,
                 },
             ]),
         }]),

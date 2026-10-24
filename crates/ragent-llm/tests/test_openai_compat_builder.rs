@@ -64,6 +64,7 @@ fn tool_result(id: &str, content: &str) -> ContentPart {
     ContentPart::ToolResult {
         tool_use_id: id.to_string(),
         content: Arc::from(content),
+        is_error: false,
     }
 }
 

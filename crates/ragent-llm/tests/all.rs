@@ -111,3 +111,24 @@ mod test_shared_request;
 
 #[path = "test_thinking_adapters.rs"]
 mod test_thinking_adapters;
+
+#[path = "test_wire_decode.rs"]
+mod test_wire_decode;
+
+#[path = "test_wire_encode.rs"]
+mod test_wire_encode;
+
+#[path = "test_wire_encode_message.rs"]
+mod test_wire_encode_message;
+
+#[path = "test_wire_matrix.rs"]
+mod test_wire_matrix;
+
+#[path = "test_wire_profile.rs"]
+mod test_wire_profile;
+
+#[path = "test_wire_profile_table.rs"]
+mod test_wire_profile_table;
+
+#[path = "test_wire_trace.rs"]
+mod test_wire_trace;

@@ -257,6 +257,7 @@ fn test_build_request_body_with_tool_results() {
             content: ChatContent::Parts(vec![ContentPart::ToolResult {
                 tool_use_id: "call_123".to_string(),
                 content: "file contents here".to_string().into(),
+                is_error: false,
             }]),
         }]),
         tools: Arc::new(vec![]),

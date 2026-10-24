@@ -350,7 +350,9 @@ impl HuggingFaceClient {
                                 "type": "image_url",
                                 "image_url": { "url": url }
                             })),
-                            ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
+                            ContentPart::ToolResult { .. }
+                            | ContentPart::ToolUse { .. }
+                            | ContentPart::Reasoning { .. } => None,
                         })
                         .collect();
                     if content_parts.len() == 1 {
@@ -396,12 +398,15 @@ impl HuggingFaceClient {
                             if let ContentPart::ToolResult {
                                 tool_use_id,
                                 content,
+                                is_error,
                             } = result
                             {
+                                // FR-014: `role:"tool"` has no error flag, so the
+                                // content carries the `ERROR: ` prefix.
                                 messages.push(json!({
                                     "role": "tool",
                                     "tool_call_id": tool_use_id,
-                                    "content": content
+                                    "content": crate::provider::wire::encode::error_marked(content, *is_error)
                                 }));
                             }
                         }

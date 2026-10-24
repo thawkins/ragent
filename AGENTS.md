@@ -176,15 +176,15 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 
 ### Core Tools (always available)
 
-- `bash` — Execute a shell command. Use `command` to provide the command.
+- `Bash` — Execute a shell command. Use `command` to provide the command.
 - `read` — Read file contents with optional `start_line`/`end_line` range.
-- `edit` — Replace an exact occurrence of text in a file.
+- `Edit` — Replace an exact occurrence of text in a file.
 - `multiedit` — Apply multiple edits across one or more files atomically.
-- `write` — Create or overwrite a file.
+- `Write` — Create or overwrite a file.
 - `create` — Create a new file with content.
 - `append_to_file` — Append text to the end of a file.
-- `grep` — Search file contents for a regex pattern using ripgrep.
-- `glob` — Find files matching a glob pattern.
+- `Grep` — Search file contents for a regex pattern using ripgrep.
+- `Glob` — Find files matching a glob pattern.
 - `list` — List directory contents.
 - `get_env` — Read environment variables.
 - `file_info` — Return metadata for a file or directory.
@@ -196,21 +196,21 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `make_directory` — Create a directory at the given path, including any missing parent directories.
 - `calculator` — Evaluate a mathematical expression.
 - `think` — Record a short reasoning note without changing project state.
-- `task_create` — Create a new session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies.
-- `task_update` — Update a task's status (pending, in_progress, completed), subject, description, owner, metadata, or dependencies.
-- `task_get` — Retrieve the full record of a single task by ID.
-- `task_list` — List all tasks for the current session, optionally filtered by status.
+- `TaskCreate` — Create a new session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies.
+- `TaskUpdate` — Update a task's status (pending, in_progress, completed), subject, description, owner, metadata, or dependencies.
+- `TaskGet` — Retrieve the full record of a single task by ID.
+- `TaskList` — List all tasks for the current session, optionally filtered by status.
 - `memory_store` — Store a structured memory with category, tags, and confidence score.
 - `memory_recall` — Search structured memories using full-text query with optional category/tag filters.
 - `memory_forget` — Delete structured memories by ID or filter criteria.
-- `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
+- `EnterPlanMode` — Delegate to the plan agent for read-only codebase analysis.
 - `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
 - `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
 - `codeindex_references` — Find all references to a symbol by name across the indexed codebase.
 - `codeindex_dependencies` — Query file-level dependencies from the code index.
 - `codeindex_status` — Show the current status and statistics of the codebase index.
 - `codeindex_reindex` — Trigger a full re-index of the codebase.
-- `ask_user` — Ask the user a question and get feedback from user.
+- `AskUserQuestion` — Ask the user a question and get feedback from user.
 
 ### Tool Use — Critical Instructions
 
@@ -218,7 +218,7 @@ When you need to take any action, call the appropriate tool IMMEDIATELY. Do NOT 
 
 ### Code Intelligence Decision Flow
 
-When the codebase index is active, you MUST use `codeindex` tools instead of `grep` for code symbol queries. The index is faster, returns structured results, and understands symbol kinds.
+When the codebase index is active, you MUST use `codeindex` tools instead of `Grep` for code symbol queries. The index is faster, returns structured results, and understands symbol kinds.
 
 | Query type                     | Use                             |
 | ------------------------------ | ------------------------------- |
@@ -229,27 +229,27 @@ When the codebase index is active, you MUST use `codeindex` tools instead of `gr
 | "Is the index working?"        | `codeindex_status`            |
 | "Re-index after bulk edits"    | `codeindex_reindex`           |
 
-When searching for arbitrary text strings, comments, or non-symbol content, use `grep` with the `pattern` parameter. **Do NOT use `search` or `search_in_repo`** — these are not available tools. Always use `grep` for all text and pattern matching across files.
+When searching for arbitrary text strings, comments, or non-symbol content, use `Grep` with the `pattern` parameter. **Do NOT use `search` or `search_in_repo`** — these are not available tools. Always use `Grep` for all text and pattern matching across files.
 
 **CRITICAL — grep parameter requirement:**
-The `grep` tool requires the `pattern` parameter. This is the ONLY required field. Do NOT omit it. Example:
+The `Grep` tool requires the `pattern` parameter. This is the ONLY required field. Do NOT omit it. Example:
 
 ```
 grep(pattern: "fn main", path: "src")
 ```
 
 **CRITICAL — grep is the ONLY text search tool:**
-There is no `search` or `search_in_repo` tool. Use `grep` for every text search need, whether it's a regex pattern or a plain text string. There are no aliases or shortcuts.
+There is no `search` or `search_in_repo` tool. Use `Grep` for every text search need, whether it's a regex pattern or a plain text string. There are no aliases or shortcuts.
 
 ### Shell Execution Rules
 
-- For simple commands or code snippets, use `bash` with the `command` parameter.
+- For simple commands or code snippets, use `Bash` with the `command` parameter.
 - Timeout defaults to 1500 seconds.
 - The `bash_reset` tool resets the persistent shell state.
 
 ### Important
 
-Always use the canonical `bash` tool.
+Always use the canonical `Bash` tool.
 
 ## File Reading Best Practices
 
@@ -425,7 +425,7 @@ team_status                        ← read what they found
 
 ## Task Tracking
 
-- Use `task_create`, `task_update`, `task_get`, and `task_list` to track tasks.
+- Use `TaskCreate`, `TaskUpdate`, `TaskGet`, and `TaskList` to track tasks.
 - Always mark the task as "in-progress" when work on a task is started.
 - Always mark the task as "completed" when work on a task is done.
 

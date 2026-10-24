@@ -531,8 +531,8 @@ fn test_disabled_recorders_ignore_toggles() {
     coord.record_timeout();
 
     let perm = PermissionRecorder::disabled();
-    perm.record_approved("bash");
-    perm.record_denied("bash");
+    perm.record_approved("Bash");
+    perm.record_denied("Bash");
 
     let comp = CompressionRecorder::disabled();
     comp.record_compression(1000, 500, 0.5);

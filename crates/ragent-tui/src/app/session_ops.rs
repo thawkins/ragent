@@ -384,14 +384,16 @@ impl App {
     ///
     /// Providers that share an OpenAI-compatible envelope (including the
     /// router, which forwards to a concrete backend) map to
-    /// [`ToolFormat::OpenAi`]; Anthropic, Gemini, Bedrock and HuggingFace use
-    /// their own shapes.
+    /// [`ToolFormat::OpenAi`]; Anthropic, Gemini, Bedrock, HuggingFace and the
+    /// Responses API use their own shapes (a Responses session measured with the
+    /// chat envelope would report the wrong per-tool overhead, FR-007).
     fn tool_format_for_provider(provider_id: &str) -> ToolFormat {
         match provider_id {
             "anthropic" => ToolFormat::Anthropic,
             "gemini" => ToolFormat::Gemini,
             "bedrock" => ToolFormat::Bedrock,
             "huggingface" => ToolFormat::HuggingFace,
+            "openai_responses" => ToolFormat::OpenAiResponses,
             _ => ToolFormat::OpenAi,
         }
     }
@@ -3169,7 +3171,7 @@ impl App {
 
     /// Clear any text selection or context menu anchored on a pane whose
     /// layout area has collapsed to zero (e.g. a side panel that was just
-    /// dismissed by a toggle such as Alt+T). The render pass zeroes the
+    /// dismissed by a toggle such as Alt+I). The render pass zeroes the
     /// `*_area` of hidden panels, but the `text_selection`/`context_menu`
     /// state may still reference that pane - left stale, the next
     /// [`Self::assert_ui_invariants`] call would panic. This self-heals

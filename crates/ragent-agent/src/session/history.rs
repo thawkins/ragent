@@ -240,6 +240,9 @@ fn assistant_tool_results(msg: &Message) -> Vec<ContentPart> {
                 Some(ContentPart::ToolResult {
                     tool_use_id: call_id.clone(),
                     content: tool_result_content_for_llm(tool, &result_text, state.output.as_ref()),
+                    // FR-014/T-017: the flag derives from the recorded status,
+                    // never from the content text.
+                    is_error: state.status.is_error(),
                 })
             }
             _ => None,
@@ -580,8 +583,10 @@ pub fn estimate_request_bytes_with_tool_bytes(
                         ContentPart::ToolResult {
                             tool_use_id,
                             content,
+                            ..
                         } => tool_use_id.len() + content.len(),
                         ContentPart::ImageUrl { url } => url.len(),
+                        ContentPart::Reasoning { text, .. } => text.len(),
                     })
                     .sum(),
             };

@@ -449,17 +449,24 @@ impl GeminiClient {
                             ContentPart::ToolResult {
                                 tool_use_id,
                                 content,
+                                is_error,
                             } => {
-                                // Gemini uses functionResponse for tool results
+                                // Gemini uses functionResponse for tool results;
+                                // it has no error flag, so an error carries the
+                                // FR-014 `ERROR: ` prefix.
+                                let result =
+                                    crate::provider::wire::encode::error_marked(content, *is_error);
                                 json!({
                                     "functionResponse": {
                                         "name": tool_use_id.split('_').next().unwrap_or("tool"),
                                         "response": {
-                                            "result": content
+                                            "result": result
                                         }
                                     }
                                 })
                             }
+                            // FR-011: Gemini has no signed-reasoning channel.
+                            ContentPart::Reasoning { .. } => Value::Null,
                             ContentPart::ToolUse { id: _, name, input } => {
                                 // Gemini uses functionCall for tool invocations
                                 json!({

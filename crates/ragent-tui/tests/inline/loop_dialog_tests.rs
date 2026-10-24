@@ -112,7 +112,7 @@ fn test_build_spec_applies_defaults_and_parsed_fields() {
     assert_eq!(spec.verify_cmd.as_deref(), Some("cargo test"));
     assert_eq!(spec.scope, vec!["src/**", "tests/**"]);
     assert_eq!(spec.read_only, vec!["tests/**"]);
-    assert_eq!(spec.tool_set, vec!["read", "edit", "bash"]);
+    assert_eq!(spec.tool_set, vec!["read", "Edit", "Bash"]);
     assert_eq!(spec.max_steps, Some(40));
     assert_eq!(spec.cost_limit, Some(5000), "entered value wins");
     assert!(!spec.checkpoints);

@@ -163,7 +163,7 @@ fn test_all_metrics_disabled_short_circuits() {
 
     let perm = PermissionRecorder::from_subsystem(&sub);
     perm.record_approved("read");
-    perm.record_denied("bash");
+    perm.record_denied("Bash");
 
     let comp = CompressionRecorder::from_subsystem(&sub);
     comp.record_compression(1000, 500, 0.5);

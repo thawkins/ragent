@@ -517,7 +517,7 @@ impl ExecutionBackend for ContainerBackend {
 
         // 1. `bash`: validate against the host 7-layer model first (FR-002,
         //    FR-037), then run the command inside the sandbox.
-        if tool_name == "bash" {
+        if tool_name == "Bash" {
             let command = call.input["command"]
                 .as_str()
                 .context("Missing required 'command' parameter")?

@@ -34,6 +34,7 @@ fn arc_str_round_trips_through_json() {
     let part = ContentPart::ToolResult {
         tool_use_id: "call_1".to_string(),
         content: Arc::clone(&original),
+        is_error: false,
     };
     let message = ChatMessage {
         role: "tool".to_string(),

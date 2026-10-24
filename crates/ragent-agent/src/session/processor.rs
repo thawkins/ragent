@@ -2928,6 +2928,8 @@ impl SessionProcessor {
                                     &result_content,
                                     tool_metadata.as_ref(),
                                 ),
+                                // FR-014/T-017: from the recorded status.
+                                is_error: status.is_error(),
                             });
                             // FR-033: a PostToolUse hook (for example a Claude
                             // security-guidance pattern check) may return

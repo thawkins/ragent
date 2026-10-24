@@ -464,10 +464,13 @@ impl BedrockAnthropicClient {
                                 "name": name,
                                 "input": input
                             }),
-                            ContentPart::ToolResult { tool_use_id, content } => json!({
+                            ContentPart::ToolResult { tool_use_id, content, is_error } => json!({
+                                // FR-014: Anthropic Messages on Bedrock carries the
+                                // flag natively.
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
-                                "content": content
+                                "content": content,
+                                "is_error": is_error
                             }),
                             // FR-024: Image support for Anthropic models
                             ContentPart::ImageUrl { url } => json!({
@@ -478,7 +481,11 @@ impl BedrockAnthropicClient {
                                     "data": extract_base64_from_data_uri(url).unwrap_or(url.as_str())
                                 }
                             }),
+                            // FR-011: reasoning replay is the echo profile's
+                            // encoder's job (T-018); this loop never forwards it.
+                            ContentPart::Reasoning { .. } => Value::Null,
                         })
+                        .filter(|v| !v.is_null())
                         .collect();
                     json!(content_parts)
                 }
@@ -849,16 +856,22 @@ impl BedrockConverseClient {
                             ContentPart::ToolResult {
                                 tool_use_id,
                                 content,
+                                is_error,
                             } => json!({
+                                // FR-014: Converse carries the flag as its native
+                                // `status` field.
                                 "toolResult": {
                                     "toolUseId": tool_use_id,
                                     "content": [{
                                         "text": content
                                     }],
-                                    "status": "success"
+                                    "status": if *is_error { "error" } else { "success" }
                                 }
                             }),
+                            // FR-011: Converse has no signed-reasoning channel.
+                            ContentPart::Reasoning { .. } => Value::Null,
                         })
+                        .filter(|v| !v.is_null())
                         .collect()
                 }
             };

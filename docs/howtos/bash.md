@@ -1,6 +1,6 @@
 # The Bash Tool: Configuration and Security
 
-The `bash` tool is the workhorse of ragent. It executes shell commands from the agent's
+The `Bash` tool is the workhorse of ragent. It executes shell commands from the agent's
 working directory and applies a seven-layer security model.
 
 This document covers:
@@ -22,7 +22,7 @@ The tool is implemented in `crates/ragent-tools-core/src/bash.rs` (~1750 lines) 
 `BashTool` struct. It is a unit struct with no fields of its own — all behaviour is
 driven by the global `ragent_config` at execution time, populated from your config files.
 
-Every command an agent runs through `bash` goes through the same pipeline:
+Every command an agent runs through `Bash` goes through the same pipeline:
 
 ```
 command string

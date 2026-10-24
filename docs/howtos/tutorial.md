@@ -171,8 +171,8 @@ binary crate called "my-app" with:
 - A .gitignore for the target/ directory
 ```
 
-ragent calls `bash` to run `cargo init`, then `write` and
-`edit` to create the files. When it requests permission, respond with `y`
+ragent calls `Bash` to run `cargo init`, then `Write` and
+`Edit` to create the files. When it requests permission, respond with `y`
 (allow once) or `a` (allow always for this session). To skip prompts
 entirely, press `Alt+Y` to toggle YOLO mode, or start with `--yes`.
 
@@ -227,7 +227,7 @@ Verify status:
 ```
 
 The agent can now use `codeindex_search`, `codeindex_references`,
-`codeindex_dependencies`, and `codeindex_symbols` instead of `grep` for
+`codeindex_dependencies`, and `codeindex_symbols` instead of `Grep` for
 symbol queries. For advanced graph analysis (god-nodes, shortest paths,
 community detection):
 
@@ -288,7 +288,7 @@ unit test in tests/ that verifies the output.
 ```
 
 ragent reads the existing file (via `read` or `codeindex_search`), edits
-`src/cli.rs` (via `edit` or `multi_edit`), creates the test file, and
+`src/cli.rs` (via `Edit` or `multi_edit`), creates the test file, and
 optionally runs `cargo check` to verify. Each tool call appears in the
 message pane with a step number; the Log panel shows full JSON.
 
@@ -457,7 +457,7 @@ Create a task list for fixing the config loader:
 5. Verify all tests pass
 ```
 
-Open the TASKS panel (`Alt+T`) to watch progress in real time.
+Open the TASKS panel (`Alt+I`) to watch progress in real time.
 
 ---
 
@@ -588,7 +588,7 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Ctrl+C` | Copy selection / arm quit |
 | `Alt+L` | Toggle Log panel |
 | `Alt+P` | Toggle Profile panel |
-| `Alt+T` | Toggle TASKS panel |
+| `Alt+I` | Toggle TASKS panel |
 | `Alt+M` | Toggle Memory panel |
 | `Alt+O` | Toggle Telemetry panel |
 | `Alt+C` | Toggle Context side panel |

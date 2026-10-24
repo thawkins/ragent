@@ -67,6 +67,7 @@ fn test_gemini_build_request_body_parts_system_and_tools() {
                 ContentPart::ToolResult {
                     tool_use_id: "call_1".to_string(),
                     content: Arc::from("42"),
+                    is_error: false,
                 },
                 ContentPart::ToolUse {
                     id: "x".to_string(),

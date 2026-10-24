@@ -165,7 +165,7 @@ async fn test_gemini_call_in_stream_without_finish_reason_is_flushed() {
     // F2: a stream that ends without any finishReason frame previously
     // dropped the buffered call entirely.
     let sse = concat!(
-        "{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"bash\",\"args\":{\"command\":\"ls\"}}}]}}]}\n\n",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"Bash\",\"args\":{\"command\":\"ls\"}}}]}}]}\n\n",
         ""
     );
 
@@ -188,7 +188,7 @@ async fn test_gemini_call_in_stream_without_finish_reason_is_flushed() {
 
     let (starts, args, ends) = drain_events(&events);
     assert_eq!(starts.len(), 1, "end-of-stream flush must emit the call");
-    assert_eq!(starts[0].1, "bash");
+    assert_eq!(starts[0].1, "Bash");
     assert!(args.contains("command"));
     assert_eq!(ends, 1);
 }

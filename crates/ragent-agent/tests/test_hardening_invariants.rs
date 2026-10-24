@@ -137,7 +137,7 @@ fn container_descriptor() -> BackendConfig {
 async fn reject_bash(command: &str) -> (String, usize) {
     let ctx = ctx_in(std::env::current_dir().expect("cwd"));
     let backend = ContainerBackend::from_descriptor(&container_descriptor(), &ctx.working_dir);
-    let (bash, runs) = NamedTool::new("bash");
+    let (bash, runs) = NamedTool::new("Bash");
 
     let err = ExecutionBackend::execute_tool(
         &backend,

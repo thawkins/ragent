@@ -8740,7 +8740,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+V", "Paste image from clipboard as attachment"),
     ("Alt+L", "Toggle log panel visibility"),
     ("Alt+P", "Toggle profiler panel visibility"),
-    ("Alt+T", "Toggle Tasks panel visibility"),
+    ("Alt+I", "Toggle Tasks panel visibility"),
     ("Alt+O", "Toggle telemetry panel visibility"),
     ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),

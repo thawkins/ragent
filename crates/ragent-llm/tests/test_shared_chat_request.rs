@@ -50,6 +50,7 @@ fn shared_request_arc_str_tool_result_is_preserved() {
     let part = ContentPart::ToolResult {
         tool_use_id: "call_x".to_string(),
         content: StdArc::from("output"),
+        is_error: false,
     };
     let body = SharedChatRequest::new(
         vec![ChatMessage {

@@ -24,7 +24,8 @@ use std::pin::Pin;
 
 use super::http_client::{create_http_client, create_streaming_http_client};
 use super::thinking::openai_thinking_levels_for_model;
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::tool_cache::{ToolFormat, cached_tools};
+use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -256,8 +257,113 @@ impl ResponsesApiClient {
         }
     }
 
+    /// Builds the Responses-API input list (FR-018).
+    ///
+    /// Every [`ChatMessage`] becomes zero or more entries in the `input`
+    /// array:
+    ///
+    /// - `Text` -> `{"role": role, "content": text}` (unchanged)
+    /// - `Parts[Text]` -> `{"role": role, "content": [{type:"text"...}]}`
+    /// - `Parts[ToolUse]` -> `{"type":"function_call","call_id", "name", "arguments"}`
+    /// - `Parts[ToolResult]` -> `{"type":"function_call_output","call_id","output"}`
+    /// - `Parts[ImageUrl]` -> `Err(WireLoss)` - the Responses input has no
+    ///   image slot, so the request is refused rather than silently stripped
+    ///   (FR-018). A future `Image` -> input-image item mapping would remove
+    ///   this arm.
+    fn build_input_items(
+        &self,
+        messages: &[ChatMessage],
+    ) -> Result<Vec<Value>, ragent_types::RagentError> {
+        let mut items = Vec::new();
+        for msg in messages {
+            let role = match msg.role.as_str() {
+                "user" => "user",
+                "assistant" => "assistant",
+                "system" => "system",
+                "developer" => "developer",
+                _ => continue,
+            };
+            match &msg.content {
+                ChatContent::Text(text) => {
+                    items.push(json!({
+                        "role": role,
+                        "content": text,
+                    }));
+                }
+                ChatContent::Parts(parts) => {
+                    // Text content as an input_text-equivalent entry, matching
+                    // the existing wire shape (role + content array of type:text).
+                    let text_parts: Vec<Value> = parts
+                        .iter()
+                        .filter_map(|part| match part {
+                            ContentPart::Text { text } => {
+                                Some(json!({ "type": "text", "text": text }))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    if !text_parts.is_empty() {
+                        items.push(json!({
+                            "role": role,
+                            "content": text_parts,
+                        }));
+                    }
+                    // Tool constructs each become their own input item.
+                    for part in parts {
+                        match part {
+                            ContentPart::ToolUse { id, name, input } => {
+                                items.push(json!({
+                                    "type": "function_call",
+                                    "call_id": id,
+                                    "name": name,
+                                    "arguments": input.to_string(),
+                                }));
+                            }
+                            ContentPart::ToolResult {
+                                tool_use_id,
+                                content,
+                                is_error,
+                            } => {
+                                // FR-014: `function_call_output` has no error
+                                // flag, so the content carries the `ERROR: `
+                                // prefix.
+                                let output =
+                                    crate::provider::wire::encode::error_marked(content, *is_error);
+                                items.push(json!({
+                                    "type": "function_call_output",
+                                    "call_id": tool_use_id,
+                                    "output": output,
+                                }));
+                            }
+                            ContentPart::Text { .. } => {
+                                // Already emitted above as the role/content item.
+                            }
+                            // FR-011: the Responses API has no signed-reasoning
+                            // input item.
+                            ContentPart::Reasoning { .. } => {}
+                            ContentPart::ImageUrl { .. } => {
+                                return Err(ragent_types::RagentError::WireLoss {
+                                    construct: "ImageUrl".to_string(),
+                                    provider: "openai_responses".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(items)
+    }
+
     /// Builds the request body for the Responses API.
-    pub fn build_request_body(&self, request: &ChatRequest) -> Value {
+    ///
+    /// Returns `Err(WireLoss)` when the history contains a construct the
+    /// Responses input list has no slot for (FR-018). The caller shall not
+    /// issue the request in that case.
+    pub fn build_request_body(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<Value, ragent_types::RagentError> {
         // Map thinking config to reasoning effort
         let reasoning_effort = request
             .thinking
@@ -271,55 +377,13 @@ impl ResponsesApiClient {
             })
             .unwrap_or("medium");
 
-        // Build input array from messages
-        let input_array: Vec<Value> = request
-            .messages
-            .iter()
-            .filter_map(|msg| {
-                let role = match msg.role.as_str() {
-                    "user" => "user",
-                    "assistant" => "assistant",
-                    "system" => "system",
-                    "developer" => "developer",
-                    _ => return None,
-                };
+        let input_array = self.build_input_items(&request.messages)?;
 
-                let content = match &msg.content {
-                    ChatContent::Text(text) => Value::String(text.clone()),
-                    ChatContent::Parts(parts) => {
-                        let parts_array: Vec<Value> = parts
-                            .iter()
-                            .filter_map(|part| match part {
-                                ContentPart::Text { text } => {
-                                    Some(json!({ "type": "text", "text": text }))
-                                }
-                                _ => None, // Responses API doesn't support images yet
-                            })
-                            .collect();
-                        Value::Array(parts_array)
-                    }
-                };
-
-                Some(json!({
-                    "role": role,
-                    "content": content,
-                }))
-            })
-            .collect();
-
-        // Build tools array
-        let tools: Vec<Value> = request
-            .tools
-            .iter()
-            .map(|tool| {
-                json!({
-                    "type": "function",
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                })
-            })
-            .collect();
+        // The tool array comes from the one shared encoder (FR-003): the
+        // Responses API takes the flattened function shape, so the payload is
+        // the same inner array the chat family assigns, only differently shaped.
+        let cached = cached_tools(ToolFormat::OpenAiResponses, &request.tools);
+        let tools = cached.responses_tools_array();
 
         let mut body = json!({
             "model": request.model,
@@ -330,8 +394,8 @@ impl ResponsesApiClient {
             "stream": true,
         });
 
-        if !tools.is_empty() {
-            body["tools"] = Value::Array(tools);
+        if tools.as_array().is_some_and(|list| !list.is_empty()) {
+            body["tools"] = tools;
         }
 
         if let Some(max_tokens) = request.max_tokens {
@@ -378,7 +442,7 @@ impl ResponsesApiClient {
             body["previous_response_id"] = Value::String(prev_id.to_string());
         }
 
-        body
+        Ok(body)
     }
 
     /// Parses the SSE stream from the Responses API.
@@ -602,7 +666,7 @@ impl LlmClient for ResponsesApiClient {
         request: ChatRequest,
     ) -> anyhow::Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/responses", self.base_url);
-        let body = self.build_request_body(&request);
+        let body = self.build_request_body(&request)?;
 
         tracing::debug!(
             url = %url,

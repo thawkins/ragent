@@ -270,9 +270,9 @@ const REMOTE_ALL_UPDATES: &str = "event: session_created\ndata: {\"session_id\":
      event: text_delta\ndata: {\"text\":\"Hello \"}\n\n\
      event: text_delta\ndata: {\"text\":\"world\"}\n\n\
      event: reasoning_delta\ndata: {\"text\":\"thinking\"}\n\n\
-     event: tool_call_start\ndata: {\"call_id\":\"c1\",\"tool\":\"bash\"}\n\n\
-     event: tool_call_end\ndata: {\"call_id\":\"c1\",\"tool\":\"bash\",\"duration_ms\":12}\n\n\
-     event: tool_result\ndata: {\"call_id\":\"c1\",\"tool\":\"bash\",\"content\":\"ok\",\"content_line_count\":3,\"success\":true}\n\n\
+     event: tool_call_start\ndata: {\"call_id\":\"c1\",\"tool\":\"Bash\"}\n\n\
+     event: tool_call_end\ndata: {\"call_id\":\"c1\",\"tool\":\"Bash\",\"duration_ms\":12}\n\n\
+     event: tool_result\ndata: {\"call_id\":\"c1\",\"tool\":\"Bash\",\"content\":\"ok\",\"content_line_count\":3,\"success\":true}\n\n\
      event: agent_notice\ndata: {\"message\":\"a remote notice\"}\n\n\
      event: permission_requested\ndata: {\"request_id\":\"p1\",\"permission\":\"file:write\",\"description\":\"write a file\",\"options\":[\"allow\",\"deny\"]}\n\n\
      event: question_requested\ndata: {\"request_id\":\"q1\",\"question\":\"which?\",\"options\":[\"a\",\"b\"],\"default_index\":1}\n\n\
@@ -306,11 +306,11 @@ async fn remote_turn_mirrors_every_update_kind() {
     )));
     assert!(events.iter().any(|e| matches!(
         e,
-        Event::ToolCallStart { tool, .. } if tool == "bash"
+        Event::ToolCallStart { tool, .. } if tool == "Bash"
     )));
     assert!(events.iter().any(|e| matches!(
         e,
-        Event::ToolCallEnd { tool, error: None, duration_ms: 12, .. } if tool == "bash"
+        Event::ToolCallEnd { tool, error: None, duration_ms: 12, .. } if tool == "Bash"
     )));
     assert!(events.iter().any(|e| matches!(
         e,

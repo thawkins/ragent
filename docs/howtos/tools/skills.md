@@ -5,7 +5,7 @@ prompts, and file context into agent sessions.
 
 | Tool | Description |
 |------|-------------|
-| `skill_manage` | List, read, load, or reload skill packs. |
+| `Skill` | List, read, load, or reload skill packs. |
 
 ---
 

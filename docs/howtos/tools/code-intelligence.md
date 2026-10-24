@@ -20,8 +20,8 @@ codeindex tools are read-only and hardwired always-allowed.
 **Use cases:** finding function definitions, tracing callers, dependency
 analysis, code graph exploration.
 
-**System instruction:** "MUST use codeindex instead of `grep` for code
-symbol queries. Use `grep` only for arbitrary text patterns."
+**System instruction:** "MUST use codeindex instead of `Grep` for code
+symbol queries. Use `Grep` only for arbitrary text patterns."
 
 Tools that need the semantic graph (`codeindex_explain`, `codeindex_path`,
 `codeindex_communities`, `codeindex_godnodes`) require the graph to be built

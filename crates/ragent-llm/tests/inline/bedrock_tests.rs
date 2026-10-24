@@ -348,6 +348,7 @@ fn test_converse_request_body_parts_and_tools() {
                     crate::llm::ContentPart::ToolResult {
                         tool_use_id: "tu1".to_string(),
                         content: Arc::from("4"),
+                        is_error: false,
                     },
                 ]),
             },

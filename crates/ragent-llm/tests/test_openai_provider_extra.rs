@@ -73,6 +73,7 @@ fn test_openai_request_body_tool_use_and_result_packing() {
             content: ChatContent::Parts(vec![ContentPart::ToolResult {
                 tool_use_id: "call_1".to_string(),
                 content: Arc::from("sunny"),
+                is_error: false,
             }]),
         },
     ]);

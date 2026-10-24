@@ -194,13 +194,13 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 
 | Category string      | Permission variant      | Typical tools                           |
 |----------------------|------------------------|-----------------------------------------|
-| `read`, `file:read`  | `Permission::Read`     | `read`, `glob`, `grep`, `list`, `file_info`, `diff_files` |
-| `edit`, `file:write` | `Permission::Edit`     | `write`, `create`, `edit`, `multi_edit`, `append_to_file`, `rm`, `move_file`, `copy_file`, `make_directory`, `patch`, `apply_patch` |
-| `bash`, `bash:execute` | `Permission::Bash`   | `bash`, `bash_reset`, `bg`              |
+| `read`, `file:read`  | `Permission::Read`     | `read`, `Glob`, `Grep`, `list`, `file_info`, `diff_files` |
+| `Edit`, `file:write` | `Permission::Edit`     | `Write`, `create`, `Edit`, `multi_edit`, `append_to_file`, `rm`, `move_file`, `copy_file`, `make_directory`, `patch`, `apply_patch` |
+| `bash`, `bash:execute` | `Permission::Bash`   | `Bash`, `bash_reset`, `bg`              |
 | `web`                | `Permission::Web`      | `webfetch`, `websearch`, `mf_fetch`, `mf_search`, `mf_crawl`, `mf_screenshot` (registered only when a drivable headless browser is present; spec `openhands` FR-029) |
 | `network:fetch`      | `Permission::Web`     | `http_request` |
-| `plan`, `plan_enter` | `Permission::PlanEnter`| `plan_enter`                            |
-| `task`               | `Permission::Task`     | `task_create`, `task_update`, `task_get`, `task_list` |
+| `plan`, `EnterPlanMode` | `Permission::PlanEnter`| `EnterPlanMode`                            |
+| `task`               | `Permission::Task`     | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` |
 | `git:read`           | `Permission::Custom`   | `git_status`, `git_log`, `git_diff`, `git_show`, `git_branch` |
 | `git:write`          | `Permission::Custom`   | `git_add`, `git_commit`, `git_push`, `git_checkout`, `git_merge`, `git_reset`, `git_tag` |
 | `github:read`        | `Permission::Custom`   | `github_list_issues`, `github_get_issue`, `github_list_prs` |
@@ -581,7 +581,7 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
 ### Layer 7 — User Allow/Deny Lists
 
 The user can supplement the built-in lists with their own patterns via the
-`bash` config block or the `/bash` slash command:
+`Bash` config block or the `/bash` slash command:
 
 ```json
 {
@@ -1091,8 +1091,8 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
 | Codeindex (read-only)   | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` |
 | Sub-agent management    | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` |
 | Team tools              | All tools starting with `team_` (20 tools)                |
-| Task management         | All tools starting with `task_` (`task_create`, `task_update`, `task_get`, `task_list`) |
-| Interactive question    | `ask_user`                                                |
+| Task management         | All tools starting with `task_` (`TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`) |
+| Interactive question    | `AskUserQuestion`                                                |
 | Model introspection     | `model_info`                                              |
 
 > **Note:** the graph tools (`codeindex_explain`, `codeindex_path`,

@@ -65,17 +65,32 @@ fn test_input_summary_bash_tool() {
 }
 
 #[test]
-fn test_input_summary_bash_tool_uses_120_char_truncation() {
-    let command = format!("echo {}", "x".repeat(110));
+fn test_input_summary_bash_tool_uses_250_char_truncation() {
+    // A command that fits inside the wider bash budget is shown in full.
+    let command = format!("echo {}", "x".repeat(240));
     let input = json!({ "command": command });
     let summary = tool_input_summary("bash", &input, "/home/user/project");
     assert!(
-        summary.contains(&"x".repeat(100)),
+        summary.contains(&"x".repeat(240)),
         "Should preserve long command text up to the wider truncation limit: {summary}"
     );
     assert!(
         !summary.ends_with("..."),
-        "Should not truncate a command shorter than 120 characters: {summary}"
+        "Should not truncate a command shorter than 250 characters: {summary}"
+    );
+}
+
+#[test]
+fn test_input_summary_bash_tool_clips_beyond_250_chars() {
+    // Beyond the budget the preview keeps exactly 250 command characters and
+    // then the ellipsis; the "$ " prefix is not counted against the command.
+    let command = format!("echo {}", "y".repeat(400));
+    let input = json!({ "command": command });
+    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    assert_eq!(
+        summary,
+        format!("$ {}{}", &command[..250], "..."),
+        "Should clip at the 250 character bash budget"
     );
 }
 

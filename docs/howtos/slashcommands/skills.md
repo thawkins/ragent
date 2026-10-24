@@ -74,6 +74,6 @@ Command | Scope | Access | Description
 ## Related
 
 - `/reload skills` - rescan skill directories after edits
-- `skill_manage` - list/read/load/reload skills from chat
+- `Skill` - list/read/load/reload skills from chat
 - `~/.ragent/skills/` - personal (user-global) skill packs
 - `.ragent/skills/` - project-local skill packs (higher priority)

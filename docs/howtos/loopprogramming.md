@@ -344,7 +344,7 @@ the normal permission layer (allow/deny/ask rules, YOLO, etc.).
    Mandatory safety tools are always exempted. Message:
    `scope violation: tool out of scope — tool '<t>' is outside the loop's tool
    set (allowed: …)`.
-2. **Read-only constraint (FR-021)** -- for `bash`, per-sub-command write
+2. **Read-only constraint (FR-021)** -- for `Bash`, per-sub-command write
    heuristics plus redirection targets are inspected (e.g. `sed -i`, any `>`
    redirection); for other tools, `LOOP_WRITE_TOOLS` membership crossed with
    path globs. Message:
@@ -359,13 +359,13 @@ sees why the call was rejected.
 
 Supporting constants:
 
-- `LOOP_WRITE_TOOLS` -- mutating tools, including legacy aliases: `write`,
-  `create`, `edit`, `multi_edit`, `multiedit`, `patch`, `apply_patch`,
+- `LOOP_WRITE_TOOLS` -- mutating tools, including legacy aliases: `Write`,
+  `create`, `Edit`, `multi_edit`, `multiedit`, `patch`, `apply_patch`,
   `append_to_file`, `update_file`, `write_file`, `rm`, `move_file`, `copy_file`,
   `make_directory`, `memory_store`, `memory_forget`, `memory_replace`,
   `memory_write`, `pdf_write`.
 - `LOOP_ALWAYS_ALLOWED_TOOLS` -- mandatory safety tools that stay available even
-  under a restricted tool set: `think`, `ask_user`, `agent_complete`,
+  under a restricted tool set: `think`, `AskUserQuestion`, `agent_complete`,
   `model_info`, `memory_store`, `memory_recall`, `memory_forget`,
   `conversation_search`, `session_search`.
 - `BASH_WRITE_COMMANDS` -- mutating shell commands (`rm`, `mv`, `cp`, `mkdir`,

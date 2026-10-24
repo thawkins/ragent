@@ -71,6 +71,7 @@ fn tool_result_content_arc_str_round_trips_as_a_plain_string() {
     let part = ContentPart::ToolResult {
         tool_use_id: "call-1".to_string(),
         content: Arc::from("file contents"),
+        is_error: false,
     };
     let json = serde_json::to_value(&part).expect("serialize");
     assert_eq!(json["type"], "tool_result");
@@ -81,6 +82,32 @@ fn tool_result_content_arc_str_round_trips_as_a_plain_string() {
         ContentPart::ToolResult { content, .. } => assert_eq!(&*content, "file contents"),
         other => panic!("unexpected part: {other:?}"),
     }
+}
+
+/// FR-014/T-017: a `tool_result` serialised before the flag existed still
+/// parses, and parses as a success - the field deliberately defaults rather
+/// than rejecting the old wire shape (a persisted session predating FR-014
+/// would carry no flag).
+#[test]
+fn tool_result_without_is_error_deserialises_as_false() {
+    let json = serde_json::json!({
+        "type": "tool_result",
+        "tool_use_id": "call-9",
+        "content": "done",
+    });
+    let part: ContentPart = serde_json::from_value(json).expect("deserialize");
+    let ContentPart::ToolResult { is_error, .. } = &part else {
+        panic!("expected ToolResult");
+    };
+    assert!(!is_error, "a missing flag reads as a successful result");
+
+    let serialised = serde_json::to_value(&part).expect("serialize");
+    let ContentPart::ToolResult { is_error, .. } =
+        serde_json::from_value(serialised).expect("round trip")
+    else {
+        panic!("expected ToolResult");
+    };
+    assert!(!is_error);
 }
 
 #[test]
@@ -97,6 +124,7 @@ fn every_content_part_variant_round_trips() {
         ContentPart::ToolResult {
             tool_use_id: "call-2".to_string(),
             content: Arc::from("ok"),
+            is_error: false,
         },
         ContentPart::ImageUrl {
             url: "data:image/png;base64,AAAA".to_string(),

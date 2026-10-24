@@ -301,7 +301,7 @@ fn sse_decoder_handles_multiline_data_and_unknown_events() {
     // The SSE grammar joins multiple `data:` lines with `\n`; an unknown event is
     // preserved rather than dropped.
     let body = "event: tool_result\n\
-                data: {\"call_id\":\"c1\",\"tool\":\"bash\",\n\
+                data: {\"call_id\":\"c1\",\"tool\":\"Bash\",\n\
                 data: \"content\":\"ok\",\"success\":true}\n\n\
                 event: some_new_event\ndata: {\"x\":1}\n\n";
     let frames = split_sse_frames(body);
@@ -309,11 +309,11 @@ fn sse_decoder_handles_multiline_data_and_unknown_events() {
     assert_eq!(
         parse_remote_update(
             "tool_result",
-            "{\"call_id\":\"c1\",\"tool\":\"bash\",\"content\":\"ok\",\"success\":true}"
+            "{\"call_id\":\"c1\",\"tool\":\"Bash\",\"content\":\"ok\",\"success\":true}"
         ),
         RemoteUpdate::ToolResult {
             call_id: "c1".to_string(),
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             content: "ok".to_string(),
             content_line_count: 0,
             metadata: None,
@@ -383,7 +383,7 @@ async fn relay_turn_streams_and_mirrors_updates() {
                 event: message_start\ndata: {\"message_id\":\"m1\"}\n\n\
                 event: text_delta\ndata: {\"text\":\"Hello \"}\n\n\
                 event: text_delta\ndata: {\"text\":\"from remote\"}\n\n\
-                event: tool_call_start\ndata: {\"call_id\":\"c1\",\"tool\":\"bash\"}\n\n\
+                event: tool_call_start\ndata: {\"call_id\":\"c1\",\"tool\":\"Bash\"}\n\n\
                 event: message_end\ndata: {\"message_id\":\"m1\",\"reason\":\"stop\"}\n\n"
         .to_string();
     let (url, handle) = start_mock_server(body).await;
@@ -410,7 +410,7 @@ async fn relay_turn_streams_and_mirrors_updates() {
     assert!(matches!(seen[0], RemoteUpdate::SessionCreated));
     assert!(
         seen.iter()
-            .any(|u| matches!(u, RemoteUpdate::ToolCallStart { tool, .. } if tool == "bash"))
+            .any(|u| matches!(u, RemoteUpdate::ToolCallStart { tool, .. } if tool == "Bash"))
     );
     handle.abort();
 }

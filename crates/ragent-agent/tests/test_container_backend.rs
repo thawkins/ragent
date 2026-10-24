@@ -192,7 +192,7 @@ async fn missing_image_fails_provisioning_without_host_execution() {
         eprintln!("skipping: no container runtime on PATH");
         return;
     }
-    let (tool, runs) = NamedTool::new("bash");
+    let (tool, runs) = NamedTool::new("Bash");
     let ctx = ctx();
     let backend = ContainerBackend::from_descriptor(&descriptor("podman", None), &ctx.working_dir);
     assert_eq!(backend.kind(), ExecutionBackendKind::Podman);
@@ -228,7 +228,7 @@ async fn nonexistent_image_fails_provisioning_without_host_execution() {
         eprintln!("skipping: no container runtime on PATH");
         return;
     };
-    let (tool, runs) = NamedTool::new("bash");
+    let (tool, runs) = NamedTool::new("Bash");
     let ctx = ctx();
     let backend = ContainerBackend::from_descriptor(
         &descriptor(
@@ -438,7 +438,7 @@ async fn sandbox_runs_bash_inside_the_container_and_not_on_the_host() {
     let container = backend.container_name().to_string();
     let volume = backend.volume_name().to_string();
 
-    let (bash, bash_runs) = NamedTool::new("bash");
+    let (bash, bash_runs) = NamedTool::new("Bash");
     let marker = format!("CONTAINER_MARKER_{}.txt", std::process::id());
 
     // 1. Provision by running a shell command; it must print the workspace path
@@ -620,7 +620,7 @@ async fn sandbox_bash_still_enforces_the_seven_layer_validator() {
     );
     let container = backend.container_name().to_string();
     let volume = backend.volume_name().to_string();
-    let (bash, _runs) = NamedTool::new("bash");
+    let (bash, _runs) = NamedTool::new("Bash");
 
     let err = ExecutionBackend::execute_tool(
         &backend,

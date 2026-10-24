@@ -384,7 +384,7 @@ fn remove_sandbox(runtime: ContainerRuntime, container: &str, volume: &str) {
 
 /// Run a `bash` command through a spawned container backend.
 async fn run_bash(backend: &ContainerBackend, ctx: &ToolContext, command: &str) -> ToolOutput {
-    let (tool, _runs) = NamedTool::new("bash");
+    let (tool, _runs) = NamedTool::new("Bash");
     ExecutionBackend::execute_tool(
         backend,
         BackendToolCall {
@@ -513,7 +513,7 @@ async fn a_missing_live_credential_fails_provisioning_without_host_execution() {
         return;
     }
 
-    let (tool, runs) = NamedTool::new("bash");
+    let (tool, runs) = NamedTool::new("Bash");
     let ctx = ctx();
     // The default resolver is an empty store.
     let backend = ContainerBackend::from_descriptor(

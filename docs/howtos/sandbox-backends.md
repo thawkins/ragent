@@ -268,7 +268,7 @@ invocation:
              <image> sleep infinity
   ```
 
-  The image must provide a minimal POSIX shell userland (`sh`, `sed`, `grep`,
+  The image must provide a minimal POSIX shell userland (`sh`, `sed`, `Grep`,
   `find`, `base64`); the container command is `sleep infinity`, so the sandbox
   stays up for the whole session and each tool call is one cheap `exec`. The
   container is created before the first tool call, so the project is made
@@ -285,13 +285,13 @@ invocation:
   gets a freshly-provisioned container (FR-010, FR-023).
 
 - **Dispatch.** Only the shell and file/search tools are served:
-  - `bash` - validated by the **7-layer host validator**
+  - `Bash` - validated by the **7-layer host validator**
     (`ragent_tools_core::bash::validate_shell_command`) before it is executed, so
     the sandbox can never be used to bypass the security model (FR-002, FR-037);
     it then runs as `exec <name> sh -lc '<command>'` with the workspace as the
     working directory.
-  - `read`, `write`, `create`, `append_file`, `rm`, `mkdir`, `list`, `glob`,
-    `grep` - translated to a sandbox `exec` script (content is transported
+  - `read`, `Write`, `create`, `append_file`, `rm`, `mkdir`, `list`, `Glob`,
+    `Grep` - translated to a sandbox `exec` script (content is transported
     base64-encoded so it cannot be mangled by quoting) and confined to the
     workspace mount point.
   - **Every other tool is refused** - the container backend has no adapter for it

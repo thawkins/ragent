@@ -110,7 +110,7 @@ fn test_bundled_skills_have_allowed_tools() {
             skill.name
         );
         assert!(
-            skill.allowed_tools.contains(&"bash".to_string()),
+            skill.allowed_tools.contains(&"Bash".to_string()),
             "Skill '{}' should allow bash",
             skill.name
         );

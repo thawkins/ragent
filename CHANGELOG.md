@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Tool renames for Claude Code compatibility (spec `uniformtools` FR-023 to FR-030, T-031, NFR-007).** Thirteen tools take their Claude Code spelling so a Claude-published skill resolves without translation; every documentation reference, bundled-skill body, and agent prompt now uses the new name. The old spelling fails with an unknown-tool error (no alias is kept).
+
+  | Before | After |
+  |---|---|
+  | `ask_user` | `AskUserQuestion` |
+  | `bash` | `Bash` |
+  | `edit` | `Edit` |
+  | `plan_enter` | `EnterPlanMode` |
+  | `plan_exit` | `ExitPlanMode` |
+  | `glob` | `Glob` |
+  | `grep` | `Grep` |
+  | `skill_manage` | `Skill` |
+  | `task_create` | `TaskCreate` |
+  | `task_get` | `TaskGet` |
+  | `task_list` | `TaskList` |
+  | `task_update` | `TaskUpdate` |
+  | `write` | `Write` |
+
+  Update any hook `matcher`, permission rule, or `allowed_tools` list that names an old spelling to the new one.
+
 ## [1.0.149] - 2026-10-21
 
 Release 1.0.149: the shared store chrome across every catalogue and setup-panel

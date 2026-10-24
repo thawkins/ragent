@@ -41,6 +41,7 @@ pub mod sse;
 pub mod thinking;
 /// Serialisation cache for tool definitions per wire format.
 pub mod tool_cache;
+pub mod wire;
 pub mod xai;
 
 use std::collections::HashMap;

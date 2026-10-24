@@ -1,20 +1,20 @@
 # Tools — Shell
 
-Tools for running shell commands and managing background tasks. `bash`
+Tools for running shell commands and managing background tasks. `Bash`
 commands pass through a 7-layer security model: safe-command whitelist,
 banned-command checks, denied patterns, directory-escape prevention, syntax
 validation, obfuscation detection, and user allowlist/denylist.
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Execute a shell command (7-layer security). |
+| `Bash` | Execute a shell command (7-layer security). |
 | `bash_reset` | Reset persistent shell state. |
 | `bg` | Manage background shell tasks (spawn, list, wait, cancel). |
 | `open` | Open a file/folder/URL via the desktop handler. |
 
 **Use cases:** running builds, tests, git operations, long-running tasks.
 
-**System instruction:** "For simple commands use `bash` with the `command`
+**System instruction:** "For simple commands use `Bash` with the `command`
 parameter immediately. Do not describe what you will run."
 
 ---

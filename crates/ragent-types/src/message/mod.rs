@@ -43,7 +43,7 @@ impl fmt::Display for Role {
 }
 
 /// Lifecycle status of a tool call.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolCallStatus {
     /// The tool call has been created but not yet started.
@@ -70,6 +70,21 @@ impl fmt::Display for ToolCallStatus {
             Self::Running => write!(f, "running"),
             Self::Completed => write!(f, "completed"),
             Self::Error => write!(f, "error"),
+        }
+    }
+}
+
+impl ToolCallStatus {
+    /// The `is_error` flag this status maps to on a tool result (FR-014).
+    ///
+    /// This is the one derivation the whole workspace uses - history
+    /// construction, the refusal adapter and the wire encoders all read it -
+    /// so a new status can never leave the flag a successful-looking result
+    /// silently implies.
+    pub const fn is_error(&self) -> bool {
+        match self {
+            Self::Pending | Self::Running | Self::Completed => false,
+            Self::Error => true,
         }
     }
 }

@@ -231,11 +231,11 @@ fn test_ascii_dialect_json_payload() {
 #[test]
 fn test_ascii_dialect_xml_parameter_payload() {
     let text = format!(
-        "{ASCII_OPEN}<function=bash>\n<parameter=command>\ncargo test\n</parameter>\n</function>{ASCII_CLOSE}"
+        "{ASCII_OPEN}<function=Bash>\n<parameter=command>\ncargo test\n</parameter>\n</function>{ASCII_CLOSE}"
     );
     let calls = extract_text_tool_calls(&text);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "bash");
+    assert_eq!(calls[0].name, "Bash");
     let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
     assert_eq!(args["command"], "cargo test");
 }
@@ -295,11 +295,11 @@ fn test_underscore_dialect_json_payload() {
 #[test]
 fn test_underscore_dialect_xml_payload() {
     let text = format!(
-        "{UNDERSCORE_OPEN}<function=bash>\n<parameter=command>\ncargo build\n</parameter>\n</function>{UNDERSCORE_CLOSE}"
+        "{UNDERSCORE_OPEN}<function=Bash>\n<parameter=command>\ncargo build\n</parameter>\n</function>{UNDERSCORE_CLOSE}"
     );
     let calls = extract_text_tool_calls(&text);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "bash");
+    assert_eq!(calls[0].name, "Bash");
 }
 
 #[test]
@@ -321,11 +321,11 @@ fn test_underscore_dialect_multiple_and_spans() {
 #[test]
 fn test_json_body_wrapped_in_backticks() {
     let text = format!(
-        "{ASCII_OPEN}`{{\"name\": \"grep\", \"arguments\": {{\"pattern\": \"fn main\"}}}}`{ASCII_CLOSE}"
+        "{ASCII_OPEN}`{{\"name\": \"Grep\", \"arguments\": {{\"pattern\": \"fn main\"}}}}`{ASCII_CLOSE}"
     );
     let calls = extract_text_tool_calls(&text);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "grep");
+    assert_eq!(calls[0].name, "Grep");
     let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
     assert_eq!(args["pattern"], "fn main");
 }

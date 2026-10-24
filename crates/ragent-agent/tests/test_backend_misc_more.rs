@@ -281,14 +281,14 @@ async fn container_rm_rejects_wildcards() {
 async fn container_bash_missing_command_and_banned_command_fail_before_provisioning() {
     let (backend, context) = imageless_backend();
     // A `bash` call with no `command` fails on the required parameter.
-    let missing = dispatch_file_tool(&backend, &context, "bash", json!({})).await;
+    let missing = dispatch_file_tool(&backend, &context, "Bash", json!({})).await;
     assert!(missing.to_string().contains("command"), "{missing}");
 
     // A banned command is rejected by the 7-layer validator before any sandbox.
     let banned = dispatch_file_tool(
         &backend,
         &context,
-        "bash",
+        "Bash",
         json!({ "command": "mkfs.ext4 /dev/sda1" }),
     )
     .await;
@@ -367,30 +367,30 @@ fn remote_decoder_covers_every_event_arm() {
         }
     );
     assert_eq!(
-        parse_remote_update("tool_call_start", "{\"call_id\":\"c1\",\"tool\":\"bash\"}"),
+        parse_remote_update("tool_call_start", "{\"call_id\":\"c1\",\"tool\":\"Bash\"}"),
         RemoteUpdate::ToolCallStart {
             call_id: "c1".to_string(),
-            tool: "bash".to_string()
+            tool: "Bash".to_string()
         }
     );
     assert_eq!(
         parse_remote_update(
             "tool_call_end",
-            "{\"call_id\":\"c1\",\"tool\":\"bash\",\"error\":\"boom\",\"duration_ms\":42}"
+            "{\"call_id\":\"c1\",\"tool\":\"Bash\",\"error\":\"boom\",\"duration_ms\":42}"
         ),
         RemoteUpdate::ToolCallEnd {
             call_id: "c1".to_string(),
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             error: Some("boom".to_string()),
             duration_ms: 42
         }
     );
     // No error field -> `None`, missing duration -> 0.
     assert_eq!(
-        parse_remote_update("tool_call_end", "{\"call_id\":\"c1\",\"tool\":\"bash\"}"),
+        parse_remote_update("tool_call_end", "{\"call_id\":\"c1\",\"tool\":\"Bash\"}"),
         RemoteUpdate::ToolCallEnd {
             call_id: "c1".to_string(),
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             error: None,
             duration_ms: 0
         }

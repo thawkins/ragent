@@ -534,7 +534,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 - **`/spec impl` task-range dependencies** — a Dependencies cell such as
   `T-001–T-014` now expands into every spanned ID, so the final verification
   task is scheduled last instead of first.
-- **Tasks panel and side panels** — the Alt+T tasks panel row now reads
+- **Tasks panel and side panels** — the Alt+I tasks panel row now reads
   `[STATUS] <id> title`, and every toggled side panel (Alt+M/T/P/O/C and the
   log panel) takes 50% of the window width.
 
@@ -657,7 +657,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   runs before permissions/execution, and panicked tool tasks synthesise an
   error result so the conversation never keeps an orphaned `tool_use`.
 - **Edit tools preserve line endings and BOMs** — CRLF files keep CRLF
-  endings through `edit`/`multi_edit` (no more silent CRLF-to-LF conversion),
+  endings through `Edit`/`multi_edit` (no more silent CRLF-to-LF conversion),
   a leading BOM no longer blocks first-line edits, and non-UTF-8 files get a
   precise encoding error.
 - **Text-format tool-call recovery** — when a model narrates tool calls as
@@ -1599,9 +1599,9 @@ can be shown together).
 
 ---
 
-## 12. TASKS panel — `Alt+T`
+## 12. TASKS panel — `Alt+I`
 
-Press **`Alt+T`** to toggle the **TASKS panel** on the right side of the screen.
+Press **`Alt+I`** to toggle the **TASKS panel** on the right side of the screen.
 
 The TASKS panel lists tasks for the current session, fetched from the
 SQLite-backed storage on every render. Each row shows:
@@ -1626,8 +1626,8 @@ no `blocked` status value (FR-005). When a task is `in_progress` and has an
 
 ### Managing Tasks
 
-Create, update, or list tasks with the `task_create` / `task_update` /
-`task_list` tools or the `/task` slash command:
+Create, update, or list tasks with the `TaskCreate` / `TaskUpdate` /
+`TaskList` tools or the `/task` slash command:
 
 ```text
 /task add Implement token bucket rate limiter
@@ -1641,14 +1641,14 @@ You can also use the tool directly in a prompt:
 Create a task list for adding OAuth2 login support
 ```
 
-ragent will call `task_create` to add the items, and the TASKS panel updates
+ragent will call `TaskCreate` to add the items, and the TASKS panel updates
 immediately.
 
 ### Interacting with the TASKS panel
 
 - **`Scroll`** with the mouse wheel.
 - **`Drag`** the scrollbar thumb to move through a long task list.
-- Press **`Alt+T`** again to hide the panel.
+- Press **`Alt+I`** again to hide the panel.
 
 The scrollbar gutter runs along the right edge of the panel.
 
@@ -1764,7 +1764,7 @@ The Context panel is display-only: its contents are never sent to the model.
 | --------- | --------- | ------------------------------------------------- |
 | `Alt+L` | Log       | Runtime events, tool calls, warnings, errors      |
 | `Alt+P` | Profile   | Live agent-loop profiler output                   |
-| `Alt+T` | TASKS    | Session tasks and status                         |
+| `Alt+I` | TASKS    | Session tasks and status                         |
 | `Alt+M` | Memory    | Project/user memory and structured-memory summary |
 | `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
 | `Alt+C` | Context   | Token breakdown of the context window             |
@@ -1788,7 +1788,7 @@ shortcut again to close the panel.
 | `Ctrl+C`                      | Copy selection / arm quit                   |
 | `Alt+L`                       | Toggle Log panel                            |
 | `Alt+P`                       | Toggle Profile panel                        |
-| `Alt+T`                       | Toggle TASKS panel                           |
+| `Alt+I`                       | Toggle TASKS panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
 | `Alt+O`                       | Toggle Telemetry panel                      |
 | `Alt+C`                       | Toggle Context panel                        |

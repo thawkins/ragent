@@ -15,13 +15,13 @@ use super::thinking::{
     request_uses_unsupported_anthropic_display,
 };
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::wire::encode::{MessageContext, encode_message};
+use super::wire::profile_table::ANTHROPIC_MESSAGES;
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
-
-use super::media::{extract_base64_from_data_uri, extract_mime_from_data_uri};
 
 /// Default max output tokens when a request does not specify `max_tokens`
 /// (ANTIPAT 5.6: named default limit).
@@ -284,51 +284,14 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     pub(crate) fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut messages = Vec::new();
-
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .map(|part| match part {
-                            ContentPart::Text { text } => json!({
-                                "type": "text",
-                                "text": text
-                            }),
-                            ContentPart::ToolUse { id, name, input } => json!({
-                                "type": "tool_use",
-                                "id": id,
-                                "name": name,
-                                "input": input
-                            }),
-                            ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } => json!({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": content
-                            }),
-                            ContentPart::ImageUrl { url } => json!({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": extract_mime_from_data_uri(url).unwrap_or("image/png"),
-                                    "data": extract_base64_from_data_uri(url).unwrap_or(url.as_str())
-                                }
-                            }),
-                        })
-                        .collect();
-                    json!(content_parts)
-                }
-            };
-            messages.push(json!({
-                "role": msg.role,
-                "content": content
-            }));
-        }
+        // The request-side message loop is the one shared encoder (FR-006): this
+        // client contributes no carrier of its own, only its profile.
+        let ctx = MessageContext::default();
+        let messages: Vec<Value> = request
+            .messages
+            .iter()
+            .flat_map(|msg| encode_message(ANTHROPIC_MESSAGES, msg, &ctx))
+            .collect();
 
         let mut body = json!({
             "model": request.model,

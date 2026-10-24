@@ -8,7 +8,7 @@
 off; showing the panel hides the log, profile, memory, and telemetry panels so
 only one side panel is visible at a time. With arguments it operates on session
 tasks: `list` renders the task table, `add`/`create`/`update`/`get` route to
-the `task_create`, `task_update`, and `task_get` tools.
+the `TaskCreate`, `TaskUpdate`, and `TaskGet` tools.
 
 ## Syntax
 
@@ -28,10 +28,10 @@ the `task_create`, `task_update`, and `task_get` tools.
 |------|-------------|
 | (bare) | Toggle the Tasks side panel |
 | `list [status]` | Render the task table, optionally filtered by status |
-| `add <subject>` | Create a task via `task_create` |
+| `add <subject>` | Create a task via `TaskCreate` |
 | `create <subject>` | Alias for `add` |
-| `update <id> <status>` | Change a task's status via `task_update` |
-| `get <id>` | Inspect one task via `task_get` |
+| `update <id> <status>` | Change a task's status via `TaskUpdate` |
+| `get <id>` | Inspect one task via `TaskGet` |
 | `help` | Show this subcommand table |
 
 Valid statuses for `update` and the `list` filter are the session tracker's
@@ -85,5 +85,5 @@ The TASKS side panel renders one row per session task as
 
 ## Related
 
-- `task_create`, `task_update`, `task_get`, `task_list` tools
+- `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` tools
 - Spec tracking: `spec_task_update` mirrors into the same session tracker

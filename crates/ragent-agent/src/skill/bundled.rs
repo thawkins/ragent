@@ -102,13 +102,13 @@ fn simplify_skill() -> SkillInfo {
         Some("[all|output_path]"),
         false,
         vec![
-            "bash".to_string(),
+            "Bash".to_string(),
             "read".to_string(),
-            "grep".to_string(),
-            "glob".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
             "create".to_string(),
-            "write".to_string(),
-            "edit".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
             "multi_edit".to_string(),
             "codeindex_search".to_string(),
             "codeindex_symbols".to_string(),
@@ -134,12 +134,12 @@ fn batch_skill() -> SkillInfo {
         Some("<instruction>"),
         true,
         vec![
-            "bash".to_string(),
+            "Bash".to_string(),
             "read".to_string(),
-            "edit".to_string(),
+            "Edit".to_string(),
             "create".to_string(),
-            "grep".to_string(),
-            "glob".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
             "codeindex_search".to_string(),
             "codeindex_symbols".to_string(),
             "codeindex_references".to_string(),
@@ -163,7 +163,7 @@ fn debug_skill() -> SkillInfo {
         "Troubleshoots current session by reading debug logs",
         Some("[description]"),
         false,
-        vec!["bash".to_string(), "read".to_string(), "grep".to_string()],
+        vec!["Bash".to_string(), "read".to_string(), "Grep".to_string()],
         DEBUG_BODY,
     )
 }
@@ -176,7 +176,7 @@ fn loop_skill() -> SkillInfo {
         "Runs a prompt repeatedly on an interval (scheduled tasks)",
         Some("[interval] <prompt>"),
         true,
-        vec!["bash".to_string(), "read".to_string()],
+        vec!["Bash".to_string(), "read".to_string()],
         LOOP_BODY,
     )
 }
@@ -215,7 +215,7 @@ Focus on substance over style - ignore formatting and naming preferences.
 **IMPORTANT - Output file requirement:**
 If a file path was provided (not `all` and not empty), you MUST:
 1. Create a markdown summary document with all your findings
-2. Use the `write` tool to save the summary to that EXACT path
+2. Use the `Write` tool to save the summary to that EXACT path
 3. Confirm to the user that the file was saved
 
 Example: `/simplify docs/review.md` saves findings to docs/review.md.
@@ -227,7 +227,7 @@ Apply the following instruction across all matching files in the codebase:
 $ARGUMENTS
 
 Steps:
-1. Use `grep` and `glob` to identify all files that need changes
+1. Use `Grep` and `Glob` to identify all files that need changes
 2. Group files by the type of change needed
 3. For each file:
    a. Read the current content

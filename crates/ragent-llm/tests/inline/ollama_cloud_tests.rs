@@ -243,6 +243,7 @@ fn test_build_request_body_tool_use_and_result_pairing() {
             content: ChatContent::Parts(vec![ContentPart::ToolResult {
                 tool_use_id: "call_9".to_string(),
                 content: Arc::from("sunny"),
+                is_error: false,
             }]),
         },
     ];

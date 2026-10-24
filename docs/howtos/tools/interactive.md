@@ -5,7 +5,7 @@ read environment variables.
 
 | Tool | Description |
 |------|-------------|
-| `ask_user` | Ask the user a question (with optional choices). |
+| `AskUserQuestion` | Ask the user a question (with optional choices). |
 | `think` | Record a short reasoning note. |
 | `calculator` | Evaluate a mathematical expression. |
 | `get_env` | Read environment variable values. |

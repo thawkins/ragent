@@ -148,7 +148,7 @@ resolved output path is confined to the workspace root.
 - **Permission categories.** `pdf_read` requires `file:read`; `pdf_write`
   requires `file:write`. These flow through the standard configurable
   allow/deny/ask rule engine and the file-path guards -- the same surface as
-  the plain `read`/`write` tools. There are no PDF-specific permission rules.
+  the plain `read`/`Write` tools. There are no PDF-specific permission rules.
 - **Goal-loop write detection.** `LOOP_WRITE_TOOLS` (in
   `crates/ragent-agent/src/session/loop_state.rs`) includes `pdf_write`.
   Inside a `/loop` run, any call to this tool counts as a destructive write: it

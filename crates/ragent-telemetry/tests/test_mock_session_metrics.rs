@@ -146,7 +146,7 @@ mod mock_session {
 
         // Simulate permission resolution.
         let permission = PermissionRecorder::new(registry.clone());
-        permission.record_approved("bash");
+        permission.record_approved("Bash");
         permission.record_denied("edit");
 
         // Simulate compression pipeline run.

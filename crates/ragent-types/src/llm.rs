@@ -192,11 +192,40 @@ pub enum ContentPart {
         /// every tool call result.
         #[serde(with = "arc_str_serde")]
         content: Arc<str>,
+        /// Whether the call failed (FR-014).
+        ///
+        /// Derived from the record's `ToolCallStatus` at the one history
+        /// construction site, never guessed from the content. A profile that
+        /// declares `supports_is_error` sends it natively; every other profile's
+        /// encoder prefixes the content with `ERROR: ` instead.
+        ///
+        /// The field defaults to `false` on deserialisation so a persisted
+        /// session or a fixture written before the flag existed keeps its
+        /// prior meaning (a result with no recorded error).
+        #[serde(default)]
+        is_error: bool,
     },
     /// An image specified as a URL or `data:` URI.
     ImageUrl {
         /// The image URL or `data:image/png;base64,...` data URI.
         url: String,
+    },
+    /// Model reasoning (extended thinking) recorded for replay (FR-011).
+    ///
+    /// Anthropic's extended thinking requires the signed thinking block that
+    /// accompanied a tool call to be echoed back on the turn that answers it,
+    /// so history records the block and a profile whose `echo_reasoning` is
+    /// `true` (T-018) re-emits it. Every other profile's encoder skips the
+    /// part, matching the history converter's longstanding behaviour of not
+    /// forwarding reasoning.
+    Reasoning {
+        /// The reasoning text.
+        text: String,
+        /// The provider's signature over the block, when it supplies one
+        /// (Anthropic's `signature`); echoed with the replayed block so the
+        /// provider can verify it originated the reasoning.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
 }
 

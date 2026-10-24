@@ -83,4 +83,4 @@ pack. Reload with `/reload skills` after adding or editing packs.
 
 - `/skills` - list-only form of the same registry
 - `/reload skills` - rescan skill directories after edits
-- `skill_manage` - list/read/load/reload skills from chat
+- `Skill` - list/read/load/reload skills from chat
