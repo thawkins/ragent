@@ -303,7 +303,7 @@ Use `team_idle` when you have no more tasks to work on.
 ### 5.3 Plan Approval Workflow
 
 1. Teammate calls `team_submit_plan` with its planned approach
-2. Teammate enters read-only mode (no write/bash tools active)
+2. Teammate enters read-only mode (no Write/Bash tools active)
 3. Lead receives a `plan_request` mailbox message
 4. Lead calls `team_approve_plan` (approve or reject with feedback)
 5. Teammate receives result:
@@ -467,7 +467,7 @@ Settings in `ragent.json`:
 | M3-T4 | Implement message delivery: teammate message → lead EventBus event | `Event::TeammateMessage` |
 | M3-T5 | Implement idle notification: `team_idle` → `Event::TeammateIdle` | |
 | M3-T6 | Implement plan approval state machine (`PlanPending`, `PlanApproved`, `PlanRejected`) | Stored in `TeamMember.plan_status` |
-| M3-T7 | Implement read-only plan mode: block write/bash tools while `PlanPending` | In session processor tool dispatch |
+| M3-T7 | Implement read-only plan mode: block Write/Bash tools while `PlanPending` | In session processor tool dispatch |
 | M3-T8 | Implement hook runner for `TeammateIdle` and `TaskCompleted` | Exec subprocess; interpret exit code |
 | M3-T9 | Implement `TeamManager::shutdown_teammate()` and cleanup | |
 | M3-T10 | Add `Event` variants: `TeammateSpawned`, `TeammateMessage`, `TeammateIdle`, `TeamTaskClaimed`, `TeamTaskCompleted`, `TeamCleanedUp` | In `event/mod.rs` |
@@ -571,6 +571,6 @@ M3 depends on M1 and M2. M4 depends on M3.
 | File locking | `fs2::FileExt::lock_exclusive()` | Cross-platform; same crate used elsewhere in ragent |
 | Teammate sessions | Separate `SessionProcessor` calls (not threads) | Reuses existing session/processor architecture |
 | In-process only (V1) | No tmux/iTerm2 split panes | TUI is ratatui-based; split panes require external terminal support not yet available |
-| Plan mode | Block write/bash tools at tool-dispatch level | Cleanest enforcement; no per-tool awareness needed |
+| Plan mode | Block Write/Bash tools at tool-dispatch level | Cleanest enforcement; no per-tool awareness needed |
 | Mailbox polling | Background tokio task per teammate | Keeps messaging responsive without blocking the main loop |
 | Hook runner | Subprocess exec (same as skill hooks) | Consistent with existing hook pattern; shell scripts work naturally |

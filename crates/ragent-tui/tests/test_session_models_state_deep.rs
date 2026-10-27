@@ -1029,6 +1029,9 @@ async fn plan_approval_with_empty_stack_logs_an_error() {
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
+    // Only the prose half ("agent stack is empty") is asserted here. The tool
+    // name half of the same log line was migrated to `ExitPlanMode` by the
+    // FR-023 rename, so this case is unaffected by that spelling change.
     assert!(
         app.log_entries
             .iter()
@@ -1257,22 +1260,21 @@ async fn model_show_falls_back_when_metadata_is_unresolvable() {
 }
 
 #[tokio::test]
-async fn tools_list_renders_visibility_table_and_tool_sources() {
+async fn tools_list_renders_every_tool_and_its_source() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.session_processor
-        .tool_registry
-        .set_hidden(&["read".to_string()]);
 
     app.execute_slash_command("/tools list").await;
 
     let text = last_message(&app);
-    assert!(text.contains("Tool Family Visibility"), "text: {text}");
-    assert!(text.contains("Visible Tools"), "text: {text}");
-    assert!(text.contains("Disabled by visibility (1)"), "text: {text}");
+    assert!(text.contains("Tools ("), "text: {text}");
+    assert!(
+        !text.contains("Tool Family Visibility"),
+        "the visibility table is gone: {text}"
+    );
     assert!(text.contains("internal"), "text: {text}");
     assert!(
-        text.contains("visibility:github") || text.contains("visibility:teams"),
-        "a family tool names its visibility switch: {text}"
+        text.contains("codeindex_search"),
+        "a family tool is listed like any other: {text}"
     );
 }
 

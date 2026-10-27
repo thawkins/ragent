@@ -552,7 +552,7 @@ Explain the difference between async/await and threads in Rust
 > development tasks including writing code, debugging, reviewing, and
 > explaining code. You have access to tools for reading, writing, and
 > editing files, executing shell commands, and searching codebases.
-> Use 'grep' or 'search' to find text/code patterns, 'glob' to find
+> Use 'Grep' or 'search' to find text/code patterns, 'Glob' to find
 > files by name, 'list' to view directory contents, and 'read' to
 > view file contents. Always prefer using tools to verify your
 > assumptions rather than guessing.
@@ -1030,7 +1030,7 @@ The model would spawn this as:
 **System prompt:**
 
 > You are an exploration agent specializing in understanding
-> codebases. Use read, grep, glob, and list tools to navigate and
+> codebases. Use read, Grep, Glob, and list tools to navigate and
 > understand code. Provide concise, accurate answers about code
 > structure, patterns, and logic. Do NOT modify any files.
 

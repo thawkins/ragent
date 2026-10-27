@@ -6,7 +6,7 @@
 use anyhow::{Context, Result, bail};
 use futures::StreamExt;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::{
@@ -15,8 +15,10 @@ use super::thinking::{
     request_uses_unsupported_anthropic_display,
 };
 use super::tool_cache::{ToolFormat, cached_tools};
-use super::wire::encode::{MessageContext, encode_message};
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::encode::{MessageContext, encode_messages};
 use super::wire::profile_table::ANTHROPIC_MESSAGES;
+use super::wire::trace;
 use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
@@ -287,11 +289,15 @@ impl AnthropicClient {
         // The request-side message loop is the one shared encoder (FR-006): this
         // client contributes no carrier of its own, only its profile.
         let ctx = MessageContext::default();
-        let messages: Vec<Value> = request
-            .messages
-            .iter()
-            .flat_map(|msg| encode_message(ANTHROPIC_MESSAGES, msg, &ctx))
-            .collect();
+        let messages = match encode_messages(ANTHROPIC_MESSAGES, &request.messages, &ctx) {
+            Ok(messages) => messages,
+            Err(loss) => {
+                // FR-018: a construct this profile cannot carry fails the request
+                // here rather than being stripped from the history. Returning the
+                // refusal as the body makes the wire layer report it.
+                return json!({ "error": loss.to_string() });
+            }
+        };
 
         let mut body = json!({
             "model": request.model,
@@ -314,7 +320,7 @@ impl AnthropicClient {
             // `input_schema` key) instead of building a fresh `Vec<Value>` on
             // every call.
             let cached = cached_tools(ToolFormat::Anthropic, &request.tools);
-            body["tools"] = cached.anthropic_tools_array();
+            body[ToolFormat::Anthropic.body_key()] = cached.anthropic_tools_array();
         }
 
         if request_uses_unsupported_anthropic_display(request) {
@@ -339,6 +345,7 @@ impl LlmClient for AnthropicClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/messages", self.base_url);
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body).context("serialise Anthropic request body")?;
 
         let response = self
@@ -383,12 +390,12 @@ impl LlmClient for AnthropicClient {
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
-            // F5: open tool_use blocks keyed by the SSE content-block index.
-            // A HashMap iterated with `.last()` attributed `input_json_delta`
-            // args to an arbitrary open block when more than one tool_use
-            // block streamed in parallel; the index keys the deltas to the
-            // correct call.
-            let mut tool_call_blocks: BTreeMap<u64, String> = BTreeMap::new();
+            // FR-004: one accumulator for every open `tool_use` block, keyed by
+            // the SSE content-block index the frame carries. Iterating a map with
+            // `.last()` attributed `input_json_delta` arguments and `content_block_stop`
+            // to an arbitrary open block when more than one block streamed in
+            // parallel; the index keys each frame to its own call.
+            let mut acc = ToolCallAccumulator::new(ANTHROPIC_MESSAGES, "anthropic");
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -486,10 +493,13 @@ impl LlmClient for AnthropicClient {
                                         yield StreamEvent::ReasoningStart;
                                     }
                                     Some("tool_use") => {
-                                        let id = content_block["id"].as_str().unwrap_or("").to_string();
-                                        let name = content_block["name"].as_str().unwrap_or("").to_string();
-                                        tool_call_blocks.insert(block_index, id.clone());
-                                        yield StreamEvent::ToolCallStart { id, name };
+                                        let id = content_block["id"].as_str().unwrap_or("");
+                                        let name = content_block["name"].as_str().unwrap_or("");
+                                        if let Some(event) =
+                                            acc.open(StreamKey::Index(block_index), Some(id), name)
+                                        {
+                                            yield event;
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -508,30 +518,37 @@ impl LlmClient for AnthropicClient {
                                             yield StreamEvent::ReasoningDelta { text: text.to_string() };
                                         }
                                     }
+                                    // FR-011: the signed-thinking block carries
+                                    // its signature in this delta, and the block
+                                    // has to be echoed back with it. It is
+                                    // surfaced as its own event rather than
+                                    // appended to the reasoning text, so the
+                                    // record keeps the two apart.
+                                    Some("signature_delta") => {
+                                        if let Some(signature) = delta["signature"].as_str() {
+                                            yield StreamEvent::ReasoningSignature {
+                                                signature: signature.to_string(),
+                                            };
+                                        }
+                                    }
                                     Some("input_json_delta") => {
-                                        if let Some(json_str) = delta["partial_json"].as_str() {
-                                            // F5: route the delta to the block
-                                            // named by this event's index.
-                                            if let Some(id) = tool_call_blocks.get(&block_index) {
-                                                yield StreamEvent::ToolCallDelta {
-                                                    id: id.clone(),
-                                                    args_json: json_str.to_string(),
-                                                };
-                                            }
+                                        if let Some(json_str) = delta["partial_json"].as_str()
+                                            && let Some(event) =
+                                                acc.delta(&StreamKey::Index(block_index), json_str)
+                                        {
+                                            yield event;
                                         }
                                     }
                                     _ => {}
                                 }
                             }
                             "content_block_stop" => {
-                                // F5: close the block named by this event's
-                                // index (previously "the last known tool" in
-                                // arbitrary HashMap order).
+                                // Close the block named by this event's index (an
+                                // unnamed block, or one whose start never opened a
+                                // call, closes nothing).
                                 let block_index = parsed["index"].as_u64().unwrap_or(0);
-                                if let Some(id) = tool_call_blocks.remove(&block_index)
-                                    && !id.is_empty()
-                                {
-                                    yield StreamEvent::ToolCallEnd { id };
+                                if let Some(event) = acc.end(&StreamKey::Index(block_index)) {
+                                    yield event;
                                 }
                             }
                             "message_delta" => {

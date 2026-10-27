@@ -156,7 +156,7 @@ impl Tool for MultiEditTool {
          next `old_string` for it. Each edit must match exactly once in its \
          file; if any single edit fails validation, no files are modified \
          (atomic rollback), so split uncertain batches into separate \
-         `multi_edit` calls or single `edit` calls. On failure the error names \
+         `multi_edit` calls or single `Edit` calls. On failure the error names \
          the failing edit index and tells you what to do - follow it: \
          not-found errors include a numbered near-miss snippet (\"almost \
          matches a block starting at line N - rebuild old_string from the \

@@ -144,12 +144,131 @@ keeps the older mtime and lets cargo reuse the broken object file), then re-run 
   meant adding `crates/ragent-types/src/tool_rename.rs` to that list - otherwise the guard
   would have kept asserting purity over a shim and stopped covering the real table.
 
+## What was found, not written, when this task was picked up
+
+Most of the task had already landed in the tree without its registrations, and
+two pieces were missing outright. Reporting that honestly matters more than the
+line count, so it is written down rather than implied:
+
+- **Already in the tree:** `crates/ragent-types/src/tool_rename.rs` (the table and
+  its helpers), the `ragent_agent::tool::rename` shim,
+  `ToolsConfig::validate_alias_spellings` with `RetiredAliasSpelling`,
+  `AliasTable::from_aliases`' retired-entry arm, `unresolved_targets`,
+  `report_unresolved_targets_once` and `reset_unresolved_targets_for_test`, its
+  call from `session/loop_steps.rs`, and the four resolver-side cases in
+  `crates/ragent-agent/tests/test_tool_alias_table.rs`.
+- **Missing:** `Config::parse_file` never called the validator and the
+  `RAGENT_CONFIG_CONTENT` route never called it either - so FR-031's load-time
+  guarantee did not exist, and the eleven cases in
+  `crates/ragent-config/tests/test_retired_alias_spelling.rs` were **dead**:
+  the file had no `#[path]` line in `crates/ragent-config/tests/all.rs`, so the
+  consolidated target ran none of them. This is the sixth orphan-module defect in
+  this spec (T-046 counted five) and the first one where the orphan was the
+  deliverable itself.
+- **Also missing:** the dry-run readiness path, which parses the same files
+  through its own `parse_config_str` and would have reported `Config loaded` for
+  a file the next real load refuses, and the two cases that pin it.
+
+## What this task added
+
+### The loader calls the check, twice
+
+`Config::reject_retired_alias_spellings(tools, label)` is a new `pub` associated
+function on `Config` in `crates/ragent-config/src/config.rs`, called from
+`Config::parse_file` (which serves the global file, the project file and
+`RAGENT_CONFIG`) and from the `RAGENT_CONFIG_CONTENT` route. It renders
+
+```
+Invalid config in <label>: N `tools.aliases` entries name a renamed ragent tool
+spelling, which FR-031 forbids:
+  - <RetiredAliasSpelling::reason()>       (one line per offender)
+```
+
+so the reader gets the source, the count, and every offender at once - a table
+copied from an old `--dry-run` dump carries several, and fixing them one reload
+at a time is the failure mode the single message exists to avoid.
+
+It is `pub` rather than `pub(crate)` because the readiness path lives in
+`ragent-agent`; the first draft was `pub(crate)` and `ragent-agent` failed to
+compile with `E0624` (`private associated function`). That is the correct
+direction of the seam: the *policy* (which entries are refused) stays in
+`ragent-config`, and the *rendering* is one function both callers share rather
+than two copies of the same sentence.
+
+### The readiness path agrees (`crates/ragent-agent/src/dry_run.rs`)
+
+`parse_config_str` now runs the same check after the shape parse and maps the
+error to the item message, so `ragent run --dry-run` cannot report `Config
+loaded` for a file the real load refuses.
+
+### The test file is registered
+
+`crates/ragent-config/tests/all.rs` gained
+`#[path = "test_retired_alias_spelling.rs"] mod test_retired_alias_spelling;`.
+Without it the eleven cases compiled into nothing; with it they run as
+`test_retired_alias_spelling::<fn>`.
+
+### Two readiness cases (`crates/ragent-agent/tests/test_dry_run_extra.rs`)
+
+`test_project_config_with_a_retired_alias_spelling_is_blocked` (config section
+BLOCKED, exit 1, the item message names `bash` and `Bash`) and
+`test_project_config_with_an_unregistered_alias_target_still_loads` (the
+"not a rename problem" half, so the readiness check is not simply "refuse every
+alias"). Both are `#[serial_test::serial]` and call `isolate()`.
+
+While adding them, `test_env_config_path_loaded` was found to reference `dir`
+without ever binding it - it could not have compiled had the file been built;
+it now binds `dir` and calls `isolate()` like its siblings.
+
+## RED proofs (run, observed, reverted byte-identically)
+
+Every file was copied with `cp -p` first and restored with `cp -p` plus
+`md5sum -c` against a recorded checksum, then `touch`ed (a `cp -p` restore keeps
+the older mtime and lets cargo reuse the broken object file).
+
+1. Removing `Self::reject_retired_alias_spellings(&config.tools, &label)?` from
+   `parse_file` failed **five** loader cases: the retired source key, the retired
+   target, the "every offending entry" case, and both self-mapping cases. The one
+   case that still passed is the inline route's - which is proof 2's subject.
+   (`md5sum -c`: `crates/ragent-config/src/config.rs: OK`.)
+2. Removing the call from the `RAGENT_CONFIG_CONTENT` route failed
+   `test_the_inline_environment_route_is_refused_and_names_itself` with "the
+   inline route must be refused like any other configuration". The two call sites
+   are not redundant: proof 1 does not red it and proof 2 does not red proof 1's
+   five.
+3. Removing the dry-run call failed
+   `test_project_config_with_a_retired_alias_spelling_is_blocked` at the
+   `assert_eq!(cfg.status, ReadinessStatus::Blocked)` line - the readiness report
+   really is checked rather than incidentally correct.
+4. (Carried from the resolver half, re-run here.) Removing the retired-entry arm
+   from `AliasTable::from_aliases` failed
+   `test_resolver_never_consults_a_retired_spelling_from_the_table` with
+   `left: Some("think")`.
+
 ## Verification
 
-`cargo fmt --check`; `cargo clippy -p ragent-types -p ragent-config -p ragent-agent
---all-targets` (only the pre-existing `pub(crate)`-inside-private-module noise);
-`cargo test -p ragent-config --test all` 415 passed; `cargo test -p ragent-config --doc`
-8 passed; `cargo test -p ragent-agent --test all test_tool_alias_table::` 25 passed;
-eight guard scripts pass (`check-inline-tests`, `check-dead-code-reasons`,
-`check-silent-errors`, `check-security-unwraps`, `check-poison-locks`,
-`check-test-env-isolation`, `check-file-tool-containment`, `check-shared-guards`).
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy -p ragent-config -p ragent-agent --all-targets`: **no finding in
+  any touched file** (the warnings reported are the pre-existing
+  `pub(crate) ... inside private module` family and `unnecessary structure name
+  repetition` in crates/files this task did not open).
+- `cargo nextest run -p ragent-config`: **436 passed / 0 failed** (the eleven
+  cases now run; the crate was 425 before).
+- `cargo nextest run -p ragent-agent`: **2103 passed / 0 failed / 1 skipped**
+  (two new dry-run cases; 2101 before).
+- `cargo test -p ragent-config --doc`: 8 passed.
+- All twelve `scripts/check-*.sh` guards pass except `check-bench-regression`,
+  which reports `no criterion results directory found at target/criterion` -
+  it needs a bench run first and asserts nothing about this change.
+
+## Gotchas
+
+- **A `tests/test_*.rs` file that no `tests/all.rs` declares runs nothing and
+  says so only if you look.** `cargo nextest run -p <crate> -E 'test(<file>::)'`
+  prints `0 tests run` rather than an error, which reads like success. After
+  adding a test file, run the filter and check the count is what you wrote.
+- **`pub(crate)` stops at the crate boundary even for a `#[doc(hidden)]`
+  helper.** The dry-run path is in `ragent-agent`, so the shared renderer had to
+  be `pub`.
+- `awk 'length > 101'` on `CHANGELOG.md` is worth running before finishing; the
+  file has older long lines, so check the block you wrote rather than the file.

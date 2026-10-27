@@ -779,6 +779,14 @@ pub fn should_retry_stream_error(
 /// Convert message parts into provider-facing [`ChatContent`] without any
 /// blocking I/O. Panics if called on an [`Image`] part; callers must first
 /// verify the session has no images (see [`history_to_chat_messages`]).
+///
+/// A [`MessagePart::ToolCall`]'s tool name is forwarded **verbatim** (FR-028):
+/// a record written before the rename carries the spelling the old build sent
+/// the provider, and a continued turn has to match it. Rewriting it here would
+/// make the assistant's `tool_use` disagree with the `tool_result` that answers
+/// it, and the provider rejects the pair. `crates/ragent-agent/tests/`
+/// `test_fr028_state_survival.rs` case 7 pins this for every retired spelling
+/// and for a name that never existed.
 fn parts_to_chat_content_sync(parts: &[MessagePart]) -> ChatContent {
     let mut content_parts: Vec<ContentPart> = Vec::new();
 
@@ -798,8 +806,16 @@ fn parts_to_chat_content_sync(parts: &[MessagePart]) -> ChatContent {
                     input: state.input.clone(),
                 });
             }
-            MessagePart::Reasoning { .. } => {
-                // Reasoning is not forwarded to the provider.
+            MessagePart::Reasoning { text, signature } => {
+                // FR-011: the reasoning block is forwarded *with* its
+                // signature so a provider whose wire profile declares it can
+                // replay the signed block; every other profile's encoder omits
+                // it, which is where the omission belongs (a property of the
+                // wire contract, not of history).
+                content_parts.push(ContentPart::Reasoning {
+                    text: text.clone(),
+                    signature: signature.clone(),
+                });
             }
             MessagePart::Image { .. } => {
                 // FUNC-043: never panic on a data-driven part. Image parts
@@ -839,8 +855,13 @@ pub(crate) async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent 
                     input: state.input.clone(),
                 });
             }
-            MessagePart::Reasoning { .. } => {
-                // Reasoning is not forwarded to the provider.
+            MessagePart::Reasoning { text, signature } => {
+                // FR-011: forwarded with its signature; the encoder for the
+                // active provider's profile decides whether it is replayed.
+                content_parts.push(ContentPart::Reasoning {
+                    text: text.clone(),
+                    signature: signature.clone(),
+                });
             }
             MessagePart::Image(img) => {
                 let mime_type = img.mime_type.clone();
@@ -917,9 +938,9 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 
     // 2. Check if any file-writing tool was executed in assistant_parts.
     let write_tools = [
-        "write",
+        "Write",
         "create",
-        "edit",
+        "Edit",
         "multiedit",
         "multi_edit",
         "patch",

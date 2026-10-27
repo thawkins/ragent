@@ -235,11 +235,16 @@ fn warm_message_search_index_is_noop_then_backfills() {
     // Rows are indexed incrementally on insert, so the warm-up is a no-op.
     assert_eq!(storage.warm_message_search_index().expect("warm"), 0);
 
-    // Simulate an upgrade: drop the FTS row, then the warm-up backfills it.
+    // Simulate an upgrade: drop the FTS row *and* its key row, then the warm-up
+    // backfills it. Dropping the key row is what a legacy database looks like -
+    // the index is contentless, so a bare index row with no `message_fts_keys`
+    // row is already treated as missing (SQLITE T-01).
     {
         let conn = storage.conn_lock_for_test().expect("lock");
         conn.execute("DELETE FROM messages_fts", [])
             .expect("clear fts");
+        conn.execute("DELETE FROM message_fts_keys", [])
+            .expect("clear fts keys");
     }
     assert_eq!(storage.warm_message_search_index().expect("backfill"), 1);
     // A second run finds nothing missing.
@@ -269,9 +274,13 @@ fn warm_message_search_index_skips_corrupt_parts() {
         )
         .expect("plant broken");
         conn.execute("DELETE FROM messages_fts", []).expect("clear");
+        conn.execute("DELETE FROM message_fts_keys", [])
+            .expect("clear keys");
     }
-    // The valid message is backfilled; the corrupt one is skipped.
-    assert_eq!(storage.warm_message_search_index().expect("backfill"), 2);
+    // Only the valid message is backfilled. The report counts rows the warm-up
+    // actually repaired, so the corrupt message - visited, logged and skipped -
+    // does not inflate it (SQLITE T-01: a skipped row is not a repair).
+    assert_eq!(storage.warm_message_search_index().expect("backfill"), 1);
     let hits = storage
         .search_conversation("s1", "valid", 10)
         .expect("search");

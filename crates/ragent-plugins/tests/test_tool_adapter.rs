@@ -111,7 +111,7 @@ fn registration_rejects_collision_with_builtin() {
         LifecycleState::Loaded
     );
 
-    let builtins: BTreeSet<String> = ["read".to_string(), "bash".to_string()]
+    let builtins: BTreeSet<String> = ["read".to_string(), "Bash".to_string()]
         .into_iter()
         .collect();
 
@@ -147,7 +147,7 @@ fn registration_accepts_distinct_names_and_registers_all() {
         manager.enable("multi").expect("enable").state,
         LifecycleState::Loaded
     );
-    let builtins: BTreeSet<String> = ["read".to_string(), "bash".to_string()]
+    let builtins: BTreeSet<String> = ["read".to_string(), "Bash".to_string()]
         .into_iter()
         .collect();
 

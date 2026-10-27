@@ -38,7 +38,10 @@ Dev-dependencies: tempfile, tokio (full+test-util), criterion.
   - `symbols(filter)` / `try_symbols(filter)` — Query symbols from the structured index.
   - `references(name, limit)` / `try_references(...)` — Find all references to a symbol.
   - `dependencies(path, direction)` / `try_dependencies(...)` — Get file dependencies (imports or dependents).
-  - `status()` / `try_status()` — Index statistics.
+  - `status()` / `try_status()` — Index statistics. `try_status` is the
+    render-path poll: it memoises the graph node count (`graph_node_count`
+    de-duplicates the union of both edge endpoint columns, a multi-second scan on
+    a large graph) and refreshes it when the edge count changes.
   - `godnodes(n)` / `try_godnodes(n)` — Top-N highest-degree symbols.
   - `path(from, to)` / `try_path(...)` — Shortest path between two symbols.
   - `explain(name)` / `try_explain(name)` — Symbol metadata and edges.

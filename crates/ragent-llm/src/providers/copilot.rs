@@ -31,6 +31,9 @@ use std::pin::Pin;
 use std::sync::Mutex;
 
 use super::thinking::{reasoning_effort_from_request, reasoning_levels_from_supported_efforts};
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::profile_table::OPENAI_CHAT;
+use super::wire::trace;
 use crate::llm::{ChatRequest, LlmClient, StreamEvent, ToolDefinition};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
@@ -337,6 +340,7 @@ impl LlmClient for CopilotClient {
         let url = format!("{}/chat/completions", self.base_url);
         tracing::debug!(url = %url, model = %request.model, "copilot chat request");
         let body = self.build_request_body(&request, &request.tools);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body).context("serialise Copilot request body")?;
 
         let timeout_secs = request
@@ -403,7 +407,10 @@ impl LlmClient for CopilotClient {
             // previous chunk so a UTF-8 sequence split across TCP chunks is not
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
+            // FR-004: the chat-completions family keys tool calls by
+            // `tool_calls[].index`, so the shared accumulator owns the open-call
+            // state instead of a `HashMap<u64, String>` per provider.
+            let mut acc = ToolCallAccumulator::new(OPENAI_CHAT, "copilot");
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -516,20 +523,17 @@ impl LlmClient for CopilotClient {
                         if let Some(tool_calls) = delta["tool_calls"].as_array() {
                             for tc in tool_calls {
                                 let index = tc["index"].as_u64().unwrap_or(0);
+                                let key = StreamKey::Index(index);
 
                                 if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
+                                    acc.set_id(&key, id);
                                 }
 
                                 if let Some(function) = tc.get("function") {
-                                    if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
+                                    if let Some(name) = function["name"].as_str()
+                                        && let Some(event) = acc.open(key.clone(), None, name)
+                                    {
+                                        yield event;
                                     }
 
                                     // F4: accept both argument forms (string
@@ -537,14 +541,9 @@ impl LlmClient for CopilotClient {
                                     let args_json = super::tool_cache::tool_arguments_json(function);
                                     if let Some(args) =
                                         args_json.filter(|args| !args.is_empty())
+                                        && let Some(event) = acc.delta(&key, &args)
                                     {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args,
-                                        };
+                                        yield event;
                                     }
                                 }
                             }
@@ -552,12 +551,10 @@ impl LlmClient for CopilotClient {
 
                         // Finish reason
                         if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End pending tool calls in index order (see the
-                            // openai provider for the rationale).
-                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                            ends.sort_unstable_by_key(|(idx, _)| *idx);
-                            for (_, id) in ends {
-                                yield StreamEvent::ToolCallEnd { id };
+                            // End the open calls in index order (see the shared
+                            // accumulator for the rationale).
+                            for event in acc.end_all() {
+                                yield event;
                             }
 
                             let reason = match finish_reason {

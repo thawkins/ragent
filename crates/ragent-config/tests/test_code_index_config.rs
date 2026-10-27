@@ -105,12 +105,6 @@ fn test_config_defaults_are_safe() {
         config.code_index.enabled,
         "code_index.enabled should default to true — agents need code search"
     );
-
-    // Tool visibility: codeindex should be ON by default
-    assert!(
-        config.tool_visibility.codeindex,
-        "tool_visibility.codeindex should default to true"
-    );
 }
 
 #[test]
@@ -120,10 +114,6 @@ fn test_config_roundtrip_preserves_defaults() {
     let restored: Config = serde_json::from_str(&json).unwrap();
 
     assert_eq!(restored.code_index.enabled, original.code_index.enabled);
-    assert_eq!(
-        restored.tool_visibility.codeindex,
-        original.tool_visibility.codeindex
-    );
 }
 
 #[test]
@@ -141,21 +131,5 @@ fn test_serialised_default_omits_code_index_enabled() {
         code_index.get("enabled").is_none(),
         "code_index.enabled should be omitted from serialised default (it is true), but found: {:?}",
         code_index.get("enabled")
-    );
-}
-
-#[test]
-fn test_serialised_tool_visibility_omits_default_codeindex() {
-    // When serialising the default config, `tool_visibility.codeindex` (true) should
-    // be omitted so that code-level default changes take effect.
-    let config = Config::default();
-    let json = serde_json::to_string_pretty(&config).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    let tool_visibility = &parsed["tool_visibility"];
-    assert!(
-        tool_visibility.get("codeindex").is_none(),
-        "tool_visibility.codeindex should be omitted from serialised default (it is true), but found: {:?}",
-        tool_visibility.get("codeindex")
     );
 }

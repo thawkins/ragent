@@ -36,8 +36,9 @@
 //! ## What this file deliberately does not check
 //!
 //! - **The per-family counts.** `test_tool_rename_atomic_landing.rs` case 5 owns
-//!   those (21 families, the `agent` 3 / `team` 20 canaries). Repeating them here
-//!   would be two guards to keep in step.
+//!   those (21 families, the `agent` 4 / `team` 19 canaries - the split
+//!   `permission_category()` gives, since `team_wait` reports `agent:spawn`).
+//!   Repeating them here would be two guards to keep in step.
 //! - **`permission.rs`'s `Permission` spellings.** Those are the permission
 //!   *type* vocabulary (`Read`, `Bash`, `Edit`, ...) parsed from a rule's
 //!   `permission` field, one step removed from a category, and FR-028 keeps them
@@ -52,7 +53,8 @@
 
 use ragent_agent::hooks::{
     HookConfig, HookTrigger, report_retired_matcher_spellings_once,
-    reset_retired_matcher_spellings_for_test, retired_matcher_spellings_for_test,
+    reset_retired_matcher_spellings_for_test, retired_matcher_report,
+    retired_matcher_spellings_for_test,
 };
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 use ragent_agent::session::history::history_to_chat_messages;
@@ -217,6 +219,15 @@ fn test_a_hook_matcher_naming_only_a_retired_spelling_is_reported_once() {
         vec![("bash".to_string(), "Bash".to_string())],
         "FR-028: the matcher names the retired spelling and its replacement"
     );
+    // The sentence the warning emits has to name the spelling, its replacement
+    // and the trigger, or a reader cannot fix the file it is about.
+    let sentence = retired_matcher_report("bash", "Bash", "pre_tool_use");
+    for needle in ["bash", "Bash", "pre_tool_use"] {
+        assert!(
+            sentence.contains(needle),
+            "FR-028: the report must name {needle:?}; got {sentence:?}"
+        );
+    }
     assert_eq!(
         report_retired_matcher_spellings_once(&hooks),
         1,

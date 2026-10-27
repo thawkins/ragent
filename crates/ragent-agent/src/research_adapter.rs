@@ -3,7 +3,7 @@
 //!
 //! The research crate defines its own small traits ([`ragent_research::WebSearchTool`],
 //! [`ragent_research::WebFetchTool`], [`ragent_research::LocalTool`]).  The agent
-//! crate has access to the full tool registry (`glob`, `grep`, `read`, `list`,
+//! crate has access to the full tool registry (`Glob`, `Grep`, `read`, `list`,
 //! `websearch`, `webfetch`), so this module provides thin wrappers that implement
 //! the research traits by calling those agent tools.
 //!
@@ -37,7 +37,7 @@ use ragent_research::{
 /// Build a [`ResearchSession`] backed by the agent tool `registry`.
 ///
 /// If `websearch`/`webfetch` are present, web gathering is enabled.  If
-/// `glob`/`grep`/`read`/`list` are present, local gathering is enabled.
+/// `Glob`/`Grep`/`read`/`list` are present, local gathering is enabled.
 /// Missing tools are silently omitted so the session degrades gracefully.
 ///
 /// If `active_model` is supplied and a `ProviderRegistry` is available, an
@@ -335,8 +335,8 @@ fn build_local_gatherer(
     storage: Option<Arc<Storage>>,
     config: Option<Arc<Config>>,
 ) -> Option<LocalGatherer> {
-    let glob = registry.get("glob")?;
-    let grep = registry.get("grep")?;
+    let glob = registry.get("Glob")?;
+    let grep = registry.get("Grep")?;
     let read = registry.get("read")?;
     let list = registry.get("list")?;
     let ctx = build_tool_context(

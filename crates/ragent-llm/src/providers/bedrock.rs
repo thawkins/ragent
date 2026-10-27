@@ -43,14 +43,19 @@ use super::thinking::{
     request_uses_unsupported_anthropic_display,
 };
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::encode::{MessageContext, encode_messages};
+use super::wire::profile_table::{ANTHROPIC_MESSAGES, BEDROCK_CONVERSE};
+use super::wire::trace;
+#[cfg(test)]
+use crate::llm::ChatContent;
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
 
 use super::anthropic::DEFAULT_MAX_OUTPUT_TOKENS;
-use super::media::{extract_base64_from_data_uri, extract_mime_from_data_uri};
 
 /// Fallback context window (tokens) reported for a discovered Bedrock model
 /// whose `ListFoundationModels` entry does not declare one (ANTIPAT M6.10).
@@ -445,56 +450,13 @@ impl BedrockAnthropicClient {
     /// This is the same format as the direct Anthropic Messages API, but
     /// sent to the Bedrock endpoint.
     fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut messages = Vec::new();
-
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .map(|part| match part {
-                            ContentPart::Text { text } => json!({
-                                "type": "text",
-                                "text": text
-                            }),
-                            ContentPart::ToolUse { id, name, input } => json!({
-                                "type": "tool_use",
-                                "id": id,
-                                "name": name,
-                                "input": input
-                            }),
-                            ContentPart::ToolResult { tool_use_id, content, is_error } => json!({
-                                // FR-014: Anthropic Messages on Bedrock carries the
-                                // flag natively.
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": content,
-                                "is_error": is_error
-                            }),
-                            // FR-024: Image support for Anthropic models
-                            ContentPart::ImageUrl { url } => json!({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": extract_mime_from_data_uri(url).unwrap_or("image/png"),
-                                    "data": extract_base64_from_data_uri(url).unwrap_or(url.as_str())
-                                }
-                            }),
-                            // FR-011: reasoning replay is the echo profile's
-                            // encoder's job (T-018); this loop never forwards it.
-                            ContentPart::Reasoning { .. } => Value::Null,
-                        })
-                        .filter(|v| !v.is_null())
-                        .collect();
-                    json!(content_parts)
-                }
-            };
-            messages.push(json!({
-                "role": msg.role,
-                "content": content
-            }));
-        }
+        // The same Anthropic Messages carrier the direct client writes, so this
+        // client passes its profile and nothing else (FR-006).
+        let ctx = MessageContext::default();
+        let messages = match encode_messages(ANTHROPIC_MESSAGES, &request.messages, &ctx) {
+            Ok(messages) => messages,
+            Err(loss) => return json!({ "error": loss.to_string() }),
+        };
 
         let mut body = json!({
             "anthropic_version": "bedrock-2023-06-01",
@@ -518,7 +480,7 @@ impl BedrockAnthropicClient {
             // H2: reuse the cached serialised Anthropic-format tool list (the
             // Bedrock Anthropic body uses the same `input_schema` shape).
             let cached = cached_tools(ToolFormat::Anthropic, &request.tools);
-            body["tools"] = cached.anthropic_tools_array();
+            body[ToolFormat::Anthropic.body_key()] = cached.anthropic_tools_array();
         }
 
         // FR-025: Thinking/reasoning support for Claude models
@@ -550,6 +512,7 @@ impl LlmClient for BedrockAnthropicClient {
         );
 
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body)
             .context("Failed to serialize Bedrock Anthropic request body")?;
 
@@ -600,7 +563,12 @@ impl LlmClient for BedrockAnthropicClient {
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
-            let mut tool_call_args: HashMap<String, String> = HashMap::new();
+            // FR-004: the Anthropic-Messages shape behind Bedrock keys a tool block
+            // by its content-block index, exactly as the direct Anthropic provider
+            // does. A frame that carries no index has nothing to key by and falls
+            // through to the accumulator's last-opened attribution, which T-009
+            // (FR-005) removes in favour of a required index.
+            let mut acc = ToolCallAccumulator::new(ANTHROPIC_MESSAGES, "bedrock");
 
             futures::pin_mut!(stream);
 
@@ -701,10 +669,31 @@ impl LlmClient for BedrockAnthropicClient {
                                         yield StreamEvent::ReasoningStart;
                                     }
                                     Some("tool_use") => {
-                                        let id = content_block["id"].as_str().unwrap_or("").to_string();
-                                        let name = content_block["name"].as_str().unwrap_or("").to_string();
-                                        tool_call_args.insert(id.clone(), String::new());
-                                        yield StreamEvent::ToolCallStart { id, name };
+                                        let id = content_block["id"].as_str().unwrap_or("");
+                                        let name = content_block["name"].as_str().unwrap_or("");
+                                        // The Anthropic Messages shape names a block
+                                        // by its `index` and its tool by `id`, so
+                                        // `from_frame` prefers the index and falls
+                                        // back to the id. A block that supplies
+                                        // neither cannot be addressed by any later
+                                        // frame, so it is dropped rather than given
+                                        // an invented key (FR-004).
+                                        match StreamKey::from_frame(
+                                            parsed["index"].as_u64(),
+                                            Some(id),
+                                        ) {
+                                            Some(key) => {
+                                                if let Some(event) =
+                                                    acc.open(key, Some(id), name)
+                                                {
+                                                    yield event;
+                                                }
+                                            }
+                                            None => tracing::debug!(
+                                                "Bedrock: tool_use block with no index and no \
+                                                 id; dropping its start"
+                                            ),
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -722,26 +711,51 @@ impl LlmClient for BedrockAnthropicClient {
                                             yield StreamEvent::ReasoningDelta { text: text.to_string() };
                                         }
                                     }
-                                                                          Some("input_json_delta") => {
-                                                                              if let Some(json_str) = delta["partial_json"].as_str()
-                                                                                  && let Some((id, args)) = tool_call_args.iter_mut().last()
-                                                                              {
-                                                                                  args.push_str(json_str);
-                                                                                  yield StreamEvent::ToolCallDelta {
-                                                                                      id: id.clone(),
-                                                                                      args_json: json_str.to_string(),
-                                                                                  };
-                                                                              }
-                                                                          }                                    _ => {}
+                                    // FR-011: the signed-thinking block's
+                                    // signature, surfaced apart from the
+                                    // reasoning text so the record can echo the
+                                    // block back with it.
+                                    Some("signature_delta") => {
+                                        if let Some(signature) = delta["signature"].as_str() {
+                                            yield StreamEvent::ReasoningSignature {
+                                                signature: signature.to_string(),
+                                            };
+                                        }
+                                    }
+                                    Some("input_json_delta") => {
+                                        if let Some(json_str) = delta["partial_json"].as_str() {
+                                            // The block is named by this event's
+                                            // `index`; a frame that omits it names no
+                                            // call, and folding it onto the block
+                                            // opened last merges two parallel calls
+                                            // (FR-005, FUNC-032).
+                                            let Some(index) = parsed["index"].as_u64() else {
+                                                tracing::warn!(
+                                                    "Bedrock: input_json_delta without an \
+                                                     index; skipping frame"
+                                                );
+                                                continue;
+                                            };
+                                            if let Some(event) =
+                                                acc.delta(&StreamKey::Index(index), json_str)
+                                            {
+                                                yield event;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
                             "content_block_stop" => {
-                                if let Some((id, _)) = tool_call_args.iter().last() {
-                                    let id = id.clone();
-                                    if !id.is_empty() {
-                                        yield StreamEvent::ToolCallEnd { id: id.clone() };
-                                        tool_call_args.remove(&id);
-                                    }
+                                let Some(index) = parsed["index"].as_u64() else {
+                                    tracing::warn!(
+                                        "Bedrock: content_block_stop without an index; \
+                                         skipping frame"
+                                    );
+                                    continue;
+                                };
+                                if let Some(event) = acc.end(&StreamKey::Index(index)) {
+                                    yield event;
                                 }
                             }
                             "message_delta" => {
@@ -802,85 +816,14 @@ impl BedrockConverseClient {
     /// Translates `ChatRequest` into the Converse format, including tool
     /// definitions (FR-021) and image content (FR-024).
     fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut messages = Vec::new();
-
         // Add system prompt as a separate top-level field
-        // (Converse API uses `system` not a system message)
-
-        for msg in request.messages.iter() {
-            if msg.role == "system" {
-                continue; // Handled separately
-            }
-
-            let role = match msg.role.as_str() {
-                "user" => "user",
-                "assistant" => "assistant",
-                _ => continue, // Skip unknown roles
-            };
-
-            let content = match &msg.content {
-                ChatContent::Text(text) => {
-                    vec![json!({
-                        "text": text
-                    })]
-                }
-                ChatContent::Parts(parts) => {
-                    parts
-                        .iter()
-                        .map(|part| match part {
-                            ContentPart::Text { text } => json!({
-                                "text": text
-                            }),
-                            // FR-024: Image support for Converse API
-                            ContentPart::ImageUrl { url } => {
-                                let mime = extract_mime_from_data_uri(url).unwrap_or("image/png");
-                                let data =
-                                    extract_base64_from_data_uri(url).unwrap_or(url.as_str());
-                                json!({
-                                    "image": {
-                                        "format": mime_to_converse_format(mime),
-                                        "source": {
-                                            "bytes": data
-                                        }
-                                    }
-                                })
-                            }
-                            // FR-021: Tool use in Converse format
-                            ContentPart::ToolUse { id, name, input } => json!({
-                                "toolUse": {
-                                    "toolUseId": id,
-                                    "name": name,
-                                    "input": input
-                                }
-                            }),
-                            ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                                is_error,
-                            } => json!({
-                                // FR-014: Converse carries the flag as its native
-                                // `status` field.
-                                "toolResult": {
-                                    "toolUseId": tool_use_id,
-                                    "content": [{
-                                        "text": content
-                                    }],
-                                    "status": if *is_error { "error" } else { "success" }
-                                }
-                            }),
-                            // FR-011: Converse has no signed-reasoning channel.
-                            ContentPart::Reasoning { .. } => Value::Null,
-                        })
-                        .filter(|v| !v.is_null())
-                        .collect()
-                }
-            };
-
-            messages.push(json!({
-                "role": role,
-                "content": content
-            }));
-        }
+        // (Converse API uses `system` not a system message). The encoder drops the
+        // roles Converse has no slot for, `system` among them (FR-006).
+        let ctx = MessageContext::default();
+        let messages = match encode_messages(BEDROCK_CONVERSE, &request.messages, &ctx) {
+            Ok(messages) => messages,
+            Err(loss) => return json!({ "error": loss.to_string() }),
+        };
 
         let mut body = json!({
             "messages": messages,
@@ -917,23 +860,10 @@ impl BedrockConverseClient {
             // H2: reuse the cached serialised `toolConfig` object instead of
             // rebuilding a fresh `Vec<Value>` of `toolSpec` objects per call.
             let cached = cached_tools(ToolFormat::Bedrock, &request.tools);
-            body["toolConfig"] = cached.bedrock_tool_config_object();
+            body[ToolFormat::Bedrock.body_key()] = cached.bedrock_tool_config_object();
         }
 
         body
-    }
-}
-
-/// Converts a MIME type to the Converse API image format string.
-///
-/// E.g. `image/png` -> `png`, `image/jpeg` -> `jpeg`
-fn mime_to_converse_format(mime: &str) -> &str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpeg",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        _ => "png", // Default
     }
 }
 
@@ -947,6 +877,7 @@ impl LlmClient for BedrockConverseClient {
         let url = format!("{}/model/{}/converse-stream", self.base_url, self.model_id);
 
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body)
             .context("Failed to serialize Bedrock Converse request body")?;
 
@@ -996,7 +927,12 @@ impl LlmClient for BedrockConverseClient {
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
-            let mut active_tool_call_id = String::new();
+            // FR-004: the Converse stream is index-keyed (`contentBlockIndex`), so
+            // its open calls live in the shared accumulator and this module keeps no
+            // block state of its own. A frame that carries no `contentBlockIndex`
+            // names no call, so it is skipped with a warning rather than folded onto
+            // whichever block was opened last (FR-005, FUNC-032).
+            let mut acc = ToolCallAccumulator::new(BEDROCK_CONVERSE, "bedrock");
 
             futures::pin_mut!(stream);
 
@@ -1089,18 +1025,40 @@ impl LlmClient for BedrockConverseClient {
                         }
 
                         match current_event_type.as_str() {
-                                                        "contentBlockStart" => {
-                                                            if let Some(start) = parsed.get("start")
-                                                                && let Some(tool_use) = start.get("toolUse")
-                                                            {
-                                                                active_tool_call_id = tool_use["toolUseId"].as_str().unwrap_or("").to_string();
-                                                                let name = tool_use["name"].as_str().unwrap_or("").to_string();
-                                                                yield StreamEvent::ToolCallStart {
-                                                                    id: active_tool_call_id.clone(),
-                                                                    name,
-                                                                };
-                                                            }
-                                                        }                            "contentBlockDelta" => {
+                            "contentBlockStart" => {
+                                if let Some(start) = parsed.get("start")
+                                    && let Some(tool_use) = start.get("toolUse")
+                                {
+                                    let id = tool_use["toolUseId"].as_str().unwrap_or("");
+                                    let name = tool_use["name"].as_str().unwrap_or("");
+                                    // Key by `contentBlockIndex`, which the AWS shape
+                                    // repeats on every event of a block and marks
+                                    // required on each - that is what lets two parallel
+                                    // blocks keep their own fragments (FR-005). The
+                                    // `from_frame` fallback below covers only a start
+                                    // that supplies an id and no index: it pins the id,
+                                    // and such a block takes no fragment because the
+                                    // delta and stop arms require the index (FUNC-032).
+                                    let key = match parsed["contentBlockIndex"].as_u64() {
+                                        Some(index) => StreamKey::Index(index),
+                                        None => match StreamKey::from_frame(None, Some(id)) {
+                                            Some(key) => key,
+                                            None => {
+                                                tracing::debug!(
+                                                    "Bedrock Converse: toolUse block with no \
+                                                     contentBlockIndex and no toolUseId; \
+                                                     dropping its start"
+                                                );
+                                                continue;
+                                            }
+                                        },
+                                    };
+                                    if let Some(event) = acc.open(key, Some(id), name) {
+                                        yield event;
+                                    }
+                                }
+                            }
+                            "contentBlockDelta" => {
                                 if let Some(delta) = parsed.get("delta") {
                                     if let Some(text_delta) = delta.get("text")
                                         && let Some(text) = text_delta.as_str()
@@ -1111,19 +1069,39 @@ impl LlmClient for BedrockConverseClient {
                                         && let Some(input) = tool_delta.get("input")
                                         && let Some(json_str) = input.as_str()
                                     {
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: active_tool_call_id.clone(),
-                                            args_json: json_str.to_string(),
+                                        // The block is named by
+                                        // `contentBlockIndex`, which the shape repeats on
+                                        // every event of a block. A frame that omits it
+                                        // names no call, and folding it onto the block
+                                        // opened last is what merges two parallel calls
+                                        // (FR-005, FUNC-032).
+                                        let Some(index) =
+                                            parsed["contentBlockIndex"].as_u64()
+                                        else {
+                                            tracing::warn!(
+                                                "Bedrock Converse: toolUse delta without a \
+                                                 contentBlockIndex; skipping frame"
+                                            );
+                                            continue;
                                         };
+                                        if let Some(event) =
+                                            acc.delta(&StreamKey::Index(index), json_str)
+                                        {
+                                            yield event;
+                                        }
                                     }
                                 }
                             }
                             "contentBlockStop" => {
-                                if !active_tool_call_id.is_empty() {
-                                    yield StreamEvent::ToolCallEnd {
-                                        id: active_tool_call_id.clone(),
-                                    };
-                                    active_tool_call_id = String::new();
+                                let Some(index) = parsed["contentBlockIndex"].as_u64() else {
+                                    tracing::warn!(
+                                        "Bedrock Converse: contentBlockStop without a \
+                                         contentBlockIndex; skipping frame"
+                                    );
+                                    continue;
+                                };
+                                if let Some(event) = acc.end(&StreamKey::Index(index)) {
+                                    yield event;
                                 }
                             }
                             "messageStop" => {

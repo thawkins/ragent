@@ -114,7 +114,7 @@ fn test_registry_get_list_and_permission_categories() {
 }
 
 #[test]
-fn test_registry_register_replaces_and_set_hidden_removes() {
+fn test_registry_register_replaces_an_existing_tool() {
     let registry = create_vcs_registry();
 
     // Registering a stub under a fresh name adds exactly one entry.
@@ -139,26 +139,13 @@ fn test_registry_register_replaces_and_set_hidden_removes() {
         "git:write"
     );
 
-    // Hiding a tool removes it from the definitions but not the registry.
-    registry.set_hidden(&["zz_stub_tool".to_string()]);
-    let defs = registry.definitions();
-    assert!(
-        defs.iter().all(|d| d.name != "zz_stub_tool"),
-        "hidden tool must not appear in definitions"
-    );
-    assert!(
-        registry.get("zz_stub_tool").is_some(),
-        "hidden tool remains registered"
-    );
-
-    // Replacing the hidden set re-exposes it.
-    registry.set_hidden(&[]);
+    // Every registered tool is advertised: `definitions()` has no filter.
     assert!(
         registry
             .definitions()
             .iter()
             .any(|d| d.name == "zz_stub_tool"),
-        "clearing the hidden set must re-expose the tool"
+        "every registered tool must appear in definitions"
     );
 }
 

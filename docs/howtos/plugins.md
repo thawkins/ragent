@@ -1234,11 +1234,11 @@ criteria and can be used as worked examples:
 ### 15.5 Related commands and documents
 
 - `/reload` - reload customisations after plugin files change.
-- `/tools` - toggle tool visibility (plugin tools are always advertised while
-  enabled).
+- `/tools` - list every registered tool, including the `plugin_<id>_<tool>`
+  entries a loaded plugin contributes.
 - `ragent plugins <sub>` - CLI parity for the same subcommands.
 - [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md) - the
   `/plugins` command reference.
-- [`docs/howtos/config.md`](config.md) section 7.37 - the `plugins` config block.
+- [`docs/howtos/config.md`](config.md) section 7.31 - the `plugins` config block.
 - [`specs/plugins/SPEC.md`](../../../specs/plugins/SPEC.md) - the full
   plugin-system specification.

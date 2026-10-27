@@ -7,6 +7,11 @@
 //! tool, that history records the canonical name, and that switching aliases off
 //! restores the unknown-tool refusal with its did-you-mean hint.
 //!
+//! The last two cases (T-021) cover the *outbound* half of FR-015: with
+//! `tools.expose_alias_names` on, the tools array the processor sends carries the
+//! alias spelling alongside its canonical name, and with it off the same
+//! configuration sends the registry's own names.
+//!
 //! Every case uses an explicit `tools.aliases` entry onto the offline `think`
 //! tool rather than a built-in row, because the built-in targets (`webfetch`,
 //! `websearch`) perform network I/O and these tests must not touch a network.
@@ -249,6 +254,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok(Harness {
@@ -480,5 +486,110 @@ async fn test_registered_name_wins_over_a_table_entry() -> Result<()> {
         tool_call_part(&reply, "calculator").is_none(),
         "the entry must not re-point a tool that is already registered"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The outbound list a turn actually builds (FR-015, T-021)
+// ---------------------------------------------------------------------------
+
+/// The tool list the processor puts on the wire carries the alias spelling when
+/// `tools.expose_alias_names` is on, and the system prompt's tool reference
+/// names that same spelling - one list, so the prompt and the wire agree.
+#[tokio::test]
+async fn test_the_wire_and_the_prompt_advertise_the_alias_spelling() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let harness = make_processor(
+        event_bus,
+        vec![ScriptedReply::Text("done".to_string())],
+        r#"{"aliases": {"Frobnicate": "think"}, "expose_alias_names": true}"#,
+    )?;
+    let session = harness
+        .processor
+        .session_manager
+        .create_session(harness.working_dir.clone())
+        .expect("session created");
+
+    let config = harness.processor.load_config_cached();
+    let table = ragent_agent::tool::alias_table::AliasTable::from_tools_config(&config.tools);
+    let prompt = ragent_agent::session::prompt_builders::build_tool_reference_from_defs(
+        &table.outbound_definitions(
+            &harness.processor.tool_registry.definitions(),
+            config.tools.expose_alias_names,
+        ),
+    );
+    assert!(
+        prompt.contains("- `Frobnicate` -"),
+        "the prompt's tool reference advertises the spelling next to its canonical \
+         name, so the model is told about the name the wire list offers (FR-015)"
+    );
+    assert!(
+        prompt.contains("- `think` -"),
+        "the canonical name stays advertised"
+    );
+
+    let reply = harness
+        .processor
+        .process_message(
+            &session.id,
+            "what can you do",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("turn succeeds");
+    assert_eq!(reply.text_content(), "done");
+
+    let captured = harness.captured.lock().expect("captured lock");
+    let request = captured.first().expect("one request was sent");
+    let advertised: Vec<&str> = request.tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        advertised.contains(&"Frobnicate"),
+        "the request's tools array advertises the alias spelling, got {advertised:?}"
+    );
+    assert!(
+        advertised.contains(&"think"),
+        "the request's tools array still advertises the canonical name"
+    );
+    Ok(())
+}
+
+/// With the switch off the very same configuration sends the registry's own
+/// names: advertising is opt-in and inert by default (FR-015's third clause).
+#[tokio::test]
+async fn test_the_wire_list_is_unchanged_when_advertising_is_off() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let harness = make_processor(
+        event_bus,
+        vec![ScriptedReply::Text("done".to_string())],
+        r#"{"aliases": {"Frobnicate": "think"}}"#,
+    )?;
+    let session = harness
+        .processor
+        .session_manager
+        .create_session(harness.working_dir.clone())
+        .expect("session created");
+
+    let reply = harness
+        .processor
+        .process_message(
+            &session.id,
+            "what can you do",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("turn succeeds");
+    assert_eq!(reply.text_content(), "done");
+
+    let captured = harness.captured.lock().expect("captured lock");
+    let request = captured.first().expect("one request was sent");
+    let advertised: Vec<&str> = request.tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        !advertised.contains(&"Frobnicate"),
+        "with `expose_alias_names` off the resolution table stays off the wire, got \
+         {advertised:?}"
+    );
+    assert!(advertised.contains(&"think"));
     Ok(())
 }

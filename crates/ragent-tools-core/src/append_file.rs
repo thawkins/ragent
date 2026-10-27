@@ -27,7 +27,7 @@ impl Tool for AppendFileTool {
          parameters: `path` (string) - the file to append to, and `content` \
          (string) - the text to append. This is more efficient than rewriting \
          the whole file when only adding content to the end. Avoid using this \
-         for mid-file edits; use `edit` or `apply_patch` instead."
+         for mid-file edits; use `Edit` or `apply_patch` instead."
     }
 
     fn parameters_schema(&self) -> Value {

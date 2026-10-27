@@ -26,6 +26,7 @@ pub mod plugins;
 pub mod runtime_flag;
 pub mod security_analyzer;
 pub mod telemetry;
+pub mod tools;
 pub mod trigger;
 pub mod user_dirs;
 pub mod yolo;
@@ -41,8 +42,8 @@ pub use config::{
     DEFAULT_INPUT_QUEUE_CAPACITY, DEFAULT_LOOP_MAX_STEPS, ExecutionBackend, ExecutionBackendKind,
     GitLabIntegrationConfig, LoopConfig, McpServerConfig, McpTransport, MemoryConfig, ModelConfig,
     PieGapConfig, PriceEntry, ProviderConfig, ResearchConfig, ResearchEvaluateConfig,
-    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig, ToolVisibilityConfig,
-    default_acp_turn_timeout_secs, tool_family_names,
+    ResearchModelsConfig, ResearchSupervisorConfig, SddConfig, StreamConfig,
+    default_acp_turn_timeout_secs,
 };
 pub use connectors::{
     ConnectorCredentialsConfig, ConnectorMarketplaceEntry, ConnectorStoreEndpoint,
@@ -58,6 +59,7 @@ pub use permission::{
 pub use plugins::{MarketplaceEntry, PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
 pub use security_analyzer::{AnalyzerModelRef, SecurityAnalyzerConfig};
 pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};
+pub use tools::{AliasesConfig, RetiredAliasSpelling, TOOLS_ALIASES_KEY, ToolsConfig};
 pub use trigger::{McpNotificationMode, TriggerConfig};
 
 /// Re-synchronise every process-wide runtime flag (`yolo`, `edit_log`,

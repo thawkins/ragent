@@ -51,12 +51,12 @@ use ragent_types::ThinkingLevel;
 #[test]
 fn test_deny_reason_out_of_tool_set_is_tool_out_of_scope() {
     let mut spec = LoopSpec::new("coder", "goal");
-    spec.tool_set = vec!["read".to_string(), "grep".to_string()];
+    spec.tool_set = vec!["read".to_string(), "Grep".to_string()];
     let reason = spec
-        .deny_reason("bash", &serde_json::json!({"command": "ls -la"}))
+        .deny_reason("Bash", &serde_json::json!({"command": "ls -la"}))
         .expect("bash is outside the tool set");
     assert!(reason.contains("tool out of scope"), "reason: {reason}");
-    assert!(reason.contains("bash"), "reason names the tool: {reason}");
+    assert!(reason.contains("Bash"), "reason names the tool: {reason}");
     assert!(
         reason.contains("outside the loop's tool set"),
         "reason explains the tool set: {reason}"
@@ -85,11 +85,11 @@ fn test_deny_reason_mandatory_safety_tools_stay_allowed() {
 fn test_deny_reason_no_tool_set_allows_every_tool() {
     let spec = LoopSpec::new("coder", "goal");
     assert!(
-        spec.deny_reason("bash", &serde_json::json!({"command": "cargo test"}))
+        spec.deny_reason("Bash", &serde_json::json!({"command": "cargo test"}))
             .is_none()
     );
     assert!(
-        spec.deny_reason("write", &serde_json::json!({"path": "x.md"}))
+        spec.deny_reason("Write", &serde_json::json!({"path": "x.md"}))
             .is_none()
     );
 }
@@ -100,10 +100,10 @@ fn test_deny_reason_write_to_read_only_path() {
     spec.read_only = vec!["tests/**".to_string()];
     let reason = spec
         .deny_reason(
-            "write",
+            "Write",
             &serde_json::json!({"path": "tests/test_foo.rs", "content": "boom"}),
         )
-        .expect("write to a read-only path is denied");
+        .expect("Write to a read-only path is denied");
     assert!(reason.contains("read-only"), "reason: {reason}");
     assert!(
         reason.contains("constraint violation"),
@@ -156,10 +156,10 @@ fn test_deny_reason_scope_violation_on_file_operation() {
     spec.scope = vec!["src/**".to_string()];
     let reason = spec
         .deny_reason(
-            "write",
+            "Write",
             &serde_json::json!({"path": "target/out.txt", "content": "x"}),
         )
-        .expect("write outside the scope is denied");
+        .expect("Write outside the scope is denied");
     assert!(reason.contains("scope violation"), "reason: {reason}");
     assert!(
         reason.contains("outside the loop's scope"),
@@ -167,7 +167,7 @@ fn test_deny_reason_scope_violation_on_file_operation() {
     );
     // In-scope path passes.
     assert!(
-        spec.deny_reason("write", &serde_json::json!({"path": "src/main.rs"}))
+        spec.deny_reason("Write", &serde_json::json!({"path": "src/main.rs"}))
             .is_none()
     );
 }
@@ -189,7 +189,7 @@ fn test_deny_reason_bash_sub_command_write_to_read_only_path() {
     spec.read_only = vec!["tests/**".to_string()];
     let reason = spec
         .deny_reason(
-            "bash",
+            "Bash",
             &serde_json::json!({"command": "cargo test && rm tests/test_foo.rs"}),
         )
         .expect("bash rm of a read-only path is denied");
@@ -197,7 +197,7 @@ fn test_deny_reason_bash_sub_command_write_to_read_only_path() {
     // Reading commands are fine.
     assert!(
         spec.deny_reason(
-            "bash",
+            "Bash",
             &serde_json::json!({"command": "ls tests/ && cargo test"})
         )
         .is_none()
@@ -209,8 +209,8 @@ fn test_deny_reason_bash_out_of_scope_path_token() {
     let mut spec = LoopSpec::new("coder", "goal");
     spec.scope = vec!["src/**".to_string()];
     let reason = spec
-        .deny_reason("bash", &serde_json::json!({"command": "cat /etc/hostname"}))
-        .expect("bash touching an out-of-scope path is denied");
+        .deny_reason("Bash", &serde_json::json!({"command": "cat /etc/hostname"}))
+        .expect("Bash touching an out-of-scope path is denied");
     assert!(reason.contains("scope violation"), "reason: {reason}");
 }
 
@@ -415,6 +415,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured))
@@ -452,7 +453,7 @@ fn tool_result_texts(reply: &ragent_agent::message::Message) -> Vec<String> {
         .collect()
 }
 
-/// FR-009: with `tool_set: ["read"]`, a scripted `bash` call is denied with a
+/// FR-009: with `tool_set: ["read"]`, a scripted `Bash` call is denied with a
 /// "tool out of scope" observation, never executed, and the loop continues to
 /// the text-only reply which completes the run normally.
 #[tokio::test]
@@ -463,7 +464,7 @@ async fn test_out_of_tool_set_call_returns_denial_observation() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "bash",
+                name: "Bash",
                 args: r#"{"command": "echo pwned > pwned.txt"}"#.to_string(),
             },
             ScriptedReply::TextOnly("gave up"),
@@ -520,7 +521,7 @@ async fn test_out_of_tool_set_call_returns_denial_observation() -> Result<()> {
     Ok(())
 }
 
-/// FR-021: with `read_only: ["tests/**"]`, a scripted `write` to a protected
+/// FR-021: with `read_only: ["tests/**"]`, a scripted `Write` to a protected
 /// path returns a read-only constraint observation and does not modify the
 /// file. The loop continues and completes on the following text-only reply.
 #[tokio::test]
@@ -531,7 +532,7 @@ async fn test_write_to_read_only_path_denied_with_observation() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "tests/protected.rs", "content": "boom"}"#.to_string(),
             },
             ScriptedReply::TextOnly("done instead"),
@@ -649,7 +650,7 @@ async fn test_out_of_scope_file_operation_denied_with_observation() -> Result<()
 
 /// FR-008: with `tool_set: ["read"]`, the wire tool definitions offered to
 /// the loop are restricted to the set plus the mandatory safety tools -
-/// `bash` is not among them while `think` (always allowed) is.
+/// `Bash` is not among them while `think` (always allowed) is.
 #[tokio::test]
 async fn test_tool_set_restricts_loop_tool_surface() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(64));
@@ -675,7 +676,7 @@ async fn test_tool_set_restricts_loop_tool_surface() -> Result<()> {
     let first = requests.first().expect("at least one request");
     let names: Vec<&str> = first.tools.iter().map(|tool| tool.name.as_str()).collect();
     assert!(
-        !names.contains(&"bash"),
+        !names.contains(&"Bash"),
         "the loop's tool surface must exclude out-of-set tools, got: {names:?}"
     );
     assert!(
@@ -700,11 +701,11 @@ async fn test_denial_observation_does_not_terminate_loop() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "tests/locked.rs", "content": "x"}"#.to_string(),
             },
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "tests/locked.rs", "content": "y"}"#.to_string(),
             },
             ScriptedReply::TextOnly("done"),
@@ -777,7 +778,7 @@ async fn test_no_tool_set_offers_full_tool_surface() -> Result<()> {
     let first = requests.first().expect("at least one request");
     let names: Vec<&str> = first.tools.iter().map(|tool| tool.name.as_str()).collect();
     assert!(
-        names.contains(&"bash"),
+        names.contains(&"Bash"),
         "without a tool set every tool is offered, got: {names:?}"
     );
     Ok(())
@@ -792,7 +793,7 @@ async fn test_denial_applies_under_auto_approve() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "tests/blocked.rs", "content": "x"}"#.to_string(),
             },
             ScriptedReply::TextOnly("done"),

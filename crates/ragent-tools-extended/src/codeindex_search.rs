@@ -22,8 +22,8 @@ impl Tool for CodeIndexSearchTool {
          Required parameter: 'query' (symbol name, keyword, or phrase). Optional \
          filters: 'kind' (function/struct/enum/trait/etc.), 'language' (e.g. rust), \
          'file_pattern' (path substring), and 'max_results' (default 20, max 100). \
-         USE THIS instead of `grep` or `search` when looking for named code entities; \
-         use `grep` only for arbitrary text patterns, comments, or non-symbol content."
+         USE THIS instead of `Grep` or `search` when looking for named code entities; \
+         use `Grep` only for arbitrary text patterns, comments, or non-symbol content."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -66,8 +66,8 @@ impl Tool for CodeIndexSearchTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` or `glob` as fallback tools for code search.",
-                    &["grep", "glob"],
+                    "Use `Grep` or `Glob` as fallback tools for code search.",
+                    &["Grep", "Glob"],
                 ));
             }
         };

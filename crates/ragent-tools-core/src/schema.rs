@@ -44,14 +44,24 @@ pub fn validate_required_args(schema: &Value, input: &Value) -> Result<(), Strin
         let Some(field_name) = required_field.as_str() else {
             continue;
         };
-        let Some(field_value) = object.get(field_name) else {
-            return Err(format!("missing required parameter '{field_name}'"));
-        };
-        let Some(expected_type) = properties
+        let declared_type = properties
             .and_then(|props| props.get(field_name))
             .and_then(|prop| prop.get("type"))
-            .and_then(Value::as_str)
-        else {
+            .and_then(Value::as_str);
+        let Some(field_value) = object.get(field_name) else {
+            // FR-009 (spec `uniformtools`) requires the corrective result to
+            // name the offending parameter *and its declared type*, so the
+            // message states the type here rather than leaving the caller to
+            // look it up a second time from the same schema.
+            return Err(match declared_type {
+                Some(expected_type) => format!(
+                    "missing required parameter '{field_name}', which is declared as type \
+                     '{expected_type}'"
+                ),
+                None => format!("missing required parameter '{field_name}'"),
+            });
+        };
+        let Some(expected_type) = declared_type else {
             continue;
         };
         if !declared_type_matches(expected_type, field_value) {
@@ -92,4 +102,60 @@ fn json_type_name(value: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+/// Renames argument keys that differ from a declared property only by ASCII
+/// letter case onto the declared spelling, leaving every other key untouched.
+///
+/// A model that capitalises a parameter (`EXPRESSION` for `expression`, `PATH`
+/// for `path`) sent a value the tool can use; [`validate_required_args`], which
+/// matches keys exactly, could not see it. Folding here - after the decode and
+/// before the schema check - means the validator and the tool body read one
+/// spelling, and a payload that never mentioned the key is still refused.
+///
+/// Only a *unique* case-insensitive match folds: two declared properties that
+/// differ only by case must not make the choice depend on map order. A schema
+/// with no declared `properties` (a parameterless tool) is returned unchanged,
+/// and so is any input that is not a JSON object.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_tools_core::schema::fold_argument_keys;
+/// use serde_json::json;
+///
+/// let schema = json!({"properties": {"expression": {"type": "string"}}});
+/// let folded = fold_argument_keys(&schema, json!({"EXPRESSION": "6*7"}));
+/// assert_eq!(folded, json!({"expression": "6*7"}));
+/// ```
+#[must_use]
+pub fn fold_argument_keys(schema: &Value, input: Value) -> Value {
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return input;
+    };
+    let Value::Object(mut map) = input else {
+        return input;
+    };
+    let folded: Vec<(String, String)> = map
+        .keys()
+        .filter(|key| !properties.contains_key(*key))
+        .filter_map(|key| {
+            let mut matches = properties
+                .keys()
+                .filter(|declared| declared.eq_ignore_ascii_case(key));
+            let declared = matches.next()?;
+            // Only a unique match is a fold: two declared properties that differ
+            // only by case must not make the choice depend on map order.
+            if matches.next().is_some() {
+                return None;
+            }
+            Some((key.clone(), declared.clone()))
+        })
+        .collect();
+    for (from, to) in folded {
+        if let Some(value) = map.remove(&from) {
+            map.entry(to).or_insert(value);
+        }
+    }
+    Value::Object(map)
 }

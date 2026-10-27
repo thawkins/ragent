@@ -99,7 +99,6 @@ fn test_codeindex_on_persists_when_global_has_it_disabled() {
     // Mimic the `/codeindex on` handler: set enabled=true and save.
     let mut cfg = Config::load().expect("load for toggle");
     cfg.code_index.set_enabled(true);
-    cfg.tool_visibility.set_codeindex(true);
     cfg.save_to_source().expect("save after toggle");
 
     // Reload (simulate restart).
@@ -109,10 +108,6 @@ fn test_codeindex_on_persists_when_global_has_it_disabled() {
         "❌ codeindex should remain enabled after restart (got disabled). \
          Project file:\n{}",
         std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
-    );
-    assert!(
-        reloaded.tool_visibility.codeindex,
-        "tool_visibility.codeindex should remain enabled after restart"
     );
 }
 
@@ -141,52 +136,12 @@ fn test_codeindex_off_persists_when_original_config_omitted_enabled() {
     // Mimic `/codeindex off`.
     let mut cfg = Config::load().expect("load for toggle");
     cfg.code_index.set_enabled(false);
-    cfg.tool_visibility.set_codeindex(false);
     cfg.save_to_source().expect("save after toggle");
 
     let reloaded = Config::load().expect("reload");
     assert!(
         !reloaded.code_index.enabled,
         "❌ codeindex should remain disabled after restart (got enabled). \
-         Project file:\n{}",
-        std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
-    );
-    assert!(
-        !reloaded.tool_visibility.codeindex,
-        "tool_visibility.codeindex should remain disabled after restart"
-    );
-}
-
-/// `/tools <switch> on|off` for codeindex must persist across restart.
-#[test]
-#[serial]
-fn test_tools_codeindex_toggle_persists() {
-    let _guard = EnvGuard::new();
-    let tmp = tempfile::tempdir().expect("temp dir");
-    let project = tmp.path().join("project");
-    std::fs::create_dir_all(&project).expect("create project dir");
-
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", tmp.path().join(".config")) };
-    unsafe { std::env::remove_var("RAGENT_CONFIG") };
-    unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
-
-    // Start with codeindex explicitly off.
-    write_project_config(&project, r#"{ "tool_visibility": { "codeindex": false } }"#);
-
-    std::env::set_current_dir(&project).expect("cwd into project");
-
-    let cfg = Config::load().expect("load");
-    assert!(!cfg.tool_visibility.codeindex);
-
-    // Mimic `/tools codeindex on`.
-    let mut cfg = Config::load().expect("load for toggle");
-    cfg.tool_visibility.set_codeindex(true);
-    cfg.save_to_source().expect("save");
-
-    let reloaded = Config::load().expect("reload");
-    assert!(
-        reloaded.tool_visibility.codeindex,
-        "❌ tool_visibility.codeindex should remain on after restart (got off). \
          Project file:\n{}",
         std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
     );

@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 use super::openai_compat::OpenAiCompat;
 use super::thinking::openai_thinking_levels_for_model;
+use super::wire::trace;
 use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
@@ -225,6 +226,7 @@ impl LlmClient for OpenAiClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         // H2: serialise directly into a byte buffer (single allocation, no
         // intermediate string) and send via `RequestBuilder::body` rather than
         // `.json(&body)` which re-serialises through a serde adapter.

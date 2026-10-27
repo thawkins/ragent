@@ -10,7 +10,6 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
-use ragent_agent::ToolVisibilityConfig;
 use ragent_agent::agent::{AgentInfo, CustomAgentDef};
 use ragent_agent::event::EventBus;
 use ragent_agent::mcp::{McpServer, discovery::DiscoveredMcpServer};
@@ -1017,7 +1016,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help",
+        description: "List every registered tool: /tools (help) | /tools list|show | /tools help",
     },
     SlashCommandDef {
         trigger: "router",
@@ -2917,8 +2916,6 @@ pub struct App {
     pub model_loading_state: Option<ModelLoadingState>,
     /// Active model download state, if any (progress bar popup).
     pub model_download_state: Option<ModelDownloadState>,
-    /// Current persisted tool-family visibility switches.
-    pub tool_visibility: ToolVisibilityConfig,
     /// Which screen is currently displayed.
     pub current_screen: ScreenMode,
     /// Randomly selected tip shown on the home screen.
@@ -4626,7 +4623,7 @@ impl App {
         let Some(client) = self.session_processor.mcp_client.get() else {
             return;
         };
-        let (live_ids, pairs) = {
+        let (live_ids, per_server) = {
             // Non-blocking: this is reached from the event loop (a connect
             // loop event and the housekeeping pass), which must not stall behind
             // the connect loop's write lock. A miss leaves the registry stale for
@@ -4638,18 +4635,16 @@ impl App {
             // server (`mcp_<sanitized-server>_`), so the stale scan below can
             // prefix-match without re-deriving the sanitization.
             let mut live_ids = std::collections::HashSet::new();
-            let mut pairs = Vec::new();
+            let mut per_server = Vec::new();
             for server in guard.servers() {
                 if server.status == ragent_agent::mcp::McpStatus::Connected {
-                    live_ids.insert(ragent_agent::tool::McpToolWrapper::ragent_name_for(
-                        &server.id, "",
+                    live_ids.insert(ragent_agent::tool::McpToolWrapper::ragent_prefix_for(
+                        &server.id,
                     ));
-                    for tool in &server.tools {
-                        pairs.push((server.id.clone(), tool.clone()));
-                    }
+                    per_server.push((server.id.clone(), server.tools.clone()));
                 }
             }
-            (live_ids, pairs)
+            (live_ids, per_server)
         };
         let registry = &self.session_processor.tool_registry;
         // A registered MCP tool is stale when its `mcp_<sanitized-server>_`
@@ -4663,18 +4658,20 @@ impl App {
             .filter(|name| !live_ids.iter().any(|prefix| name.starts_with(prefix)))
             .collect();
         registry.remove_all(&stale);
-        for (server_id, tool) in pairs {
-            self.session_processor
-                .tool_registry
-                .register(std::sync::Arc::new(
-                    ragent_agent::tool::McpToolWrapper::new(
-                        &server_id,
-                        &tool.name,
-                        &tool.description,
-                        tool.parameters,
-                        std::sync::Arc::clone(&client),
-                    ),
-                ));
+        for (server_id, tools) in per_server {
+            // The one MCP bridge, so FR-032's namespacing rule is applied by the
+            // same implementation the startup path uses; a refused tool is
+            // reported once and simply does not appear in `wrappers`.
+            let bridged = ragent_agent::tool::mcp_tool::bridge_server_tools(
+                &server_id,
+                &tools,
+                std::sync::Arc::clone(&client),
+            );
+            for wrapper in bridged.wrappers {
+                self.session_processor
+                    .tool_registry
+                    .register(std::sync::Arc::new(wrapper));
+            }
         }
         self.session_processor.invalidate_tool_cache();
     }

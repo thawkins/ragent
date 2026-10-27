@@ -43,8 +43,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check
         run: cargo check --workspace
-      - name: Test
-        run: cargo test --workspace
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Test (nextest)
+        run: cargo nextest run --workspace --profile ci --no-fail-fast
+      - name: Test (doc tests - nextest does not run these)
+        run: cargo test --workspace --doc
 
   dead-code-lint:
     name: Dead-code lint
@@ -101,6 +105,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@nextest
       - name: Verify self-test fails on a seeded uncontained file tool
         run: bash scripts/check-file-tool-containment.sh --self-test
       - name: Verify every file tool is contained
@@ -137,10 +145,14 @@ jobs:
         run: bash scripts/check-silent-errors.sh --self-test
       - name: Verify no new silent error suppression (ANTIPAT M4)
         run: bash scripts/check-silent-errors.sh
+      - name: Verify self-test fails on a seeded retired tool spelling
+        run: bash scripts/check-tool-rename.sh --self-test
+      - name: Verify no retired tool spelling survives as a literal (FR-027, NFR-008(e))
+        run: bash scripts/check-tool-rename.sh
       - name: Verify the shared guard regression suite
-        run: 'cargo test -p ragent-types --test all test_shared_guards::'
+        run: 'cargo nextest run -p ragent-types -E "test(test_shared_guards::)"'
       - name: Verify the unified redaction regression suite
-        run: 'cargo test -p ragent-types --test all test_unified_redaction::'
+        run: 'cargo nextest run -p ragent-types -E "test(test_unified_redaction::)"'
 
   ms0-regression:
     name: ANTIPAT M0 regression suites
@@ -155,24 +167,25 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
       - name: Shared guard unit tests
-        run: 'cargo test -p ragent-types --test all test_shared_guards::'
+        run: 'cargo nextest run -p ragent-types -E "test(test_shared_guards::)"'
       - name: Unified redaction tests
-        run: 'cargo test -p ragent-types --test all test_unified_redaction::'
+        run: 'cargo nextest run -p ragent-types -E "test(test_unified_redaction::)"'
       - name: Research retry-clamp tests (ANTIPAT M0.2)
-        run: 'cargo test -p ragent-research --test all test_search_retry_clamp::'
+        run: 'cargo nextest run -p ragent-research -E "test(test_search_retry_clamp::)"'
       - name: Git argv-injection guard tests (ANTIPAT M0.3)
-        run: 'cargo test -p ragent-tools-vcs --test all test_ms0_git_arg_guards::'
+        run: 'cargo nextest run -p ragent-tools-vcs -E "test(test_ms0_git_arg_guards::)"'
       - name: Config redaction + denylist tests (ANTIPAT M0.8)
-        run: 'cargo test -p ragent-config --test all test_ms0_config_guards::'
+        run: 'cargo nextest run -p ragent-config -E "test(test_ms0_config_guards::)"'
       - name: Plugin integrity tests (ANTIPAT M0.6)
-        run: 'cargo test -p ragent-plugins --test all test_add::'
+        run: 'cargo nextest run -p ragent-plugins -E "test(test_add::)"'
       - name: Spec containment tests (ANTIPAT M0.7)
-        run: 'cargo test -p ragent-specs --test all test_govcreate_authoring::'
+        run: 'cargo nextest run -p ragent-specs -E "test(test_govcreate_authoring::)"'
       - name: Channel SSRF tests (ANTIPAT M0.5)
-        run: 'cargo test -p ragent-tools-extended --test all test_channels::'
+        run: 'cargo nextest run -p ragent-tools-extended -E "test(test_channels::)"'
       - name: Telemetry toggle tests (ANTIPAT M0.15)
-        run: 'cargo test -p ragent-telemetry --features telemetry --test all test_metric_toggles::'
+        run: 'cargo nextest run -p ragent-telemetry --features telemetry -E "test(test_metric_toggles::)"'
 
   clippy:
     name: Clippy

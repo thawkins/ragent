@@ -32,7 +32,7 @@ fn test_safe_provider_name_passes() {
 
 #[test]
 fn test_safe_tool_name_passes() {
-    assert_eq!(sanitize_attr_value("bash"), "bash");
+    assert_eq!(sanitize_attr_value("Bash"), "Bash");
     assert_eq!(sanitize_attr_value("read"), "read");
     assert_eq!(sanitize_attr_value("codeindex_search"), "codeindex_search");
 }
@@ -231,5 +231,5 @@ fn test_looks_sensitive_false_for_safe() {
     assert!(!looks_sensitive("claude-sonnet-4-20250514"));
     assert!(!looks_sensitive("ollama"));
     assert!(!looks_sensitive("qwen3:1.7b"));
-    assert!(!looks_sensitive("bash"));
+    assert!(!looks_sensitive("Bash"));
 }

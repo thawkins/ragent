@@ -113,7 +113,7 @@ fn result_tool_and_info_arms() {
         "open",
         "conversation_search",
         "session_search",
-        "skill_manage",
+        "Skill",
         "initiative",
         "apply_patch",
     ] {

@@ -35,7 +35,7 @@ fn new_seeds_line_and_byte_estimates_from_an_existing_file() {
 
 #[test]
 fn write_to_an_unopenable_path_is_a_silent_no_op() {
-    // A spool whose parent directory does not exist: `write` must swallow the
+    // A spool whose parent directory does not exist: `Write` must swallow the
     // open error and return without panicking.
     let dir = tempfile::tempdir().expect("tempdir");
     let missing = dir.path().join("no-such-dir").join("spool.log");

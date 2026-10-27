@@ -12,7 +12,7 @@ state computed from `blocked_by` dependencies — it cannot be set directly.
 
 ---
 
-## task_create
+## TaskCreate
 
 Create a task.
 
@@ -29,7 +29,7 @@ Create a task.
 
 ---
 
-## task_update
+## TaskUpdate
 
 Update an existing task. `blocked` status is rejected — pass blockedness via
 `add_blocked_by`. Completing a task auto-evaluates dependents.
@@ -48,7 +48,7 @@ Update an existing task. `blocked` status is rejected — pass blockedness via
 
 ---
 
-## task_get
+## TaskGet
 
 Retrieve the full record of one task: status, owner, metadata, dependencies,
 timestamps.
@@ -61,7 +61,7 @@ timestamps.
 
 ---
 
-## task_list
+## TaskList
 
 List all session tasks ordered by creation time.
 
@@ -73,6 +73,6 @@ List all session tasks ordered by creation time.
 
 **Example:**
 ```text
-task_create subject="Fix config loader" description="Reproduce panic and fix root cause"
-task_update task_id="task-001" status="in_progress"
+TaskCreate subject="Fix config loader" description="Reproduce panic and fix root cause"
+TaskUpdate task_id="task-001" status="in_progress"
 ```

@@ -1151,6 +1151,7 @@ fn render_messages_with_tool_calls_and_steps() {
             },
             MessagePart::Reasoning {
                 text: "reasoning line".to_string(),
+                signature: None,
             },
         ],
     ));

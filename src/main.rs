@@ -28,6 +28,8 @@ use ragent_agent::{
 use ragent_connectors::{ConnectorSession, store_dirs};
 
 mod cli;
+mod cli_out;
+
 mod cli_surface;
 mod connectors;
 mod crash_dump;
@@ -50,6 +52,11 @@ struct Cli {
     /// Print the ragent version and exit
     #[arg(long, short = 'V')]
     version: bool,
+
+    /// Print the per-provider wire matrix (the declared tool-calling contract)
+    /// and exit without contacting any provider or running any tool
+    #[arg(long, global = true)]
+    wire_matrix: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -326,9 +333,9 @@ fn working_dir() -> PathBuf {
 /// Print the ragent ASCII art startup banner to stdout.
 fn print_banner() {
     for line in ragent_tui::logo::LOGO {
-        println!("{line}");
+        cliprintln!("{line}");
     }
-    println!(
+    cliprintln!(
         "  v{}  -  Rust AI coding agent\n",
         env!("CARGO_PKG_VERSION")
     );
@@ -343,13 +350,11 @@ async fn run_dry_run_and_exit(
     agent_name: &str,
     model_override: Option<&str>,
     json_output: bool,
-    config: Arc<tokio::sync::RwLock<Config>>,
     provider_registry: Arc<ragent_agent::provider::ProviderRegistry>,
     tool_registry: Arc<ragent_agent::tool::ToolRegistry>,
 ) {
     let config_path = config_path.map(PathBuf::from);
     let working_dir = crate::working_dir();
-    let hidden_tools = config.read().await.effective_hidden_tools();
     let inputs = ragent_agent::dry_run::DryRunInputs {
         config_path,
         agent_name: agent_name.to_string(),
@@ -357,21 +362,20 @@ async fn run_dry_run_and_exit(
         provider_registry,
         tool_registry,
         working_dir,
-        hidden_tools,
     };
 
     let (report, exit_code) = ragent_agent::dry_run::run_dry_run(inputs).await;
 
     if json_output {
         match report.to_json() {
-            Ok(json) => println!("{json}"),
+            Ok(json) => cliprintln!("{json}"),
             Err(e) => {
-                eprintln!("Failed to serialise readiness report: {e}");
+                cliprintln_err!("Failed to serialise readiness report: {e}");
                 std::process::exit(2);
             }
         }
     } else {
-        print!("{}", report.to_human_string());
+        cliprint!("{}", report.to_human_string());
     }
 
     std::process::exit(i32::from(exit_code));
@@ -391,8 +395,18 @@ async fn async_main() -> Result<()> {
     // session marker the next start would report as an unclean exit.
     let cli = Cli::parse();
     if cli.version {
-        println!("ragent {}", env!("CARGO_PKG_VERSION"));
+        cliprintln!("ragent {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+
+    // `--wire-matrix` (FR-016, spec `uniformtools` T-022) is answered here, with
+    // `--version`, and before every side effect below: the panic hook, the crash
+    // marker, the config load, `Storage::open`, the secret-registry seed and the
+    // MCP connect loop. FR-016 requires the table to print without contacting any
+    // provider and without executing any tool, and the only way to guarantee that
+    // by construction is to return before the code that could do either runs.
+    if cli.wire_matrix {
+        return cli::handle_wire_matrix_command();
     }
 
     // Install the panic hook first so panics during startup are also captured.
@@ -404,22 +418,23 @@ async fn async_main() -> Result<()> {
     // below was unreachable (ANTIPAT A-01).
     match crash_dump::previous_unclean_exit(&working_dir) {
         Ok(Some(prev)) => {
-            eprintln!(
+            cliprintln_err!(
                 "warning: previous ragent session (pid {}, started {}) exited without unwinding \
                  - check log/panics/last-crash.json and other panic reports",
-                prev.pid, prev.updated_at
+                prev.pid,
+                prev.updated_at
             );
-            eprintln!("         {}", prev.core_dump_hint);
+            cliprintln_err!("         {}", prev.core_dump_hint);
         }
         Ok(None) => {}
-        Err(e) => eprintln!("warning: could not read previous crash marker: {e}"),
+        Err(e) => cliprintln_err!("warning: could not read previous crash marker: {e}"),
     }
 
     // Stamp the crash marker before anything else can die: an abort (stack
     // overflow) or SIGKILL leaves the marker as "running", which the next
     // start reports. A clean return overwrites it with "clean exit".
     if let Err(e) = crash_dump::write_record(&working_dir, "running") {
-        eprintln!("warning: failed to write crash marker: {e}");
+        cliprintln_err!("warning: failed to write crash marker: {e}");
     }
 
     let mut startup = StartupTimings::new();
@@ -447,7 +462,7 @@ async fn async_main() -> Result<()> {
         // silently downgraded to `warn` with no hint to the user.
         // SEC-078: `--log-level` is untrusted argv; neutralise control chars
         // and escape sequences before echoing it to the terminal.
-        eprintln!(
+        cliprintln_err!(
             "warning: invalid log level '{}' - falling back to 'warn'",
             ragent_types::sanitize_terminal::sanitize_terminal(&cli.log_level)
         );
@@ -507,7 +522,7 @@ async fn async_main() -> Result<()> {
     tracing::info!(log_level = %cli.log_level, tui_mode = tui_will_run, "Tracing initialized");
 
     // In TUI mode the alternate screen paints over raw stderr, so the default
-    // panic hook, `eprintln!`, and any C-library diagnostic would be lost.
+    // panic hook, `cliprintln_err!`, and any C-library diagnostic would be lost.
     // Redirect fd 2 into a truncating spool (`log/logwindow/stderr-*.log`) and
     // mirror it into the log panel; non-TUI modes keep writing to the terminal.
     let stderr_spool = if tui_will_run {
@@ -697,11 +712,6 @@ async fn async_main() -> Result<()> {
     );
 
     let t0 = Instant::now();
-    let hidden_tools = config.effective_hidden_tools();
-    if !hidden_tools.is_empty() {
-        tracing::debug!(hidden_tools = ?hidden_tools, "Hiding tools from registry");
-        tool_registry.set_hidden(&hidden_tools);
-    }
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(
         config.permission.clone(),
     )));
@@ -841,6 +851,7 @@ async fn async_main() -> Result<()> {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
     startup.record("Session manager & processor", t0.elapsed());
@@ -995,7 +1006,6 @@ async fn async_main() -> Result<()> {
             &cli.agent,
             cli.model.as_deref(),
             cli.json,
-            Arc::clone(&config),
             Arc::clone(&provider_registry),
             Arc::clone(&tool_registry),
         )
@@ -1079,7 +1089,14 @@ async fn async_main() -> Result<()> {
                         )
                         .await
                     {
-                        Ok(msg) => writeln!(std::io::stdout().lock(), "{}", msg.text_content())?,
+                        Ok(msg) => {
+                            if !crate::cli_out::writeln_io_log(
+                                std::io::stdout().lock(),
+                                format_args!("{}", msg.text_content()),
+                            ) {
+                                return Err(cli::CliExit::failure().into());
+                            }
+                        }
                         Err(e) => tracing::error!(error = %e, "Failed to process message"),
                     }
                 }
@@ -1134,12 +1151,12 @@ async fn async_main() -> Result<()> {
                     prompt.clone()
                 } else {
                     // SEC-077: the bang command must pass the same 7-layer bash
-                    // validation the `bash` tool applies; otherwise
+                    // validation the `Bash` tool applies; otherwise
                     // `ragent run "!<cmd>"` bypassed every guard (banned tools,
                     // directory escape, denied patterns, obfuscation).
                     if let Err(e) = ragent_tools_core::bash::validate_shell_command(cmd, &dir).await
                     {
-                        eprintln!("command rejected: {e}");
+                        cliprintln_err!("command rejected: {e}");
                         std::process::exit(2);
                     }
                     // Async context: spawn_blocking keeps a slow/hanging shell
@@ -1170,7 +1187,12 @@ async fn async_main() -> Result<()> {
                 .await
             {
                 Ok(msg) => {
-                    writeln!(std::io::stdout(), "{}", msg.text_content())?;
+                    if !crate::cli_out::writeln_io_log(
+                        std::io::stdout(),
+                        format_args!("{}", msg.text_content()),
+                    ) {
+                        return Err(cli::CliExit::failure().into());
+                    }
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Run failed");
@@ -1329,7 +1351,7 @@ async fn async_main() -> Result<()> {
                         )?;
                     }
                     Err(e) => {
-                        eprintln!("ragent session export: {e}");
+                        cliprintln_err!("ragent session export: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -1360,7 +1382,7 @@ async fn async_main() -> Result<()> {
                         )?;
                     }
                     Err(e) => {
-                        eprintln!("ragent session import: {e}");
+                        cliprintln_err!("ragent session import: {e}");
                         std::process::exit(1);
                     }
                 }
@@ -1511,9 +1533,13 @@ async fn async_main() -> Result<()> {
             // Flush stdout before the runtime is shut down so a closed pipe
             // (e.g. `ragent models | head`) cannot race the print and turn into
             // a `Broken pipe` panic (see the note on `main`'s bounded shutdown).
+            // The `write_io_log` helper classifies EPIPE as benign and logs it at
+            // `debug` rather than propagating a
+            // `failed printing to stdout` panic.
             let mut stdout = std::io::stdout().lock();
-            stdout.write_all(out.as_bytes())?;
-            stdout.flush()?;
+            if !crate::cli_out::write_io_log(&mut stdout, format_args!("{out}"), false) {
+                return Err(cli::CliExit::failure().into());
+            }
         }
         Some(Commands::Config { command }) => match command {
             Some(ConfigCommands::Check { json }) => {
@@ -1522,7 +1548,6 @@ async fn async_main() -> Result<()> {
                     &cli.agent,
                     cli.model.as_deref(),
                     cli.json || json,
-                    Arc::clone(&config),
                     Arc::clone(&provider_registry),
                     Arc::clone(&tool_registry),
                 )
@@ -1530,7 +1555,7 @@ async fn async_main() -> Result<()> {
             }
             _ => {
                 let config = config.read().await;
-                println!("{:#?}", *config);
+                cliprintln!("{:#?}", *config);
                 drop(config);
             }
         },
@@ -1583,7 +1608,7 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
                         model_id: model.to_string(),
                     },
                 ) else {
-                    eprintln!(
+                    cliprintln_err!(
                         "ragent spec govcreate: no model configured \
                          - pass --model provider/model or set one via /model in the TUI"
                     );
@@ -1767,7 +1792,7 @@ fn main_body() -> Result<()> {
     if let Err(e) = &result
         && stderr_spool::is_active()
     {
-        println!("ragent: {e}");
+        cliprintln!("ragent: {e}");
     }
     result
 }

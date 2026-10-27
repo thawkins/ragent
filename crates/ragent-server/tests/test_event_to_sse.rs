@@ -144,7 +144,7 @@ fn test_tool_call_args() {
     let (name, v) = parse_data(&Event::ToolCallArgs {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         args: r#"{"cmd":"ls"}"#.into(),
     });
     assert_eq!(name, "tool_call_args");
@@ -174,7 +174,7 @@ fn test_tool_result_no_metadata() {
     let (_, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         content: "ok".into(),
         content_line_count: 1,
         metadata: None,
@@ -188,7 +188,7 @@ fn test_tool_result_no_metadata() {
 fn test_tools_sent() {
     let (name, v) = parse_data(&Event::ToolsSent {
         session_id: "s1".into(),
-        tools: vec!["read".into(), "bash".into()],
+        tools: vec!["read".into(), "Bash".into()],
     });
     assert_eq!(name, "tools_sent");
     let arr = v["tools"].as_array().unwrap();
@@ -543,7 +543,7 @@ fn test_tool_result_redacts_api_key() {
     let (_, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         content: format!("Result: {secret}"),
         content_line_count: 1,
         metadata: None,
@@ -563,7 +563,7 @@ fn test_tool_result_redacts_bearer_token() {
     let (_, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         content: format!("Auth: {token}"),
         content_line_count: 1,
         metadata: None,
@@ -583,7 +583,7 @@ fn test_tool_result_redacts_key_prefix() {
     let (_, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         content: format!("My key: {secret}"),
         content_line_count: 1,
         metadata: None,
@@ -602,7 +602,7 @@ fn test_tool_result_no_secrets_passes_through() {
     let (_, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         content: "Hello world, no secrets here".into(),
         content_line_count: 1,
         metadata: None,

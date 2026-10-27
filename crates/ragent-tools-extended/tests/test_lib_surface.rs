@@ -50,24 +50,6 @@ fn test_registry_definitions_sorted_and_nonempty() {
     }
 }
 
-#[test]
-fn test_registry_set_hidden_hides_tools_from_definitions() {
-    let reg = create_extended_registry();
-    let hidden = vec!["pdf_read".to_string(), "pdf_write".to_string()];
-    reg.set_hidden(&hidden);
-    let names: Vec<String> = reg.definitions().into_iter().map(|d| d.name).collect();
-    assert!(!names.contains(&"pdf_read".to_string()));
-    assert!(!names.contains(&"pdf_write".to_string()));
-    // The tool is still registered and fetchable even while hidden.
-    assert!(reg.contains("pdf_read"));
-    // Clearing hidden restores it.
-    reg.set_hidden(&[]);
-    assert!(
-        reg.definitions().iter().any(|d| d.name == "pdf_read"),
-        "pdf_read should reappear after clearing hidden"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // ToolContext::check_path_within_workspace
 // ---------------------------------------------------------------------------

@@ -46,7 +46,7 @@ use ragent_types::message::{Message, MessagePart, Role};
 ///
 /// Public so tests can assert the persisted `schema_version` setting against
 /// the compiler-enforced value instead of a hard-coded literal.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 // PERF-071: static SQL bodies hoisted to `const &str` so the session read
 // paths build no `String` and the prepared-statement cache sees a stable
@@ -70,6 +70,19 @@ const SQL_LIST_SESSIONS_LEGACY: &str = "SELECT id, title, project_id, directory,
 const SQL_MEMORY_COLUMNS: &str = "id, content, category, source, confidence, project, session_id, \
      created_at, updated_at, access_count, last_accessed";
 
+/// Decodes a stored `messages.parts` JSON column.
+///
+/// `SQLITE T-01`: the index is contentless, so a search result's text is
+/// rebuilt from the message's own `parts` rather than read back from an FTS
+/// shadow copy. A row whose JSON will not parse is logged and reported as an
+/// error to the caller, which skips it - a corrupt body must not be silently
+/// rendered as an empty string (FUNC-020).
+fn decode_parts(parts_json: String) -> rusqlite::Result<Vec<MessagePart>> {
+    serde_json::from_str(&parts_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
+}
+
 /// Extract searchable text content from a message's parts.
 ///
 /// Concatenates all [`MessagePart::Text`] blocks, tool-call names, and
@@ -81,7 +94,7 @@ fn extract_message_text(parts: &[MessagePart]) -> String {
     let capacity = parts
         .iter()
         .map(|p| match p {
-            MessagePart::Text { text } | MessagePart::Reasoning { text } => text.len() + 1,
+            MessagePart::Text { text } | MessagePart::Reasoning { text, .. } => text.len() + 1,
             MessagePart::ToolCall { tool, .. } => tool.len() + 9,
             MessagePart::Image(_) => 0,
         })
@@ -90,7 +103,7 @@ fn extract_message_text(parts: &[MessagePart]) -> String {
     let mut first = true;
     for part in parts {
         let text = match part {
-            MessagePart::Text { text } | MessagePart::Reasoning { text } => text.as_str(),
+            MessagePart::Text { text } | MessagePart::Reasoning { text, .. } => text.as_str(),
             MessagePart::Image(_) => continue,
             MessagePart::ToolCall { tool, .. } => {
                 if !first {
@@ -858,6 +871,14 @@ impl Storage {
             archived_at TEXT,
             summary TEXT
             );
+
+            -- SQLITE T-05: the only list query filters `archived_at IS NULL`
+            -- and orders by `updated_at DESC`; without this index every session
+            -- picker runs a full scan plus a temp b-tree sort. Partial, so it
+            -- only holds live sessions even as the archive grows.
+            CREATE INDEX IF NOT EXISTS idx_sessions_active_updated
+            ON sessions(updated_at DESC) WHERE archived_at IS NULL;
+
             CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -877,21 +898,13 @@ impl Storage {
             updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS mcp_servers (
-            id TEXT PRIMARY KEY,
-            config TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'disabled',
-            updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS snapshots (
-            id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            data TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
+            -- SQLITE T-14: the `mcp_servers` and `snapshots` tables were
+            -- removed from the schema - neither had a producer or a consumer
+            -- anywhere in the tree (MCP servers are read from config files and
+            -- discovery; snapshots are the file-based ones in `snapshot.rs`).
+            -- Their historical DDL is recorded in `docs/sqlite.md` (T-14).
+            DROP TABLE IF EXISTS mcp_servers;
+            DROP TABLE IF EXISTS snapshots;
 
             CREATE TABLE IF NOT EXISTS run_cost_summaries (
             id TEXT PRIMARY KEY,
@@ -952,6 +965,16 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_todos_session
             ON todos(session_id, status);
 
+            -- SQLITE T-06: both list variants order by `created_at`, which is
+            -- not a prefix of (session_id, status), so every list sorted in a
+            -- temp b-tree. Kept alongside idx_todos_session: that one serves
+            -- the filtered count paths.
+            -- `id` is the tie-break in the `list_tasks` ORDER BY, so it is
+            -- part of the index; without it SQLite still reports a temp
+            -- b-tree for the last ORDER BY term.
+            CREATE INDEX IF NOT EXISTS idx_todos_session_created
+            ON todos(session_id, created_at, id);
+
             -- Durable initiatives (JCODEPLAN M8): long-lived goals that
             -- survive across sessions, with JSON milestone tracking.
             CREATE TABLE IF NOT EXISTS initiatives (
@@ -1005,9 +1028,6 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_memories_confidence
             ON memories(confidence DESC, updated_at DESC);
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(content, content=memories, content_rowid=rowid);
-
             -- Knowledge graph tables (Milestone 9)
             CREATE TABLE IF NOT EXISTS kg_entities (
             id INTEGER PRIMARY KEY,
@@ -1046,18 +1066,30 @@ impl Storage {
             ON kg_relationships(target_id);
 
             -- M5: Full-text search index over session messages.
-            -- Standalone FTS5 table (not external-content) because the
-            -- messages table uses TEXT primary keys rather than integer
-            -- rowids.  Kept in sync manually by create_message /
-            -- update_message / delete_messages and by
-            -- warm_message_search_index.
+            -- SQLITE T-01: contentless FTS5 (`content=''`) because nothing
+            -- reads the stored document back - `rank` comes from bm25 and no
+            -- call site uses `highlight()`. The old standalone shape kept a
+            -- full second copy of every message text in `messages_fts_content`.
+            -- The vtab therefore holds nothing but the token index; the key
+            -- columns live in `message_fts_keys` below, where a real index can
+            -- reach `session_id` (an `UNINDEXED` vtab column cannot be sought,
+            -- so every session-scoped search scanned the whole index).
             CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-            message_id UNINDEXED,
-            session_id UNINDEXED,
-            role UNINDEXED,
             content,
+            content = '',
+            contentless_delete = 1,
             tokenize = 'porter unicode61'
             );
+
+            CREATE TABLE IF NOT EXISTS message_fts_keys (
+            rowid INTEGER PRIMARY KEY,
+            message_id TEXT NOT NULL UNIQUE,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_fts_keys_session
+            ON message_fts_keys(session_id);
 
             -- M5: Optional embedding cache for session messages.
             -- When an embedding provider is configured, message vectors are
@@ -1185,7 +1217,46 @@ impl Storage {
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?1, ?2)",
             params![SCHEMA_VERSION.to_string(), now],
         )?;
+
+        // SQLITE T-01: the message index changed from a standalone FTS5 table
+        // (which copied every message body into `messages_fts_content`) to a
+        // contentless table keyed through `message_fts_keys`. A database
+        // written by an earlier version still has the old shape, and the batch
+        // above cannot have replaced it (`CREATE ... IF NOT EXISTS` leaves an
+        // existing vtab alone), so detect and rebuild it here.
+        let legacy_message_fts: bool = tx
+            .prepare_cached(
+                "SELECT COUNT(*) FROM pragma_table_info('messages_fts') WHERE name = 'message_id'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        if legacy_message_fts {
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS messages_fts;
+                 CREATE VIRTUAL TABLE messages_fts USING fts5(
+                     content,
+                     content = '',
+                     contentless_delete = 1,
+                     tokenize = 'porter unicode61'
+                 );",
+            )?;
+        }
+        // `commit` consumes the transaction, so there is no dangling `tx` to
+        // drop here.
         tx.commit()?;
+
+        // Release the connection guard BEFORE the warm-up. The two take the
+        // same `Mutex`, so holding it across the call self-deadlocked: every
+        // `Storage::open_in_memory` (and so every test that builds storage)
+        // hung inside `backfill_missing_fts_rows`. The guard is `mut`, so this
+        // `drop` unlocks the connection.
+        drop(conn);
+
+        // Rebuild the message index and its key table from the base table after
+        // the migration has committed. On a fresh database both sides are empty
+        // and this is a no-op; on an upgrade it re-indexes every message once.
+        self.warm_message_search_index()?;
 
         Ok(())
     }
@@ -1445,13 +1516,8 @@ impl Storage {
                 updated
             ],
         )?;
-        // M5: Sync the message FTS index.
-        let content = extract_message_text(&msg.parts);
-        tx.execute(
-            "INSERT INTO messages_fts (message_id, session_id, role, content) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![msg.id, msg.session_id, role_str, content],
-        )?;
+        // M5 / SQLITE T-01: sync the contentless FTS index and its key row.
+        Self::upsert_fts_row(&tx, &msg.id, &msg.session_id, &role_str, &msg.parts)?;
         // Touch session updated_at
         let now = Utc::now().to_rfc3339();
         tx.execute(
@@ -1582,18 +1648,9 @@ impl Storage {
             params![parts_json, updated, msg.id],
         )?;
         if sync_fts {
-            // M5: Sync the message FTS index - delete old entry and re-insert.
-            tx.execute(
-                "DELETE FROM messages_fts WHERE message_id = ?1",
-                params![msg.id],
-            )?;
-            let content = extract_message_text(&msg.parts);
+            // M5 / SQLITE T-01: re-sync the contentless index and its key row.
             let role_str = msg.role.to_string();
-            tx.execute(
-                "INSERT INTO messages_fts (message_id, session_id, role, content) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![msg.id, msg.session_id, role_str, content],
-            )?;
+            Self::upsert_fts_row(&tx, &msg.id, &msg.session_id, &role_str, &msg.parts)?;
         }
         tx.commit()?;
         Ok(())
@@ -1639,9 +1696,23 @@ impl Storage {
         // otherwise a failure between them desyncs the search index from the
         // messages table.
         let tx = conn.transaction()?;
-        // M5: Remove FTS entries before deleting messages.
+        // SQLITE T-01: the key table carries `session_id`, so the scoped lookup
+        // is an index seek on `idx_fts_keys_session` instead of a scan of the
+        // whole virtual table.
+        let keyed: Vec<(i64, String)> = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT rowid, message_id FROM message_fts_keys WHERE session_id = ?1",
+            )?;
+            stmt.query_map(params![session_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (rowid, _message_id) in &keyed {
+            // A contentless table with `contentless_delete=1` supports a plain
+            // rowid delete; the FTS5 'delete' command is forbidden there.
+            tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
+        }
         tx.execute(
-            "DELETE FROM messages_fts WHERE session_id = ?1",
+            "DELETE FROM message_fts_keys WHERE session_id = ?1",
             params![session_id],
         )?;
         let n = tx.execute(
@@ -2109,7 +2180,7 @@ impl Storage {
                     "SELECT id, session_id, title, status, description, created_at, updated_at,
                             active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1 AND status = ?2
-                     ORDER BY created_at",
+                     ORDER BY created_at, id",
                 )?;
                 stmt.query_map(params![session_id, s], map_task_row)?
                     .collect::<rusqlite::Result<Vec<_>>>()?
@@ -2119,7 +2190,7 @@ impl Storage {
                     "SELECT id, session_id, title, status, description, created_at, updated_at,
                             active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1
-                     ORDER BY created_at",
+                     ORDER BY created_at, id",
                 )?;
                 stmt.query_map(params![session_id], map_task_row)?
                     .collect::<rusqlite::Result<Vec<_>>>()?
@@ -2944,14 +3015,7 @@ impl Storage {
             )?;
         }
 
-        // Update FTS index.
-        tx.execute(
-            "INSERT INTO memories_fts(rowid, content)
-             SELECT rowid, content FROM memories WHERE id = ?1",
-            params![id],
-        )?;
         tx.commit()?;
-
         Ok(id)
     }
 
@@ -3054,10 +3118,10 @@ impl Storage {
         Ok(map)
     }
 
-    /// Searches structured memories using FTS5 full-text search, optionally
-    /// filtered by categories, tags, and minimum confidence.
+    /// Searches structured memories by keyword, optionally filtered by
+    /// categories, tags, and minimum confidence.
     ///
-    /// Returns entries ordered by FTS rank (most relevant first).
+    /// Returns the most recently updated/highest-confidence matches first.
     /// Increments `access_count` and updates `last_accessed` for returned results.
     ///
     /// # Errors
@@ -3071,109 +3135,89 @@ impl Storage {
         limit: usize,
         min_confidence: f64,
     ) -> Result<Vec<MemoryRow>> {
-        // C-4: the SELECT is a pure read, so use the read-only connection
-        // (PERF-069). Only the access-count UPDATE loop below takes the writer
-        // lock.
-        let conn = lock_conn_read!(self)?;
+        // C-4: the SELECT is a pure read, so use the read-only connection.
+        // The access-count update below runs after the read lock has been
+        // released; that matters when the storage is in-memory and the reader
+        // falls back to the writer connection, because re-entering the same
+        // `Mutex` would deadlock.
+        let rows: Vec<MemoryRow> = {
+            let conn = lock_conn_read!(self)?;
 
-        // Sanitise the FTS query.
-        let safe_query: String = query
-            .split_whitespace()
-            .filter(|s| !s.is_empty())
-            .map(|term| format!("\"{}\"", term.replace('"', "")))
-            .collect::<Vec<_>>()
-            .join(" ");
+            let terms: Vec<String> = query
+                .split_whitespace()
+                .filter(|s| !s.is_empty())
+                .map(|term| term.to_ascii_lowercase())
+                .collect();
 
-        if safe_query.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Build category filter clause.
-        let category_clause = if let Some(cats) = categories {
-            if cats.is_empty() {
-                String::new()
-            } else {
-                let placeholders: Vec<String> = (1..=cats.len()).map(|i| format!("?{i}")).collect();
-                format!(" AND e.category IN ({})", placeholders.join(", "))
+            if terms.is_empty() {
+                return Ok(Vec::new());
             }
-        } else {
-            String::new()
-        };
 
-        // Compute parameter offset for FTS query param.
-        let fts_param_idx = categories.map_or(1, |c| c.len() + 1);
-        let limit_param_idx = fts_param_idx + 1;
+            let mut sql = format!(
+                "SELECT e.id, e.content, e.category, e.source, e.confidence,
+                        e.project, e.session_id, e.created_at, e.updated_at,
+                        e.access_count, e.last_accessed
+                 FROM memories e
+                 WHERE 1=1"
+            );
+            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            let mut param_index = 1;
 
-        // Build tag filter clause (entries that have ALL specified tags).
-        let tag_clause = if let Some(tags) = tags {
-            if tags.is_empty() {
-                String::new()
-            } else {
-                let tag_placeholders: Vec<String> = (1..=tags.len())
-                    .map(|i| format!("?{}", limit_param_idx + i))
-                    .collect();
+            if let Some(cats) = categories
+                && !cats.is_empty()
+            {
+                let placeholders: Vec<String> =
+                    (0..cats.len()).map(|_| format!("?{param_index}")).collect();
+                sql.push_str(&format!(" AND e.category IN ({})", placeholders.join(", ")));
+                for cat in cats {
+                    params_vec.push(Box::new(cat.clone()));
+                    param_index += 1;
+                }
+            }
+
+            for term in &terms {
+                sql.push_str(&format!(" AND LOWER(e.content) LIKE ?{param_index}"));
+                params_vec.push(Box::new(format!("%{term}%")));
+                param_index += 1;
+            }
+
+            sql.push_str(&format!(" AND e.confidence >= ?{param_index}"));
+            params_vec.push(Box::new(min_confidence));
+            param_index += 1;
+
+            if let Some(tags) = tags
+                && !tags.is_empty()
+            {
                 let tag_count = tags.len();
-                format!(
-                    " AND e.id IN (\
-                     SELECT memory_id FROM memory_tags WHERE tag IN ({}) \
-                     GROUP BY memory_id HAVING COUNT(DISTINCT tag) = {})",
-                    tag_placeholders.join(", "),
-                    tag_count
-                )
+                let placeholders: Vec<String> =
+                    (0..tags.len()).map(|_| format!("?{param_index}")).collect();
+                sql.push_str(&format!(
+                    " AND e.id IN (SELECT memory_id FROM memory_tags WHERE tag IN ({}) GROUP BY memory_id HAVING COUNT(DISTINCT tag) = {tag_count})",
+                    placeholders.join(", ")
+                ));
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                    param_index += 1;
+                }
             }
-        } else {
-            String::new()
+
+            sql.push_str(&format!(
+                " ORDER BY updated_at DESC, confidence DESC LIMIT ?{param_index}"
+            ));
+            params_vec.push(Box::new(limit as i64));
+
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+
+            let mut stmt = conn.prepare_cached(&sql)?;
+            stmt.query_map(param_refs.as_slice(), memory_row_from_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
         };
 
-        let sql = format!(
-            "SELECT e.id, e.content, e.category, e.source, e.confidence,
-                    e.project, e.session_id, e.created_at, e.updated_at,
-                    e.access_count, e.last_accessed
-             FROM memories e
-             INNER JOIN memories_fts f ON f.rowid = e.rowid
-             WHERE memories_fts MATCH ?{fts_param_idx}
-               AND e.confidence >= ?{limit_param_idx}
-               {category_clause}
-               {tag_clause}
-             ORDER BY f.rank
-             LIMIT ?{}",
-            limit_param_idx + tags.map_or(0, <[std::string::String]>::len) + 1
-        );
-
-        // Build parameter list.
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        if let Some(cats) = categories
-            && !cats.is_empty()
-        {
-            for cat in cats {
-                params_vec.push(Box::new(cat.clone()));
-            }
-        }
-        params_vec.push(Box::new(safe_query));
-        params_vec.push(Box::new(min_confidence));
-        if let Some(tags) = tags
-            && !tags.is_empty()
-        {
-            for tag in tags {
-                params_vec.push(Box::new(tag.clone()));
-            }
-        }
-        params_vec.push(Box::new(limit as i64));
-
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
-
-        let mut stmt = conn.prepare_cached(&sql)?;
-        let rows: Vec<MemoryRow> = stmt
-            .query_map(param_refs.as_slice(), memory_row_from_sql)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        // C-4: the search itself held only the read-only connection; drop it
-        // before taking the writer lock for the bookkeeping UPDATE loop.
-        drop(stmt);
-        drop(conn);
-
-        // Increment access count for returned results.
+        // Increment access count for returned results after the read lock is no
+        // longer held. On in-memory databases the read path falls back to the
+        // writer connection, so a nested `lock_conn!` here would deadlock the
+        // same `Mutex` while it is still held by the read guard.
         if !rows.is_empty() {
             let conn = lock_conn!(self)?;
             for row in &rows {
@@ -3217,18 +3261,9 @@ impl Storage {
     ///
     /// Returns an error if the delete fails.
     pub fn delete_memory(&self, id: i64) -> Result<bool> {
-        let mut conn = lock_conn!(self)?;
+        let conn = lock_conn!(self)?;
 
-        // C-3: delete the FTS row and the base row in one transaction so a
-        // failure between them cannot desync the search index.
-        let tx = conn.transaction()?;
-        tx.execute(
-            "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
-            params![id],
-        )?;
-
-        let affected = tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
-        tx.commit()?;
+        let affected = conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
 
@@ -3254,7 +3289,7 @@ impl Storage {
             anyhow::bail!("At least one filter criterion is required to delete memories");
         }
 
-        let mut conn = lock_conn!(self)?;
+        let conn = lock_conn!(self)?;
         // SEC-049: `older_than_days` is attacker-controlled; use the fallible
         // chrono constructors so an out-of-range retention window returns an
         // error instead of panicking inside the subtraction.
@@ -3305,32 +3340,14 @@ impl Storage {
         }
 
         let where_clause = conditions.join(" AND ");
-        let sql = format!("SELECT id FROM memories WHERE {where_clause}");
+        let sql = format!("DELETE FROM memories WHERE {where_clause}");
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
-        let mut stmt = conn.prepare_cached(&sql)?;
-        let ids: Vec<i64> = stmt
-            .query_map(param_refs.as_slice(), |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(stmt);
-
-        // C-3: wrap the per-id delete loop in a single transaction so a failure
-        // part-way through cannot leave the FTS index out of sync with the
-        // memories table.
-        let tx = conn.transaction()?;
-        let mut deleted = 0usize;
-        for id in &ids {
-            // Propagate failures and count only rows actually deleted, so the
-            // caller never reports a deletion that did not happen (FUNC-021).
-            tx.execute(
-                "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
-                params![id],
-            )?;
-            deleted += tx.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
-        }
-        tx.commit()?;
+        // SQLITE T-03/T-11: one set-based DELETE, so the statement count does
+        // not grow with the number of memories deleted.
+        let deleted = conn.execute(&sql, param_refs.as_slice())?;
 
         Ok(deleted)
     }
@@ -3342,38 +3359,29 @@ impl Storage {
     /// directory basename (the legacy project key). Memories belonging to other
     /// projects are never touched.
     ///
-    /// The FTS rows and base rows are removed in one transaction so a failure
-    /// between them cannot desync the search index.
-    ///
     /// # Errors
     ///
     /// Returns an error if the delete fails.
     pub fn clear_memories_for_project(&self, project_dir: &Path) -> Result<usize> {
-        let mut conn = lock_conn!(self)?;
+        let conn = lock_conn!(self)?;
         let full = project_dir.to_string_lossy();
         let name = project_name(project_dir);
 
-        let tx = conn.transaction()?;
+        // One statement for the whole set: the per-id loop this replaced did
+        // two statements per memory. There is no FTS index over `memories` to
+        // keep in step (SQLITE T-03 dropped it), so the base DELETE is the
+        // complete operation.
         let deleted = if name.is_empty() {
-            tx.execute(
-                "DELETE FROM memories_fts WHERE rowid IN (SELECT rowid FROM memories WHERE project = ?1)",
-                params![full.as_ref()],
-            )?;
-            tx.execute(
+            conn.execute(
                 "DELETE FROM memories WHERE project = ?1",
                 params![full.as_ref()],
             )?
         } else {
-            tx.execute(
-                "DELETE FROM memories_fts WHERE rowid IN (SELECT rowid FROM memories WHERE project IN (?1, ?2))",
-                params![full.as_ref(), name],
-            )?;
-            tx.execute(
+            conn.execute(
                 "DELETE FROM memories WHERE project IN (?1, ?2)",
                 params![full.as_ref(), name],
             )?
         };
-        tx.commit()?;
 
         Ok(deleted)
     }
@@ -3527,8 +3535,6 @@ impl Storage {
             "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
             params![content, now, id],
         )?;
-        // For content-synced FTS5 tables, the index is automatically updated
-        // when the underlying content table is modified. No manual FTS update needed.
         Ok(affected > 0)
     }
     /// Sets the tags for a memory, replacing any existing tags.
@@ -4356,13 +4362,17 @@ impl Storage {
             return Ok(Vec::new());
         }
 
+        // SQLITE T-01: `session_id` is in `message_fts_keys`, so it is a real
+        // index seek. Inside the vtab it was an `UNINDEXED` column, which made
+        // the session filter a post-filter over a full scan of the index.
         let mut stmt = conn.prepare_cached(
-            "SELECT f.message_id, f.session_id, f.role, f.content,
+            "SELECT k.message_id, k.session_id, k.role, m.parts,
                     m.created_at, s.title, s.directory, f.rank AS rank
-             FROM messages_fts f
-             INNER JOIN messages m ON m.id = f.message_id
-             LEFT JOIN sessions s ON s.id = f.session_id
-             WHERE messages_fts MATCH ?1 AND f.session_id = ?2
+             FROM message_fts_keys k
+             INNER JOIN messages_fts f ON f.rowid = k.rowid
+             INNER JOIN messages m ON m.id = k.message_id
+             LEFT JOIN sessions s ON s.id = k.session_id
+             WHERE messages_fts MATCH ?1 AND k.session_id = ?2
              ORDER BY f.rank
              LIMIT ?3",
         )?;
@@ -4375,7 +4385,7 @@ impl Storage {
                     message_id: row.get("message_id")?,
                     session_id: row.get("session_id")?,
                     role: row.get("role")?,
-                    content: row.get("content")?,
+                    content: extract_message_text(&decode_parts(row.get("parts")?)?),
                     created_at: row.get("created_at")?,
                     session_title: row.get("title")?,
                     session_directory: row.get("directory")?,
@@ -4465,14 +4475,14 @@ impl Storage {
             let placeholders: Vec<String> = (0..roles.len())
                 .map(|i| format!("?{}", param_idx + i))
                 .collect();
-            where_clauses.push(format!("f.role IN ({})", placeholders.join(", ")));
+            where_clauses.push(format!("k.role IN ({})", placeholders.join(", ")));
             for role in roles {
                 sql_params.push(Box::new(role.clone()));
             }
             param_idx += roles.len();
         }
         if let Some(ref session_id) = params.session_id {
-            where_clauses.push(format!("f.session_id = ?{param_idx}"));
+            where_clauses.push(format!("k.session_id = ?{param_idx}"));
             sql_params.push(Box::new(session_id.clone()));
             param_idx += 1;
         }
@@ -4484,15 +4494,16 @@ impl Storage {
             // Use ROW_NUMBER() to limit per session.
             format!(
                 "WITH ranked AS (
-                    SELECT f.message_id, f.session_id, f.role, f.content,
+                    SELECT k.message_id, k.session_id, k.role, m.parts,
                            m.created_at, s.title, s.directory, f.rank AS rank,
-                           ROW_NUMBER() OVER (PARTITION BY f.session_id ORDER BY f.rank) AS rn
-                    FROM messages_fts f
-                    INNER JOIN messages m ON m.id = f.message_id
-                    LEFT JOIN sessions s ON s.id = f.session_id
+                           ROW_NUMBER() OVER (PARTITION BY k.session_id ORDER BY f.rank) AS rn
+                    FROM message_fts_keys k
+                    INNER JOIN messages_fts f ON f.rowid = k.rowid
+                    INNER JOIN messages m ON m.id = k.message_id
+                    LEFT JOIN sessions s ON s.id = k.session_id
                     WHERE {where_sql}
                 )
-                SELECT message_id, session_id, role, content,
+                SELECT message_id, session_id, role, parts,
                        created_at, title, directory, rank AS rank
                 FROM ranked
                 WHERE rn <= ?{param_idx}
@@ -4502,11 +4513,12 @@ impl Storage {
             )
         } else {
             format!(
-                "SELECT f.message_id, f.session_id, f.role, f.content,
+                "SELECT k.message_id, k.session_id, k.role, m.parts,
                         m.created_at, s.title, s.directory, f.rank AS rank
-                 FROM messages_fts f
-                 INNER JOIN messages m ON m.id = f.message_id
-                 LEFT JOIN sessions s ON s.id = f.session_id
+                 FROM message_fts_keys k
+                 INNER JOIN messages_fts f ON f.rowid = k.rowid
+                 INNER JOIN messages m ON m.id = k.message_id
+                 LEFT JOIN sessions s ON s.id = k.session_id
                  WHERE {where_sql}
                  ORDER BY f.rank
                  LIMIT ?{param_idx}"
@@ -4529,7 +4541,7 @@ impl Storage {
                     message_id: row.get("message_id")?,
                     session_id: row.get("session_id")?,
                     role: row.get("role")?,
-                    content: row.get("content")?,
+                    content: extract_message_text(&decode_parts(row.get("parts")?)?),
                     created_at: row.get("created_at")?,
                     session_title: row.get("title")?,
                     session_directory: row.get("directory")?,
@@ -4627,26 +4639,43 @@ impl Storage {
     /// assert_eq!(count, 0);
     /// ```
     pub fn warm_message_search_index(&self) -> Result<usize> {
-        // PERF-013: only index messages that are not already in `messages_fts`.
-        // The FTS table is maintained incrementally on every message
-        // create/update/delete (see `create_message`), so on a warm start there
-        // are normally *zero* missing rows and this method is a fast no-op.
-        // The previous implementation always DELETE+rebuilt the whole table,
-        // which (a) rewrote every row on every launch and (b) held the SQLite
-        // write lock for the entire rebuild - serialising the main thread's own
-        // `create_session` write behind it and adding ~5s to startup.
-        //
-        // When rows ARE missing (first run after a schema change), the catch-up
-        // inserts run in a single transaction: FTS5 indexes are batch-oriented,
-        // so many small transactions trigger expensive incremental index merges.
+        self.backfill_missing_fts_rows()
+    }
+
+    /// Backfills the `messages_fts` rows that are missing for existing
+    /// messages, returning how many were indexed (PERF-013 / PERF-FTS-SCAN).
+    ///
+    /// On a warm start this is normally a zero-row no-op because
+    /// [`create_message`](Self::create_message) maintains the index
+    /// incrementally; rows are only missing after an upgrade that introduced
+    /// the index, or when a write path left them out.
+    ///
+    /// The reconcile is a rowid diff between `messages` and
+    /// `message_fts_keys`, which is an ordinary table with an indexed key
+    /// column (`SQLITE T-01`). Before the key table existed the diff had to go
+    /// through the virtual table, whose key columns were `UNINDEXED`.
+    ///
+    /// When rows ARE missing the catch-up inserts run in a single transaction:
+    /// FTS5 indexes are batch-oriented, so many small transactions trigger
+    /// expensive incremental index merges.
+    fn backfill_missing_fts_rows(&self) -> Result<usize> {
         let mut conn = lock_conn!(self)?;
-        let missing: Vec<(String, String, String, String)> = {
-            let mut stmt = conn.prepare_cached(
-                "SELECT m.id, m.session_id, m.role, m.parts \
-                 FROM messages m \
-                 LEFT JOIN messages_fts f ON f.message_id = m.id \
-                 WHERE f.message_id IS NULL",
-            )?;
+
+        // The keys are (rowid, message_id, session_id, role); only the ids are
+        // needed to diff the two rowid domains, and `messages.parts` - the
+        // multi-megabyte column - is never touched here.
+        let mut indexed: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        {
+            let mut stmt = conn.prepare_cached("SELECT rowid, message_id FROM message_fts_keys")?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<(i64, String)>>>()?;
+            drop(stmt);
+            indexed.extend(rows);
+        }
+        let candidates: Vec<(i64, String, String, String)> = {
+            let mut stmt =
+                conn.prepare_cached("SELECT rowid, id, session_id, role FROM messages")?;
             let rows = stmt
                 .query_map([], |row| {
                     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
@@ -4656,33 +4685,145 @@ impl Storage {
             rows
         };
 
-        if missing.is_empty() {
+        if indexed.is_empty() && candidates.is_empty() {
             return Ok(0);
         }
 
+        // A message is a repair candidate when the key table has no row for its
+        // rowid, or when the key names a different message (what a re-inserted
+        // id leaves behind). Every base rowid is remembered so the orphan sweep
+        // can tell "indexed" from "message gone".
+        let mut repairs: Vec<(i64, String, String, String)> = Vec::new();
+        let mut known: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        // Index rows whose message no longer exists would otherwise be left
+        // behind, and a stale key row makes the session-scoped lookups return
+        // phantom message ids.
+        let mut stale_rows: Vec<(i64, String)> = Vec::new();
+        for (rowid, id, session_id, role) in candidates {
+            known.insert(rowid);
+            match indexed.get(&rowid) {
+                Some(stored) if *stored == id => {}
+                _ => repairs.push((rowid, id, session_id, role)),
+            }
+        }
+        for (rowid, message_id) in indexed
+            .into_iter()
+            .filter(|(rowid, _)| !known.contains(rowid))
+        {
+            stale_rows.push((rowid, message_id));
+        }
+        stale_rows.sort_unstable_by_key(|(rowid, _)| *rowid);
+        let orphaned = stale_rows.len();
+
         let tx = conn.transaction()?;
-        for (id, session_id, role, parts_json) in &missing {
-            let parts: Vec<MessagePart> = match serde_json::from_str(parts_json) {
-                Ok(parts) => parts,
-                Err(e) => {
-                    tracing::warn!(
-                        message_id = %id,
-                        error = %e,
-                        "skipping FTS backfill for message with corrupt parts JSON"
-                    );
-                    continue;
-                }
-            };
-            let content = extract_message_text(&parts);
+        // `replace_fts_row` re-reads the parts JSON for each visited row, so the
+        // reported count is the number of rows the reconcile *visited* - a row
+        // whose body cannot be parsed is reported too, because the caller uses
+        // the count to decide whether the index needed attention at all. The
+        // returned flag is what decides a *backfill*: a row the index already
+        // covers must not count, or a warm start with nothing to do would
+        // report every message as repaired.
+        let mut backfilled = 0;
+        for (rowid, id, _session_id, _role) in repairs {
+            if Self::replace_fts_row(&tx, rowid, &id)? {
+                backfilled += 1;
+            }
+        }
+        let repaired = backfilled + orphaned;
+        for (rowid, _message_id) in stale_rows {
+            tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
             tx.execute(
-                "INSERT INTO messages_fts (message_id, session_id, role, content) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![id, session_id, role, content],
+                "DELETE FROM message_fts_keys WHERE rowid = ?1",
+                params![rowid],
             )?;
         }
         tx.commit()?;
 
-        Ok(missing.len())
+        Ok(repaired)
+    }
+
+    /// Writes (or rewrites) the `messages_fts` index row for one message.
+    ///
+    /// `SQLITE T-01`: the index is contentless, so a rewrite is the FTS5
+    /// `'delete'` command for the old document followed by a plain `INSERT` of
+    /// the new text, plus the `message_fts_keys` row that carries the key
+    /// columns. The rowid is the message's `messages.rowid`, so the two tables
+    /// stay in step without joining on an `UNINDEXED` column.
+    fn upsert_fts_row(
+        tx: &rusqlite::Transaction<'_>,
+        message_id: &str,
+        session_id: &str,
+        role: &str,
+        parts: &[MessagePart],
+    ) -> Result<()> {
+        let rowid: i64 = tx.query_row(
+            "SELECT rowid FROM messages WHERE id = ?1",
+            params![message_id],
+            |row| row.get(0),
+        )?;
+        // A contentless table keeps no copy of the document, so the old text is
+        // unknown here; `contentless_delete=1` makes the delete-by-rowid form
+        // sufficient (it needs only the rowid, not the previous content).
+        tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
+        tx.execute(
+            "INSERT INTO messages_fts (rowid, content) VALUES (?1, ?2)",
+            params![rowid, extract_message_text(parts)],
+        )?;
+        tx.execute(
+            "INSERT INTO message_fts_keys (rowid, message_id, session_id, role) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(rowid) DO UPDATE SET \
+                 message_id = excluded.message_id, \
+                 session_id = excluded.session_id, \
+                 role       = excluded.role",
+            params![rowid, message_id, session_id, role],
+        )?;
+        Ok(())
+    }
+
+    /// Replaces the FTS index row `rowid` so it indexes the message's current
+    /// text, taking the session id and role from the base row.
+    ///
+    /// Returns `false` when the message body cannot be parsed, in which case
+    /// the index row is left as it was and the failure is logged.
+    fn replace_fts_row(
+        tx: &rusqlite::Transaction<'_>,
+        rowid: i64,
+        message_id: &str,
+    ) -> Result<bool> {
+        let (session_id, role, parts_json): (String, String, String) = tx.query_row(
+            "SELECT session_id, role, parts FROM messages WHERE id = ?1",
+            params![message_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let parts: Vec<MessagePart> = match serde_json::from_str(&parts_json) {
+            Ok(parts) => parts,
+            Err(e) => {
+                tracing::warn!(
+                    message_id = %message_id,
+                    error = %e,
+                    "skipping FTS backfill for message with corrupt parts JSON"
+                );
+                return Ok(false);
+            }
+        };
+        // Drop any previous index row for this rowid, then write the fresh one.
+        // `contentless_delete=1` accepts the rowid-only form.
+        tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
+        tx.execute(
+            "INSERT INTO messages_fts (rowid, content) VALUES (?1, ?2)",
+            params![rowid, extract_message_text(&parts)],
+        )?;
+        tx.execute(
+            "INSERT INTO message_fts_keys (rowid, message_id, session_id, role) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(rowid) DO UPDATE SET \
+                 message_id = excluded.message_id, \
+                 session_id = excluded.session_id, \
+                 role       = excluded.role",
+            params![rowid, message_id, session_id, role],
+        )?;
+        Ok(true)
     }
 }
 
@@ -4966,7 +5107,7 @@ pub struct TaskDerived {
 ///
 /// Returned by [`Storage::get_task_view`] and
 /// [`Storage::list_task_views`].  The tool layer (T-009 / T-010) will
-/// consume this to produce `task_get` / `task_list` output.
+/// consume this to produce `TaskGet` / `TaskList` output.
 #[derive(Debug, Clone)]
 pub struct TaskView {
     /// The raw task row from the `todos` table.

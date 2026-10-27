@@ -212,7 +212,7 @@ fn test_the_slash_menu_offers_no_retired_tool_spelling() {
         .collect();
     assert_eq!(
         retired_commands,
-        BTreeSet::from(["Bash"]),
+        BTreeSet::from(["bash"]),
         "FR-033: the retired spellings that are also slash commands are \
          {retired_commands:?}, not just the `/bash` allowlist command"
     );

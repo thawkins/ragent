@@ -79,7 +79,7 @@ async fn test_tool_call_batch_updates_status_and_duration() {
     app.handle_event(Event::ToolCallStart {
         session_id: "sess-1".to_string(),
         call_id: "c2".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
     })
     .await;
     app.needs_redraw = false;
@@ -89,7 +89,7 @@ async fn test_tool_call_batch_updates_status_and_duration() {
         step: 1,
         calls: vec![ToolCallBatchEntry {
             call_id: "c2".to_string(),
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             args: "{}".to_string(),
             error: None,
             duration_ms: 999,
@@ -119,7 +119,7 @@ async fn test_tool_call_batch_creates_missing_part() {
         step: 1,
         calls: vec![ToolCallBatchEntry {
             call_id: "c3".to_string(),
-            tool: "write".to_string(),
+            tool: "Write".to_string(),
             args: "{}".to_string(),
             error: None,
             duration_ms: 42,
@@ -135,7 +135,7 @@ async fn test_tool_call_batch_creates_missing_part() {
     let MessagePart::ToolCall { tool, state, .. } = part else {
         panic!("expected ToolCall part");
     };
-    assert_eq!(tool, "write");
+    assert_eq!(tool, "Write");
     assert_eq!(state.status, ToolCallStatus::Completed);
     assert_eq!(state.duration_ms, Some(42));
 }
@@ -188,7 +188,7 @@ async fn test_pending_args_drained_by_next_lifecycle_event() {
     app.handle_event(Event::ToolCallArgs {
         session_id: "sess-1".to_string(),
         call_id: "c9".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         args: r#"{"command":"ls -la"}"#.to_string(),
     })
     .await;
@@ -200,7 +200,7 @@ async fn test_pending_args_drained_by_next_lifecycle_event() {
         "sess-1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "c9".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Running,
@@ -302,4 +302,74 @@ async fn test_tool_call_batch_args_populate_missing_input() {
         "batch-carried args must populate a missing input"
     );
     assert_eq!(state.status, ToolCallStatus::Completed);
+}
+
+/// FR-007 (uniformtools T-012): the TUI decodes a call's argument text through
+/// the shared helper, so whitespace-only args show as an empty object rather
+/// than "no input", and a double-encoded payload shows the object the tool
+/// receives.
+#[tokio::test]
+async fn test_tool_args_decode_through_the_shared_helper() {
+    let mut app = app_with_session();
+
+    // Whitespace-only argument text: the helper decodes it to `{}`.
+    app.handle_event(Event::ToolCallStart {
+        session_id: "sess-1".to_string(),
+        call_id: "ws".to_string(),
+        tool: "list".to_string(),
+    })
+    .await;
+    app.handle_event(Event::ToolCallArgs {
+        session_id: "sess-1".to_string(),
+        call_id: "ws".to_string(),
+        tool: "list".to_string(),
+        args: "  \n\t ".to_string(),
+    })
+    .await;
+
+    let ws_part = app
+        .messages
+        .iter()
+        .flat_map(|m| &m.parts)
+        .find(|p| matches!(p, MessagePart::ToolCall { call_id, .. } if call_id == "ws"))
+        .expect("the whitespace-args part exists");
+    let MessagePart::ToolCall { state, .. } = ws_part else {
+        panic!("expected ToolCall part");
+    };
+    assert_eq!(
+        state.input,
+        serde_json::json!({}),
+        "whitespace args decode to an empty object (FR-007), not null"
+    );
+
+    // A double-encoded payload decodes to the object the tool will receive.
+    app.handle_event(Event::ToolCallStart {
+        session_id: "sess-1".to_string(),
+        call_id: "enc".to_string(),
+        tool: "read".to_string(),
+    })
+    .await;
+    let encoded = serde_json::to_string(r#"{"path":"src/lib.rs"}"#).expect("encode");
+    app.handle_event(Event::ToolCallArgs {
+        session_id: "sess-1".to_string(),
+        call_id: "enc".to_string(),
+        tool: "read".to_string(),
+        args: encoded,
+    })
+    .await;
+
+    let enc_part = app
+        .messages
+        .iter()
+        .flat_map(|m| &m.parts)
+        .find(|p| matches!(p, MessagePart::ToolCall { call_id, .. } if call_id == "enc"))
+        .expect("the encoded-args part exists");
+    let MessagePart::ToolCall { state, .. } = enc_part else {
+        panic!("expected ToolCall part");
+    };
+    assert_eq!(
+        state.input["path"], "src/lib.rs",
+        "a double-encoded payload is shown decoded (FR-007): {:?}",
+        state.input
+    );
 }

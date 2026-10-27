@@ -8,8 +8,7 @@ usage patterns.
 
 > **Scope:** Code index tools, slash commands, graph analysis, language
 > support, and troubleshooting. For the full tool catalog see
-> `docs/howtos/tools/INDEX.md`. For hiding/exposing tool families see
-> `docs/howtos/tool-visibility.md`. For TUI workflow see
+> `docs/howtos/tools/INDEX.md`. For TUI workflow see
 > `docs/howtos/tutorial.md`.
 
 ---
@@ -32,7 +31,7 @@ usage patterns.
    - 4.10 [codeindex_godnodes](#410-codeindex_godnodes)
 5. [The Semantic Code Graph](#5-the-semantic-code-graph)
 6. [System Instructions](#6-system-instructions)
-7. [Decision Flow: codeindex vs grep](#7-decision-flow-codeindex-vs-grep)
+7. [Decision Flow: codeindex vs Grep](#7-decision-flow-codeindex-vs-grep)
 8. [Slash Commands](#8-slash-commands)
 9. [Worked Examples](#9-worked-examples)
 10. [Troubleshooting](#10-troubleshooting)
@@ -87,8 +86,8 @@ When enabled, ragent opens the index database at
 starts the background file watcher. The first scan may take a few seconds
 on large codebases.
 
-Visibility is persisted to `ragent.json` via the `tool_visibility.codeindex`
-key. See `docs/howtos/tool-visibility.md` for the full switch reference.
+Enabling the code index registers the ten codeindex tools with the registry, so
+`/codeindex on` and `/codeindex off` are the only switch the family has.
 
 ---
 
@@ -578,7 +577,7 @@ and whether the graph has been built.
 The agent receives the following instruction in its system prompt when
 the code index is active:
 
-> **MANDATORY — You MUST use codeindex tools instead of grep for code
+> **MANDATORY — You MUST use codeindex tools instead of Grep for code
 > symbol queries.** When the index is active, `Grep` is the WRONG choice
 > for finding functions, types, structs, enums, traits, or any named code
 > entity. The index is faster, returns structured results with
@@ -590,7 +589,7 @@ or `codeindex_symbols` rather than `Grep`.
 
 ---
 
-## 7. Decision Flow: codeindex vs grep
+## 7. Decision Flow: codeindex vs Grep
 
 | Query type | Use |
 |------------|-----|
@@ -751,7 +750,6 @@ The full-text search index has no documents. Run:
 | Document | Covers |
 |----------|--------|
 | `docs/howtos/tools/INDEX.md` | Full tool catalog (148 registered static tools in the default build, 149 with a drivable headless browser engine present, + 1 dynamic tool, split by category) |
-| `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/custom-agents.md` | Custom agent profiles |
 | `TUI-QUICKSTART.md` | TUI layout, panels, startup options |

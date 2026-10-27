@@ -41,9 +41,10 @@ The test-binary count is the headline effect of the consolidation rollout: the
 tree still holds 939 consolidated `test_*.rs` files plus 125 `tests/inline/*`
 modules, but each crate compiles them into
 ONE `tests/all.rs` target (`autotests = false` + `[[test]] name = "all"` +
-`#[path = "test_x.rs"] mod test_x;`), so a full `cargo test` links 19
-integration binaries instead of ~948. Run one file by filter:
-`cargo test -p <crate> --test all test_foo::`.
+`#[path = "test_x.rs"] mod test_x;`), so a full run links 19 integration
+binaries instead of ~948. Tests run under `cargo nextest`
+(`.config/nextest.toml`); run one file by filter:
+`cargo nextest run -p <crate> -E 'test(test_foo::)'`.
 
 ---
 

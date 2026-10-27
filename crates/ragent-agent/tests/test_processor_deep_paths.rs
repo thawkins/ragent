@@ -272,6 +272,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured, tmp))
@@ -746,7 +747,7 @@ async fn test_spec_task_auto_completed_after_spec_dir_write() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write".into(),
+                name: "Write".into(),
                 args: r#"{"path": "specs/testspec/notes.md", "content": "note"}"#.into(),
             },
             ScriptedReply::Text("wrote a spec note".into()),
@@ -825,7 +826,7 @@ async fn test_spec_task_not_completed_for_unrelated_write() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write".into(),
+                name: "Write".into(),
                 args: r#"{"path": "scratch/notes.md", "content": "note"}"#.into(),
             },
             ScriptedReply::Text("wrote a scratch note".into()),

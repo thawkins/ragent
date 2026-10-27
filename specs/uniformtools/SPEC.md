@@ -1,7 +1,7 @@
 ---
 status: draft
 audit:
-  - { time: 1792880859, from: "none", to: "draft", actor: "system" }
+  - { time: 1793052935, from: "none", to: "draft", actor: "system" }
 ---
 # Specification: Unified Tool Calling Across Providers, Mapped to ragent Tools
 
@@ -74,9 +74,12 @@ Facts verified in the tree at the time of writing.
 | OpenAI-family body | `crates/ragent-llm/src/providers/openai_compat.rs` | `OpenAiCompatSpec`, `base_body`, `with_messages`; emits `tool_calls` + `role:"tool"` |
 | OpenAI-family stream | `crates/ragent-llm/src/providers/sse.rs` | `OpenAiSseSpec`, `parse_openai_sse_stream` |
 | Argument validation | `crates/ragent-tools-core/src/schema.rs` | `validate_required_args(schema, input)` |
+| Refusal values | `crates/ragent-agent/src/session/tool_input_error.rs` | `ToolInputError{Undecodable,SchemaViolation,UnknownTool}` - the sentence, the record status and therefore the `is_error` flag of a call refused before it ran (FR-008, FR-009, FR-014; D8) |
 | Dispatch | `crates/ragent-agent/src/session/processor.rs:305` | `dispatch_tool_with_permissions`, `dispatch_tool_leaf`, `schema_violation` |
 | Loop | `crates/ragent-agent/src/session/loop_steps.rs` | `LlmStepResult{tool_calls: Vec<PendingToolCall>}`, event accumulation |
 | Permissions | `crates/ragent-agent/src/session/permissions.rs` | `PermissionAction{Allow,Deny,Ask}`, 120 s prompt timeout, YOLO bypass, `TOOL_REPEAT_LIMIT = 5` |
+| Tool config section | `crates/ragent-config/src/tools.rs` | `ToolsConfig{aliases, expose_alias_names, wire_trace}` behind `Config::tools`; `AliasesConfig` as a five-field four-state value (absent / `true` / `false` / object) with `is_unspecified`, `is_enabled`, `uses_builtin_table`, `entries`, custom serde in both directions, plus `ToolsConfig::merge` and `is_default`; every switch off and the whole section omitted from a serialised config while default (FR-015, FR-017; T-020) |
+| Escape-hatch audit | `crates/ragent-agent/tests/test_escape_hatch_audit.rs` | Seven predicates over the whole tree (config field and serde names, environment-variable names, the resolution path's purity, CLI flag/alias/subcommand names, the `tools` key set, plugin/connector/agent/hook/skill settings, the built-in alias table), each with an inspection floor, plus the pinned one-entry `EXEMPTIONS` list; the evidence lives in `T-043-ESCAPE-HATCH-AUDIT.md` (FR-031; T-043) |
 
 ### Divergences that this specification closes
 
@@ -128,6 +131,22 @@ on. The fix is to complete it, not to replace it:
 Rationale: a second parallel representation would need a translation on every
 hop, and every translation is a place to lose the tool-call id.
 
+D1 keeps the record's JSON **untyped**: `ToolCallState::input`/`::output`
+(`ragent-types/src/message/mod.rs`), `ContentPart::ToolUse::input` and
+`ToolDefinition::parameters` (`ragent-types/src/llm.rs`) all stay
+`serde_json::Value`. FR-001's "decoded JSON `input`" is a decode guarantee, not
+a type guarantee: the arguments shape is owned by the callee, and the callee set
+is open at run time (148 built-in tools today, plus every MCP server and plugin
+registered after the binary was compiled), so no compile-time type can describe
+it. `ToolUse::input` is replayed to the provider every step, so a fixed field set
+would drop keys it does not model (FR-006, FR-018), and
+`ToolDefinition::parameters` is forwarded third-party JSON Schema that a typed
+subset could only narrow (FR-003) or that would need a schema crate (NFR-002
+forbids one). The three former `TODO: Replace Value with a typed struct` markers
+are resolved by this decision and recorded in full in
+`T-025-TYPED-ARGS-DECISION.md`, which the guard
+`crates/ragent-types/tests/test_typed_args_decision.rs` pins.
+
 ### D2 - `ToolWireProfile` is the single source of truth per provider family
 
 One `const` profile per wire family, listing:
@@ -145,7 +164,10 @@ One `const` profile per wire family, listing:
 | `synthetic_ids` | whether ids must be generated when the provider omits them |
 
 A provider with no profile does not compile (the profile is a required field of
-its client constructor).
+its client constructor). The type itself carries no `Default` impl, no optional
+field and no serde attribute: a client that states no profile has no fallback
+contract to inherit, which is what makes FR-002's coverage assertion a
+build-time guarantee rather than a convention.
 
 ### D3 - One encoder, four call sites
 
@@ -157,11 +179,14 @@ folded into `encode_tools`; `openai_responses.rs` stops building its own array.
 ### D4 - Arguments are decoded once, in the harness, not in the provider
 
 Providers emit `ToolCallDelta{args_json}` fragments verbatim. The harness
-accumulates them and calls one `parse_tool_arguments` helper that accepts a
-JSON object, or a JSON string that parses to an object, or empty/whitespace
-(which means `{}`). Anything else is a corrective, LLM-visible error and the
-tool does not run. This is already the shape of the fix at
-`processor.rs:3026`; the requirement is to make it the only path.
+accumulates them and calls one `decode_tool_arguments` helper
+(`ragent_types::tool_args`, T-012) that accepts a JSON object, or a JSON string
+that parses to an object, or empty/whitespace (which means `{}`). Anything else
+is a corrective, LLM-visible error and the tool does not run. The helper is
+reachable from `crates/ragent-types/src/lib.rs` and every decode site in the
+loop, the hook layer and the TUI routes through it; the provider layer names it
+nowhere, and `crates/ragent-agent/tests/test_tool_arg_decode_routing.rs` fails
+the build when a new bare `serde_json::from_str` appears on argument text.
 
 ### D5 - Alias resolution is declarative and bidirectional
 
@@ -199,6 +224,66 @@ Two consequences follow, and both are requirements:
 - `tools.expose_alias_names` (FR-015) can no longer advertise a second spelling
   for a renamed tool, because FR-026 forbids the second spelling existing at
   all. It advertises only the remaining unmapped provider spellings.
+
+### D8 - A pre-execution refusal is one value, not three decisions
+
+FR-008 and FR-009 both refuse a call before it runs, and both must produce a
+result that (a) says the tool did not run, (b) names the tool, (c) states the
+cause in the model's own terms, and (d) is *marked* as an error (FR-014). Four
+obligations per cause, two causes, and nothing in the type system keeping them
+aligned - so before this specification each gate decided all four separately and
+they drifted: a decode failure was formatted one way and a schema violation
+another, and the `is_error` flag was derived again at every append site.
+
+`crates/ragent-agent/src/session/tool_input_error.rs` makes the refusal itself
+the unit: one `ToolInputError` value owns its model-facing sentence (via
+`Display`), its record status, and - through `ToolCallStatus::is_error` - the
+result flag, so a gate cannot state a refusal one way and record it another. Both
+loop gates build that value: the decode gate in the pre-dispatch position, and
+the schema gate in the in-task position through `into_anyhow()`, because the
+task's single error exit already reformats an error into the result text and
+status. `is_error` is then read once, at the one append site, from the status the
+refusal named.
+
+The module is also where FR-009's full sentence is delivered: the violation
+names the offending parameter **and its declared type**, which
+`ragent-tools-core`'s validator states directly rather than leaving each caller
+to look the type up from the same schema a second time.
+
+Declared but uncompiled is the worst of both positions - the invariant looks
+enforced and is not. This module existed for a commit before `T-013` declared it,
+and the moment its own contract cases could run one of them failed, because the
+validator's message did not yet carry the declared type.
+
+### D9 - The two optional features are configured by one section, and silence is the default
+
+FR-015 and FR-017 are both conditional on configuration, which makes the
+*default* the requirement: with no `tools` section, everything behaves exactly as
+it did before this specification. That is a claim about the file on disk as much
+as about control flow, so the section is omitted while every switch is at its
+default and each key is omitted while it is at its own; a build that has never
+seen `tools` writes a byte-identical `ragent.json`, and the first unrelated
+`save_to_source` cannot introduce a key the user never wrote.
+
+`tools.aliases` is a four-state value, not a boolean: absent (this layer has no
+opinion), `true` (use the built-in provider-spelling table), `false` (switch
+resolution off and drop inherited entries), and an object (contribute these
+entries). `{}` is an object, not the `false` switch - collapsing the two would
+let a project file that merely declares an empty table wipe the user-global one
+and would rewrite the author's `{}` as `false`. The merged rules follow from the
+kinds of value: the two opt-in booleans OR (so a layer that enables one cannot be
+silently switched off by a layer that omits the key), entries union per spelling
+with the overlay winning a collision (so one project entry does not discard the
+user's table), and only an explicit `false` clears.
+
+The section is **not** stripped from an untrusted project overlay. An alias
+resolves a name, not a capability: after resolution the call runs through the
+same unknown-tool check, loop restriction, destructive classifier, hooks,
+permission layer and bash validation as a call the model spelled canonically, and
+a registered name always wins so no entry can shadow or re-point a tool. The
+refusal FR-031 needs is a per-entry rejection of a retired spelling at load time,
+which is why it lives in the section's own validator rather than in
+`merge_project`.
 
 ---
 
@@ -766,6 +851,26 @@ timeout exception. Its failure messages **shall** be ASCII, **shall** name the
 predicate letter it failed and the exact edit required, and **shall** exit
 non-zero. The check **shall** be usable both as a `cargo test` case and as a
 `scripts/` guard beside the existing `check-*` scripts, from one implementation.
+
+### The guard is one implementation, in two forms
+
+NFR-009's last clause is a design rule, not a packaging preference: the check is
+`scripts/check_tool_rename.py`, and both front doors run **that program**.
+`scripts/check-tool-rename.sh` is a wrapper that `exec`s it with the caller's
+arguments and holds no predicate logic and no fixture, and
+`crates/ragent-agent/tests/test_tool_rename_guard.rs` reads its `--json` report
+and asserts the same verdict, the same hits and the same ASCII wording the
+script prints. A predicate change lands in one file, and a change that makes the
+two forms disagree fails a case rather than surviving review.
+
+`--root DIR` is part of the same rule: it lets a case point the one
+implementation at a private copy of the repository under `target/temp/`, so a
+seeded violation is never visible to a sibling test process and no fixture is
+written into the checkout. `--self-test` (the guard's own contract) is the one
+run that still seeds inside the tree. A scan of a different root is judged
+against **that** root's FR-023 table and fails closed when the table is absent,
+because the retired spellings are read from the tree being judged rather than
+from the checkout the program happens to live in.
 
 ---
 

@@ -97,6 +97,13 @@ struct AgentPromptKey {
     agent_prompt_hash: u64,
 }
 
+/// Cache key for the tool-definition lists (FR-015).
+///
+/// The registry version alone is not enough: `tools.expose_alias_names` and the
+/// alias table are per-turn config values that change what the outbound list
+/// contains without a tool being registered, so both are part of the key.
+type ToolCacheKey = (u64, bool, crate::tool::alias_table::AliasTable);
+
 /// System prompt cache that tracks components separately for efficient invalidation.
 ///
 /// Each component is cached independently so that changes to one component
@@ -107,12 +114,17 @@ pub struct SystemPromptCache {
     agent_prompts: Mutex<HashMap<AgentPromptKey, Cached<String>>>,
     /// Tool reference section - changes only on tool registration
     tool_reference: Mutex<Cached<String>>,
-    /// Sorted tool definition cache - changes only on tool registration
-    tool_definitions: Mutex<Option<(u64, Arc<Vec<ToolDefinition>>)>>,
+    /// Sorted tool definition cache - changes only on tool registration.
+    ///
+    /// The key is `(tool-registry version, expose_alias_names, the alias
+    /// table)`: FR-015's advertising switch is a per-turn config value that the
+    /// registry version does not observe, so it is part of the key rather than a
+    /// silent staleness.
+    tool_definitions: Mutex<Option<(ToolCacheKey, Arc<Vec<ToolDefinition>>)>>,
     /// PERF-034: the subagent wire surface (tool definitions with interactive
-    /// tools removed), keyed by the tool-registry version. Sub-agent turns share
-    /// one immutable filtered vector instead of rebuilding it every step.
-    subagent_tool_definitions: Mutex<Option<(u64, Arc<Vec<ToolDefinition>>)>>,
+    /// tools removed), keyed the same way. Sub-agent turns share one immutable
+    /// filtered vector instead of rebuilding it every step.
+    subagent_tool_definitions: Mutex<Option<(ToolCacheKey, Arc<Vec<ToolDefinition>>)>>,
     /// Codeindex guidance section - changes only on index state change
     codeindex_guidance: Mutex<Cached<String>>,
     /// Team guidance section - changes only on team membership change
@@ -259,49 +271,61 @@ impl SystemPromptCache {
     }
 
     /// Get or compute the cached sorted tool definitions.
+    ///
+    /// `alias_table` and `expose_alias_names` are the FR-015 advertising inputs:
+    /// a cache entry is reused only while the registry version **and** both of
+    /// them are unchanged, so switching `tools.expose_alias_names` on takes
+    /// effect on the next turn instead of serving a stale list.
     pub fn get_tool_definitions(
         &self,
         tool_registry: &ToolRegistry,
+        alias_table: &crate::tool::alias_table::AliasTable,
+        expose_alias_names: bool,
     ) -> Option<Arc<Vec<ToolDefinition>>> {
         let current_version = tool_registry.version();
         let mut cache = self.tool_definitions.lock().ok()?;
 
-        if let Some((version, defs)) = cache.as_ref() {
-            if *version == current_version {
+        if let Some((key, defs)) = cache.as_ref() {
+            if key.0 == current_version && key.1 == expose_alias_names && key.2 == *alias_table {
                 return Some(Arc::clone(defs));
             }
         }
 
-        let defs = tool_registry.definitions();
-        *cache = Some((current_version, Arc::clone(&defs)));
+        let defs =
+            alias_table.outbound_definitions(&tool_registry.definitions(), expose_alias_names);
+        let key = (current_version, expose_alias_names, alias_table.clone());
+        *cache = Some((key, Arc::clone(&defs)));
         Some(defs)
     }
 
     /// PERF-034: get or compute the subagent wire surface - the tool
-    /// definitions with interactive tools removed - keyed by the tool-registry
+    /// definitions with interactive tools removed, keyed by the tool-registry
     /// version so repeated sub-agent steps share one immutable vector.
     pub fn get_subagent_tool_definitions(
         &self,
         tool_registry: &ToolRegistry,
+        alias_table: &crate::tool::alias_table::AliasTable,
+        expose_alias_names: bool,
     ) -> Option<Arc<Vec<ToolDefinition>>> {
         let current_version = tool_registry.version();
         let mut cache = self.subagent_tool_definitions.lock().ok()?;
 
-        if let Some((version, defs)) = cache.as_ref() {
-            if *version == current_version {
+        if let Some((key, defs)) = cache.as_ref() {
+            if key.0 == current_version && key.1 == expose_alias_names && key.2 == *alias_table {
                 return Some(Arc::clone(defs));
             }
         }
 
         let filtered: Arc<Vec<ToolDefinition>> = Arc::new(
-            tool_registry
-                .definitions()
+            alias_table
+                .outbound_definitions(&tool_registry.definitions(), expose_alias_names)
                 .iter()
                 .filter(|def| !crate::session::permissions::is_interactive_tool(&def.name))
                 .cloned()
                 .collect(),
         );
-        *cache = Some((current_version, Arc::clone(&filtered)));
+        let key = (current_version, expose_alias_names, alias_table.clone());
+        *cache = Some((key, Arc::clone(&filtered)));
         Some(filtered)
     }
 

@@ -73,7 +73,7 @@ pub use ragent_config::config::StreamConfig;
 pub use ragent_config::{
     AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, GitLabIntegrationConfig,
     McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PriceEntry, ProviderConfig,
-    ToolVisibilityConfig, bash_lists, dir_lists, tool_family_names,
+    bash_lists, dir_lists,
 };
 pub use ragent_llm::{llm, provider};
 pub use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};

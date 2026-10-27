@@ -8,7 +8,7 @@ Spec `uniformtools`, task T-011. Requirement FR-020:
 
 ## 1. The failure this closes
 
-`ToolCallAccumulator::open` emitted a start at most once per *key*. Two different
+`ToolCallAccumulator::open` emits a start at most once per *key*. Two different
 keys carrying the same provider id were two separate calls to the accumulator, so
 both starts were emitted - under the same id. Everything downstream keys on that
 id:
@@ -33,17 +33,17 @@ asked.
 
 ## 2. The change
 
-All of it is inside `crates/ragent-llm/src/providers/wire/decode.rs`:
+All of the FR-020 logic is inside `crates/ragent-llm/src/providers/wire/decode.rs`:
 
-- **A per-response ledger.** `ToolCallAccumulator` gained
+- **A per-response ledger.** `ToolCallAccumulator` holds
   `emitted_ids: Vec<String>` - every id it has emitted a start under in this
   stream. A `Vec` rather than a `HashSet`: a response carries a handful of calls of
   which at most one or two collide, so a linear `contains` is cheaper than hashing
   and keeps the accumulator's allocation count the same.
-- **The first claim keeps the id; the rest are re-keyed.** `open` now computes the
+- **The first claim keeps the id; the rest are re-keyed.** `open` computes the
   requested id (the provider's own, or the one FR-019 mints when the provider named
-  none) and hands it to a new `start_id(requested, name)`. If the ledger has not
-  seen it, it is recorded and returned unchanged. If it has, a fresh
+  none) and hands it to `start_id(requested, name)`. If the ledger has not seen it,
+  it is recorded and returned unchanged. If it has, a fresh
   `<provider>_<counter>_<name>` id is minted and recorded instead, and one
   `tracing::warn!` is logged - naming the provider, the duplicated id, the
   replacement and the tool.
@@ -57,14 +57,14 @@ All of it is inside `crates/ragent-llm/src/providers/wire/decode.rs`:
   `StreamKeying::ByCallId` family the id *is* the key, so a repeated frame resolves
   to the same `OpenCall` and returns `None`; re-keying there would invent a call
   out of a repeated frame. This is asserted directly.
-- **`synthetic_id` walks past used ids.** It now loops while the candidate is in
-  `emitted_ids` before returning, because a provider is free to spell its own id
+- **`synthetic_id` walks past used ids.** Before returning, it loops while the
+  candidate is in `emitted_ids`, because a provider is free to spell its own id
   exactly like ours (`openai_0_read`). Without that, the mint intended to resolve a
   collision would create one.
 - **Logging split out.** `synthetic_id` only formats now; the FR-019 debug line
-  moved to a new `mint_for_unnamed`, and the FR-020 warning lives in `start_id`.
-  The two events tell different stories ("the provider named no id" vs "the
-  provider reused an id") and a shared logger could only log one of them.
+  lives in `mint_for_unnamed`, and the FR-020 warning lives in `start_id`. The two
+  events tell different stories ("the provider named no id" vs "the provider reused
+  an id") and a shared logger could only log one of them.
 
 ### The Azure Resource Anthropic branch (a tenth accumulator site)
 
@@ -77,9 +77,12 @@ start and no end. Every FR-004/FR-005/FR-019/FR-020 guarantee was therefore abse
 on that path, and no FR-020 reconciliation could reach it.
 
 The branch now builds `ToolCallAccumulator::new(ANTHROPIC_MESSAGES,
-"azure_resource")` and routes its three arms through `open` / `delta` / `end`, exactly
-as `anthropic.rs` does - the duplication T-008 and T-011 exist to delete. The
-`BTreeMap` import went with it.
+"azure_resource")` and routes its three arms (`content_block_start` /
+`content_block_delta` / `content_block_stop`) through `open` / `delta` / `end`,
+exactly as `anthropic.rs` does - the duplication T-008 and T-011 exist to delete.
+The `BTreeMap` import went with it. (This half was already in the working tree when
+the task was executed; what T-011 added to it is the proof - see section 4 - and the
+`azure_resource.rs` rows in both source scans.)
 
 ## 3. What did not change
 
@@ -96,7 +99,7 @@ as `anthropic.rs` does - the duplication T-008 and T-011 exist to delete. The
 
 ## 4. Tests
 
-`crates/ragent-llm/tests/test_wire_decode.rs` (19 cases, 5 new):
+`crates/ragent-llm/tests/test_wire_decode.rs` (5 new cases):
 
 - `test_accumulator_rekeys_a_duplicate_call_id_and_keeps_the_first` - two index-keyed
   calls both announcing `call_dup`: the first start is `call_dup`, the second is
@@ -105,8 +108,8 @@ as `anthropic.rs` does - the duplication T-008 and T-011 exist to delete. The
   call is *closed* before the second arrives, and the id is still spent
   (`anthropic_0_Grep`), which is what keeps a sequential duplicate attributable.
 - `test_accumulator_rekeys_a_collision_between_a_minted_id_and_a_provider_id` - a
-  provider id spelled `openai_0_read`, then an unnamed call whose first candidate
-  would be that same string: the mint advances to `openai_1_read`.
+  provider id spelled `openai_0_read`, the next one `openai_1_read`, then a third call
+  that repeats the first: the mint must walk to `openai_2_read`.
 - `test_accumulator_does_not_rekey_a_repeated_frame_of_the_same_call` - a repeated
   `CallId` frame and a repeated `Index` frame each produce no event and no collision.
 - `test_accumulator_warns_one_line_per_collision_and_not_per_frame` - the only case
@@ -118,8 +121,8 @@ as `anthropic.rs` does - the duplication T-008 and T-011 exist to delete. The
 
 `crates/ragent-llm/tests/test_openai_provider_extra.rs` (1 new) -
 `test_openai_chat_rekeys_two_calls_that_share_one_id`: the same collision through the
-real SSE parser and a local one-shot server, asserting two starts
-(`call_dup`, `openai_0_read`), two deltas each carrying its own `path`, and two ends.
+real SSE parser and a local one-shot server, asserting two starts (`call_dup`,
+`openai_0_Read`), two deltas each carrying its own `path`, and two ends.
 
 `crates/ragent-llm/tests/test_azure_resource_anthropic.rs` (1 new) -
 `test_azure_anthropic_stream_uses_the_shared_accumulator_for_parallel_calls`: two
@@ -135,23 +138,23 @@ recovery" list.
 ## 5. Red proofs
 
 Each defect applied, the named case observed to fail, then the file restored from
-`target/temp` and verified byte-identical by `md5sum` (and `touch`ed so cargo cannot
-reuse the broken object file):
+`target/temp/t011/` and verified byte-identical by `md5sum -c` (and `touch`ed so
+cargo cannot reuse the broken object file):
 
-| # | Injected defect | Case that failed |
+| # | Injected defect | Case that failed (verbatim) |
 |---|---|---|
-| 1 | `start_id`'s ledger check short-circuited to `if true` (every id keeps itself - the pre-T-011 behaviour) | `..._rekeys_a_duplicate_call_id_and_keeps_the_first`, `..._rekeys_a_duplicate_id_used_by_two_sequential_calls`, `..._warns_one_line_per_collision_and_not_per_frame` (`[]` warnings), and the end-to-end `test_openai_chat_rekeys_two_calls_that_share_one_id` |
-| 2 | the `tracing::warn!` moved into `open`'s per-frame path so every repeated frame logs | `..._warns_one_line_per_collision_and_not_per_frame` (10 warnings, listing `call_dup` three times) |
-| 3 | `synthetic_id`'s skip-used-ids loop deleted | `..._rekeys_a_collision_between_a_minted_id_and_a_provider_id` (`openai_0_read` where `openai_2_read` is required - the replacement was itself the duplicate) |
-| 4 | `azure_resource.rs`'s `content_block_start` arm restored to the raw `StreamEvent::ToolCallStart` emit | `test_azure_anthropic_stream_uses_the_shared_accumulator_for_parallel_calls` (`toolu_dup` twice) |
+| 1 | `start_id`'s ledger check short-circuited to `if true` (every id keeps itself - the pre-T-011 behaviour) | `..._rekeys_a_collision_between_a_minted_id_and_a_provider_id` (`openai_0_read` vs `openai_2_read`), `..._rekeys_a_duplicate_call_id_and_keeps_the_first` (`("call_dup","read")` vs `("openai_0_read","read")`), `..._rekeys_a_duplicate_id_used_by_two_sequential_calls` (`toolu_dup` vs `anthropic_0_Grep`), `..._warns_one_line_per_collision_and_not_per_frame` (`left: 0, right: 2` warnings), and the end-to-end `test_openai_chat_rekeys_two_calls_that_share_one_id` (`["call_dup","call_dup"]` vs `["call_dup","openai_0_Read"]`) |
+| 2 | the `tracing::warn!` moved to the top of `start_id`, so every frame logs rather than every collision | `..._warns_one_line_per_collision_and_not_per_frame` (`left: 7, right: 2` warnings) |
+| 3 | `synthetic_id`'s skip-used-ids loop deleted (`while false && ...`) | `..._rekeys_a_collision_between_a_minted_id_and_a_provider_id` (`openai_0_read` where `openai_2_read` is required - the replacement was itself the duplicate) |
+| 4 | `azure_resource.rs`'s `content_block_start` arm restored to a raw `StreamEvent::ToolCallStart` emit | `test_azure_anthropic_stream_uses_the_shared_accumulator_for_parallel_calls` (`[("toolu_dup","Read"),("toolu_dup","Grep")]` vs `[("toolu_dup","Read"),("azure_resource_0_Grep","Grep")]`) |
 
-Proof 3 needed its case rewritten before it proved anything. The first version of the
-test drove one provider id (`openai_0_read`) and one *unnamed* call, which passes with
-or without the walk: the unnamed call mints `openai_0_read` internally, `start_id`
-then sees the collision and mints again from counter 1, so `openai_1_read` comes out
-either way and the walk never iterates. The case now seats provider ids on both
-consecutive counters first (`openai_0_read`, `openai_1_read`), then re-keys a third call
-that repeats the first - so without the walk the replacement is a *third*
+Proof 3 needed its case rewritten before it proved anything. The first version of
+the test drove one provider id (`openai_0_read`) and one *unnamed* call, which
+passes with or without the walk: the unnamed call mints `openai_0_read` internally,
+`start_id` then sees the collision and mints again from counter 1, so `openai_1_read`
+comes out either way and the walk never iterates. The case now seats provider ids on
+both consecutive counters first (`openai_0_read`, `openai_1_read`), then re-keys a
+third call that repeats the first - so without the walk the replacement is a *third*
 `openai_0_read` and the assertion fails, which is the proof recorded above. A red
 proof that stays green is not a proof, and a test whose comment claims to exercise a
 branch it never reaches is worse than no test.
@@ -159,13 +162,20 @@ branch it never reaches is worse than no test.
 ## 6. Verification
 
 - `cargo fmt --all -- --check` - clean.
-- `cargo clippy -p ragent-llm --all-targets` - no warnings.
-- `cargo check --workspace --all-targets` - clean.
-- `cargo test -p ragent-llm --test all` - **287 passed**, 2 ignored (was 280).
-- `cargo test -p ragent-llm --lib` - 327 passed; `--doc` - 30 passed.
+- `cargo check --workspace --all-targets` - clean (46.7 s).
+- `cargo clippy -p ragent-llm --all-targets` - only the pre-existing 19
+  `unnecessary structure name repetition` findings in `tool_cache.rs`; no finding in
+  a file this task touched.
+- `cargo nextest run -p ragent-llm --no-fail-fast` - **636 passed**, 2 skipped,
+  0 failed (the five `test_wire_decode` collision cases, the OpenAI end-to-end case
+  and the Azure Resource case among them).
+- `cargo test -p ragent-llm --doc` - 30 passed.
 - Guard scripts `check-inline-tests`, `check-silent-errors`, `check-poison-locks`,
   `check-security-unwraps`, `check-shared-guards`, `check-test-env-isolation`,
-  `check-dead-code-reasons`, `check-file-tool-containment` - all PASS.
+  `check-dead-code-reasons`, `check-file-tool-containment`,
+  `check-connector-endpoint-literal`, `check-tool-rename`, `check-vcs-duplication`,
+  `check-team-duplication` - all PASS. `check-bench-regression` exits 2 because
+  `target/criterion` is absent (no bench has been run; not a code finding).
 
 ## 7. What is left in this area
 
@@ -173,4 +183,4 @@ branch it never reaches is worse than no test.
   the re-keyed call counts as complete, which is the point of emitting the start at
   all.
 - T-026 can replay recorded frames through the accumulator directly (NFR-004); the
-  duplicate case above is already a hand-written version of that replay.
+  duplicate cases above are already hand-written versions of that replay.

@@ -240,7 +240,7 @@ fn test_request_token_tracker_matches_full_estimate() {
     let more_tools = vec![
         tools[0].clone(),
         ToolDefinition {
-            name: "write".to_string(),
+            name: "Write".to_string(),
             description: "writes a file".to_string(),
             parameters: serde_json::json!({"type": "object"}),
         },

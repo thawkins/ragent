@@ -724,13 +724,13 @@ async fn tool_call_end_with_error_logs_failure() {
     app.handle_event(Event::ToolCallStart {
         session_id: "s1".to_string(),
         call_id: "err-call".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
     })
     .await;
     app.handle_event(Event::ToolCallEnd {
         session_id: "s1".to_string(),
         call_id: "err-call".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         error: Some("exit code 1".to_string()),
         duration_ms: 5,
     })

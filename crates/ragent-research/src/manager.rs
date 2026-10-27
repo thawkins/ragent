@@ -290,6 +290,11 @@ impl ResearchManager {
             item.output_format = Some(output_format.as_str().to_string());
         }
         ResearchIo::create_item_dirs(&self.research_root, &name).await?;
+        // Hold the item's write lock for the whole publication: a concurrent
+        // `persist_frontmatter` must not slip between the two renames below, or
+        // a reader sees one file of the pair without the other.
+        let write_lock = self.item_write_lock(&name);
+        let write_guard = write_lock.lock().await;
         let content = render_skeleton(&name, title, topic, output_format);
         ResearchIo::atomic_write(
             ResearchIo::research_md_path(&self.research_root, &name),
@@ -304,6 +309,11 @@ impl ResearchManager {
             &corpa_content,
         )
         .await?;
+        // The pair is on disk. The `refresh_index` rescan below runs as a
+        // separate step a caller may observe half-done, and a caller that
+        // immediately rewrites the item (a run marking it in progress) must not
+        // wait behind a whole-vault rescan, so the lock is released here.
+        drop(write_guard);
         tracing::info!(
             name = %name,
             title = %title,
@@ -369,12 +379,43 @@ impl ResearchManager {
     /// [`ResearchError::NotFound`] when the directory doesn't exist.
     pub async fn show(&self, name: &str) -> Result<ResearchItem> {
         let name = ResearchName::try_new(name)?;
-        if !ResearchIo::item_exists(&self.research_root, &name).await {
+        Ok(self.show_validated(&name).await?.0)
+    }
+
+    /// [`Self::show`] for a caller that already holds a validated name.
+    ///
+    /// Returns the item and its validated name, so a route that has to ask
+    /// "does this exist" before using it does not validate the same string
+    /// twice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResearchError::NotFound`] when the item directory exists but
+    /// its `RESEARCH.md` does not: `create` publishes the directory and the file
+    /// in separate steps, so a directory alone is not an item.
+    pub async fn show_validated(
+        &self,
+        name: &ResearchName,
+    ) -> Result<(ResearchItem, ResearchName)> {
+        if !ResearchIo::item_exists(&self.research_root, name).await {
             let suggestions = self.suggest_closest(name.as_str()).await;
             return Err(ResearchError::NotFound(name.to_string(), suggestions));
         }
-        let path = ResearchIo::research_md_path(&self.research_root, &name);
-        self.read_item_cached(&path).await
+        let path = ResearchIo::research_md_path(&self.research_root, name);
+        match self.read_item_cached(&path).await {
+            Ok(item) => Ok((item, name.clone())),
+            // `create` makes the item directory before it writes the file, so a
+            // reader that arrives in between sees a directory with no item. That
+            // is "not an item yet", not an I/O failure: report it as not found
+            // rather than as a 500 the caller cannot act on.
+            Err(ResearchError::Io(ResearchIoError::Io(e)))
+                if e.kind() == std::io::ErrorKind::NotFound =>
+            {
+                let suggestions = self.suggest_closest(name.as_str()).await;
+                Err(ResearchError::NotFound(name.to_string(), suggestions))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // -- Delete (T-010) ----------------------------------------------------
@@ -841,9 +882,51 @@ impl ResearchManager {
         Ok(body)
     }
 
+    /// The in-process write lock for one research item's files.
+    ///
+    /// `create` publishes `RESEARCH.md` and `CORPA.md` in two renames and
+    /// `persist_frontmatter` rewrites `RESEARCH.md` in a third; a reader that
+    /// arrives mid-publication, or a second writer interleaved with the first,
+    /// sees a half-written item. Writers of one item take this lock, so the pair
+    /// is always published as one step. Keyed by the item directory, so two
+    /// managers over the same root serialise too.
+    fn item_write_lock(&self, name: &ResearchName) -> Arc<tokio::sync::Mutex<()>> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+
+        static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
+            OnceLock::new();
+
+        let key = ResearchIo::item_dir(&self.research_root, name);
+        let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(guard.entry(key).or_default())
+    }
+
     async fn persist_frontmatter(&self, item: &ResearchItem) -> Result<()> {
+        // A full rewrite has no body to preserve yet: a caller that marks an
+        // item in progress while the item is still being created (the HTTP
+        // `POST /research` route runs the session in the background, and the
+        // session marks the item in progress immediately after `create`)
+        // would otherwise fail here with `NotFound` and leave a half-created
+        // item - the directory exists but `RESEARCH.md` does not.
+        // One writer at a time per item: a `create` publishing the pair must not
+        // interleave with this rewrite.
+        let write_lock = self.item_write_lock(&item.name);
+        let _write_guard = write_lock.lock().await;
         let path = ResearchIo::research_md_path(&self.research_root, &item.name);
-        let body = Self::read_body_after_frontmatter(&path).await?;
+        let body = match Self::read_body_after_frontmatter(&path).await {
+            Ok(body) => body,
+            Err(ResearchError::Io(ResearchIoError::NotFound(_))) => String::new(),
+            Err(ResearchError::Io(ResearchIoError::Io(e)))
+                if e.kind() == std::io::ErrorKind::NotFound =>
+            {
+                String::new()
+            }
+            Err(e) => return Err(e),
+        };
         let content = format!("{}{}", item.render_frontmatter(), body);
         ResearchIo::atomic_write(&path, &content).await?;
         Ok(())

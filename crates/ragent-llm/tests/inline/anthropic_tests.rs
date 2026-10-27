@@ -35,7 +35,7 @@ fn test_anthropic_model_to_info_uses_live_thinking_capability() {
 // chat() / SSE parsing via a local mock server
 // ---------------------------------------------------------------------------
 
-use crate::llm::{ChatRequest, LlmClient, StreamEvent};
+use crate::llm::{ChatContent, ChatRequest, LlmClient, StreamEvent};
 use ragent_types::event::FinishReason;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -300,4 +300,83 @@ fn test_anthropic_build_request_body_parts_and_images() {
     assert_eq!(parts[1]["source"]["media_type"], "image/jpeg");
     assert_eq!(parts[1]["source"]["data"], "QUJD");
     assert_eq!(parts[2]["type"], "tool_result");
+}
+
+// ---------------------------------------------------------------------------
+// FR-011: the signed-thinking block's signature (T-018)
+// ---------------------------------------------------------------------------
+
+/// FR-011: Anthropic sends the signature of a signed thinking block as a
+/// `signature_delta` inside that block, after its thinking text. It reaches the
+/// agent loop as its own event, so it is recorded apart from the reasoning text
+/// (an agent that appended it to the reasoning buffer would show it to the user
+/// and lose it as a signature) and can be echoed back with the block.
+#[tokio::test]
+async fn test_anthropic_signed_thinking_reaches_the_loop_as_its_own_event() {
+    let sse = concat!(
+        "event: content_block_start\n",
+        "data: {\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weigh \"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"the options\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"EqQBCkYIBxgCKkA\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"index\":0}\n\n",
+        "event: content_block_start\n",
+        "data: {\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_9\",\"name\":\"Read\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"index\":1}\n\n",
+        "event: message_delta\n",
+        "data: {\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n",
+    )
+    .to_string();
+    let url = spawn_anthropic_sse(sse).await;
+    let events: Vec<StreamEvent> = anthropic_client(url)
+        .chat(anthropic_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    let signatures: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ReasoningSignature { signature } => Some(signature.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        signatures,
+        vec!["EqQBCkYIBxgCKkA"],
+        "the signed block's signature must be surfaced exactly once, unchanged"
+    );
+
+    // The signature is not reasoning text: the reasoning channel carries the
+    // thinking alone, so the replayed block can be reassembled byte for byte.
+    let reasoning: String = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ReasoningDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reasoning, "weigh the options");
+
+    // And it arrives before the call it justified, as the provider requires.
+    let signature_at = events
+        .iter()
+        .position(|event| matches!(event, StreamEvent::ReasoningSignature { .. }))
+        .expect("signature event");
+    let call_at = events
+        .iter()
+        .position(|event| matches!(event, StreamEvent::ToolCallStart { .. }))
+        .expect("tool call event");
+    assert!(
+        signature_at < call_at,
+        "the signature closes the thinking block, so it precedes the call"
+    );
 }

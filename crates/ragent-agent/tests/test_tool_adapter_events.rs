@@ -87,13 +87,13 @@ where
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn core_adapter_converts_session_input_events_during_bash() {
-    // While `bash` awaits its child, both adapter forwarders are live and
+    // While `Bash` awaits its child, both adapter forwarders are live and
     // subscribed. Publishing session-bus events in that window drives the
     // `convert_core_event` arms (UserInput / QuestionAnswered) plus its
     // session-id filter and `_ => None` fallthrough.
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = create_default_registry();
-    let bash = registry.get("bash").expect("bash tool registered");
+    let bash = registry.get("Bash").expect("Bash tool registered");
     let ctx = ctx_in(dir.path());
 
     let bus = ctx.event_bus.clone();
@@ -146,11 +146,11 @@ async fn core_adapter_converts_session_input_events_during_bash() {
 async fn core_adapter_forwards_shell_cwd_changed_from_bash() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = create_default_registry();
-    let bash = registry.get("bash").expect("bash tool registered");
+    let bash = registry.get("Bash").expect("Bash tool registered");
     let ctx = ctx_in(dir.path());
 
     let mut rx = ctx.event_bus.subscribe();
-    // A large output widens the post-publish window inside `bash` (the
+    // A large output widens the post-publish window inside `Bash` (the
     // `ShellCwdChanged` publish happens just before the output is formatted),
     // giving the per-call forwarder time to convert it before it is aborted.
     // The timeout is deliberately generous - under a parallel
@@ -254,8 +254,8 @@ async fn extended_task_create_then_get_roundtrips_through_storage_adapter() {
     let registry = create_default_registry();
     let ctx = storage_ctx(dir.path());
 
-    let create = registry.get("task_create").expect("task_create registered");
-    assert_eq!(create.name(), "task_create");
+    let create = registry.get("TaskCreate").expect("task_create registered");
+    assert_eq!(create.name(), "TaskCreate");
     assert_eq!(create.permission_category(), "task");
     let created = create
         .execute(
@@ -281,7 +281,7 @@ async fn extended_task_create_then_get_roundtrips_through_storage_adapter() {
 
     // task_get reads the same row back through `list_tasks`.
     let got = registry
-        .get("task_get")
+        .get("TaskGet")
         .expect("task_get registered")
         .execute(json!({ "task_id": task_id }), &ctx)
         .await
@@ -300,8 +300,8 @@ async fn extended_task_update_mutates_through_storage_adapter() {
     let ctx = storage_ctx(dir.path());
 
     let created = registry
-        .get("task_create")
-        .expect("task_create")
+        .get("TaskCreate")
+        .expect("TaskCreate")
         .execute(json!({ "subject": "First", "description": "d" }), &ctx)
         .await
         .expect("create");
@@ -311,7 +311,7 @@ async fn extended_task_update_mutates_through_storage_adapter() {
         .to_string();
 
     let updated = registry
-        .get("task_update")
+        .get("TaskUpdate")
         .expect("task_update registered")
         .execute(
             json!({ "task_id": task_id, "status": "in_progress", "owner": "worker" }),
@@ -333,8 +333,8 @@ async fn extended_task_create_rejects_unknown_blocked_by() {
     // `blocked_by` validation calls `list_tasks` on the adapter and then bails
     // when the referenced id does not exist in the session.
     let err = registry
-        .get("task_create")
-        .expect("task_create")
+        .get("TaskCreate")
+        .expect("TaskCreate")
         .execute(
             json!({
                 "subject": "Blocked",
@@ -358,8 +358,8 @@ async fn extended_task_update_rejects_blocked_status() {
     let ctx = storage_ctx(dir.path());
 
     let created = registry
-        .get("task_create")
-        .expect("task_create")
+        .get("TaskCreate")
+        .expect("TaskCreate")
         .execute(json!({ "subject": "T", "description": "d" }), &ctx)
         .await
         .expect("create");
@@ -369,8 +369,8 @@ async fn extended_task_update_rejects_blocked_status() {
         .to_string();
 
     let err = registry
-        .get("task_update")
-        .expect("task_update")
+        .get("TaskUpdate")
+        .expect("TaskUpdate")
         .execute(json!({ "task_id": task_id, "status": "blocked" }), &ctx)
         .await
         .expect_err("status=blocked must be rejected");
@@ -384,12 +384,12 @@ async fn extended_task_tools_error_cleanly_without_storage() {
     let ctx = ctx_in(dir.path());
 
     for (tool, input) in [
-        ("task_create", json!({ "subject": "s", "description": "d" })),
+        ("TaskCreate", json!({ "subject": "s", "description": "d" })),
         (
-            "task_update",
+            "TaskUpdate",
             json!({ "task_id": "task-1", "status": "pending" }),
         ),
-        ("task_get", json!({ "task_id": "task-1" })),
+        ("TaskGet", json!({ "task_id": "task-1" })),
     ] {
         let err = registry
             .get(tool)

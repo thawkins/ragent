@@ -129,6 +129,7 @@ impl Default for ArchiveConfig {
 /// ```no_run
 /// use ragent_agent::session::archive::{export_session_archive, ArchiveConfig};
 /// use ragent_storage::Storage;
+/// use std::path::Path;
 /// use std::sync::Arc;
 ///
 /// let storage = Arc::new(Storage::open_in_memory().unwrap());
@@ -137,7 +138,7 @@ impl Default for ArchiveConfig {
 ///     &storage,
 ///     None,
 ///     "session-id",
-///     "/path/to/archive.tar.gz",
+///     Path::new("/path/to/archive.tar.gz"),
 ///     &config,
 /// ).unwrap();
 /// ```
@@ -400,6 +401,7 @@ pub struct ImportResult {
 /// ```no_run
 /// # use ragent_agent::session::archive::{import_session_archive, ImportConfig};
 /// # use ragent_storage::Storage;
+/// # use std::path::Path;
 /// # use std::sync::Arc;
 /// # async fn example() -> anyhow::Result<()> {
 /// let storage = Arc::new(Storage::open_in_memory()?);
@@ -408,7 +410,7 @@ pub struct ImportResult {
 ///     activate_triggers: false,
 ///     ..Default::default()
 /// };
-/// let result = import_session_archive(&storage, None, "session.tar.gz", &config).await?;
+/// let result = import_session_archive(&storage, None, Path::new("session.tar.gz"), &config).await?;
 /// println!("Imported {} messages", result.messages_imported);
 /// # Ok(())
 /// # }

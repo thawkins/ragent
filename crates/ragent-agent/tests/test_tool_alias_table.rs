@@ -339,7 +339,7 @@ fn tools_in_memory(json: &str) -> ToolsConfig {
 #[test]
 fn test_resolver_never_consults_a_retired_spelling_from_the_table() {
     // Every `before` spelling is fed in as a source key *and* as a target for
-    // every pair, so the case grows with the table rather than pinning `bash`.
+    // every pair, so the case grows with the table rather than pinning `Bash`.
     let registry = create_default_registry();
     for row in &TOOL_RENAMES {
         let as_key = AliasTable::from_tools_config(&tools_in_memory(&format!(

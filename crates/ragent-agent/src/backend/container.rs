@@ -39,15 +39,15 @@
 //!
 //! ## Dispatch
 //!
-//! - `bash` - the command is validated by the **7-layer host validator**
+//! - `Bash` - the command is validated by the **7-layer host validator**
 //!   ([`ragent_tools_core::bash::validate_shell_command`]) before it is executed,
 //!   so the sandbox can never be used to bypass the security model (FR-002,
 //!   FR-037); it then runs as `exec <name> sh -lc '<command>'` with the workspace
 //!   as the working directory.
-//! - `read`, `write`, `create`, `append_file`, `rm`, `mkdir`, `list`, `glob`,
-//!   `grep` - translated to a sandbox `exec` script (content is transported
-//!   base64-encoded so it cannot be mangled by quoting) and confined to the
-//!   workspace mount point.
+//! - `read`, `Write`, `create`, `append_to_file`, `rm`, `make_directory`, `list`,
+//!   `Glob`, `Grep` - translated to a sandbox `exec` script (content is
+//!   transported base64-encoded so it cannot be mangled by quoting) and confined
+//!   to the workspace mount point.
 //! - Every other tool - **refused**. The container backend has no adapter for
 //!   it and never falls back to host execution (FR-031).
 //!
@@ -88,7 +88,7 @@ const PROVISION_TIMEOUT_SECS: u64 = 300;
 /// Seconds allowed for a single non-shell tool `exec`.
 const FILE_EXEC_TIMEOUT_SECS: u64 = 120;
 
-/// Maximum lines a routed `read`/`grep`/`glob`/`list` result renders before it is
+/// Maximum lines a routed `read`/`Grep`/`Glob`/`list` result renders before it is
 /// truncated, matching the core tools' output discipline.
 const MAX_OUTPUT_LINES: usize = 500;
 
@@ -515,7 +515,7 @@ impl ExecutionBackend for ContainerBackend {
     ) -> anyhow::Result<crate::tool::ToolOutput> {
         let tool_name = call.tool.name().to_string();
 
-        // 1. `bash`: validate against the host 7-layer model first (FR-002,
+        // 1. `Bash`: validate against the host 7-layer model first (FR-002,
         //    FR-037), then run the command inside the sandbox.
         if tool_name == "Bash" {
             let command = call.input["command"]
@@ -579,7 +579,7 @@ impl ExecutionBackend for ContainerBackend {
 }
 
 impl ContainerBackend {
-    /// Format a `bash` result the way the host `bash` tool does.
+    /// Format a `Bash` result the way the host `Bash` tool does.
     fn bash_output(
         &self,
         output: std::process::Output,
@@ -668,7 +668,7 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
                 range = sq(&range),
             )
         }
-        "create" | "write" => {
+        "create" | "Write" => {
             let path = container_path(workspace, required_str(input, "path")?)?;
             let content = required_str(input, "content")?;
             format!(
@@ -677,7 +677,7 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
                 payload = sq(&base64_std(content.as_bytes())),
             )
         }
-        "append_file" => {
+        "append_to_file" => {
             let path = container_path(workspace, required_str(input, "path")?)?;
             let content = required_str(input, "content")?;
             format!(
@@ -697,7 +697,7 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
                 path = sq(&path),
             )
         }
-        "mkdir" => {
+        "make_directory" => {
             let path = container_path(workspace, required_str(input, "path")?)?;
             format!(
                 "mkdir -p {path} && echo \"created {path}\"",
@@ -714,7 +714,7 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
                 path = sq(&path),
             )
         }
-        "glob" => {
+        "Glob" => {
             let pattern = required_str(input, "pattern")?;
             let base = match input["path"].as_str() {
                 Some(raw) => container_path(workspace, raw)?,
@@ -730,7 +730,7 @@ fn container_script(tool: &str, input: &Value, workspace: &str) -> anyhow::Resul
                 cap = MAX_OUTPUT_LINES,
             )
         }
-        "grep" => {
+        "Grep" => {
             let pattern = required_str(input, "pattern")?;
             let base = match input["path"].as_str() {
                 Some(raw) => container_path(workspace, raw)?,

@@ -674,7 +674,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
             Event::HookWarning {
                 session_id: s("s"),
                 hook_command: s("lint"),
-                tool: s("write"),
+                tool: s("Write"),
                 stderr: s("warn"),
             },
             "HookWarning",
@@ -683,7 +683,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
         variant(
             Event::ToolResultFlagged {
                 session_id: s("s"),
-                tool: s("write"),
+                tool: s("Write"),
                 hook_command: s("lint"),
                 reason: s("blocked"),
             },
@@ -693,7 +693,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
         variant(
             Event::SecurityVerdict {
                 session_id: s("s"),
-                tool: s("bash"),
+                tool: s("Bash"),
                 verdict: s("deny"),
                 rationale: s("unsafe"),
             },

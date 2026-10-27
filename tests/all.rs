@@ -47,3 +47,6 @@ mod test_serve_openai_gate;
 
 #[path = "test_version_flag.rs"]
 mod test_version_flag;
+
+#[path = "test_wire_matrix_flag.rs"]
+mod test_wire_matrix_flag;

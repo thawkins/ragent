@@ -140,7 +140,7 @@ fn alias_tool_identity_surface() {
     assert!(run.description().to_lowercase().contains("command"));
 
     let ask = AskUserTool;
-    assert_eq!(ask.name(), "ask_user");
+    assert_eq!(ask.name(), "AskUserQuestion");
     assert_eq!(ask.permission_category(), "ask_user");
     assert!(ask.parameters_schema()["properties"]["question"].is_object());
 }
@@ -351,7 +351,7 @@ async fn team_create_records_failed_blueprint_spawns() {
     // is surfaced in the tool metadata.
     std::fs::write(
         bp_dir.join("spawn-prompts.json"),
-        json!([{ "tool": "bash", "args": { "command": "echo nope" } }]).to_string(),
+        json!([{ "tool": "Bash", "args": { "command": "echo nope" } }]).to_string(),
     )
     .expect("write spawn-prompts.json");
 
@@ -369,7 +369,7 @@ async fn team_create_records_failed_blueprint_spawns() {
         "one refused seed must be recorded: {meta}"
     );
     let failures = meta["failed_spawns"].as_array().expect("array");
-    assert_eq!(failures[0]["tool"], "bash");
+    assert_eq!(failures[0]["tool"], "Bash");
     assert!(out.content.contains("failed"), "{}", out.content);
 }
 
@@ -533,15 +533,22 @@ fn tool_definitions_cache_shares_the_allocation() {
     registry.register(Arc::new(PlanEnterTool));
     let cache = SystemPromptCache::new();
 
-    let first = cache.get_tool_definitions(&registry).expect("defs");
-    let second = cache.get_tool_definitions(&registry).expect("defs");
+    let table = ragent_agent::tool::alias_table::AliasTable::default();
+    let first = cache
+        .get_tool_definitions(&registry, &table, false)
+        .expect("defs");
+    let second = cache
+        .get_tool_definitions(&registry, &table, false)
+        .expect("defs");
     assert!(
         Arc::ptr_eq(&first, &second),
         "an unchanged registry returns the cached allocation"
     );
 
     registry.register(Arc::new(PlanEnterTool));
-    let third = cache.get_tool_definitions(&registry).expect("defs");
+    let third = cache
+        .get_tool_definitions(&registry, &table, false)
+        .expect("defs");
     assert!(
         !Arc::ptr_eq(&second, &third),
         "a registry change forces a rebuild"

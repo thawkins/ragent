@@ -6,8 +6,8 @@
 //! `SessionProcessor::process_message` entry through more paths than the
 //! baseline harness:
 //!
-//! - tool steps that invoke real core tools (`bash`, `read`, `write`, `grep`,
-//!   `list`, `glob`) and a multi-tool sequential turn;
+//! - tool steps that invoke real core tools (`Bash`, `read`, `Write`, `Grep`,
+//!   `list`, `Glob`) and a multi-tool sequential turn;
 //! - a step whose provider stream emits `StreamEvent::Error` mid-stream;
 //! - a `Finish { ToolUse }` with an unknown tool name (error-observation path);
 //! - a long pre-seeded history so the pre-send compaction / emergency
@@ -210,7 +210,7 @@ fn make_processor(event_bus: Arc<EventBus>, replies: Vec<ScriptedReply>) -> Resu
         retry_backoff_secs: 0,
         ..Default::default()
     };
-    // Auto-approve writes so the `write` tool step executes without a prompt.
+    // Auto-approve writes so the `Write` tool step executes without a prompt.
     let checker = PermissionChecker::new(vec![PermissionRule {
         permission: Permission::Custom("file:write".to_string()),
         pattern: Some("**".to_string()),
@@ -259,6 +259,7 @@ fn make_processor(event_bus: Arc<EventBus>, replies: Vec<ScriptedReply>) -> Resu
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured, tmp))
@@ -310,7 +311,7 @@ fn collect_events(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> SeenEvent
 // real core tools: bash (echo), read, write, grep, list, glob
 // ---------------------------------------------------------------------------
 
-/// A `bash` tool step with a harmless `echo` command, then a text step.
+/// A `Bash` tool step with a harmless `echo` command, then a text step.
 /// `echo` is on the safe-command whitelist so it runs without a prompt.
 #[tokio::test]
 async fn test_bash_tool_step_then_text() -> Result<()> {
@@ -320,7 +321,7 @@ async fn test_bash_tool_step_then_text() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "bash",
+                name: "Bash",
                 args: r#"{"command": "echo hello from bash"}"#.to_string(),
             },
             ScriptedReply::TextOnly("bash done"),
@@ -355,7 +356,7 @@ async fn test_bash_tool_step_then_text() -> Result<()> {
     Ok(())
 }
 
-/// A `write` tool step (auto-approved via the in-memory allow rule) followed
+/// A `Write` tool step (auto-approved via the in-memory allow rule) followed
 /// by a `read` of the same file and a text step - three sequential tool calls
 /// across the same turn.
 #[tokio::test]
@@ -366,7 +367,7 @@ async fn test_multiple_sequential_tool_calls_in_one_turn() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "note.txt", "content": "hello file"}"#.to_string(),
             },
             ScriptedReply::ToolCall {
@@ -404,7 +405,7 @@ async fn test_multiple_sequential_tool_calls_in_one_turn() -> Result<()> {
     Ok(())
 }
 
-/// `grep`, `list`, and `glob` read-only steps all execute without a prompt
+/// `Grep`, `list`, and `Glob` read-only steps all execute without a prompt
 /// (they resolve to `file:read`, auto-granted for paths under the cwd).
 #[tokio::test]
 async fn test_read_only_tools_grep_list_glob() -> Result<()> {
@@ -414,7 +415,7 @@ async fn test_read_only_tools_grep_list_glob() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "grep",
+                name: "Grep",
                 args: r#"{"pattern": "pub fn", "path": "."}"#.to_string(),
             },
             ScriptedReply::ToolCall {
@@ -422,7 +423,7 @@ async fn test_read_only_tools_grep_list_glob() -> Result<()> {
                 args: r#"{"path": ".", "depth": 1}"#.to_string(),
             },
             ScriptedReply::ToolCall {
-                name: "glob",
+                name: "Glob",
                 args: r#"{"pattern": "**/*.rs"}"#.to_string(),
             },
             ScriptedReply::TextOnly("read-only sweep done"),

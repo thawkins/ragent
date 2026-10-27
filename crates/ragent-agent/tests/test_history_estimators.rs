@@ -115,7 +115,7 @@ fn detect_incomplete_file_task_requires_action_and_filename_and_missing_write() 
     // Verb + filename + a write tool used -> complete (false).
     assert!(!detect_incomplete_file_task(
         "please create report.txt",
-        &[tool_call_part("write")]
+        &[tool_call_part("Write")]
     ));
 
     // A write tool via an alias also counts.

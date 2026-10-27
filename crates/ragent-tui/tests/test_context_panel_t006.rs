@@ -60,7 +60,7 @@ fn test_conversation_history_counts_tool_call_payloads() {
         "session-1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "bash".into(),
+            tool: "Bash".into(),
             call_id: "call-123".into(),
             state: Box::new(ragent_agent::message::ToolCallState {
                 status: ragent_agent::message::ToolCallStatus::Completed,

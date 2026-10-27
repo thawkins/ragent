@@ -10,9 +10,9 @@
 //! and `test_loop_steps_extra.rs` files:
 //!
 //! - dozens of real core tools across a single turn (`think`, `calculator`,
-//!   `get_env`, `ragent_info`, `os_info`, `file_info`, `write`, `edit`,
+//!   `get_env`, `ragent_info`, `os_info`, `file_info`, `Write`, `Edit`,
 //!   `multiedit`, `append_to_file`, `copy_file`, `move_file`, `diff`, `read`,
-//!   `rm`, `grep`, `list`, `glob`);
+//!   `rm`, `Grep`, `list`, `Glob`);
 //! - a multipart user message carrying an image part (async history path);
 //! - malformed tool-call JSON (corrective error observation);
 //! - two tool calls in one streamed step;
@@ -21,9 +21,9 @@
 //!   provider error surfaced fatally; a silent `Finish { Stop }` with no text;
 //! - the pre-set cancel flag; the tool-repeat guard (auto-approve denial);
 //!   permission-denied write recovery;
-//! - `plan_enter` (agent switch), `plan_exit` (agent restore),
+//! - `EnterPlanMode` (agent switch), `ExitPlanMode` (agent restore),
 //!   `agent_complete` - each breaking the loop;
-//! - `ask_user` answered by a spawned responder task;
+//! - `AskUserQuestion` answered by a spawned responder task;
 //! - text-format tool-call recovery from bare JSON;
 //! - goal-loop lifecycle: budget exhaustion, goal achieved, a passing and a
 //!   failing verification gate;
@@ -290,6 +290,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured, tmp))
@@ -914,7 +915,7 @@ async fn test_tool_repeat_guard_auto_denies() -> Result<()> {
 // Loop-breaking tool metadata
 // ---------------------------------------------------------------------------
 
-/// `plan_enter` reports `agent_switch` metadata, which breaks the tool loop.
+/// `EnterPlanMode` reports `agent_switch` metadata, which breaks the tool loop.
 /// Auto-approve keeps the `plan` permission from prompting (the test must not
 /// block on an interactive permission dialog).
 #[tokio::test]
@@ -923,7 +924,7 @@ async fn test_plan_enter_switch_breaks_loop() -> Result<()> {
     let (processor, working_dir, captured, _dir) = make_processor(
         event_bus.clone(),
         vec![ScriptedReply::ToolCall {
-            name: "plan_enter".into(),
+            name: "EnterPlanMode".into(),
             args: r#"{"task": "design something"}"#.into(),
         }],
         Vec::new(),
@@ -947,7 +948,7 @@ async fn test_plan_enter_switch_breaks_loop() -> Result<()> {
             Arc::new(AtomicBool::new(false)),
         )
         .await
-        .expect("plan_enter turn succeeds");
+        .expect("EnterPlanMode turn succeeds");
     assert_eq!(
         captured_count(&captured),
         1,
@@ -956,14 +957,14 @@ async fn test_plan_enter_switch_breaks_loop() -> Result<()> {
     Ok(())
 }
 
-/// `plan_exit` reports `agent_restore` metadata, which also breaks the loop.
+/// `ExitPlanMode` reports `agent_restore` metadata, which also breaks the loop.
 #[tokio::test]
 async fn test_plan_exit_restore_breaks_loop() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
     let (processor, working_dir, captured, _dir) = make_processor(
         event_bus.clone(),
         vec![ScriptedReply::ToolCall {
-            name: "plan_exit".into(),
+            name: "ExitPlanMode".into(),
             args: r#"{"summary": "here is the plan"}"#.into(),
         }],
         Vec::new(),
@@ -987,7 +988,7 @@ async fn test_plan_exit_restore_breaks_loop() -> Result<()> {
             Arc::new(AtomicBool::new(false)),
         )
         .await
-        .expect("plan_exit turn succeeds");
+        .expect("ExitPlanMode turn succeeds");
     assert_eq!(captured_count(&captured), 1);
     Ok(())
 }
@@ -1041,7 +1042,7 @@ async fn test_agent_complete_breaks_loop() -> Result<()> {
 // Permission paths
 // ---------------------------------------------------------------------------
 
-/// Auto-approve mode lets a `write` step execute (the `Some(true)` allow path),
+/// Auto-approve mode lets a `Write` step execute (the `Some(true)` allow path),
 /// then a `read` verifies the file.
 #[tokio::test]
 async fn test_auto_approve_write_then_read() -> Result<()> {
@@ -1050,7 +1051,7 @@ async fn test_auto_approve_write_then_read() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write".into(),
+                name: "Write".into(),
                 args: r#"{"path": "auto.txt", "content": "auto-approved"}"#.into(),
             },
             ScriptedReply::ToolCall {
@@ -1097,11 +1098,11 @@ async fn test_edit_chain_of_file_tools() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write".into(),
+                name: "Write".into(),
                 args: r#"{"path": "a.txt", "content": "hello world\n"}"#.into(),
             },
             ScriptedReply::ToolCall {
-                name: "edit".into(),
+                name: "Edit".into(),
                 args: r#"{"file_path": "a.txt", "old_string": "hello", "new_string": "hi"}"#.into(),
             },
             ScriptedReply::ToolCall {
@@ -1178,7 +1179,7 @@ async fn test_permission_denied_write_recovers() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "write".into(),
+                name: "Write".into(),
                 args: r#"{"path": "blocked.txt", "content": "x"}"#.into(),
             },
             ScriptedReply::Text("recovered from denial".into()),
@@ -1199,7 +1200,7 @@ async fn test_permission_denied_write_recovers() -> Result<()> {
     let reply = processor
         .process_message(
             &session.id,
-            "write",
+            "Write",
             &make_agent(),
             Arc::new(AtomicBool::new(false)),
         )
@@ -1216,7 +1217,7 @@ async fn test_permission_denied_write_recovers() -> Result<()> {
 // ask_user answered by a responder
 // ---------------------------------------------------------------------------
 
-/// `ask_user` blocks until a `QuestionAnswered` arrives; a spawned responder
+/// `AskUserQuestion` blocks until a `QuestionAnswered` arrives; a spawned responder
 /// answers the request so the tool returns the response and the loop advances.
 #[tokio::test]
 async fn test_ask_user_question_answered() -> Result<()> {
@@ -1225,7 +1226,7 @@ async fn test_ask_user_question_answered() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCall {
-                name: "ask_user".into(),
+                name: "AskUserQuestion".into(),
                 args: r#"{"question": "pick one"}"#.into(),
             },
             ScriptedReply::Text("answered".into()),
@@ -1478,7 +1479,7 @@ async fn test_loop_verification_fail_budget() -> Result<()> {
 // Sub-agent paths
 // ---------------------------------------------------------------------------
 
-/// In a sub-agent run an interactive tool (`ask_user`) is denied with a
+/// In a sub-agent run an interactive tool (`AskUserQuestion`) is denied with a
 /// corrective observation rather than blocking.
 #[tokio::test]
 async fn test_subagent_interactive_tool_denied() -> Result<()> {
@@ -1493,7 +1494,7 @@ async fn test_subagent_interactive_tool_denied() -> Result<()> {
                 args: r#"{"thought": "a"}"#.into(),
             },
             ScriptedReply::ToolCall {
-                name: "ask_user".into(),
+                name: "AskUserQuestion".into(),
                 args: r#"{"question": "should never block"}"#.into(),
             },
             ScriptedReply::Text(long.clone()),

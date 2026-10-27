@@ -834,6 +834,25 @@ The AI agent can use these tools during a session:
 drivable headless browser engine is present — spec `openhands` FR-029 — so the
 default build advertises 148; with a bundled driver it is 149.)
 
+**Provider spellings (optional).** A model, an ACP client or an MCP server may
+name a tool with a spelling ragent does not register — Anthropic's `WebFetch`,
+OpenAI's `web_search`/`file_search`. Enable `tools.aliases` in `ragent.json` to
+resolve such a spelling onto the ragent tool **before** the unknown-tool check:
+
+```json
+{ "tools": { "aliases": true } }
+```
+
+`true` enables the built-in table (`WebFetch` → `webfetch`, `WebSearch` →
+`websearch`, `file_search` → `codeindex_search`, `web_search` → `websearch`);
+an object adds your own entries on top. Resolution is exact and case-sensitive
+and a registered name always wins, so an alias can never shadow or re-point a
+real tool, and an unmapped name still reaches the unknown-tool error with its
+did-you-mean hint. The thirteen renamed tools (`Bash`, `Edit`, `Write`, ...) are
+registry names themselves and need no alias. `tools.expose_alias_names: true`
+additionally advertises the remaining spellings in the outbound tool list. With
+`tools` absent, behaviour is unchanged.
+
 The **PDF family** (`pdf_read`, `pdf_write`) reads and writes PDF files
 entirely in-process (see [`docs/howtos/office.md`](docs/howtos/office.md)).
 
@@ -912,7 +931,7 @@ context: fork
 
 Deploy to $0:
 
-1. Run tests: cargo test --release
+1. Run tests: cargo nextest run --release
 2. Build: cargo build --release
 3. Deploy to $ARGUMENTS
 4. Verify the deployment succeeded
@@ -954,7 +973,7 @@ Result returned to agent
 - **Dynamic context**: Use `` !`command` `` to execute shell commands and inject output
 - **Forked execution**: Set `context: fork` to run in an isolated subagent (separate conversation history)
 - **Model override**: Use `model: "provider/model"` to use a different model for this skill
-- **Tool restrictions**: Use `allowed-tools: [bash, read]` to limit tools available when running the skill
+- **Tool restrictions**: Use `allowed-tools: [Bash, read]` (or the YAML block form) to limit tools available when running the skill. Entries resolve by exact name: the adopted Claude spellings (`Bash`, `Edit`, `Grep`, ...) and the tools that kept their ragent names (`read`, `list`, ...) work as written; a retired spelling or a typo matches nothing and is reported, naming the entry and the skill
 
 ### Personal Skills
 
@@ -1019,6 +1038,10 @@ ragent can load third-party plugins written for OpenAI Codex and Claude
 Code/Desktop, running their JavaScript on an embedded, budget-sandboxed engine
 (no Node.js, Deno, or Bun required). Plugins contribute tools (registered as
 `plugin_<id>_<tool>`) and slash commands through a versioned `ragent` host API.
+The `plugin_<id>_` namespace keeps a plugin's own tool - even one it calls
+`Bash` or `Edit` - from occupying a name ragent owns or a spelling the tool
+rename retired; the bridge reports such a contribution once, names the
+replacement, and keeps the plugin's other tools working.
 
 Manage plugins from the TUI or the CLI:
 
@@ -1700,7 +1723,7 @@ is sent to the model for review and error resolution.
 
 ```
 ! ls -la
-! cargo test --lib
+! cargo nextest run --lib
 ! git status
 ```
 
@@ -2282,13 +2305,15 @@ parsed into the required structure (FR-005/FR-006).
 - **One test binary per crate** — every crate (and the root `ragent` package) now
   sets `autotests = false` and declares a single `[[test]] name = "all"` whose
   `tests/all.rs` `#[path]`-includes each former top-level test file as a child
-  module. A full `cargo test` links **19 integration targets instead of ~948**;
-  the test-name sets are verified identical to the pre-change sets. Run one file
-  with the filter form:
+  module. A full run links **19 integration targets instead of ~948**; the
+  test-name sets are verified identical to the pre-change sets. Tests run under
+  `cargo nextest` (`.config/nextest.toml`), which gives every test its own
+  process. Run one file with the filter form:
 
   ```bash
-  cargo test -p ragent-tui --test all test_slash_commands::
-  cargo test -p ragent-agent --test all test_processor_deep_paths::
+  cargo nextest run -p ragent-tui -E 'test(test_slash_commands::)'
+  cargo nextest run -p ragent-agent -E 'test(test_processor_deep_paths::)'
+  cargo test --workspace --doc   # doc tests: nextest does not run them
   ```
 
   Merging binaries merges process state, so each `tests/all.rs` defines one
@@ -2498,10 +2523,8 @@ parsed into the required structure (FR-005/FR-006).
   category, and the active marketplace together; click and wheel drive the
   marketplace pane exactly as the category pane.
 - **`browser` tool removed** — the `browser` CDP tool and the whole
-  `ragent-tools-extended::browser` module are deleted, along with `BrowserConfig`
-  and the `tool_visibility.browser` switch. The registered tool count falls
-  152 -> 151 across 22 categories, and the remaining `/tools` switches are
-  `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.
+  `ragent-tools-extended::browser` module are deleted, along with `BrowserConfig`.
+  The registered tool count falls 152 -> 151 across 22 categories.
 - **MCP discovery and startup diagnostics** — `/mcp discover` now scans the
   ragent-native `~/.config/ragent/servers/` directory first; a startup failure is
   echoed to stdout when the TUI stderr spool is active so it is never silent; and
@@ -2582,12 +2605,10 @@ parsed into the required structure (FR-005/FR-006).
   (`office_read`, `office_write`, `office_info`, `libre_read`, `libre_write`,
   `libre_info`) and their module set are gone; only the PDF family
   (`pdf_read`, `pdf_write`) remains, sharing a new `pdf_common` helper. The
-  registered tool count falls 158 -> 152 across 23 categories. The
-  `tool_visibility.office` switch is removed (the remaining switches are
-  `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`,
-  `browser`), OOXML/ODF extensions now return an actionable error from
-  `detect_document_format`, and the dependencies `docx-rust`, `calamine`,
-  `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped. The research
+  registered tool count falls 158 -> 152 across 23 categories. OOXML/ODF
+  extensions now return an actionable error from `detect_document_format`, and
+  the dependencies `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and
+  `spreadsheet-ods` are dropped. The research
   `--from-file` pre-step still reads PDF and plain-text/markdown files.
 - **`/simplify all` code-quality pass** — a correctness, performance, and
   dead-code sweep over the changed set, including a `pdf_write` image-path

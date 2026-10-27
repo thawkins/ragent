@@ -46,7 +46,10 @@
 //!   unknown-tool error already suggests `read` for a call to `Read`, so an entry
 //!   would add a second spelling of one tool for no gain.
 
+use std::sync::Arc;
+
 use ragent_config::{AliasesConfig, ToolsConfig};
+use ragent_types::ToolDefinition;
 
 use super::ToolRegistry;
 use super::rename::Rename;
@@ -261,6 +264,75 @@ impl AliasTable {
         self.entries
             .iter()
             .map(|(spelling, target)| (spelling.as_str(), target.as_str()))
+    }
+
+    /// Returns the outbound tool list for `definitions`: the registry's own
+    /// definitions when `expose` is `false`, or those definitions plus one
+    /// advertised entry per alias spelling when it is `true` (FR-015).
+    ///
+    /// The un-advertised case returns a copy, so the wire path keeps a single
+    /// `Arc<Vec<ToolDefinition>>` type and a build that never set
+    /// `tools.expose_alias_names` sends byte-identical names.
+    ///
+    /// An advertised alias is a **copy** of its target's definition carrying the
+    /// spelling as its name, and is emitted only when all four hold:
+    ///
+    /// - the spelling is not itself registered - a registration always wins, so
+    ///   an entry can never advertise a second entry of a real tool (FR-026);
+    /// - its target **is** registered - an entry whose target this build does not
+    ///   hold is refused at use (FR-031) and must not be advertised as callable;
+    /// - the spelling is not already in the list - so no name is advertised
+    ///   twice, whatever the caller's list contains.
+    ///
+    /// There is deliberately **no** FR-023 table read here. FR-031 forbids
+    /// advertising a retired ragent spelling, and the table already refuses to
+    /// hold one ([`AliasTable::from_aliases`], its single once-per-turn read), so
+    /// a second lookup would buy nothing and would put a rename scan on the
+    /// outbound path every tool call pays for (NFR-006). The outbound guard is
+    /// therefore structural rather than duplicated: an entry that cannot exist
+    /// cannot be advertised.
+    ///
+    /// The result is ascending by name, like every other registry enumeration
+    /// (FR-030), so an advertised spelling sorts among the canonical names rather
+    /// than being appended in table order.
+    #[must_use]
+    pub fn outbound_definitions(
+        &self,
+        definitions: &[ToolDefinition],
+        expose: bool,
+    ) -> Arc<Vec<ToolDefinition>> {
+        if !expose || self.is_empty() {
+            return self.borrow_definitions(definitions);
+        }
+        let mut merged: Vec<ToolDefinition> = definitions.to_vec();
+        for (spelling, target) in self.entries() {
+            if merged.iter().any(|def| def.name == spelling) {
+                continue;
+            }
+            let Some(source) = merged.iter().find(|def| def.name == target).cloned() else {
+                continue;
+            };
+            merged.push(ToolDefinition {
+                name: spelling.to_string(),
+                ..source
+            });
+        }
+        if merged.len() == definitions.len() {
+            // Nothing was advertised (every entry was skipped), so the caller
+            // keeps the list it passed in rather than a copy of it.
+            return self.borrow_definitions(definitions);
+        }
+        merged.sort_by(|left, right| left.name.cmp(&right.name));
+        Arc::new(merged)
+    }
+
+    /// Returns `definitions` as the shared `Arc` the outbound path needs.
+    ///
+    /// A single allocation per call: the wire path takes an
+    /// `Arc<Vec<ToolDefinition>>`, and the un-advertised case must not add a
+    /// second copy on top of the one the registry cache already shares.
+    fn borrow_definitions(&self, definitions: &[ToolDefinition]) -> Arc<Vec<ToolDefinition>> {
+        Arc::new(definitions.to_vec())
     }
 
     /// Returns the ragent tool name `name` maps onto, or `None` when the table

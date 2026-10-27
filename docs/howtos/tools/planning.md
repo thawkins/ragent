@@ -11,7 +11,7 @@ Delegate read-only analytical work to the plan agent.
 
 ---
 
-## plan_enter
+## EnterPlanMode
 
 Enter plan mode / delegate analysis to the plan agent. The plan agent is
 read-only: it explores the codebase and produces a structured implementation
@@ -21,17 +21,17 @@ plan without making any changes.
 prompt.
 
 ```text
-plan_enter
+EnterPlanMode
 ```
 
 ---
 
-## plan_exit
+## ExitPlanMode
 
 Exit plan mode and return to normal editing.
 
 **Arguments:** none.
 
 ```text
-plan_exit
+ExitPlanMode
 ```

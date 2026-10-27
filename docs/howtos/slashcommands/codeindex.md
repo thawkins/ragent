@@ -186,4 +186,5 @@ Prints, per the non-blocking `try_status()` snapshot:
 - `codeindex_search`, `codeindex_symbols`, `codeindex_references`,
   `codeindex_dependencies`, `codeindex_explain`, `codeindex_path`,
   `codeindex_communities`, `codeindex_godnodes` LLM tools.
-- `/tools codeindex on|off` controls tool visibility rather than indexing.
+- `/tools list` prints the registered tool set (it does not change indexing; use
+  `/codeindex on` / `/codeindex off`).

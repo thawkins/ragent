@@ -80,7 +80,7 @@ impl App {
         task: String,
         context: String,
     ) {
-        // Push current agent to stack so plan_exit can restore it
+        // Push current agent to stack so ExitPlanMode can restore it
         self.agent_stack.push(self.agent_info.clone());
 
         // Find and switch to the plan agent
@@ -1257,7 +1257,12 @@ impl App {
                 // serialization is used because newlines render poorly in the
                 // single-line log panel and only the first 200 chars survive
                 // the preview cap anyway.
-                let pretty = serde_json::from_str::<serde_json::Value>(args)
+                //
+                // FR-007: the preview decodes through the shared helper, so a
+                // double-encoded or whitespace payload is shown the way the
+                // tool will receive it instead of the TUI inventing a second
+                // JSON rule.
+                let pretty = ragent_types::tool_args::decode_tool_arguments(args)
                     .ok()
                     .and_then(|v| serde_json::to_string(&v).ok())
                     .unwrap_or_else(|| args.to_string());
@@ -1317,7 +1322,7 @@ impl App {
                 // task tracker, so it must invalidate the cache too.
                 if matches!(
                     tool.as_str(),
-                    "task_create" | "task_update" | "spec_task_update"
+                    "TaskCreate" | "TaskUpdate" | "spec_task_update"
                 ) {
                     self.tasks_cache_dirty = true;
                 }
@@ -2892,11 +2897,12 @@ impl App {
         if let Some(last) = self.messages.last_mut()
             && last.role == Role::Assistant
         {
-            if let Some(MessagePart::Reasoning { text: t }) = last.parts.last_mut() {
+            if let Some(MessagePart::Reasoning { text: t, .. }) = last.parts.last_mut() {
                 t.push_str(text);
             } else {
                 last.parts.push(MessagePart::Reasoning {
                     text: text.to_string(),
+                    signature: None,
                 });
             }
             last.touch();
@@ -2910,6 +2916,7 @@ impl App {
                 Role::Assistant,
                 vec![MessagePart::Reasoning {
                     text: text.to_string(),
+                    signature: None,
                 }],
             );
             self.messages.push(msg);
@@ -3009,7 +3016,10 @@ impl App {
     }
 
     pub(crate) fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
-        if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
+        // FR-007: the shared decoder, so the part shows the argument object the
+        // tool will receive - the double-encoded string form included - and an
+        // empty/whitespace payload is `{}` rather than "no input".
+        if let Ok(input) = ragent_types::tool_args::decode_tool_arguments(args_json) {
             for idx in (0..self.messages.len()).rev() {
                 // `applied` tracks whether the input was actually written
                 // (the part may already carry populated args).
@@ -3098,8 +3108,9 @@ impl App {
                                 else {
                                     break;
                                 };
+                                // FR-007: one decode rule for the buffer too.
                                 if let Ok(input) =
-                                    serde_json::from_str::<serde_json::Value>(&args_json)
+                                    ragent_types::tool_args::decode_tool_arguments(&args_json)
                                 {
                                     state.input = input;
                                     did_apply = true;

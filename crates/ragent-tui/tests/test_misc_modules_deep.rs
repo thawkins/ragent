@@ -1733,7 +1733,7 @@ fn loop_dialog_build_spec_from_state_validates_the_goal() {
     state.goal_field = ragent_tui::input_field::InputField::with_text("ship it");
     state.verify_cmd_field = ragent_tui::input_field::InputField::with_text("cargo test");
     state.scope_field = ragent_tui::input_field::InputField::with_text("src/**, Cargo.toml");
-    state.tool_set_field = ragent_tui::input_field::InputField::with_text("read, write");
+    state.tool_set_field = ragent_tui::input_field::InputField::with_text("read, Write");
     state.max_steps_field = ragent_tui::input_field::InputField::with_text("7");
     state.checkpoints = true;
 
@@ -1742,7 +1742,7 @@ fn loop_dialog_build_spec_from_state_validates_the_goal() {
     assert_eq!(spec.agent, "general");
     assert_eq!(spec.verify_cmd.as_deref(), Some("cargo test"));
     assert_eq!(spec.scope, vec!["src/**", "Cargo.toml"]);
-    assert_eq!(spec.tool_set, vec!["read", "write"]);
+    assert_eq!(spec.tool_set, vec!["read", "Write"]);
     assert_eq!(spec.max_steps, Some(7));
     assert!(spec.checkpoints);
 }

@@ -49,7 +49,7 @@ async fn missing_program_is_a_failure_not_an_error() {
     let outcome = run_verification_command("definitely-not-a-real-program-xyz", &dir)
         .await
         .expect("run");
-    // `bash` itself exists, so the spawn succeeds and bash reports the
+    // `Bash` itself exists, so the spawn succeeds and bash reports the
     // missing command with exit status 127.
     match outcome {
         VerificationOutcome::Failure { reason, .. } => {

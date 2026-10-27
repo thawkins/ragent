@@ -49,7 +49,7 @@ fn synthetic_history(n: usize) -> Vec<Message> {
                     text: format!("response {i}"),
                 },
                 MessagePart::ToolCall {
-                    tool: "bash".to_string(),
+                    tool: "Bash".to_string(),
                     call_id: format!("call-{i}"),
                     state: Box::new(ragent_agent::message::ToolCallState {
                         status: ragent_agent::message::ToolCallStatus::Completed,
@@ -144,7 +144,7 @@ fn interim_save_hash(parts: &[MessagePart]) -> u64 {
                     dur.hash(&mut hasher);
                 }
             }
-            MessagePart::Reasoning { text } => text.hash(&mut hasher),
+            MessagePart::Reasoning { text, .. } => text.hash(&mut hasher),
             MessagePart::Image(img) => {
                 img.mime_type.hash(&mut hasher);
                 img.path.hash(&mut hasher);
@@ -175,12 +175,12 @@ fn bench_tool_result_content_for_llm(c: &mut Criterion) {
     // Short result - fast path (no truncation).
     let short = "hello world\n".to_string();
     group.bench_function("short", |b| {
-        b.iter(|| black_box(tool_result_content_for_llm("bash", &short, None)));
+        b.iter(|| black_box(tool_result_content_for_llm("Bash", &short, None)));
     });
     // Long result - truncation path.
     let long: String = "x".repeat(50_000);
     group.bench_function("long", |b| {
-        b.iter(|| black_box(tool_result_content_for_llm("bash", &long, None)));
+        b.iter(|| black_box(tool_result_content_for_llm("Bash", &long, None)));
     });
     group.finish();
 }
@@ -214,7 +214,7 @@ fn bench_interim_save_hash(c: &mut Criterion) {
     for n in [1usize, 5, 20] {
         let parts: Vec<MessagePart> = (0..n)
             .map(|i| MessagePart::ToolCall {
-                tool: "bash".to_string(),
+                tool: "Bash".to_string(),
                 call_id: format!("call-{i}"),
                 state: Box::new(ragent_agent::message::ToolCallState {
                     status: ragent_agent::message::ToolCallStatus::Completed,
@@ -257,7 +257,7 @@ fn bench_mock_llm_chat_stream(c: &mut Criterion) {
         });
     });
     // Tool-call script - measures tool-call assembly throughput.
-    let tool_script = MockLlmScript::single_tool_call("bash", r#"{"command":"echo hi"}"#);
+    let tool_script = MockLlmScript::single_tool_call("Bash", r#"{"command":"echo hi"}"#);
     let tool_client = MockLlmClient::new(tool_script);
     group.bench_function("single_tool_call", |b| {
         b.iter(|| {

@@ -41,6 +41,8 @@ use ragent_connectors::{
     subcommand_of,
 };
 
+use crate::cli_out::cliprintln;
+
 /// Entry point for `ragent connectors <args...>`, invoked from the CLI dispatcher.
 ///
 /// `args` is everything after the `connectors` verb (may be empty). Prints the
@@ -57,7 +59,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
 
     // A bare `ragent connectors` renders usage (FR-004, FR-017 parity).
     if text.is_empty() {
-        println!("{}", cli_usage());
+        cliprintln!("{}", cli_usage());
         return Ok(());
     }
 
@@ -74,13 +76,13 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
     // describes the browser and points at the TUI surface instead of opening
     // it (one wording, two surfaces: FR-004).
     if sub == "claude" {
-        println!("{}", cli_body(&catalogue_browser_pointer()));
+        cliprintln!("{}", cli_body(&catalogue_browser_pointer()));
         return Ok(());
     }
 
     // `help` and any unrecognised subcommand both render the usage block.
     if sub == "help" || !CONNECTOR_SUBCOMMANDS.contains(&sub) {
-        println!("{}", cli_usage());
+        cliprintln!("{}", cli_usage());
         return Ok(());
     }
 
@@ -96,13 +98,13 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
     // (FR-036), so it runs on the off-loop blocking path.
     if sub == "stores" && rest.contains("--check") {
         let report = run_connector_subcommand_stores_check(&config).await;
-        println!("{}", cli_body(&report));
+        cliprintln!("{}", cli_body(&report));
         return Ok(());
     }
 
     // The session-free subcommands first: they need no MCP client at all.
     if let Some(report) = run_connector_subcommand(&workdir, sub, rest) {
-        println!("{}", cli_body(&report));
+        cliprintln!("{}", cli_body(&report));
         return Ok(());
     }
 
@@ -123,7 +125,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
         )
         .await
         {
-            println!("{}", cli_body(&report));
+            cliprintln!("{}", cli_body(&report));
             return Ok(());
         }
     }
@@ -133,7 +135,7 @@ pub async fn run_cli(args: &[String]) -> Result<()> {
     let report = run_connector_subcommand_env(&mut env, sub, rest)
         .await
         .unwrap_or_else(|| render_help(sub));
-    println!("{}", cli_body(&report));
+    cliprintln!("{}", cli_body(&report));
     Ok(())
 }
 

@@ -220,6 +220,42 @@ async fn test_skill_load_starts_invocation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_skill_load_reports_a_stale_allowed_tool_entry() {
+    // FR-029 (spec `uniformtools`): the `/skill` trigger is one of the three
+    // places a pack's `allowed_tools` becomes a restriction, so a stale entry
+    // must be reported there rather than silently shrinking the surface.
+    ragent_agent::tool::allowed_tools::reset_unresolved_allowed_tools_for_test();
+    let project = SkillProject::new();
+    project.write_pack(
+        &[".ragent", "skills"],
+        "typo",
+        "---\nname: typo\ndescription: declares one adopted and one stale entry\n\
+         allowed-tools:\n  - Bash\n  - ReadFile\n---\n\nReply with exactly: TYPO-OK\n",
+    );
+    let mut app = project.app();
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "ollama".to_string(),
+        name: "Ollama".to_string(),
+        source: ProviderSource::AutoDiscovered,
+    });
+    app.selected_model = Some("ollama/qwen3:latest".to_string());
+
+    app.execute_slash_command("/skill typo").await;
+
+    // The proof the slash surface reported is that the ledger already holds the
+    // pair: asking again is silent.
+    assert_eq!(
+        ragent_agent::tool::allowed_tools::report_unresolved_allowed_tools_once(
+            &ragent_agent::tool::create_default_registry(),
+            "skill `typo`",
+            &["Bash".to_string(), "ReadFile".to_string()],
+        ),
+        0,
+        "FR-029: `/skill` must report the stale entry when it applies the restriction"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_skill_unknown_pack_reports_not_found() {
     let project = SkillProject::new();
     let mut app = project.app();

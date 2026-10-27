@@ -1,5 +1,5 @@
 //! Regression tests for FUNC-068: every file-mutating tool must honour
-//! `ctx.allowed_roots`, not just `write`. A destination under a whitelisted root
+//! `ctx.allowed_roots`, not just `Write`. A destination under a whitelisted root
 //! outside `working_dir` must be accepted by all of them.
 
 use std::path::{Path, PathBuf};

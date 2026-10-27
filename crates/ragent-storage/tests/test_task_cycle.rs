@@ -1,7 +1,7 @@
 //! todo2tasks T-005: tests for cycle detection in the task dependency
 //! DAG (`detect_cycle`).
 //!
-//! These tests verify FR-004: when a `task_update` call attempts to add
+//! These tests verify FR-004: when a `TaskUpdate` call attempts to add
 //! a `blocked_by` or `add_blocks` edge that would create a dependency
 //! cycle, the system rejects the update with an error describing the
 //! cycle and does not persist the edge.

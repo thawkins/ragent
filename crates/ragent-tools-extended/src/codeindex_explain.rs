@@ -52,8 +52,8 @@ impl Tool for CodeIndexExplainTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` or `glob` as fallback tools for code search.",
-                    &["grep", "glob"],
+                    "Use `Grep` or `Glob` as fallback tools for code search.",
+                    &["Grep", "Glob"],
                 ));
             }
         };
@@ -68,7 +68,7 @@ impl Tool for CodeIndexExplainTool {
                     metadata: Some(json!({
                         "error": "codeindex_missing_parameter",
                         "parameter": "symbol",
-                        "fallback_tools": ["grep", "glob"]
+                        "fallback_tools": ["Grep", "Glob"]
                     })),
                 });
             }
@@ -92,7 +92,7 @@ impl Tool for CodeIndexExplainTool {
                 metadata: Some(json!({
                     "error": "codeindex_symbol_not_found",
                     "symbol": symbol,
-                    "fallback_tools": ["grep", "glob"]
+                    "fallback_tools": ["Grep", "Glob"]
                 })),
             }),
             Some(Some(result)) => {

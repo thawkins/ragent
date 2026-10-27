@@ -16,15 +16,25 @@
 //!    position that profile's `id_field` names.
 //! 3. **The dialects the encoder absorbed**, so a future edit cannot quietly put
 //!    a copy back: the Converse role policy, the HuggingFace name prefix, native
-//!    Ollama's name-keyed result and image rules, and the Responses input list that
-//!    carries tool history at all (FR-018's dropping behaviour is what T-007
-//!    replaces; this file only pins that the carrier is now *reached*).
+//!    Ollama's name-keyed result and image rules, the Responses input list that
+//!    carries tool history (FR-018's `WireLoss` refusal for a construct the input
+//!    shape has no slot for - an image part or a message role), and the two
+//!    dialect switches that died with the loops (`strict_single_text_collapse` and
+//!    Copilot's unconditional collapse).
+//!
+//! A fourth group pins the conversation-level form. Six of the seven provider
+//! modules call it with no context at all, so a body built from it must equal the
+//! concatenation of the per-message calls, and a construct the encoder refuses
+//! must refuse the whole conversation rather than shorten it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ragent_llm::llm::{ChatContent, ChatMessage, ContentPart};
-use ragent_llm::provider::wire::encode::{MessageContext, encode_message, tool_names_by_id};
+use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart};
+use ragent_llm::provider::wire::ToolWireProfile;
+use ragent_llm::provider::wire::encode::{
+    MessageContext, encode_message, encode_message_fallible, encode_messages, tool_names_by_id,
+};
 use ragent_llm::provider::wire::profile_table::{
     ANTHROPIC_MESSAGES, BEDROCK_CONVERSE, GEMINI, OLLAMA_NATIVE, OPENAI_CHAT, OPENAI_RESPONSES,
     PROVIDER_WIRE,
@@ -109,7 +119,15 @@ fn test_tool_role_message_carries_the_id_in_the_profile_id_field() {
 
     assert_eq!(result.len(), 1, "one `role:\"tool\"` message per result");
     assert_eq!(result[0]["role"], "tool");
-    assert_eq!(result[0]["tool_call_id"], "call_ab12");
+    // Read through the profile's own `id_field` rather than the literal, so this
+    // case states "the id is in the key the profile names" and not "the key is
+    // `tool_call_id`": the literal is the encoder's to write, and the source scan
+    // below is what proves no provider module writes its own.
+    let id_key = match OPENAI_CHAT.id_field {
+        IdField::Key(key) => key,
+        IdField::Synthesised => panic!("the OpenAI family keys its result by id"),
+    };
+    assert_eq!(result[0][id_key], "call_ab12");
     assert_eq!(result[0]["content"], "alpha");
     assert_eq!(
         result[0].as_object().expect("an object").len(),
@@ -138,9 +156,15 @@ fn test_tool_role_message_mirrors_the_tool_name_only_when_asked() {
 
     let with = encode_message(OPENAI_CHAT, &result, &mirrored);
     assert_eq!(with[0]["tool_name"], "Read");
-    assert_eq!(
-        with[0]["tool_call_id"], "call_ab12",
-        "the id is still written: the name is a mirror, not a replacement"
+    assert!(
+        with[0].get("tool_call_id").is_some(),
+        "the id is still written: the name is a mirror, not a replacement: {}",
+        with[0]
+    );
+    assert!(
+        without[0].get("tool_name").is_none(),
+        "without the mirror the entry is the canonical three fields: {}",
+        without[0]
     );
 }
 
@@ -704,8 +728,10 @@ fn test_native_ollama_strips_the_data_uri_and_keeps_images_to_the_turn_allowed()
 #[test]
 fn test_responses_input_carries_tool_history_instead_of_only_text() {
     // FR-018's subject is that the Responses path used to drop every non-text part.
-    // The carrier now reaches the wire; refusing a construct it cannot carry is
-    // T-007's `WireLoss` change, so this case asserts presence, not policy.
+    // The carrier now reaches the wire; the `WireLoss` policy for the constructs
+    // this shape genuinely has no slot for is
+    // `test_a_role_the_responses_input_list_has_no_item_for_is_refused` and
+    // `test_a_refused_construct_refuses_the_whole_conversation`.
     let ctx = MessageContext::default();
     let request = conversation();
     let input: Vec<Value> = request
@@ -775,6 +801,14 @@ fn test_no_provider_module_writes_a_result_carrier_literal() {
         "openai_compat.rs",
         "openai_responses.rs",
     ];
+    for name in modules {
+        let path = providers.join(name);
+        assert!(
+            path.is_file(),
+            "the scan reads {name}, so a renamed module would quietly pass: {}",
+            path.display()
+        );
+    }
     // Every key that names one of the four carriers on the request side. The
     // response side reads the same keys back (`toolUse` on a Converse delta,
     // `tool_calls` in an SSE frame), which is a decoder's job and is why the scan
@@ -791,12 +825,19 @@ fn test_no_provider_module_writes_a_result_carrier_literal() {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         for (key, what) in request_carriers {
-            assert!(
-                !source.contains(key),
-                "{} still writes {key}, which is {what}; every request-side carrier \
-                 belongs to `wire::encode::encode_message` (FR-006)",
-                path.display()
-            );
+            // The scan names the key itself, so a hit is reported with the line it
+            // is on: the failure is then the copy to delete, not a hunt for it.
+            if let Some(line) = source
+                .lines()
+                .position(|text| text.contains(key))
+                .map(|index| index + 1)
+            {
+                panic!(
+                    "{}:{line} still writes {key}, which is {what}; every request-side \
+                     carrier belongs to `wire::encode::encode_message` (FR-006)",
+                    path.display()
+                );
+            }
         }
     }
 }
@@ -1027,4 +1068,459 @@ fn test_the_responses_client_body_uses_the_encoder_for_its_input_list() {
     assert_eq!(output["call_id"], "call_ab12");
     assert_eq!(call["name"], "Read", "the call names the tool it invokes");
     assert_eq!(output["output"], "alpha");
+}
+
+#[test]
+fn test_the_responses_client_refuses_to_build_a_body_it_would_shorten() {
+    // FR-018 says "shall not issue the request", and the client's `chat` uses `?`
+    // on this builder, so the refusal has to leave the *body builder* as an error
+    // rather than as a body with fewer entries. The construct used here is a role
+    // the input list has no item for, because it is the one a session can reach
+    // without a provider that sends images.
+    use ragent_llm::provider::openai_responses::ResponsesApiClient;
+
+    let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
+    let mut messages = conversation();
+    messages.push(text_message("tool", "orphan output"));
+    let request = ragent_llm::llm::ChatRequest {
+        model: "gpt-5.6".to_string(),
+        messages: Arc::new(messages),
+        tools: Arc::new(Vec::new()),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        system: None,
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+
+    match client.build_request_body(&request) {
+        Err(ragent_types::RagentError::WireLoss {
+            ref construct,
+            ref provider,
+        }) => {
+            assert_eq!(construct, "role:tool");
+            assert_eq!(provider, "openai_responses");
+        }
+        other => panic!(
+            "the Responses client must refuse a history it cannot carry whole \
+             instead of sending the rest (FR-018): {other:?}"
+        ),
+    }
+
+    // The same history with a role the input list accepts still builds, so the
+    // refusal is the construct's and not a wider "always error" state.
+    let ok_request = ragent_llm::llm::ChatRequest {
+        model: "gpt-5.6".to_string(),
+        messages: Arc::new(conversation()),
+        ..request
+    };
+    assert!(
+        client.build_request_body(&ok_request).is_ok(),
+        "a carryable history still builds a body"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 4. The conversation-level form, and the dialects that died with the loops
+// ---------------------------------------------------------------------------
+
+/// The name of the provider whose OpenAI-compatible dialect the Copilot case
+/// drives, so the body builder is exercised rather than a copy of it.
+#[test]
+fn test_encode_messages_equals_the_per_message_calls_for_every_profile() {
+    // Six of the seven provider modules hand their whole history to the
+    // conversation-level form with `MessageContext::default()`, so it must be
+    // exactly the per-message loop it replaced - same entries, same order. A
+    // family that started dropping or reordering a message here would change every
+    // one of those requests at once.
+    let request = conversation();
+    for (provider, profile) in every_declared_profile() {
+        let ctx = MessageContext::default();
+        let mut expected: Vec<Value> = Vec::new();
+        for msg in &request {
+            expected.extend(encode_message(profile, msg, &ctx));
+        }
+        let actual = encode_messages(profile, &request, &ctx)
+            .unwrap_or_else(|e| panic!("{provider}: the history encodes: {e}"));
+        assert_eq!(
+            actual, expected,
+            "{provider}: the conversation form must be the per-message loop"
+        );
+        assert!(
+            !actual.is_empty(),
+            "{provider}: a conversation with a text turn encodes to something"
+        );
+    }
+}
+
+#[test]
+fn test_a_refused_construct_refuses_the_whole_conversation() {
+    // FR-018: the Responses input list has no image slot. The refusal must not
+    // arrive as a shortened history - the caller may not issue that request - and
+    // must not leak into the six families that carry images fine.
+    let image = ChatMessage {
+        role: "user".to_string(),
+        content: ChatContent::Parts(vec![ContentPart::ImageUrl {
+            url: "data:image/png;base64,AAA".to_string(),
+        }]),
+    };
+    let mut history = conversation();
+    history.push(image);
+
+    let refused = encode_messages(OPENAI_RESPONSES, &history, &MessageContext::default());
+    assert!(
+        matches!(
+            refused,
+            Err(ragent_types::RagentError::WireLoss { ref construct, ref provider })
+                if construct == "ImageUrl" && provider == "openai_responses"
+        ),
+        "the Responses input list must refuse an image rather than strip it: {refused:?}"
+    );
+
+    for profile in [
+        OPENAI_CHAT,
+        ANTHROPIC_MESSAGES,
+        BEDROCK_CONVERSE,
+        GEMINI,
+        OLLAMA_NATIVE,
+    ] {
+        assert!(
+            encode_messages(profile, &history, &MessageContext::default()).is_ok(),
+            "a profile that carries images must not refuse the same history"
+        );
+    }
+}
+
+#[test]
+fn test_a_role_the_responses_input_list_has_no_item_for_is_refused() {
+    // The second construct the Responses input shape cannot carry is the message
+    // *role*: it accepts `user`, `assistant`, `system` and `developer` and has no
+    // item for anything else. `ChatMessage::role` is a `String`, so an unknown role
+    // reaches the encoder, and the input list used to answer it by emitting nothing
+    // - a silently shortened history, which is exactly what FR-018 forbids. The
+    // refusal has to name the role and the provider so the failure says what was
+    // lost and who could not carry it.
+    let ctx = MessageContext::default();
+    let mut history = conversation();
+    history.push(text_message("tool", "orphan output"));
+
+    let refused = encode_messages(OPENAI_RESPONSES, &history, &ctx);
+    match refused {
+        Err(ragent_types::RagentError::WireLoss {
+            ref construct,
+            ref provider,
+        }) => {
+            assert_eq!(
+                construct, "role:tool",
+                "the error must name the role it cannot carry"
+            );
+            assert_eq!(
+                provider, "openai_responses",
+                "the error must name the provider that cannot carry it"
+            );
+        }
+        other => panic!(
+            "a role the Responses input list has no item for must be refused rather \
+             than dropped (FR-018): {other:?}"
+        ),
+    }
+
+    // Every role the shape *does* have an item for still carries, so the refusal is
+    // the shape's limit and not a blanket refusal of the conversation-level form.
+    let carried = encode_messages(OPENAI_RESPONSES, &conversation(), &ctx)
+        .expect("the canonical conversation carries");
+    assert!(
+        !carried.is_empty(),
+        "the canonical history encodes to something"
+    );
+    for role in ["user", "assistant", "system", "developer"] {
+        assert!(
+            encode_message(OPENAI_RESPONSES, &text_message(role, "hi"), &ctx)[0]["role"] == role,
+            "the Responses input list has an item for the `{role}` role"
+        );
+    }
+
+    // And the other six families keep their own role policies: an unknown role is a
+    // dropped turn there, which is what each of them already did with `system` or
+    // `tool` before the encoder was shared. Widening this refusal to them would be a
+    // behaviour change no requirement asks for.
+    for profile in [
+        OPENAI_CHAT,
+        ANTHROPIC_MESSAGES,
+        BEDROCK_CONVERSE,
+        GEMINI,
+        OLLAMA_NATIVE,
+    ] {
+        assert!(
+            encode_messages(profile, &history, &MessageContext::default()).is_ok(),
+            "only the Responses input list refuses an unknown role"
+        );
+    }
+}
+
+#[test]
+fn test_a_single_text_part_collapses_and_an_image_never_does() {
+    // The rule Copilot's `strict_single_text_collapse` flag used to choose between
+    // is now the only rule: one *text* part collapses to a bare string, one image
+    // part stays in its array. The old unconditional collapse in Copilot's copy
+    // wrote `"content": null` here and lost the image.
+    let ctx = MessageContext::default();
+    let single_text = ChatMessage {
+        role: "user".to_string(),
+        content: ChatContent::Parts(vec![ContentPart::Text {
+            text: "just text".to_string(),
+        }]),
+    };
+    let single_image = ChatMessage {
+        role: "user".to_string(),
+        content: ChatContent::Parts(vec![ContentPart::ImageUrl {
+            url: "data:image/png;base64,AAA".to_string(),
+        }]),
+    };
+
+    let collapsed = encode_message(OPENAI_CHAT, &single_text, &ctx);
+    assert_eq!(collapsed[0]["content"], "just text");
+
+    let kept = encode_message(OPENAI_CHAT, &single_image, &ctx);
+    assert!(
+        kept[0]["content"].is_array(),
+        "a single image part must stay in an array, not collapse to null: {kept:?}"
+    );
+    assert_eq!(kept[0]["content"][0]["type"], "image_url");
+}
+
+#[test]
+fn test_copilot_and_openai_differ_only_in_stream_options() {
+    // `strict_single_text_collapse` was Copilot's one dialect switch on the message
+    // loop; with the loop shared there is nothing left to set, so the two specs
+    // differ in the base body alone. Pin that, so a future field added here is a
+    // deliberate dialect rather than a resurrected copy.
+    use ragent_llm::provider::openai_compat::OpenAiCompatSpec;
+
+    let openai = OpenAiCompatSpec::openai();
+    let copilot = OpenAiCompatSpec::copilot();
+    assert_eq!(openai.openai_envelope, copilot.openai_envelope);
+    assert_eq!(openai.tool_result_name, copilot.tool_result_name);
+    assert_ne!(
+        openai.stream_options_in_base, copilot.stream_options_in_base,
+        "stream_options is the one difference Copilot keeps"
+    );
+}
+
+#[test]
+fn test_a_local_ollama_result_carries_both_the_id_and_the_name() {
+    // `mirror_tool_name` is the one context fact the OpenAI-compatible builder
+    // still has to pass: local Ollama asks for the OpenAI `tool_call_id` and the
+    // native `tool_name` on the same result message.
+    use ragent_llm::provider::openai_compat::{OpenAiCompatSpec, build_openai_messages};
+
+    let mut request = ChatRequest {
+        model: "llama3".to_string(),
+        messages: Arc::new(conversation()),
+        tools: Arc::new(Vec::new()),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        system: None,
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+    let mirroring = build_openai_messages(&request, &OpenAiCompatSpec::ollama());
+    let plain = build_openai_messages(&request, &OpenAiCompatSpec::openai());
+
+    let result = mirroring
+        .iter()
+        .find(|entry| entry["role"] == "tool")
+        .expect("the result becomes its own message");
+    assert_eq!(result["tool_call_id"], "call_ab12");
+    assert_eq!(
+        result["tool_name"], "Read",
+        "local Ollama asks for the name beside the id"
+    );
+    let plain_result = plain
+        .iter()
+        .find(|entry| entry["role"] == "tool")
+        .expect("the result becomes its own message");
+    assert!(
+        plain_result.get("tool_name").is_none(),
+        "canonical OpenAI takes the id alone: {plain_result:?}"
+    );
+
+    // The system prompt is still this builder's own dialect, not the encoder's.
+    let system: Arc<str> = Arc::from("be brief");
+    request.system = Some(system);
+    let with_system = build_openai_messages(&request, &OpenAiCompatSpec::openai());
+    assert_eq!(with_system[0]["role"], "system");
+    assert_eq!(with_system[0]["content"], "be brief");
+}
+
+#[test]
+fn test_the_encoder_refuses_a_profile_its_family_table_does_not_cover() {
+    // `MessageFamily::of` returns `None` for a profile combination no family
+    // implements - a defect in the profile table rather than a request condition.
+    // The encoder must omit the message and log, not guess a shape, and the
+    // coverage case above is what fails the build for it.
+    let invented = ToolWireProfile {
+        result_carrier: ResultCarrier::GeminiFunctionResponse,
+        ..OPENAI_CHAT
+    };
+    let message = text_message("user", "hello");
+    let ctx = MessageContext::default();
+    assert!(
+        encode_message(invented, &message, &ctx).is_empty(),
+        "an uncovered envelope/carrier pair writes nothing"
+    );
+    let empty: Vec<Value> = Vec::new();
+    assert_eq!(
+        encode_message_fallible(invented, &message, &ctx)
+            .expect("omitting a message is not a wire loss"),
+        empty,
+        "an uncovered pair writes nothing"
+    );
+    // The real Gemini profile does cover its own carrier, so the case above is
+    // about the combination and not about Gemini.
+    assert_ne!(encode_message(GEMINI, &message, &ctx), empty);
+}
+
+// ---------------------------------------------------------------------------
+// FR-011: reasoning echo (T-018)
+// ---------------------------------------------------------------------------
+
+/// One signed reasoning block, as the agent loop records it after the provider
+/// streamed the thinking text and its signature.
+fn signed_reasoning(text: &str, signature: &str) -> ContentPart {
+    ContentPart::Reasoning {
+        text: text.to_string(),
+        signature: Some(signature.to_string()),
+    }
+}
+
+/// FR-011: the assistant turn that answers a tool call must carry the signed
+/// thinking block back, before the `tool_use` it decided.
+///
+/// Anthropic requires both halves: the reasoning text and the provider's
+/// signature over it, in that order relative to the call.
+#[test]
+fn test_anthropic_replays_the_signed_thinking_block_before_the_call() {
+    let turn = message(
+        "assistant",
+        vec![
+            signed_reasoning("weigh the options", "EqQBCkYIBxgCKkA"),
+            tool_use("call_ab12", "Read"),
+        ],
+    );
+    let encoded = encode_message(ANTHROPIC_MESSAGES, &turn, &MessageContext::default());
+    let blocks = encoded[0]["content"]
+        .as_array()
+        .expect("the assistant turn is a block list");
+    assert_eq!(
+        blocks[0],
+        serde_json::json!({
+            "type": "thinking",
+            "thinking": "weigh the options",
+            "signature": "EqQBCkYIBxgCKkA"
+        }),
+        "the signed block is replayed first, byte for byte"
+    );
+    assert_eq!(blocks[1]["type"], "tool_use");
+    assert_eq!(
+        blocks[1]["id"], "call_ab12",
+        "the call the thinking decided follows it"
+    );
+}
+
+/// FR-011's other half: a profile that declares `echo_reasoning == false`
+/// carries on omitting reasoning, so this task moved no byte on those paths.
+#[test]
+fn test_a_profile_without_echo_reasoning_still_omits_the_block() {
+    let turn = message(
+        "assistant",
+        vec![
+            signed_reasoning("weigh the options", "EqQBCkYIBxgCKkA"),
+            tool_use("call_ab12", "Read"),
+        ],
+    );
+    for (label, profile) in every_declared_profile() {
+        if profile.echo_reasoning {
+            continue;
+        }
+        let encoded = encode_message(profile, &turn, &MessageContext::default());
+        let rendered = serde_json::Value::Array(encoded).to_string();
+        assert!(
+            !rendered.contains("thinking") && !rendered.contains("weigh the options"),
+            "{label}: reasoning is omitted without `echo_reasoning`: {rendered}"
+        );
+        assert!(
+            rendered.contains("Read"),
+            "{label}: omitting reasoning must not drop the call: {rendered}"
+        );
+    }
+    // And the one family that does declare it writes the block, so the loop
+    // above is about the declaration rather than about a broken fixture.
+    let echoed = encode_message(ANTHROPIC_MESSAGES, &turn, &MessageContext::default());
+    assert_eq!(echoed[0]["content"][0]["type"], "thinking");
+}
+
+/// A block recorded without a signature is replayed without the key: an empty
+/// `signature` would claim the provider signed a block it did not (T-001's
+/// omission rule, which FR-011's replay must preserve).
+#[test]
+fn test_an_unsigned_reasoning_block_is_replayed_without_a_signature() {
+    let turn = message(
+        "assistant",
+        vec![
+            ContentPart::Reasoning {
+                text: "no signature here".to_string(),
+                signature: None,
+            },
+            tool_use("call_ab12", "Read"),
+        ],
+    );
+    let encoded = encode_message(ANTHROPIC_MESSAGES, &turn, &MessageContext::default());
+    let block = &encoded[0]["content"][0];
+    assert_eq!(block["type"], "thinking");
+    assert_eq!(block["thinking"], "no signature here");
+    assert!(
+        block.get("signature").is_none(),
+        "an unsigned block gains no `signature` key: {block}"
+    );
+}
+
+/// The whole conversation form replays it too, so the provider module that calls
+/// `encode_messages` gets the echo without a second implementation.
+#[test]
+fn test_the_conversation_encoder_replays_the_signed_block() {
+    let mut messages = conversation();
+    messages[1] = message(
+        "assistant",
+        vec![
+            signed_reasoning("reading notes", "sig-1"),
+            ContentPart::Text {
+                text: "reading".to_string(),
+            },
+            tool_use("call_ab12", "Read"),
+        ],
+    );
+    let encoded = encode_messages(ANTHROPIC_MESSAGES, &messages, &MessageContext::default())
+        .expect("a signed block is a construct Anthropic carries");
+    let assistant = encoded
+        .iter()
+        .find(|entry| entry["role"] == "assistant")
+        .expect("the assistant turn");
+    assert_eq!(
+        assistant["content"][0],
+        serde_json::json!({
+            "type": "thinking",
+            "thinking": "reading notes",
+            "signature": "sig-1"
+        })
+    );
+    assert_eq!(assistant["content"][2]["type"], "tool_use");
 }

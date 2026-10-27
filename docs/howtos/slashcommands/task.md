@@ -59,17 +59,17 @@ Only completed tasks are shown.
 
 ```
 From: /task add Update the changelog
-A new session task is created via task_create and appears in /task list.
+A new session task is created via TaskCreate and appears in /task list.
 ```
 
 ```
 From: /task update T-1 completed
-task_update marks T-1 completed; dependent tasks are re-evaluated.
+TaskUpdate marks T-1 completed; dependent tasks are re-evaluated.
 ```
 
 ```
 From: /task get T-1
-task_get returns the full record: description, owner, blocked_by.
+TaskGet returns the full record: description, owner, blocked_by.
 ```
 
 ## Output

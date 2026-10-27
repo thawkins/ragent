@@ -446,10 +446,10 @@ fn tc_014_duplicate_tool_name_is_rejected_and_leaves_the_surface_intact() {
     let tree = TempTree::new("tc14");
     tree.install_disabled("collider");
 
-    // Seed the surface with the built-in `bash` tool: the plugin must never be
+    // Seed the surface with the built-in `Bash` tool: the plugin must never be
     // able to displace it.
     let mut surface = TestSurface::default();
-    surface.tools.insert("bash".to_string());
+    surface.tools.insert("Bash".to_string());
     let mut session = PluginSession::start(tree.dirs(), PluginsConfig::default(), &mut surface);
     let outcome = session.enable("collider", &mut surface).expect("enable");
 
@@ -463,7 +463,10 @@ fn tc_014_duplicate_tool_name_is_rejected_and_leaves_the_surface_intact() {
         LifecycleState::Errored
     );
     assert!(!surface.tools.contains("plugin_collider_bash"));
-    assert!(surface.tools.contains("bash"), "built-in bash is untouched");
+    assert!(
+        surface.tools.contains("Bash"),
+        "the built-in `Bash` tool is untouched"
+    );
 }
 
 // -- NFR: discovery under 2 s for 50 installed plugins -----------------------

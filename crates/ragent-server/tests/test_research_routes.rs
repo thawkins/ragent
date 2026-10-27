@@ -30,7 +30,7 @@ use tower::ServiceExt;
 static FS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Build a minimal [`AppState`] for testing research routes.
-fn test_state(token: &str) -> AppState {
+fn test_state(token: &str, research_root: &std::path::Path) -> AppState {
     let storage = Arc::new(Storage::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new(16));
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
@@ -79,6 +79,7 @@ fn test_state(token: &str) -> AppState {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
         bg_service: std::sync::OnceLock::new(),
     });
     AppState {
@@ -90,7 +91,7 @@ fn test_state(token: &str) -> AppState {
         rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: Arc::new(crate::research_sandbox::research_root()),
+        research_root: Arc::new(research_root.to_path_buf()),
     }
 }
 
@@ -142,17 +143,69 @@ fn test_name() -> String {
     )
 }
 
-/// Create a research item in the sandbox vault and return its name.
-async fn create_test_item(name: &str, topic: &str) {
-    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
-    mgr.create(name, &format!("Test: {topic}"), topic)
-        .await
-        .unwrap();
+/// Create a research item in `root` and wait until it is visible there.
+///
+/// Each test owns its vault root: `ResearchManager::refresh_index` republishes
+/// `INDEX.md` from the whole vault, so two tests sharing a root overwrite each
+/// other's index.
+async fn create_test_item(root: &std::path::Path, name: &str, topic: &str) {
+    let mgr = ResearchManager::new(root);
+    // A write can fail when another test's `POST /research` background run
+    // deletes the whole sandbox while this one is publishing (see
+    // `crate::research_sandbox::isolated_research_root`, which is what makes the
+    // sandbox safe to wipe at all). Retrying a failed create keeps the
+    // helper's promise - an empty vault at this test's root, and this item in
+    // it - instead of failing on another test's cleanup.
+    let mut last_err = None;
+    for _ in 0..20 {
+        match mgr.create(name, &format!("Test: {topic}"), topic).await {
+            Ok(_) => {
+                last_err = None;
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        }
+    }
+    if let Some(e) = last_err {
+        panic!("could not create research item '{name}': {e}");
+    }
+    // Publishing an item is a directory create followed by two file renames
+    // (`RESEARCH.md`, then `CORPA.md`), so a reader arriving in between sees a
+    // directory with only part of the pair. Wait for the files this helper
+    // promises rather than handing a half-published item to the request.
+    let Ok(research_name) = ragent_research::ResearchName::try_new(name) else {
+        return;
+    };
+    let item_dir = ragent_research::ResearchIo::item_dir(root, &research_name);
+    for _ in 0..100 {
+        // A missing directory means the item was deleted while this waited;
+        // that is a finished state, not a half-created one.
+        if !item_dir.is_dir() {
+            return;
+        }
+        if ragent_research::ResearchIo::research_md_path(root, &research_name).is_file()
+            && ragent_research::ResearchIo::corpa_md_path(root, &research_name).is_file()
+        {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let entries: Vec<String> = std::fs::read_dir(&item_dir)
+        .map(|dir| {
+            dir.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    panic!("research item '{name}' was created but its files never appeared: {entries:?}");
 }
 
-/// Delete a research item from the sandbox vault.
-async fn delete_test_item(name: &str) {
-    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
+/// Delete a research item from `root`.
+async fn delete_test_item(root: &std::path::Path, name: &str) {
+    let mgr = ResearchManager::new(root);
     let _ = mgr.delete(name).await;
 }
 
@@ -168,12 +221,11 @@ fn auth_put(token: &str, uri: &str) -> Request<Body> {
 
 /// Create a research item on disk and stamp a recorded invocation line into
 /// its RESEARCH.md frontmatter, as a real invocation-aware front-end would.
-async fn create_test_item_with_invocation(name: &str, invocation: &str) {
-    create_test_item(name, "replay topic").await;
-    let path = crate::research_sandbox::research_root()
-        .join(name)
-        .join("RESEARCH.md");
-    let content = std::fs::read_to_string(&path).unwrap();
+async fn create_test_item_with_invocation(root: &std::path::Path, name: &str, invocation: &str) {
+    create_test_item(root, name, "replay topic").await;
+    let path = root.join(name).join("RESEARCH.md");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("reading {} after create: {e}", path.display()));
     let stamped = content.replacen(
         "\n---\n",
         &format!("\ninvocation: \"{invocation}\"\n---\n"),
@@ -188,7 +240,8 @@ async fn create_test_item_with_invocation(name: &str, invocation: &str) {
 
 #[tokio::test]
 async fn test_research_list_requires_auth() {
-    let app = router(test_state("secret"));
+    let root = crate::research_sandbox::isolated_research_root();
+    let app = router(test_state("secret", &root));
     let req = Request::builder()
         .uri("/research")
         .body(Body::empty())
@@ -199,7 +252,8 @@ async fn test_research_list_requires_auth() {
 
 #[tokio::test]
 async fn test_research_list_returns_empty_or_items() {
-    let app = router(test_state("tok"));
+    let root = crate::research_sandbox::isolated_research_root();
+    let app = router(test_state("tok", &root));
     let resp = app.oneshot(auth_get("tok", "/research")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = body_string(resp).await;
@@ -212,8 +266,9 @@ async fn test_research_list_returns_empty_or_items() {
 
 #[tokio::test]
 async fn test_research_show_not_found() {
+    let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", "/research/nonexistent-item-xyz"))
         .await
@@ -226,10 +281,11 @@ async fn test_research_show_not_found() {
 #[tokio::test]
 async fn test_research_show_returns_item_fields() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "test topic for show").await;
+    create_test_item(&root, &name, "test topic for show").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}")))
         .await
@@ -250,16 +306,17 @@ async fn test_research_show_returns_item_fields() {
     assert!(parsed["item"].get("topic").is_none() || parsed["item"]["topic"].is_null());
     assert!(parsed["item"].get("queries").is_none() || parsed["item"]["queries"].is_null());
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_show_full_includes_extended_fields() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "test topic for full show").await;
+    create_test_item(&root, &name, "test topic for full show").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}?full=true")))
         .await
@@ -273,7 +330,7 @@ async fn test_research_show_full_includes_extended_fields() {
     // Actually skip_serializing_if = "Vec::is_empty" means it's omitted when empty.
     // So we just verify topic is present.
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 // -- Delete tests ---------------------------------------------------------
@@ -281,10 +338,11 @@ async fn test_research_show_full_includes_extended_fields() {
 #[tokio::test]
 async fn test_research_delete_requires_confirmation() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "topic").await;
+    create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     // Without ?confirm=delete-{name}
     let resp = app
         .oneshot(auth_delete("tok", &format!("/research/{name}")))
@@ -294,16 +352,17 @@ async fn test_research_delete_requires_confirmation() {
     let body = body_string(resp).await;
     assert!(body.contains("confirm"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_delete_with_confirmation() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "topic").await;
+    create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let confirm = format!("delete-{name}");
     let resp = app
         .oneshot(auth_delete(
@@ -319,14 +378,15 @@ async fn test_research_delete_with_confirmation() {
     assert!(body.contains("\"deleted\""));
 
     // Verify it's actually gone
-    let mgr = ResearchManager::new(crate::research_sandbox::research_root());
+    let mgr = ResearchManager::new(&root);
     assert!(mgr.show(&name).await.is_err());
 }
 
 #[tokio::test]
 async fn test_research_delete_not_found() {
+    let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_delete(
             "tok",
@@ -341,8 +401,9 @@ async fn test_research_delete_not_found() {
 
 #[tokio::test]
 async fn test_research_post_invalid_name() {
+    let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let body = r#"{"name":"INVALID NAME!","topic":"test"}"#;
     let resp = app
         .oneshot(auth_post("tok", "/research", body))
@@ -354,9 +415,10 @@ async fn test_research_post_invalid_name() {
 #[tokio::test]
 async fn test_research_post_returns_202_with_location() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
     let body = format!(r#"{{"name":"{name}","topic":"test topic for post"}}"#);
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
         .await
@@ -381,19 +443,20 @@ async fn test_research_post_returns_202_with_location() {
     // was created on disk. Wait a moment for the spawn to start, then
     // delete the item.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_post_accepts_output_limit_fields() {
     // researchmax FR-012: the new `max_concepts` / `max_findings` JSON fields
+    let root = crate::research_sandbox::isolated_research_root();
     // must be accepted (not rejected as unknown) so a POST carrying them starts
     // a run.
     let _guard = FS_LOCK.lock().await;
     let name = test_name();
     let body =
         format!(r#"{{"name":"{name}","topic":"test topic","max_concepts":2,"max_findings":3}}"#);
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
         .await
@@ -407,16 +470,17 @@ async fn test_research_post_accepts_output_limit_fields() {
 
     // Clean up - the background run may fail (no LLM), but the item exists.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_post_duplicate_returns_conflict() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "topic").await;
+    create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let body = format!(r#"{{"name":"{name}","topic":"duplicate"}}"#);
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
@@ -426,7 +490,7 @@ async fn test_research_post_duplicate_returns_conflict() {
     let body = body_string(resp).await;
     assert!(body.contains("already exists"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 // -- SSE events endpoint -------------------------------------------------
@@ -435,8 +499,9 @@ async fn test_research_post_duplicate_returns_conflict() {
 
 #[tokio::test]
 async fn test_research_update_not_found() {
+    let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", "/research/nonexistent-item-xyz"))
         .await
@@ -449,10 +514,11 @@ async fn test_research_update_not_found() {
 #[tokio::test]
 async fn test_research_update_without_invocation_returns_bad_request() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "topic").await;
+    create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -461,16 +527,17 @@ async fn test_research_update_without_invocation_returns_bad_request() {
     let body = body_string(resp).await;
     assert!(body.contains("no invocation recorded"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_update_with_unparseable_invocation_returns_bad_request() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item_with_invocation(&name, "ragent research list --all").await;
+    create_test_item_with_invocation(&root, &name, "ragent research list --all").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -479,22 +546,24 @@ async fn test_research_update_with_unparseable_invocation_returns_bad_request() 
     let body = body_string(resp).await;
     assert!(body.contains("cannot replay"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_update_accepts_recorded_invocation() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
     // The recorded invocation names the same item; the frontmatter name is
     // authoritative for the replay either way.
     create_test_item_with_invocation(
+        &root,
         &name,
         &format!("ragent research create {name} \"replay topic\" --tier full"),
     )
     .await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -523,23 +592,25 @@ async fn test_research_update_accepts_recorded_invocation() {
     // Clean up - the background replay may fail (no LLM), but the item
     // exists on disk and the run registry must drain.
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_update_replays_recorded_output_limits() {
     // researchmax FR-013: a recorded HTTP summary carrying the output-limit
+    let root = crate::research_sandbox::isolated_research_root();
     // flags must replay through `from_invocation` (the run is accepted rather
     // than rejected as unparseable).
     let _guard = FS_LOCK.lock().await;
     let name = test_name();
     create_test_item_with_invocation(
+        &root,
         &name,
         &format!("POST /research {name} \"replay topic\" --max-concepts 2 --max-findings 3"),
     )
     .await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -551,20 +622,22 @@ async fn test_research_update_replays_recorded_output_limits() {
     assert_eq!(parsed["status"], "accepted");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_update_conflicts_with_in_flight_run() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
     create_test_item_with_invocation(
+        &root,
         &name,
         &format!("ragent research create {name} \"replay topic\""),
     )
     .await;
 
-    let state = test_state("tok");
+    let state = test_state("tok", &root);
     // Simulate an in-flight run by pre-registering the name.
     {
         let mut runs = state.research_runs.lock().await;
@@ -580,7 +653,7 @@ async fn test_research_update_conflicts_with_in_flight_run() {
     let body = body_string(resp).await;
     assert!(body.contains("already in progress"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 // -- SSE events endpoint (continued) -------------------------------------
@@ -588,10 +661,11 @@ async fn test_research_update_conflicts_with_in_flight_run() {
 #[tokio::test]
 async fn test_research_events_no_active_run_returns_status() {
     let _guard = FS_LOCK.lock().await;
+    let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
-    create_test_item(&name, "topic").await;
+    create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}/events")))
         .await
@@ -602,13 +676,14 @@ async fn test_research_events_no_active_run_returns_status() {
     let body = body_string(resp).await;
     assert!(body.contains("No active research run"));
 
-    delete_test_item(&name).await;
+    delete_test_item(&root, &name).await;
 }
 
 #[tokio::test]
 async fn test_research_events_not_found() {
+    let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok"));
+    let app = router(test_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", "/research/nonexistent-xyz/events"))
         .await

@@ -75,6 +75,17 @@ pub(crate) struct TurnClient {
     pub working_dir: PathBuf,
     /// Team context for this session, if it participates in a team.
     pub team_context: Option<Arc<TeamContext>>,
+    /// The declarative tool-name alias table for this turn (spec
+    /// `uniformtools` FR-015).
+    ///
+    /// Built once per turn from `tools.aliases` rather than read on the
+    /// dispatch path, so resolving an inbound spelling is a short linear scan
+    /// over a handful of entries. Empty - the default, and therefore the
+    /// pre-existing behaviour - means every name resolves against the registry
+    /// alone, and [`resolve_inbound_tool_name`] returns `None` for every name.
+    ///
+    /// [`resolve_inbound_tool_name`]: crate::tool::alias_table::resolve_inbound_tool_name
+    pub alias_table: crate::tool::alias_table::AliasTable,
 }
 
 /// Mutable state shared across loop iterations.
@@ -109,6 +120,10 @@ pub(crate) struct LoopState {
 pub(crate) struct LlmStepResult {
     pub text_buffer: String,
     pub reasoning_buffer: String,
+    /// FR-011: the provider's signature over `reasoning_buffer`, when it sent
+    /// one. Persisted alongside the reasoning text so a profile that declares
+    /// `echo_reasoning` can replay the signed block.
+    pub reasoning_signature: Option<String>,
     pub tool_calls: Vec<PendingToolCall>,
     pub last_input_tokens: u64,
     pub last_output_tokens: u64,
@@ -361,7 +376,15 @@ impl SessionProcessor {
             let plugin_hooks = ragent_plugins::scanned_plugin_hooks(
                 &crate::skill::plugin_store_dirs(&working_dir),
             );
-            crate::hooks::merge_hook_configs(&configured, &plugin_hooks)
+            let merged = crate::hooks::merge_hook_configs(&configured, &plugin_hooks);
+            // FR-028: report a hook whose `matcher` names only a retired
+            // spelling. The headless surfaces (`ragent run`, the server, ACP)
+            // have no separate load step, so the point where a turn's hooks are
+            // built is their load. The ledger makes this free once the TUI has
+            // already reported the same entry, so a per-turn call does not
+            // repeat the warning.
+            crate::hooks::report_retired_matcher_spellings_once(&merged);
+            merged
         };
 
         // Fire on_session_start hook when this is the first message. A
@@ -396,6 +419,22 @@ impl SessionProcessor {
             );
         }
 
+        // FR-015: build the alias table once for this turn, and report any entry
+        // whose target this build does not register *once* per process (FR-031) -
+        // a plugin or MCP tool may be bridged after the configuration loaded, so
+        // the target cannot be refused at load time and is refused when used
+        // instead.
+        let alias_table =
+            crate::tool::alias_table::AliasTable::from_tools_config(&session_config.tools);
+        alias_table.report_unresolved_targets_once(&self.tool_registry);
+
+        // FR-017: the payload trace is process-wide, so it is set here - once per
+        // turn, from the turn's resolved config (after the automation override
+        // above, so an automation's own setting is what is read). A config change
+        // therefore takes effect on the next turn, and a default config leaves
+        // every provider writing nothing at all.
+        ragent_llm::provider::wire::trace::set_enabled(session_config.tools.wire_trace);
+
         Ok(TurnClient {
             model_ref,
             client,
@@ -403,6 +442,7 @@ impl SessionProcessor {
             parsed_hook_configs,
             working_dir,
             team_context,
+            alias_table,
         })
     }
 
@@ -416,6 +456,7 @@ impl SessionProcessor {
         session_config: &ragent_config::Config,
         working_dir: &std::path::Path,
         team_context: Option<&Arc<TeamContext>>,
+        alias_table: &crate::tool::alias_table::AliasTable,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<Arc<str>> {
         // Load skill registry for system prompt injection. C-001: the
@@ -500,30 +541,46 @@ impl SessionProcessor {
                     allowed
                 })
         };
-        let effective_defs: Arc<Vec<ToolDefinition>> =
-            if allowed_set.is_empty() && loop_tool_set.is_none() {
-                self.system_prompt_cache()
-                    .get_tool_definitions(&self.tool_registry)
-                    .unwrap_or_else(|| self.tool_registry.definitions())
-            } else {
-                // One fused pass: the agent allowlist (when non-empty) and the
-                // loop tool set (when configured) both filter in a single
-                // iteration, avoiding an intermediate allocation.
-                Arc::new(
-                    self.tool_registry
-                        .definitions()
-                        .iter()
-                        .filter(|d| {
-                            (allowed_set.is_empty()
-                                || crate::tool::is_allowed_tool(&d.name, &allowed_set))
-                                && loop_tool_set
-                                    .as_ref()
-                                    .is_none_or(|allowed| allowed.contains(d.name.as_str()))
-                        })
-                        .cloned()
-                        .collect(),
+        let effective_defs: Arc<Vec<ToolDefinition>> = if allowed_set.is_empty()
+            && loop_tool_set.is_none()
+        {
+            // FR-015: `tools.expose_alias_names` advertises each alias
+            // spelling alongside its canonical name, so the prompt's tool
+            // reference lists exactly the names the wire list carries.
+            self.system_prompt_cache()
+                .get_tool_definitions(
+                    &self.tool_registry,
+                    &alias_table,
+                    session_config.tools.expose_alias_names,
                 )
-            };
+                .unwrap_or_else(|| {
+                    alias_table.outbound_definitions(
+                        &self.tool_registry.definitions(),
+                        session_config.tools.expose_alias_names,
+                    )
+                })
+        } else {
+            // One fused pass: the agent allowlist (when non-empty) and the
+            // loop tool set (when configured) both filter in a single
+            // iteration, avoiding an intermediate allocation. An advertised
+            // alias spelling is filtered by the name it is advertised under,
+            // matching the wire list the same allowlist shapes.
+            alias_table
+                .outbound_definitions(
+                    &self.tool_registry.definitions(),
+                    session_config.tools.expose_alias_names,
+                )
+                .iter()
+                .filter(|d| {
+                    (allowed_set.is_empty() || crate::tool::is_allowed_tool(&d.name, &allowed_set))
+                        && loop_tool_set
+                            .as_ref()
+                            .is_none_or(|allowed| allowed.contains(d.name.as_str()))
+                })
+                .cloned()
+                .collect::<Vec<ToolDefinition>>()
+                .into()
+        };
         // Interactive-tool block (subagent): interactive tools are removed
         // from the advertised tool reference so a sub-agent is never told to
         // ask a user it does not have.
@@ -962,6 +1019,10 @@ impl SessionProcessor {
         let backoff_secs = self.stream_config.retry_backoff_secs;
         let mut text_buffer = String::new();
         let mut reasoning_buffer = String::new();
+        // FR-011: the provider's signature over `reasoning_buffer`, kept apart
+        // from the text so the replayed signed block is byte-identical to the
+        // one the provider signed.
+        let mut reasoning_signature: Option<String> = None;
         let mut tool_calls: Vec<PendingToolCall> = Vec::new();
         let mut attempted_truncation_continuation = false;
         let mut last_input_tokens: u64 = 0;
@@ -971,6 +1032,12 @@ impl SessionProcessor {
         let llm_recorder = crate::telemetry::LlmRecorder::from_subsystem(&self.telemetry);
         'retry: for attempt in 0..=max_retries {
             let mut saw_completed_tool_call = false;
+            // True once the provider has opened ANY tool call this attempt.
+            // FR-022 keys on "no complete call", not on "no start": a call
+            // whose arguments were cut off mid-delta still opened, and its
+            // truncated arguments are a dispatch problem the normal pipeline
+            // reports, not a lost call.
+            let mut tool_calls_ever_started = false;
             // Truncation-continuation pass (background sub-agents only).
             //
             // The default sub-agent path keeps buffers from the previous
@@ -983,10 +1050,17 @@ impl SessionProcessor {
             if attempt > 0 && !is_truncation_continuation {
                 text_buffer.clear();
                 reasoning_buffer.clear();
+                // FR-011: the signature belongs to the reasoning text that was
+                // just discarded. Keeping it would pair a fresh block with the
+                // previous attempt's signature, and a provider verifies the two
+                // together - an echoed block whose signature covers different
+                // text is rejected rather than merely unverified.
+                reasoning_signature = None;
                 tool_calls.clear();
                 last_input_tokens = 0;
                 last_output_tokens = 0;
                 saw_completed_tool_call = false;
+                tool_calls_ever_started = false;
 
                 let wait_secs = attempt as u64 * backoff_secs;
                 self.event_bus.publish(Event::AgentNotice {
@@ -1325,6 +1399,13 @@ impl SessionProcessor {
                             reasoning_buffer.push_str(&text);
                         }
                         StreamEvent::ReasoningEnd => {}
+                        // FR-011: the provider's signature over the block it
+                        // just streamed. It is recorded apart from the
+                        // reasoning text so the turn's history can echo the
+                        // signed block back verbatim on the next step.
+                        StreamEvent::ReasoningSignature { signature } => {
+                            reasoning_signature = Some(signature);
+                        }
                         StreamEvent::ToolCallStart { id, name } => {
                             let text = stream_buffer.drain_text();
                             if !text.is_empty() {
@@ -1341,6 +1422,7 @@ impl SessionProcessor {
                                 });
                             }
                             stream_buffer.reset_timer();
+                            tool_calls_ever_started = true;
                             tool_calls.push(PendingToolCall {
                                 id,
                                 name,
@@ -1587,6 +1669,36 @@ impl SessionProcessor {
                 loop_state.last_finish_reason = None;
             }
 
+            // FR-022: a provider that reports a tool-use finish while the
+            // accumulator produced zero COMPLETE tool calls has lost a tool
+            // call. No tool phase will advance the conversation, so the step
+            // would otherwise end the turn as if the model had answered. Treat
+            // it as truncation instead, which (a) records the provider-side cut
+            // so the final message is not presented as a clean reply, and (b)
+            // arms the text-recovery path below: several providers report a
+            // tool-use finish while narrating the invocation as text, and the
+            // recovery scan is the only thing that can still salvage the call.
+            if Self::finish_was_tool_use_without_a_call(
+                loop_state.last_finish_reason.as_ref(),
+                tool_calls_ever_started,
+                tool_calls.len(),
+            ) {
+                tracing::warn!(
+                    session_id = %session_id,
+                    provider = %turn.model_ref.provider_id,
+                    "tool-use finish with zero parsed tool calls; treating the \
+                     step as truncated and entering text recovery"
+                );
+                self.event_bus.publish(Event::AgentNotice {
+                    session_id: session_id.to_string(),
+                    message: "The provider reported a tool call but none could be \
+                              parsed - checking the reply text for a recoverable \
+                              call."
+                        .to_string(),
+                });
+                loop_state.last_finish_reason = Some(FinishReason::Truncation);
+            }
+
             // Truncation-continuation kick: for background sub-agents, the
             // only way to recover from a provider-side silent cut is to ask
             // the model to continue. We do it once per step (bounded by the
@@ -1723,12 +1835,35 @@ impl SessionProcessor {
         Ok(LlmStepResult {
             text_buffer,
             reasoning_buffer,
+            reasoning_signature,
             tool_calls,
             last_input_tokens,
             last_output_tokens,
             llm_request_start,
             should_break: false,
         })
+    }
+
+    /// FR-022: a tool-use finish with no complete tool call is a truncation.
+    ///
+    /// Returns `true` when the provider finished the step reporting tool use
+    /// but the accumulator produced no complete tool call and no call ever
+    /// started. In that case the turn would otherwise end as if the model had
+    /// answered, hiding a lost tool call; the caller must treat the step as
+    /// truncated (the reason is already recorded as `Truncation` by
+    /// `call_llm_step`) and let the text-recovery path have the buffers.
+    ///
+    /// A call that *started* but never completed counts as parsed: its
+    /// truncated argument deltas are reported by the normal dispatch pipeline,
+    /// which is louder than a truncation notice.
+    pub fn finish_was_tool_use_without_a_call(
+        finish_reason: Option<&FinishReason>,
+        saw_tool_call_start: bool,
+        tool_call_count: usize,
+    ) -> bool {
+        matches!(finish_reason, Some(FinishReason::ToolUse))
+            && !saw_tool_call_start
+            && tool_call_count == 0
     }
 
     /// Final save of the assistant message, timing breakdown, and

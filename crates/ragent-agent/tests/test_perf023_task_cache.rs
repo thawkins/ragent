@@ -10,7 +10,7 @@
 //!
 //! These tests construct a `TeamManager` without a live `SessionProcessor`
 //! by calling the (private) `TeamManager::new` via a thin test shim - we
-//! instead exercise the cache through the public `task_list` /
+//! instead exercise the cache through the public `TaskList` /
 //! `apply_to_task_list` / `claim_next_task` / `complete_task` methods, which
 //! only need `team_dir` (no session processor is required for the task
 //! cache path).

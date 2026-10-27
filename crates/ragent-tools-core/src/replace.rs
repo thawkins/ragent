@@ -1,7 +1,7 @@
 //! Shared replacement matchers.
 //!
 //! [`find_exact_replacement_range`] is the canonical matcher used by every
-//! replace-style tool in ragent (`edit`, `multi_edit`, `apply_patch`;
+//! replace-style tool in ragent (`Edit`, `multi_edit`, `apply_patch`;
 //! historically also the legacy `memory_replace`). It locates a unique byte
 //! range `[start, end)` in `content` where `needle` should be replaced.
 //!
@@ -331,7 +331,7 @@ pub enum FindDiagKind {
     MultipleMatches(usize),
 }
 
-/// A richer replacement-failure diagnostic used by `edit` and `multi_edit` to
+/// A richer replacement-failure diagnostic used by `Edit` and `multi_edit` to
 /// produce actionable error messages.
 #[derive(Debug, Clone)]
 pub struct FindDiag {

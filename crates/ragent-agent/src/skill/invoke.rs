@@ -253,6 +253,16 @@ pub async fn invoke_forked_skill(
     // 2. Resolve the subagent
     let agent = resolve_forked_skill_agent(invocation, active_model.as_ref())?;
 
+    // A declared `allowed-tools` entry that names no registered tool is a
+    // capability this fork silently loses, so report it before the isolated turn
+    // runs (FR-029). The ledger keeps a second fork of the same skill silent, and
+    // keeps this quiet when the invoking surface already reported it.
+    crate::tool::allowed_tools::report_skill_allowed_tools_once(
+        &processor.tool_registry,
+        &invocation.skill_name,
+        &invocation.allowed_tools,
+    );
+
     // 4. Format the skill content as the initial prompt
     let prompt = format_skill_message(invocation);
 

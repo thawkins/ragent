@@ -39,7 +39,7 @@
 //! ## Why the report is made where a restriction is applied
 //!
 //! The three call sites are the places a skill's list is turned into a real
-//! restriction: `skill_manage` (`read`/`load`), the TUI's `/skill` and bare
+//! restriction: `Skill` (`read`/`load`), the TUI's `/skill` and bare
 //! `/<name>` trigger, and the forked-skill resolver. Reporting on the
 //! system-prompt path instead would warn about every discovered manifest on every
 //! turn - including third-party plugin skills the session never runs - and would
@@ -172,18 +172,20 @@ pub fn report_unresolved_allowed_tools_once(
 /// [`report_unresolved_allowed_tools_once`] for a skill, naming it as the
 /// declarer (FR-029).
 ///
-/// Keeps the three call sites to one line each, and gives every site the same
-/// declarer text so the ledger key cannot disagree between them.
+/// Takes the skill's name and list rather than a [`SkillInfo`] so all three call
+/// sites - `Skill`, the TUI `/skill` trigger and the forked-skill resolver - reach
+/// it with the same arguments; the forked path only carries a `SkillInvocation`,
+/// which has the name and the list but is not a `SkillInfo`. Keeping the declarer
+/// text here means the ledger key cannot disagree between the three.
+///
+/// [`SkillInfo`]: crate::skill::SkillInfo
 pub fn report_skill_allowed_tools_once(
     registry: &ToolRegistry,
-    skill: &crate::skill::SkillInfo,
+    skill_name: &str,
+    allowed: &[String],
 ) -> usize {
-    if skill.allowed_tools.is_empty() {
+    if allowed.is_empty() {
         return 0;
     }
-    report_unresolved_allowed_tools_once(
-        registry,
-        &format!("skill `{}`", skill.name),
-        &skill.allowed_tools,
-    )
+    report_unresolved_allowed_tools_once(registry, &format!("skill `{skill_name}`"), allowed)
 }

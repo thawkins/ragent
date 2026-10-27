@@ -82,6 +82,6 @@ Disables YOLO mode and restores normal permission gating.
 ## Related
 
 - `/autopilot` - autonomous runs with permission auto-approval for the run duration
-- `/bash` - the bash tool whose security layers are relaxed by YOLO mode
+- `/bash` - the Bash tool whose security layers are relaxed by YOLO mode
 - `/mcp` - MCP server management, whose validation is skipped under YOLO
 - Permission rules in `ragent.json` - allow/deny rules are bypassed while YOLO is on

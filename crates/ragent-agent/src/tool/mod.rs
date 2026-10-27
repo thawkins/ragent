@@ -11,8 +11,14 @@
 pub mod mcp_tool;
 pub use mcp_tool::McpToolWrapper;
 
+/// The declarative provider-name alias table and its inbound resolver
+/// (spec `uniformtools` FR-015).
+pub mod alias_table;
 /// Alias tools that map commonly hallucinated tool names to canonical implementations.
 pub mod aliases;
+/// Resolution and reporting of a skill's `allowed_tools` entries (spec
+/// `uniformtools` FR-029).
+pub mod allowed_tools;
 /// Sub-agent cancellation tool.
 pub mod cancel_agent;
 /// Structured memory store, recall, and forget tools.
@@ -20,6 +26,8 @@ pub mod conversation_search;
 pub mod list_agents;
 pub mod new_agent;
 pub mod plan;
+/// The FR-023 tool-rename table (a re-export of `ragent_types::tool_rename`).
+pub mod rename;
 pub mod structured_memory;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 ///
@@ -183,6 +191,14 @@ pub trait TeamManagerInterface: Send + Sync {
     /// `ToolContext`. Returns `None` when no manager is available (e.g. in
     /// tests that construct a `ToolContext` without a team manager).
     fn lead_session_id(&self) -> Option<&str>;
+
+    /// Returns `true` if this teammate's plan awaits the lead's verdict.
+    ///
+    /// The plan-approval gate (T-307) calls this from the tool-dispatch
+    /// pipeline; without it in the interface the gate cannot ask a
+    /// type-erased manager, and a `downcast` to the concrete manager would make
+    /// every test double have to be the real one.
+    fn is_plan_pending(&self, agent_id: &str) -> bool;
 }
 
 /// Execution context passed to each tool invocation.
@@ -226,7 +242,9 @@ impl Default for ToolOutput {
 ///     read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
 ///     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
 ///     permission_checker: None,
-///     tool_registry: Arc::new(create_default_registry()),
+///     allowed_roots: Vec::new(),
+///     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+///     tool_registry: ToolContext::default_tool_registry(),
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -298,7 +316,7 @@ pub struct ToolContext {
     /// Tools that execute *other* tools on the session's behalf - currently
     /// only `team_create` running a blueprint seed file - must route those
     /// calls through the same permission decision the agent loop applies, so a
-    /// blueprint (untrusted project content) cannot execute `bash`/`write`
+    /// blueprint (untrusted project content) cannot execute `Bash`/`Write`
     /// without approval (SEC-ragent-team-001, FR-024).
     ///
     /// `None` when the caller has no permission checker (tests, adapters that
@@ -371,8 +389,8 @@ pub trait Tool: Send + Sync {
 /// Adapter that wraps a `ragent_tools_core::Tool` and exposes it as an
 /// agent-local [`Tool`]. The runtime registry uses this to register the core
 /// tool implementations under the agent's `Tool` trait; it is also reused by
-/// `aliases.rs` to delegate alias calls (`update_file`->`write`, `run_code`->
-/// `bash`) to the single source-of-truth implementations in
+/// `aliases.rs` to delegate alias calls (`update_file`->`Write`, `run_code`->
+/// `Bash`) to the single source-of-truth implementations in
 /// `ragent-tools-core` (see DCREMOVALPLAN M3).
 pub(crate) struct ExtractedCoreToolAdapter {
     inner: Arc<dyn ragent_tools_core::Tool>,
@@ -576,6 +594,13 @@ impl Tool for ExtractedCoreToolAdapter {
 /// `new_string`) inside each edit object before delegating to the inner
 /// adapter, so existing agent prompts continue to work during the
 /// deprecation window.
+///
+/// The `name()` body returns a constant rather than forwarding to the inner
+/// adapter. It has to: a forwarder's registry key is whatever the wrapped tool
+/// returns, which is `multi_edit`, so a forwarding body would register the
+/// legacy alias as a second tool of the same name - the duplicate registration
+/// NFR-008 predicate (f) reports. The constant is the alias's whole reason to
+/// exist.
 struct LegacyMultiEditAlias {
     inner: ExtractedCoreToolAdapter,
 }
@@ -1274,20 +1299,17 @@ pub(crate) fn always_allowed_tool_names() -> Vec<&'static str> {
 /// (e.g., MCP tools) after the registry is wrapped in an `Arc`.
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
-    /// Tool names that are hidden from LLM tool definitions and system-prompt listings.
-    hidden: RwLock<HashSet<String>>,
-    /// PERF-012: monotonic version counter bumped on every `register()` /
-    /// `set_hidden()` call.  Caches (the system-prompt component cache,
-    /// `cached_tool_definitions`, `estimate_request_bytes`) compare this
-    /// version against the version they were last built at to decide
-    /// whether to invalidate in O(1), instead of re-hashing all ~111 tool
-    /// definitions on every step.
+    /// PERF-012: monotonic version counter bumped on every `register()` call.
+    /// Caches (the system-prompt component cache, `cached_tool_definitions`,
+    /// `estimate_request_bytes`) compare this version against the version they
+    /// were last built at to decide whether to invalidate in O(1), instead of
+    /// re-hashing all ~111 tool definitions on every step.
     version: std::sync::atomic::AtomicU64,
     /// PERF-012: cached sorted [`ToolDefinition`] list. `None` means the cache
     /// is stale and must be rebuilt by [`definitions`](Self::definitions);
-    /// `Some(arc)` is reused until the next `register()` / `set_hidden()`
-    /// invalidation. This converts the per-call O(n log n) sort into a
-    /// one-time cost amortised across every step of the agent loop.
+    /// `Some(arc)` is reused until the next `register()` invalidation.
+    /// This converts the per-call O(n log n) sort into a one-time cost
+    /// amortised across every step of the agent loop.
     /// T-008 (FR-014): storing the list behind `Arc` lets callers share the
     /// definitions rather than cloning the whole `Vec` on every request.
     definitions_cache: RwLock<Option<Arc<Vec<ToolDefinition>>>>,
@@ -1308,7 +1330,6 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
-            hidden: RwLock::new(HashSet::new()),
             version: std::sync::atomic::AtomicU64::new(0),
             definitions_cache: RwLock::new(None),
             // T-008: `Arc` wrapper is created lazily in `definitions()`.
@@ -1316,8 +1337,8 @@ impl ToolRegistry {
     }
 
     /// PERF-012: invalidate the `definitions` cache. Called by `register()`
-    /// and `set_hidden()` so the next `definitions()` call rebuilds the
-    /// sorted `Vec<ToolDefinition>` from scratch.
+    /// so the next `definitions()` call rebuilds the sorted
+    /// `Vec<ToolDefinition>` from scratch.
     fn invalidate_definitions_cache(&self) {
         let mut guard = self
             .definitions_cache
@@ -1334,50 +1355,6 @@ impl ToolRegistry {
     #[must_use]
     pub fn version(&self) -> u64 {
         self.version.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// Marks the given tool names as hidden so they are excluded from
-    /// [`definitions`](Self::definitions) and the system-prompt tool listing.
-    /// Hidden tools remain registered and can still be executed if the LLM
-    /// happens to call them by name; they are simply not advertised.
-    ///
-    /// Call this once after constructing the registry, before the first session.
-    pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self
-            .hidden
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *hidden = names.iter().cloned().collect();
-        // PERF-012: the hidden set participates in `definitions()` filtering,
-        // so a change here must invalidate the sorted-definition cache.
-        drop(hidden);
-        self.invalidate_definitions_cache();
-    }
-
-    /// Returns the currently hidden tool names, sorted alphabetically.
-    ///
-    /// A tool is hidden when it is excluded from [`definitions`](Self::definitions)
-    /// and the system-prompt tool listing, but remains registered and executable.
-    /// Used by the `/tools` report to render hidden entries distinctly.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use ragent_agent::tool::create_default_registry;
-    ///
-    /// let registry = create_default_registry();
-    /// registry.set_hidden(&["read".to_string()]);
-    /// assert!(registry.hidden().contains(&"read".to_string()));
-    /// ```
-    #[must_use]
-    pub fn hidden(&self) -> Vec<String> {
-        let hidden = self
-            .hidden
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut names: Vec<String> = hidden.iter().cloned().collect();
-        names.sort();
-        names
     }
 
     /// Registers a tool, keyed by its [`Tool::name`].
@@ -1456,7 +1433,7 @@ impl ToolRegistry {
     /// let registry = create_default_registry();
     /// let names = registry.list();
     /// assert!(names.contains(&"read".to_string()));
-    /// assert!(names.contains(&"bash".to_string()));
+    /// assert!(names.contains(&"Bash".to_string()));
     /// ```
     pub fn list(&self) -> Vec<String> {
         let tools = self
@@ -1486,10 +1463,9 @@ impl ToolRegistry {
     /// ```
     pub fn definitions(&self) -> Arc<Vec<ToolDefinition>> {
         // PERF-012 / T-008: serve the sorted-definition cache when it is valid.
-        // The cache is invalidated (set to `None`) by `register()` and
-        // `set_hidden()`, so a steady-state agent loop reuses the same
-        // sorted `Arc<Vec>` across every step instead of paying an O(n log n)
-        // sort on every uncached call.
+        // The cache is invalidated (set to `None`) by `register()`, so a
+        // steady-state agent loop reuses the same sorted `Arc<Vec>` across every
+        // step instead of paying an O(n log n) sort on every uncached call.
         {
             let guard = self
                 .definitions_cache
@@ -1503,13 +1479,8 @@ impl ToolRegistry {
             .tools
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hidden = self
-            .hidden
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
-            .filter(|t| !hidden.contains(t.name()))
             .map(|t| ToolDefinition {
                 name: t.name().to_string(),
                 description: t.description().to_string(),
@@ -1529,11 +1500,10 @@ impl ToolRegistry {
         defs
     }
 
-    /// Returns every registered tool sorted by name, including hidden ones.
+    /// Returns every registered tool sorted by name.
     ///
-    /// Used by the `tool_info` introspection tool, which must snapshot the
-    /// full registry - visible tools plus tools hidden by a visibility
-    /// switch - regardless of the hidden set.
+    /// Used by the `tool_info` introspection tool, which snapshots the full
+    /// registry.
     #[must_use]
     pub fn all_tools(&self) -> Vec<Arc<dyn Tool>> {
         let tools = self
@@ -1543,46 +1513,6 @@ impl ToolRegistry {
         let mut all: Vec<Arc<dyn Tool>> = tools.values().cloned().collect();
         all.sort_by(|a, b| a.name().cmp(b.name()));
         all
-    }
-
-    /// Returns [`ToolDefinition`] descriptors for the registered tools that are
-    /// currently hidden by [`set_hidden`](Self::set_hidden), sorted by name.
-    ///
-    /// Used by the `/tools` report so a hidden tool is still listed (matching
-    /// the count of [`definitions`](Self::definitions)) but marked as disabled.
-    /// Hidden tools remain registered and executable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use ragent_agent::tool::create_default_registry;
-    ///
-    /// let registry = create_default_registry();
-    /// registry.set_hidden(&["read".to_string()]);
-    /// let hidden = registry.hidden_definitions();
-    /// assert_eq!(hidden.len(), 1);
-    /// assert_eq!(hidden[0].name, "read");
-    /// ```
-    pub fn hidden_definitions(&self) -> Vec<ToolDefinition> {
-        let tools = self
-            .tools
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hidden = self
-            .hidden
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut defs: Vec<ToolDefinition> = tools
-            .values()
-            .filter(|t| hidden.contains(t.name()))
-            .map(|t| ToolDefinition {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                parameters: t.parameters_schema(),
-            })
-            .collect();
-        defs.sort_by(|a, b| a.name.cmp(&b.name));
-        defs
     }
 }
 
@@ -1594,8 +1524,8 @@ impl Default for ToolRegistry {
 
 /// Creates a [`ToolRegistry`] pre-populated with all built-in tools.
 ///
-/// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`,
-/// `question`, `pdf_read`, `pdf_write`, `new_agent`, `cancel_agent`,
+/// Included tools: `read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, `list`,
+/// `AskUserQuestion`, `pdf_read`, `pdf_write`, `new_agent`, `cancel_agent`,
 /// `list_agents`.
 ///
 /// # Examples

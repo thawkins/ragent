@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use ragent_types::ThinkingConfig;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -36,13 +36,17 @@ use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::session::SessionManager;
 use crate::session::cache::SystemPromptCache;
+use crate::session::dispatch::{
+    ToolDispatchContext, ToolDispatchPipeline, canonical_dispatch_name, resolve_tool_call,
+};
 use crate::session::history::PendingToolCall;
 use crate::session::loop_state::LoopSpec;
 use crate::session::permissions::{
     extract_command_name, extract_resource_from_input, split_bash_command,
 };
-use crate::telemetry::{LlmRecorder, SessionRecorder, ToolRecorder};
-use crate::tool::{McpToolWrapper, ToolContext, ToolRegistry};
+use crate::telemetry::{LlmRecorder, SessionRecorder};
+use crate::tool::alias_table::AliasTable;
+use crate::tool::{ToolContext, ToolRegistry};
 
 // Re-export the public helpers that external callers (tests, benches) import
 // from `session::processor::...` so the extraction does not break those paths.
@@ -122,8 +126,8 @@ fn writes_in_spec_dir(
     tool_calls.iter().any(|tc| {
         if !matches!(
             tc.name.as_str(),
-            "write"
-                | "edit"
+            "Write"
+                | "Edit"
                 | "multiedit"
                 | "multi_edit"
                 | "patch"
@@ -133,7 +137,10 @@ fn writes_in_spec_dir(
         ) {
             return false;
         }
-        let Ok(args): Result<serde_json::Value, _> = serde_json::from_str(&tc.args_json) else {
+        // FR-007: the shared decoder, so this check reads the same argument
+        // object the call ran with (an encoded-string payload included) rather
+        // than carrying a second JSON rule of its own.
+        let Ok(args) = ragent_types::tool_args::decode_tool_arguments(&tc.args_json) else {
             tracing::warn!(
                 tool = %tc.name,
                 "unparseable args in spec-dir write check; treating as no-match"
@@ -163,96 +170,42 @@ fn writes_in_spec_dir(
     })
 }
 
-/// C5: builds the unknown-tool error message, attaching a "did you mean"
-/// hint when a registered tool name is similar to the hallucinated one.
+/// Whether a dispatched call's result may be appended to history (FR-013 of
+/// spec `uniformtools`).
 ///
-/// Similarity is deliberately cheap: case-insensitive equality, prefix match,
-/// containment, or a small edit distance against the registry's tool list.
-/// Structural matches (equality/prefix/containment) always outrank edit
-/// distance, and among equals the smallest distance wins - a `find` over
-/// registry order would otherwise let a loose containment match on an
-/// early-listed tool beat a minimal-distance match later on.
-fn unknown_tool_error(registry: &crate::tool::ToolRegistry, name: &str) -> anyhow::Error {
-    let lowered = name.to_lowercase();
-    let lowered_len = lowered.chars().count();
-    let max_distance = usize::max(2, lowered_len / 3);
-    // Rank tiers: 0 = equality, 1 = prefix (either direction), 2 = containment
-    // (either direction), 3 = edit distance. Within a tier, smaller edit
-    // distance wins; ties keep the first candidate.
-    let mut best: Option<(u8, usize, String)> = None;
-    for candidate in registry.list() {
-        let cand_lower = candidate.to_lowercase();
-        let (rank, distance) = if cand_lower == lowered {
-            (0, 0)
-        } else if cand_lower.starts_with(&lowered) || lowered.starts_with(&cand_lower) {
-            (1, edit_distance(&cand_lower, &lowered))
-        } else if cand_lower.contains(&lowered) || lowered.contains(&cand_lower) {
-            (2, edit_distance(&cand_lower, &lowered))
-        } else {
-            // Bail before building the distance matrix when the length
-            // difference alone already exceeds the budget.
-            let cand_len = cand_lower.chars().count();
-            if cand_len.abs_diff(lowered_len) > max_distance {
-                continue;
-            }
-            let distance = edit_distance(&cand_lower, &lowered);
-            if distance > max_distance {
-                continue;
-            }
-            (3, distance)
-        };
-        let better = match &best {
-            None => true,
-            Some((best_rank, best_distance, _)) => {
-                rank < *best_rank || (rank == *best_rank && distance < *best_distance)
-            }
-        };
-        if better {
-            best = Some((rank, distance, candidate));
-        }
-    }
-    match best {
-        Some((_, _, candidate)) => {
-            anyhow::anyhow!("Unknown tool: '{name}'. Did you mean '{candidate}'?")
-        }
-        None => anyhow::anyhow!("Unknown tool: '{name}'"),
-    }
+/// The one reading of the unresolved-approval tracker
+/// ([`crate::session::pending::PendingVerdicts`]) on the tool phase's append
+/// path: a result is appended only for a call whose permission verdict has
+/// resolved. It is a free function rather than a closure capture because the
+/// tool phase's result handler already borrows three step-local buffers
+/// mutably, and a handler that owned the tracker would have to take those
+/// buffers with it.
+///
+/// `session_id` and `call_id` together name the call, so a verdict recorded for
+/// one session can never unblock another session's call.
+#[must_use]
+fn result_is_appendable(
+    pending: &crate::session::pending::PendingVerdicts,
+    session_id: &str,
+    call_id: &str,
+) -> bool {
+    !pending.is_unresolved(session_id, call_id)
 }
 
-/// Levenshtein edit distance between two tool names.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0usize; b.len() + 1];
-    for (i, a_char) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, b_char) in b.iter().enumerate() {
-            let substitution_cost = usize::from(a_char != b_char);
-            current[j + 1] = (previous[j + 1] + 1)
-                .min(current[j] + 1)
-                .min(previous[j] + substitution_cost);
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    previous[b.len()]
-}
-
-/// B3: validates a tool call's arguments against the tool's declared
-/// `parameters_schema()`. Shared by the B1 args-parse gate (where the payload
-/// is unparseable and `Value::Null` is validated) and the pre-dispatch gate in
-/// the execution task, so both sites report identical corrective reasons.
-fn schema_violation(
-    registry: &crate::tool::ToolRegistry,
-    tool_name: &str,
-    input: &Value,
-) -> Result<(), String> {
-    match registry.get(tool_name) {
-        Some(tool) => {
-            ragent_tools_core::schema::validate_required_args(&tool.parameters_schema(), input)
-        }
-        None => Err("tool not registered".to_string()),
-    }
+/// Test-only handle on [`result_is_appendable`] (FR-013).
+///
+/// Integration tests live in a separate crate and cannot reach a private free
+/// function, and the FR-013 guard is only worth having if its decision can be
+/// exercised: the call is made by the tool phase's result handler, which no
+/// integration test can invoke directly.
+#[doc(hidden)]
+#[must_use]
+pub fn result_is_appendable_for_test(
+    pending: &crate::session::pending::PendingVerdicts,
+    session_id: &str,
+    call_id: &str,
+) -> bool {
+    result_is_appendable(pending, session_id, call_id)
 }
 
 /// Dispatch a tool invocation through the active execution backend
@@ -301,7 +254,7 @@ async fn dispatch_tool_leaf(
 /// permission checks live in one readable place. The behaviour is unchanged
 /// from the previous inline implementation.
 #[allow(clippy::too_many_arguments)]
-async fn dispatch_tool_with_permissions(
+pub(crate) async fn dispatch_tool_with_permissions(
     tool: &std::sync::Arc<dyn crate::tool::Tool>,
     tool_input: Value,
     tc: &crate::session::history::PendingToolCall,
@@ -327,7 +280,7 @@ async fn dispatch_tool_with_permissions(
         return dispatch_tool_leaf(tool, tool_input, tool_ctx).await;
     }
     let resource = extract_resource_from_input(&tool_input, &tc.name);
-    if tc.name == "bash" {
+    if tc.name == "Bash" {
         let sub_commands = split_bash_command(&resource);
         use ragent_tools_core::bash::is_safe_command;
         // SEC-011: judge the *full* sub-command, not its first token. Passing
@@ -435,6 +388,13 @@ async fn dispatch_tool_with_permissions(
                 Err(anyhow::anyhow!("Permission denied by user or policy"))
             }
         }
+        // FR-013 (T-016): an `Ask` that survived the permission layer is one
+        // whose verdict never resolved - the layer either prompts and returns a
+        // decision or turns a timeout into a `Deny`. It is refused here as an
+        // error, never reported as a success, so the tool phase can only append
+        // a denial observation and never an unapproved call's output. (The tool
+        // phase separately refuses an append for a call the tracker still names
+        // unresolved; see `result_is_appendable`.)
         Ok(crate::permission::PermissionAction::Ask) => Err(anyhow::anyhow!(
             "Permission check returned Ask (internal error)"
         )),
@@ -463,6 +423,14 @@ fn policy_has_explicit_verdict(
         )
     })
 }
+
+/// The cache key for [`SessionProcessor::cached_tool_definitions`] (FR-015).
+///
+/// The tool-registry version alone does not describe the outbound list: the
+/// `tools.expose_alias_names` switch and the turn's alias table both change which
+/// names the list carries while the registry is untouched, so all three are part
+/// of the key and a config change takes effect on the next call.
+type ToolDefinitionCacheKey = (u64, bool, AliasTable);
 
 /// Drives the agentic conversation loop for a single session.
 ///
@@ -534,7 +502,12 @@ pub struct SessionProcessor {
     pub spec_manager: std::sync::OnceLock<Arc<ragent_specs::SpecManager>>,
     /// Cached tool definitions for the agent loop. Populated after MCP client
     /// registration via [`set_mcp_client`] and invalidated when tools change.
-    pub cached_tool_definitions: parking_lot::RwLock<Option<Arc<Vec<ToolDefinition>>>>,
+    ///
+    /// FR-015: the entry is keyed by `(tool-registry version,
+    /// expose_alias_names, the alias table)`, because the advertising switch and
+    /// the alias table change the outbound list without a tool being registered.
+    pub cached_tool_definitions:
+        parking_lot::RwLock<Option<(ToolDefinitionCacheKey, Arc<Vec<ToolDefinition>>)>>,
     /// Cached tool *names* for the `ToolsSent` event (PERF-003).
     ///
     /// Mirrors [`cached_tool_definitions`]: the comma-joined name list is built
@@ -686,6 +659,17 @@ pub struct SessionProcessor {
     /// `"stop"`. Inserted at every turn finalise; cleared at run entry.
     pub last_message_end_reason:
         std::sync::RwLock<HashMap<String, ragent_types::event::FinishReason>>,
+    /// The tool calls whose permission verdict has not resolved, per session
+    /// (FR-013 of spec `uniformtools`).
+    ///
+    /// The dispatch pipeline's permission stage marks a call unresolved
+    /// immediately before a prompt is published and settles it when the verdict
+    /// resolves, so [`SessionProcessor`] never appends a tool result for a call
+    /// that is still awaiting approval. Holding the tracker here - rather than
+    /// inside one call's dispatch - is what makes it a *state* the tool phase can
+    /// read rather than a property of one call's local flow; see
+    /// [`crate::session::pending`].
+    pub pending_verdicts: crate::session::pending::PendingVerdicts,
 }
 
 /// C-001: a cached [`crate::skill::SkillRegistry`] plus the inputs used to
@@ -1349,39 +1333,36 @@ impl SessionProcessor {
     /// Set the MCP client and register all tools from connected servers into the tool registry.
     ///
     /// This should be called once after the MCP client has connected to all configured servers.
-    /// Tools are registered with names in the format `mcp_{server_id}_{tool_name}`.
+    /// Tools are registered with names in the format `mcp_{server_id}_{tool_name}`, through
+    /// [`bridge_server_tools`](crate::tool::mcp_tool::bridge_server_tools) so FR-032's
+    /// namespacing rule is applied here and in the TUI by one implementation.
     pub async fn set_mcp_client(&self, client: Arc<tokio::sync::RwLock<crate::mcp::McpClient>>) {
-        // Register all currently connected MCP tools into the shared registry.
-        let tool_defs = {
+        // Group each connected server's advertised tools before releasing the lock:
+        // the bridge needs the whole list, because a refusal is reported per server.
+        let per_server = {
             let c = client.read().await;
-            // Collect (server_id, tool_def) pairs for all connected servers.
-            let mut pairs = Vec::new();
-            for server in c.servers() {
-                if server.status == crate::mcp::McpStatus::Connected {
-                    for tool in &server.tools {
-                        pairs.push((server.id.clone(), tool.clone()));
-                    }
-                }
-            }
-            pairs
+            c.servers()
+                .iter()
+                .filter(|server| server.status == crate::mcp::McpStatus::Connected)
+                .map(|server| (server.id.clone(), server.tools.clone()))
+                .collect::<Vec<_>>()
         };
 
-        let registered = tool_defs.len();
-        for (server_id, tool_def) in tool_defs {
-            let wrapper = McpToolWrapper::new(
-                &server_id,
-                &tool_def.name,
-                &tool_def.description,
-                tool_def.parameters,
-                client.clone(),
-            );
-            tracing::debug!(
-                server_id = %server_id,
-                tool = %tool_def.name,
-                ragent_name = %wrapper.ragent_name,
-                "Registering MCP tool"
-            );
-            self.tool_registry.register(Arc::new(wrapper));
+        let mut registered = 0usize;
+        for (server_id, tools) in per_server {
+            let bridged =
+                crate::tool::mcp_tool::bridge_server_tools(&server_id, &tools, Arc::clone(&client));
+            if !bridged.refusals.is_empty() {
+                tracing::debug!(
+                    server_id = %server_id,
+                    refused = bridged.refusals.len(),
+                    "Refused MCP tools that break FR-032 (each reported once per source and name)"
+                );
+            }
+            registered += bridged.wrappers.len();
+            for wrapper in bridged.wrappers {
+                self.tool_registry.register(Arc::new(wrapper));
+            }
         }
 
         if registered > 0 {
@@ -1495,19 +1476,29 @@ impl SessionProcessor {
 
     /// Return cached tool definitions, populating the cache if necessary.
     ///
+    /// FR-015: the outbound list is passed through the turn's alias table, so
+    /// `tools.expose_alias_names` advertises each alias spelling alongside its
+    /// canonical name. A build with advertising off sends the registry's own
+    /// names, unchanged.
+    ///
     /// P-7 / PERF-014: also populates [`cached_tool_definition_bytes`] with
     /// the total serialised byte size of the definitions (computed once via
     /// [`estimate_tool_definition_bytes`]) so the per-step request-size
     /// estimate can reuse the sum instead of re-serialising ~111 tool
     /// schemas on every step.
-    fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
+    fn get_cached_tool_definitions(&self, alias_table: &AliasTable) -> Arc<Vec<ToolDefinition>> {
+        let expose = self.tool_names_exposed(alias_table);
         {
             let guard = self.cached_tool_definitions.read();
-            if let Some(ref defs) = *guard {
+            if let Some((ref key, ref defs)) = *guard
+                && key.0 == self.tool_registry.version()
+                && key.1 == expose
+                && key.2 == *alias_table
+            {
                 return defs.clone();
             }
         }
-        let defs = self.tool_registry.definitions();
+        let defs = alias_table.outbound_definitions(&self.tool_registry.definitions(), expose);
         // PERF-003: also cache the tool-name list used by the `ToolsSent`
         // event so we don't allocate ~111 Strings on every loop step.
         let names: Arc<[String]> = defs.iter().map(|t| t.name.clone()).collect();
@@ -1517,7 +1508,10 @@ impl SessionProcessor {
         let tool_bytes = estimate_tool_definition_bytes(&defs);
         {
             let mut guard = self.cached_tool_definitions.write();
-            *guard = Some(defs.clone());
+            *guard = Some((
+                (self.tool_registry.version(), expose, alias_table.clone()),
+                defs.clone(),
+            ));
         }
         {
             let mut names_guard = self.cached_tool_names.write();
@@ -1528,6 +1522,18 @@ impl SessionProcessor {
             *bytes_guard = Some(tool_bytes);
         }
         defs
+    }
+
+    /// Returns `true` when this session's `tools.expose_alias_names` asks for
+    /// the alias spellings in the outbound tool list (FR-015).
+    ///
+    /// Read through [`Self::load_config_cached`] so the helper needs no config
+    /// argument and the same mtime-cached config every other per-turn read uses
+    /// is what decides. An empty table already means "advertising has nothing to
+    /// add", and the default is off, which is the behaviour every build had
+    /// before this switch existed.
+    fn tool_names_exposed(&self, alias_table: &AliasTable) -> bool {
+        !alias_table.is_empty() && self.load_config_cached().tools.expose_alias_names
     }
 
     /// Return the cached total serialised byte size of the tool definitions
@@ -1972,6 +1978,7 @@ impl SessionProcessor {
                 &turn.session_config,
                 &turn.working_dir,
                 turn.team_context.as_ref(),
+                &turn.alias_table,
                 &profiler,
             )
             .await?;
@@ -2054,7 +2061,7 @@ impl SessionProcessor {
         let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
             std::sync::Arc::new(Vec::new())
         } else if let Some(allowed) = loop_tool_set {
-            let all = self.get_cached_tool_definitions();
+            let all = self.get_cached_tool_definitions(&turn.alias_table);
             std::sync::Arc::new(
                 all.iter()
                     .filter(|def| {
@@ -2071,10 +2078,14 @@ impl SessionProcessor {
             // use. The dispatch gate below still denies a hallucinated call
             // (fail closed). Cached by tool-registry version.
             self.system_prompt_cache()
-                .get_subagent_tool_definitions(&self.tool_registry)
-                .unwrap_or_else(|| self.get_cached_tool_definitions())
+                .get_subagent_tool_definitions(
+                    &self.tool_registry,
+                    &turn.alias_table,
+                    turn.session_config.tools.expose_alias_names,
+                )
+                .unwrap_or_else(|| self.get_cached_tool_definitions(&turn.alias_table))
         } else {
-            self.get_cached_tool_definitions()
+            self.get_cached_tool_definitions(&turn.alias_table)
         };
         // P-7: prime the tool-definition byte cache alongside the definitions
         // cache so the per-step request-size estimator can reuse the sum.
@@ -2523,8 +2534,12 @@ impl SessionProcessor {
             {
                 let _scope = profiler.scope("loop.response.process");
                 if !llm_result.reasoning_buffer.is_empty() {
+                    // FR-011: the provider's signature is recorded beside the
+                    // reasoning text, so a profile that declares
+                    // `echo_reasoning` can replay the signed block verbatim.
                     std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Reasoning {
                         text: llm_result.reasoning_buffer.clone(),
+                        signature: llm_result.reasoning_signature.clone(),
                     });
                 }
                 if !llm_result.text_buffer.is_empty() {
@@ -2795,6 +2810,31 @@ impl SessionProcessor {
                 // allocations from the previous step are retained).
                 assistant_content_parts.clear();
                 tool_result_parts.clear();
+                // FR-011 (T-018): the signed reasoning block is pushed FIRST, so
+                // it precedes both the text and the tool-use blocks of the
+                // assistant turn that answers it. Anthropic requires the
+                // thinking that decided a call to arrive before the call, which
+                // is why this push is above the text push rather than beside the
+                // tool-use push below.
+                //
+                // This is the *within-turn* half of the replay, and it is the
+                // half a history converter cannot provide: the next request of
+                // this turn is built from `chat_messages`, and this message is
+                // what gets appended to it at the end of the phase. A block
+                // recorded only in `assistant_parts` would reach the provider on
+                // next turn's rebuilt history, i.e. after the echoing turn - too
+                // late for the provider that requires it.
+                //
+                // The part is pushed unconditionally, with no profile check: the
+                // omission for a profile declaring `echo_reasoning == false` is
+                // the encoder's decision (FR-011, and
+                // `tests/test_tool_input_error.rs` refuses a converter that
+                // re-implements it here).
+                if !llm_result.reasoning_buffer.is_empty() {
+                    let text = std::mem::take(&mut llm_result.reasoning_buffer);
+                    let signature = llm_result.reasoning_signature.take();
+                    assistant_content_parts.push(ContentPart::Reasoning { text, signature });
+                }
                 // P-18: move `text_buffer` into the `ContentPart::Text` rather
                 // than cloning it. The buffer is not referenced after this
                 // point (the response-preview and no-tool-nudge paths ran
@@ -2804,7 +2844,48 @@ impl SessionProcessor {
                     assistant_content_parts.push(ContentPart::Text { text });
                 }
                 let parallel_tool_calls = turn.session_config.experimental.parallel_tool_calls;
-                let mut futures = Vec::new();
+                // FR-010 (T-015): a provider whose wire contract declares
+                // `supports_parallel == false` cannot carry a parallel step, so
+                // the user's `experimental.parallel_tool_calls` opt-in is
+                // demoted here - once per step, before any call is prepared -
+                // and every call below runs through the sequential arm. That
+                // arm is the same ordered pipeline with the same recorded
+                // order (FR-012), so forcing it changes the concurrency of a
+                // step and never the history it produces.
+                //
+                // The gate is a demotion only: it never turns concurrency on,
+                // and a provider that does support parallel calls is not
+                // touched. It is read per step rather than cached per turn
+                // because the lookup is a scan of fifteen rows, and a step
+                // never spans two providers.
+                //
+                // The router is the one id whose contract is not settled here:
+                // `RouterClient` forwards the canonical request to whichever
+                // downstream provider its classification picked, so the row
+                // `profile_for("router")` returns describes the canonical
+                // encoding and not the effective contract. A downstream
+                // provider that declares `supports_parallel == false` cannot be
+                // honoured through this gate (the selection is made inside
+                // `chat`, after this decision), which is a recorded gap in the
+                // task doc rather than a silently wrong answer.
+                let mut parallel_tool_calls = parallel_tool_calls;
+                if parallel_tool_calls
+                    && crate::provider::wire::profile_table::profile_for(
+                        &turn.model_ref.provider_id,
+                    )
+                    .is_none_or(|profile| !profile.supports_parallel)
+                {
+                    parallel_tool_calls = false;
+                    tracing::info!(
+                        provider = %turn.model_ref.provider_id,
+                        reason = "the provider's wire profile declares \
+                                  supports_parallel == false, so the step's tool \
+                                  calls run sequentially (FR-010)",
+                        "parallel tool dispatch demoted to sequential"
+                    );
+                }
+                // One entry per call of this step, in the provider's order.
+                let mut futures: Vec<PendingStepCall> = Vec::new();
                 // P-8/P-9: build a single `ToolContext` for this step and clone
                 // it per tool call. `active_spec` is read once here (P-9) so
                 // the async lock is acquired at most once per step instead of
@@ -2818,6 +2899,52 @@ impl SessionProcessor {
                     .iter()
                     .map(std::path::PathBuf::from)
                     .collect();
+                // FR-015: resolve a provider spelling onto the ragent tool BEFORE
+                // the unknown-tool check, and rewrite the pending call so every
+                // later stage - the loop restriction, `LOOP_WRITE_TOOLS`, the
+                // destructive-action classifier, the hooks, the permission
+                // layer, the repeat guard, the telemetry key and the history
+                // record - sees one canonical name, and the provider spelling
+                // never reaches the persisted form (FR-001).
+                //
+                // This sits at the top of the tool phase rather than above it so
+                // the per-call decision below reads the name it dispatches: a
+                // step with no tool calls never builds a table, and a call is
+                // canonicalised exactly when it is about to be resolved (FR-012's
+                // "before any guard").
+                //
+                // A registered name always wins (the resolver checks the
+                // registry first), and a spelling the table cannot resolve - or
+                // whose target this build does not register - is left untouched,
+                // so it reaches the unknown-tool refusal naming the spelling the
+                // client actually sent. With `tools.aliases` absent this loop is
+                // a no-op over an empty table (FR-015's "behaviour shall be
+                // unchanged").
+                for tc in &mut llm_result.tool_calls {
+                    // Two spellings resolve onto a registered tool, in this
+                    // order: the declarative alias table (FR-015), then the
+                    // registry's own unique ASCII-case-insensitive match - so
+                    // `CALCULATOR` for `calculator`, or `bash` for `Bash`,
+                    // reaches the tool instead of being refused as unknown. The
+                    // exact spelling still wins both lookups, and a name neither
+                    // resolves is left untouched so it reaches the unknown-tool
+                    // refusal naming the spelling the client actually sent.
+                    let canonical = crate::tool::alias_table::resolve_inbound_tool_name(
+                        &self.tool_registry,
+                        &turn.alias_table,
+                        &tc.name,
+                    )
+                    .or_else(|| canonical_dispatch_name(&self.tool_registry, &tc.name));
+                    let Some(canonical) = canonical else {
+                        continue;
+                    };
+                    tracing::info!(
+                        spelling = %tc.name,
+                        tool = %canonical,
+                        "alias spelling resolved to a ragent tool name (FR-015)"
+                    );
+                    tc.name = canonical;
+                }
                 let base_tool_ctx = ToolContext {
                     session_id: session_id.to_string(),
                     working_dir: turn.working_dir.clone(),
@@ -2846,6 +2973,24 @@ impl SessionProcessor {
                     canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                     tool_registry: self.tool_registry.clone(),
                 };
+                // FR-012: one dispatched call's outcome in the concurrent arm,
+                // carrying the position the call had in the provider's step so
+                // the batch is applied in that order whichever arm produced it.
+                type ToolStepResult = (
+                    ToolExecutionResult,
+                    Option<WatchdogIdentity>,
+                    Option<String>,
+                    usize,
+                );
+                // A step's outcome as the concurrent arm holds it: either the
+                // outcome a *run* will produce (a future) or an outcome the
+                // prepare loop already decided and that is emitted in its own
+                // position by the drain below (a refused call). Both are kept in
+                // one list, so a refused call's record lands exactly where the
+                // provider put the call instead of ahead of every sibling.
+                type StepOutcomeSlot =
+                    std::pin::Pin<Box<dyn std::future::Future<Output = ToolStepResult> + Send>>;
+                type PendingStepCall = Result<StepOutcomeSlot, Box<ToolStepResult>>;
                 type ToolExecutionResult = Result<
                     (
                         PendingToolCall,
@@ -2860,24 +3005,6 @@ impl SessionProcessor {
                     ),
                     ToolTaskError,
                 >;
-                // Builds the synthetic error result shared by the B1
-                // args-parse gate and the sequential/parallel join-failure
-                // paths (C1). One construction site keeps the 9-field tuple
-                // consistent as fields evolve.
-                let synthetic_error_result =
-                    |tc: &PendingToolCall, msg: &str| -> ToolExecutionResult {
-                        Ok((
-                            tc.clone(),
-                            Value::Null,
-                            ToolCallStatus::Error,
-                            None,
-                            Some(msg.to_string()),
-                            0u64,
-                            format!("Error: {msg}"),
-                            None,
-                            Vec::new(),
-                        ))
-                    };
                 let result_profiler = profiler.clone();
                 // P-15: collect one `ToolCallBatchEntry` per tool call so a
                 // single `Event::ToolCallBatch` can be published at the end of
@@ -2893,6 +3020,15 @@ impl SessionProcessor {
                 // rejected by the borrow checker.
                 let mut tool_panic: Option<String> = None;
                 let mut staged_tool_panic: Option<String> = None;
+                // FR-013: the step's view of the unresolved-approval tracker.
+                //
+                // Read through a free function rather than captured by the
+                // handler: the handler already borrows three step-local buffers
+                // mutably, so it must stay a borrowing closure, and a captured
+                // tracker would make it a `move` closure that takes those
+                // buffers with it. Passing the tracker per call keeps the one
+                // shared state - not a copy of it - on the FR-013 guard.
+                let step_pending_verdicts = self.pending_verdicts.clone();
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
@@ -2908,29 +3044,65 @@ impl SessionProcessor {
                             additional_contexts,
                         )) => {
                             let success = status == ToolCallStatus::Completed;
+                            // FR-013 (T-016): a result is appended only for a
+                            // call whose permission verdict has resolved - so no
+                            // history append can run while a permission verdict
+                            // is unresolved. The record is still written, so the
+                            // conversation carries the `tool_use` the provider
+                            // listed and no model call is left orphaned, but it
+                            // carries no output and no error: an unapproved
+                            // call's outcome must never reach the model as if it
+                            // had run. The guard reads a state the permission
+                            // stage settled on every exit path, so reaching it
+                            // means a verdict did not resolve - a wedged wait, an
+                            // aborted task - and it is logged rather than passed
+                            // over.
+                            let verdict_resolved =
+                                result_is_appendable(&step_pending_verdicts, session_id, &tc.id);
+                            if !verdict_resolved {
+                                tracing::warn!(
+                                    session_id = %session_id,
+                                    call_id = %tc.id,
+                                    tool = %tc.name,
+                                    "tool result withheld: the call's permission verdict \
+                                     has not resolved (FR-013)"
+                                );
+                            }
                             std::sync::Arc::make_mut(&mut assistant_parts).push(
                                 MessagePart::ToolCall {
                                     tool: tc.name.clone(),
                                     call_id: tc.id.clone(),
                                     state: Box::new(ToolCallState {
-                                        status,
+                                        status: if verdict_resolved {
+                                            status
+                                        } else {
+                                            ToolCallStatus::Pending
+                                        },
                                         input,
-                                        output: output_value,
-                                        error: error.clone(),
+                                        output: if verdict_resolved { output_value } else { None },
+                                        error: if verdict_resolved {
+                                            error.clone()
+                                        } else {
+                                            None
+                                        },
                                         duration_ms: Some(duration_ms),
                                     }),
                                 },
                             );
-                            tool_result_parts.push(ContentPart::ToolResult {
-                                tool_use_id: tc.id.clone(),
-                                content: tool_result_content_for_llm(
-                                    &tc.name,
-                                    &result_content,
-                                    tool_metadata.as_ref(),
-                                ),
-                                // FR-014/T-017: from the recorded status.
-                                is_error: status.is_error(),
-                            });
+                            // The result content: nothing for an unresolved
+                            // verdict (FR-013), the rendered result otherwise.
+                            if verdict_resolved {
+                                tool_result_parts.push(ContentPart::ToolResult {
+                                    tool_use_id: tc.id.clone(),
+                                    content: tool_result_content_for_llm(
+                                        &tc.name,
+                                        &result_content,
+                                        tool_metadata.as_ref(),
+                                    ),
+                                    // FR-014/T-017: from the recorded status.
+                                    is_error: status.is_error(),
+                                });
+                            }
                             // FR-033: a PostToolUse hook (for example a Claude
                             // security-guidance pattern check) may return
                             // `hookSpecificOutput.additionalContext`; fold it
@@ -2989,7 +3161,7 @@ impl SessionProcessor {
                     }
                 };
 
-                for tc in &llm_result.tool_calls {
+                for (dispatch_order, tc) in llm_result.tool_calls.iter().enumerate() {
                     let _scope = profiler.scope("loop.tool_phase.prepare_call");
                     // C4: an interrupt raised mid-phase stops further
                     // dispatch. Not-yet-started calls have no `ToolUse`
@@ -3004,60 +3176,58 @@ impl SessionProcessor {
                         );
                         break;
                     }
-                    // B1: parse the arguments ONCE per call. A malformed args
-                    // JSON used to be silently coerced to `{}` (six parse
-                    // sites), so the tool executed with empty arguments and
-                    // the model only saw a misleading "missing parameter X"
-                    // error. The parse result is now computed once and reused
-                    // through every guard/hook stage; a parse failure
-                    // short-circuits execution with a corrective,
-                    // LLM-visible error so the model can resend valid JSON.
-                    let parsed_input: Result<Value, String> =
-                        serde_json::from_str(&tc.args_json).map_err(|e| e.to_string());
-                    let input: Value = match &parsed_input {
-                        Ok(value) => value.clone(),
-                        Err(e) => {
-                            warn!(
-                                error = %e,
-                                // SEC: arguments can carry credentials; redact
-                                // before logging (verification gate: no raw
-                                // `args = %`).
-                                args = %ragent_types::sanitize::redact_secrets(&tc.args_json),
-                                "Failed to parse tool call arguments"
-                            );
-                            // B3: even a parse failure is validated against
-                            // the schema so a non-object payload gets the
-                            // same corrective treatment.
-                            let schema_error =
-                                schema_violation(&self.tool_registry, &tc.name, &Value::Null);
-                            let err_msg = format!(
-                                "Invalid arguments JSON for tool '{}': {e}. \
-                                 Arguments must be a single valid JSON object; \
-                                 resend the complete tool call with corrected \
-                                 JSON.{}",
-                                tc.name,
-                                schema_error
-                                    .err()
-                                    .map(|reason| format!(" ({reason})"))
-                                    .unwrap_or_default()
-                            );
-                            let synthetic = Ok((
-                                tc.clone(),
-                                Value::Null,
-                                ToolCallStatus::Error,
+                    // Stages 1-3 of the one ordered pipeline (FR-012): decode
+                    // the accumulated argument text once (FR-007), resolve the
+                    // tool, then validate against its declared schema (FR-008,
+                    // FR-009, FR-021). A malformed args JSON used to be silently
+                    // coerced to `{}` (six parse sites), so the tool executed
+                    // with empty arguments and the model only saw a misleading
+                    // "missing parameter X" error; and an unregistered name used
+                    // to be answered by a second, ad-hoc error. Both are now
+                    // `ToolInputError` values built by the pipeline, so the
+                    // sentence, the record status and the `is_error` flag are one
+                    // derivation and a call can be measured against the tool it
+                    // will not run.
+                    let resolved = resolve_tool_call(&self.tool_registry, tc);
+                    // The decoded, schema-validated arguments. A refused call
+                    // keeps them in its record so the TUI can render what the
+                    // model sent; it is `Value::Null` only when the payload would
+                    // not decode at all.
+                    let input: Value = resolved.input.clone();
+                    if let Err(refusal) = &resolved.tool {
+                        // A refusal is answered here, before the tool task is
+                        // spawned, so no hook, permission check or backend call
+                        // sees it. The outcome is built by the pipeline's refusal
+                        // constructor: the loop states the content of a refusal
+                        // nowhere, so its sentence, record status and `is_error`
+                        // flag are one derivation (FR-008, FR-009, FR-021).
+                        let synthetic = ToolDispatchPipeline::refusal(
+                            &tc,
+                            refusal,
+                            input,
+                            &self.event_bus,
+                            session_id,
+                        );
+                        if parallel_tool_calls {
+                            // A refused call still occupies its position: the
+                            // record is emitted by the drain in the provider's
+                            // order, so this step and the sequential one produce
+                            // the same history (FR-012). Only the refusal's
+                            // `ToolCallEnd` is published now, by the constructor
+                            // above, so the UI closes the call out promptly.
+                            futures.push(Err(Box::new((
+                                Ok(synthetic),
                                 None,
-                                Some(err_msg.clone()),
-                                0u64,
-                                format!("Error: {err_msg}"),
                                 None,
-                                Vec::new(),
-                            ));
-                            if handle_tool_execution_result(synthetic) {
-                                break;
-                            }
+                                dispatch_order,
+                            ))));
                             continue;
                         }
-                    };
+                        if handle_tool_execution_result(Ok(synthetic)) {
+                            break;
+                        }
+                        continue;
+                    }
                     assistant_content_parts.push(ContentPart::ToolUse {
                         id: tc.id.clone(),
                         name: tc.name.clone(),
@@ -3090,26 +3260,16 @@ impl SessionProcessor {
                     // plus a `PathBuf`/`String` clone).
                     let tool_ctx = base_tool_ctx.clone();
                     let tc_clone = tc.clone();
-                    let registry = self.tool_registry.clone();
-                    let permission_checker = self.permission_checker.clone();
-                    let event_bus = self.event_bus.clone();
-                    let session_id_str = session_id.to_string();
-                    let session_id_for_perm = session_id.to_string();
-                    let hook_working_dir = turn.working_dir.clone();
-                    let hook_configs = turn.parsed_hook_configs.clone();
-                    let extraction_engine = self.extraction_engine.clone();
+                    // The pipeline's context borrows these rather than cloning
+                    // them per stage: one `Arc` bump each, taken once per call.
                     let storage_clone = self.session_manager.storage().clone();
-                    let profiler_clone = profiler.clone();
-                    let team_context_cache = self.team_context_cache.clone();
-                    let tool_repeat_guard = self.tool_repeat_guard.clone();
-                    let telemetry_clone = Arc::clone(&self.telemetry);
                     // T-015 (FR-006): resolve the analyzer client once per tool
                     // call, outside the spawned task (the resolve performs async
                     // config + provider I/O). `None` when the analyzer is
                     // disabled, so the task skips it entirely.
                     let security_analyzer = self.security_analyzer_client(&turn.model_ref).await;
                     // T-009 (FR-008/FR-009/FR-021/FR-022): the loop
-                    // restriction guard runs inside the task, before hooks
+                    // restriction guard runs inside the pipeline, before hooks
                     // and the permission checker, so a restricted loop
                     // cannot execute a call outside its tool set or scope.
                     let loop_spec = self.active_loop_specs.read().await.get(session_id).cloned();
@@ -3164,501 +3324,43 @@ impl SessionProcessor {
                             return Err(anyhow::anyhow!(err_msg));
                         }
                     }
-                    // B2: the loop restriction must run even when the args
-                    // JSON failed to parse - fail closed. Unparseable args
-                    // used to be coerced to `{}`, letting path-based scope
-                    // checks pass vacuously.
-                    let loop_restriction_input = match &parsed_input {
-                        Ok(value) => value.clone(),
-                        Err(_) => Value::Null,
+                    // Every stage after this point lives in
+                    // `ToolDispatchPipeline::run` and nowhere
+                    // else: the task below is a thin shell that awaits it, so the
+                    // sequential arm (which awaits that future) and the concurrent
+                    // arm (which collects it into `join_all`) cannot run a
+                    // different pipeline (FR-012). This block owns only what is
+                    // per-turn rather than per-call - the loop's first-write
+                    // capture above, and the turn's borrows, cloned once here.
+                    let dispatch_ctx = ToolDispatchContext {
+                        session_id: session_id.to_string(),
+                        permission_checker: self.permission_checker.clone(),
+                        event_bus: self.event_bus.clone(),
+                        tool_ctx: tool_ctx.clone(),
+                        loop_spec: loop_spec.clone(),
+                        hook_configs: turn.parsed_hook_configs.clone(),
+                        hook_working_dir: turn.working_dir.clone(),
+                        tool_repeat_guard: self.tool_repeat_guard.clone(),
+                        telemetry: Arc::clone(&self.telemetry),
+                        extraction_engine: self.extraction_engine.clone(),
+                        storage: storage_clone.clone(),
+                        team_context_cache: self.team_context_cache.clone(),
+                        security_analyzer: security_analyzer.clone(),
+                        agent_is_subagent: agent.mode == crate::agent::AgentMode::Subagent,
+                        auto_approve,
+                        loop_checkpoint,
+                        checkpoint_timeout_secs,
+                        pending_verdicts: self.pending_verdicts.clone(),
                     };
+                    let profiler_clone = profiler.clone();
                     let fut = tokio::spawn(async move {
-                        let _tool_total_scope =
-                            profiler_clone.scope_with(|| format!("tool.total:{}", tc_clone.name));
-                        event_bus.publish(Event::ToolCallStart {
-                            session_id: session_id_str.clone(),
-                            call_id: tc_clone.id.clone(),
-                            tool: tc_clone.name.clone(),
-                        });
-                        event_bus.increment_tool_calls(&session_id_str);
-                        // T-010 (FR-015): the destructive-action checkpoint
-                        // applies per call - only when the loop has
-                        // checkpoints enabled AND this invocation is marked
-                        // destructive (deletion, config write, dependency
-                        // installation, destructive git). Plain write tools
-                        // keep the normal permission path.
-                        let checkpoint_forced = loop_checkpoint
-                            && crate::session::permissions::is_destructive_tool(
-                                &tc_clone.name,
-                                &loop_restriction_input,
-                            );
-                        // T-009: per-loop tool-set / scope / read-only
-                        // restriction (FR-008, FR-009, FR-021, FR-022).
-                        // A violation returns a denial observation to the
-                        // model instead of executing the tool. This check is
-                        // unconditional: it applies in auto-approve / YOLO
-                        // mode too (FR-024 - the permission layer is always
-                        // in the path).
-                        if let Some(spec) = &loop_spec {
-                            // B2: unparseable args fail closed - a denied
-                            // call is returned to the model instead of
-                            // silently evaluating the restriction against
-                            // `{}`.
-                            let early_input = loop_restriction_input.clone();
-                            if let Some(reason) = spec.deny_reason(&tc_clone.name, &early_input) {
-                                tracing::info!(
-                                    tool = %tc_clone.name,
-                                    reason = %reason,
-                                    "loop restriction denied tool execution"
-                                );
-                                return denied_tool_call(
-                                    &tc_clone,
-                                    &event_bus,
-                                    &session_id_str,
-                                    early_input,
-                                    reason,
-                                );
-                            }
-                        }
-                        // Interactive-tool block (subagent): a sub-agent run
-                        // has no attached user (background, cron, server,
-                        // forked skill). An interactive tool would block the
-                        // run forever waiting for a reply that can never
-                        // arrive, so deny with a corrective observation
-                        // instead of executing (fail closed, same shape as
-                        // the T-009 loop-restriction denial above).
-                        if agent_is_subagent
-                            && crate::session::permissions::is_interactive_tool(&tc_clone.name)
-                        {
-                            let reason = format!(
-                                "interactive tool '{}' is not available in \
-                                 subagent runs - no user is attached; decide \
-                                 autonomously from the task context and \
-                                 continue",
-                                tc_clone.name
-                            );
-                            tracing::warn!(
-                                tool = %tc_clone.name,
-                                "interactive tool denied in subagent run"
-                            );
-                            return denied_tool_call(
-                                &tc_clone,
-                                &event_bus,
-                                &session_id_str,
-                                loop_restriction_input.clone(),
-                                reason,
-                            );
-                        }
-                        let pre_hook_result = {
-                            crate::hooks::run_pre_tool_use_hooks(
-                                &hook_configs,
-                                &hook_working_dir,
-                                &tc_clone.name,
-                                &tc_clone.args_json,
-                                &session_id_str,
-                                Some(&event_bus),
-                            )
-                        };
-                        // SEC-ragent-agent-001 (SECTASKS T-007): `hook_approved`
-                        // distinguishes "a hook explicitly approved this call"
-                        // from "no hook decided". It is threaded into
-                        // `dispatch_tool_with_permissions`, where it can satisfy
-                        // an `Ask` but never an explicit `Deny`.
-                        let mut hook_approved = false;
-                        // T-015 (FR-006, FR-017): set when the security analyzer
-                        // returned an `allow` for this call; threaded into
-                        // `dispatch_tool_with_permissions` to satisfy a bare `Ask`.
-                        let mut security_approved = false;
-                        let tool_input: Value = match pre_hook_result {
-                            crate::hooks::PreToolUseResult::Allow {
-                                hook_approved: approved,
-                            } => {
-                                hook_approved = approved;
-                                // Unparseable args never reach here: the B1
-                                // gate short-circuits before the task runs.
-                                parsed_input.unwrap_or(Value::Null)
-                            }
-                            crate::hooks::PreToolUseResult::Deny { reason } => {
-                                tracing::warn!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
-                                let err_msg = format!("Permission denied by hook: {}", reason);
-                                return denied_tool_call(
-                                    &tc_clone,
-                                    &event_bus,
-                                    &session_id_str,
-                                    parsed_input.unwrap_or(Value::Null),
-                                    err_msg,
-                                );
-                            }
-                            crate::hooks::PreToolUseResult::Blocked { reason } => {
-                                tracing::warn!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook blocked tool execution");
-                                let err_msg = format!("Blocked by hook: {}", reason);
-                                return denied_tool_call(
-                                    &tc_clone,
-                                    &event_bus,
-                                    &session_id_str,
-                                    parsed_input.unwrap_or(Value::Null),
-                                    err_msg,
-                                );
-                            }
-                            crate::hooks::PreToolUseResult::ModifiedInput { input } => input,
-                            crate::hooks::PreToolUseResult::NoDecision => {
-                                parsed_input.unwrap_or(Value::Null)
-                            }
-                        };
-                        // Tool-repeat guard (FR-044): after the hooks, on
-                        // the canonical `tool_input` value. Five identical
-                        // consecutive calls pass; the sixth prompts the
-                        // user (primary runs) or is denied with a
-                        // corrective observation (subagent / auto-approve
-                        // runs). A denial returns the standard tuple so
-                        // the TUI spinner closes out and the model sees
-                        // the reason.
-                        let repeat_guard_input = tool_input.clone();
-                        if let Some(guard_reason) =
-                            crate::session::permissions::check_tool_repeat_guard(
-                                &tool_repeat_guard,
-                                &event_bus,
-                                &session_id_str,
-                                &tc_clone.name,
-                                &repeat_guard_input,
-                                agent_is_subagent,
-                                auto_approve == Some(true),
-                                checkpoint_timeout_secs,
-                            )
-                            .await
-                        {
-                            return denied_tool_call(
-                                &tc_clone,
-                                &event_bus,
-                                &session_id_str,
-                                repeat_guard_input,
-                                guard_reason,
-                            );
-                        }
-                        let _permit = match crate::resource::acquire_tool_permit().await {
-                            Ok(permit) => permit,
-                            Err(e) => {
-                                let err_msg = format!("tool permit acquisition failed: {e}");
-                                // C3: close out the UI tool call - no
-                                // `ToolCallEnd` is published on this early
-                                // return, which used to leave the TUI spinner
-                                // stuck on the in-flight call.
-                                event_bus.publish(Event::ToolCallEnd {
-                                    session_id: session_id_str.clone(),
-                                    call_id: tc_clone.id.clone(),
-                                    tool: tc_clone.name.clone(),
-                                    error: Some(err_msg.clone()),
-                                    duration_ms: 0,
-                                });
-                                return (
-                                    tc_clone.clone(),
-                                    tool_input,
-                                    ToolCallStatus::Error,
-                                    None,
-                                    Some(err_msg),
-                                    0u64,
-                                    String::new(),
-                                    None,
-                                    Vec::new(),
-                                );
-                            }
-                        };
-                        let start = Instant::now();
-                        let tool_input_for_post_hook = serde_json::to_string(&tool_input)
-                            .unwrap_or_else(|_| tc_clone.args_json.clone());
-                        // T-015 (FR-006, FR-017): when the security analyzer is
-                        // enabled, evaluate this action *after* the PreToolUse
-                        // hooks and *before* execution, publish the verdict +
-                        // rationale so it is visible whatever the outcome, and
-                        // apply it as a tightening-only layer. A `deny` is a hard
-                        // denial; an `allow` can satisfy a bare `Ask` but never
-                        // an explicit policy `Deny` or a forced checkpoint; a
-                        // fail-safe `ask` leaves the normal interactive flow.
-                        if let Some((analyzer_client, analyzer_model, analyzer_timeout)) =
-                            security_analyzer.as_ref()
-                        {
-                            let verdict = crate::security::analyze_tool_action(
-                                analyzer_client,
-                                analyzer_model,
-                                &tc_clone.name,
-                                &serde_json::to_string(&tool_input)
-                                    .unwrap_or_else(|_| tc_clone.args_json.clone()),
-                                *analyzer_timeout,
-                            )
-                            .await;
-                            // FR-017: publish the verdict *before* the action
-                            // is permitted or refused. Published directly on the
-                            // cloned bus (the spawned task cannot borrow `self`).
-                            event_bus.publish(Event::SecurityVerdict {
-                                session_id: session_id_str.clone(),
-                                tool: tc_clone.name.clone(),
-                                verdict: verdict.label().to_string(),
-                                rationale: verdict.rationale.clone(),
-                            });
-                            match verdict.decision {
-                                crate::permission::PermissionAction::Deny => {
-                                    // FR-006: the analyzer's denial is reported
-                                    // to the model so it can correct course - the
-                                    // rationale is the observation text.
-                                    return denied_tool_call(
-                                        &tc_clone,
-                                        &event_bus,
-                                        &session_id_str,
-                                        tool_input,
-                                        format!(
-                                            "Action denied by security analyzer: {}",
-                                            verdict.rationale
-                                        ),
-                                    );
-                                }
-                                crate::permission::PermissionAction::Allow => {
-                                    security_approved = true;
-                                }
-                                crate::permission::PermissionAction::Ask => {
-                                    // FR-006, FR-017: the analyzer escalated to a
-                                    // prompt. Surface its rationale in the chat so
-                                    // the user sees why the call was flagged, then
-                                    // let the standard interactive flow decide.
-                                    event_bus.publish(Event::AgentNotice {
-                                        session_id: session_id_str.clone(),
-                                        message: format!(
-                                            "security analyzer: {} - {}",
-                                            verdict.label(),
-                                            verdict.rationale
-                                        ),
-                                    });
-                                }
-                            }
-                        }
-                        let result = registry
-                            .get(&tc_clone.name)
-                            .ok_or_else(|| unknown_tool_error(&registry, &tc_clone.name));
-                        let result = match result {
-                            Ok(tool) => {
-                                // B3: central required-argument validation.
-                                // The tool's declared `parameters_schema()`
-                                // has always been shown to the model but never
-                                // enforced; required-field presence and
-                                // primitive types are now checked before
-                                // permissions so the model gets a corrective
-                                // error naming the offending parameter.
-                                if let Err(schema_err) =
-                                    schema_violation(&registry, &tc_clone.name, &tool_input)
-                                {
-                                    Err(anyhow::anyhow!("Invalid tool arguments: {schema_err}"))
-                                } else {
-                                    dispatch_tool_with_permissions(
-                                        &tool,
-                                        tool_input,
-                                        &tc_clone,
-                                        &tool_ctx,
-                                        &permission_checker,
-                                        &event_bus,
-                                        &session_id_for_perm,
-                                        auto_approve,
-                                        checkpoint_forced,
-                                        checkpoint_timeout_secs,
-                                        hook_approved,
-                                        security_approved,
-                                    )
-                                    .await
-                                }
-                            }
-                            Err(e) => Err(e),
-                        };
-                        let duration_ms = start.elapsed().as_millis() as u64;
-                        let tool_recorder = ToolRecorder::from_subsystem(&telemetry_clone);
-                        tool_recorder.record_invocation(&tc_clone.name);
-                        tool_recorder.record_duration(&tc_clone.name, duration_ms as f64);
-                        if tc_clone.name.starts_with("team_") {
-                            team_context_cache.write().clear();
-                        }
-                        let output_content = result
-                            .as_ref()
-                            .map(|o| o.content.clone())
-                            .unwrap_or_default();
-                        let output_json = result
-                            .as_ref()
-                            .ok()
-                            .and_then(|o| o.metadata.clone())
-                            .unwrap_or_else(|| serde_json::json!({"content": output_content}));
-                        let success = result.is_ok();
-                        let mut additional_contexts: Vec<String> = Vec::new();
-                        let post_hook_result = {
-                            crate::hooks::run_post_tool_use_hooks(
-                                &hook_configs,
-                                &hook_working_dir,
-                                &tc_clone.name,
-                                &tool_input_for_post_hook,
-                                &output_json.to_string(),
-                                success,
-                                &session_id_str,
-                                Some(&event_bus),
-                            )
-                            .await
-                        };
-                        let modified_output = match post_hook_result {
-                            crate::hooks::PostToolUseResult::Ok {
-                                modified_output,
-                                additional_context,
-                            } => {
-                                additional_contexts.extend(additional_context);
-                                modified_output
-                            }
-                            crate::hooks::PostToolUseResult::Flagged { reason } => {
-                                tracing::info!(
-                                    tool = %tc_clone.name,
-                                    reason = %reason,
-                                    "PostToolUse hook flagged tool result as policy-violated"
-                                );
-                                None
-                            }
-                            crate::hooks::PostToolUseResult::Warn { message } => {
-                                // SEC: hook-supplied text can echo user/tool
-                                // data; redact before logging.
-                                tracing::info!(
-                                    tool = %tc_clone.name,
-                                    message = %ragent_types::sanitize::redact_secrets(&message),
-                                    "PostToolUse hook emitted warning"
-                                );
-                                None
-                            }
-                        };
-                        let result = if let Some(modified) = modified_output {
-                            if let Some(modified_content) =
-                                modified.get("content").and_then(|v| v.as_str())
-                            {
-                                Ok(crate::tool::ToolOutput {
-                                    content: modified_content.to_string(),
-                                    metadata: Some(modified.clone()),
-                                })
-                            } else {
-                                result
-                            }
-                        } else {
-                            result
-                        };
-                        let (output_value, error) = match &result {
-                            Ok(output) => {
-                                let val = match &output.metadata {
-                                    Some(meta) if meta.is_object() => {
-                                        let mut obj = meta.clone();
-                                        if let Some(map) = obj.as_object_mut() {
-                                            map.insert(
-                                                "content".to_string(),
-                                                json!(output.content),
-                                            );
-                                        }
-                                        obj
-                                    }
-                                    _ => json!({ "content": output.content }),
-                                };
-                                (Some(val), None)
-                            }
-                            Err(e) => (None, Some(format!("{e:#}"))),
-                        };
-                        if let Some(err_msg) = &error
-                            && err_msg.contains("permission denied")
-                        {
-                            crate::hooks::fire_hooks(
-                                &hook_configs,
-                                crate::hooks::HookTrigger::OnPermissionDenied,
-                                &hook_working_dir,
-                                &[("RAGENT_ERROR", err_msg.as_str())],
-                            );
-                        }
-                        let status = if result.is_ok() {
-                            ToolCallStatus::Completed
-                        } else {
-                            ToolCallStatus::Error
-                        };
-                        // Recovery for a message-window display race: when a
-                        // tool call fails with a permission error, the TUI
-                        // drains the event queue in the same wake as the
-                        // `PermissionReplied` handler and re-renders the
-                        // chat - removing the in-flight ToolCall part that
-                        // `ToolCallStart` created (the pending prompt is
-                        // gone, so the part is no longer protected). The
-                        // already-queued `ToolCallArgs` then finds no part
-                        // and is buffered in `pending_tool_args`, while the
-                        // re-created part from `ToolCallEnd` renders with an
-                        // empty input. Republish the args now, after the
-                        // part has been re-created, so the buffered args are
-                        // applied and the tool's parameters/category icon
-                        // appear in the message window.
-                        if result.is_err()
-                            && error.as_deref().is_some_and(|e| {
-                                e.contains("Permission denied") || e.contains("Blocked by hook")
-                            })
-                        {
-                            event_bus.publish(Event::ToolCallArgs {
-                                session_id: session_id_str.clone(),
-                                call_id: tc_clone.id.clone(),
-                                tool: tc_clone.name.clone(),
-                                args: tc_clone.args_json.clone(),
-                            });
-                        }
-                        let success = status == ToolCallStatus::Completed;
-                        event_bus.publish(Event::ToolCallEnd {
-                            session_id: session_id_str.clone(),
-                            call_id: tc_clone.id.clone(),
-                            tool: tc_clone.name.clone(),
-                            error: error.clone(),
-                            duration_ms,
-                        });
-                        let result_content = match &result {
-                            Ok(output) => output.content.clone(),
-                            Err(e) => format!("Error: {e}"),
-                        };
-                        let content_line_count = result
-                            .as_ref()
-                            .ok()
-                            .and_then(|o| o.metadata.as_ref())
-                            .and_then(|m| m.get("lines"))
-                            .and_then(serde_json::Value::as_u64)
-                            .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                        // M-007: publish only a short display preview on the
-                        // event (the TUI logs ~2500 chars and the LLM gets the
-                        // full content via `tool_result_content_for_llm`), so a
-                        // large result is not cloned in full into the event and
-                        // the activity-log records.
-                        const TOOL_RESULT_EVENT_PREVIEW_CHARS: usize = 2000;
-                        let result_preview =
-                            truncate_preview(&result_content, TOOL_RESULT_EVENT_PREVIEW_CHARS);
-                        let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
-                        event_bus.publish(Event::ToolResult {
-                            session_id: session_id_str.clone(),
-                            call_id: tc_clone.id.clone(),
-                            tool: tc_clone.name.clone(),
-                            content: result_preview,
-                            content_line_count,
-                            metadata: tool_metadata.clone(),
-                            success,
-                        });
-                        if let Some(engine) = extraction_engine.get() {
-                            let sid = session_id_str.clone();
-                            engine.on_tool_result(
-                                &tc_clone.name,
-                                &input,
-                                &result_content,
-                                success,
-                                &sid,
-                                &storage_clone,
-                                &event_bus,
-                                &hook_working_dir,
-                            );
-                        }
-                        (
-                            tc_clone,
-                            input,
-                            status,
-                            output_value,
-                            error,
-                            duration_ms,
-                            result_content,
-                            tool_metadata,
-                            additional_contexts,
+                        ToolDispatchPipeline::run(
+                            &dispatch_ctx,
+                            &tc_clone,
+                            resolved,
+                            &profiler_clone,
                         )
+                        .await
                     });
                     if parallel_tool_calls {
                         // Capture the real call identity for the watchdog and
@@ -3668,27 +3370,63 @@ impl SessionProcessor {
                         let parallel_call_id = tc.id.clone();
                         let parallel_tool_name = tc.name.clone();
                         let parallel_args_json = tc.args_json.clone();
+                        // The synthesised-outcome constructor publishes
+                        // `ToolCallEnd` itself, so it needs its own handles: the
+                        // ones above are moved into the spawned tool task.
+                        let parallel_event_bus = self.event_bus.clone();
+                        let parallel_session_id = session_id.to_string();
                         let watchdog_identity: WatchdogIdentity = (tc.id.clone(), tc.name.clone());
+                        // The join-failure answer is built here, before the
+                        // future is moved into the `join_all`, by the one
+                        // synthesised-outcome constructor the sequential arm
+                        // also uses (FR-012). It is a plain function returning
+                        // the outcome, so neither arm assembles the tuple itself.
+                        let synthesise_failure =
+                            move |call_id: String,
+                                  name: String,
+                                  join_err: &dyn std::fmt::Display| {
+                                let msg = format!("Tool task failed: {join_err}");
+                                let synthetic_tc = crate::session::history::PendingToolCall {
+                                    id: call_id,
+                                    name,
+                                    args_json: parallel_args_json.clone(),
+                                };
+                                crate::session::dispatch::ToolDispatchPipeline::synthesised(
+                                    &synthetic_tc,
+                                    &msg,
+                                    0,
+                                    &parallel_event_bus,
+                                    &parallel_session_id,
+                                )
+                            };
                         let abort_handle = fut.abort_handle();
-                        futures.push(async move {
+                        futures.push(Ok(Box::pin(async move {
+                            // A tuple rather than a bare `None`, so the arm's
+                            // shape is inferable from this line alone.
+                            let no_stall: Option<(String, String)> = None;
+                            let no_join_error: Option<String> = None;
                             match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {
-                                Ok(Ok(ok)) => (Ok(ok), None, None),
+                                Ok(Ok(ok)) => (Ok(ok), no_stall, no_join_error, dispatch_order),
                                 Ok(Err(join_err)) => {
                                     // C1: the tool task panicked or failed to
                                     // join. Synthesise an error result so the
                                     // tool_use record is not orphaned in the
                                     // conversation history, and surface the
                                     // panic so loop sessions still terminate.
-                                    let msg = format!("Tool task failed: {join_err}");
-                                    let synthetic_tc = crate::session::history::PendingToolCall {
-                                        id: parallel_call_id,
-                                        name: parallel_tool_name,
-                                        args_json: parallel_args_json,
-                                    };
+                                    // The outcome comes from the pipeline's one
+                                    // synthesised-outcome constructor, so this
+                                    // shape and the sequential one cannot word
+                                    // the same failure differently (FR-012).
+                                    let outcome = synthesise_failure(
+                                        parallel_call_id,
+                                        parallel_tool_name,
+                                        &join_err,
+                                    );
                                     (
-                                        synthetic_error_result(&synthetic_tc, &msg),
+                                        Ok(outcome),
                                         None,
                                         Some(join_err.to_string()),
+                                        dispatch_order,
                                     )
                                 }
                                 Err(_) => {
@@ -3697,10 +3435,11 @@ impl SessionProcessor {
                                         Err(ToolTaskError::WatchdogAbort),
                                         Some(watchdog_identity),
                                         None,
+                                        dispatch_order,
                                     )
                                 }
                             }
-                        });
+                        }) as StepOutcomeSlot));
                     } else {
                         let watchdog_identity: WatchdogIdentity = (tc.id.clone(), tc.name.clone());
                         let abort_handle = fut.abort_handle();
@@ -3750,23 +3489,12 @@ impl SessionProcessor {
                                 let msg = format!("Tool task failed: {join_err}");
                                 warn!(error = %join_err, "Tool execution task panicked");
                                 staged_tool_panic = Some(join_err.to_string());
-                                self.event_bus.publish(Event::ToolCallEnd {
-                                    session_id: session_id.to_string(),
-                                    call_id: tc.id.clone(),
-                                    tool: tc.name.clone(),
-                                    error: Some(msg.clone()),
-                                    duration_ms: 0,
-                                });
-                                let synthetic = Ok((
-                                    tc.clone(),
-                                    Value::Null,
-                                    ToolCallStatus::Error,
-                                    None,
-                                    Some(msg.clone()),
-                                    0u64,
-                                    format!("Error: {msg}"),
-                                    None,
-                                    Vec::new(),
+                                let synthetic = Ok(ToolDispatchPipeline::synthesised(
+                                    &tc,
+                                    &msg,
+                                    0,
+                                    &self.event_bus,
+                                    session_id,
                                 ));
                                 if handle_tool_execution_result(synthetic) {
                                     break;
@@ -3776,11 +3504,30 @@ impl SessionProcessor {
                     }
                 }
                 if parallel_tool_calls {
-                    let results = {
+                    // FR-012: the outcomes are applied in the provider's
+                    // order, in this arm exactly as in the sequential one. The
+                    // step is a list of slots in that order - a future for a
+                    // call that runs, an already-decided outcome for a call the
+                    // prepare loop refused - so waiting and then draining the
+                    // list yields the calls in the order the provider listed
+                    // them. Applying each outcome as it finished (or appending
+                    // refusals where they were decided) would make the same step
+                    // produce two different histories depending on
+                    // `parallel_tool_calls`, which is what the one pipeline
+                    // exists to prevent.
+                    let results: Vec<ToolStepResult> = {
                         let _scope = profiler.scope("loop.tool_phase.join_parallel");
-                        futures::future::join_all(futures).await
+                        let settled =
+                            futures::future::join_all(futures.into_iter().map(|slot| async move {
+                                match slot {
+                                    Ok(future) => Some(future.await),
+                                    Err(outcome) => Some(*outcome),
+                                }
+                            }))
+                            .await;
+                        settled.into_iter().flatten().collect()
                     };
-                    for (result, stalled_tool, panic_msg) in results {
+                    for (result, stalled_tool, panic_msg, _order) in results {
                         if let Some((call_id, tool_name)) = stalled_tool {
                             watchdog_timed_out = true;
                             let msg = watchdog_timeout_msg(&tool_name, &call_id);
@@ -3963,8 +3710,8 @@ impl SessionProcessor {
                         && llm_result.tool_calls.iter().any(|tc| {
                             matches!(
                                 tc.name.as_str(),
-                                "write"
-                                    | "edit"
+                                "Write"
+                                    | "Edit"
                                     | "multiedit"
                                     | "multi_edit"
                                     | "patch"
@@ -4008,6 +3755,11 @@ impl SessionProcessor {
                 // buffer allocated for reuse on the next step). P-6: mutate the
                 // shared `Arc<Vec>` via `Arc::make_mut` so an unchanged
                 // history is not cloned.
+                //
+                // FR-013 (T-016): the turn's history is appended only here,
+                // after every call of the step has been awaited and its
+                // permission verdict settled, so this line can never run while
+                // a verdict is unresolved - the step could not have reached it.
                 Arc::make_mut(&mut chat_messages).push(ChatMessage {
                     role: "assistant".to_string(),
                     content: ChatContent::Parts(std::mem::take(&mut assistant_content_parts)),
@@ -4721,51 +4473,6 @@ impl SessionProcessor {
 ///
 /// Delegates to [`ragent_types::strutil::truncate_chars`] after trimming, so the
 /// char-boundary logic lives in one place.
-fn truncate_preview(s: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_preview(s: &str, max_chars: usize) -> String {
     ragent_types::strutil::truncate_chars(s.trim(), max_chars)
-}
-
-/// Publish `ToolCallEnd` for a denied tool call and return the standard
-/// 8-tuple error result.
-///
-/// Shared by the three in-task denial paths in the tool-call gate:
-/// the T-009 loop-restriction check, the subagent interactive-tool block,
-/// and the PreToolUse hook `Deny`/`Blocked` arms. Each previously
-/// duplicated the event publish + tuple assembly inline; they now funnel
-/// through this helper so a new denial path cannot forget the UI close-out.
-fn denied_tool_call(
-    tc: &crate::session::history::PendingToolCall,
-    event_bus: &crate::event::EventBus,
-    session_id_str: &str,
-    input: Value,
-    reason: String,
-) -> (
-    crate::session::history::PendingToolCall,
-    Value,
-    ToolCallStatus,
-    Option<Value>,
-    Option<String>,
-    u64,
-    String,
-    Option<Value>,
-    Vec<String>,
-) {
-    event_bus.publish(Event::ToolCallEnd {
-        session_id: session_id_str.to_string(),
-        call_id: tc.id.clone(),
-        tool: tc.name.clone(),
-        error: Some(reason.clone()),
-        duration_ms: 0,
-    });
-    (
-        tc.clone(),
-        input,
-        ToolCallStatus::Error,
-        None,
-        Some(reason),
-        0u64,
-        String::new(),
-        None,
-        Vec::new(),
-    )
 }

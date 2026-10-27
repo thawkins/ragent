@@ -40,6 +40,10 @@ tool crates.
   - Provider auth methods: `store_provider_auth`, `get_provider_auth`, `delete_provider_auth`.
   - Settings methods: `get_setting`, `set_setting`, `delete_setting`.
   - Schema methods: `schema_version`, `migrate`.
+  - Search-index maintenance: `warm_message_search_index` (startup reconcile of
+    `messages_fts` against `messages`; diffs the rowid domains via the FTS5
+    `messages_fts_content` shadow table rather than joining on the `UNINDEXED`
+    `message_id`, backfills missing or stale rows and drops orphaned index rows).
 
 ### Module: activity_log
 

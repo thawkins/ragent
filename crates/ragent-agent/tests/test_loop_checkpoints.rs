@@ -256,6 +256,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().to_path_buf();
@@ -292,6 +293,15 @@ where
         .filter(|event| pred(event))
         .collect()
 }
+
+/// Checkpoint-prompt timeout, in seconds, for the cases that leave the prompt
+/// unanswered and assert on the timeout-as-denial default.
+///
+/// `start_loop` resolves a spec's `None` to the `loop.checkpoint_timeout_secs`
+/// config default of 120 seconds, so a case that wants the safe default has to
+/// ask for a short window explicitly. Every case that *answers* the prompt keeps
+/// the default, so the production timeout stays covered.
+const TIMEOUT_DENIAL_SECS: u32 = 1;
 
 /// The scripted destructive call: `rm` a file that exists.
 fn rm_call() -> ScriptedReply {
@@ -340,6 +350,10 @@ async fn test_checkpoint_denies_destructive_call_under_allow_rule() -> Result<()
         .expect("session created");
     let mut spec = LoopSpec::new("general", "delete the file");
     spec.max_steps = Some(5);
+    // The prompt is deliberately left unanswered, so ask for a short window
+    // rather than waiting out the 120s config default: this case is about the
+    // timeout-as-denial default, not about the length of the production timeout.
+    spec.checkpoint_timeout_secs = Some(TIMEOUT_DENIAL_SECS);
     processor.start_loop(&session.id, spec).await;
 
     processor
@@ -458,6 +472,10 @@ async fn test_auto_approve_still_enforces_checkpoint() -> Result<()> {
         .expect("session created");
     let mut spec = LoopSpec::new("general", "delete the file then think");
     spec.max_steps = Some(5);
+    // The prompt is deliberately left unanswered, so ask for a short window
+    // rather than waiting out the 120s config default: this case is about the
+    // timeout-as-denial default, not about the length of the production timeout.
+    spec.checkpoint_timeout_secs = Some(TIMEOUT_DENIAL_SECS);
     processor.start_loop(&session.id, spec).await;
 
     processor
@@ -661,15 +679,15 @@ async fn test_checkpoint_reason_and_classifier() -> Result<()> {
     assert!(!destructive("git_reset", r#"{"mode":"soft"}"#));
     // Bash sub-commands are scanned for destructive prefixes.
     assert!(destructive(
-        "bash",
+        "Bash",
         r#"{"command":"git push --force origin main"}"#
     ));
-    assert!(destructive("bash", r#"{"command":"rm -rf build"}"#));
+    assert!(destructive("Bash", r#"{"command":"rm -rf build"}"#));
     assert!(!destructive(
-        "bash",
+        "Bash",
         r#"{"command":"cargo test --workspace"}"#
     ));
-    assert!(!destructive("write", r#"{"path":"notes.md"}"#));
+    assert!(!destructive("Write", r#"{"path":"notes.md"}"#));
     Ok(())
 }
 

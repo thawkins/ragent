@@ -17,7 +17,13 @@ use std::pin::Pin;
 
 use super::thinking::should_warn_unsupported_thinking;
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::encode::{HF_TOOL_PREFIX, MessageContext, encode_messages};
+use super::wire::profile_table::OPENAI_CHAT;
+use super::wire::trace;
+#[cfg(test)]
+use crate::llm::{ChatContent, ContentPart};
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -273,15 +279,12 @@ pub(crate) struct HuggingFaceClient {
     use_cache: bool,
 }
 
-/// Prefix applied to all tool names sent to the HuggingFace router.
+/// Prefix applied to all tool names sent to the HuggingFace router, then
+/// stripped when mapping tool-call responses back to ragent's internal names.
 ///
-/// The HuggingFace inference router rejects tool names containing common
-/// substrings (`read`, `write`, `search`, `list`, `open`, `memo`, `pdf`,
-/// `todo`, etc.) in streaming mode. We prefix every tool name with `t_` so
-/// the model sees e.g. `t_search` / `t_write_file`, and strip the prefix
-/// when mapping tool-call responses back to ragent's internal names.
-const HF_TOOL_PREFIX: &str = "t_";
-
+/// The constant itself lives beside the encoder that applies it
+/// ([`HF_TOOL_PREFIX`], FR-006), so the request and the history cannot disagree
+/// on the rewrite.
 impl HuggingFaceClient {
     /// Returns the prefixed (safe) tool name for the HuggingFace router.
     fn safe_tool_name(name: &str) -> String {
@@ -320,7 +323,9 @@ impl HuggingFaceClient {
     ///
     /// All tool names are prefixed with [`HF_TOOL_PREFIX`] to avoid the
     /// HuggingFace router's reserved-substring restrictions. Tool names in
-    /// the system prompt and conversation history are rewritten to match.
+    /// the system prompt and conversation history are rewritten to match: the
+    /// prompt here, the history by passing the same prefix to the shared encoder
+    /// (FR-006).
     fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
@@ -335,95 +340,15 @@ impl HuggingFaceClient {
                 "content": rewritten
             }));
         }
-        for msg in request.messages.iter() {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
-                ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({
-                                "type": "text",
-                                "text": text
-                            })),
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult { .. }
-                            | ContentPart::ToolUse { .. }
-                            | ContentPart::Reasoning { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1 {
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
-                    }
-                }
-            };
-
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => Some(json!({
-                                    "id": id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": Self::safe_tool_name(name),
-                                        "arguments": input.to_string()
-                                    }
-                                })),
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                                is_error,
-                            } = result
-                            {
-                                // FR-014: `role:"tool"` has no error flag, so the
-                                // content carries the `ERROR: ` prefix.
-                                messages.push(json!({
-                                    "role": "tool",
-                                    "tool_call_id": tool_use_id,
-                                    "content": crate::provider::wire::encode::error_marked(content, *is_error)
-                                }));
-                            }
-                        }
-                    } else {
-                        messages.push(json!({
-                            "role": msg.role,
-                            "content": content
-                        }));
-                    }
-                }
-                _ => {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
+        // The per-message shape is the one shared OpenAI-family encoder; this
+        // client contributes only the name rewrite its router requires.
+        let ctx = MessageContext {
+            name_prefix: Some(HF_TOOL_PREFIX),
+            ..MessageContext::default()
+        };
+        match encode_messages(OPENAI_CHAT, &request.messages, &ctx) {
+            Ok(encoded) => messages.extend(encoded),
+            Err(loss) => return json!({ "error": loss.to_string() }),
         }
 
         let mut body = json!({
@@ -453,7 +378,7 @@ impl HuggingFaceClient {
                 // name prefix) instead of building a fresh `Vec<Value>` on
                 // every call.
                 let cached = cached_tools(ToolFormat::HuggingFace, &request.tools);
-                body["tools"] = cached.openai_tools_array();
+                body[ToolFormat::HuggingFace.body_key()] = cached.openai_tools_array();
             } else {
                 tracing::info!(
                     model = %request.model,
@@ -492,6 +417,7 @@ impl LlmClient for HuggingFaceClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body).context("serialise HuggingFace request body")?;
 
         let mut req = self
@@ -578,7 +504,9 @@ impl LlmClient for HuggingFaceClient {
             // previous chunk so a UTF-8 sequence split across TCP chunks is not
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
+            // FR-004: the chat-completions family keys tool calls by
+            // `tool_calls[].index`; the shared accumulator owns the open calls.
+            let mut acc = ToolCallAccumulator::new(OPENAI_CHAT, "huggingface");
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -691,22 +619,25 @@ impl LlmClient for HuggingFaceClient {
                         if let Some(tool_calls) = delta["tool_calls"].as_array() {
                             for tc in tool_calls {
                                 let index = tc["index"].as_u64().unwrap_or(0);
+                                let key = StreamKey::Index(index);
 
                                 if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
+                                    acc.set_id(&key, id);
                                 }
 
                                 if let Some(function) = tc.get("function") {
                                     if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        let original_name =
-                                            Self::strip_tool_prefix(name);
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: original_name,
-                                        };
+                                        // HuggingFace routes some models through a
+                                        // `t_<tool>` wire name; the rename is to the
+                                        // *name*, not to a per-site variable, so the
+                                        // accumulator records the tool the consumer
+                                        // resolves (FR-004, NFR-007).
+                                        let original_name = Self::strip_tool_prefix(name);
+                                        if let Some(event) =
+                                            acc.open(key.clone(), None, &original_name)
+                                        {
+                                            yield event;
+                                        }
                                     }
 
                                     // F4: accept both argument forms (string
@@ -714,14 +645,9 @@ impl LlmClient for HuggingFaceClient {
                                     let args_json = super::tool_cache::tool_arguments_json(function);
                                     if let Some(args) =
                                         args_json.filter(|args| !args.is_empty())
+                                        && let Some(event) = acc.delta(&key, &args)
                                     {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args,
-                                        };
+                                        yield event;
                                     }
                                 }
                             }
@@ -729,12 +655,10 @@ impl LlmClient for HuggingFaceClient {
 
                         // Finish reason
                         if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End pending tool calls in index order (see the
-                            // openai provider for the rationale).
-                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                            ends.sort_unstable_by_key(|(idx, _)| *idx);
-                            for (_, id) in ends {
-                                yield StreamEvent::ToolCallEnd { id };
+                            // End the open calls in index order (see the shared
+                            // accumulator for the rationale).
+                            for event in acc.end_all() {
+                                yield event;
                             }
 
                             let reason = match finish_reason {

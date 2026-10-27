@@ -56,8 +56,6 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **ResearchConfig** (struct) — Research subsystem configuration (OA recovery, Unpaywall).
 - **SddConfig** (struct) — Spec-Driven Development capability toggles.
 - **StreamConfig** (struct) — LLM streaming configuration (timeouts, retries).
-- **ToolVisibilityConfig** (struct) — Tool-family visibility switches (hide tool families from LLM).
-- **tool_family_names** (fn) — Maps a switch name to its tool family list.
 - **Permission** (enum) — Permission types (Read, Edit, Bash, Web, Custom, etc.).
 - **PermissionAction** (enum) — Action for a matched rule (Allow, Deny, Ask).
 - **PermissionChecker** (struct) — Evaluates permission rules to decide allow/deny/ask.
@@ -82,9 +80,8 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 
 ### Module: config
 
-- **Config** (struct) — Top-level config; methods: `load`, `save`, `save_to_source`, `global_config_dir`, `global_config_path`, `backup_global_config`, `restore_global_config`, `effective_hidden_tools`, `merge`, `thinking_config_for_model`.
-- Supporting structs: `ToolVisibilityConfig`, `ToolVisibilitySpecified`, `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `SemanticConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `BrowserConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
-- **tool_family_names** (fn) — Maps visibility switch name to tool family list.
+- **Config** (struct) — Top-level config; methods: `load`, `save`, `save_to_source`, `global_config_dir`, `global_config_path`, `backup_global_config`, `restore_global_config`, `merge`, `thinking_config_for_model`.
+- Supporting structs: `AgentPerfConfig`, `StreamConfig`, `CodeIndexConfig`, `CodeIndexSpecified`, `ProviderConfig`, `ApiConfig`, `ModelConfig`, `Cost`, `Capabilities`, `AgentConfig`, `BashConfig`, `DirsConfig`, `CommandDef`, `McpServerConfig`, `PriceEntry`, `McpTransport`, `ExperimentalFlags`, `MemoryConfig`, `StructuredMemoryConfig`, `SemanticConfig`, `RetrievalConfig`, `AutoExtractConfig`, `DecayConfig`, `CrossProjectConfig`, `GitLabIntegrationConfig`, `BrowserConfig`, `SddConfig`, `PieGapConfig`, `ResearchConfig`.
 
 ### Module: dir_lists
 
@@ -114,6 +111,13 @@ allowlists, and feature toggles for ragent. Loaded with layered precedence
 - **OtelProtocol** (enum) — Http or Grpc.
 - **OtelConfig** (struct) — OTLP export config; method: `validate`.
 - **TelemetryConfig** (struct) — Top-level telemetry config; methods: `merge`, `is_enabled`.
+
+### Module: tools
+
+- **ToolsConfig** (struct) — The `tools` section (FR-015, FR-017): `aliases`, `expose_alias_names`, `wire_trace`; methods `is_default`, `merge`, `validate_alias_spellings`.
+- **AliasesConfig** (struct) — The `tools.aliases` value in both accepted forms (a boolean, or an object of provider spelling to ragent tool name); methods `is_unspecified`, `is_enabled`, `uses_builtin_table`, `entries`.
+- **RetiredAliasSpelling** (struct) — One entry the FR-023 rename forbids (FR-031), carrying the key, the target, the offending spelling, its `after` replacement, `in_source_key` and `self_mapping`; `reason()` renders the load-error sentence.
+- **TOOLS_ALIASES_KEY** (const) — `"tools.aliases"`, used verbatim in a load error so a reader is sent to the key they wrote.
 
 ### Module: trigger
 

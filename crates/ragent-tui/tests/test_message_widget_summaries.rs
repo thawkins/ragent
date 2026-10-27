@@ -26,7 +26,7 @@ const CWD: &str = "/proj";
 
 /// Rightwards arrow the source emits for paths and transitions.
 const ARROW: &str = "\u{2192}";
-/// Leftwards arrow the source emits for `plan_exit`.
+/// Leftwards arrow the source emits for `ExitPlanMode`.
 const LEFT_ARROW: &str = "\u{2190}";
 /// Left-right arrow the source emits for `diff_files`.
 const BOTH_ARROW: &str = "\u{2194}";
@@ -73,8 +73,8 @@ fn test_summary_helpers() {
     assert_eq!(capitalize_tool_name("mcp_server_tool"), "Mcp_server_tool");
     assert_eq!(capitalize_tool_name(""), "");
 
-    assert_eq!(canonical_tool_name("update_file"), "write");
-    assert_eq!(canonical_tool_name("run_code"), "bash");
+    assert_eq!(canonical_tool_name("update_file"), "Write");
+    assert_eq!(canonical_tool_name("run_code"), "Bash");
     assert_eq!(canonical_tool_name("read"), "read");
 
     assert_eq!(make_relative_path("/proj/src/a.rs", "/proj"), "src/a.rs");
@@ -360,7 +360,11 @@ fn test_input_network_env_family() {
 fn test_input_agent_plan_question_family() {
     assert_input_table(&[
         ("question", json!({"question": "Continue?"}), "Continue?"),
-        ("ask_user", json!({"query": "Which one?"}), "Which one?"),
+        (
+            "AskUserQuestion",
+            json!({"query": "Which one?"}),
+            "Which one?",
+        ),
         (
             "agent_complete",
             json!({"summary": "first line\nsecond line"}),
@@ -375,11 +379,11 @@ fn test_input_agent_plan_question_family() {
         format!("explore {ARROW} find it")
     );
     assert_eq!(
-        input_summary("plan_enter", json!({"task": "build it"})),
+        input_summary("EnterPlanMode", json!({"task": "build it"})),
         format!("{ARROW} build it")
     );
     assert_eq!(
-        input_summary("plan_exit", json!({"summary": "done"})),
+        input_summary("ExitPlanMode", json!({"summary": "done"})),
         format!("{LEFT_ARROW} done")
     );
     assert_eq!(
@@ -430,11 +434,11 @@ fn test_input_memory_initiative_family() {
 fn test_input_bash_keeps_raw_arguments_when_fields_are_unknown() {
     // A bash command with a recognised field name renders as a shell prompt.
     assert_eq!(
-        input_summary("bash", json!({"command": "ls -la"})),
+        input_summary("Bash", json!({"command": "ls -la"})),
         format!("$ ls -la")
     );
     assert_eq!(
-        input_summary("bash", json!({"command": "a\nb"})),
+        input_summary("Bash", json!({"command": "a\nb"})),
         format!("$ a ; b")
     );
     // An alias resolves to bash before the match.
@@ -447,9 +451,9 @@ fn test_input_bash_keeps_raw_arguments_when_fields_are_unknown() {
         input_summary("read", json!({"whatever": "x"})),
         "whatever=\"x\""
     );
-    assert_eq!(input_summary("write", json!({"p": 1})), "p=1");
+    assert_eq!(input_summary("Write", json!({"p": 1})), "p=1");
     assert_eq!(
-        input_summary("edit", json!({"file": "a.rs"})),
+        input_summary("Edit", json!({"file": "a.rs"})),
         "file=\"a.rs\""
     );
     // An empty input object yields an empty summary.
@@ -480,7 +484,7 @@ fn test_result_file_family() {
         "3 lines read (summarised, 100 total)"
     );
     assert_eq!(
-        result_summary("write", json!({"lines": 5}), json!({"path": "/proj/a.rs"})),
+        result_summary("Write", json!({"lines": 5}), json!({"path": "/proj/a.rs"})),
         "5 lines written to a.rs"
     );
     assert_eq!(
@@ -489,7 +493,7 @@ fn test_result_file_family() {
     );
     assert_eq!(
         result_summary(
-            "edit",
+            "Edit",
             json!({"path": "/proj/a.rs", "old_lines": 2, "new_lines": 3}),
             json!({})
         ),
@@ -573,23 +577,23 @@ fn test_result_search_family() {
         "3+ found"
     );
     assert_eq!(
-        result_summary("grep", json!({"count": 4, "file_count": 2}), json!({})),
+        result_summary("Grep", json!({"count": 4, "file_count": 2}), json!({})),
         "4 matched in 2 files searched"
     );
     assert_eq!(
         result_summary(
-            "grep",
+            "Grep",
             json!({"count": 4, "file_count": 1, "truncated": true}),
             json!({})
         ),
         "4+ matched in 1 file searched"
     );
     assert_eq!(
-        result_summary("glob", json!({"count": 1}), json!({})),
+        result_summary("Glob", json!({"count": 1}), json!({})),
         "1 file found"
     );
     assert_eq!(
-        result_summary("glob", json!({"count": 5, "truncated": true}), json!({})),
+        result_summary("Glob", json!({"count": 5, "truncated": true}), json!({})),
         "5 files+ found"
     );
 }
@@ -598,18 +602,18 @@ fn test_result_search_family() {
 fn test_result_bash_family() {
     assert_eq!(
         result_summary(
-            "bash",
+            "Bash",
             json!({"timed_out": true, "duration_ms": 1500}),
             json!({})
         ),
         "timed out after 1500ms"
     );
     assert_eq!(
-        result_summary("bash", json!({"lines": 2, "exit_code": 0}), json!({})),
+        result_summary("Bash", json!({"lines": 2, "exit_code": 0}), json!({})),
         format!("2 lines{ELLIPSIS} (exit 0)")
     );
     assert_eq!(
-        result_summary("bash", json!({"lines": 1}), json!({})),
+        result_summary("Bash", json!({"lines": 1}), json!({})),
         format!("1 line{ELLIPSIS}")
     );
 }
@@ -657,7 +661,11 @@ fn test_result_interaction_family() {
         "yes"
     );
     assert_eq!(
-        result_summary("ask_user", json!({"content": "picked two"}), json!({})),
+        result_summary(
+            "AskUserQuestion",
+            json!({"content": "picked two"}),
+            json!({})
+        ),
         "picked two"
     );
     assert_eq!(

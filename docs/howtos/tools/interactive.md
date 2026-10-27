@@ -12,7 +12,7 @@ read environment variables.
 
 ---
 
-## ask_user
+## AskUserQuestion
 
 Ask the user a question and wait for the typed response. With `options` the
 user picks from a multiple-choice dialog; otherwise they type free text.
@@ -26,7 +26,7 @@ user picks from a multiple-choice dialog; otherwise they type free text.
 
 **Example:**
 ```text
-ask_user question="Which build profile?" options=["Debug","Release","Check only"]
+AskUserQuestion question="Which build profile?" options=["Debug","Release","Check only"]
 ```
 
 ---

@@ -18,6 +18,9 @@ mod test_activity_projection_branches;
 #[path = "test_automation_run.rs"]
 mod test_automation_run;
 
+#[path = "test_canonical_tool_parts.rs"]
+mod test_canonical_tool_parts;
+
 #[path = "test_cron_every_no_start.rs"]
 mod test_cron_every_no_start;
 
@@ -47,6 +50,9 @@ mod test_finish_reason;
 
 #[path = "test_format_size.rs"]
 mod test_format_size;
+
+#[path = "test_fr032_dynamic_bridge.rs"]
+mod test_fr032_dynamic_bridge;
 
 #[path = "test_guard_file_helpers.rs"]
 mod test_guard_file_helpers;
@@ -114,8 +120,14 @@ mod test_strutil_unittest;
 #[path = "test_thinking.rs"]
 mod test_thinking;
 
+#[path = "test_tool_args.rs"]
+mod test_tool_args;
+
 #[path = "test_trigger_module.rs"]
 mod test_trigger_module;
+
+#[path = "test_typed_args_decision.rs"]
+mod test_typed_args_decision;
 
 #[path = "test_trigger_types.rs"]
 mod test_trigger_types;

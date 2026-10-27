@@ -34,7 +34,7 @@ name: deploy
 description: Deploy the application to production
 disable-model-invocation: true
 allowed-tools:
-  - bash
+  - Bash
   - read
 context: fork
 agent: general-purpose
@@ -62,7 +62,7 @@ Deploy $ARGUMENTS to production:
     );
     assert!(skill.disable_model_invocation);
     assert!(skill.user_invocable);
-    assert_eq!(skill.allowed_tools, vec!["bash", "read"]);
+    assert_eq!(skill.allowed_tools, vec!["Bash", "read"]);
     assert_eq!(skill.context, Some(SkillContext::Fork));
     assert_eq!(skill.agent.as_deref(), Some("general-purpose"));
     assert_eq!(skill.argument_hint.as_deref(), Some("[environment]"));
@@ -76,7 +76,7 @@ Deploy $ARGUMENTS to production:
 
 #[test]
 fn test_parse_single_allowed_tool() {
-    let content = "---\nallowed-tools: bash\n---\nBody\n";
+    let content = "---\nallowed-tools: Bash\n---\nBody\n";
     let skill = parse_skill_md(
         content,
         &PathBuf::from("/test/skills/test/SKILL.md"),
@@ -85,7 +85,7 @@ fn test_parse_single_allowed_tool() {
     )
     .expect("should parse single allowed tool");
 
-    assert_eq!(skill.allowed_tools, vec!["bash"]);
+    assert_eq!(skill.allowed_tools, vec!["Bash"]);
 }
 
 #[test]

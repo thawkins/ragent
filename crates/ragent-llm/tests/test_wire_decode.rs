@@ -15,8 +15,13 @@
 //! The last two cases are the mechanical half of T-008: they read the
 //! provider sources and fail if a module goes back to keeping its own block map,
 //! and they check that every family in the profile table declares a keying the
-//! accumulator actually implements. Both are pure source/table reads, so the whole
-//! file runs without a provider (NFR-004).
+//! accumulator actually implements. `test_no_stream_attributes_a_frame_to_the_call_opened_last`
+//! (T-009, FR-005) is the same kind of source read against the other failure:
+//! the last-opened attribution coming back as a helper. All of them are pure
+//! source/table reads, so the whole file runs without a provider (NFR-004).
+
+use std::fs;
+use std::path::PathBuf;
 
 use ragent_llm::llm::StreamEvent;
 use ragent_llm::provider::wire::StreamKeying;
@@ -271,8 +276,9 @@ fn test_accumulator_holds_a_whole_deferred_call_until_it_is_flushed() {
         })
         .collect();
     assert_eq!(starts.len(), 2);
-    // FR-019: the accumulator mints the id, so Gemini's own `fc_...` spelling is
-    // gone and the name travels beside the id rather than inside it.
+    // FR-019: the accumulator mints the id from the provider id it was built with,
+    // so no provider invents a spelling of its own, and the name travels beside the
+    // id rather than inside it.
     assert_eq!(
         starts[0],
         (
@@ -346,9 +352,6 @@ fn test_the_provider_modules_no_longer_keep_their_own_tool_call_maps() {
     // FR-004 asks for one accumulator, not one per module that happens to be
     // listed (T-004 folded its sibling encoders for the same reason), and T-011
     // added the Azure Resource Anthropic branch, the eleventh copy of that loop.
-    use std::fs;
-    use std::path::PathBuf;
-
     let providers = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("providers");
@@ -404,9 +407,6 @@ fn test_no_stream_attributes_a_frame_to_the_call_opened_last() {
     // (index or id) or its frame is dropped. This reads the sources rather than
     // calling them, because the failure it prevents is a *caller* reaching for the
     // fallback, and the two helpers that offered it are gone.
-    use std::fs;
-    use std::path::PathBuf;
-
     let providers = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("providers");
@@ -420,7 +420,12 @@ fn test_no_stream_attributes_a_frame_to_the_call_opened_last() {
         let path = providers.join(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        for retired in ["delta_last", "end_last", "open.last_mut()"] {
+        for retired in [
+            "delta_last(",
+            "end_last(",
+            ".last_mut()",
+            "active_tool_call_id",
+        ] {
             assert!(
                 !source.contains(retired),
                 "{} still carries the last-opened attribution `{retired}`; a frame \
@@ -588,6 +593,26 @@ fn test_accumulator_does_not_rekey_a_repeated_frame_of_the_same_call() {
             .is_none()
     );
     assert_eq!(acc.open_count(), 2, "two calls, not three");
+
+    // FR-019's line, drawn here in one place because it is easy to misread: a key
+    // is not an id. A frame that names only the key supplies no id, so the call
+    // gets the minted one:
+    let key_only = StreamKey::CallId("call_x".to_string());
+    assert_eq!(
+        start(acc.open(key_only.clone(), None, "read")).0,
+        "openai_responses_0_read"
+    );
+    // ... while a frame that carries the id is the provider's, byte for byte
+    // (FR-006):
+    assert_eq!(
+        start(acc.open(
+            StreamKey::CallId("call_y".to_string()),
+            Some("call_y"),
+            "read"
+        ))
+        .0,
+        "call_y"
+    );
 }
 
 #[test]
@@ -733,14 +758,10 @@ fn test_accumulator_warns_one_line_per_collision_and_not_per_frame() {
 #[test]
 fn test_no_module_invents_a_tool_call_id_or_recovers_a_name_from_one() {
     // FR-019's unwanted behaviour has two halves, and both are mechanical: no
-    // provider may mint a call id of its own spelling (Gemini's `fc_<name>_<n>`,
-    // Ollama Cloud's `ollama_cloud_tc_<index>`, the old `tc_<index>`), and no
-    // module may read a tool name out of an id by splitting it. The accumulator is
-    // the one place a synthetic id exists, so a `format!("..._{}...")` naming a
-    // call id elsewhere is the defect - not a style preference.
-    use std::fs;
-    use std::path::PathBuf;
-
+    // provider may mint a call id of its own spelling, and no module may read a
+    // tool name out of an id by splitting it. The accumulator is the one place a
+    // synthetic id exists, so a `format!("..._{}...")` naming a call id elsewhere -
+    // or a keying that puts one in a key - is the defect, not a style preference.
     let providers = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("providers");
@@ -760,7 +781,17 @@ fn test_no_module_invents_a_tool_call_id_or_recovers_a_name_from_one() {
         let path = providers.join(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        for retired in ["format!(\"fc_", "format!(\"tc_", "_tc_{"] {
+        // The last two are the same defect as a minted id: a name-shaped spelling
+        // used as a *key* reaches the consumer as the call id, because the key of an
+        // id-less call is its id until the accumulator's own minting replaces it.
+        // `call@` is the marker that distinguishes such a key from the id a frame
+        // actually carried, which is what makes an id-less `CallId` key mint.
+        for retired in [
+            "format!(\"fc_",
+            "format!(\"tc_",
+            "_tc_{",
+            "CallId(format!(\"unnamed_",
+        ] {
             assert!(
                 !source.contains(retired),
                 "{} still mints its own tool-call id with `{retired}`; the synthetic \

@@ -91,7 +91,7 @@ fn test_text_messages_round_trip_preserves_text() {
 fn test_tool_use_and_result_are_paired_into_tool_call_part() {
     // assistant tool use, then user tool result sharing the same id.
     let chat = vec![
-        assistant_tool_use("call_1", "bash", serde_json::json!("ls -la")),
+        assistant_tool_use("call_1", "Bash", serde_json::json!("ls -la")),
         tool_result("call_1", "file1.txt\nfile2.txt"),
     ];
     let messages = chat_messages_to_messages(&chat);
@@ -138,7 +138,7 @@ fn test_messages_to_chat_messages_emits_tool_result_followup() {
         session_id: "s1".to_string(),
         role: Role::Assistant,
         parts: vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "call_9".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,

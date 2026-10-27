@@ -8,7 +8,7 @@
 //!
 //! - **FR-002, FR-037 - the 7-layer bash validator is backend-independent.**
 //!   The `podman`/`docker` sandbox runs the canonical host validator on every
-//!   `bash` call *before* it touches a container, so a banned tool, a denied
+//!   `Bash` call *before* it touches a container, so a banned tool, a denied
 //!   pattern, a directory escape, or an obfuscated command is rejected with the
 //!   tool never executing on the host - and this assertion needs no container
 //!   runtime, because the refusal precedes provisioning.
@@ -132,7 +132,7 @@ fn container_descriptor() -> BackendConfig {
 // FR-002, FR-037: the 7-layer bash validator gates every sandbox bash call.
 // ---------------------------------------------------------------------------
 
-/// Run `command` through the container backend's `bash` path and return the
+/// Run `command` through the container backend's `Bash` path and return the
 /// error string plus the host-execution counter.
 async fn reject_bash(command: &str) -> (String, usize) {
     let ctx = ctx_in(std::env::current_dir().expect("cwd"));

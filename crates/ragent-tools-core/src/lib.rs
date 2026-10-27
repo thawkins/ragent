@@ -65,7 +65,7 @@ use ragent_types::event::EventBus;
 use ragent_types::llm::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -386,8 +386,8 @@ pub fn check_path_within_root_cached(
 /// session's `working_dir` is **always** an allowed root; `allowed_roots`
 /// entries are *additional* roots (sibling project directories, shared
 /// workspaces, sub-agent targets) layered on top of it. Previously only
-/// `write` honoured `allowed_roots`, so a whitelisted destination was writable
-/// by `write` yet wrongly rejected by `create`, `append_to_file`, `copy_file`,
+/// `Write` honoured `allowed_roots`, so a whitelisted destination was writable
+/// by `Write` yet wrongly rejected by `create`, `append_to_file`, `copy_file`,
 /// `move_file`, `make_directory`, and `rm`.
 ///
 /// # Errors
@@ -493,7 +493,6 @@ impl CleanPath for Path {
 /// Tool registry for managing available tools by name.
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
-    hidden: RwLock<HashSet<String>>,
 }
 
 impl ToolRegistry {
@@ -502,7 +501,6 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
-            hidden: RwLock::new(HashSet::new()),
         }
     }
 
@@ -563,15 +561,6 @@ impl ToolRegistry {
             .clear();
     }
 
-    /// Hide tools from advertised tool definitions while keeping them executable.
-    pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self
-            .hidden
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *hidden = names.iter().cloned().collect();
-    }
-
     /// Export visible tools as LLM tool definitions.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -579,13 +568,8 @@ impl ToolRegistry {
             .tools
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hidden = self
-            .hidden
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
-            .filter(|tool| !hidden.contains(tool.name()))
             .map(|tool| ToolDefinition {
                 name: tool.name().to_string(),
                 description: tool.description().to_string(),
@@ -612,7 +596,7 @@ impl Default for ToolRegistry {
 ///
 /// let registry = create_core_registry();
 /// assert!(registry.contains("read"));
-/// assert!(registry.contains("bash"));
+/// assert!(registry.contains("Bash"));
 /// ```
 #[must_use]
 pub fn create_core_registry() -> ToolRegistry {

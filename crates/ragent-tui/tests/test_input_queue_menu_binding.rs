@@ -165,9 +165,9 @@ async fn test_other_alt_keys_are_unaffected() {
         "NFR-009: ALT-L must still toggle the log panel, got {action:?}"
     );
 
-    let action = handle_key(&mut app, alt(KeyCode::Char('t'))).await;
+    let action = handle_key(&mut app, alt(KeyCode::Char('i'))).await;
     assert!(
         matches!(action, Some(InputAction::ToggleTasksPanel)),
-        "NFR-009: ALT-T must still toggle the tasks panel, got {action:?}"
+        "NFR-009: ALT-I must still toggle the tasks panel, got {action:?}"
     );
 }

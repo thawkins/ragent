@@ -31,7 +31,6 @@ fn dry_run_inputs(dir: &TempDir, config_path: Option<PathBuf>) -> DryRunInputs {
         provider_registry: Arc::new(create_provider_registry()),
         tool_registry: Arc::new(create_tool_registry()),
         working_dir: dir.path().to_path_buf(),
-        hidden_tools: Vec::new(),
     }
 }
 

@@ -1,4 +1,4 @@
-//! Coverage-focused tests for the `glob` file-discovery tool.
+//! Coverage-focused tests for the `Glob` file-discovery tool.
 //!
 //! Drives the public [`GlobTool`] against real trees under `target/temp` so the
 //! recursive walk, hidden/generated-directory filtering, the no-match and

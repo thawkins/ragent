@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use crate::llm::LlmClient;
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::provider::openai::OpenAiClient;
+use crate::provider::wire::trace;
 use crate::{ModelInfo, Provider};
 
 const DEFAULT_AZURE_FOUNDRY_HOST: &str = "https://services.ai.azure.com";
@@ -212,6 +213,7 @@ impl LlmClient for AzureFoundryClient {
             format!("{}/openai/v1/chat/completions", self.base_url)
         };
         let body = self.inner.build_request_body(&request);
+        trace::record_body(&request, &body);
         // PERF-061: serialise once into a reference-counted `Bytes` so each
         // retry attempt clones only the refcount instead of copying the whole
         // request payload (up to 5 attempts per request).

@@ -1,4 +1,4 @@
-//! Tests for the `skill_manage` tool (JCODEPLAN M8 T-071).
+//! Tests for the `Skill` tool (JCODEPLAN M8 T-071).
 
 use ragent_agent::event::EventBus;
 use ragent_agent::tool::{Tool, ToolContext, skill_manage::SkillManageTool};
@@ -46,7 +46,7 @@ fn write_project_skill(dir: &std::path::Path, name: &str, body: &str) {
 #[test]
 fn test_skill_manage_identity() {
     let tool = SkillManageTool;
-    assert_eq!(tool.name(), "skill_manage");
+    assert_eq!(tool.name(), "Skill");
     assert!(tool.description().contains("skill"));
     assert_eq!(tool.permission_category(), "skill:manage");
 }
@@ -314,7 +314,7 @@ async fn test_skill_manage_unknown_action_rejected() {
         .await
         .expect_err("unknown action");
     assert!(
-        err.to_string().contains("Unknown skill_manage action"),
+        err.to_string().contains("Unknown Skill action"),
         "err: {err}"
     );
 }

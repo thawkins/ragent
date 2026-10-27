@@ -71,6 +71,7 @@ fn test_state(token: &str) -> AppState {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
         bg_service: std::sync::OnceLock::new(),
     });
     AppState {
@@ -82,7 +83,7 @@ fn test_state(token: &str) -> AppState {
         rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: std::sync::Arc::new(crate::research_sandbox::research_root()),
+        research_root: std::sync::Arc::new(crate::research_sandbox::isolated_research_root()),
     }
 }
 

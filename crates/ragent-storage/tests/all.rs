@@ -50,6 +50,8 @@ mod test_cron_automation_lifecycle;
 mod test_cron_events_table;
 #[path = "test_cron_storage_round_trip.rs"]
 mod test_cron_storage_round_trip;
+#[path = "test_dead_tables_dropped.rs"]
+mod test_dead_tables_dropped;
 #[path = "test_discovered_models.rs"]
 mod test_discovered_models;
 #[path = "test_embedding_store.rs"]
@@ -80,6 +82,8 @@ mod test_reader_concurrency;
 mod test_run_cost_summaries;
 #[path = "test_schema_version_fast_path.rs"]
 mod test_schema_version_fast_path;
+#[path = "test_sessions_list_plan.rs"]
+mod test_sessions_list_plan;
 #[path = "test_settings_and_file_storage.rs"]
 mod test_settings_and_file_storage;
 #[path = "test_snapshot_expand.rs"]
@@ -92,7 +96,11 @@ mod test_task_crud;
 mod test_task_cycle;
 #[path = "test_task_dag.rs"]
 mod test_task_dag;
+#[path = "test_tasks_list_plan.rs"]
+mod test_tasks_list_plan;
 #[path = "test_todos_migration.rs"]
 mod test_todos_migration;
 #[path = "test_wal_warmup.rs"]
 mod test_wal_warmup;
+#[path = "test_warm_index_scan.rs"]
+mod test_warm_index_scan;

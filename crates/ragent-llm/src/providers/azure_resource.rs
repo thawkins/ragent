@@ -30,13 +30,16 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::llm::LlmClient;
 use crate::provider::anthropic::AnthropicClient;
 use crate::provider::azure_foundry::AzureFoundryClient;
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
+use crate::provider::wire::decode::{StreamKey, ToolCallAccumulator};
+use crate::provider::wire::profile_table::ANTHROPIC_MESSAGES;
+use crate::provider::wire::trace;
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 
@@ -370,6 +373,7 @@ impl LlmClient for AzureAnthropicClient {
     {
         let url = format!("{}/anthropic/v1/messages", self.inner.base_url);
         let body = self.inner.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes =
             serde_json::to_vec(&body).context("serialise Azure Anthropic request body")?;
 
@@ -431,11 +435,10 @@ impl LlmClient for AzureAnthropicClient {
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
             let mut current_event_type = String::new();
-            // F5: open tool_use blocks keyed by the SSE content-block index;
-            // `.last()` on a HashMap attributed deltas to an arbitrary open
-            // block, and the index field was captured then ignored, so args
-            // were never even accumulated. The index now keys the buffers.
-            let mut tool_call_blocks: BTreeMap<u64, String> = BTreeMap::new();
+            // FR-004: the Anthropic-Messages shape behind the Azure resource keys a
+            // tool block by its content-block index, so the shared accumulator owns
+            // the open calls instead of a `BTreeMap<u64, String>` here.
+            let mut acc = ToolCallAccumulator::new(ANTHROPIC_MESSAGES, "azure_resource");
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -533,10 +536,13 @@ impl LlmClient for AzureAnthropicClient {
                                         yield StreamEvent::ReasoningStart;
                                     }
                                     Some("tool_use") => {
-                                        let id = content_block["id"].as_str().unwrap_or("").to_string();
-                                        let name = content_block["name"].as_str().unwrap_or("").to_string();
-                                        tool_call_blocks.insert(block_index, id.clone());
-                                        yield StreamEvent::ToolCallStart { id, name };
+                                        let id = content_block["id"].as_str().unwrap_or("");
+                                        let name = content_block["name"].as_str().unwrap_or("");
+                                        if let Some(event) =
+                                            acc.open(StreamKey::Index(block_index), Some(id), name)
+                                        {
+                                            yield event;
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -555,28 +561,33 @@ impl LlmClient for AzureAnthropicClient {
                                             yield StreamEvent::ReasoningDelta { text: text.to_string() };
                                         }
                                     }
+                                    // FR-011: the signed-thinking block's
+                                    // signature, surfaced apart from the
+                                    // reasoning text so the record can echo the
+                                    // block back with it.
+                                    Some("signature_delta") => {
+                                        if let Some(signature) = delta["signature"].as_str() {
+                                            yield StreamEvent::ReasoningSignature {
+                                                signature: signature.to_string(),
+                                            };
+                                        }
+                                    }
                                     Some("input_json_delta") => {
-                                        if let Some(json_str) = delta["partial_json"].as_str() {
-                                            // F5: the delta belongs to the block
-                                            // named by this event's index.
-                                            if let Some(id) = tool_call_blocks.get(&block_index) {
-                                                yield StreamEvent::ToolCallDelta {
-                                                    id: id.clone(),
-                                                    args_json: json_str.to_string(),
-                                                };
-                                            }
+                                        if let Some(json_str) = delta["partial_json"].as_str()
+                                            && let Some(event) =
+                                                acc.delta(&StreamKey::Index(block_index), json_str)
+                                        {
+                                            yield event;
                                         }
                                     }
                                     _ => {}
                                 }
                             }
                             "content_block_stop" => {
-                                // F5: close the block named by this event's index.
+                                // Close the block named by this event's index.
                                 let block_index = parsed["index"].as_u64().unwrap_or(0);
-                                if let Some(id) = tool_call_blocks.remove(&block_index)
-                                    && !id.is_empty()
-                                {
-                                    yield StreamEvent::ToolCallEnd { id };
+                                if let Some(event) = acc.end(&StreamKey::Index(block_index)) {
+                                    yield event;
                                 }
                             }
                             "message_delta" => {

@@ -429,6 +429,88 @@ async fn test_cloud_chat_thinking_and_tool_calls() {
 }
 
 #[tokio::test]
+async fn test_cloud_chat_synthesises_an_id_for_a_tool_call_that_has_none() {
+    // FR-019: native Ollama's `tool_calls[]` may omit `id` entirely. Two such calls
+    // arrive, and the frame-local index restarts at zero in each frame, so the
+    // provider keys them by a stream-scoped counter and leaves the id to the
+    // accumulator, which mints `<provider>_<counter>_<name>`: the two calls are
+    // distinguishable and each delta lands on the call its frame named.
+    //
+    // Both frames are *streaming* frames (`done:false`), not one streaming frame and
+    // one done frame: the accumulator's minted counter is per stream, so a call
+    // carried on the `done:true` frame always follows the streaming ones and would
+    // mint `_1_` even if the streaming arm's keying had folded.
+    use crate::llm::LlmClient;
+    let ndjson = concat!(
+        "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.rs\"}}}]},\"done\":false}\n",
+        "{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"read_file\",\"arguments\":{\"path\":\"b.rs\"}}}]},\"done\":false}\n",
+        "{\"done\":true,\"done_reason\":\"tool_calls\"}\n",
+    )
+    .to_string();
+    let url = spawn_cloud_body(ndjson).await;
+    let events: Vec<StreamEvent> = cloud_client_at(url)
+        .chat(simple_cloud_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    let starts: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallStart { id, name } => Some((id.clone(), name.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        vec![
+            (
+                "ollama_cloud_0_read_file".to_string(),
+                "read_file".to_string()
+            ),
+            (
+                "ollama_cloud_1_read_file".to_string(),
+                "read_file".to_string()
+            ),
+        ],
+        "each id-less call gets its own FR-019 id, and the name is not recoverable \
+         from it: two calls to the same tool must still differ"
+    );
+
+    let deltas: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallDelta { id, args_json } => Some((id.clone(), args_json.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        deltas,
+        vec![
+            (
+                "ollama_cloud_0_read_file".to_string(),
+                "{\"path\":\"a.rs\"}".to_string()
+            ),
+            (
+                "ollama_cloud_1_read_file".to_string(),
+                "{\"path\":\"b.rs\"}".to_string()
+            ),
+        ],
+        "the second frame's delta must not fold onto the first call"
+    );
+
+    let ends: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallEnd { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends.len(), 2, "one end per call; got {ends:?}");
+}
+
+#[tokio::test]
 async fn test_cloud_chat_http_error_surfaces_body() {
     use crate::llm::LlmClient;
     let url = spawn_cloud_status(500, r#"{"error":"exploded"}"#.to_string()).await;

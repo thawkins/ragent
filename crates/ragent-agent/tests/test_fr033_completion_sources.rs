@@ -54,7 +54,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ragent_agent::dry_run::DryRunInputs;
 use ragent_agent::event::EventBus;
-use ragent_agent::session::dispatch::suggest_tool_name;
+use ragent_agent::session::tool_suggestion::suggest_tool_name;
 use ragent_agent::tool::command_catalog::{COMMAND_CATALOG, TOOLS_SUBS};
 use ragent_agent::tool::rename::TOOL_RENAMES;
 use ragent_agent::tool::{Tool, ToolContext, ToolOutput, ToolRegistry, create_default_registry};
@@ -374,7 +374,7 @@ async fn test_the_dry_run_tool_section_is_built_from_the_registry_it_was_handed(
         .find(|item| item.name == "total")
         .expect("the `tools` section reports a total");
     assert_eq!(
-        total.message, "3 visible tools",
+        total.message, "3 registered tools",
         "FR-033: `--dry-run` reported {:?} for a registry holding three tools, so \
          it is not reading the registry it was handed",
         total.message

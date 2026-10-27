@@ -57,8 +57,8 @@ impl Tool for CodeIndexPathTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` or `glob` as fallback tools for code search.",
-                    &["grep", "glob"],
+                    "Use `Grep` or `Glob` as fallback tools for code search.",
+                    &["Grep", "Glob"],
                 ));
             }
         };
@@ -73,7 +73,7 @@ impl Tool for CodeIndexPathTool {
                     metadata: Some(json!({
                         "error": "codeindex_missing_parameter",
                         "parameter": "from",
-                        "fallback_tools": ["grep", "glob"]
+                        "fallback_tools": ["Grep", "Glob"]
                     })),
                 });
             }
@@ -89,7 +89,7 @@ impl Tool for CodeIndexPathTool {
                     metadata: Some(json!({
                         "error": "codeindex_missing_parameter",
                         "parameter": "to",
-                        "fallback_tools": ["grep", "glob"]
+                        "fallback_tools": ["Grep", "Glob"]
                     })),
                 });
             }
@@ -115,7 +115,7 @@ impl Tool for CodeIndexPathTool {
                     "error": "codeindex_no_path",
                     "from": from,
                     "to": to,
-                    "fallback_tools": ["grep", "glob"]
+                    "fallback_tools": ["Grep", "Glob"]
                 })),
             }),
             Some(Some(result)) => {

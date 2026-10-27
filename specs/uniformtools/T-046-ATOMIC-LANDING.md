@@ -3,8 +3,10 @@
 **Spec ID:** uniformtools
 **Task:** T-046
 **Requirement:** FR-034 (`The rename never ships two spellings at once`)
-**Status:** completed (the guard, the landing rule and the measurement). The
-*commit* it governs is still owed by T-033 and T-038 - see §6.
+**Status:** completed - the guard, the landing rule and the measurement are
+recorded below and verified on this tree. The one thing the task does **not**
+produce is the commit itself, which FR-034 clause 2 still blocks on work later
+tasks owe; §6 states exactly what remains and why none of it is this rename.
 **Depends on:** T-030 (the FR-023 table), T-041 (the pre-rename baseline)
 
 FR-034 is a *state-driven* requirement: it does not describe a feature, it
@@ -38,8 +40,10 @@ most likely to be broken.
 ## 1. The tree-state guard
 
 `crates/ragent-agent/tests/test_tool_rename_atomic_landing.rs` - 7 cases, all
-passing. It reads the FR-023 table and asserts the **live registry** agrees with
-it, across every enumeration the build offers:
+passing, and **registered** (see §7.1: the file shipped unregistered, so until
+this task its 7 cases reported `running 0 tests` and exited 0). It reads the
+FR-023 table and asserts the **live registry** agrees with it, across every
+enumeration the build offers:
 
 | # | Case | Clause it pins |
 |---|---|---|
@@ -47,7 +51,7 @@ it, across every enumeration the build offers:
 | 2 | `test_no_before_spelling_is_reachable_by_lookup_or_by_enumeration` | 1 - `get(before)` is `None` and no key carries a `before` |
 | 3 | `test_registry_keys_tool_names_and_definition_names_agree` | 1 - the three enumerations are element-for-element identical |
 | 4 | `test_every_registration_is_stored_under_the_name_its_tool_reports` | the half-renamed detector (below) |
-| 5 | `test_the_renamed_tools_keep_the_permission_family_they_had_before_the_rename` | 2 - FR-028's counts, 21 families, `agent` 3 and `team` 20 |
+| 5 | `test_the_renamed_tools_keep_the_permission_family_they_had_before_the_rename` | 2 - FR-028's counts, 21 families, `agent` 4 and `team` 19 |
 | 6 | `test_the_fr030_surface_total_is_the_baseline_at_the_rename` | 3 - 148 names and 148 definitions |
 | 7 | `test_the_registry_holds_no_duplicate_registration` | 1 - no enumeration repeats a name |
 
@@ -152,8 +156,8 @@ Measured from the tree that carries the rename, against
 | `ToolRegistry::list()` | 148 | **148** | 3 |
 | `ToolRegistry::definitions()` | 148 | **148** | 3 |
 | families | 21 | **21** | 2 (FR-028) |
-| `agent` family | 3 | **3** | 2 - canary |
-| `team` family | 20 | **20** | 2 - canary |
+| `agent` family | 4 | **4** | 2 - canary |
+| `team` family | 19 | **19** | 2 - canary |
 | names with an ASCII uppercase letter | 0 | **13** | 1 - the sharpest count |
 | sorted-name digest, no trailing newline | `a833f0f1...` | **`308d92d9d975666cf1f815369e18cc7b457c1c0dcbab004c45f2835100368321`** | 1 |
 | symmetric difference of the two lists | - | **26 (13 removed + 13 added)** | 1 |
@@ -164,10 +168,11 @@ nothing else. The digest matches the one `T-041-BASELINE.md` *predicted* before
 the rename started, which is the independent confirmation that no tool was
 missed and none was renamed twice.
 
-The `agent` 3 / `team` 20 canary matters here: the stale `target/release/ragent`
-left over from 1.0.148 also reports 148, but splits it `agent` 4 / `team` 19. A
-landing check that compared only the total against that binary would pass while
-its family table was wrong, so case 5 of the guard pins both canaries.
+The `agent` 4 / `team` 19 canary matters here because the family is derived from
+`permission_category()`, not from the tool name: `team_wait` is an `agent:spawn`
+tool, so a landing check that counted the 20 `team_*`-named tools as the `team`
+family would report 3 / 20 and pass a total-only comparison. Case 5 of the guard
+pins both canaries (T-041 §2.1).
 
 ### 4.1 Reproducing the numbers
 
@@ -195,10 +200,12 @@ before-list digest in `T-041-BASELINE.md`, not merely a similar one. A single
 missed or doubled pair would have moved that value, so the agreement is the
 independent proof that the rename applied exactly the table.
 
-The three scratch examples that produced these figures (uppercase list, digest,
-symmetric difference) were deleted after the run - `git status --porcelain
-crates/ragent-agent/examples/` shows only the pre-existing `tool_table.rs` - so
-the working tree is unchanged by the measurement.
+The scratch example that produced these figures (uppercase list, digest,
+symmetric difference, all in one `examples/t046_measure.rs`) was deleted after
+the run, and `crates/ragent-agent/examples/` - which did not exist before the
+measurement - was removed with it, so `git status --porcelain` reports nothing
+under either path and the working tree is unchanged by the measurement. The
+figures are the printed output of that run.
 
 ## 5. The atomicity evidence in history
 
@@ -218,11 +225,12 @@ done
 
 **All thirteen return zero commits**: no tree in this repository's history has
 ever carried an `after` spelling as a `Tool::name()` return. At `HEAD`
-(`d172b658`, `Version: 1.0.149`) all thirteen sites still return `before`; the
-working tree returns `after` at all thirteen. There is therefore no commit in
-which both spellings resolve and none in which neither does - the cut has
-exactly one side with the old spelling and the new side only exists in the
-uncommitted tree.
+(`d6abcd4a`) all thirteen sites still return `before` - spot-checked with
+`git show HEAD:crates/ragent-tools-core/src/write.rs`, which returns `"write"`,
+as does `HEAD~1` - while the working tree returns `after` at all thirteen. So
+there is no commit in which both spellings resolve and none in which neither
+does: the cut has exactly one side with the old spelling, and the new side
+exists only in the uncommitted tree.
 
 The scoping is not pedantry. An unscoped eight-space search does report one hit:
 `git log -S'        "TaskList"' --all` names `1e08279f Version: 1.0.131`, but that
@@ -241,43 +249,163 @@ one commit. The mechanics of that commit are §6.
 
 FR-034 clause 2 - "the build and the workspace test suites pass" - is not met by
 this working tree, and the requirement explicitly forbids landing a tree that
-fails it. The failures are not in the rename; they are the un-migrated literals
-of two later tasks:
+fails it. Measured with `cargo test --workspace --no-fail-fast` on this tree (55
+test-result lines: 52 ok, 3 failed targets):
 
-| Crate | Test binary | Result | Failures | Cause |
-|---|---|---|---|---|
-| `ragent-agent` | `all` | 1785 passed | 35 | `tests/**` still assert `before` names (T-038) |
-| `ragent-tools-core` | `all` | 393 passed | 2 | registry-surface cases assert `before` names (T-038) |
-| `ragent-tools-extended` | `all` | 1778 passed | 6 | task-tool identity cases assert `before` names (T-038) |
-| `ragent-server` | `all` | 191 passed | 1 | OpenAI-surface case names `bash` (T-038) |
+| Target | Result | Cause | Owner |
+|---|---|---|---|
+| `ragent-llm --test all` | 292 passed, **6 failed** | four source scans and two byte-comparisons from `d6abcd4a`'s wire layer (`test_wire_decode`, `test_wire_encode`, `test_wire_encode_message`, `test_wire_trace`); none names a tool | not this spec's rename |
+| `ragent-tui --lib` | 141 passed, 1 failed -> **142 passed** | `loop_dialog_tests.rs:100` typed `"read, edit, bash"` into the loop dialog while line 115 asserts `["read", "Edit", "Bash"]`; `parse_comma_list` is verbatim by design (T-036), so the input literal was the half-migrated half. **Fixed by T-038**: the fixture now types `"read, Edit, Bash"` and the target is green | T-038 (landed) |
+| `ragent-tui --test all` | 3646 passed, **3 failed** | the three Alt+T tasks-panel cases recorded as pre-existing in T-031 §11 | pre-existing |
 
-Every one of the 44 is a `before` literal in a test file: `tool 'edit' should be
-registered`, `default registry must expose bash`, `task_create registered`,
-`assertion failed: names.contains(&"write")`, and the two whole-surface failures
-whose message prints the post-rename list back at the reader. None is a defect in
-the rename. The guard in §1 is **green on this same tree** - it is not one of the
-44 - which is the property that matters: the rename it checks is complete, and
-the red cells are the migration debt later tasks owe.
+Everything else is green, including the four crates the earlier draft of this
+section named as red: `ragent-agent --test all` 1694 passed / 1 ignored,
+`ragent-tools-core --test all` 394, `ragent-tools-extended --test all` 1806 / 11
+ignored, `ragent-server --test all` 192, `ragent-config` 417, `ragent-types` 418.
+The 44 `before` literals this record previously tabulated are **gone**: a scan of
+every `crates/*/tests/**/*.rs` for tool-name-shaped `before` usage (`get("…")`,
+`contains(&"…")`, `name() == "…"`, a `"…" =>` arm) now returns **4** hits, and
+none is an assertion about a registered name -
 
-A further live regression is T-033's, not a test literal:
-`crates/ragent-agent/src/research_adapter.rs:338-339` looks up `registry.get("glob")`
-and `get("grep")`, which now return `None`, so `build_local_gatherer` returns
-`None` and `/research` loses local file cross-referencing (`has_local: false`).
+| Site | What it is |
+|---|---|
+| `test_fr032_bridge_containment.rs:97` | `!names(&bridged).contains(&"bash")` - a *negative* assertion that the bridge does **not** surface the retired spelling |
+| `edit_log_tests.rs:111,198,202` | `tool_counts.get("edit")` on the edit log, whose keys are the tool names the log recorded before this change - fixture data, not a registry lookup |
 
-So the rename cannot be committed until T-033 migrates the non-test literals and
-T-038 migrates the test literals - which is the FR-034 rule working as intended:
-it is refusing to let this tree land early. When it does land, the landing is:
+so the remaining red was one input literal (T-038, since landed - see the row
+above) and three targets this spec never owned.
 
-1. complete T-033 and T-038;
+The live regression the earlier draft recorded is also **fixed on this tree**:
+`crates/ragent-agent/src/research_adapter.rs:338-339` now looks up
+`registry.get("Glob")` and `get("Grep")`, so `build_local_gatherer` returns
+`Some` and `/research` keeps local file cross-referencing - `has_local: true` is
+asserted by `test_research_adapter_extra2::provider_model_wiring_uses_storage_and_config_base_url`
+(passing) and by the two `has_local: true` debug-assertion cases in
+`tests/inline/research_adapter_tests.rs`. That fix belongs to T-033's site list;
+it is recorded here only because this section previously cited it as a reason the
+tree could not land.
+
+### 6.1 Clause 2 is measured over the registered tests, and 20 files are not registered
+
+The count above is honest but not complete, and a reader checking FR-034 clause 2
+should know why. **20 `tests/test_*.rs` files across six crates have no `#[path]`
+line in their crate's `tests/all.rs`**, so they contribute zero cases:
+
+| Crate | Unregistered files |
+|---|---|
+| `ragent-agent` | `test_approval_blocks_result`, `test_fr028_state_survival`, `test_fr029_allowed_tools`, `test_fr030_surface_agreement`, `test_fr032_bridge_containment`, `test_fr033_completion_sources`, `test_mcp_npx_cache_repair`, `test_nfr006_rename_cost`, `test_parallel_gate`, `test_tool_argument_decode_sites`, `test_tool_rename_guard`, `test_unified_dispatch` |
+| `ragent-tui` | `test_fr030_surface_agreement`, `test_fr033_completion_surfaces`, `test_mcp_bridged_surfaces`, `test_mcp_remove`, `test_modules_arms_deep` |
+| others | `ragent-config/test_retired_alias_spelling`, `ragent-plugins/test_fr032_plugin_bridge`, `ragent-types/test_fr032_dynamic_bridge` |
+
+Twelve of the fifteen `ragent-agent` files were temporarily registered to see
+whether they could be, and the probe **did not compile** - 18 errors naming APIs
+that exist in no compiled module (`ragent_agent::session::dispatch`,
+`tool::allowed_tools`, `hooks::run_pre_tool_use_hooks_decoded`,
+`mcp::npx_cache`, `ragent_types::tool_bridge`, `ToolRegistry::resolve`, and
+`DryRunInputs`' missing `hidden_tools` field). The probe was reverted and
+`tests/all.rs` is byte-identical to the version this task started from (plus the
+one `#[path]` line below). So the unregistered files cannot simply be added: they
+are T-014's and later tasks' work, and clause 2 cannot see them until then. That
+is a finding about the *measurement*, not about this rename, and it is recorded
+rather than repaired here because registering a test file whose APIs do not exist
+is not a change that can compile.
+
+## 7. What this task actually changed
+
+Four edits, no behaviour change to the agent:
+
+1. **`crates/ragent-agent/tests/all.rs`** - one
+   `#[path = "test_tool_rename_atomic_landing.rs"] mod test_tool_rename_atomic_landing;`
+   line. See §7.1.
+2. **`crates/ragent-agent/tests/test_tool_rename_atomic_landing.rs`** -
+   `FR030_CANARY_FAMILIES` corrected from the predicted `("agent", 3), ("team", 20)`
+   to the measured `("agent", 4), ("team", 19)`, and the doc comment and one
+   failure message corrected with it. T-041 §8.1 named this file as one of the
+   three stale guards that would fail on a correct tree and assigned the
+   correction to T-046; `test_fr030_surface_agreement.rs` and
+   `test_fr028_state_survival.rs` carry the same stale pair and belong to T-037.
+   The correction is not a relaxation: both numbers still pin a count, and the
+   pair is now the one `--dry-run` prints (`agent: 4 tools`, `team: 19 tools`).
+3. **`crates/ragent-llm/tests/inline/anthropic_tests.rs`** - `ChatContent` added
+   to the `crate::llm` import. `d6abcd4a` removed it from `anthropic.rs`'s
+   imports (the file no longer spells the type) while the `#[path]`-included test
+   module, which uses it twice, inherited `use super::*`. The result was that
+   `cargo test -p ragent-llm --lib` **did not compile at `HEAD`** - two `E0433`
+   errors - so the crate's unit suite had not run at all. A one-word import
+   repair; `--lib` now reports 324 passed.
+4. **`specs/uniformtools/T-046-ATOMIC-LANDING.md`** - this record.
+
+Red proofs, run on this tree and reverted (`md5sum`-verified byte-identical):
+
+| Break | Cases that went red | Message it produced |
+|---|---|---|
+| `write.rs` `Tool::name()` back to `"write"` | 1, 2, 4 | `must resolve exactly one spelling of the pair "write" -> "Write", but it holds 1 "write" and 0 "Write"`; `registry.get("write") still returns a tool`; `` `after` "Write" is not registered `` |
+| `aliases.rs` `UpdateFileTool` renamed to `"write"`, registering a second `"write"` beside `Write` | 1, 2, 4 | `it holds 1 "write" and 1 "Write"` - the *both* state; `a registered tool still reports the retired spelling "write"` |
+| `write.rs` `Tool::name()` returns `"WriteX"` (neither column) | 1, 4 | `it holds 0 "write" and 0 "Write"` - the *neither* state |
+
+All three states FR-034 forbids are therefore red, each naming the pair, the
+surface and the direction. The canary correction is separately proven: with
+`("agent", 3), ("team", 20)` restored, case 5 fails on a correct tree with
+the message "the `agent` family holds Some(4) tools, not the 3 the baseline records" - which
+is exactly the stale expectation T-041 §8.1 predicted, and confirms the constants
+are load-bearing rather than decorative.
+
+Verification: `cargo fmt --all -- --check` clean; `cargo clippy -p ragent-agent -p
+ragent-tui -p ragent-llm --all-targets` reports only the pre-existing
+`pub(crate)`-inside-a-private-module warnings; the eight guard scripts
+(`check-silent-errors`, `check-security-unwraps`, `check-poison-locks`,
+`check-inline-tests`, `check-test-env-isolation`, `check-shared-guards`,
+`check-dead-code-reasons`, `check-file-tool-containment`) all pass.
+`scripts/check-tool-rename.sh` still reports 26 predicate-(e) lines, all of them
+T-033's own exemption-list work (shell words, `pluralize` labels, permission-type
+strings and doc examples) - not this task's sites, and the same 26 it reported
+before this task started.
+
+### 7.1 The fifth orphan-module defect, and the verification habit it teaches
+
+`crates/ragent-agent/tests/test_tool_rename_atomic_landing.rs` shipped with
+`d6abcd4a` and **was never registered** in `crates/ragent-agent/tests/all.rs`, so
+this spec's central guard sat in the tree contributing nothing:
+
+```text
+$ cargo test -p ragent-agent --test all test_tool_rename_atomic_landing::
+running 0 tests
+test result: ok. 0 passed; 0 failed;      <-- exit 0
+```
+
+An empty run is green. That is the whole hazard: the exit code cannot distinguish
+"7 cases passed" from "the file never compiled", and the `--test all` filter form
+(`cargo test -p <crate> --test all <file>::`) reports the same 0 for a typo in the
+module name as for a missing `#[path]` line. The only reliable check is the
+`running N tests` line, which is why every verification note in this spec quotes
+it.
+
+This is the fifth defect of the same class here - after `ragent-types`'
+`tool_args` and `tool_rename`, `ragent-agent`'s `session/tool_input_error`, and
+`ragent-config`'s `tools` section - and §6.1 records that the class is far from
+exhausted: **20** `tests/test_*.rs` files across six crates are still
+unregistered, and registering twelve of them does not compile because they name
+APIs no compiled module provides. A reader should therefore treat "the tests
+pass" in this spec as meaning "the registered tests pass", and check the count.
+
+## 8. The landing checklist, unchanged
+
+When the commit is finally made it is:
+
+1. complete T-033 (the 26 predicate-(e) literals) and T-038 (**done**: the
+   loop-dialog input literal and the 136-file test migration; the 20 orphan test
+   files' own registration is still owed once their APIs exist);
 2. `cargo fmt --all -- --check`, `cargo clippy --all-targets`, and the full
    workspace test suites green;
-3. `ragent --dry-run` reports 148 with `agent` 3 / `team` 20;
+3. `ragent --dry-run` reports 148 with `agent` 4 / `team` 19 - the numbers §4
+   measures and case 5 and case 6 of the guard pin;
 4. **one** commit carrying T-031, T-033 and T-038 together (FR-034's own
    dependency note, and `PLAN.md`'s "T-046 is the landing rule for T-031
    itself");
 5. TC-030 step 9 of `TESTPLAN.md` reads the resulting history and confirms it is
    one commit.
 
-This task's durable output is the guard in §1 and the measurement in §4, both of
-which hold the line at whatever commit that turns out to be. Nothing in §1
-depends on the commit existing yet.
+This task's durable output is the guard in §1, the rule this section states, and
+the measurement in §4 - all three of which hold the line at whatever commit that
+turns out to be. Nothing in §1 depends on the commit existing yet, and nothing in
+§6 is a defect in the rename.

@@ -7,11 +7,12 @@
 //! | # | Case | Surface it pins |
 //! |---|---|---|
 //! | 1 | `test_every_registry_enumeration_reports_the_fr030_total` | `list`, `definitions`, `all_tools` |
-//! | 2 | `test_the_dry_run_tools_section_agrees_with_the_registry` | `--dry-run` (human) |
-//! | 3 | `test_the_dry_run_json_tools_section_agrees_with_the_registry` | `--dry-run --json` |
-//! | 4 | `test_tool_info_reports_the_registry_total_and_every_name` | `tool_info` |
-//! | 5 | `test_commands_info_catalogue_is_intact_and_names_no_retired_tool` | `commands_info` |
-//! | 6 | `test_the_outbound_provider_tool_list_is_the_registry_surface` | the wire list sent to a provider |
+//! | 2 | `test_the_registry_names_match_the_recorded_after_rename_digest` | the names themselves: uppercase count, the `after` set, the digest |
+//! | 3 | `test_the_dry_run_tools_section_agrees_with_the_registry` | `--dry-run` (human) |
+//! | 4 | `test_the_dry_run_json_tools_section_agrees_with_the_registry` | `--dry-run --json` |
+//! | 5 | `test_tool_info_reports_the_registry_total_and_every_name` | `tool_info` |
+//! | 6 | `test_commands_info_catalogue_is_intact_and_names_no_retired_tool` | `commands_info` |
+//! | 7 | `test_the_outbound_provider_tool_list_is_the_registry_surface` | the wire list sent to a provider |
 //!
 //! The `/tools list` and `/bug-report` halves live beside the surfaces they
 //! render, in `crates/ragent-tui/tests/test_fr030_surface_agreement.rs`: both are
@@ -19,12 +20,13 @@
 //!
 //! ## Why the count alone is not the assertion
 //!
-//! T-041 §2.1 records the trap this file exists to prevent: the stale release
-//! binary in `target/` also reports "148 visible tools", but splits the surface
-//! `agent` 4 / `team` 19 while the tree that landed the rename reports
-//! `agent` 3 / `team` 20. A comparison that checked only the total would pass
-//! against the wrong binary, so case 2 compares the **whole** family table and
-//! calls out the two canaries in its failure message.
+//! T-041 §2.1 records the trap this file exists to prevent: a family read off
+//! the tool *name* prefix rather than off `permission_category()` gives
+//! `agent` 3 / `team` 20 for this surface, because `team_wait` reports
+//! `agent:spawn` despite its name. Both readings total 148, so a comparison
+//! that checked only the total would pass against the wrong one. Cases 3 and 4
+//! therefore compare the **whole** family table and call the two canaries out
+//! in the failure message.
 //!
 //! ## What this file deliberately does not check
 //!
@@ -39,6 +41,14 @@
 //!   the family table the `--dry-run` report prints.
 
 #![allow(unsafe_code)]
+// The dry-run case must keep `crate::global_env_lock()` held across
+// `run_dry_run(...).await`: the report reads the ambient global config, the
+// project config and both override variables, so releasing the lock mid-run
+// would let another env-mutating test change the inputs under it. That is the
+// same reason `test_fr033_completion_sources.rs` and `test_gcf_raw_consumers.rs`
+// carry these two allows, and `scripts/check-test-env-isolation.sh` requires the
+// guard to span the mutation.
+#![allow(clippy::await_holding_lock, clippy::future_not_send)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsString;
@@ -57,7 +67,7 @@ use ragent_agent::provider::{ModelInfo, Provider, ProviderRegistry};
 use ragent_agent::session::SessionManager;
 use ragent_agent::session::processor::{CachedConfig, SessionProcessor};
 use ragent_agent::storage::Storage;
-use ragent_agent::tool::command_catalog::COMMAND_CATALOG;
+use ragent_agent::tool::command_catalog::{COMMAND_CATALOG, TOOLS_SUBS};
 use ragent_agent::tool::rename::TOOL_RENAMES;
 use ragent_agent::tool::{ToolContext, ToolRegistry, create_default_registry};
 use ragent_config::{Capabilities, Config as RagentConfig, Cost};
@@ -73,9 +83,15 @@ use serde_json::Value;
 /// headless browser resolves on `PATH`), so the default build advertises 148.
 const FR030_TOTAL: usize = 148;
 
-/// One canary family per T-041 §2.1: the pair whose split tells this tree's build
-/// from the stale release binary beside it.
-const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 3), ("team", 20)];
+/// One canary family per T-041 §2.1: the pair whose split tells a family count
+/// taken from `permission_category()` from one taken off the name prefix.
+///
+/// Measured on this tree (`--dry-run`, and the registry grouped by category),
+/// not copied from the baseline's "expected" column: the pair is `agent` 4 /
+/// `team` 19, because `team_wait` reports `agent:spawn`. The name-prefix
+/// reading of the same registry gives the wrong `agent` 3 / `team` 20 - and the
+/// same 148 total.
+const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 4), ("team", 19)];
 
 /// The family count T-041 records beside the total (21 families summing to 148).
 const FR030_FAMILY_COUNT: usize = 21;
@@ -373,7 +389,7 @@ async fn test_the_dry_run_tools_section_agrees_with_the_registry() {
     let section = tools_section(&report);
     let registry = create_default_registry();
 
-    // `ragent --dry-run` prints this item first: `total: N visible tools`.
+    // `ragent --dry-run` prints this item first: `total: N registered tools`.
     let total = section
         .items
         .iter()
@@ -381,7 +397,7 @@ async fn test_the_dry_run_tools_section_agrees_with_the_registry() {
         .expect("FR-030: the `tools` section reports a total");
     assert_eq!(
         total.message,
-        format!("{FR030_TOTAL} visible tools"),
+        format!("{FR030_TOTAL} registered tools"),
         "FR-030: `--dry-run` reports {:?}, not the {FR030_TOTAL} baseline",
         total.message
     );
@@ -425,8 +441,9 @@ async fn test_the_dry_run_tools_section_agrees_with_the_registry() {
             reported.get(family).copied(),
             Some(count),
             "FR-030: the `{family}` family holds {:?} tools, not the {count} the \
-             baseline records - this is the canary that tells this tree's build \
-             from a stale one beside it, which also reports {FR030_TOTAL}",
+             baseline records - this is the canary that tells a family count taken \
+             from `permission_category()` from one taken off the tool name prefix \
+             (`team_wait` is in `agent`); both readings total {FR030_TOTAL}",
             reported.get(family)
         );
     }
@@ -463,7 +480,7 @@ async fn test_the_dry_run_json_tools_section_agrees_with_the_registry() {
         .expect("FR-030: the JSON `tools` section reports a total");
     assert_eq!(
         total["message"].as_str(),
-        Some(format!("{FR030_TOTAL} visible tools").as_str()),
+        Some(format!("{FR030_TOTAL} registered tools").as_str()),
         "FR-030: the JSON readiness report reports {:?} tools, not {FR030_TOTAL}",
         total["message"]
     );
@@ -637,17 +654,21 @@ async fn test_commands_info_catalogue_is_intact_and_names_no_retired_tool() {
         let description = entry["description"].as_str().expect("description");
         for token in retired.iter() {
             let backticked = format!("`{token}`");
-            if description.contains(&backticked) && !triggers.contains(token) {
-                panic!(
-                    "FR-030: the `/{trigger}` description names the retired tool `{token}` \
-                     in backticks: {description:?}"
-                );
-            }
+            assert!(
+                !description.contains(&backticked) || triggers.contains(token),
+                "FR-030: the `/{trigger}` description names the retired tool `{token}` \
+                 in backticks: {description:?}"
+            );
         }
     }
 
-    // The `/tools` entry is the one command that offers tool names; its
-    // subcommands are exactly what the handler accepts.
+    // The `/tools` entry is the one command that offers tool names. Its
+    // subcommands are the single `TOOLS_SUBS` table every `/tools` reader shares
+    // (FR-033, T-045: the dispatch arm, the completion menu, the parameter hint,
+    // the help page and this catalogue), so pinning it against that constant is
+    // what makes the catalogue unable to drift from the handler. The list is the
+    // subcommand words only - `list`, `show`, the seven visibility switches and
+    // `help` - not the `--help`/`-h`/`usage` flag aliases the handler also keeps.
     let tools_entry = builtin
         .iter()
         .find(|entry| entry["trigger"] == "tools")
@@ -660,10 +681,20 @@ async fn test_commands_info_catalogue_is_intact_and_names_no_retired_tool() {
         .collect();
     assert_eq!(
         subcommands,
-        vec!["list", "show", "help"],
-        "FR-030: `/tools` offers {subcommands:?}, not the `list`, `show`, `help` \
-         the handler accepts"
+        TOOLS_SUBS.to_vec(),
+        "FR-030/FR-033: `commands_info` offers {subcommands:?} for `/tools`, which is \
+         not the `TOOLS_SUBS` table every `/tools` reader shares"
     );
+    // Every advertised subcommand must be one the handler acts on: the fixed
+    // words the dispatch arm matches. The seven family-visibility switches that
+    // used to sit beside them are gone with tool-family visibility.
+    for sub in &subcommands {
+        assert!(
+            matches!(*sub, "list" | "show" | "help"),
+            "FR-030: `commands_info` advertises `/tools {sub}`, which is not one of \
+             `list`, `show`, `help`"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -837,6 +868,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     (processor, tmp, captured)

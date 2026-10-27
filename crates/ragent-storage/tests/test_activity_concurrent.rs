@@ -156,7 +156,7 @@ fn validate_multiple_tool_calls_and_results_passes() {
             1,
             EventKind::ToolCall {
                 tool_call_id: "c2".into(),
-                tool: "write".into(),
+                tool: "Write".into(),
                 args: "{}".into(),
             },
         ),
@@ -173,7 +173,7 @@ fn validate_multiple_tool_calls_and_results_passes() {
             3,
             EventKind::ToolResult {
                 tool_call_id: "c2".into(),
-                tool: "write".into(),
+                tool: "Write".into(),
                 success: true,
                 content: "done".into(),
             },

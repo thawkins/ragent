@@ -314,10 +314,8 @@ pub fn is_tool_free_agent(agent: &AgentInfo) -> bool {
 /// Compose the effective tool surface for `/prompt` (FR-008), mirroring the
 /// `loop_steps.rs` filter order:
 ///
-/// 1. registry definitions (already exclude `tool_visibility`-hidden tools -
-///    the TUI applies `config.effective_hidden_tools()` through
-///    `ToolRegistry::set_hidden` before rendering, the same registry the
-///    session loop reads),
+/// 1. registry definitions (every registered tool: no family switch hides a
+///    tool from the model any more, so the definitions are the registry),
 /// 2. agent `allowed_tools` allowlist (plus the always-allowed control
 ///    surface `build_allowed_tool_set` folds in) when non-empty,
 /// 3. subagent mode only: interactive tools removed.

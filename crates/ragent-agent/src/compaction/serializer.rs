@@ -87,7 +87,7 @@ fn serialize_assistant(message: &Message, tool_output_max_chars: usize) -> Strin
                     lines.push(format!("[Assistant]: {text}"));
                 }
             }
-            MessagePart::Reasoning { text } => {
+            MessagePart::Reasoning { text, .. } => {
                 if !text.is_empty() {
                     lines.push(format!("[Assistant reasoning]: {text}"));
                 }
@@ -186,7 +186,7 @@ impl PartTextContent for MessagePart {
     fn text_content(&self) -> String {
         match self {
             Self::Text { text } => text.clone(),
-            Self::Reasoning { text } => text.clone(),
+            Self::Reasoning { text, .. } => text.clone(),
             Self::ToolCall { tool, state, .. } => {
                 let mut parts = vec![format!(
                     "tool={tool} input={}",

@@ -1,7 +1,7 @@
 //! Shared helpers for edit-style tools.
 //!
 //! [`check_stale_file`] and [`record_edit_timestamp`] are used by both the
-//! single-file `edit` tool and the batch `multi_edit` tool. Keeping them in
+//! single-file `Edit` tool and the batch `multi_edit` tool. Keeping them in
 //! one place avoids copy-paste drift and guarantees both tools enforce the
 //! same stale-file baseline semantics.
 

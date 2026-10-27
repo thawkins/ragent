@@ -25,7 +25,7 @@ fn test_pre_tool_use_exit_code_2_blocks_and_ignores_stdout_allow() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/etc/passwd"}"#,
         "sess-001",
         Some(&bus),
@@ -59,7 +59,7 @@ fn test_pre_tool_use_exit_code_2_uses_stderr_as_reason() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "bash",
+        "Bash",
         r#"{"command":"rm -rf /"}"#,
         "sess-002",
         Some(&bus),
@@ -89,7 +89,7 @@ fn test_pre_tool_use_exit_code_2_crops_long_stderr() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "bash",
+        "Bash",
         r#"{"command":"echo hi"}"#,
         "sess-003",
         Some(&bus),
@@ -119,7 +119,7 @@ fn test_pre_tool_use_exit_code_1_warns_and_returns_no_decision() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/tmp/test"}"#,
         "sess-004",
         Some(&bus),
@@ -143,7 +143,7 @@ fn test_pre_tool_use_exit_code_1_warns_and_returns_no_decision() {
         } => {
             assert_eq!(session_id, "sess-004");
             assert_eq!(hook_command, hooks[0].command);
-            assert_eq!(tool, "write");
+            assert_eq!(tool, "Write");
             assert_eq!(stderr, "suspicious");
         }
         other => panic!("expected HookWarning, got {:?}", other),
@@ -251,7 +251,7 @@ async fn test_post_tool_use_exit_code_0_parses_modified_output() {
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/tmp/foo"}"#,
         r#"{"content":"original"}"#,
         true,
@@ -289,7 +289,7 @@ async fn test_post_tool_use_exit_code_1_warns_and_publishes_hook_warning() {
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/tmp/foo"}"#,
         r#"{"content":"original"}"#,
         true,
@@ -317,7 +317,7 @@ async fn test_post_tool_use_exit_code_1_warns_and_publishes_hook_warning() {
         } => {
             assert_eq!(session_id, "sess-post-002");
             assert_eq!(hook_command, hooks[0].command);
-            assert_eq!(tool, "write");
+            assert_eq!(tool, "Write");
             assert_eq!(stderr, "suspicious output");
         }
         other => panic!("expected HookWarning, got {:?}", other),
@@ -339,7 +339,7 @@ async fn test_post_tool_use_exit_code_2_flags_and_publishes_tool_result_flagged(
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "bash",
+        "Bash",
         r#"{"command":"rm -rf /"}"#,
         r#"{"content":"done"}"#,
         true,
@@ -366,7 +366,7 @@ async fn test_post_tool_use_exit_code_2_flags_and_publishes_tool_result_flagged(
             reason,
         } => {
             assert_eq!(session_id, "sess-post-003");
-            assert_eq!(tool, "bash");
+            assert_eq!(tool, "Bash");
             assert_eq!(hook_command, hooks[0].command);
             assert_eq!(reason, "policy violation");
         }
@@ -464,7 +464,7 @@ async fn test_post_tool_use_flagged_takes_priority_over_warn() {
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/tmp/foo"}"#,
         r#"{"content":"done"}"#,
         true,
@@ -561,7 +561,7 @@ async fn test_post_tool_use_timeout_does_not_override_warn() {
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "write",
+        "Write",
         r#"{"path":"/tmp/foo"}"#,
         r#"{"content":"done"}"#,
         true,
@@ -603,7 +603,7 @@ async fn test_post_tool_use_timeout_does_not_override_flagged() {
     let result = run_post_tool_use_hooks(
         &hooks,
         Path::new("/tmp"),
-        "bash",
+        "Bash",
         r#"{"command":"echo hi"}"#,
         r#"{"content":"done"}"#,
         true,
@@ -703,7 +703,7 @@ fn test_fixture_pre_tool_use_exit_0_deny() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         dir.path(),
-        "write",
+        "Write",
         r#"{"path":"/etc/passwd"}"#,
         "sess-fixture-002",
         Some(&bus),
@@ -777,7 +777,7 @@ fn test_fixture_pre_tool_use_exit_1_warns_and_allows() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         dir.path(),
-        "bash",
+        "Bash",
         r#"{"command":"curl http://example.com"}"#,
         "sess-fixture-004",
         Some(&bus),
@@ -800,7 +800,7 @@ fn test_fixture_pre_tool_use_exit_1_warns_and_allows() {
             ..
         } => {
             assert_eq!(session_id, "sess-fixture-004");
-            assert_eq!(tool, "bash");
+            assert_eq!(tool, "Bash");
             assert_eq!(stderr, "suspicious tool call");
         }
         other => panic!("expected HookWarning, got {:?}", other),
@@ -830,7 +830,7 @@ fn test_fixture_pre_tool_use_exit_2_blocks() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         dir.path(),
-        "write",
+        "Write",
         r#"{"path":"/etc/shadow"}"#,
         "sess-fixture-005",
         Some(&bus),
@@ -908,7 +908,7 @@ fn test_fixture_pre_tool_use_exit_2_takes_precedence_over_allow_in_same_stdout()
     let result = run_pre_tool_use_hooks(
         &hooks,
         dir.path(),
-        "write",
+        "Write",
         r#"{"path":"/etc/shadow"}"#,
         "sess-fixture-007",
         Some(&bus),
@@ -955,7 +955,7 @@ fn test_fixture_pre_tool_use_multiple_hooks_first_blocks() {
     let result = run_pre_tool_use_hooks(
         &hooks,
         dir.path(),
-        "write",
+        "Write",
         r#"{"path":"/etc/shadow"}"#,
         "sess-fixture-008",
         Some(&bus),

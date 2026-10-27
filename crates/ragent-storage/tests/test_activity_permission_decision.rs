@@ -19,7 +19,7 @@ fn record_permission_decision_persists_grant() {
     let event = log
         .record_permission_decision(
             &run,
-            "bash",
+            "Bash",
             Principal::Operator,
             BoundaryTarget::Shell,
             true,
@@ -33,7 +33,7 @@ fn record_permission_decision_persists_grant() {
             boundary,
             granted,
         } => {
-            assert_eq!(tool, "bash");
+            assert_eq!(tool, "Bash");
             assert_eq!(*principal, Principal::Operator);
             assert_eq!(*boundary, BoundaryTarget::Shell);
             assert!(*granted);
@@ -50,7 +50,7 @@ fn record_permission_decision_persists_deny() {
     let event = log
         .record_permission_decision(
             &run,
-            "write",
+            "Write",
             Principal::Operator,
             BoundaryTarget::FileSystem,
             false,
@@ -114,7 +114,7 @@ fn recorded_permission_decision_is_durable_and_replayable() {
     let appended = log
         .record_permission_decision(
             &run,
-            "bash",
+            "Bash",
             Principal::Operator,
             BoundaryTarget::Shell,
             true,
@@ -135,7 +135,7 @@ fn multiple_permission_decisions_get_monotonic_sequence_numbers() {
     let d0 = log
         .record_permission_decision(
             &run,
-            "bash",
+            "Bash",
             Principal::Operator,
             BoundaryTarget::Shell,
             true,
@@ -144,7 +144,7 @@ fn multiple_permission_decisions_get_monotonic_sequence_numbers() {
     let d1 = log
         .record_permission_decision(
             &run,
-            "write",
+            "Write",
             Principal::Operator,
             BoundaryTarget::FileSystem,
             false,
@@ -164,17 +164,17 @@ fn permission_decision_interleaves_with_tool_call() {
     let perm = log
         .record_permission_decision(
             &run,
-            "bash",
+            "Bash",
             Principal::Operator,
             BoundaryTarget::Shell,
             true,
         )
         .expect("perm");
     let call = log
-        .record_tool_call(&run, "c1", "bash", r#"{"command":"ls"}"#)
+        .record_tool_call(&run, "c1", "Bash", r#"{"command":"ls"}"#)
         .expect("call");
     let result = log
-        .record_tool_result(&run, "c1", "bash", true, "file.txt")
+        .record_tool_result(&run, "c1", "Bash", true, "file.txt")
         .expect("result");
     assert!(perm.seq < call.seq);
     assert!(call.seq < result.seq);
@@ -196,7 +196,7 @@ fn recorded_permission_decision_has_nonempty_event_id() {
     let event = log
         .record_permission_decision(
             &run,
-            "bash",
+            "Bash",
             Principal::Operator,
             BoundaryTarget::Shell,
             true,

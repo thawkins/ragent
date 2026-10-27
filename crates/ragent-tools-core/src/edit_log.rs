@@ -1,6 +1,6 @@
-//! Edit-operation instrumentation for `edit`, `multi_edit`, and `apply_patch`.
+//! Edit-operation instrumentation for `Edit`, `multi_edit`, and `apply_patch`.
 //!
-//! When enabled, every `edit`, `multi_edit`, and `apply_patch` invocation
+//! When enabled, every `Edit`, `multi_edit`, and `apply_patch` invocation
 //! writes a single JSON line to a log file in `<working_dir>/log/editlog/edits-<timestamp>.jsonl`.
 //! Each line records the timestamp, the target file path, the search/replacement text,
 //! and the outcome.
@@ -54,7 +54,7 @@ fn log_file_path(log_dir: &Path) -> PathBuf {
 ///
 /// * `working_dir` - project working directory; the `log/` subdirectory is
 ///   created here if needed.
-/// * `tool` - name of the tool that performed the edit (`"edit"`,
+/// * `tool` - name of the tool that performed the edit (`"Edit"`,
 ///   `"multi_edit"`, or `"apply_patch"`).
 /// * `file_path` - absolute or project-relative path of the edited file.
 /// * `old_str` - search string that was replaced.
@@ -88,7 +88,7 @@ pub fn log_edit_operation(
 /// Extra fields attached to an edit-log entry by [`log_edit_operation_ex`].
 #[derive(Default)]
 pub struct EntryExtras<'a> {
-    /// Name of the tool (`"edit"`, `"multi_edit"`, `"apply_patch"`).
+    /// Name of the tool (`"Edit"`, `"multi_edit"`, `"apply_patch"`).
     pub tool: &'a str,
     /// Search string that was replaced.
     pub old_str: &'a str,

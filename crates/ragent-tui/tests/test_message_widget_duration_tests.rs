@@ -169,7 +169,7 @@ fn test_toolcall_duration_with_inline_diff() {
         "session-1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "edit".to_string(),
+            tool: "Edit".to_string(),
             call_id: "call-005".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,

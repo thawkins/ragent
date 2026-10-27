@@ -15,7 +15,7 @@ use crate::tool::metadata::MetadataBuilder;
 ///
 /// A blueprint directory is untrusted project content (it is contributed by a
 /// repository, a plugin pack, or a marketplace bundle), so a seed entry naming
-/// `bash`/`write`/`rm`/`team_spawn` must not execute directly: that bypassed
+/// `Bash`/`Write`/`rm`/`team_spawn` must not execute directly: that bypassed
 /// `dispatch_tool_with_permissions` entirely - no permission-category check, no
 /// prompt, no repeat guard (SEC-ragent-team-001, SEC-ragent-agent-008).
 ///

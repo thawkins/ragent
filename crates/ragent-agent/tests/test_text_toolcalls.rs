@@ -88,19 +88,19 @@ fn test_extract_xml_zero_parameter_call() {
 
 #[test]
 fn test_extract_bare_json_array() {
-    let text = r#"[{"name": "bash", "arguments": {"command": "ls"}}, {"name": "think", "arguments": {"thought": "ok"}}]"#;
+    let text = r#"[{"name": "Bash", "arguments": {"command": "ls"}}, {"name": "think", "arguments": {"thought": "ok"}}]"#;
     let calls = extract_text_tool_calls(text);
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].name, "bash");
+    assert_eq!(calls[0].name, "Bash");
     assert_eq!(calls[1].name, "think");
 }
 
 #[test]
 fn test_extract_bare_json_single_object() {
-    let text = r#"{"name": "grep", "parameters": {"pattern": "fn main"}}"#;
+    let text = r#"{"name": "Grep", "parameters": {"pattern": "fn main"}}"#;
     let calls = extract_text_tool_calls(text);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "grep");
+    assert_eq!(calls[0].name, "Grep");
     let args: Value = serde_json::from_str(&calls[0].args_json).unwrap();
     assert_eq!(args["pattern"], "fn main");
 }
@@ -143,7 +143,7 @@ fn test_multibyte_content_survives_extraction() {
 
 #[test]
 fn test_string_form_arguments_pass_through() {
-    let text = r#"{"name": "bash", "arguments": "{\"command\": \"ls\"}"}"#;
+    let text = r#"{"name": "Bash", "arguments": "{\"command\": \"ls\"}"}"#;
     let calls = extract_text_tool_calls(text);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].args_json, r#"{"command": "ls"}"#);

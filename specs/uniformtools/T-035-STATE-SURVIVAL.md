@@ -32,27 +32,36 @@ and is the only new production code.
 
 - **`HookConfig::retired_matcher_spellings()`** - the stale part of a matcher, as
   `(retired spelling, adopted spelling)` pairs in matcher order. It splits exactly as
-  `matches_decoded_tool` splits (`|` and `,`), takes the bare tool name before any
-  `Name(pattern)` guard, and resolves it through `Rename::after_of` /
-  `Rename::before_of`, so both columns are the table's own `&'static str` and no
-  allocation happens on the reporting path. A matcher naming the *adopted* spelling is
-  silent: that is the correct spelling, and warning about it would be noise on every
-  hook the rename has already fixed.
+  `matches_tool` splits (`|` and `,`), takes the bare tool name before any
+  `Name(pattern)` guard, and looks the name up in `ragent_types::tool_rename::TOOL_RENAMES`
+  by exact, **case-sensitive** equality, so both columns are the table's own
+  `&'static str` and no allocation happens on the reporting path. A matcher naming the
+  *adopted* spelling is silent: that is the correct spelling, and warning about it would
+  be noise on every hook the rename has already fixed.
 - **`report_retired_matcher_spellings_once(&[HookConfig]) -> usize`** - logs one
   `warn!` per stale entry, naming the spelling, its replacement and the trigger, and
   returns how many it reported so a test can tell "first report" from "already
   reported".
+- **`retired_matcher_report(before, after, trigger) -> String`** - the sentence itself,
+  split out so its wording is assertable without capturing a tracing subscriber.
 - **`retired_matcher_spellings_seen()`** - a process-wide, poison-tolerant
   `Mutex<HashSet<(String, String)>>`, matching the `OnceLock` registries already in this
-  crate (`alias_table::unresolved_targets_seen`, `agent`, `reference`). Process-wide
-  rather than per-session because the hook list is rebuilt from the configuration on
-  every turn: a naive `warn!` would emit the same sentence on every step and train the
-  reader to ignore it. Per *entry* rather than per list, so adding a different stale
-  matcher still reports.
+  crate (`alias_table::unresolved_targets_seen`,
+  `tool::allowed_tools::unresolved_entries_seen`). Process-wide rather than per-session
+  because the hook list is rebuilt from the configuration on every turn: a naive `warn!`
+  would emit the same sentence on every step and train the reader to ignore it. Per
+  *entry* rather than per list, so adding a different stale matcher still reports.
 - **`reset_retired_matcher_spellings_for_test()`** and
   **`retired_matcher_spellings_for_test()`** - `#[doc(hidden)]` helpers, because the
   ledger is process-wide and this crate's test binary is one process, and because an
   integration test in another crate reads the pairs as data.
+
+The lookup is deliberately **not** `Rename::after_of`. Nine of the thirteen pairs differ
+only in case, and `after_of` compares with `==`, so a case-sensitive lookup is the same
+thing - but stating it matters: an ASCII-case-insensitive lookup (the shape
+`matches_tool` uses for the *match* predicate) would report `Bash` as a stale `bash` and
+warn about every correct matcher. Reporting and matching are two different predicates and
+the spelling one is exact.
 
 ### When the report fires
 
@@ -82,7 +91,10 @@ one layer up. The doc comment on `is_destructive_tool` now says so.
 like it did are the requirement: the family `ask_user` holds a tool now called
 `AskUserQuestion`, and `bash:execute` is still reported by the tool now called `Bash`.
 `T-041-BASELINE.md` records both as deliberate; `docs/howtos/permissions.md` now says so
-to a reader.
+to a reader. The two `permission_category()` implementations carry a doc comment saying
+why their value is not their tool name, and `parts_to_chat_content_sync` carries one
+saying the tool name is forwarded verbatim - both are the "next reader tidies this up"
+site, which is exactly how this class of duty breaks.
 
 ## Tests
 
@@ -108,12 +120,12 @@ FR-028 forbids - and the 32-value set is the cross-check against
 
 ## RED proofs (run, observed, reverted)
 
-1. Disabling the rename lookup in `retired_matcher_spellings` (`if false && let Some(after)
-   = ...`) failed **three** cases - 1, 5 and 6 - with `left: []`. The report is what those
-   cases measure, not an incidental side effect.
-2. Emptying the loop in `report_retired_matcher_spellings_once` failed case 3 only, which
-   is the split the two functions are meant to have: the accessor is the derivation, the
-   reporter is the once-per-entry ledger.
+1. Disabling the table lookup in `retired_matcher_spellings` (`.find(|pair| false &&
+   pair.before == name)`) failed **three** cases - 3, 5 and 6 - with `left: []`. The report
+   is what those cases measure, not an incidental side effect.
+2. Making the ledger suppress everything (`if true || !seen.insert(...)`) failed case 3
+   only, which is the split the two functions are meant to have: the accessor is the
+   derivation, the reporter is the once-per-entry ledger.
 3. Rewriting the name on the way out in `parts_to_chat_content_sync`
    (`Rename::after_of(tool).unwrap_or(tool)`) failed case 7 with
    `left: "Bash" / right: "bash"` - so the verbatim replay is measured, and a "helpful"
@@ -181,14 +193,35 @@ the spelling matters, so the next reader does not "restore" it.
 - `specs/uniformtools/PLAN.md` - T-035 marked completed.
 - `specs/uniformtools/T-035-STATE-SURVIVAL.md` - this record.
 
+Two per-line (e) exemptions in `scripts/check_tool_rename.py` moved with the code they
+name: `tool/aliases.rs`'s `permission_category()` value (238, was 230) and the two
+permission-type comparisons in `session/permissions.rs` (595/596, were 577/578). The doc
+comments added above those lines shifted them; the reasons are unchanged, and the guard
+reports zero unexempted lines. An exemption is keyed by line, so this is the expected
+maintenance cost of the mechanism - it fails loudly rather than silently skipping a
+different line, which is the property that matters.
+
 ## Verification
 
-`cargo fmt --check`; `cargo clippy -p ragent-agent -p ragent-tui --all-targets` (only the
-pre-existing `pub(crate)`-inside-private-module, `get(0)`, and one pre-existing
-`MutexGuard`-across-await warning); `cargo check --workspace --all-targets`;
-`cargo test -p ragent-agent --test all` 1842 passed / 1 ignored (including the 9 new
-cases, `test_session_text_helpers` 40, `hooks` 36, `test_loop_checkpoints` 9,
-`test_escape_hatch_audit` 8); the eight guard scripts
-(`check-inline-tests`, `check-dead-code-reasons`, `check-silent-errors`,
-`check-security-unwraps`, `check-poison-locks`, `check-test-env-isolation`,
-`check-file-tool-containment`, `check-shared-guards`) pass.
+`cargo fmt --check`; `cargo clippy -p ragent-agent -p ragent-tui -p ragent-tools-core
+--all-targets` (only pre-existing warnings: `pub(crate)`-inside-private-module across
+`ragent-agent`, `unnecessary structure name repetition`, and one `manual_assert_eq` in
+`crates/ragent-tui/tests/test_text_selection.rs` - none in a file this task touched);
+`cargo check -p ragent-agent -p ragent-tui -p ragent-tools-core --all-targets`;
+`cargo test -p ragent-agent --test all` 1703 passed / 1 ignored (including the 9 new
+cases); `cargo test -p ragent-tools-core --test all` 394 passed;
+`cargo test -p ragent-tui --test all` 3647 passed / 3 **pre-existing** failures
+(`test_input_more::alt_toggle_keys_map_to_actions`,
+`test_input_queue_menu_binding::test_other_alt_keys_are_unaffected`,
+`test_memory_panel::test_toggle_memory_mutually_excludes_tasks_panel` - all three are the
+`Alt+T` -> `ToggleTasksPanel` input mapping, untouched by this task and reproducing with
+`event_handler.rs` at HEAD); the nine guard scripts (`check-inline-tests`,
+`check-dead-code-reasons`, `check-silent-errors`, `check-security-unwraps`,
+`check-poison-locks`, `check-test-env-isolation`, `check-file-tool-containment`,
+`check-shared-guards`, `check-tool-rename`) pass.
+
+Four `ragent-agent` doctests fail (`agent::read_git_status`, `session::archive::
+export_session_archive`, `session::archive::import_session_archive`, `tool::ToolContext`).
+They are **pre-existing and unrelated**: they fail because the examples predate
+`ToolContext`'s `allowed_roots`/`canonical_cache` fields and a missing `use
+std::sync::Arc`, which this task did not touch (verified against `HEAD`).

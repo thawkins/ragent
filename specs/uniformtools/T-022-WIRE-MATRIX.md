@@ -165,3 +165,100 @@ mtime-fresh can look green (here, falsely red) for the wrong reason.
   the new doctest's `.expect(...)`; the example now returns
   `Result<(), MissingProfile>` and uses `?`, which is the rule the guard is asking
   for rather than a suppression.
+
+## 8. Landing record (this session)
+
+### 8.1 State found
+
+The feature was **already in the tree** at `d6abcd4a` and complete. `git status`
+shows `matrix.rs`, `crates/ragent-llm/tests/test_wire_matrix.rs` and
+`tests/test_wire_matrix_flag.rs` as tracked and unmodified; only `src/cli.rs`,
+`src/main.rs` and `tests/all.rs` differ from `HEAD`, and all three carry this
+task's work. So, as with T-004 and T-008 in this spec, this task's delta was
+verification and the landing record, not new implementation. The figures below
+were measured, not taken from the sections above.
+
+| Item | Measured |
+|---|---|
+| `matrix.rs` | 187 lines, unmodified since `d6abcd4a` |
+| `src/cli.rs` `handle_wire_matrix_command` | 27 lines including its doc comment |
+| Renderer tests | 8 cases in 249 lines, all green |
+| Binary tests | 4 cases in 180 lines, all green |
+| Rows printed | 14 registered providers, sorted |
+| `--wire-matrix` wall clock | 9-10 ms (`target/debug/ragent`, measured with `time`) |
+| `cargo build --release`-equivalent full start | ~2 s (config load + `Storage::open` + MCP connect loop, all skipped) |
+
+The printed table, verbatim columns, is:
+
+```
+PROVIDER          ENVELOPE                     CARRIER                         ID FIELD      ARGUMENTS    STREAM KEYING  PARALLEL  IS ERROR  REASONING  SYNTHETIC IDS
+anthropic         anthropic_tool               user_tool_result_block          tool_use_id   json_object  by_index       yes       yes       yes        no
+azure_foundry     openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+azure_resource    openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+bedrock           bedrock_tool_spec            user_tool_result_block          toolUseId     json_object  by_index       yes       yes       no         no
+copilot           openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+gemini            gemini_function_declaration  gemini_function_response        synthesised   json_object  by_index       yes       no        no         yes
+generic_openai    openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+huggingface       openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+ollama            openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+ollama_cloud      openai_function              tool_role_message               synthesised   json_object  by_call_id     yes       no        no         yes
+openai            openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+openai_responses  responses_flat_function      responses_function_call_output  call_id       json_string  by_call_id     yes       no        no         no
+openrouter        openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+router            openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+xai               openai_function              tool_role_message               tool_call_id  json_string  by_index       yes       no        no         no
+```
+
+Fifteen lines follow the rule (14 data rows plus the heading), every one ASCII
+with no trailing whitespace, and the two Ollama entries differ on argument
+encoding exactly as `..._shows_the_declared_contract_not_a_second_copy` asserts.
+
+### 8.2 Red proofs re-run
+
+All four breaks from section 4 were re-applied on this tree and reverted, so the
+proofs describe the current code and not the draft. Each file was saved with
+`cp -p` to `target/temp/t022/`, recorded in `target/temp/t022/before.sha256`, and
+restored content-identically and `touch`ed before the `sha256sum -c` check - the
+`cp -p` mtime trap from section 4 is real and would otherwise let `cargo` reuse
+the broken object file.
+
+| Break | File | Result |
+|---|---|---|
+| `yes_no`'s `"no"` arm changed to `""` | `matrix.rs` | `..._has_no_blank_cell` **FAILED** (7 passed, 1 failed) - `row 2 does not have 10 populated columns` |
+| `rows.sort_by(...)` deleted | `matrix.rs` | `..._is_sorted_and_order_independent` **FAILED** (7 passed, 1 failed) - rows in `HashMap` order |
+| `MissingProfile` return replaced by `let _ = missing;` | `matrix.rs` | `..._refuses_a_provider_with_no_declared_profile` **FAILED** (7 passed, 1 failed) |
+| `cliprint!("{table}")` replaced by `let _ = table;` | `src/cli.rs` | `..._flag_prints_one_row_per_provider` and `..._flag_populates_every_column` **FAILED** (2 passed, 2 failed) |
+
+Restore verified: `sha256sum -c target/temp/t022/before.sha256` reports `OK` for
+both files, and both suites are green again afterwards (8/8 and 4/4).
+
+### 8.3 Verification measured this session
+
+- `cargo fmt --all -- --check` - clean.
+- `cargo check --workspace --all-targets` - finished with no error and no new
+  warning line.
+- `cargo clippy -p ragent-llm -p ragent --all-targets` - **no** finding in
+  `matrix.rs`, `src/cli.rs`, `src/main.rs` or either test file. The 19
+  `unnecessary structure name repetition` warnings are pre-existing in
+  `tool_cache.rs`, and the `pub(crate) ... inside private module` noise is
+  pre-existing across `ragent-llm`; neither is touched here.
+- `cargo test -p ragent-llm --test all` - **294 passed / 4 failed / 2 ignored**.
+  The 4 are the pre-existing guard cases still owned by pending tasks
+  (`test_wire_decode::test_no_module_invents_a_tool_call_id_or_recovers_a_name_from_one`
+  for T-010, `test_wire_encode_message::test_no_provider_module_writes_a_result_carrier_literal`
+  for T-006, and `test_wire_trace::test_agent_loop_sets_the_switch_from_config`
+  plus `..._every_provider_records_its_body` for T-023). None is in a file this
+  task touched.
+- `cargo test -p ragent-llm --lib` - 323 passed.
+- `cargo test -p ragent-llm --doc` - 30 passed (including `matrix::render`'s
+  doctest).
+- `cargo test -p ragent --test all` - **48 passed, 0 failed**.
+- All twelve `scripts/check-*.sh` guards PASS.
+
+### 8.4 Documentation updated for this landing
+
+`PLAN.md`'s T-022 row was rewritten from one line to the full delivery record and
+flipped to `completed`; `TESTPLAN.md`'s TC-002 gained an "Automated half (T-022)"
+paragraph mapping each manual expectation to a named case; `CHANGELOG.md`'s
+`Unreleased` `Added` section gained this feature's entry; `crates/ragent-llm/DOCS.md`
+already described the `matrix` submodule and needed no change.

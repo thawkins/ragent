@@ -1239,7 +1239,7 @@ fn render_wait_agents_task_table_with_statuses() {
 #[test]
 fn render_tool_error_without_detail_uses_default_message() {
     let msg = tool_call(
-        "bash",
+        "Bash",
         "call-err",
         ToolCallState {
             status: ToolCallStatus::Error,
@@ -1256,7 +1256,7 @@ fn render_tool_error_without_detail_uses_default_message() {
 #[test]
 fn render_tool_error_with_detail() {
     let msg = tool_call(
-        "bash",
+        "Bash",
         "call-err2",
         ToolCallState {
             status: ToolCallStatus::Error,
@@ -1410,6 +1410,7 @@ fn render_reasoning_multiline() {
         Role::Assistant,
         vec![MessagePart::Reasoning {
             text: "reason one\nreason two".to_string(),
+            signature: None,
         }],
     );
     let text = lines_text(&msg);
@@ -1431,7 +1432,7 @@ fn render_read_tool_line_range_and_inline_diff() {
 #[test]
 fn render_edit_tool_inline_diff_stats() {
     let msg = completed(
-        "edit",
+        "Edit",
         json!({"file_path": "/home/user/project/src/main.rs"}),
         json!({"path": "/home/user/project/src/main.rs", "old_lines": 4, "new_lines": 9}),
     );

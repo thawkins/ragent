@@ -34,7 +34,7 @@ fn test_input_summary_read_tool_missing_path_shows_placeholder() {
 #[test]
 fn test_input_summary_write_tool() {
     let input = json!({"path": "output.txt", "content": "hello"});
-    let summary = tool_input_summary("write", &input, "/home/user/project");
+    let summary = tool_input_summary("Write", &input, "/home/user/project");
     assert!(
         !summary.contains("[file]"),
         "Tag should be removed: {summary}"
@@ -56,7 +56,7 @@ fn test_input_summary_list_tool() {
 #[test]
 fn test_input_summary_bash_tool() {
     let input = json!({"command": "cargo build"});
-    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    let summary = tool_input_summary("Bash", &input, "/home/user/project");
     assert!(
         !summary.contains("[exec]"),
         "Tag should be removed: {summary}"
@@ -69,7 +69,7 @@ fn test_input_summary_bash_tool_uses_250_char_truncation() {
     // A command that fits inside the wider bash budget is shown in full.
     let command = format!("echo {}", "x".repeat(240));
     let input = json!({ "command": command });
-    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    let summary = tool_input_summary("Bash", &input, "/home/user/project");
     assert!(
         summary.contains(&"x".repeat(240)),
         "Should preserve long command text up to the wider truncation limit: {summary}"
@@ -86,7 +86,7 @@ fn test_input_summary_bash_tool_clips_beyond_250_chars() {
     // then the ellipsis; the "$ " prefix is not counted against the command.
     let command = format!("echo {}", "y".repeat(400));
     let input = json!({ "command": command });
-    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    let summary = tool_input_summary("Bash", &input, "/home/user/project");
     assert_eq!(
         summary,
         format!("$ {}{}", &command[..250], "..."),
@@ -99,7 +99,7 @@ fn test_input_summary_bash_tool_multiline_replaces_newlines() {
     let command =
         "cd /home/thawkins/Projects/ragent\ntimeout 600 cargo test --workspace 2>&1 | tail -40";
     let input = json!({ "command": command });
-    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    let summary = tool_input_summary("Bash", &input, "/home/user/project");
     assert!(
         !summary.contains('\n'),
         "Multiline command should not contain raw newlines: {summary:?}"
@@ -121,7 +121,7 @@ fn test_input_summary_bash_tool_multiline_replaces_newlines() {
 #[test]
 fn test_input_summary_grep_tool() {
     let input = json!({"pattern": "fn main", "path": "src"});
-    let summary = tool_input_summary("grep", &input, "/home/user/project");
+    let summary = tool_input_summary("Grep", &input, "/home/user/project");
     assert!(
         !summary.contains("[search]"),
         "Tag should be removed: {summary}"
@@ -133,7 +133,7 @@ fn test_input_summary_grep_tool() {
 #[test]
 fn test_input_summary_glob_tool() {
     let input = json!({"pattern": "**/*.rs"});
-    let summary = tool_input_summary("glob", &input, "/home/user/project");
+    let summary = tool_input_summary("Glob", &input, "/home/user/project");
     assert!(
         !summary.contains("[search]"),
         "Tag should be removed: {summary}"
@@ -144,7 +144,7 @@ fn test_input_summary_glob_tool() {
 #[test]
 fn test_input_summary_edit_tool() {
     let input = json!({"path": "file.txt", "old_str": "old", "new_str": "new"});
-    let summary = tool_input_summary("edit", &input, "/home/user/project");
+    let summary = tool_input_summary("Edit", &input, "/home/user/project");
     assert!(
         !summary.contains("[file]"),
         "Tag should be removed: {summary}"
@@ -162,7 +162,7 @@ fn test_input_summary_edit_tool_canonical_file_path() {
         "old_string": "old",
         "new_string": "new"
     });
-    let summary = tool_input_summary("edit", &input, "/home/user/project");
+    let summary = tool_input_summary("Edit", &input, "/home/user/project");
     assert!(
         !summary.contains("[file]"),
         "Tag should be removed: {summary}"
@@ -222,12 +222,26 @@ fn test_input_summary_websearch_tool() {
 
 #[test]
 fn test_canonical_tool_name_aliases() {
-    assert_eq!(canonical_tool_name("update_file"), "write");
+    assert_eq!(canonical_tool_name("update_file"), "Write");
 
-    assert_eq!(canonical_tool_name("run_code"), "bash");
+    assert_eq!(canonical_tool_name("run_code"), "Bash");
 
     // Unknown tools return themselves
     assert_eq!(canonical_tool_name("custom_tool"), "custom_tool");
+}
+
+/// A stored `ToolCall` recorded before the rename (FR-028 replays it verbatim)
+/// must still render through the same rich per-tool branch a live call gets.
+#[test]
+fn test_canonical_tool_name_resolves_a_retired_spelling() {
+    assert_eq!(canonical_tool_name("bash"), "Bash");
+    assert_eq!(canonical_tool_name("grep"), "Grep");
+    assert_eq!(canonical_tool_name("task_create"), "TaskCreate");
+    assert_eq!(canonical_tool_name("skill_manage"), "Skill");
+    // A live (already-canonical) call is unaffected.
+    assert_eq!(canonical_tool_name("Bash"), "Bash");
+    // A name the FR-023 table never held is still returned unchanged.
+    assert_eq!(canonical_tool_name("read"), "read");
 }
 
 // =============================================================================
@@ -266,7 +280,7 @@ fn test_result_summary_bash_success() {
         "line_count": 5
     }));
     let input = json!({"command": "echo hello"});
-    let result = tool_result_summary("bash", &output, &input, "/project");
+    let result = tool_result_summary("Bash", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     // Bash shows lines and exit code, not duration directly
@@ -299,7 +313,7 @@ fn test_result_summary_write_tool() {
         "line_count": 10
     }));
     let input = json!({"path": "test.txt"});
-    let result = tool_result_summary("write", &output, &input, "/project");
+    let result = tool_result_summary("Write", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(summary.contains("10"), "Should show line count: {summary}");
@@ -318,7 +332,7 @@ fn test_result_summary_grep_tool() {
         "truncated": false
     }));
     let input = json!({"pattern": "test"});
-    let result = tool_result_summary("grep", &output, &input, "/project");
+    let result = tool_result_summary("Grep", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(summary.contains('5'), "Should show match count");
@@ -332,7 +346,7 @@ fn test_result_summary_glob_tool() {
         "pattern": "*.rs"
     }));
     let input = json!({"pattern": "*.rs"});
-    let result = tool_result_summary("glob", &output, &input, "/project");
+    let result = tool_result_summary("Glob", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(summary.contains("10"), "Should show file count");
@@ -375,7 +389,7 @@ fn test_result_summary_edit_tool() {
         "new_lines": 3
     }));
     let input = json!({"path": "file.txt"});
-    let result = tool_result_summary("edit", &output, &input, "/project");
+    let result = tool_result_summary("Edit", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(summary.contains('5'), "Should show old lines");
@@ -384,7 +398,7 @@ fn test_result_summary_edit_tool() {
 
 #[test]
 fn test_result_summary_no_metadata() {
-    let result = tool_result_summary("bash", &None, &json!({}), "/project");
+    let result = tool_result_summary("Bash", &None, &json!({}), "/project");
     assert!(result.is_none(), "Should return None for empty metadata");
 }
 
@@ -471,7 +485,7 @@ fn test_truncate_str_unicode() {
 #[test]
 fn test_capitalize_tool_name() {
     assert_eq!(capitalize_tool_name("read"), "Read");
-    assert_eq!(capitalize_tool_name("bash"), "Bash");
+    assert_eq!(capitalize_tool_name("Bash"), "Bash");
     assert_eq!(capitalize_tool_name(""), "");
 }
 
@@ -538,8 +552,8 @@ fn test_file_operations_use_correct_emoji() {
     let input = json!({"path": "test.txt"});
 
     let read_summary = tool_input_summary("read", &input, "/project");
-    let write_summary = tool_input_summary("write", &input, "/project");
-    let edit_summary = tool_input_summary("edit", &input, "/project");
+    let write_summary = tool_input_summary("Write", &input, "/project");
+    let edit_summary = tool_input_summary("Edit", &input, "/project");
 
     assert_eq!(read_summary, "test.txt");
     assert_eq!(write_summary, "test.txt");
@@ -556,14 +570,14 @@ fn test_directory_operations_use_folder_emoji() {
 #[test]
 fn test_search_operations_use_magnifying_glass() {
     let input = json!({"pattern": "test"});
-    let summary = tool_input_summary("grep", &input, "/project");
+    let summary = tool_input_summary("Grep", &input, "/project");
     assert_eq!(summary, "\"test\"");
 }
 
 #[test]
 fn test_execution_operations_use_lightning() {
     let input = json!({"command": "ls"});
-    let summary = tool_input_summary("bash", &input, "/project");
+    let summary = tool_input_summary("Bash", &input, "/project");
     assert_eq!(summary, "$ ls");
 }
 
@@ -863,7 +877,7 @@ fn test_result_summary_github_get_actions_failed() {
 #[test]
 fn test_input_summary_task_create() {
     let input = json!({"subject": "Implement JWT auth", "description": "Add JWT tokens"});
-    let summary = tool_input_summary("task_create", &input, "/project");
+    let summary = tool_input_summary("TaskCreate", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -878,7 +892,7 @@ fn test_input_summary_task_create() {
 #[test]
 fn test_input_summary_task_update_status() {
     let input = json!({"task_id": "task-abc123", "status": "completed"});
-    let summary = tool_input_summary("task_update", &input, "/project");
+    let summary = tool_input_summary("TaskUpdate", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -890,7 +904,7 @@ fn test_input_summary_task_update_status() {
 #[test]
 fn test_input_summary_task_update_subject() {
     let input = json!({"task_id": "task-abc123", "subject": "New title"});
-    let summary = tool_input_summary("task_update", &input, "/project");
+    let summary = tool_input_summary("TaskUpdate", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -902,7 +916,7 @@ fn test_input_summary_task_update_subject() {
 #[test]
 fn test_input_summary_task_update_no_fields() {
     let input = json!({"task_id": "task-abc123"});
-    let summary = tool_input_summary("task_update", &input, "/project");
+    let summary = tool_input_summary("TaskUpdate", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -913,7 +927,7 @@ fn test_input_summary_task_update_no_fields() {
 #[test]
 fn test_input_summary_task_get() {
     let input = json!({"task_id": "task-abc123"});
-    let summary = tool_input_summary("task_get", &input, "/project");
+    let summary = tool_input_summary("TaskGet", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -925,7 +939,7 @@ fn test_input_summary_task_get() {
 #[test]
 fn test_input_summary_task_list_default() {
     let input = json!({});
-    let summary = tool_input_summary("task_list", &input, "/project");
+    let summary = tool_input_summary("TaskList", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -936,7 +950,7 @@ fn test_input_summary_task_list_default() {
 #[test]
 fn test_input_summary_task_list_filtered() {
     let input = json!({"status": "pending"});
-    let summary = tool_input_summary("task_list", &input, "/project");
+    let summary = tool_input_summary("TaskList", &input, "/project");
     assert!(
         !summary.contains("[task]"),
         "Tag should be removed: {summary}"
@@ -951,7 +965,7 @@ fn test_result_summary_task_create() {
         "subject": "Implement JWT auth",
         "status": "pending",
     });
-    let result = tool_result_summary("task_create", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskCreate", &Some(output), &json!({}), "/project");
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.contains("created"), "Should say 'created'");
@@ -967,7 +981,7 @@ fn test_result_summary_task_update_status() {
         "status": "completed",
         "unblocked": [],
     });
-    let result = tool_result_summary("task_update", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskUpdate", &Some(output), &json!({}), "/project");
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.contains("updated"), "Should say 'updated'");
@@ -982,7 +996,7 @@ fn test_result_summary_task_update_with_unblocked() {
         "status": "completed",
         "unblocked": ["task-xyz", "task-def"],
     });
-    let result = tool_result_summary("task_update", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskUpdate", &Some(output), &json!({}), "/project");
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.contains("2 unblocked"), "Should mention unblocked count");
@@ -995,7 +1009,7 @@ fn test_result_summary_task_get() {
         "subject": "Implement JWT auth",
         "status": "in_progress",
     });
-    let result = tool_result_summary("task_get", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskGet", &Some(output), &json!({}), "/project");
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.contains("in_progress"), "Should contain status");
@@ -1010,7 +1024,7 @@ fn test_result_summary_task_list() {
         "status_filter": "all",
         "tasks": [],
     });
-    let result = tool_result_summary("task_list", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskList", &Some(output), &json!({}), "/project");
     assert_eq!(result, Some("3 tasks".to_string()));
 }
 
@@ -1021,6 +1035,6 @@ fn test_result_summary_task_list_empty() {
         "status_filter": "all",
         "tasks": [],
     });
-    let result = tool_result_summary("task_list", &Some(output), &json!({}), "/project");
+    let result = tool_result_summary("TaskList", &Some(output), &json!({}), "/project");
     assert_eq!(result, Some("0 tasks".to_string()));
 }

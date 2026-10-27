@@ -2,21 +2,30 @@
 //!
 //! FR-013 is state-driven: while a tool call's permission verdict is still
 //! unresolved (the interactive prompt is open, awaiting a reply), the system
-//! must not append a tool result for it to history. The turn cannot continue
-//! on an unapproved call's output. The invariant is structural:
+//! must not append a tool result for it to history, so no turn can continue on
+//! an unapproved call's output.
+//!
+//! The invariant has a structural half and a stateful half, and this file pins
+//! both:
 //!
 //! - `dispatch_tool_with_permissions` awaits `check_permission_with_prompt`
-//!   before dispatching, so no output exists while the verdict is pending;
-//! - the `PermissionAction::Ask` (unresolved) branch maps to a denied error,
-//!   not a success observation, so an unanswered verdict only appends an error;
+//!   before dispatching, so no output exists while the verdict is pending, and
+//!   the `PermissionAction::Ask` (unresolved) branch maps to a denied error
+//!   rather than a success observation;
+//! - the unresolved interval is *tracked*: the dispatch pipeline's permission
+//!   stage marks the call unresolved in
+//!   [`ragent_agent::session::pending::PendingVerdicts`] immediately before the
+//!   prompt is published and settles it when the verdict resolves, and the tool
+//!   phase refuses to append a result for a call the tracker still names (see
+//!   `result_is_appendable`);
 //! - the only history-append sites are the `handle_tool_execution_result`
 //!   pushes and the step's two `chat_messages` pushes, all reached AFTER the
 //!   awaited pipeline run.
 //!
-//! This file pins the invariant two ways. The source guards fail if a future
-//! change moved a history append ahead of the permission await. The behavioural
-//! cases drive the loop with a denied write and assert the file was never
-//! written and the observation is a denied-error.
+//! The source guards fail if a future change moved a history append ahead of
+//! the permission await, or dropped the stateful guard. The tracker cases pin
+//! the state itself. The behavioural cases drive the loop with a denied write
+//! and assert the file was never written and the observation is a denied-error.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -238,6 +247,7 @@ fn make_processor_deny(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().to_path_buf();
@@ -298,11 +308,11 @@ fn permission_check_maps_unresolved_verdict_to_a_denied_error() {
 fn history_append_runs_only_after_the_permission_verdict_resolved() {
     let processor = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
     assert!(
-        processor.contains("FR-013 (T-016): no history append can run while a"),
+        processor.contains("history append can run while a permission verdict"),
         "the tool-phase history guard comment must be present (FR-013)"
     );
     assert!(
-        processor.contains("FR-013 (T-016): the turn's history is appended only"),
+        processor.contains("the turn's history is appended only here"),
         "the step history-append guard comment must be present (FR-013)"
     );
     assert!(
@@ -472,6 +482,7 @@ async fn test_approved_write_executes_and_returns_success() -> Result<()> {
             active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
             active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
             last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+            pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
         });
         let tmp = tempfile::tempdir().expect("tmpdir");
         let path = tmp.path().to_path_buf();
@@ -528,4 +539,161 @@ async fn test_approved_write_executes_and_returns_success() -> Result<()> {
         "an approved result must be is_error:false"
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The unresolved interval, tracked (T-016)
+// ---------------------------------------------------------------------------
+
+/// The permission stage marks the call unresolved before the prompt is
+/// published and settles it after the verdict resolves, so the interval the
+/// tracker describes is exactly the interval the user has not answered yet.
+#[test]
+fn the_permission_stage_marks_then_settles_the_call() {
+    let dispatch = read_workspace_file("crates/ragent-agent/src/session/dispatch.rs");
+    let begin = dispatch
+        .find("ctx.pending_verdicts.begin(session_id, &tc.id);")
+        .unwrap_or_else(|| {
+            panic!(
+                "the permission stage must mark the call unresolved before it prompts \
+                 (FR-013)"
+            )
+        });
+    let settle = dispatch
+        .find("ctx.pending_verdicts.settle(session_id, &tc.id);")
+        .unwrap_or_else(|| {
+            panic!("the permission stage must settle the call once the verdict resolves (FR-013)")
+        });
+    assert!(
+        begin < settle,
+        "the mark must precede the settle: the call is unresolved for the interval \
+         between them (FR-013)"
+    );
+    let publish = dispatch
+        .find("event_bus.publish(Event::ToolCallStart {")
+        .unwrap_or(0);
+    assert!(
+        begin > publish,
+        "the mark belongs to the permission stage, after the call's start - not to the \
+         step's prepare loop (FR-013)"
+    );
+}
+
+/// The tool phase reads the tracker on its one append path, and it withholds
+/// both the record's output and the result content for an unsettled call.
+#[test]
+fn the_result_append_reads_the_tracker() {
+    let processor = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
+    assert!(
+        processor.contains("fn result_is_appendable("),
+        "the one reading of the unresolved-approval tracker must exist (FR-013)"
+    );
+    assert!(
+        processor.contains("result_is_appendable(&step_pending_verdicts, session_id, &tc.id)"),
+        "the tool phase must consult result_is_appendable for the call it is about to \
+         append (FR-013)"
+    );
+    assert!(
+        processor.contains(
+            "if verdict_resolved {\n                                tool_result_parts.push("
+        ),
+        "the tool result must be pushed only for a resolved verdict (FR-013)"
+    );
+    assert!(
+        processor.contains("tool result withheld: the call's permission verdict"),
+        "a withheld result must be logged rather than silently dropped (FR-013)"
+    );
+}
+
+/// A fresh tracker reports every call resolved, and a mark is observable only
+/// for the session it was taken for.
+#[test]
+fn the_tracker_starts_empty_and_is_per_session() {
+    let pending = ragent_agent::session::pending::PendingVerdicts::new();
+    assert!(
+        !pending.is_unresolved("sess-1", "call_1"),
+        "a fresh tracker has no unresolved call, so the guard is inert on the common \
+         path (FR-013)"
+    );
+    pending.begin("sess-1", "call_1");
+    assert!(
+        pending.is_unresolved("sess-1", "call_1"),
+        "a marked call is unresolved (FR-013)"
+    );
+    assert!(
+        !pending.is_unresolved("sess-2", "call_1"),
+        "a mark belongs to one session: another session's identical call id is not \
+         unresolved (FR-013)"
+    );
+    assert!(
+        !pending.is_unresolved("sess-1", "call_2"),
+        "a mark belongs to one call (FR-013)"
+    );
+    pending.settle("sess-1", "call_1");
+    assert!(
+        !pending.is_unresolved("sess-1", "call_1"),
+        "a settled call is resolved, so its result may be appended (FR-013)"
+    );
+}
+
+/// Two prompts for one call (the bash sub-command loop prompts once per
+/// sub-command) leave it unresolved until the last one is settled.
+#[test]
+fn a_second_mark_keeps_the_call_unresolved_until_the_last_settle() {
+    let pending = ragent_agent::session::pending::PendingVerdicts::new();
+    pending.begin("sess-1", "call_1");
+    pending.begin("sess-1", "call_1");
+    assert!(
+        pending.is_unresolved("sess-1", "call_1"),
+        "a call is unresolved while any of its prompts is unanswered (FR-013)"
+    );
+    pending.settle("sess-1", "call_1");
+    assert!(
+        !pending.is_unresolved("sess-1", "call_1"),
+        "the verdict is one verdict: settling it resolves the call (FR-013)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Behaviour: the guard withholds a result the tracker has not settled
+// ---------------------------------------------------------------------------
+
+/// The append decision itself: a call the tracker still names unresolved is not
+/// appendable, and the guard is not global - a sibling call of the same step,
+/// and the same call id in another session, both stay appendable.
+#[test]
+fn the_append_guard_withholds_only_the_unresolved_call() {
+    use ragent_agent::session::pending::PendingVerdicts;
+    use ragent_agent::session::processor::result_is_appendable_for_test as appendable;
+
+    let pending = PendingVerdicts::new();
+    assert!(
+        appendable(&pending, "sess-1", "call_1"),
+        "with nothing unresolved the tool phase appends every result, so the guard \
+         is inert on the common path (FR-013)"
+    );
+
+    pending.begin("sess-1", "call_1");
+    assert!(
+        !appendable(&pending, "sess-1", "call_1"),
+        "a call whose permission verdict has not resolved must not have its result \
+         appended (FR-013)"
+    );
+    assert!(
+        appendable(&pending, "sess-1", "call_2"),
+        "a sibling call of the same step is unaffected: the guard names one call, \
+         not the step (FR-013)"
+    );
+    assert!(
+        appendable(&pending, "sess-2", "call_1"),
+        "the same call id in another session is unaffected: a verdict belongs to the \
+         session that raised it (FR-013)"
+    );
+
+    pending.settle("sess-1", "call_1");
+    assert!(
+        appendable(&pending, "sess-1", "call_1"),
+        "once the verdict resolves the result is appended again - a denial or an \
+         allow both resolve it (FR-013)"
+    );
 }

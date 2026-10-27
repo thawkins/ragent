@@ -19,6 +19,19 @@
 //! merged or split) or only a *renderer* drifted from the registry - the two
 //! different defects FR-030 forbids in one sentence.
 //!
+//! ## Two facts measured on this tree, not assumed from the baseline
+//!
+//! - **`/tools list` renders the whole registry in one table.** Its header is
+//!   `Tools (N total):` where `N` is `definitions().len()`. There is no second,
+//!   disabled block: tool-family visibility was removed and every registered
+//!   tool is advertised, so the rows and the registry are the same set.
+//! - **The `Tools registered` line FR-030 names did not exist.** `handle_bug_report`
+//!   used to write only `- **Tools visible**: {n}`, where `n` was the count of
+//!   *enabled family switches* out of seven - 1 on the shipped default
+//!   configuration, and never a tool count (T-041 §4). `handle_bug_report` now
+//!   writes `- **Tools registered**: {registry.list().len()}` as the first line of
+//!   `## Tool Configuration`; the switch-count line went with the switches.
+//!
 //! ## What this file deliberately does not check
 //!
 //! - **The `/tools` table's column layout.** `test_slash_tools.rs` owns the
@@ -73,18 +86,6 @@ fn registry_names(app: &App) -> Vec<String> {
 async fn test_tools_list_reports_the_fr030_total_and_every_name() {
     let (_guard, _env, _temp, mut app) = isolated_app();
     let registry = registry_names(&app);
-
-    app.execute_slash_command("/tools list").await;
-    assert_eq!(app.status, "tools");
-    let rendered = last_message(&app);
-
-    // The header `render_tool_list` always writes.
-    assert!(
-        rendered.contains(&format!("Registered Tools ({FR030_TOTAL} total):")),
-        "FR-030: `/tools list` does not report the {FR030_TOTAL} baseline; header \
-         was: {:?}",
-        rendered.lines().take(3).collect::<Vec<_>>()
-    );
     assert_eq!(
         registry.len(),
         FR030_TOTAL,
@@ -93,48 +94,90 @@ async fn test_tools_list_reports_the_fr030_total_and_every_name() {
         registry.len()
     );
 
-    // Every data row is `name<pad> source<pad> description`. The message window
-    // renders markdown to ASCII, so the opening ```text fence survives only as a
-    // leading backtick on the heading row and the closing fence as a lone "`"
-    // line. Locate the heading row by its column titles, skip the underline, and
-    // read one row per registered tool until the closing marker.
+    app.execute_slash_command("/tools list").await;
+    assert_eq!(app.status, "tools");
+    let rendered = last_message(&app);
+
+    // The header is `Tools (N total):`, where `N` is `definitions().len()`.
+    let header = rendered
+        .lines()
+        .find(|line| line.starts_with("Tools ("))
+        .unwrap_or_else(|| {
+            panic!("FR-030: `/tools list` has no `Tools (N total):` header: {rendered:?}")
+        });
+    let numbers: Vec<usize> = header
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse().ok())
+        .collect();
+    assert_eq!(
+        numbers.len(),
+        1,
+        "FR-030: could not read the tool count from {header:?}"
+    );
+    assert_eq!(
+        numbers[0], FR030_TOTAL,
+        "FR-030: `/tools list` reports {} tools, not the {FR030_TOTAL} baseline: \
+         {header:?}",
+        numbers[0]
+    );
+
+    // Read every data row of every tool table in the message. The message window
+    // renders markdown to ASCII, so a ```text fence survives only as a leading
+    // backtick on the heading row and as a lone "`" line at the close. A tool table
+    // is the block under a heading that names all three columns - the family
+    // visibility table above it has only two, so the heading is what distinguishes
+    // them.
     let lines: Vec<&str> = rendered.lines().collect();
-    let heading = lines
-        .iter()
-        .position(|line| {
-            line.contains("name") && line.contains("source") && line.contains("description")
-        })
-        .unwrap_or_else(|| panic!("FR-030: `/tools list` has no table heading: {rendered:?}"));
     let mut listed: Vec<String> = Vec::new();
-    for line in lines.iter().skip(heading + 1) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed == "`" {
-            break;
-        }
-        // The heading's underline (`----  ------  -----------`), which arrives in
-        // the same column order as a data row.
-        if trimmed.starts_with("----") {
+    let mut index = 0;
+    while index < lines.len() {
+        let is_heading = lines[index].contains("name")
+            && lines[index].contains("source")
+            && lines[index].contains("description");
+        if !is_heading {
+            index += 1;
             continue;
         }
-        let name = line.split_whitespace().next().unwrap_or_default();
-        assert!(
-            !name.is_empty(),
-            "FR-030: `/tools list` rendered a row with no tool name: {line:?}"
-        );
-        listed.push(name.to_string());
+        // Skip the heading and its underline.
+        index += 2;
+        while index < lines.len() {
+            let trimmed = lines[index].trim();
+            if trimmed.is_empty() || trimmed == "`" {
+                break;
+            }
+            let name = lines[index].split_whitespace().next().unwrap_or_default();
+            assert!(
+                !name.is_empty(),
+                "FR-030: `/tools list` rendered a row with no tool name: {:?}",
+                lines[index]
+            );
+            listed.push(name.to_string());
+            index += 1;
+        }
+        index += 1;
     }
 
     assert_eq!(
         listed.len(),
         FR030_TOTAL,
         "FR-030: `/tools list` rendered {} rows, not the {FR030_TOTAL} the header \
-         claims",
+         accounts for",
         listed.len()
     );
+    listed.sort();
     assert_eq!(
         listed, registry,
         "FR-030: `/tools list` enumerates a different set of tools than the registry \
          it renders"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        FR030_TOTAL,
+        "FR-030: `/tools list` rendered a duplicate tool row"
     );
 }
 

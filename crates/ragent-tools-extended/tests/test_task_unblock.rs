@@ -4,7 +4,7 @@
 //! Verifies that when a task transitions to `completed`, dependent
 //! tasks that list it in `blocked_by` are re-evaluated at read time:
 //! those whose `blocked_by` is now fully `completed` are flagged as
-//! "available" in `task_get` / `task_list` output, while those with
+//! "available" in `TaskGet` / `TaskList` output, while those with
 //! remaining unfinished blockers are flagged as "blocked".
 
 use std::sync::Arc;

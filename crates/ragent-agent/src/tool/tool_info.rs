@@ -2,7 +2,7 @@
 //!
 //! `tool_info` returns a JSON dump of every tool registered in the agent's
 //! [`ToolRegistry`] (name, description, parameters schema, permission
-//! category, source-family, hidden/visible state). `commands_info` does the
+//! category, source-family). `commands_info` does the
 //! same for the TUI slash-command surface (trigger, description, subcommands,
 //! flags) plus any plugin-contributed commands resolved live from the enabled
 //! plugin store.
@@ -39,8 +39,6 @@ struct ToolInfoEntry {
     /// For MCP wrappers: the original MCP server id and tool name.
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp: Option<McpToolRef>,
-    /// True when the tool is hidden from the model by a visibility switch.
-    hidden: bool,
 }
 
 /// MCP provenance for a bridged tool (`mcp:<server>` source).
@@ -94,7 +92,6 @@ pub struct CommandsInfoTool;
 ///   through [`Tool::mcp_wrapper_info`]); the server id may itself contain
 ///   `_`, so it cannot be recovered from the mangled ragent name alone);
 /// - `plugin:<id>` for plugin-registered tools (`plugin_<id>_<tool>`);
-/// - the visibility-switch family name for family-gated built-ins;
 /// - `internal` otherwise.
 fn tool_source(tool: &Arc<dyn Tool>, mcp_info: Option<(&str, &str)>) -> String {
     if let Some((server_id, _tool_name)) = mcp_info {
@@ -107,33 +104,11 @@ fn tool_source(tool: &Arc<dyn Tool>, mcp_info: Option<(&str, &str)>) -> String {
         }
         return "plugin".to_string();
     }
-    for switch in VISIBILITY_SWITCHES {
-        if let Some(names) = ragent_config::tool_family_names(switch)
-            && names.contains(&name)
-        {
-            return format!("visibility:{switch}");
-        }
-    }
     "internal".to_string()
 }
 
-/// The visibility-switch family names scanned by [`tool_source`]. Mirrors
-/// `tool_visibility_switches` in ragent-config's `ToolVisibilityConfig`; kept
-/// in one place so adding a family means editing one list here and the
-/// config struct.
-const VISIBILITY_SWITCHES: &[&str] = &[
-    "github",
-    "gitlab",
-    "teams",
-    "agents",
-    "plan",
-    "codeindex",
-    "masterfetch",
-];
-
-/// Build the sorted snapshot of every registered tool (visible + hidden).
+/// Build the sorted snapshot of every registered tool.
 fn registry_snapshot(registry: &ToolRegistry) -> Vec<ToolInfoEntry> {
-    let hidden = registry.hidden();
     let mut entries: Vec<ToolInfoEntry> = registry
         .all_tools()
         .into_iter()
@@ -141,7 +116,6 @@ fn registry_snapshot(registry: &ToolRegistry) -> Vec<ToolInfoEntry> {
             let name = tool.name().to_string();
             let mcp_info = tool.mcp_wrapper_info();
             ToolInfoEntry {
-                hidden: hidden.contains(&name),
                 source: tool_source(&tool, mcp_info),
                 description: tool.description().to_string(),
                 parameters: tool.parameters_schema(),
@@ -167,9 +141,8 @@ impl Tool for ToolInfoTool {
     fn description(&self) -> &'static str {
         "Return a JSON-encoded dump of the tool registry: every registered \
          tool with its name, description, parameters JSON schema, permission \
-         category, source (internal / mcp:<server> / plugin:<id> / \
-         visibility:<family>), and hidden state. Read-only; takes no \
-         parameters and always succeeds."
+         category, and source (internal / mcp:<server> / plugin:<id>). \
+         Read-only; takes no parameters and always succeeds."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -187,11 +160,8 @@ impl Tool for ToolInfoTool {
     async fn execute(&self, _input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let entries = registry_snapshot(&ctx.tool_registry);
         let total = entries.len();
-        let visible = entries.iter().filter(|e| !e.hidden).count();
         let value = json!({
             "total": total,
-            "visible": visible,
-            "hidden": total - visible,
             "tools": entries,
         });
         Ok(ToolOutput {

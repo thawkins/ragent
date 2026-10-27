@@ -406,13 +406,13 @@ impl LoopSpec {
 }
 /// Tools that mutate the workspace or protected state (FR-021).
 ///
-/// Includes canonical tool names and their legacy aliases. `bash` is
+/// Includes canonical tool names and their legacy aliases. `Bash` is
 /// special-cased: its sub-commands are scanned for write-ish commands instead
 /// of matching the tool name.
 pub const LOOP_WRITE_TOOLS: &[&str] = &[
-    "write",
+    "Write",
     "create",
-    "edit",
+    "Edit",
     "multi_edit",
     "multiedit",
     "patch",
@@ -444,7 +444,7 @@ const BASH_WRITE_COMMANDS: &[&str] = &[
 /// configured (FR-008): control/introspection plus the memory tools.
 pub const LOOP_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
     "think",
-    "ask_user",
+    "AskUserQuestion",
     "agent_complete",
     "model_info",
     "memory_store",
@@ -626,7 +626,7 @@ impl LoopSpec {
 
         // FR-021/FR-022 path checks apply to explicit path parameters, and
         // for bash to path-looking tokens in the command string.
-        let paths = if tool_name == "bash" {
+        let paths = if tool_name == "Bash" {
             input
                 .get("command")
                 .and_then(Value::as_str)
@@ -646,7 +646,7 @@ impl LoopSpec {
             .has_scope()
             .then(|| compile_globs(&self.scope, "scope"));
 
-        if tool_name == "bash" {
+        if tool_name == "Bash" {
             // FR-021: a filesystem-mutating bash sub-command whose write
             // target matches a read-only constraint is denied. Scope checks
             // below still apply to every path token in the command.

@@ -18,7 +18,7 @@ const QUESTION_DISMISSED_MARKER: &str = "[User dismissed question]";
 /// Ask the user a single clarifying question through the TUI question dialog
 /// and wait for the answer.
 ///
-/// Mirrors the `ask_user` tool: publishes [`Event::QuestionRequested`] on the
+/// Mirrors the `AskUserQuestion` tool: publishes [`Event::QuestionRequested`] on the
 /// app event bus and awaits the matching [`Event::QuestionAnswered`] reply.
 /// Returns `None` when the event bus closes before the user answers.
 async fn ask_user_clarification(

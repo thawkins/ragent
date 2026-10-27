@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// In-memory fake filesystem. Maps canonical paths to either file
-/// contents or "directory" markers for `glob` lookups.
+/// contents or "directory" markers for `Glob` lookups.
 #[derive(Default)]
 struct FakeFs {
     files: HashMap<PathBuf, String>,

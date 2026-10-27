@@ -96,6 +96,7 @@ fn make_app() -> App {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -575,7 +576,7 @@ async fn test_toggle_memory_mutually_excludes_tasks_panel() {
     );
 
     // Re-enable Tasks panel - Memory must be dismissed.
-    app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT))
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT))
         .await;
     assert!(app.show_tasks_panel);
     assert!(

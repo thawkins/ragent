@@ -35,7 +35,7 @@ use anyhow::Result;
 use futures::stream;
 use ragent_agent::agent::{AgentInfo, AgentMode, ModelRef};
 use ragent_agent::event::{Event, EventBus, FinishReason};
-use ragent_agent::llm::{ChatRequest, LlmClient, StreamEvent};
+use ragent_agent::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_agent::permission::PermissionChecker;
 use ragent_agent::provider::{ModelInfo, Provider, ProviderRegistry};
@@ -289,6 +289,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured, tmp))
@@ -404,6 +405,31 @@ fn captured_count(captured: &Arc<Mutex<Vec<ChatRequest>>>) -> usize {
 
 fn captured_requests(captured: &Arc<Mutex<Vec<ChatRequest>>>) -> Vec<ChatRequest> {
     captured.lock().expect("captured lock").clone()
+}
+
+/// The `is_error` flags of the tool results carried by the `index`-th request's
+/// history, in order.
+///
+/// FR-014 is about what the *provider* receives, so the flag is read off the
+/// wire form (`ContentPart::ToolResult`) rather than off the rendered message.
+fn refusal_results(captured: &Arc<Mutex<Vec<ChatRequest>>>, index: usize) -> Vec<bool> {
+    let requests = captured.lock().expect("captured lock");
+    let Some(request) = requests.get(index) else {
+        return Vec::new();
+    };
+    request
+        .messages
+        .iter()
+        .filter_map(|m| match &m.content {
+            ChatContent::Parts(parts) => Some(parts),
+            ChatContent::Text(_) => None,
+        })
+        .flatten()
+        .filter_map(|p| match p {
+            ContentPart::ToolResult { is_error, .. } => Some(*is_error),
+            _ => None,
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -643,9 +669,11 @@ async fn test_finish_content_filter_records_reason() -> Result<()> {
 }
 
 /// A bare `Finish { ToolUse }` with no tool calls and no text ends the turn and
-/// records `ToolUse` as the terminal reason.
+/// records `Truncation` as the terminal reason: spec `uniformtools` FR-022 - a
+/// tool-use finish with zero complete calls is a lost tool call, not a clean
+/// tool-use turn, so the reply is not presented as a completed answer.
 #[tokio::test]
-async fn test_finish_tool_use_without_calls_records_tool_use() -> Result<()> {
+async fn test_finish_tool_use_without_calls_records_truncation() -> Result<()> {
     let event_bus = Arc::new(EventBus::new(4096));
     let (processor, working_dir, captured, _dir) = make_plain(
         event_bus.clone(),
@@ -676,7 +704,7 @@ async fn test_finish_tool_use_without_calls_records_tool_use() -> Result<()> {
     assert_eq!(captured_count(&captured), 1, "no second request");
     assert_eq!(
         processor.last_message_end_reason(&session.id),
-        Some(FinishReason::ToolUse)
+        Some(FinishReason::Truncation)
     );
     Ok(())
 }
@@ -811,7 +839,7 @@ async fn test_subagent_tool_surface_excludes_interactive_tools() -> Result<()> {
         requests[0]
             .tools
             .iter()
-            .all(|t| t.name != "ask_user" && t.name != "question"),
+            .all(|t| t.name != "AskUserQuestion" && t.name != "question"),
         "interactive tools are removed from the sub-agent wire surface"
     );
     Ok(())
@@ -862,7 +890,7 @@ async fn test_loop_tool_set_restricts_wire_surface() -> Result<()> {
         "the loop's own tool is offered"
     );
     assert!(
-        requests[0].tools.iter().all(|t| t.name != "bash"),
+        requests[0].tools.iter().all(|t| t.name != "Bash"),
         "tools outside the loop set are not offered on the wire"
     );
     Ok(())
@@ -1351,5 +1379,265 @@ async fn test_tool_step_records_completed_toolcall_part() -> Result<()> {
         }),
         Some(ToolCallStatus::Completed)
     ));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// FR-007 (uniformtools T-012): the loop reaches a call's arguments through the
+// one shared decoder, so a provider quirk no longer looks like a broken call.
+// ---------------------------------------------------------------------------
+
+/// Empty and whitespace-only argument text decodes to `{}`, so a parameterless
+/// tool runs instead of failing - and it runs through the same gate a real
+/// object does, not the corrective-error branch.
+#[tokio::test]
+async fn test_whitespace_arguments_run_the_tool_with_an_empty_object() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let mut rx = event_bus.subscribe();
+    let (processor, working_dir, captured, _dir) = make_plain(
+        event_bus.clone(),
+        vec![
+            ScriptedReply::ToolCall {
+                name: "tool_info".to_string(),
+                args: "  \n\t ".to_string(),
+            },
+            ScriptedReply::Text("listed".to_string()),
+        ],
+    )?;
+    let session = processor
+        .session_manager
+        .create_session(working_dir)
+        .expect("session created");
+
+    let reply = processor
+        .process_message(
+            &session.id,
+            "list the tools",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("whitespace-argument turn succeeds");
+
+    // The tool ran: `tool_info` takes no parameters and succeeds on `{}`.
+    assert_eq!(
+        captured_count(&captured),
+        2,
+        "the tool result is fed back for a second step"
+    );
+    assert_eq!(reply.text_content(), "listed");
+    let state = reply
+        .parts
+        .iter()
+        .find_map(|p| match p {
+            MessagePart::ToolCall { tool, state, .. } if tool == "tool_info" => Some(state.clone()),
+            _ => None,
+        })
+        .expect("the tool call is recorded");
+    assert_eq!(
+        state.status,
+        ToolCallStatus::Completed,
+        "whitespace arguments must decode to an empty object, not a corrective \
+         error (FR-007): {:?}",
+        state.error
+    );
+    assert_eq!(state.input, serde_json::json!({}));
+    let seen = collect_events(&mut rx);
+    assert!(seen.tool_call_end, "the call closes out");
+    assert!(!seen.agent_error, "no corrective error is raised");
+    Ok(())
+}
+
+/// A double-encoded argument payload (a JSON string holding the object) decodes
+/// to that object, so the tool receives the arguments the server meant.
+#[tokio::test]
+async fn test_encoded_string_arguments_run_the_tool_decoded() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let (processor, working_dir, _captured, _dir) = make_plain(
+        event_bus.clone(),
+        vec![
+            ScriptedReply::ToolCall {
+                name: "think".to_string(),
+                // The server put the argument object inside a string field.
+                args: serde_json::to_string(r#"{"thought":"decoded"}"#).expect("encode"),
+            },
+            ScriptedReply::Text("thought about it".to_string()),
+        ],
+    )?;
+    let session = processor
+        .session_manager
+        .create_session(working_dir)
+        .expect("session created");
+
+    let reply = processor
+        .process_message(
+            &session.id,
+            "think",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("encoded-string turn succeeds");
+
+    let state = reply
+        .parts
+        .iter()
+        .find_map(|p| match p {
+            MessagePart::ToolCall { tool, state, .. } if tool == "think" => Some(state.clone()),
+            _ => None,
+        })
+        .expect("the tool call is recorded");
+    assert_eq!(
+        state.status,
+        ToolCallStatus::Completed,
+        "an encoded-string payload must decode to its object (FR-007): {:?}",
+        state.error
+    );
+    assert_eq!(
+        state.input,
+        serde_json::json!({"thought": "decoded"}),
+        "the tool received the decoded object, not the wire string"
+    );
+    Ok(())
+}
+
+/// A payload that is valid JSON but not an object is still refused with the
+/// corrective error, so accepting more shapes did not make a bare array or a
+/// number executable.
+#[tokio::test]
+async fn test_non_object_arguments_are_still_refused() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let (processor, working_dir, captured, _dir) = make_plain(
+        event_bus.clone(),
+        vec![
+            ScriptedReply::ToolCall {
+                name: "tool_info".to_string(),
+                args: "[1, 2]".to_string(),
+            },
+            ScriptedReply::Text("retried".to_string()),
+        ],
+    )?;
+    let session = processor
+        .session_manager
+        .create_session(working_dir)
+        .expect("session created");
+
+    let reply = processor
+        .process_message(
+            &session.id,
+            "list the tools",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("non-object turn succeeds");
+
+    assert_eq!(
+        captured_count(&captured),
+        2,
+        "the corrective error goes back to the model for a retry"
+    );
+    assert_eq!(reply.text_content(), "retried");
+    let state = reply
+        .parts
+        .iter()
+        .find_map(|p| match p {
+            MessagePart::ToolCall { tool, state, .. } if tool == "tool_info" => Some(state.clone()),
+            _ => None,
+        })
+        .expect("the refused call is recorded");
+    assert_eq!(state.status, ToolCallStatus::Error);
+    let error = state.error.expect("the correction is recorded");
+    assert!(
+        error.contains("an array"),
+        "the corrective message names what was found (FR-008): {error}"
+    );
+    assert!(
+        error.contains("tool_info"),
+        "the corrective message names the tool: {error}"
+    );
+    assert!(
+        error.contains("resend"),
+        "the corrective message tells the model how to fix the call (FR-008): {error}"
+    );
+    assert_eq!(
+        refusal_results(&captured, 1),
+        vec![true],
+        "the refused call's tool result is marked is_error (FR-014), not presented \
+         as a completed call"
+    );
+    Ok(())
+}
+
+/// The FR-009 corrective error names the offending parameter and its declared
+/// type, and the result it produces carries `is_error` (FR-014) - one refusal
+/// value drives the sentence, the status and the flag, so the wire form and the
+/// record cannot disagree.
+#[tokio::test]
+async fn test_schema_violation_names_the_parameter_and_is_marked_on_the_wire() -> Result<()> {
+    let event_bus = Arc::new(EventBus::new(4096));
+    let (processor, working_dir, captured, _dir) = make_plain(
+        event_bus.clone(),
+        vec![
+            ScriptedReply::ToolCall {
+                // `move_file` requires both `source` and `destination`.
+                name: "move_file".to_string(),
+                args: r#"{"source": "a.txt"}"#.to_string(),
+            },
+            ScriptedReply::Text("fixed it".to_string()),
+        ],
+    )?;
+    let session = processor
+        .session_manager
+        .create_session(working_dir)
+        .expect("session created");
+
+    let reply = processor
+        .process_message(
+            &session.id,
+            "move the file",
+            &make_agent(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("schema-violation turn succeeds");
+
+    assert_eq!(captured_count(&captured), 2, "the correction is fed back");
+    assert_eq!(reply.text_content(), "fixed it");
+    let state = reply
+        .parts
+        .iter()
+        .find_map(|p| match p {
+            MessagePart::ToolCall { tool, state, .. } if tool == "move_file" => Some(state.clone()),
+            _ => None,
+        })
+        .expect("the refused call is recorded");
+    assert_eq!(
+        state.status,
+        ToolCallStatus::Error,
+        "a call that never ran is an error"
+    );
+    let error = state.error.expect("the correction is recorded");
+    assert!(
+        error.contains("tool 'move_file'"),
+        "the sentence names the tool (FR-009): {error}"
+    );
+    assert!(
+        error.contains("'destination'"),
+        "the sentence names the offending parameter (FR-009): {error}"
+    );
+    assert!(
+        error.contains("string"),
+        "the sentence states the declared type (FR-009): {error}"
+    );
+    assert!(
+        !error.contains("Invalid tool arguments:"),
+        "the sentence comes from the shared constructor, not a second wording: {error}"
+    );
+    assert_eq!(
+        refusal_results(&captured, 1),
+        vec![true],
+        "the refused call's tool result is marked is_error (FR-014)"
+    );
     Ok(())
 }

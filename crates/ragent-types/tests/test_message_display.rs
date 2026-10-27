@@ -110,6 +110,7 @@ fn text_content_concatenates_only_text_parts() {
             },
             MessagePart::Reasoning {
                 text: "thinking".into(),
+                signature: None,
             },
             MessagePart::Text {
                 text: "world".into(),

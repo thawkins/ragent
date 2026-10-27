@@ -382,7 +382,7 @@ fn remove_sandbox(runtime: ContainerRuntime, container: &str, volume: &str) {
         .status();
 }
 
-/// Run a `bash` command through a spawned container backend.
+/// Run a `Bash` command through a spawned container backend.
 async fn run_bash(backend: &ContainerBackend, ctx: &ToolContext, command: &str) -> ToolOutput {
     let (tool, _runs) = NamedTool::new("Bash");
     ExecutionBackend::execute_tool(

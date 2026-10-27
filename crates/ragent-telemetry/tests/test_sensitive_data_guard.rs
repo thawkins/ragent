@@ -203,8 +203,8 @@ fn test_attr_tool_rejects_non_conforming_name() {
 /// `attr_tool` passes through a safe tool name.
 #[test]
 fn test_attr_tool_passes_safe_name() {
-    let kv = InstrumentRegistry::attr_tool("bash");
-    assert_eq!(kv.value.as_str(), "bash");
+    let kv = InstrumentRegistry::attr_tool("Bash");
+    assert_eq!(kv.value.as_str(), "Bash");
 }
 
 /// `attr_component` redacts a credential-shaped component name (FR-034).

@@ -20,9 +20,9 @@ impl Tool for CodeIndexReferencesTool {
         "Find all references to a symbol by name across the indexed codebase. \
          Required parameter: 'symbol' (the named code entity to look up). Optional \
          'limit' (default 50, max 200). Returns file locations grouped by file, \
-         with reference kind (call, type, field_access). USE THIS instead of `grep` \
+         with reference kind (call, type, field_access). USE THIS instead of `Grep` \
          when you need to find where a function, type, or variable is used; the \
-         index provides semantic reference kinds that grep cannot."
+         index provides semantic reference kinds that Grep cannot."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -51,8 +51,8 @@ impl Tool for CodeIndexReferencesTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` as a fallback tool.",
-                    &["grep"],
+                    "Use `Grep` as a fallback tool.",
+                    &["Grep"],
                 ));
             }
         };

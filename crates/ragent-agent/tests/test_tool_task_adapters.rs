@@ -195,7 +195,7 @@ async fn core_write_adapter_then_read_roundtrips() {
     let ctx = ctx_in(dir.path());
 
     registry
-        .get("write")
+        .get("Write")
         .expect("write tool")
         .execute(
             serde_json::json!({ "path": "out.txt", "content": "round trip\n" }),
@@ -243,8 +243,8 @@ async fn extended_task_list_adapter_uses_the_storage_backend() {
         .expect("session");
 
     let registry = create_default_registry();
-    let tool = registry.get("task_list").expect("task_list registered");
-    assert_eq!(tool.name(), "task_list");
+    let tool = registry.get("TaskList").expect("task_list registered");
+    assert_eq!(tool.name(), "TaskList");
     assert_eq!(tool.permission_category(), "task");
 
     let mut ctx = ctx_in(dir.path());
@@ -272,8 +272,8 @@ async fn extended_task_tool_without_storage_errors_cleanly() {
     let ctx = ctx_in(dir.path());
     // No storage wired into the context.
     let err = registry
-        .get("task_list")
-        .expect("task_list")
+        .get("TaskList")
+        .expect("TaskList")
         .execute(serde_json::json!({}), &ctx)
         .await
         .expect_err("task_list needs a storage backend");

@@ -322,7 +322,7 @@ runs the command instead of accepting the answer:
 - **Fail, budget breached** -- the run ends as `budget_exhausted`; there is no
   opportunity to retry the verification.
 
-Execution details (mirroring the bash tool's shell handling):
+Execution details (mirroring the Bash tool's shell handling):
 
 | Property | Value |
 |---|---|
@@ -330,7 +330,7 @@ Execution details (mirroring the bash tool's shell handling):
 | Timeout | 600 seconds (`VERIFICATION_TIMEOUT`); a timeout counts as a failure |
 | Output capture | head 8000 chars + tail 2000 chars, ASCII-truncated |
 | Spawn error | Counts as failure (e.g. the program does not exist) |
-| Status description | `exit code {N}` style reasons, mirroring the bash tool |
+| Status description | `exit code {N}` style reasons, mirroring the Bash tool |
 
 ---
 

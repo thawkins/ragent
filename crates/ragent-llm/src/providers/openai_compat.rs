@@ -15,7 +15,9 @@
 use serde_json::{Value, json};
 
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, ToolDefinition};
+use super::wire::encode::{MessageContext, encode_message, tool_names_by_id};
+use super::wire::profile_table::OPENAI_CHAT;
+use crate::llm::{ChatRequest, ToolDefinition};
 
 /// Dialect switches for [`build_openai_messages`] and [`OpenAiCompat::base_body`].
 ///
@@ -33,34 +35,38 @@ pub struct OpenAiCompatSpec {
     pub openai_envelope: bool,
     /// Emit `"stream_options": {"include_usage": true}` in the base body.
     pub stream_options_in_base: bool,
-    /// Collapse a single text part to a bare string only when that part is
-    /// actually a text part (Copilot). The canonical providers collapse any
-    /// single-element parts array unconditionally.
-    pub strict_single_text_collapse: bool,
     /// Add `"tool_name"` to tool-result messages (local Ollama) so both the
     /// OpenAI-compatible and the native Ollama wire shapes are satisfied.
     pub tool_result_name: bool,
 }
 
 impl OpenAiCompatSpec {
+    /// The wire format this dialect's messages are encoded as (FR-002, T-017).
+    ///
+    /// Every provider that builds a body through this module speaks the OpenAI
+    /// chat-completions *message* vocabulary; what differs between them is
+    /// dialect switches on top (a mirrored `tool_name`, the envelope, the
+    /// sampling fields), never a second message shape.
+    const MESSAGE_FORMAT: ToolFormat = ToolFormat::OpenAi;
+
     /// The canonical OpenAI Chat Completions dialect.
     #[must_use]
     pub const fn openai() -> Self {
         Self {
             openai_envelope: true,
             stream_options_in_base: true,
-            strict_single_text_collapse: false,
             tool_result_name: false,
         }
     }
 
-    /// GitHub Copilot: OpenAI shape without `stream_options` and with the
-    /// stricter single-text collapse.
+    /// GitHub Copilot: the OpenAI shape without `stream_options`.
+    ///
+    /// The stricter single-text collapse Copilot used to ask for is now the only
+    /// rule the shared encoder applies (FR-006), so there is nothing to set.
     #[must_use]
     pub const fn copilot() -> Self {
         Self {
             stream_options_in_base: false,
-            strict_single_text_collapse: true,
             ..Self::openai()
         }
     }
@@ -84,7 +90,6 @@ impl OpenAiCompatSpec {
         Self {
             openai_envelope: false,
             stream_options_in_base: false,
-            strict_single_text_collapse: false,
             tool_result_name: false,
         }
     }
@@ -102,126 +107,36 @@ pub fn build_openai_messages(request: &ChatRequest, spec: &OpenAiCompatSpec) -> 
         }));
     }
 
-    // Map tool_use_id -> tool_name so tool results can carry both the
-    // OpenAI `tool_call_id` and the native Ollama `tool_name` when asked.
-    let tool_id_to_name = if spec.tool_result_name {
-        let mut map = std::collections::HashMap::new();
-        for msg in request.messages.iter() {
-            if let ChatContent::Parts(parts) = &msg.content {
-                for part in parts {
-                    if let ContentPart::ToolUse { id, name, .. } = part {
-                        map.insert(id.clone(), name.clone());
-                    }
-                }
-            }
-        }
-        Some(map)
+    // Every per-message shape below is the one shared OpenAI-family encoder
+    // (FR-006). This function keeps only what is a *dialect* rather than a wire
+    // contract: the system prompt packing above, and whether a tool result also
+    // names its tool (local Ollama asks for both the OpenAI `tool_call_id` and the
+    // native `tool_name`).
+    let tool_names = if spec.tool_result_name {
+        Some(tool_names_by_id(&request.messages))
     } else {
         None
     };
-
+    let ctx = MessageContext {
+        tool_names: tool_names.as_ref(),
+        mirror_tool_name: spec.tool_result_name,
+        // FR-014: this dialect assembles its own `messages` array, so the shared
+        // encoder never sees its tool results. The format states the marking rule
+        // instead of the caller restating it: `ToolFormat::result_content` applies
+        // the `ERROR: ` marker exactly where the result's profile declares
+        // `supports_is_error == false`, which is the same rule the encoder's own
+        // carriers use, so the two paths cannot disagree.
+        error_marking: spec
+            .tool_result_name
+            .then_some(OpenAiCompatSpec::MESSAGE_FORMAT),
+        // The one name rewrite a family applies inside its envelope, taken from
+        // the format rather than restated here, so a request's tool names and the
+        // names in the calls it is answered with cannot drift apart.
+        name_prefix: OpenAiCompatSpec::MESSAGE_FORMAT.message_name_prefix(),
+        ..MessageContext::default()
+    };
     for msg in request.messages.iter() {
-        let content = match &msg.content {
-            ChatContent::Text(text) => json!(text),
-            ChatContent::Parts(parts) => {
-                let content_parts: Vec<Value> = parts
-                    .iter()
-                    .filter_map(|part| match part {
-                        ContentPart::Text { text } => Some(json!({
-                            "type": "text",
-                            "text": text
-                        })),
-                        ContentPart::ImageUrl { url } => Some(json!({
-                            "type": "image_url",
-                            "image_url": { "url": url }
-                        })),
-                        ContentPart::ToolResult { .. }
-                        | ContentPart::ToolUse { .. }
-                        | ContentPart::Reasoning { .. } => None,
-                    })
-                    .collect();
-                let single_text = !spec.strict_single_text_collapse
-                    || content_parts
-                        .first()
-                        .and_then(|part| part.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("text");
-                if content_parts.len() == 1 && single_text {
-                    content_parts[0]["text"].clone()
-                } else {
-                    json!(content_parts)
-                }
-            }
-        };
-
-        match &msg.content {
-            ChatContent::Parts(parts) => {
-                let tool_results: Vec<&ContentPart> = parts
-                    .iter()
-                    .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                    .collect();
-                let tool_uses: Vec<&ContentPart> = parts
-                    .iter()
-                    .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                    .collect();
-
-                if !tool_uses.is_empty() {
-                    let tool_calls: Vec<Value> = tool_uses
-                        .iter()
-                        .filter_map(|p| match p {
-                            ContentPart::ToolUse { id, name, input } => Some(json!({
-                                "id": id,
-                                "type": "function",
-                                "function": {
-                                    "name": name,
-                                    "arguments": input.to_string()
-                                }
-                            })),
-                            _ => None,
-                        })
-                        .collect();
-                    messages.push(json!({
-                        "role": "assistant",
-                        "tool_calls": tool_calls
-                    }));
-                } else if !tool_results.is_empty() {
-                    for result in tool_results {
-                        if let ContentPart::ToolResult {
-                            tool_use_id,
-                            content,
-                            is_error,
-                        } = result
-                        {
-                            // FR-014: `role:"tool"` has no error flag, so the
-                            // content carries the `ERROR: ` prefix.
-                            let mut tool_msg = json!({
-                                "role": "tool",
-                                "tool_call_id": tool_use_id,
-                                "content": crate::provider::wire::encode::error_marked(content, *is_error)
-                            });
-                            if let Some(name) = tool_id_to_name
-                                .as_ref()
-                                .and_then(|map| map.get(tool_use_id))
-                            {
-                                tool_msg["tool_name"] = json!(name);
-                            }
-                            messages.push(tool_msg);
-                        }
-                    }
-                } else {
-                    messages.push(json!({
-                        "role": msg.role,
-                        "content": content
-                    }));
-                }
-            }
-            _ => {
-                messages.push(json!({
-                    "role": msg.role,
-                    "content": content
-                }));
-            }
-        }
+        messages.extend(encode_message(OPENAI_CHAT, msg, &ctx));
     }
 
     messages
@@ -282,7 +197,7 @@ impl OpenAiCompat {
             // H2: reuse the cached serialised tool list instead of building a
             // fresh `Vec<Value>` of `json!` tool objects on every call.
             let cached = cached_tools(ToolFormat::OpenAi, tools);
-            body["tools"] = cached.openai_tools_array();
+            body[ToolFormat::OpenAi.body_key()] = cached.openai_tools_array();
         }
 
         Self { body }

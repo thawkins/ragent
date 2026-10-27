@@ -13,11 +13,12 @@
 //! [`GEMINI`](wire::profile_table::GEMINI),
 //! [`BEDROCK_CONVERSE`](wire::profile_table::BEDROCK_CONVERSE),
 //! [`OPENAI_RESPONSES`](wire::profile_table::OPENAI_RESPONSES),
-//! [`OLLAMA_NATIVE`](wire::profile_table::OLLAMA_NATIVE)), and every registered
-//! provider id names the contract it encodes its requests with in the
-//! [`PROVIDER_WIRE`](wire::profile_table::PROVIDER_WIRE) table, looked up by
-//! [`profile_for`](wire::profile_table::profile_for). The constants and the
-//! table live in the [`profile_table`](wire::profile_table) submodule; this
+//! [`OLLAMA_NATIVE`](wire::profile_table::OLLAMA_NATIVE)), the `FAMILIES` list
+//! names every one of them, and every registered provider id names the contract
+//! it encodes its requests with in the
+//! [`PROVIDER_WIRE`](wire::profile_table::PROVIDER_WIRE) table, looked up
+//! by [`profile_for`](wire::profile_table::profile_for). The constants and the
+//! two tables live in the [`profile_table`](wire::profile_table) submodule; this
 //! module holds the shape of the contract itself. An id that is absent from the
 //! table has no declared contract, and the coverage assertion in
 //! `tests/test_wire_profile_table.rs` fails the build, so a provider cannot be
@@ -189,6 +190,35 @@ impl StreamKeying {
 /// make for themselves. A client takes a profile by value (it is [`Copy`]) and
 /// dispatches its encoders and its stream accumulator on it, so adding a
 /// provider means declaring a profile rather than re-deriving the contract.
+///
+/// Every field is a required decision, and the type has **no `Default` impl and
+/// no optional field**: a client constructed without a profile fails to compile,
+/// and there is no fallback contract one could be silently built with. That is
+/// what makes the coverage assertion on
+/// [`PROVIDER_WIRE`](wire::profile_table::PROVIDER_WIRE) a build-time guarantee
+/// rather than a convention.
+///
+/// The nine decisions, and the one place each is read (or the task that will
+/// read it, where the consumer is not yet written - the field is declared here
+/// first, because a profile is the single statement of a provider's terms and a
+/// decision added later would mean a client encoded requests it never
+/// described):
+///
+/// | Field | Consumer |
+/// |---|---|
+/// | [`tool_envelope`](Self::tool_envelope) | `wire::encode::encode_tools` (FR-003, T-004) |
+/// | [`result_carrier`](Self::result_carrier) | `wire::encode::encode_message` (FR-006, T-006) |
+/// | [`id_field`](Self::id_field) | `wire::encode::encode_message`, the id-keyed carriers (FR-006, T-006) |
+/// | [`args_encoding`](Self::args_encoding) | `wire::encode`'s `args_json` (FR-007, T-004/T-006) |
+/// | [`stream_keying`](Self::stream_keying) | `wire::decode::ToolCallAccumulator::new` (FR-004, T-008) |
+/// | [`supports_parallel`](Self::supports_parallel) | the agent loop's per-step parallel gate (FR-010, T-015) |
+/// | [`supports_is_error`](Self::supports_is_error) | `wire::encode`'s `mark_error` (FR-014, T-017) |
+/// | [`echo_reasoning`](Self::echo_reasoning) | the reasoning replay path (FR-011, T-018) |
+/// | [`synthetic_ids`](Self::synthetic_ids) | the accumulator's id minting (FR-019, T-010) |
+///
+/// A field whose consumer is a later task is still declared here, and the wire
+/// matrix (FR-016) prints every one of them, so the table states the whole
+/// contract from the day the type exists rather than growing a column per task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ToolWireProfile {
     /// The envelope a tool definition is wrapped in (FR-003).
@@ -203,7 +233,10 @@ pub struct ToolWireProfile {
     /// The key streamed tool-call deltas are attributed by (FR-004).
     pub stream_keying: StreamKeying,
     /// Whether the loop may dispatch a step's tool calls concurrently
-    /// (FR-010). `false` forces sequential execution.
+    /// (FR-010). `false` forces sequential execution: the agent loop demotes
+    /// the user's `experimental.parallel_tool_calls` opt-in for the step and
+    /// logs the demotion once. `true` means concurrency is *permitted*, never
+    /// that it is switched on - only the user's own opt-in does that.
     pub supports_parallel: bool,
     /// Whether the provider transmits an error flag on a tool result, or needs
     /// the `ERROR: ` textual marker instead (FR-014).

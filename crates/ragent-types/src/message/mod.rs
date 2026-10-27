@@ -112,11 +112,26 @@ impl ToolCallStatus {
 pub struct ToolCallState {
     /// Current lifecycle status of the tool call.
     pub status: ToolCallStatus,
-    // TODO: Replace `Value` with a typed struct for tool call input/output once
-    // tool schemas are well-defined.
-    /// JSON arguments passed to the tool.
+    /// JSON arguments passed to the tool, as decoded by
+    /// [`crate::tool_args::decode_tool_arguments`].
+    ///
+    /// Deliberately `Value`, not a typed struct - see
+    /// `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. The arguments shape
+    /// is owned by whichever tool was called, and the tool set is open at run
+    /// time (built-in tools are 148 today, and every MCP server or plugin adds
+    /// more after the binary was compiled), so no compile-time type can
+    /// describe it. The guarantee FR-001 actually needs - that the input of an
+    /// executed call is a JSON object satisfying the callee's declared
+    /// required/type constraints - is enforced at decode and validation time,
+    /// which covers bridged tools that a type could not.
     pub input: Value,
     /// JSON result returned by the tool, if available.
+    ///
+    /// `Value` for the same reason as [`Self::input`] - see
+    /// `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. `output` is outside
+    /// FR-001's record contract and is forwarded to the provider's result
+    /// encoder uninterpreted, while the tool-side carrier
+    /// (`ToolOutput::metadata`) is itself `Option<Value>`.
     pub output: Option<Value>,
     /// Error message if the tool call failed.
     pub error: Option<String>,
@@ -163,9 +178,23 @@ pub enum MessagePart {
         state: Box<ToolCallState>,
     },
     /// Internal model reasoning or chain-of-thought.
+    ///
+    /// `signature` is the provider's opaque signature over the block.
+    /// Anthropic's extended thinking attaches one to every signed thinking
+    /// block and expects it to come back unchanged on the turn that answers a
+    /// tool call, so a provider whose wire profile declares `echo_reasoning`
+    /// (FR-011) can replay the reasoning *and* prove it originated it.
     Reasoning {
         /// The reasoning text.
         text: String,
+        /// The provider's signature over the block, when it supplies one.
+        ///
+        /// Omitted from the wire when `None`, so a signature-less block (or a
+        /// record written before the field existed) keeps the shape it always
+        /// had and never gains a `null` it never had. Defaults to `None` on
+        /// deserialisation for the same reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
     /// An image attachment (e.g. pasted from clipboard via Alt+V).
     ///

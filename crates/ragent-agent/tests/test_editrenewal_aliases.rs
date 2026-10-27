@@ -1,13 +1,13 @@
-//! Tests for the legacy `edit`/`multiedit` aliases and deprecation warnings
+//! Tests for the legacy `Edit`/`multiedit` aliases and deprecation warnings
 //! (editrenewal FR-012, T-015).
 //!
 //! Verifies that:
-//! - The default tool registry exposes `edit`, `multi_edit`, and the legacy
+//! - The default tool registry exposes `Edit`, `multi_edit`, and the legacy
 //!   `multiedit` alias.
 //! - The `multiedit` alias description marks it as deprecated.
 //! - The `multi_edit` tool description references the canonical parameter
 //!   names.
-//! - The `edit` tool description instructs the model to include context and
+//! - The `Edit` tool description instructs the model to include context and
 //!   states that `old_string` must be unique.
 
 use ragent_agent::tool::create_default_registry;
@@ -38,8 +38,8 @@ fn names_sorted() -> Vec<String> {
 fn test_registry_contains_edit_and_multi_edit_and_legacy_alias() {
     let names = names_sorted();
     assert!(
-        names.iter().any(|n| n == "edit"),
-        "edit tool must be registered: {names:?}"
+        names.iter().any(|n| n == "Edit"),
+        "Edit tool must be registered: {names:?}"
     );
     assert!(
         names.iter().any(|n| n == "multi_edit"),
@@ -88,7 +88,7 @@ fn test_multi_edit_description_references_canonical_params() {
 
 #[test]
 fn test_edit_description_states_uniqueness_and_context() {
-    let def = def_for("edit");
+    let def = def_for("Edit");
     assert!(
         def.description.contains("exactly once") || def.description.contains("unique"),
         "edit description should state old_string must be unique: {}",
@@ -103,7 +103,7 @@ fn test_edit_description_states_uniqueness_and_context() {
 
 #[test]
 fn test_edit_schema_declares_canonical_params() {
-    let def = def_for("edit");
+    let def = def_for("Edit");
     let schema_str = def.parameters.to_string();
     assert!(
         schema_str.contains("file_path"),

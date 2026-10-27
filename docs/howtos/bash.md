@@ -51,7 +51,7 @@ command string
 
 ## Configuration
 
-The bash tool is configured via the top-level `bash` block in `ragent.json` (global at
+The Bash tool is configured via the top-level `bash` block in `ragent.json` (global at
 `~/.config/ragent/ragent.json`, or project at `.ragent/ragent.json`).
 
 ### The `bash` config block
@@ -90,7 +90,7 @@ When both a global and a project config exist, ragent merges them:
 
 ### Config flow
 
-The bash tool does **not** read `Config` directly. At startup (and on `/reload`) ragent
+The Bash tool does **not** read `Config` directly. At startup (and on `/reload`) ragent
 copies the merged config into an in-memory snapshot via `BashLists::load_from_config()`
 (`crates/ragent-config/src/bash_lists.rs`):
 
@@ -426,4 +426,4 @@ either the global or project config it stays enabled (OR merge semantics).
 
 ---
 
-*This document describes the bash tool as implemented in ragent v1.0.81.*
+*This document describes the Bash tool as implemented in ragent v1.0.81.*

@@ -71,7 +71,7 @@ fn test_serialize_assistant_tool_call_completed() {
         session_id: "s1".to_string(),
         role: Role::Assistant,
         parts: vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "call_1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
@@ -86,7 +86,7 @@ fn test_serialize_assistant_tool_call_completed() {
         edit_seq: 0,
     };
     let result = serialize_message(&message, TOOL_OUTPUT_MAX_CHARS);
-    assert!(result.contains("[Assistant tool call]: bash(ls -la)"));
+    assert!(result.contains("[Assistant tool call]: Bash(ls -la)"));
     assert!(result.contains("[Tool result]: file1.txt\nfile2.txt"));
 }
 
@@ -97,7 +97,7 @@ fn test_serialize_assistant_tool_call_error() {
         session_id: "s1".to_string(),
         role: Role::Assistant,
         parts: vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "call_2".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Error,
@@ -112,7 +112,7 @@ fn test_serialize_assistant_tool_call_error() {
         edit_seq: 0,
     };
     let result = serialize_message(&message, TOOL_OUTPUT_MAX_CHARS);
-    assert!(result.contains("[Assistant tool call]: bash(bad)"));
+    assert!(result.contains("[Assistant tool call]: Bash(bad)"));
     assert!(result.contains("[Tool error]: command not found"));
 }
 

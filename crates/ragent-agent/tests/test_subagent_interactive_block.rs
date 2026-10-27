@@ -1,10 +1,10 @@
 //! Interactive-tool block in subagent runs (subagent reliability fix):
 //!
-//! - an `ask_user` call in a Subagent-mode run is denied with a corrective
+//! - an `AskUserQuestion` call in a Subagent-mode run is denied with a corrective
 //!   observation (never executed) and the loop continues,
 //! - interactive tools are removed from the wire tool definitions offered to
 //!   a Subagent-mode run,
-//! - an `ask_user` call in a Primary (interactive) run still executes and
+//! - an `AskUserQuestion` call in a Primary (interactive) run still executes and
 //!   returns the user's reply.
 
 use std::pin::Pin;
@@ -45,7 +45,7 @@ enum ScriptedReply {
     ToolCallNamed { name: &'static str, args: String },
     /// Text-only response ending with `Finish { Stop }`.
     TextOnly(&'static str),
-    /// An `ask_user` call with a valid question payload; the responder task
+    /// An `AskUserQuestion` call with a valid question payload; the responder task
     /// answers it like the TUI would.
     AskUserCall { reply: &'static str },
 }
@@ -140,7 +140,7 @@ impl LlmClient for ScriptedClient {
                 vec![
                     StreamEvent::ToolCallStart {
                         id: "call_1".to_string(),
-                        name: "ask_user".to_string(),
+                        name: "AskUserQuestion".to_string(),
                     },
                     // Valid JSON question payload so the tool actually
                     // executes and publishes QuestionRequested; the
@@ -282,6 +282,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok((processor, tmp.path().to_path_buf(), captured))
@@ -308,7 +309,7 @@ fn tool_result_texts(reply: &ragent_agent::message::Message) -> Vec<String> {
         .collect()
 }
 
-/// A subagent run whose model calls `ask_user` gets a denial observation and
+/// A subagent run whose model calls `AskUserQuestion` gets a denial observation and
 /// the loop continues to completion - the run never blocks on a user that is
 /// not attached to the session.
 #[tokio::test]
@@ -318,7 +319,7 @@ async fn test_ask_user_denied_in_subagent_run() -> Result<()> {
         event_bus,
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "ask_user",
+                name: "AskUserQuestion",
                 args: r#"{"question": "which path?"}"#.to_string(),
             },
             ScriptedReply::TextOnly("decided on my own"),
@@ -353,7 +354,7 @@ async fn test_ask_user_denied_in_subagent_run() -> Result<()> {
     Ok(())
 }
 
-/// A Primary (interactive) run can still call `ask_user` - the block only
+/// A Primary (interactive) run can still call `AskUserQuestion` - the block only
 /// applies to subagent runs. A spawned responder answers the question the
 /// way the TUI would.
 #[tokio::test]
@@ -433,7 +434,7 @@ async fn test_ask_user_still_works_in_primary_run() -> Result<()> {
         .collect();
     assert!(
         texts.iter().any(|t| t.contains("user says go ahead")),
-        "the primary run's ask_user call should return the user reply, got: {texts:?}"
+        "the primary run's AskUserQuestion call should return the user reply, got: {texts:?}"
     );
     Ok(())
 }
@@ -460,7 +461,7 @@ async fn test_interactive_tools_absent_from_subagent_tool_surface() -> Result<()
     let first = requests.first().expect("at least one request");
     let names: Vec<&str> = first.tools.iter().map(|tool| tool.name.as_str()).collect();
     assert!(
-        !names.contains(&"ask_user"),
+        !names.contains(&"AskUserQuestion"),
         "interactive tools must be absent from the subagent tool surface, got: {names:?}"
     );
     assert!(

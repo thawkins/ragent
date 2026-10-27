@@ -97,11 +97,15 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
                                 });
                             }
                         }
-                        // A chat-message reasoning part has no signature record
-                        // on this path; the reasoning text is preserved so the
-                        // message round trip does not drop it.
-                        ContentPart::Reasoning { text, .. } => {
-                            parts.push(MessagePart::Reasoning { text: text.clone() });
+                        // A chat-message reasoning part carries its signature
+                        // (FR-011) so the signed block survives the round trip
+                        // and a profile declaring `echo_reasoning` can replay
+                        // it rather than an unsigned paraphrase.
+                        ContentPart::Reasoning { text, signature } => {
+                            parts.push(MessagePart::Reasoning {
+                                text: text.clone(),
+                                signature: signature.clone(),
+                            });
                         }
                         ContentPart::ImageUrl { url } => {
                             // Parse the mime type from a `data:` URI; plain
@@ -152,7 +156,7 @@ pub(crate) fn messages_to_chat_messages(messages: &[Message]) -> Vec<LlmChatMess
                 MessagePart::Text { text } => {
                     parts.push(ContentPart::Text { text: text.clone() });
                 }
-                MessagePart::Reasoning { text } => {
+                MessagePart::Reasoning { text, .. } => {
                     parts.push(ContentPart::Text {
                         text: format!("[reasoning]: {text}"),
                     });

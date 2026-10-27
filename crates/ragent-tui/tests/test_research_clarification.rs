@@ -1,5 +1,5 @@
 //! Tests for the `/research` clarification round-trip through the TUI
-//! question dialog (the `ask_user`-style flow).
+//! question dialog (the `AskUserQuestion`-style flow).
 //!
 //! `ask_user_clarification` in `src/app/research.rs` publishes
 //! `Event::QuestionRequested` and awaits a matching
@@ -80,6 +80,7 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

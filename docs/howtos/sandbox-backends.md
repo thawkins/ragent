@@ -531,7 +531,7 @@ the status bar now shows `Backend:podman`. The change applies to the **next** tu
 Ask the agent to inspect the workspace:
 
 ```text
-List the files in the workspace with `bash: ls -la`.
+List the files in the workspace with `Bash: ls -la`.
 ```
 
 What happens on the first tool call:

@@ -25,7 +25,7 @@ impl Tool for CodeIndexSymbolsTool {
          'file_path' (path substring), 'language' (e.g. rust), 'visibility' \
          (public/private/crate), and 'limit' (default 50, max 200). Returns structured \
          results with location, signature, and documentation. USE THIS instead of \
-         `grep` when you need to list or find named symbols in a file or across \
+         `Grep` when you need to list or find named symbols in a file or across \
          the project."
     }
 
@@ -73,8 +73,8 @@ impl Tool for CodeIndexSymbolsTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` as a fallback tool.",
-                    &["grep"],
+                    "Use `Grep` as a fallback tool.",
+                    &["Grep"],
                 ));
             }
         };

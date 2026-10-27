@@ -23,7 +23,7 @@ impl Tool for RmTool {
         "Delete a single file. Required parameter: `path` (string). Wildcards and \
          glob patterns (`*`, `?`, `[...]`) are not allowed - specify one exact \
          file. Fails if the file does not exist or if the path is a directory. \
-         To delete directories, use `bash` with an appropriate command instead."
+         To delete directories, use `Bash` with an appropriate command instead."
     }
 
     fn parameters_schema(&self) -> Value {

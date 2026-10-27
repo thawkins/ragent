@@ -56,6 +56,9 @@ mod test_descriptor;
 #[path = "test_fixtures.rs"]
 mod test_fixtures;
 
+#[path = "test_fr032_plugin_bridge.rs"]
+mod test_fr032_plugin_bridge;
+
 #[path = "test_harness.rs"]
 mod test_harness;
 

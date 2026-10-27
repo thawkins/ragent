@@ -34,32 +34,33 @@ the project root `README.md` and the **Tutorial** in
    - 7.11 [`hooks`](#711-hooks)
    - 7.12 [`bash`](#712-bash)
    - 7.13 [`dirs`](#713-dirs)
-   - 7.14 [`tool_visibility`](#714-tool_visibility)
-   - 7.15 [`code_index`](#715-code_index)
-   - 7.16 [`stream`](#716-stream)
-   - 7.17 [`memory`](#717-memory)
-   - 7.18 [`compaction`](#718-compaction)
-   - 7.19 [`gitlab`](#719-gitlab)
-   - 7.20 [`hidden_tools`](#720-hidden_tools)
-   - 7.21 [`yolo`](#721-yolo)
-   - 7.22 [`edit_log`](#722-edit_log)
-   - 7.23 [`prices`](#723-prices)
-   - 7.24 [`telemetry`](#724-telemetry)
-   - 7.25 [`agent_perf`](#725-agent_perf)
-   - 7.26 [`tavily_api_key` / `langsearch_api_key` / `perplexity_api_key` / `exa_api_key` / `serper_api_key` / `openalex_email`](#726-search-api-keys)
-   - 7.27 [`sdd`](#727-sdd)
-   - 7.28 [`trigger`](#728-trigger)
-   - 7.29 [`piegap`](#729-piegap)
-   - 7.30 [`research`](#730-research)
-   - 7.31 [`loop`](#731-loop)
-   - 7.32 [`activity_log`](#732-activity_log)
-    - 7.33 [`plugins`](#733-plugins)
-    - 7.34 [`input_queue_capacity`](#734-input_queue_capacity)
-    - 7.35 [`connectors`](#735-connectors)
-    - 7.36 [`execution_backend` and `backends`](#736-execution_backend-and-backends)
-    - 7.37 [`acp`](#737-acp)
-    - 7.38 [`i18n`](#738-i18n)
-    - 7.39 [`security_analyzer`](#739-security_analyzer)
+   - 7.14 [`code_index`](#714-code_index)
+   - 7.15 [`stream`](#715-stream)
+   - 7.16 [`memory`](#716-memory)
+   - 7.17 [`compaction`](#717-compaction)
+   - 7.18 [`gitlab`](#718-gitlab)
+   - 7.19 [`yolo`](#719-yolo)
+   - 7.20 [`edit_log`](#720-edit_log)
+   - 7.21 [`prices`](#721-prices)
+   - 7.22 [`telemetry`](#722-telemetry)
+   - 7.23 [`agent_perf`](#723-agent_perf)
+   - 7.24 [Search API keys](#724-search-api-keys)
+   - 7.25 [`sdd`](#725-sdd)
+   - 7.26 [`trigger`](#726-trigger)
+   - 7.27 [`piegap`](#727-piegap)
+   - 7.28 [`research`](#728-research)
+   - 7.29 [`loop`](#729-loop)
+   - 7.30 [`activity_log`](#730-activity_log)
+   - 7.31 [`plugins`](#731-plugins)
+   - 7.32 [`input_queue_capacity`](#732-input_queue_capacity)
+   - 7.33 [`connectors`](#733-connectors)
+   - 7.34 [`execution_backend` and `backends`](#734-execution_backend-and-backends)
+   - 7.35 [`acp`](#735-acp)
+   - 7.36 [`i18n`](#736-i18n)
+   - 7.37 [`security_analyzer`](#737-security_analyzer)
+   - 7.38 [`openai`](#738-openai)
+   - 7.39 [`automation`](#739-automation)
+   - 7.40 [`tools`](#740-tools)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -74,7 +75,6 @@ All ragent runtime behaviour is driven by a single layered JSON configuration:
   catalogues)
 - **Agent defaults and overrides** (system prompts, max steps, skills)
 - **Permissions** (allow / deny / ask rules, bash and directory allow/deny lists)
-- **Tool visibility** (which tool families are advertised to the LLM)
 - **Memory, compaction, and retrieval** settings
 - **Telemetry / OpenTelemetry export**
 - **External integrations** (GitLab)
@@ -192,7 +192,7 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `permission`, `instructions`, `skill_dirs`, `hooks` | Append (union). |
 | `bash.allowlist`, `bash.denylist` | Union (deduplicated). |
 | `prices` | Per-model last-wins (overlay entry replaces base entry for the same model id). |
-| `code_index`, `tool_visibility` | Overlay wins **only** for explicitly-set fields. The `specified` flags are propagated so the value survives a reload. |
+| `code_index` | Overlay wins **only** for explicitly-set fields. The `specified` flags are propagated so the value survives a reload. |
 | `compaction` | Overlay replaces base entirely. |
 | `yolo`, `edit_log` | OR semantics: if the overlay sets `true`, it wins. |
 | `sdd`, `piegap` | OR semantics: a flag enabled in either layer stays enabled. |
@@ -202,6 +202,7 @@ provider entry (`thinking`, `env`, `models`) still merges.
 | `plugins` | Overlay wins wholesale when the `plugins` section is present, so a project-level block is not discarded by an absent user-global block. |
 | `connectors` | Overlay wins wholesale when the `connectors` section is present, so a project-level block is not discarded by an absent user-global block. |
 | `input_queue_capacity` | Overlay wins when explicitly set, so a project-level override is not discarded by an absent user-global value. |
+| `tools` | `aliases` entries union **per spelling** (the overlay wins a collision, so a project can add one spelling without discarding the user-global table); `expose_alias_names` and `wire_trace` use OR semantics. The one exception is an overlay that writes `aliases: false`, which switches resolution off and drops the inherited entries - `false` is the only way an author can say "no table", and an unconditional union would make a user-global `true` impossible to switch off. An empty object `{}` is *not* that switch. |
 
 The `config_paths` field records every file that contributed to the final
 merged config, in load order.
@@ -542,7 +543,7 @@ last-match-wins using glob patterns.
 
 | Field | Type | Description |
 | ----- | ---- | ----------- |
-| `permission` | `String` (parsed to `Permission`) | The permission type. Supports flat names (`read`, `bash`) and namespaced categories (`file:read`, `file:write`). |
+| `permission` | `String` (parsed to `Permission`) | The permission type. Supports flat names (`read`, `bash`) and namespaced categories (`file:read`, `file:write`). These are permission types, not tool names: the rename left them unchanged. |
 | `pattern` | `Option<String>` | Glob pattern matched against the resource path. `None` matches all. |
 | `action` | `PermissionAction` | `allow`, `deny`, or `ask`. |
 
@@ -551,12 +552,12 @@ last-match-wins using glob patterns.
 | Name | Permission variant | Description |
 | ---- | ------------------ | ----------- |
 | `read` / `file:read` | `Read` | Read access to files/resources. |
-| `Edit` / `Write` / `file:write` | `Edit` | Write/edit access. |
-| `bash` / `execute` | `Bash` | Shell command execution. |
+| `edit` / `write` / `file:write` | `Edit` | Write/edit access (the permission type, not the `Edit`/`Write` tool names). |
+| `bash` / `execute` / `bash:execute` | `Bash` | Shell command execution (the permission type; the tool is `Bash`). |
 | `web` / `fetch` | `Web` | Network/web access. |
 | `question` | `Question` | Interactive question to user. |
-| `EnterPlanMode` / `plan` | `PlanEnter` | Enter planning phase. |
-| `ExitPlanMode` | `PlanExit` | Exit planning phase. |
+| `plan_enter` / `plan` | `PlanEnter` | Enter planning phase (the tool is `EnterPlanMode`). |
+| `plan_exit` | `PlanExit` | Exit planning phase (the tool is `ExitPlanMode`). |
 | `task` | `Task` | Create/modify task items. |
 | `external_directory` | `ExternalDirectory` | Access dirs outside project root. |
 | `doom_loop` | `DoomLoop` | Detect/break infinite loops. |
@@ -710,7 +711,7 @@ Type: `Vec<Value>`. Default: `[]`. Merged (append) across config layers.
 
 ---
 
-### 7.12 `Bash`
+### 7.12 `bash`
 
 User-defined bash command allowlist and denylist additions.
 
@@ -774,50 +775,7 @@ directories: `/bin/**`, `/sbin/**`, `/boot/**`, `/dev/**`, `/proc/**`,
 
 ---
 
-### 7.14 `tool_visibility`
-
-Controls which tool families are advertised to the LLM. When a switch is
-`false`, all tools in that family are hidden from tool definitions and
-system-prompt listings. Hidden tools remain registered and executable.
-
-```json
-{
-  "tool_visibility": {
-    "github": true,
-    "gitlab": false,
-    "teams": true,
-    "agents": true,
-    "plan": true,
-    "codeindex": true,
-    "masterfetch": true
-  }
-}
-```
-
-#### Switches and defaults
-
-| Switch | Default | Tools governed |
-| ------ | ------- | -------------- |
-| `github` | `false` | `github_list_issues`, `github_get_issue`, `github_create_issue`, `github_comment_issue`, `github_close_issue`, `github_list_prs`, `github_get_pr`, `github_create_pr`, `github_merge_pr`, `github_review_pr` |
-| `gitlab` | `false` | 19 GitLab tools (issues, MRs, pipelines, jobs) |
-| `teams` | `false` | 20 team coordination tools |
-| `agents` | `false` | `cancel_agent`, `list_agents`, `new_agent`, `agent_complete`, `wait_agents` |
-| `plan` | `false` | `EnterPlanMode`, `ExitPlanMode` |
-| `codeindex` | `true` | `codeindex_search`, `codeindex_status`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_reindex` |
-| `masterfetch` | `true` | `mf_fetch`, `mf_crawl`, `mf_search`, `mf_cache_clear`, `mf_version` (plus `mf_screenshot` only when a drivable headless browser engine is present; spec `openhands` FR-029) |
-
-The `codeindex` and `masterfetch` switches are
-serialised **only** when explicitly set (tracked by `specified` flags). This
-lets the default config omit the key so code-level default changes propagate,
-while ensuring an explicit user toggle persists on save.
-
-The `/tools` slash command toggles these at runtime. See
-[`docs/howtos/tool-visibility.md`](tool-visibility.md) and
-[`docs/howtos/tools/INDEX.md`](tools/INDEX.md).
-
----
-
-### 7.15 `code_index`
+### 7.14 `code_index`
 
 Persistent configuration for the codebase indexing subsystem.
 
@@ -849,7 +807,7 @@ For the full code index guide, see [`docs/howtos/codeindex.md`](codeindex.md).
 
 ---
 
-### 7.16 `stream`
+### 7.15 `stream`
 
 LLM streaming behaviour: timeouts and retries.
 
@@ -878,7 +836,7 @@ start if any are present.
 
 ---
 
-### 7.17 `memory`
+### 7.16 `memory`
 
 Memory system configuration: blocks, structured store, semantic search,
 retrieval, auto-extraction, decay, and cross-project sharing.
@@ -975,7 +933,7 @@ retrieval, auto-extraction, decay, and cross-project sharing.
 
 ---
 
-### 7.18 `compaction`
+### 7.17 `compaction`
 
 Context-window compaction configuration (OpenCode-derived summarisation).
 
@@ -1024,7 +982,7 @@ Runtime behaviour:
 
 ---
 
-### 7.19 `gitlab`
+### 7.18 `gitlab`
 
 GitLab integration configuration. Values set here override those stored in
 the ragent database (set via `/gitlab setup`). Environment variables take the
@@ -1052,26 +1010,7 @@ Env var overrides: `GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_USERNAME`.
 
 ---
 
-### 7.20 `hidden_tools`
-
-Tool names to hide from the LLM. Hidden tools remain registered and
-executable; they are simply not advertised to the model.
-
-```json
-{
-  "hidden_tools": ["github_list_issues", "github_get_issue", "gitlab_list_mrs"]
-}
-```
-
-Type: `Vec<String>`. Default: `[]`. Unioned (deduplicated) across config
-layers.
-
-The `effective_hidden_tools()` method also computes tools hidden by
-`tool_visibility` switches set to `false`.
-
----
-
-### 7.21 `yolo`
+### 7.19 `yolo`
 
 YOLO mode bypasses all command validation and tool restrictions.
 
@@ -1105,7 +1044,7 @@ and path with a forced backtrace, so a privileged flag flip is attributable.
 
 ---
 
-### 7.22 `edit_log`
+### 7.20 `edit_log`
 
 Edit-operation logging for `Edit` and `multi_edit` tools.
 
@@ -1120,7 +1059,7 @@ When enabled, all edit operations are logged. The `Alt+E` keybinding and
 
 ---
 
-### 7.23 `prices`
+### 7.21 `prices`
 
 User-defined price overrides for cost estimation. Each entry overrides the
 built-in price table for a specific model. Prices are in USD per 1,000,000
@@ -1148,7 +1087,7 @@ When merged, overlay entries replace base entries with the same model id
 
 ---
 
-### 7.24 `telemetry`
+### 7.22 `telemetry`
 
 OpenTelemetry metrics export configuration.
 
@@ -1195,7 +1134,7 @@ via `apply_legacy_flag()`.
 
 ---
 
-### 7.25 `agent_perf`
+### 7.23 `agent_perf`
 
 Agent-loop performance configuration.
 
@@ -1228,7 +1167,7 @@ any are present.
 
 ---
 
-### 7.26 Search API keys
+### 7.24 Search API keys
 
 Several API keys for the `mf_search` / `websearch` tools can be stored in the
 config file. Environment variables always take precedence.
@@ -1247,7 +1186,7 @@ search engine alongside the keyless backends (OpenAlex, Wikipedia).
 
 ---
 
-### 7.27 `sdd`
+### 7.25 `sdd`
 
 Spec-Driven Development (SDD) capability toggles. All flags default to `false`
 (opt-in).
@@ -1293,7 +1232,7 @@ For the spec system, see [`docs/howtos/spec.md`](spec.md).
 
 ---
 
-### 7.28 `trigger`
+### 7.26 `trigger`
 
 Dynamic trigger rule system configuration.
 
@@ -1320,7 +1259,7 @@ section is omitted from serialised output when nothing is configured.
 
 ---
 
-### 7.29 `piegap`
+### 7.27 `piegap`
 
 Pie feature gap toggles. Each flag gates a standalone pie-derived feature. All
 default to `false` (opt-in).
@@ -1364,7 +1303,7 @@ enabled.
 
 ---
 
-### 7.30 `research`
+### 7.28 `research`
 
 Research subsystem configuration.
 
@@ -1424,7 +1363,7 @@ For the research system, see [`docs/howtos/research.md`](research.md).
 
 ---
 
-### 7.31 `loop`
+### 7.29 `loop`
 
 Goal-driven `/loop` run budgets and checkpoints (see
 [`docs/howtos/loopprogramming.md`](loopprogramming.md)). The whole section is
@@ -1458,7 +1397,7 @@ win.
 
 ---
 
-### 7.32 `activity_log`
+### 7.30 `activity_log`
 
 ```json
 {
@@ -1472,7 +1411,7 @@ win.
 
 Toggle at runtime with `/alog on|off`.
 
-### 7.33 `plugins`
+### 7.31 `plugins`
 
 Plugin subsystem configuration (spec `plugins`). Controls the master switch,
 the sandbox budgets, the store location, and per-plugin permission grants.
@@ -1506,7 +1445,7 @@ user-global). Manage plugins with `/plugins list|add|remove|enable|disable|test|
 in the TUI or `ragent plugins <sub>` from the CLI. See
 [`docs/howtos/slashcommands/plugins.md`](slashcommands/plugins.md).
 
-### 7.34 `input_queue_capacity`
+### 7.32 `input_queue_capacity`
 
 Maximum number of messages the TUI message input queue may hold (spec
 `inputqueue`). While the primary agent is executing, messages submitted with
@@ -1528,7 +1467,7 @@ absent user-global value. The per-run queue is in memory only and is never
 persisted. Manage the queue with the `Alt+Q` menu or the `/queue` slash command
 (see `docs/howtos/slashcommands/queue.md` and `TUI-QUICKSTART.md` §4).
 
-### 7.35 `connectors`
+### 7.33 `connectors`
 
 Connector subsystem configuration (spec `connectors`). Controls the master
 switch, the connector store location, the catalogue endpoints and fetch budgets,
@@ -1571,7 +1510,7 @@ in the TUI or `ragent connectors <sub>` from the CLI.
 
 ---
 
-### 7.36 `execution_backend` and `backends`
+### 7.34 `execution_backend` and `backends`
 
 Select **where** a session's tool invocations run (spec `openhands` FR-001,
 FR-026). When unset, ragent executes tools on the host exactly as before
@@ -1660,7 +1599,7 @@ server's **public** `/health` endpoint, so no key is sent). The TUI backend
 surface (T-005, FR-008) renders this registry: the active backend, each
 registered backend's health, and a switcher.
 
-### 7.37 `acp`
+### 7.35 `acp`
 
 Agent Client Protocol configuration (spec `openhands` FR-015, FR-022, FR-028,
 FR-036). Two roles:
@@ -1707,7 +1646,7 @@ See [`docs/howtos/acp.md`](acp.md) for the full guide: the client turn lifecycle
 how an agent binds to an ACP entry, worked examples for Claude Code, Codex, and
 Gemini CLI, the server endpoint, and troubleshooting.
 
-### 7.38 `i18n`
+### 7.36 `i18n`
 
 UI internationalisation (spec `openhands` FR-027). Opt-in and absent by default;
 when present, user-facing strings render from the configured locale's message
@@ -1717,7 +1656,7 @@ catalog and fall back to English for any missing key.
 { "i18n": { "enabled": true, "locale": "fr" } }
 ```
 
-### 7.39 `security_analyzer`
+### 7.37 `security_analyzer`
 
 LLM-based security-analyzer permission mode (spec `openhands` FR-006, FR-016,
 FR-017). Opt-in and absent by default; when present and enabled, each proposed
@@ -1727,7 +1666,7 @@ rationale before the action is permitted or refused. See
 
 ---
 
-### 7.40 `openai`
+### 7.38 `openai`
 
 OpenAI-compatible inbound HTTP surface configuration (spec `openhands` FR-012,
 FR-024, FR-032). Opt-in and absent by default; the `/v1/models` and
@@ -1765,7 +1704,7 @@ JSON object (FR-011). Both paths preserve the permission checks (FR-038).
 
 ---
 
-### 7.41 `automation`
+### 7.39 `automation`
 
 Automation service configuration (spec `openhands` FR-013, FR-014, FR-018,
 FR-033). Absent by default; the service is inert unless a present block sets
@@ -1828,6 +1767,67 @@ bearer token - the value is never stored, FR-035), and optional `target` (a
 channel, repository, or database id). A target with no `url` is inert.
 
 See `docs/howtos/slashcommands/automation.md` for the surfaces.
+
+---
+
+### 7.40 `tools`
+
+Tool-name alias resolution, alias advertisement and the provider payload trace
+(spec `uniformtools` FR-015, FR-017). Every switch is off by default and the
+whole section is omitted from a serialised config while it is at those
+defaults, so a build that has never seen the section writes a byte-identical
+`ragent.json` and resolves every inbound tool name against the registry alone.
+
+```jsonc
+{
+  "tools": {
+    "aliases": { "WebFetch": "webfetch" },
+    "expose_alias_names": true,
+    "wire_trace": false
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `aliases` | `bool` or `object` | absent (off) | Provider tool spellings resolved onto ragent tool names before the unknown-tool check (FR-015). `true` requests the built-in table of provider spellings; an object adds explicit `"<provider spelling>": "<ragent tool>"` entries. Both may be in force at once after a merge. |
+| `expose_alias_names` | `bool` | `false` | Additionally advertise each alias spelling in the outbound tool list, so a model that only knows the provider spelling can still see it (FR-015). Never advertises a retired ragent spelling (FR-031). |
+| `wire_trace` | `bool` | `false` | Write each step's request body, redacted through the existing sanitizer, to `target/temp/wire-trace/<session>-<step>.json` (FR-017). Inert while absent or `false`, and it never touches a provider or a tool. |
+
+**Four values, four meanings for `aliases`.** The key is deliberately not a
+plain `Option<bool>`, because absent, `true`, `false` and an object (possibly
+empty) each say something different:
+
+| Value | Meaning |
+| ----- | ------- |
+| absent | This layer has no opinion; whatever a lower layer contributed stands. |
+| `true` | Use the built-in provider-spelling table (`WebFetch` -> `webfetch`, `WebSearch` -> `websearch`, `file_search` -> `codeindex_search`, `web_search` -> `websearch`). |
+| `false` | Switch alias resolution off for the merged config and drop every inherited entry. |
+| `{ ... }` | Contribute these entries. `{}` contributes no spelling and clears nothing - it is not the `false` switch and round-trips as `{}`. |
+
+**Layered merge.** Entries union per spelling with the higher-precedence layer
+winning a collision, so a project file can add or re-point one spelling without
+discarding the user-global table. The two opt-in booleans use OR semantics: a
+layer that enables one cannot have it silently turned off by a layer that leaves
+it at the default. A project-local `.ragent/ragent.json` may contribute the
+section like any other non-privileged key, because it resolves *names*, not
+capabilities - the permission layer, the loop restriction and the 7-layer bash
+validation still run on the resolved call.
+
+**A retired spelling is refused when the config loads (FR-031).** `tools.aliases`
+is the one section that can carry a tool name, so a source key or a target value
+equal to a before-rename spelling - including the self-mapping form - stops the
+load with an error naming the file, the offending spelling and its replacement.
+A target naming no *currently registered* tool is not refused at load (a plugin,
+MCP or connector tool may be bridged later); it is reported once and refused
+when used.
+
+**Errors are load errors, not silent defaults.** A bare string, or an entry whose
+value is not a string, fails the load naming the accepted shapes and the
+offending spelling - a typo must not quietly disable alias resolution.
+
+See [section 3](#3-merge-semantics) for the merge-strategy table, and
+`QUICKSTART.md` for the resolver's inbound behaviour.
 
 ---
 
@@ -1935,14 +1935,10 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "denylist": ["secrets/**", ".env"]
     },
 
-    "tool_visibility": {
-      "github": true,
-      "gitlab": false,
-      "teams": true,
-      "agents": true,
-      "plan": true,
-      "codeindex": true,
-      "masterfetch": true
+    "tools": {
+      "aliases": { "WebFetch": "webfetch" },
+      "expose_alias_names": true,
+      "wire_trace": false
     },
 
     "code_index": {
@@ -2000,8 +1996,6 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "token": "env:GITLAB_TOKEN",
     "username": "myuser"
   },
-
-  "hidden_tools": [],
 
   "yolo": false,
   "edit_log": false,
@@ -2117,10 +2111,10 @@ need all of these — every section has defaults, so an empty `{}` is valid.
   }
 }
 ```
-  
-  ---
-  
-  ## 9. Common Recipes
+
+---
+
+## 9. Common Recipes
 
 ### Minimal config (just an API key reference)
 
@@ -2172,17 +2166,6 @@ The base URL can also be set via `GENERIC_OPENAI_API_BASE` env var.
     { "permission": "file:write", "pattern": "src/**", "action": "allow" },
     { "permission": "file:write", "pattern": "secrets/**", "action": "deny" }
   ]
-}
-```
-
-### Enable GitHub and teams tools
-
-```json
-{
-  "tool_visibility": {
-    "github": true,
-    "teams": true
-  }
 }
 ```
 
@@ -2318,7 +2301,6 @@ This is merged last, with the highest precedence.
 | [`docs/howtos/tutorial.md`](tutorial.md) | End-to-end tutorial from setup to release |
 | [`docs/howtos/permissions.md`](permissions.md) | Permissions, autopilot, and YOLO mode |
 | [`docs/howtos/tools/INDEX.md`](tools/INDEX.md) | Complete tool reference (split by category) |
-| [`docs/howtos/tool-visibility.md`](tool-visibility.md) | Tool family visibility toggles |
 | [`docs/howtos/custom-agents.md`](custom-agents.md) | Custom agent definitions (OASF / Markdown) |
 | [`docs/howtos/teams.md`](teams.md) | Teams and swarm coordination |
 | [`docs/howtos/hooks.md`](hooks.md) | Lifecycle hooks |

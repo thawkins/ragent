@@ -917,7 +917,7 @@ async fn alt_toggle_keys_map_to_actions() {
     for (c, name) in [
         ('l', "ToggleLog"),
         ('p', "ToggleProfile"),
-        ('t', "ToggleTasksPanel"),
+        ('i', "ToggleTasksPanel"),
         ('m', "ToggleMemory"),
         ('o', "ToggleTelemetry"),
         ('c', "ToggleContextPanel"),

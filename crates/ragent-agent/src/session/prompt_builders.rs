@@ -106,37 +106,37 @@ pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
 
 /// Build a system-prompt section describing the codebase index tools.
 ///
-/// Uses strong directive language to steer the LLM away from `grep`/`search`
+/// Uses strong directive language to steer the LLM away from `Grep`/`search`
 /// for any query that involves code symbols, types, or structure.
 pub(crate) fn build_codeindex_guidance_section_active() -> String {
     "\n## Code Intelligence - Codebase Index Tools\n\n\
             A **codebase index** is active for this project. It provides fast, structured \
             search across all indexed source files - symbols, references, dependencies, \
             and documentation.\n\n\
-            **MANDATORY - You MUST use codeindex tools instead of grep for code symbol queries.**\n\
-            When the index is active, `grep` is the WRONG choice for finding \
+            **MANDATORY - You MUST use codeindex tools instead of Grep for code symbol queries.**\n\
+            When the index is active, `Grep` is the WRONG choice for finding \
             functions, types, structs, enums, traits, or any named code entity. The index \
             is faster, returns structured results with file/line/signature, and understands \
             symbol kinds.\n\n\
             **Decision flow - which tool to use:**\n\
-            - \"Where is function X defined?\" -> `codeindex_search` (NOT grep)\n\
-            - \"Find all structs matching Y\" -> `codeindex_symbols` with kind=struct (NOT grep)\n\
-            - \"Who calls function Z?\" -> `codeindex_references` (NOT grep)\n\
-            - \"What does file A import?\" -> `codeindex_dependencies` (NOT grep for imports)\n\
-            - \"List all functions in file B\" -> `codeindex_symbols` with file_path (NOT grep)\n\
+            - \"Where is function X defined?\" -> `codeindex_search` (NOT Grep)\n\
+            - \"Find all structs matching Y\" -> `codeindex_symbols` with kind=struct (NOT Grep)\n\
+            - \"Who calls function Z?\" -> `codeindex_references` (NOT Grep)\n\
+            - \"What does file A import?\" -> `codeindex_dependencies` (NOT Grep for imports)\n\
+            - \"List all functions in file B\" -> `codeindex_symbols` with file_path (NOT Grep)\n\
             - \"Is the index working?\" -> `codeindex_status`\n\
             - \"Re-index after bulk edits\" -> `codeindex_reindex`\n\n\
-            **When grep IS appropriate:**\n\
+            **When Grep IS appropriate:**\n\
             - Searching for arbitrary text strings, comments, or prose (not symbols)\n\
             - Finding TODO/FIXME/HACK comments\n\
             - Searching config files, markdown, or non-code text\n\
             - Pattern matching across many files for non-structural content\n\n\
             **Rule of thumb:** If you are looking for a named code entity (function, type, \
             variable, import), use codeindex. If you are searching for a text pattern that \
-            is NOT a code symbol, use grep with the `pattern` parameter.\n\n\
-            **CRITICAL - grep parameter requirement:**\n\
-            The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
-            Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n\
+            is NOT a code symbol, use Grep with the `pattern` parameter.\n\n\
+            **CRITICAL - Grep parameter requirement:**\n\
+            The `Grep` tool requires the `pattern` parameter. This is the ONLY required field. \
+            Do NOT omit it. Example: `Grep(pattern: \"fn main\", path: \"src\")`\n\n\
             **Codeindex options and limits:**\n\n\
             - `codeindex_search` and `codeindex_symbols` both accept `max_results` (default 20, maximum 100). \
               If you expect many results, raise the limit explicitly.\n\n\
@@ -153,25 +153,25 @@ pub(crate) fn build_codeindex_guidance_section_active() -> String {
 /// Build a system-prompt section for when the codebase index is NOT active.
 ///
 /// Informs the LLM that codeindex tools will return "not available" and
-/// that grep/search should be used as fallback. Suggests enabling the index.
+/// that Grep/search should be used as fallback. Suggests enabling the index.
 pub(crate) fn build_codeindex_guidance_section_disabled() -> String {
     "\n## Code Intelligence - Codebase Index Tools\n\n\
             The codebase index is **not active** for this project. Code index tools \
             (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
             `codeindex_dependencies`) will return \"not available\" if called.\n\n\
-            Use `grep` with the `pattern` parameter for code lookups in the meantime. You can suggest \
+            Use `Grep` with the `pattern` parameter for code lookups in the meantime. You can suggest \
             the user enable the index with `/codeindex on` for faster, structured \
             symbol search.\n\n\
-            **CRITICAL - grep parameter requirement:**\n\
-            The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
-            Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n"
+            **CRITICAL - Grep parameter requirement:**\n\
+            The `Grep` tool requires the `pattern` parameter. This is the ONLY required field. \
+            Do NOT omit it. Example: `Grep(pattern: \"fn main\", path: \"src\")`\n\n"
         .to_string()
 }
 
 /// Build a concise system-prompt section listing every registered tool by name and description.
 ///
 /// Injected into every session's system prompt so the model always knows the exact tool names
-/// available. This prevents hallucinated tool names (e.g. calling "search" instead of "grep").
+/// available. This prevents hallucinated tool names (e.g. calling "search" instead of "Grep").
 #[allow(dead_code)]
 pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
     build_tool_reference_from_defs(&registry.definitions())

@@ -20,6 +20,8 @@
 //! | 6 | `test_a_correct_manifest_is_silent` | no report for a manifest that resolves |
 //! | 7 | `test_the_allowed_set_holds_the_entry_verbatim` | `build_allowed_tool_set` stores the entry, so the filter compares exact names |
 //! | 8 | `test_an_adopted_spelling_matches_exactly_one_definition` | the filtered surface is one definition per adopted entry, never two |
+//! | 9 | `test_skill_manage_reports_a_stale_entry_when_it_applies_the_restriction` | the `Skill` wiring consumes the ledger |
+//! | 10 | `test_all_three_restriction_sites_report_and_the_prompt_path_does_not` | the other two sites (TUI `/skill`, forked resolver) report, and neither per-turn prompt path does |
 //!
 //! ## Why there is no `Read` case
 //!
@@ -331,7 +333,7 @@ fn test_an_adopted_spelling_matches_exactly_one_definition() {
 }
 
 // ---------------------------------------------------------------------------
-// 9: the report is wired where a restriction is actually applied
+// 9-10: the report is wired where a restriction is actually applied
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -398,7 +400,78 @@ async fn test_skill_manage_reports_a_stale_entry_when_it_applies_the_restriction
             &entries(&["Bash", "ReadFile"]),
         ),
         0,
-        "FR-029: `skill_manage` must report the stale entry when it applies the \
+        "FR-029: `Skill` must report the stale entry when it applies the \
          restriction; the ledger already holding it here is the proof it did"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 10: all three restriction sites report, and no per-turn path does
+// ---------------------------------------------------------------------------
+
+/// The workspace root, resolved from this crate's manifest directory.
+fn workspace_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("crates/<name> sits two levels below the workspace root")
+        .to_path_buf()
+}
+
+fn read_workspace_file(relative: &str) -> String {
+    let path = workspace_root().join(relative);
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+#[test]
+fn test_all_three_restriction_sites_report_and_the_prompt_path_does_not() {
+    // FR-029's second clause is only met if the report happens where a skill's
+    // list becomes a *restriction*. `Skill` and the TUI `/skill` trigger are
+    // driven end to end above and in `crates/ragent-tui/tests/test_skill_command.rs`;
+    // the forked resolver needs a live `SessionProcessor`, so the wiring of all
+    // three - and, more importantly, the *absence* of the fourth - is pinned by
+    // reading the sources. A per-turn prompt path is the failure mode the
+    // requirement warns about: it would warn about every discovered manifest,
+    // including plugin skills the session never runs.
+    let sites = [
+        "crates/ragent-agent/src/tool/skill_manage.rs",
+        "crates/ragent-tui/src/app/slash.rs",
+        "crates/ragent-agent/src/skill/invoke.rs",
+    ];
+    for relative in sites {
+        let source = read_workspace_file(relative);
+        assert!(
+            source.contains("report_skill_allowed_tools_once"),
+            "{relative} must report a stale `allowed_tools` entry where it applies the \
+             restriction (FR-029)"
+        );
+    }
+
+    // The negative half: the paths that walk every manifest on every turn.
+    for relative in [
+        "crates/ragent-agent/src/session/prompt_builders.rs",
+        "crates/ragent-agent/src/session/loop_steps.rs",
+        "crates/ragent-tui/src/app/prompt.rs",
+    ] {
+        let source = read_workspace_file(relative);
+        assert!(
+            !source.contains("report_skill_allowed_tools_once")
+                && !source.contains("report_unresolved_allowed_tools_once"),
+            "{relative} builds the tool surface every turn; reporting there would warn \
+             about manifests the session never runs and add a per-turn scan for an entry \
+             that constrains nothing that turn (FR-029, NFR-006)"
+        );
+    }
+
+    // One definition, in the module that owns the ledger.
+    let module = read_workspace_file("crates/ragent-agent/src/tool/allowed_tools.rs");
+    let definitions = module
+        .lines()
+        .filter(|line| line.starts_with("pub fn report_skill_allowed_tools_once"))
+        .count();
+    assert_eq!(
+        definitions, 1,
+        "the skill-declarer form must be defined exactly once, so all three sites share \
+         one declarer text and the ledger key cannot disagree (FR-029)"
     );
 }

@@ -1,7 +1,7 @@
-//! todo2tasks T-010: integration tests for the `task_list` tool
+//! todo2tasks T-010: integration tests for the `TaskList` tool
 //! (`TaskListTool`).
 //!
-//! Verifies FR-015: when `task_list` is called, the system returns all
+//! Verifies FR-015: when `TaskList` is called, the system returns all
 //! session tasks ordered by `created_at`.  Each entry includes `id`,
 //! `subject`, `status`, `owner`, `blocked_by`.  Optional `status`
 //! filter: `pending` / `in_progress` / `completed` / `all` (default
@@ -537,11 +537,11 @@ async fn test_task_list_empty_unfiltered_content() {
 
 // -- Tool metadata ------------------------------------------------��--
 
-/// Tool name should be "task_list".
+/// Tool name should be "TaskList" (FR-023 `after` spelling).
 #[test]
 fn test_task_list_tool_name() {
     let tool = TaskListTool;
-    assert_eq!(tool.name(), "task_list");
+    assert_eq!(tool.name(), "TaskList");
 }
 
 /// Tool should have a non-empty description.
@@ -573,12 +573,12 @@ fn test_task_list_tool_permission_category() {
 
 // -- Registry registration -------------------------------------------
 
-/// `task_list` should be registered in the extended registry.
+/// `TaskList` should be registered in the extended registry.
 #[test]
 fn test_task_list_registered() {
     let registry = ragent_tools_extended::create_extended_registry();
     assert!(
-        registry.contains("task_list"),
-        "task_list should be registered"
+        registry.contains("TaskList"),
+        "TaskList should be registered"
     );
 }

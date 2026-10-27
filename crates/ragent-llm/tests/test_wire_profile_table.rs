@@ -3,11 +3,13 @@
 //! FR-002 has two halves. This file tests the second: a test **shall** assert
 //! that the set of profiles covers every registered provider id. The first half -
 //! "a client constructed without a profile shall fail to compile" - is not
-//! asserted here, because no client holds a profile yet: T-003 declares the
-//! contract and the table, and the encoder tasks (T-004 onward) make each client
-//! take one. What makes that later step safe is the type: `ToolWireProfile` has
-//! no `Default` impl and no optional constructor, so when a client does take a
-//! profile there is no fallback contract it could silently inherit.
+//! asserted here, because no client holds a profile yet: T-002 declares the
+//! contract, T-003 the table, and the encoder tasks (T-004 onward) make each
+//! client take one. What makes that later step safe is the type: `ToolWireProfile`
+//! has no `Default` impl and no optional constructor, so when a client does take a
+//! profile there is no fallback contract it could silently inherit. That property
+//! is pinned in `tests/test_wire_profile.rs`
+//! (`test_wire_profile_has_no_default_impl_anywhere_in_the_crate`).
 //!
 //! The assertion is deliberately one-directional in the dangerous direction and
 //! two-directional in the safe one:
@@ -20,8 +22,17 @@
 //!
 //! The remaining cases pin the properties that make the table a *table* rather
 //! than fifteen copies of the same struct: the ids are unique and ordered, the
-//! lookup agrees with the slice, every family constant is present, and the
-//! profiles differ on the axes the tree actually diverges on.
+//! lookup agrees with the slice, every declared family is listed in [`FAMILIES`]
+//! and every row names one of them, and the profiles differ on the axes the tree
+//! actually diverges on.
+//!
+//! [`FAMILIES`] is what makes the "one profile per provider family" half of the
+//! task checkable rather than assumed. `PROVIDER_WIRE` is many-to-one by design -
+//! eight providers share the OpenAI chat family - so a table alone cannot
+//! distinguish "the same declared contract" from "fifteen literals that happen to
+//! be equal today". The list names each family once, every row must be a member
+//! of it, and a source scan keeps a newly declared family constant from existing
+//! in the module without appearing in the list.
 //!
 //! No provider is contacted and no session is created: the registry is built
 //! offline (its constructors read environment variables only to *resolve* a
@@ -33,8 +44,8 @@ use std::collections::HashSet;
 use ragent_llm::provider::ProviderRegistry;
 use ragent_llm::provider::create_default_registry;
 use ragent_llm::provider::wire::profile_table::{
-    ANTHROPIC_MESSAGES, BEDROCK_CONVERSE, GEMINI, OLLAMA_NATIVE, OPENAI_CHAT, OPENAI_RESPONSES,
-    PROVIDER_WIRE, profile_for,
+    ANTHROPIC_MESSAGES, BEDROCK_CONVERSE, FAMILIES, GEMINI, OLLAMA_NATIVE, OPENAI_CHAT,
+    OPENAI_RESPONSES, PROVIDER_WIRE, profile_for,
 };
 use ragent_llm::provider::wire::{
     ArgsEncoding, IdField, ResultCarrier, StreamKeying, ToolEnvelope, ToolWireProfile,
@@ -118,33 +129,123 @@ fn test_wire_profile_table_lookup_agrees_with_the_slice() {
 }
 
 #[test]
-fn test_wire_profile_table_declares_all_six_families() {
-    // Every family constant must be a row of the table; a constant nothing
-    // names would be dead contract, and the wire matrix would never print it.
-    let named = [
-        OPENAI_CHAT,
-        ANTHROPIC_MESSAGES,
-        GEMINI,
-        BEDROCK_CONVERSE,
-        OPENAI_RESPONSES,
-        OLLAMA_NATIVE,
-    ];
-    for (index, family) in named.iter().enumerate() {
+fn test_wire_profile_table_declares_every_family_once() {
+    // `FAMILIES` is the declaration of "one profile per provider family". Every
+    // family `const` must appear in it - a constant nothing lists is dead
+    // contract the wire matrix (FR-016) would never print - and the constants
+    // must be six *distinct* contracts: no two agree on all nine fields, or the
+    // second would be a duplicate family rather than a family.
+    assert_eq!(
+        FAMILIES.len(),
+        6,
+        "the tree implements six wire formats; a seventh family is a contract \
+         change, not a list entry"
+    );
+    for (label, family) in FAMILIES {
         assert!(
             PROVIDER_WIRE.iter().any(|(_, p)| p == family),
-            "family constant {index} ({:?} / {:?}) is not named by any PROVIDER_WIRE row",
+            "family {label:?} ({:?} / {:?}) is not named by any PROVIDER_WIRE row",
             family.tool_envelope,
             family.result_carrier
         );
     }
-
-    // The six constants are six *distinct* contracts: no two agree on all nine
-    // fields, or the second would be a duplicate family rather than a family.
-    for (i, a) in named.iter().enumerate() {
-        for (j, b) in named.iter().enumerate().skip(i + 1) {
-            assert_ne!(a, b, "family constants {i} and {j} are the same profile");
+    for (i, (label_a, a)) in FAMILIES.iter().enumerate() {
+        for (label_b, b) in FAMILIES.iter().skip(i + 1) {
+            assert_ne!(
+                a, b,
+                "families {label_a:?} and {label_b:?} are the same profile"
+            );
         }
     }
+
+    // The labels are the family's own name in lower case, so they are ASCII,
+    // unique and ascending - the properties the wire matrix (FR-016) and any
+    // printed reference rely on (NFR-005).
+    let mut previous: Option<&str> = None;
+    for (label, _) in FAMILIES {
+        assert!(!label.is_empty(), "a family label may not be blank");
+        assert!(label.is_ascii(), "the family label {label:?} is not ASCII");
+        assert!(
+            label.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "the family label {label:?} is not the const name in lower case"
+        );
+        if let Some(previous) = previous {
+            assert!(
+                previous < *label,
+                "FAMILIES must be ascending, but {previous:?} precedes {label:?}"
+            );
+        }
+        previous = Some(label);
+    }
+}
+
+#[test]
+fn test_wire_profile_table_every_row_names_a_declared_family() {
+    // The coverage assertion of FR-002 in the direction the registry cannot
+    // express: a row is an *assignment* of an id to a family, never a contract
+    // composed at the row. A provider that spoke a seventh profile no family
+    // declares would make "one profile per provider family" false while every
+    // other case in this file still passed, so each row's profile must be one of
+    // the `FAMILIES` entries.
+    for (id, profile) in PROVIDER_WIRE {
+        assert!(
+            FAMILIES.iter().any(|(_, family)| family == profile),
+            "{id:?} declares a profile no family declares: {:?} / {:?} / {:?}",
+            profile.tool_envelope,
+            profile.result_carrier,
+            profile.id_field
+        );
+    }
+}
+
+#[test]
+fn test_wire_profile_table_source_declares_no_family_outside_the_list() {
+    // The mechanical half: `FAMILIES` is hand-written, so a new `pub const
+    // X: ToolWireProfile` added to `profile_table.rs` would compile and pass
+    // every value-level assertion above without ever being listed. This reads the
+    // module and pins the two sets together, so a seventh family cannot exist in
+    // the build while the list still claims six.
+    use std::path::PathBuf;
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("providers")
+        .join("wire")
+        .join("profile_table.rs");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    let mut declared: Vec<&str> = Vec::new();
+    for line in source.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("pub const ") else {
+            continue;
+        };
+        let Some((name, rest)) = rest.split_once(':') else {
+            continue;
+        };
+        if rest.trim_start().starts_with("ToolWireProfile") {
+            declared.push(name.trim());
+        }
+    }
+
+    let listed: Vec<&str> = FAMILIES.iter().map(|(label, _)| *label).collect();
+    for name in &declared {
+        assert!(
+            listed.contains(&name.to_ascii_lowercase().as_str()),
+            "`{name}` is declared in profile_table.rs but not listed in FAMILIES, so \
+             the wire matrix would never print it and no row could name it (FR-002)"
+        );
+    }
+    assert_eq!(
+        declared.len(),
+        listed.len(),
+        "{} family constants are declared but FAMILIES lists {} families: {} vs {:?}",
+        declared.len(),
+        listed.len(),
+        declared.join(", "),
+        listed
+    );
 }
 
 #[test]
@@ -279,17 +380,12 @@ fn test_wire_profile_table_every_row_is_fully_declared() {
 fn test_wire_profile_table_envelopes_and_carriers_agree_with_the_family() {
     // The envelope/carrier pair identifies a family; a row whose pair no
     // family constant declares would be a contract invented at the call site.
-    let declared: Vec<(ToolEnvelope, ResultCarrier)> = [
-        OPENAI_CHAT,
-        ANTHROPIC_MESSAGES,
-        GEMINI,
-        BEDROCK_CONVERSE,
-        OPENAI_RESPONSES,
-        OLLAMA_NATIVE,
-    ]
-    .iter()
-    .map(|p| (p.tool_envelope, p.result_carrier))
-    .collect();
+    // Read from `FAMILIES` rather than a list repeated here, so a seventh family
+    // cannot be declared, listed, and still invisible to this case.
+    let declared: Vec<(ToolEnvelope, ResultCarrier)> = FAMILIES
+        .iter()
+        .map(|(_, p)| (p.tool_envelope, p.result_carrier))
+        .collect();
 
     for (id, profile) in PROVIDER_WIRE {
         let pair = (profile.tool_envelope, profile.result_carrier);

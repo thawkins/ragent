@@ -973,7 +973,7 @@ impl SpecCommand {
                             - You MAY include a `## Cleanup` section describing teardown steps to run after the manual tests complete
                             - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`; this is a manual test plan only
           
-                         Use the `write` tool to create all three files. Ensure the spec is clear, testable, and complete."
+                         Use the `Write` tool to create all three files. Ensure the spec is clear, testable, and complete."
         )
     }
 
@@ -1044,7 +1044,7 @@ Write the following file:
 
 Do NOT create `PLAN.md`, `TESTPLAN.md`, or any other file. Only write `specs/{specname}/SPEC.md`.
 
-Use the `write` tool to create the file. Ensure the spec is clear, testable, and complete."
+Use the `Write` tool to create the file. Ensure the spec is clear, testable, and complete."
         )
     }
 
@@ -1299,7 +1299,7 @@ Write `specs/{spec_id}/PLAN.md` with:
 
 Do NOT modify `SPEC.md` or any other file. Only write `specs/{spec_id}/PLAN.md`.{data_model_instruction}{contracts_instruction}{feedback_instruction}
 
-Use the `write` tool to create the file. Ensure the plan is clear, actionable, and complete."
+Use the `Write` tool to create the file. Ensure the plan is clear, actionable, and complete."
         )
     }
 
@@ -1615,7 +1615,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 
     /// Build the prompt sent to the LLM agent for incremental spec updates.
     ///
-    /// The prompt instructs the LLM to use the `read` and `edit` tools directly
+    /// The prompt instructs the LLM to use the `read` and `Edit` tools directly
     /// to insert new requirements into `SPEC.md` and new task rows into
     /// `PLAN.md`.  This matches the architecture of `/spec create` and
     /// `/spec update` - the LLM writes files via tools, eliminating the need
@@ -1658,21 +1658,21 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 **Steps:**
 
 1. Read `specs/{spec_id}/SPEC.md` using the `read` tool.
-2. Use the `edit` tool to insert new requirement blocks into `specs/{spec_id}/SPEC.md`. Insert them immediately before the `## Non-Functional Requirements` heading (or at the end of the file if no NFR section exists). Each requirement should use EARS notation with the correct FR-NNN or NFR-NNN IDs. Use at least one EARS template type. Do not modify any existing content - only insert new blocks.
+2. Use the `Edit` tool to insert new requirement blocks into `specs/{spec_id}/SPEC.md`. Insert them immediately before the `## Non-Functional Requirements` heading (or at the end of the file if no NFR section exists). Each requirement should use EARS notation with the correct FR-NNN or NFR-NNN IDs. Use at least one EARS template type. Do not modify any existing content - only insert new blocks.
 
 3. Read `specs/{spec_id}/PLAN.md` using the `read` tool.
-4. Use the `edit` tool to insert new task table rows into `specs/{spec_id}/PLAN.md`. Append them after the last existing row in the task table. Use the same markdown table format as the existing rows. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.
-5. If you add task detail subsections, use the `edit` tool to append them after the existing task details in `specs/{spec_id}/PLAN.md`.
+4. Use the `Edit` tool to insert new task table rows into `specs/{spec_id}/PLAN.md`. Append them after the last existing row in the task table. Use the same markdown table format as the existing rows. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.
+5. If you add task detail subsections, use the `Edit` tool to append them after the existing task details in `specs/{spec_id}/PLAN.md`.
 
-**Existing SPEC.md content (for reference - use the `read` and `edit` tools to modify the actual file):**
+**Existing SPEC.md content (for reference - use the `read` and `Edit` tools to modify the actual file):**
 
 {spec_md}
 
-**Existing PLAN.md content (for reference - use the `read` and `edit` tools to modify the actual file):**
+**Existing PLAN.md content (for reference - use the `read` and `Edit` tools to modify the actual file):**
 
 {plan_md}
 
-Use the `read` and `edit` tools to make all changes directly to the files. Ensure the spec is clear, testable, and complete.",
+Use the `read` and `Edit` tools to make all changes directly to the files. Ensure the spec is clear, testable, and complete.",
         )
     }
 
@@ -1736,7 +1736,7 @@ Use the `read` and `edit` tools to make all changes directly to the files. Ensur
 
 Read the file `specs/{spec_id}/SPEC.md` using the `read` tool. If the file is very large, read it in sections. Then analyse the spec's overview and numbered requirements to identify the underlying "jobs" the feature is hired to do.
 
-Write your analysis to `specs/{spec_id}/JTBD.md` using the `write` tool. The document must contain:
+Write your analysis to `specs/{spec_id}/JTBD.md` using the `Write` tool. The document must contain:
 
 1. **YAML frontmatter** with `status: draft`.
 
@@ -1755,7 +1755,7 @@ Write your analysis to `specs/{spec_id}/JTBD.md` using the `write` tool. The doc
 
 5. A **`## Coverage Matrix`** section with a markdown table mapping each `FR-NNN` / `NFR-NNN` to the job(s) it supports. Requirements with no corresponding job should be marked *unmapped*.
 
-Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is well-formed and every job follows the grammar above."#,
+Use the `Write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is well-formed and every job follows the grammar above."#,
         )
     }
 
@@ -1826,7 +1826,7 @@ Re-read the current `specs/{spec_id}/SPEC.md` and regenerate `specs/{spec_id}/PL
 
 Read `specs/{spec_id}/SPEC.md` using the `read` tool first. If the file is large, read it in sections.
 
-Then write the following files using the `write` tool:
+Then write the following files using the `Write` tool:
 
 1. `specs/{spec_id}/PLAN.md` - An implementation plan with:
      - A `## Tasks` section with a markdown table.
@@ -1843,7 +1843,7 @@ Then write the following files using the `write` tool:
    - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results.
    - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`.{preservation_note}
 
-Use the `write` tool to write `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete.",
+Use the `Write` tool to write `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete.",
         )
     }
 
@@ -2051,7 +2051,7 @@ Write the following files:
    - Each test case has an ID (`TC-001`, `TC-002`, ...), a title, preconditions, step-by-step instructions, test data to enter, and expected results
    - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`; this is a manual test plan only
 
-Use the `write` tool to create all three files. Ensure the spec is clear, testable, and complete.",
+Use the `Write` tool to create all three files. Ensure the spec is clear, testable, and complete.",
             language = scaffold.language(),
             app_type = scaffold.app_type(),
             frontmatter_block = frontmatter.trim_end(),

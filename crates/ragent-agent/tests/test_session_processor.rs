@@ -80,7 +80,7 @@ async fn test_hardwired_ask_user_tool_is_auto_approved() {
         "session-1",
         "ask_user",
         "Which provider?",
-        "ask_user",
+        "AskUserQuestion",
         Some(false),
         None,
         false,
@@ -173,7 +173,7 @@ async fn test_hardwired_list_agents_is_auto_approved() {
 
 #[tokio::test]
 async fn test_hardwired_task_create_is_auto_approved() {
-    // todo2tasks T-011: `task_create` shares the "task" permission
+    // todo2tasks T-011: `TaskCreate` shares the "task" permission
     // category and must be auto-approved.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
     let event_bus = Arc::new(EventBus::new(16));
@@ -184,7 +184,7 @@ async fn test_hardwired_task_create_is_auto_approved() {
         "session-1",
         "task",
         "create task",
-        "task_create",
+        "TaskCreate",
         Some(false),
         None,
         false,
@@ -199,7 +199,7 @@ async fn test_hardwired_task_create_is_auto_approved() {
 
 #[tokio::test]
 async fn test_hardwired_task_update_is_auto_approved() {
-    // todo2tasks T-011: `task_update` shares the "task" permission
+    // todo2tasks T-011: `TaskUpdate` shares the "task" permission
     // category and must be auto-approved.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
     let event_bus = Arc::new(EventBus::new(16));
@@ -210,7 +210,7 @@ async fn test_hardwired_task_update_is_auto_approved() {
         "session-1",
         "task",
         "update task",
-        "task_update",
+        "TaskUpdate",
         Some(false),
         None,
         false,
@@ -225,7 +225,7 @@ async fn test_hardwired_task_update_is_auto_approved() {
 
 #[tokio::test]
 async fn test_hardwired_task_get_is_auto_approved() {
-    // todo2tasks T-011: `task_get` shares the "task" permission
+    // todo2tasks T-011: `TaskGet` shares the "task" permission
     // category and must be auto-approved.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
     let event_bus = Arc::new(EventBus::new(16));
@@ -236,7 +236,7 @@ async fn test_hardwired_task_get_is_auto_approved() {
         "session-1",
         "task",
         "get task",
-        "task_get",
+        "TaskGet",
         Some(false),
         None,
         false,
@@ -251,7 +251,7 @@ async fn test_hardwired_task_get_is_auto_approved() {
 
 #[tokio::test]
 async fn test_hardwired_task_list_is_auto_approved() {
-    // todo2tasks T-011: `task_list` shares the "task" permission
+    // todo2tasks T-011: `TaskList` shares the "task" permission
     // category and must be auto-approved.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
     let event_bus = Arc::new(EventBus::new(16));
@@ -262,7 +262,7 @@ async fn test_hardwired_task_list_is_auto_approved() {
         "session-1",
         "task",
         "list tasks",
-        "task_list",
+        "TaskList",
         Some(false),
         None,
         false,
@@ -429,21 +429,6 @@ fn test_is_permanent_llm_api_error_ignores_stall_and_timeout() {
 }
 
 #[test]
-fn test_hidden_tool_families_are_excluded_from_prompt_and_request_tools() {
-    let registry = create_default_registry();
-    let hidden = ragent_config::tool_family_names("github")
-        .expect("github family should exist")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    registry.set_hidden(&hidden);
-
-    let defs = registry.definitions();
-    assert!(!defs.iter().any(|tool| tool.name == "github_list_issues"));
-    assert!(!defs.iter().any(|tool| tool.name == "github_review_pr"));
-}
-
-#[test]
 fn test_detailed_tool_reference_includes_schemas_and_required_flags() {
     let registry = create_default_registry();
     let section = build_detailed_tool_reference_section(&registry);
@@ -459,22 +444,6 @@ fn test_detailed_tool_reference_includes_schemas_and_required_flags() {
     assert!(section.contains("- `path` (`string` (required)"));
     assert!(section.contains("- `start_line` ("));
     assert!(section.contains("- `num_lines` ("));
-}
-
-#[test]
-fn test_detailed_tool_reference_omits_hidden_tools() {
-    let registry = create_default_registry();
-    let hidden = ragent_config::tool_family_names("github")
-        .expect("github family should exist")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    registry.set_hidden(&hidden);
-
-    let section = build_detailed_tool_reference_section(&registry);
-    assert!(!section.contains("### `github_list_issues`"));
-    assert!(!section.contains("### `github_review_pr`"));
-    assert!(section.contains("### `read`"));
 }
 
 #[test]

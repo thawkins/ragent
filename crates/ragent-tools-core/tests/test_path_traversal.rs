@@ -2,8 +2,8 @@
 //!
 //! Verifies that the hardened `check_path_within_root` rejects `..`, absolute
 //! escapes, symlink escapes, and root-prefix confusion, and that every file
-//! tool entry point (`read`, `write`, `create`, `append_file`, `rm`,
-//! `mkdir`, `copy_file`, `move_file`, `file_info`, `list`, `glob`, `grep`,
+//! tool entry point (`read`, `Write`, `create`, `append_file`, `rm`,
+//! `mkdir`, `copy_file`, `move_file`, `file_info`, `list`, `Glob`, `Grep`,
 //! `diff`) enforces containment before touching the filesystem.
 
 use std::path::{Path, PathBuf};

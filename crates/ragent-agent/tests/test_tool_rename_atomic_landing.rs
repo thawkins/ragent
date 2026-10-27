@@ -11,7 +11,7 @@
 //!
 //! This file is the mechanical part of that requirement. It asserts the
 //! **registry state** the landing produces, across every enumeration the build
-//! offers, so a tree that registered `Bash` for the model but left `bash` in a
+//! offers, so a tree that registered `Bash` for the model but left `Bash` in a
 //! key map - or the reverse - fails here rather than after a bisect. It checks:
 //!
 //! | # | Case | Clause it pins |
@@ -64,13 +64,15 @@ use ragent_agent::tool::rename::TOOL_RENAMES;
 /// renamed back in, or an adapter registered a second copy.
 const FR030_TOTAL: usize = 148;
 
-/// The two family counts T-041 records as the canary against a stale binary.
+/// The two family counts T-041 records as the canary against a name-prefix count.
 ///
-/// Both binaries in `target/` report 148 tools, but the stale release build
-/// splits the surface `agent` 4 / `team` 19 while the tree that lands the rename
-/// reports `agent` 3 / `team` 20. A comparison that checks only the total would
-/// pass against the wrong binary; these two numbers are what catches it.
-const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 3), ("team", 20)];
+/// `agent` holds 4 tools and `team` 19, not the 3 / 20 a count of the `team_*`
+/// *names* produces: `team_wait`'s `permission_category()` is `agent:spawn`, so
+/// it counts in the `agent` family despite its name. A landing check that read
+/// the family off the name prefix would report 3 / 20 and still pass a
+/// total-only comparison, which is why both numbers are pinned here (T-041
+/// §2.1, T-046 §4).
+const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 4), ("team", 19)];
 
 /// The family count T-041 records beside the total (21 families summing to 148).
 const FR030_FAMILY_COUNT: usize = 21;
@@ -210,7 +212,7 @@ fn test_registry_keys_tool_names_and_definition_names_agree() {
 #[test]
 fn test_every_registration_is_stored_under_the_name_its_tool_reports() {
     // The half-renamed detector. A tree in which the key map says `Bash` but
-    // the stored tool still reports `bash` compiles, passes a key-only check,
+    // the stored tool still reports `Bash` compiles, passes a key-only check,
     // and resolves the retired spelling at every surface that reads
     // `Tool::name()` - `definitions()`, `all_tools()`, the permission layer's
     // special cases and the repeat guard's key.
@@ -248,8 +250,7 @@ fn test_the_renamed_tools_keep_the_permission_family_they_had_before_the_rename(
     // FR-028 holds `permission_category()` unchanged across the rename, so the
     // per-family counts are the sharpest evidence that a tool was renamed rather
     // than replaced: a rename keeps a family's count, a registration swap does
-    // not. The two canary families are the ones T-041 measured against the stale
-    // release binary.
+    // not. The two canary families are the ones a name-prefix count gets wrong.
     let registry = create_default_registry();
     let mut family_counts: BTreeMap<String, usize> = BTreeMap::new();
     for tool in registry.all_tools() {
@@ -271,8 +272,8 @@ fn test_the_renamed_tools_keep_the_permission_family_they_had_before_the_rename(
             family_counts.get(family).copied(),
             Some(expected),
             "FR-030/FR-034: the `{family}` family holds {:?} tools, not the {expected} \
-             the baseline records - this is the canary T-041 uses to tell this \
-             tree's build from the stale release binary beside it",
+             the baseline records - this is the canary T-041 uses to tell a real \
+             family count from a `team_*` name-prefix count",
             family_counts.get(family)
         );
     }

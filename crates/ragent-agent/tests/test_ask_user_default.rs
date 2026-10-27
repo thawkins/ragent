@@ -1,6 +1,6 @@
-//! `ask_user` default/fallback option selection.
+//! `AskUserQuestion` default/fallback option selection.
 //!
-//! When an `ask_user` call carries `options`, the tool resolves a zero-based
+//! When an `AskUserQuestion` call carries `options`, the tool resolves a zero-based
 //! `default_index` published on `Event::QuestionRequested`. The TUI pre-selects
 //! that option and, if the user lets the dialog time out, answers with it. The
 //! resolution order is:
@@ -48,9 +48,9 @@ fn ask_user_schema() -> Value {
     registry
         .definitions()
         .iter()
-        .find(|d| d.name == "ask_user")
+        .find(|d| d.name == "AskUserQuestion")
         .map(|d| d.parameters.clone())
-        .expect("ask_user should be registered")
+        .expect("AskUserQuestion should be registered")
 }
 
 fn ask_user_description() -> String {
@@ -58,9 +58,9 @@ fn ask_user_description() -> String {
     registry
         .definitions()
         .iter()
-        .find(|d| d.name == "ask_user")
+        .find(|d| d.name == "AskUserQuestion")
         .map(|d| d.description.clone())
-        .expect("ask_user should be registered")
+        .expect("AskUserQuestion should be registered")
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_ask_user_description_mentions_timeout_default() {
     );
 }
 
-/// Resolve the published `default_index` for a given `ask_user` input.
+/// Resolve the published `default_index` for a given `AskUserQuestion` input.
 ///
 /// The tool blocks until a `QuestionAnswered` arrives, so the test pre-publishes
 /// a wildcard reply (like the existing subagent tests) and then inspects the

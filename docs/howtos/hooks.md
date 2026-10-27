@@ -7,6 +7,7 @@ This guide covers the two mechanisms for controlling tool execution:
 ## Table of Contents
 
 - [Configuration](#configuration)
+  - [Tool names in a `matcher` use the current spellings](#tool-names-in-a-matcher-use-the-current-spellings)
 - [PreToolUse Hooks](#pretooluse-hooks)
   - [JSON-Decision Protocol](#json-decision-protocol)
   - [Exit-Code Convention](#exit-code-convention)
@@ -41,16 +42,44 @@ Hooks are defined in the `hooks` array of `ragent.json`:
 }
 ```
 
-Each hook entry has three fields:
+Each hook entry has four fields:
 
 | Field          | Type    | Default | Description                                      |
 |----------------|---------|---------|--------------------------------------------------|
 | `trigger`      | string  | —       | When to fire (see [triggers](#other-hook-triggers)) |
 | `command`      | string  | —       | Shell command to execute (runs via `sh -c`)      |
 | `timeout_secs` | integer | 30      | Timeout in seconds. Enforced for `post_tool_use` and the fire-and-forget triggers; **not** enforced for `pre_tool_use` (see [PreToolUse Hooks](#pretooluse-hooks)). |
+| `matcher`      | string  | *(every tool)* | Tool-scoped triggers only: which tools this hook applies to. A `\|`- or `,`-separated list of tool names, each optionally wrapped in a `Name(pattern)` guard (see [Tool names in a `matcher` use the current spellings](#tool-names-in-a-matcher-use-the-current-spellings)). |
 
 Invalid hook entries (for example an unknown `trigger` string) are skipped
 at load time with a log warning — no startup error surfaces to the user.
+
+### Tool names in a `matcher` use the current spellings
+
+The `matcher` names tools by their **current** spelling. The rename (spec
+`uniformtools` FR-023) retired thirteen ragent spellings in favour of the Claude
+Code ones, so a matcher written before it may name a name this build no longer
+registers:
+
+```json
+{ "trigger": "pre_tool_use", "matcher": "bash", "command": "..." }
+```
+
+That hook never runs — `bash` is not a registered tool any more, `Bash` is — and
+nothing in the configuration parser can tell you. FR-028 therefore reports it at
+load: one `warning` naming the retired spelling, its replacement and the
+trigger, made once per stale entry per process (a per-turn repeat would be noise
+you learn to ignore). The same warning covers a list (`bash|edit` reports twice,
+once per stale part) and a guard (`bash(git commit:*)` reports the bare name;
+`Bash(git commit:*)` does not).
+
+The matcher is **not** rewritten for you. The configuration file belongs to its
+author, and a load-time rewrite would leave the text on disk disagreeing with
+the session that is running — worse than a warning, because the next reader would
+believe the file. Fix the spelling in `ragent.json` when you see the warning.
+
+A spelling that was never renamed (`read`, `think`, `Grep`) is silent, and so is
+a hook with no `matcher` at all.
 
 ---
 
@@ -116,7 +145,7 @@ exit code **before** parsing stdout JSON:
 
 ```sh
 #!/bin/sh
-# Block all bash commands that contain "rm -rf"
+# Block all Bash commands that contain "rm -rf"
 if echo "$RAGENT_TOOL_INPUT" | grep -q "rm -rf"; then
   echo "Blocked: destructive command detected" >&2
   exit 2
@@ -129,7 +158,7 @@ echo '{"decision": "allow"}'
 
 ```sh
 #!/bin/sh
-# Warn when a write tool is used outside src/
+# Warn when a Write call targets a path outside src/
 if echo "$RAGENT_TOOL_INPUT" | grep -qv '"path":.*"src/'; then
   echo "Warning: write outside src/ directory" >&2
   exit 1
@@ -358,14 +387,14 @@ PostToolUse hooks:
 TOOL="$RAGENT_TOOL_NAME"
 INPUT="$RAGENT_TOOL_INPUT"
 
-# Block bash commands that contain "rm -rf /"
-if [ "$TOOL" = "bash" ] && echo "$INPUT" | grep -q "rm -rf /"; then
+# Block Bash commands that contain "rm -rf /"
+if [ "$TOOL" = "Bash" ] && echo "$INPUT" | grep -q "rm -rf /"; then
   echo "Blocked: refused to execute destructive command" >&2
   exit 2
 fi
 
 # Warn about writes outside the project directory
-if [ "$TOOL" = "write" ] && ! echo "$INPUT" | grep -q '"path":.*"src/'; then
+if [ "$TOOL" = "Write" ] && ! echo "$INPUT" | grep -q '"path":.*"src/'; then
   echo "Warning: write target is outside src/" >&2
   exit 1
 fi

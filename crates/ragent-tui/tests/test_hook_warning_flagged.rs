@@ -18,7 +18,7 @@ async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
         hook_command: "hooks/warn.sh".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         stderr: "suspicious network call".to_string(),
     })
     .await;
@@ -29,7 +29,7 @@ async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
         app.status
     );
     assert!(
-        app.status.contains("bash"),
+        app.status.contains("Bash"),
         "status should name the tool, got: {}",
         app.status
     );
@@ -46,7 +46,7 @@ async fn test_hook_warning_current_session_sets_transient_status_and_logs() {
     let entry = app.log_entries.last().expect("log entry should be added");
     assert_eq!(entry.level, LogLevel::Warn);
     assert!(
-        entry.message.contains("hook warning on bash"),
+        entry.message.contains("hook warning on Bash"),
         "log should identify the tool, got: {}",
         entry.message
     );
@@ -71,7 +71,7 @@ async fn test_hook_warning_long_stderr_is_truncated_safely_in_status() {
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
         hook_command: "hooks/warn.sh".to_string(),
-        tool: "write".to_string(),
+        tool: "Write".to_string(),
         stderr: long_reason.clone(),
     })
     .await;
@@ -98,7 +98,7 @@ async fn test_hook_warning_other_session_is_ignored() {
     app.handle_event(Event::HookWarning {
         session_id: "s2".to_string(),
         hook_command: "hooks/warn.sh".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         stderr: "suspicious".to_string(),
     })
     .await;
@@ -119,7 +119,7 @@ async fn test_hook_warning_transient_status_expires_to_ready() {
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
         hook_command: "hooks/warn.sh".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         stderr: "suspicious".to_string(),
     })
     .await;
@@ -145,14 +145,14 @@ async fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() 
 
     app.handle_event(Event::ToolResultFlagged {
         session_id: "s1".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         hook_command: "hooks/flag.sh".to_string(),
         reason: "policy violation: rm -rf /".to_string(),
     })
     .await;
 
     assert!(
-        app.status.contains("bash"),
+        app.status.contains("Bash"),
         "status should name the flagged tool, got: {}",
         app.status
     );
@@ -170,7 +170,7 @@ async fn test_tool_result_flagged_current_session_logs_marker_and_sets_status() 
         entry.message
     );
     assert!(
-        entry.message.contains("bash"),
+        entry.message.contains("Bash"),
         "log should name the tool, got: {}",
         entry.message
     );
@@ -194,7 +194,7 @@ async fn test_tool_result_flagged_other_session_is_ignored() {
 
     app.handle_event(Event::ToolResultFlagged {
         session_id: "s2".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         hook_command: "hooks/flag.sh".to_string(),
         reason: "policy violation".to_string(),
     })

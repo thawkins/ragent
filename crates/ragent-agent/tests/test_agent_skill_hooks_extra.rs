@@ -669,7 +669,7 @@ fn resolve_inline_skill_agent_applies_tool_restriction_and_overrides() {
         &base,
         Some("anthropic/active"),
         Some("openai:skill-model"),
-        &["bash".to_string()],
+        &["Bash".to_string()],
     );
     assert_eq!(
         agent
@@ -680,7 +680,7 @@ fn resolve_inline_skill_agent_applies_tool_restriction_and_overrides() {
     );
     assert_eq!(
         agent.allowed_tools.as_deref(),
-        Some(&["bash".to_string()][..])
+        Some(&["Bash".to_string()][..])
     );
 
     // No model change and no tool restriction returns the same Arc.

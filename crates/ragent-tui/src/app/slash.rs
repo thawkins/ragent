@@ -911,17 +911,13 @@ impl App {
                 "run".to_string(),
                 "help".to_string(),
             ],
-            "tools" => vec![
-                "list".to_string(),
-                "github".to_string(),
-                "gitlab".to_string(),
-                "teams".to_string(),
-                "agents".to_string(),
-                "plan".to_string(),
-                "codeindex".to_string(),
-                "masterfetch".to_string(),
-                "help".to_string(),
-            ],
+            // FR-033: the one `/tools` table `commands_info` publishes, the
+            // parameter hint and the handler all read. A hand-written copy here
+            // omitted `show` and drifted from what the handler accepts.
+            "tools" => ragent_agent::tool::command_catalog::TOOLS_SUBS
+                .iter()
+                .map(|sub| (*sub).to_string())
+                .collect(),
             "mouse" => {
                 vec!["on".to_string(), "off".to_string(), "help".to_string()]
             }
@@ -3268,7 +3264,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         match sub.as_str() {
             "help" | "--help" | "-h" | "" => {
                 self.append_assistant_text(
-                    "From: /editlog help\n\n## /editlog - Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
+                    "From: /editlog help\n\n## /editlog - Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `Edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
                 );
                 self.status = "editlog: help".to_string();
             }
@@ -3908,7 +3904,6 @@ Usage: `/telemetry help|on|off|setup|counters`",
                                 "skill_dirs",
                                 "hooks",
                                 "bash",
-                                "hidden_tools",
                                 "yolo",
                                 "edit_log",
                                 "sdd",
@@ -4880,36 +4875,36 @@ Manage the session task list (stored in ragent's task service).
 |------------|-------------|
 | `/task` | Toggle the Tasks side panel |
 | `/task list` | List all tasks for the current session |
-| `/task add <subject>` | Use `task_create` to add a task |
+| `/task add <subject>` | Use `TaskCreate` to add a task |
 | `/task create <subject>` | Alias for `add` |
-| `/task update <id> <status>` | Use `task_update` to update a task |
-| `/task get <id>` | Use `task_get` to inspect a task |
+| `/task update <id> <status>` | Use `TaskUpdate` to update a task |
+| `/task get <id>` | Use `TaskGet` to inspect a task |
 | `/task help` | Show this help text |
 
-Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
+Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                             self.append_assistant_text(help);
                             self.status = "task help".to_string();
                         }
                         "add" | "create" => {
                             self.append_assistant_text(
-                                "From: /task add\nUse the `task_create` tool to add a task. \
-                                 Example: task_create with `subject` and `description`.\n",
+                                "From: /task add\nUse the `TaskCreate` tool to add a task. \
+                                 Example: TaskCreate with `subject` and `description`.\n",
                             );
-                            self.status = "Use agent tool: task_create".to_string();
+                            self.status = "Use agent tool: TaskCreate".to_string();
                         }
                         "update" => {
                             self.append_assistant_text(
-                                "From: /task update\nUse the `task_update` tool to update a task. \
-                                 Example: task_update with `task_id` and `status`.\n",
+                                "From: /task update\nUse the `TaskUpdate` tool to update a task. \
+                                 Example: TaskUpdate with `task_id` and `status`.\n",
                             );
-                            self.status = "Use agent tool: task_update".to_string();
+                            self.status = "Use agent tool: TaskUpdate".to_string();
                         }
                         "get" => {
                             self.append_assistant_text(
-                                "From: /task get\nUse the `task_get` tool to inspect a task. \
-                                 Example: task_get with `task_id`.\n",
+                                "From: /task get\nUse the `TaskGet` tool to inspect a task. \
+                                 Example: TaskGet with `task_id`.\n",
                             );
-                            self.status = "Use agent tool: task_get".to_string();
+                            self.status = "Use agent tool: TaskGet".to_string();
                         }
                         _ => {
                             let help = "\
@@ -4923,13 +4918,13 @@ Manage the session task list (stored in ragent's task service).
 |------------|-------------|
 | `/task` | Toggle the Tasks side panel |
 | `/task list` | List all tasks for the current session |
-| `/task add <subject>` | Use `task_create` to add a task |
+| `/task add <subject>` | Use `TaskCreate` to add a task |
 | `/task create <subject>` | Alias for `add` |
-| `/task update <id> <status>` | Use `task_update` to update a task |
-| `/task get <id>` | Use `task_get` to inspect a task |
+| `/task update <id> <status>` | Use `TaskUpdate` to update a task |
+| `/task get <id>` | Use `TaskGet` to inspect a task |
 | `/task help` | Show this help text |
 
-Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
+Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                             self.append_assistant_text(help);
                             self.status = "task help".to_string();
                         }
@@ -5347,7 +5342,6 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                             self.selected_thinking_level =
                                 Self::load_persisted_thinking_level(self.storage.as_ref());
                             self.code_index_enabled = cfg.code_index.enabled;
-                            self.sync_tool_visibility_from_config(&cfg);
                             report.push_str("[ok] Config reloaded (ragent.json)\n");
                             self.push_log_no_agent(
                                 LogLevel::Info,
@@ -5473,88 +5467,41 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
             }
             "tools" => {
+                // FR-033: one table is the catalogue. `TOOLS_SUBS` is what the
+                // autocomplete menu offers and its parameter hint renders, what
+                // this arm's help page and every usage warning print, and what
+                // `commands_info` publishes.
+                let subs = ragent_agent::tool::command_catalog::TOOLS_SUBS;
+                let forms = subs
+                    .iter()
+                    .map(|sub| format!("`/tools {sub}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
                 let parts: Vec<&str> = args.split_whitespace().collect();
                 match parts.as_slice() {
+                    // `--help`, `-h` and `usage` are retained flag aliases; the
+                    // table lists subcommands, so they are not in it.
                     [] | ["help"] | ["--help"] | ["-h"] | ["usage"] => {
-                        self.append_assistant_text("/tools\n\n## /tools - Tool family visibility\n\n| Subcommand | Description |\n|---|---|\n| `/tools` | Show this help |\n| `/tools list` | List the tool-family visibility table plus every visible and disabled tool |\n| `/tools <switch>` | Report whether one visibility switch is on or off |\n| `/tools <switch> on|off` | Turn a visibility switch on or off and save it |\n| `/tools help` | Show this help |\n\nValid switches: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.");
+                        self.append_assistant_text(&format!(
+                            "/tools\n\n## /tools - Tool list\n\n\
+                             | Subcommand | Description |\n|---|---|\n\
+                             | `/tools` | Show this help |\n\
+                             | `/tools list` | List every registered tool with its source and description |\n\
+                             | `/tools show` | Same as `/tools list` |\n\
+                             | `/tools help` | Show this help |\n\n\
+                             Accepted forms: {forms}."
+                        ));
                         self.status = "tools help".to_string();
                     }
                     ["list"] | ["show"] => {
-                        self.append_assistant_text(&self.render_tool_visibility_table());
+                        self.append_assistant_text(&self.render_tool_list());
                         self.status = "tools".to_string();
                     }
-                    [switch] => {
-                        if let Some(enabled) = self.tool_visibility_state(switch) {
-                            self.append_assistant_text(&format!(
-                                "From: /tools\n`{switch}` is currently **{}**.",
-                                if enabled { "on" } else { "off" }
-                            ));
-                            self.status = "tools".to_string();
-                        } else {
-                            self.append_assistant_text(
-                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.",
-                                                      );
-                            self.status = "tools error".to_string();
-                        }
-                    }
-                    [switch, state] => {
-                        let enabled = match *state {
-                            "on" | "enable" => true,
-                            "off" | "disable" => false,
-                            _ => {
-                                self.append_assistant_text(
-                                    "From: /tools\n[warn] Usage: `/tools <switch> on|off`.",
-                                );
-                                self.status = "tools error".to_string();
-                                return;
-                            }
-                        };
-
-                        if !self.set_tool_visibility_state(switch, enabled) {
-                            self.append_assistant_text(
-                                                          "From: /tools\n[warn] Invalid switch. Use one of: `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`.",
-                                                      );
-                            self.status = "tools error".to_string();
-                            return;
-                        }
-                        let mut cfg = ragent_agent::Config::load().unwrap_or_default();
-                        cfg.tool_visibility = self.tool_visibility.clone();
-                        self.sync_tool_visibility_from_config(&cfg);
-
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                // P-2: invalidate the cached config so the next turn
-                                // picks up the newly-saved file.
-                                self.session_processor.invalidate_config_cache();
-                                self.append_assistant_text(&format!(
-                                    "From: /tools\n[ok] `{switch}` visibility is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status = format!(
-                                    "tools: {switch} {}",
-                                    if enabled { "on" } else { "off" }
-                                );
-                            }
-                            Err(e) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /tools\n[warn] `{switch}` visibility changed to **{}**, but saving config failed: {e}",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status = format!(
-                                    "tools: {switch} {} (unsaved)",
-                                    if enabled { "on" } else { "off" }
-                                );
-                                self.push_log_no_agent(
-                                    LogLevel::Warn,
-                                    format!("tools visibility save failed: {}", e),
-                                );
-                            }
-                        }
-                    }
                     _ => {
-                        self.append_assistant_text(
-                            "From: /tools\n[warn] Usage: `/tools` (help) | `/tools list` | `/tools <switch>` | `/tools <switch> on|off`.",
-                        );
+                        self.append_assistant_text(&format!(
+                            "From: /tools\n[warn] Usage: {forms}."
+                        ));
                         self.status = "tools error".to_string();
                     }
                 }
@@ -8834,7 +8781,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 let spec_id_phase2 = spec_id.clone();
                                 tokio::spawn(async move {
                                     // Phase 1: incremental add - the LLM uses the
-                                    // `read` and `edit` tools directly to insert new
+                                    // `read` and `Edit` tools directly to insert new
                                     // requirements into SPEC.md and new task rows
                                     // into PLAN.md. No post-processing needed.
                                     let phase1_result = processor
@@ -10595,11 +10542,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // would otherwise be stripped by the default-omission
                         // behaviour and lost on restart if a global config
                         // disagrees).
-                        self.tool_visibility.set_codeindex(true);
                         let mut cfg = ragent_agent::Config::load().unwrap_or_default();
                         cfg.code_index.set_enabled(true);
-                        cfg.tool_visibility = self.tool_visibility.clone();
-                        self.sync_tool_visibility_from_config(&cfg);
                         if self.code_index.is_some() {
                             // Already active - just ensure watcher is running
                             if self.code_index_watch_session.is_none() {
@@ -10689,11 +10633,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         // this, a config that previously omitted `enabled` (i.e.
                         // defaulted to true) would not persist the disable, and
                         // codeindex would silently re-enable on restart.
-                        self.tool_visibility.set_codeindex(false);
                         let mut cfg = ragent_agent::Config::load().unwrap_or_default();
                         cfg.code_index.set_enabled(false);
-                        cfg.tool_visibility = self.tool_visibility.clone();
-                        self.sync_tool_visibility_from_config(&cfg);
                         let was_active = self.code_index.is_some();
                         // Stop the file watcher + background worker first
                         if let Some(ref mut session) = self.code_index_watch_session {
@@ -11370,7 +11311,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 };
                                 self.append_assistant_text(&format!(
                                     "\u{2705} {action} graphify skill: {} files written to `{}`.\n\n\
-                                     The skill is now available via `/skill` or `skill_manage`. \
+                                     The skill is now available via `/skill` or `Skill`. \
                                      It provides a `/graphify` command that turns any folder of \
                                      files into a navigable knowledge graph with community \
                                      detection, god nodes, and query/path/explain tools.",
@@ -11872,6 +11813,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
         let sid = self.session_id.clone().unwrap_or_default();
         let skill = skill.clone();
+        // Report a declared `allowed-tools` entry that names no registered tool:
+        // this is the point at which the pack's list becomes the turn's
+        // restriction (FR-029). The bare `/<name>` form and `/skill <name>`
+        // share this function, and the ledger keeps a repeat invocation silent.
+        ragent_agent::tool::allowed_tools::report_skill_allowed_tools_once(
+            &self.session_processor.tool_registry,
+            &skill.name,
+            &skill.allowed_tools,
+        );
         let args_owned = args.to_string();
         let processor = self.session_processor.clone();
         let agent = ragent_agent::skill::invoke::resolve_inline_skill_agent(
@@ -12869,46 +12819,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             self.selected_model.as_deref().unwrap_or("(not set)")
         );
 
-        // Tool count from registry (approximate from tool visibility config)
-        let tool_count = self
-            .tool_visibility
-            .iter_switches()
-            .filter(|(_, v)| *v)
-            .count();
-        let tool_info = format!(
-            "- **Tools visible**: {}\n- **Tool families**:\n  - GitHub: {}\n  - GitLab: {}\n  - Teams: {}\n  - Agents: {}\n  - Plan: {}\n  - CodeIndex: {}",
-            tool_count,
-            if self.tool_visibility.github {
-                "[ok]"
-            } else {
-                "[x]"
-            },
-            if self.tool_visibility.gitlab {
-                "[ok]"
-            } else {
-                "[x]"
-            },
-            if self.tool_visibility.teams {
-                "[ok]"
-            } else {
-                "[x]"
-            },
-            if self.tool_visibility.agents {
-                "[ok]"
-            } else {
-                "[x]"
-            },
-            if self.tool_visibility.plan {
-                "[ok]"
-            } else {
-                "[x]"
-            },
-            if self.tool_visibility.codeindex {
-                "[ok]"
-            } else {
-                "[x]"
-            }
-        );
+        // FR-030 (spec `uniformtools`) names this line as one of the surfaces that
+        // must agree with the registry, so it reports the registered count -
+        // `ToolRegistry::list()`, every registered key. Every registered tool is
+        // advertised, so registered and visible are the same number.
+        let registered_tools = self.session_processor.tool_registry.list().len();
+        let tool_info = format!("- **Tools registered**: {registered_tools}");
 
         // Cost summary from token usage
         let cost_info = format!(

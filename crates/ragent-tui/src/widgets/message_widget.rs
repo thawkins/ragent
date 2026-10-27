@@ -118,7 +118,7 @@ pub fn truncate_str(s: &str, max_len: usize) -> String {
 /// gets a wider budget than the 120 characters the other tools use: a
 /// 250-character preview keeps a realistic `cd ... && cargo test ... | tail`
 /// line readable instead of clipping it to its first clause. `run_code` shares
-/// this arm because it canonicalises to `bash`.
+/// this arm because it canonicalises to `Bash`.
 pub const BASH_COMMAND_PREVIEW_CHARS: usize = 250;
 
 fn truncate_json_strings(value: &serde_json::Value, max_len: usize) -> serde_json::Value {
@@ -178,11 +178,16 @@ pub fn capitalize_tool_name(name: &str) -> String {
 /// When a model calls an alias tool (e.g. `view_file` instead of `read`),
 /// both the input summary and result summary functions should produce the same
 /// rich display as the canonical tool.
+///
+/// A retired `before` spelling is resolved through the FR-023 table as well, so
+/// a session resumed from saved history - FR-028 replays a stored
+/// [`MessagePart::ToolCall`] verbatim, unrewritten - keeps its rich rendering
+/// instead of falling through to the generic argument dump.
 pub fn canonical_tool_name(tool: &str) -> &str {
     match tool {
-        "update_file" => "write",
-        "run_code" => "bash",
-        other => other,
+        "update_file" => "Write",
+        "run_code" => "Bash",
+        other => ragent_types::tool_rename::Rename::after_of(other).unwrap_or(other),
     }
 }
 
@@ -320,17 +325,17 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 ///
 /// Tool categories (the leading category marker was removed, so each summary
 /// is now just the tool's own arguments/result text):
-/// - File Operations: read, write, create, edit, patch, rm, multiedit
-/// - Directory Operations: list, make_directory/mkdir
+/// - File Operations: read, Write, create, Edit, patch, rm, multiedit
+/// - Directory Operations: list, make_directory
 /// - File Info: file_info
-/// - Search Operations: search, grep, glob
-/// - Execution: bash, calculator
+/// - Search Operations: search, Grep, Glob
+/// - Execution: Bash, calculator
 /// - Network: webfetch, websearch, http_request
 /// - Environment: get_env
-/// - User Interaction: question, ask_user
+/// - User Interaction: question, AskUserQuestion
 /// - Reasoning: think
-/// - Planning: plan_enter, plan_exit
-/// - Task Management: task_create, task_update, task_get, task_list
+/// - Planning: EnterPlanMode, ExitPlanMode
+/// - Task Management: TaskCreate, TaskUpdate, TaskGet, TaskList
 /// - Sub-agent: new_agent, cancel_agent, list_agents, wait_agents
 /// - Team Coordination: team_*
 /// - LSP/Code Intelligence: lsp_*
@@ -370,7 +375,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     // emit a compact raw-JSON rendering so the user can always see what arguments were sent.
     let fallback_raw_args = |tool: &str, input: &serde_json::Value| -> String {
         match canonical_tool_name(tool) {
-            "bash" | "read" | "write" | "create" | "edit" => {
+            "Bash" | "read" | "Write" | "create" | "Edit" => {
                 if let Some(obj) = input.as_object()
                     && !obj.is_empty()
                 {
@@ -407,8 +412,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // string. This preserves existing behaviour for empty/missing known
         // parameters while still showing something useful when the provider
         // uses unexpected field names.
-        "write" | "create" => get_relative_path(&["path"]),
-        "edit" | "patch" => {
+        "Write" | "create" => get_relative_path(&["path"]),
+        "Edit" | "patch" => {
             // The edit tool's canonical parameter is `file_path`, with `path` as a
             // deprecated legacy alias. Check both so the file name always shows
             // in the message window header regardless of which name the model used.
@@ -495,7 +500,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 _ => format!("\"{}\"", trunc120(&query)),
             }
         }
-        "grep" => {
+        "Grep" => {
             let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
             let path = input
                 .get("path")
@@ -508,7 +513,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 _ => format!("\"{}\"", trunc120(pattern)),
             }
         }
-        "glob" => input
+        "Glob" => input
             .get("pattern")
             .and_then(|v| v.as_str())
             .unwrap_or("")
@@ -517,7 +522,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ===================================================================
         //  EXECUTION
         // ===================================================================
-        "bash" => {
+        "Bash" => {
             // Aliases may send code/cmd instead of command. Replace newlines
             // with " ; " so multiline commands display on a single line.
             // Bash gets the wider preview budget: the command IS the action, so
@@ -526,7 +531,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .as_deref()
                 .map(|s| s.replace('\n', " ; "))
                 .map(|s| format!("$ {}", truncate_str(&s, BASH_COMMAND_PREVIEW_CHARS)))
-                .unwrap_or_else(|| "bash".to_string())
+                .unwrap_or_else(|| "Bash".to_string())
         }
 
         "calculator" => {
@@ -642,7 +647,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 other => format!("{}", other),
             }
         }
-        "skill_manage" => {
+        "Skill" => {
             let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
             match action.as_str() {
                 "list" | "reload" => action,
@@ -656,7 +661,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ===================================================================
         //  USER INTERACTION
         // ===================================================================
-        "question" | "ask_user" => {
+        "question" | "AskUserQuestion" => {
             let q = get_str(&["question", "query"]).unwrap_or_default();
             trunc120(&q)
         }
@@ -672,11 +677,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ===================================================================
         //  PLANNING
         // ===================================================================
-        "plan_enter" => {
+        "EnterPlanMode" => {
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
             format!("→ {}", trunc120(task))
         }
-        "plan_exit" => {
+        "ExitPlanMode" => {
             let summary = input.get("summary").and_then(|v| v.as_str()).unwrap_or("");
             format!("← {}", trunc120(summary))
         }
@@ -684,11 +689,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ===================================================================
         //  TASK MANAGEMENT
         // ===================================================================
-        "task_create" => {
+        "TaskCreate" => {
             let subject = get_str(&["subject"]).unwrap_or_default();
             format!("+{}", trunc120(&subject))
         }
-        "task_update" => {
+        "TaskUpdate" => {
             let task_id = get_str(&["task_id"]).unwrap_or_default();
             let status = get_str(&["status"]);
             let subject = get_str(&["subject"]);
@@ -698,11 +703,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 (None, None) => format!("~{}", task_id),
             }
         }
-        "task_get" => {
+        "TaskGet" => {
             let task_id = get_str(&["task_id"]).unwrap_or_default();
             format!("get {}", task_id)
         }
-        "task_list" => {
+        "TaskList" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
@@ -1425,7 +1430,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     };
 
     let fallback_for = canonical_tool_name(tool);
-    let needs_fallback = matches!(fallback_for, "bash" | "read" | "write" | "create" | "edit");
+    let needs_fallback = matches!(fallback_for, "Bash" | "read" | "Write" | "create" | "Edit");
 
     // If the specific extractor returned an empty summary for a parameter-heavy tool,
     // fall back to a raw-args rendering so the input is never invisible.
@@ -1453,7 +1458,7 @@ pub(crate) fn read_line_range(metadata: &Option<serde_json::Value>) -> Option<St
 
 /// Return inline diff stats `(+added, -removed)` for tools that support it.
 ///
-/// Currently only the `edit`, `multiedit`, and `patch` tools
+/// Currently only the `Edit`, `multiedit`, and `patch` tools
 /// provide the necessary `old_lines` / `new_lines` metadata.
 pub(crate) fn tool_inline_diff(
     tool: &str,
@@ -1462,7 +1467,7 @@ pub(crate) fn tool_inline_diff(
     let out = output.as_ref()?;
     let tool = canonical_tool_name(tool);
     match tool {
-        "edit" => {
+        "Edit" => {
             let old_lines = out.get("old_lines").and_then(|v| v.as_u64());
             let new_lines = out.get("new_lines").and_then(|v| v.as_u64());
             match (old_lines, new_lines) {
@@ -1534,7 +1539,7 @@ pub fn tool_result_summary(
                 Some(format!("{} read", pluralize(line_count, "line", "lines")))
             }
         }
-        "write" => {
+        "Write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
@@ -1556,7 +1561,7 @@ pub fn tool_result_summary(
                 path
             ))
         }
-        "edit" => {
+        "Edit" => {
             // The edit tool writes the resolved path into its output metadata
             // (`path`), so prefer that. Fall back to the input field, checking
             // both the canonical `file_path` and the legacy `path` alias.
@@ -1677,7 +1682,7 @@ pub fn tool_result_summary(
             let trunc = if truncated { "+" } else { "" };
             Some(format!("{}{} found", count, trunc))
         }
-        "grep" => {
+        "Grep" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let files = out.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let truncated = out
@@ -1692,7 +1697,7 @@ pub fn tool_result_summary(
                 pluralize(files, "file", "files")
             ))
         }
-        "glob" => {
+        "Glob" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let truncated = out
                 .get("truncated")
@@ -1709,7 +1714,7 @@ pub fn tool_result_summary(
         // ===================================================================
         //  EXECUTION
         // ===================================================================
-        "bash" => {
+        "Bash" => {
             let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
             let timed_out = out
                 .get("timed_out")
@@ -1782,7 +1787,7 @@ pub fn tool_result_summary(
         // ===================================================================
         //  USER INTERACTION
         // ===================================================================
-        "question" | "ask_user" => {
+        "question" | "AskUserQuestion" => {
             let response = out
                 .get("response")
                 .and_then(|v| v.as_str())
@@ -1818,11 +1823,11 @@ pub fn tool_result_summary(
         // ===================================================================
         //  PLANNING
         // ===================================================================
-        "plan_enter" => {
+        "EnterPlanMode" => {
             let task = out.get("task").and_then(|v| v.as_str()).unwrap_or("plan");
             Some(format!("delegated → {}", task))
         }
-        "plan_exit" => {
+        "ExitPlanMode" => {
             let len = out
                 .get("summary_length")
                 .and_then(|v| v.as_u64())
@@ -1832,7 +1837,7 @@ pub fn tool_result_summary(
         // ===================================================================
         //  TASK MANAGEMENT
         // ===================================================================
-        "task_create" => {
+        "TaskCreate" => {
             let subject = out.get("subject").and_then(|v| v.as_str());
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             match subject {
@@ -1844,7 +1849,7 @@ pub fn tool_result_summary(
                 None => Some(format!("created [{}]", short_id(id))),
             }
         }
-        "task_update" => {
+        "TaskUpdate" => {
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             let status = out.get("status").and_then(|v| v.as_str());
             let subject = out.get("subject").and_then(|v| v.as_str());
@@ -1872,7 +1877,7 @@ pub fn tool_result_summary(
                 Some(base)
             }
         }
-        "task_get" => {
+        "TaskGet" => {
             let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("?");
             let subject = out.get("subject").and_then(|v| v.as_str()).unwrap_or("");
@@ -1883,7 +1888,7 @@ pub fn tool_result_summary(
                 truncate_str(&subject, 80)
             ))
         }
-        "task_list" => {
+        "TaskList" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(pluralize(count, "task", "tasks"))
         } // ===================================================================
@@ -2680,7 +2685,7 @@ pub fn tool_result_summary(
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             Some(action.to_string())
         }
-        "skill_manage" => {
+        "Skill" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
             Some(action.to_string())
         }
@@ -3211,7 +3216,7 @@ impl<'a> MessageWidget<'a> {
                                     Style::default().fg(Color::Gray),
                                 )));
                             }
-                        } else if tool != "edit" && tool != "think" {
+                        } else if tool != "Edit" && tool != "think" {
                             // Skip result summary for edit tool on success (already shows inline diff)
                             // Skip result summary for think tool (full thought rendered above,
                             // same as Reasoning parts)
@@ -3236,7 +3241,7 @@ impl<'a> MessageWidget<'a> {
                         )));
                     }
                 }
-                MessagePart::Reasoning { text } => {
+                MessagePart::Reasoning { text, .. } => {
                     let mut reasoning_lines = Vec::new();
                     for line in text.lines() {
                         reasoning_lines.push(Line::from(Span::styled(

@@ -172,7 +172,7 @@ async fn post_tool_use_hook_additional_context_is_collected() {
     let result = ragent_agent::hooks::run_post_tool_use_hooks(
         &configs,
         dir.path(),
-        "edit",
+        "Edit",
         r#"{"path":"a.py"}"#,
         r#"{"content":"ok"}"#,
         true,

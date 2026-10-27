@@ -221,7 +221,7 @@ fn render_tool_call_error_shows_error_line() {
         "s",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "c1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Error,
@@ -264,6 +264,7 @@ fn render_reasoning_part_is_indented() {
         Role::Assistant,
         vec![MessagePart::Reasoning {
             text: "deliberating".to_string(),
+            signature: None,
         }],
     );
     let painted = render_message(&msg, 60, 4);
@@ -341,7 +342,7 @@ fn render_completed_tool_call_shows_result_summary() {
         "s",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "grep".to_string(),
+            tool: "Grep".to_string(),
             call_id: "g1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
@@ -390,7 +391,7 @@ fn result_summary_file_operation_arms() {
     );
     assert!(
         summary(
-            "write",
+            "Write",
             json!({"lines": 4}),
             json!({"path": "/home/user/project/a.rs"})
         )
@@ -406,7 +407,7 @@ fn result_summary_file_operation_arms() {
     );
     assert!(
         summary(
-            "edit",
+            "Edit",
             json!({"path": "/home/user/project/c.rs", "old_lines": 2, "new_lines": 5}),
             json!({})
         )
@@ -502,23 +503,23 @@ fn result_summary_search_and_execution_arms() {
         "4+ found"
     );
     assert_eq!(
-        summary("grep", json!({"count": 2, "file_count": 1}), json!({})),
+        summary("Grep", json!({"count": 2, "file_count": 1}), json!({})),
         "2 matched in 1 file searched"
     );
     assert_eq!(
-        summary("glob", json!({"count": 3, "truncated": true}), json!({})),
+        summary("Glob", json!({"count": 3, "truncated": true}), json!({})),
         "3 files+ found"
     );
     assert_eq!(
         summary(
-            "bash",
+            "Bash",
             json!({"timed_out": true, "duration_ms": 300}),
             json!({})
         ),
         "timed out after 300ms"
     );
-    assert!(summary("bash", json!({"exit_code": 0, "lines": 2}), json!({})).contains("exit 0"));
-    assert_eq!(summary("bash", json!({"lines": 1}), json!({})), "1 line…");
+    assert!(summary("Bash", json!({"exit_code": 0, "lines": 2}), json!({})).contains("exit 0"));
+    assert_eq!(summary("Bash", json!({"lines": 1}), json!({})), "1 line…");
     assert_eq!(
         summary("calculator", json!({"result": "42"}), json!({})),
         "= 42"
@@ -571,7 +572,7 @@ fn result_summary_interaction_and_planning_arms() {
         "yes"
     );
     assert_eq!(
-        summary("ask_user", json!({"content": "maybe"}), json!({})),
+        summary("AskUserQuestion", json!({"content": "maybe"}), json!({})),
         "maybe"
     );
     assert_eq!(summary("think", json!({}), json!({})), "Thinking ...");
@@ -588,15 +589,15 @@ fn result_summary_interaction_and_planning_arms() {
         "done"
     );
     assert_eq!(
-        summary("plan_enter", json!({"task": "build it"}), json!({})),
+        summary("EnterPlanMode", json!({"task": "build it"}), json!({})),
         "delegated → build it"
     );
     assert_eq!(
-        summary("plan_enter", json!({}), json!({})),
+        summary("EnterPlanMode", json!({}), json!({})),
         "delegated → plan"
     );
     assert_eq!(
-        summary("plan_exit", json!({"summary_length": 42}), json!({})),
+        summary("ExitPlanMode", json!({"summary_length": 42}), json!({})),
         "returned (42 chars)"
     );
 }
@@ -605,18 +606,18 @@ fn result_summary_interaction_and_planning_arms() {
 fn result_summary_task_management_arms() {
     assert!(
         summary(
-            "task_create",
+            "TaskCreate",
             json!({"subject": "Do it", "id": "abcdef0123456789"}),
             json!({})
         )
         .contains("created \"Do it\"")
     );
     assert!(
-        summary("task_create", json!({"id": "abcdef0123456789"}), json!({})).contains("created [")
+        summary("TaskCreate", json!({"id": "abcdef0123456789"}), json!({})).contains("created [")
     );
     assert!(
         summary(
-            "task_update",
+            "TaskUpdate",
             json!({"id": "abcdef0123456789", "status": "completed", "subject": "t"}),
             json!({})
         )
@@ -624,7 +625,7 @@ fn result_summary_task_management_arms() {
     );
     assert!(
         summary(
-            "task_update",
+            "TaskUpdate",
             json!({"id": "abcdef0123456789", "status": "completed"}),
             json!({})
         )
@@ -632,18 +633,18 @@ fn result_summary_task_management_arms() {
     );
     assert!(
         summary(
-            "task_update",
+            "TaskUpdate",
             json!({"id": "abcdef0123456789", "subject": "t"}),
             json!({})
         )
         .contains("updated \"t\"")
     );
     assert!(
-        summary("task_update", json!({"id": "abcdef0123456789"}), json!({})).contains("updated [")
+        summary("TaskUpdate", json!({"id": "abcdef0123456789"}), json!({})).contains("updated [")
     );
     assert!(
         summary(
-            "task_update",
+            "TaskUpdate",
             json!({"id": "abcdef0123456789", "status": "completed", "unblocked": ["b1", "b2"]}),
             json!({})
         )
@@ -983,7 +984,7 @@ async fn event_text_and_reasoning_delta_append_to_message() {
         .flat_map(|m| m.parts.iter())
         .filter_map(|p| match p {
             MessagePart::Text { text } => Some(text.clone()),
-            MessagePart::Reasoning { text } => Some(text.clone()),
+            MessagePart::Reasoning { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -1118,7 +1119,7 @@ async fn event_tools_sent_logs_at_first_step() {
     let mut app = app_with_session("sess-1");
     app.handle_event(Event::ToolsSent {
         session_id: "sess-1".to_string(),
-        tools: vec!["read".to_string(), "bash".to_string()],
+        tools: vec!["read".to_string(), "Bash".to_string()],
     })
     .await;
     assert!(
@@ -1198,7 +1199,7 @@ async fn event_hook_warning_and_tool_result_flagged_set_status() {
     app.handle_event(Event::HookWarning {
         session_id: "sess-1".to_string(),
         hook_command: "lint.sh".to_string(),
-        tool: "write".to_string(),
+        tool: "Write".to_string(),
         stderr: "warnings found".to_string(),
     })
     .await;
@@ -1210,7 +1211,7 @@ async fn event_hook_warning_and_tool_result_flagged_set_status() {
 
     app.handle_event(Event::ToolResultFlagged {
         session_id: "sess-1".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         hook_command: "guard.sh".to_string(),
         reason: "denied".to_string(),
     })
@@ -1223,13 +1224,13 @@ async fn event_security_verdict_and_quota_update() {
     let mut app = app_with_session("sess-1");
     app.handle_event(Event::SecurityVerdict {
         session_id: "sess-1".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         verdict: "allow".to_string(),
         rationale: "read-only command".to_string(),
     })
     .await;
     assert_eq!(app.security_verdicts, 1);
-    assert_eq!(app.status, "security: allow bash");
+    assert_eq!(app.status, "security: allow Bash");
 
     app.handle_event(Event::SecurityVerdict {
         session_id: "sess-1".to_string(),

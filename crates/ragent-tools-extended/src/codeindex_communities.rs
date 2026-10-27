@@ -47,8 +47,8 @@ impl Tool for CodeIndexCommunitiesTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` or `glob` as fallback tools for code search.",
-                    &["grep", "glob"],
+                    "Use `Grep` or `Glob` as fallback tools for code search.",
+                    &["Grep", "Glob"],
                 ));
             }
         };
@@ -65,7 +65,7 @@ impl Tool for CodeIndexCommunitiesTool {
                     .to_string(),
                 metadata: Some(json!({
                     "error": "codeindex_empty_graph",
-                    "fallback_tools": ["grep", "glob"]
+                    "fallback_tools": ["Grep", "Glob"]
                 })),
             });
         }

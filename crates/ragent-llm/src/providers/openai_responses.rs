@@ -25,7 +25,12 @@ use std::pin::Pin;
 use super::http_client::{create_http_client, create_streaming_http_client};
 use super::thinking::openai_thinking_levels_for_model;
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::wire::encode::{MessageContext, encode_messages_fallible};
+use super::wire::profile_table::OPENAI_RESPONSES;
+use super::wire::trace;
+#[cfg(test)]
+use crate::llm::{ChatContent, ContentPart};
+use crate::llm::{ChatMessage, ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -257,102 +262,18 @@ impl ResponsesApiClient {
         }
     }
 
-    /// Builds the Responses-API input list (FR-018).
+    /// The Responses input list (FR-018), from the one shared encoder.
     ///
-    /// Every [`ChatMessage`] becomes zero or more entries in the `input`
-    /// array:
-    ///
-    /// - `Text` -> `{"role": role, "content": text}` (unchanged)
-    /// - `Parts[Text]` -> `{"role": role, "content": [{type:"text"...}]}`
-    /// - `Parts[ToolUse]` -> `{"type":"function_call","call_id", "name", "arguments"}`
-    /// - `Parts[ToolResult]` -> `{"type":"function_call_output","call_id","output"}`
-    /// - `Parts[ImageUrl]` -> `Err(WireLoss)` - the Responses input has no
-    ///   image slot, so the request is refused rather than silently stripped
-    ///   (FR-018). A future `Image` -> input-image item mapping would remove
-    ///   this arm.
+    /// Every [`ChatMessage`] becomes zero or more entries: a message item for its
+    /// text, then one item per tool construct (the call and its output), so the
+    /// tool exchange is carried rather than filtered out. The construction, including the `ImageUrl` -> `WireLoss`
+    /// refusal the input list has no slot to avoid, is `wire::encode`'s (FR-006):
+    /// this client names its profile and nothing else.
     fn build_input_items(
         &self,
         messages: &[ChatMessage],
     ) -> Result<Vec<Value>, ragent_types::RagentError> {
-        let mut items = Vec::new();
-        for msg in messages {
-            let role = match msg.role.as_str() {
-                "user" => "user",
-                "assistant" => "assistant",
-                "system" => "system",
-                "developer" => "developer",
-                _ => continue,
-            };
-            match &msg.content {
-                ChatContent::Text(text) => {
-                    items.push(json!({
-                        "role": role,
-                        "content": text,
-                    }));
-                }
-                ChatContent::Parts(parts) => {
-                    // Text content as an input_text-equivalent entry, matching
-                    // the existing wire shape (role + content array of type:text).
-                    let text_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => {
-                                Some(json!({ "type": "text", "text": text }))
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    if !text_parts.is_empty() {
-                        items.push(json!({
-                            "role": role,
-                            "content": text_parts,
-                        }));
-                    }
-                    // Tool constructs each become their own input item.
-                    for part in parts {
-                        match part {
-                            ContentPart::ToolUse { id, name, input } => {
-                                items.push(json!({
-                                    "type": "function_call",
-                                    "call_id": id,
-                                    "name": name,
-                                    "arguments": input.to_string(),
-                                }));
-                            }
-                            ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                                is_error,
-                            } => {
-                                // FR-014: `function_call_output` has no error
-                                // flag, so the content carries the `ERROR: `
-                                // prefix.
-                                let output =
-                                    crate::provider::wire::encode::error_marked(content, *is_error);
-                                items.push(json!({
-                                    "type": "function_call_output",
-                                    "call_id": tool_use_id,
-                                    "output": output,
-                                }));
-                            }
-                            ContentPart::Text { .. } => {
-                                // Already emitted above as the role/content item.
-                            }
-                            // FR-011: the Responses API has no signed-reasoning
-                            // input item.
-                            ContentPart::Reasoning { .. } => {}
-                            ContentPart::ImageUrl { .. } => {
-                                return Err(ragent_types::RagentError::WireLoss {
-                                    construct: "ImageUrl".to_string(),
-                                    provider: "openai_responses".to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(items)
+        encode_messages_fallible(OPENAI_RESPONSES, messages, &MessageContext::default())
     }
 
     /// Builds the request body for the Responses API.
@@ -382,8 +303,11 @@ impl ResponsesApiClient {
         // The tool array comes from the one shared encoder (FR-003): the
         // Responses API takes the flattened function shape, so the payload is
         // the same inner array the chat family assigns, only differently shaped.
-        let cached = cached_tools(ToolFormat::OpenAiResponses, &request.tools);
-        let tools = cached.responses_tools_array();
+        let tools = if request.tools.is_empty() {
+            None
+        } else {
+            Some(cached_tools(ToolFormat::OpenAiResponses, &request.tools).responses_tools_array())
+        };
 
         let mut body = json!({
             "model": request.model,
@@ -394,8 +318,10 @@ impl ResponsesApiClient {
             "stream": true,
         });
 
-        if tools.as_array().is_some_and(|list| !list.is_empty()) {
-            body["tools"] = tools;
+        // An empty list stays absent rather than becoming `"tools":[]`, which some
+        // Responses deployments reject.
+        if let Some(tools) = tools {
+            body[ToolFormat::OpenAiResponses.body_key()] = tools;
         }
 
         if let Some(max_tokens) = request.max_tokens {
@@ -667,6 +593,7 @@ impl LlmClient for ResponsesApiClient {
     ) -> anyhow::Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/responses", self.base_url);
         let body = self.build_request_body(&request)?;
+        trace::record_body(&request, &body);
 
         tracing::debug!(
             url = %url,

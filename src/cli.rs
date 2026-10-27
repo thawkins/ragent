@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 
+use crate::cli_out::{cliprint, cliprint_err, cliprintln, cliprintln_err};
 use ragent_agent::{event::EventBus, storage::Storage};
 
 /// A typed process exit requested by a CLI handler.
@@ -41,6 +42,43 @@ impl std::fmt::Display for CliExit {
 }
 
 impl std::error::Error for CliExit {}
+
+/// Print the FR-016 wire matrix - one row per registered provider - and return.
+///
+/// Builds the default provider registry, takes the ids it actually registered
+/// (so the table's rows come from the registry rather than a hand-maintained
+/// list), and hands them to the pure
+/// [`render`](ragent_llm::providers::wire::matrix::render) renderer. No provider
+/// client is constructed, no request is made and no tool runs: the registry's
+/// constructors only resolve base URLs and read local config, and the renderer
+/// reads the `const` profile table.
+///
+/// # Errors
+///
+/// Returns a [`CliExit::failure`] (exit code 1, the runtime-failure code) when a
+/// registered provider has no row in
+/// [`PROVIDER_WIRE`](ragent_llm::providers::wire::profile_table::PROVIDER_WIRE).
+/// That is a broken build rather than a mistyped flag, hence 1 and not 2.
+pub fn handle_wire_matrix_command() -> Result<()> {
+    let registry = ragent_llm::providers::create_default_registry();
+    let mut ids: Vec<String> = registry.list().into_iter().map(|p| p.id).collect();
+    ids.sort();
+    let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
+    match ragent_llm::providers::wire::matrix::render(&borrowed) {
+        Ok(table) => {
+            cliprint!("{table}");
+            Ok(())
+        }
+        Err(missing) => {
+            cliprintln_err!("ragent: {missing}");
+            cliprintln_err!(
+                "ragent: every registered provider needs a row in \
+                 crates/ragent-llm/src/providers/wire/profile_table.rs (PROVIDER_WIRE)"
+            );
+            Err(CliExit::failure().into())
+        }
+    }
+}
 
 /// small CLI demo for orchestration
 ///
@@ -82,7 +120,7 @@ pub async fn run_orchestration_example() -> anyhow::Result<()> {
     };
 
     let res = coord.start_job_sync(desc).await?;
-    println!("Orchestration sync result:\n{res}");
+    cliprintln!("Orchestration sync result:\n{res}");
 
     Ok(())
 }
@@ -309,7 +347,7 @@ pub async fn handle_research_command(
     struct CliObserver;
     impl SessionObserver for CliObserver {
         fn on_event(&self, event: SessionEvent) {
-            println!("{}", ragent_research::render_session_event_json(&event));
+            cliprintln!("{}", ragent_research::render_session_event_json(&event));
         }
     }
 
@@ -384,7 +422,7 @@ pub async fn handle_research_command(
             // Clarification defaults to off; --clarify opts in.
             let clarify = clarify.unwrap_or(false);
             if topic.is_empty() && from_urls.is_empty() && from_files.is_empty() {
-                eprintln!(
+                cliprintln_err!(
                     "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
                 );
                 return Err(CliExit::usage().into());
@@ -457,7 +495,7 @@ pub async fn handle_research_command(
     };
     match cli_cmd {
         ResearchCliCommand::Help => {
-            println!("{}", ResearchCliCommand::build_help_message());
+            cliprintln!("{}", ResearchCliCommand::build_help_message());
         }
         ResearchCliCommand::List { all, json } => {
             // `list` scans the research root directly, so a refresh here also
@@ -479,15 +517,15 @@ pub async fn handle_research_command(
                 })
                 .collect();
             if json {
-                println!("{}", ragent_research::render_list_output_json(&rows));
+                cliprintln!("{}", ragent_research::render_list_output_json(&rows));
             } else {
-                print!("{}", ragent_research::render_list_output(&rows));
+                cliprint!("{}", ragent_research::render_list_output(&rows));
             }
         }
         ResearchCliCommand::Open { name } => {
             let item = manager.show(&name).await?;
             let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
-            println!("{}", path.display());
+            cliprintln!("{}", path.display());
         }
         ResearchCliCommand::Search { query, json } => {
             let hits = manager.search(&query, 25).await?;
@@ -496,13 +534,13 @@ pub async fn handle_research_command(
                 .map(|h| (h.name, h.title, h.snippet, h.path.display().to_string()))
                 .collect();
             if json {
-                println!("{}", ragent_research::render_search_output_json(&json_rows));
+                cliprintln!("{}", ragent_research::render_search_output_json(&json_rows));
             } else {
                 let rows: Vec<(String, String, String)> = json_rows
                     .into_iter()
                     .map(|(name, title, snippet, _path)| (name, title, snippet))
                     .collect();
-                print!("{}", ragent_research::render_search_output(&rows));
+                cliprint!("{}", ragent_research::render_search_output(&rows));
             }
         }
         ResearchCliCommand::Show { name, .. } => {
@@ -520,7 +558,7 @@ pub async fn handle_research_command(
                     )
                 })
                 .collect();
-            print!(
+            cliprint!(
                 "{}",
                 ragent_research::render_show_output(
                     item.name.as_ref(),
@@ -535,20 +573,20 @@ pub async fn handle_research_command(
         }
         ResearchCliCommand::Delete { name, yes } => {
             if !yes {
-                eprint!("Are you sure you want to delete research/{name}? [y/N] ");
+                cliprint_err!("Are you sure you want to delete research/{name}? [y/N] ");
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
                 if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-                    println!("ragent-research: cancelled");
+                    cliprintln!("ragent-research: cancelled");
                     return Ok(());
                 }
             }
             manager.delete(&name).await?;
-            println!("ragent-research: deleted research/{name}");
+            cliprintln!("ragent-research: deleted research/{name}");
         }
         ResearchCliCommand::Archive { name } => {
             manager.archive(&name).await?;
-            println!("ragent-research: archived research/{name}");
+            cliprintln!("ragent-research: archived research/{name}");
         }
         ResearchCliCommand::Create {
             name,
@@ -689,16 +727,16 @@ pub async fn handle_research_command(
                     summary.push_str(&ragent_research::provider_calls_suffix(
                         &outcome.provider_tool_calls,
                     ));
-                    println!("{summary}");
+                    cliprintln!("{summary}");
                 }
                 Err(ragent_research::ResearchError::NeedsClarification { question }) => {
-                    eprintln!("ragent-research: {}", question);
-                    eprint!("Answer: ");
+                    cliprintln_err!("ragent-research: {}", question);
+                    cliprint_err!("Answer: ");
                     let mut answer = String::new();
                     std::io::stdin().read_line(&mut answer)?;
                     let answer = answer.trim();
                     if answer.is_empty() {
-                        eprintln!("ragent-research: clarification cancelled");
+                        cliprintln_err!("ragent-research: clarification cancelled");
                         return Err(CliExit::failure().into());
                     }
                     let mut req = req;
@@ -732,16 +770,16 @@ pub async fn handle_research_command(
                             summary.push_str(&ragent_research::provider_calls_suffix(
                                 &outcome.provider_tool_calls,
                             ));
-                            println!("{summary}");
+                            cliprintln!("{summary}");
                         }
                         Err(e) => {
-                            eprintln!("ragent-research: {e}");
+                            cliprintln_err!("ragent-research: {e}");
                             return Err(CliExit::failure().into());
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("ragent-research: {e}");
+                    cliprintln_err!("ragent-research: {e}");
                     return Err(CliExit::failure().into());
                 }
             }
@@ -754,9 +792,10 @@ pub async fn handle_research_command(
                 Ok(state) => {
                     let topic = state.plan.topic.clone();
                     let title = name.clone();
-                    eprintln!(
+                    cliprintln_err!(
                         "ragent-research: resuming research/{} - topic: {}",
-                        name, topic
+                        name,
+                        topic
                     );
                     // Build and run the research session.
                     let req = ragent_research::ResearchRunRequest {
@@ -788,7 +827,7 @@ pub async fn handle_research_command(
                         .await
                     {
                         Ok(outcome) => {
-                            println!(
+                            cliprintln!(
                                 "ragent-research: continued research/{} ({} sources{})",
                                 outcome.research_name,
                                 outcome.sources.len(),
@@ -798,13 +837,13 @@ pub async fn handle_research_command(
                             );
                         }
                         Err(e) => {
-                            eprintln!("ragent-research: {e}");
+                            cliprintln_err!("ragent-research: {e}");
                             return Err(CliExit::failure().into());
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("ragent-research: {e}");
+                    cliprintln_err!("ragent-research: {e}");
                     return Err(CliExit::failure().into());
                 }
             }
@@ -816,12 +855,12 @@ pub async fn handle_research_command(
             let item = match manager.show(&name).await {
                 Ok(item) => item,
                 Err(e) => {
-                    eprintln!("ragent-research: {e}");
+                    cliprintln_err!("ragent-research: {e}");
                     return Err(CliExit::failure().into());
                 }
             };
             let Some(recorded) = item.invocation.clone() else {
-                eprintln!(
+                cliprintln_err!(
                     "ragent-research: research/{name} has no invocation recorded in its \
                      frontmatter; only runs created with an invocation-aware front-end \
                      can be replayed"
@@ -831,14 +870,14 @@ pub async fn handle_research_command(
             let mut req = match ragent_research::ResearchRunRequest::from_invocation(&recorded) {
                 Ok(req) => req,
                 Err(e) => {
-                    eprintln!("ragent-research: cannot replay research/{name}: {e}");
+                    cliprintln_err!("ragent-research: cannot replay research/{name}: {e}");
                     return Err(CliExit::failure().into());
                 }
             };
             // The item name comes from the frontmatter, which is authoritative.
             req.name = name.clone();
             req.title = Some(item.title.clone());
-            eprintln!("ragent-research: updating research/{name} - replaying: {recorded}");
+            cliprintln_err!("ragent-research: updating research/{name} - replaying: {recorded}");
             let config_arc = ragent_config::Config::load().ok().map(Arc::new);
             let config = ragent_research::build_session_config(&req, config_arc.as_deref());
             let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
@@ -861,7 +900,7 @@ pub async fn handle_research_command(
                 .await
             {
                 Ok(outcome) => {
-                    println!(
+                    cliprintln!(
                         "ragent-research: updated research/{} ({} sources{})",
                         outcome.research_name,
                         outcome.sources.len(),
@@ -869,13 +908,13 @@ pub async fn handle_research_command(
                     );
                 }
                 Err(ragent_research::ResearchError::NeedsClarification { question }) => {
-                    eprintln!("ragent-research: {}", question);
-                    eprint!("Answer: ");
+                    cliprintln_err!("ragent-research: {}", question);
+                    cliprint_err!("Answer: ");
                     let mut answer = String::new();
                     std::io::stdin().read_line(&mut answer)?;
                     let answer = answer.trim();
                     if answer.is_empty() {
-                        eprintln!("ragent-research: clarification cancelled");
+                        cliprintln_err!("ragent-research: clarification cancelled");
                         return Err(CliExit::failure().into());
                     }
                     req.topic = format!("{} (clarification: {})", req.topic, answer);
@@ -885,7 +924,7 @@ pub async fn handle_research_command(
                         .await
                     {
                         Ok(outcome) => {
-                            println!(
+                            cliprintln!(
                                 "ragent-research: updated research/{} ({} sources{})",
                                 outcome.research_name,
                                 outcome.sources.len(),
@@ -895,13 +934,13 @@ pub async fn handle_research_command(
                             );
                         }
                         Err(e) => {
-                            eprintln!("ragent-research: {e}");
+                            cliprintln_err!("ragent-research: {e}");
                             return Err(CliExit::failure().into());
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("ragent-research: {e}");
+                    cliprintln_err!("ragent-research: {e}");
                     return Err(CliExit::failure().into());
                 }
             }
@@ -914,18 +953,20 @@ pub async fn handle_research_command(
             let valid_name = match ResearchName::try_new(&name) {
                 Ok(n) => n,
                 Err(e) => {
-                    eprintln!("ragent-research: invalid research name `{name}`: {e}");
+                    cliprintln_err!("ragent-research: invalid research name `{name}`: {e}");
                     return Err(CliExit::usage().into());
                 }
             };
             let item_dir = ResearchIo::item_dir(manager.root(), &valid_name);
             let sources_dir = ResearchIo::sources_dir(manager.root(), &valid_name);
             if !item_dir.exists() {
-                eprintln!("ragent-research: research folder `research/{name}` does not exist.");
+                cliprintln_err!(
+                    "ragent-research: research folder `research/{name}` does not exist."
+                );
                 return Err(CliExit::failure().into());
             }
             if !sources_dir.exists() || !sources_dir.is_dir() {
-                eprintln!("ragent-research: `research/{name}/sources/` folder not found.");
+                cliprintln_err!("ragent-research: `research/{name}/sources/` folder not found.");
                 return Err(CliExit::failure().into());
             }
             let is_empty = match std::fs::read_dir(&sources_dir) {
@@ -933,12 +974,12 @@ pub async fn handle_research_command(
                 Err(_) => true,
             };
             if is_empty {
-                eprintln!("ragent-research: `research/{name}/sources/` is empty.");
+                cliprintln_err!("ragent-research: `research/{name}/sources/` is empty.");
                 return Err(CliExit::failure().into());
             }
             let concepts_path = ResearchIo::concepts_md_path(manager.root(), &valid_name);
             if concepts_path.exists() && !force {
-                eprintln!(
+                cliprintln_err!(
                     "ragent-research: `research/{name}/CONCEPTS.md` already exists. \
                      Re-run with --force to overwrite it."
                 );
@@ -961,12 +1002,12 @@ pub async fn handle_research_command(
             {
                 Ok(p) => p,
                 Err(e) => {
-                    eprintln!("ragent-research: failed to read sources for `{name}`: {e}");
+                    cliprintln_err!("ragent-research: failed to read sources for `{name}`: {e}");
                     return Err(CliExit::failure().into());
                 }
             };
-            println!("ragent-research: cluster request accepted for `{name}` (force={force}).");
-            println!(
+            cliprintln!("ragent-research: cluster request accepted for `{name}` (force={force}).");
+            cliprintln!(
                 "ragent-research: read {} source file(s) (payload: {} / {} bytes, \
                    context window: {context_window} tokens, truncated: {}).",
                 payload.files.len(),
@@ -980,7 +1021,7 @@ pub async fn handle_research_command(
             let model_ref = match active_model {
                 Some(m) => m,
                 None => {
-                    eprintln!(
+                    cliprintln_err!(
                         "ragent-research: no active model selected. Use --model or configure a default."
                     );
                     return Err(CliExit::failure().into());
@@ -999,45 +1040,49 @@ pub async fn handle_research_command(
             {
                 Ok(text) => text,
                 Err(e) => {
-                    eprintln!("ragent-research: LLM call failed for `{name}`: {e}");
+                    cliprintln_err!("ragent-research: LLM call failed for `{name}`: {e}");
                     return Err(CliExit::failure().into());
                 }
             };
-            println!("ragent-research: concept extraction completed for `{name}`.");
+            cliprintln!("ragent-research: concept extraction completed for `{name}`.");
             let concepts_path =
                 match ragent_research::write_concepts_md(manager.root(), &valid_name, &response)
                     .await
                 {
                     Ok(p) => p,
                     Err(e) => {
-                        eprintln!("ragent-research: failed to write CONCEPTS.md for `{name}`: {e}");
+                        cliprintln_err!(
+                            "ragent-research: failed to write CONCEPTS.md for `{name}`: {e}"
+                        );
                         return Err(CliExit::failure().into());
                     }
                 };
-            println!(
+            cliprintln!(
                 "ragent-research: wrote `{path}` ({size} bytes).",
                 path = concepts_path.display(),
                 size = response.len()
             );
         }
         ResearchCliCommand::Config => {
-            println!("ragent-research: effective defaults are loaded from ragent.json.");
+            cliprintln!("ragent-research: effective defaults are loaded from ragent.json.");
         }
         ResearchCliCommand::Resume { name } => {
-            println!("ragent-research: resume '{name}' is not implemented in the CLI.");
+            cliprintln!("ragent-research: resume '{name}' is not implemented in the CLI.");
         }
         ResearchCliCommand::Export { name, .. } => {
-            println!("ragent-research: export '{name}' is not implemented in the CLI.");
+            cliprintln!("ragent-research: export '{name}' is not implemented in the CLI.");
         }
         ResearchCliCommand::Import { path, .. } => {
-            println!("ragent-research: import '{path}' is not implemented in the CLI.");
+            cliprintln!("ragent-research: import '{path}' is not implemented in the CLI.");
         }
         ResearchCliCommand::Invalid(arg) => {
-            eprintln!("ragent-research: {arg}. Try `ragent research help`.");
+            cliprintln_err!("ragent-research: {arg}. Try `ragent research help`.");
             return Err(CliExit::usage().into());
         }
         ResearchCliCommand::Unknown(sub) => {
-            eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");
+            cliprintln_err!(
+                "ragent-research: unknown subcommand '{sub}'. Try `ragent research help`."
+            );
             return Err(CliExit::usage().into());
         }
     }
@@ -1141,14 +1186,14 @@ fn handle_new_tokens(tokens: &[&str]) -> Result<()> {
     let parsed = match parse_flags(tokens) {
         Ok(request) => request,
         Err(err) => {
-            eprintln!("ragent new: {err}");
-            eprintln!();
-            eprint!("{}", new_usage_message());
+            cliprintln_err!("ragent new: {err}");
+            cliprintln_err!();
+            cliprint_err!("{}", new_usage_message());
             return Err(CliExit::usage().into());
         }
     };
     if parsed.is_help() {
-        print!("{}", new_usage_message());
+        cliprint!("{}", new_usage_message());
         return Ok(());
     }
     run_new_scaffold(&parsed)
@@ -1173,7 +1218,7 @@ fn run_new_scaffold(
 
     // FR-002: refuse non-empty targets before any filesystem writes.
     if let Err(err) = enforce_empty_directory_guard(&cwd) {
-        eprintln!("ragent new: {err}");
+        cliprintln_err!("ragent new: {err}");
         return Err(CliExit::failure().into());
     }
 
@@ -1183,7 +1228,7 @@ fn run_new_scaffold(
         .unwrap_or_else(|| "new-project".to_owned());
 
     let Some(recipe) = recipe_for(request.language()) else {
-        eprintln!("ragent new: internal: no scaffold recipe for the selected language");
+        cliprintln_err!("ragent new: internal: no scaffold recipe for the selected language");
         return Err(CliExit::usage().into());
     };
 
@@ -1194,7 +1239,7 @@ fn run_new_scaffold(
         match plan_and_emit(&cwd, request, &slug, recipe, &generated_at_utc) {
             Ok(result) => result,
             Err(err) => {
-                eprintln!("ragent new: {err}");
+                cliprintln_err!("ragent new: {err}");
                 return Err(CliExit::failure().into());
             }
         };
@@ -1253,8 +1298,8 @@ fn run_new_scaffold(
     summary.git = Some(git_outcome);
     summary.remote = remote_status;
 
-    print!("ragent new: {}", summary.render());
-    print!("{stack_note}");
+    cliprint!("ragent new: {}", summary.render());
+    cliprint!("{stack_note}");
     Ok(())
 }
 
@@ -1569,19 +1614,19 @@ pub async fn handle_govcreate_command(
             };
             let cancel = CancellationToken::none();
             let mut sink = |event: ragent_tools_extended::archdoc::GovCreateProgress| {
-                println!("{}", event.render());
+                cliprintln!("{}", event.render());
             };
             let report = run_govcreate_with_progress(&run, &stages, &cancel, &mut sink).await;
-            println!("From: /spec govcreate\n\n{}", report.render());
+            cliprintln!("From: /spec govcreate\n\n{}", report.render());
             if !report.succeeded() {
                 return Err(CliExit::failure().into());
             }
             Ok(())
         }
         SpecCommand::GovCreateUsage(reason) => {
-            eprintln!("ragent spec govcreate: {reason}");
-            eprintln!();
-            eprint!(
+            cliprintln_err!("ragent spec govcreate: {reason}");
+            cliprintln_err!();
+            cliprint_err!(
                 "{}",
                 govcreate_usage_message().replace("/spec govcreate", "ragent spec govcreate")
             );
@@ -1589,7 +1634,7 @@ pub async fn handle_govcreate_command(
         }
         _ => {
             // `SpecCommand::Unknown("govcreate")`: missing positionals (FR-003).
-            eprint!(
+            cliprint_err!(
                 "{}",
                 govcreate_usage_message().replace("/spec govcreate", "ragent spec govcreate")
             );
@@ -1622,27 +1667,30 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
 
     match sub.as_str() {
         "help" | "--help" | "-h" => {
-            println!("{}", automation_usage());
+            cliprintln!("{}", automation_usage());
             Ok(())
         }
         "runs" => {
             let Some(id) = rest.first() else {
-                eprintln!("ragent automation runs: missing automation id");
+                cliprintln_err!("ragent automation runs: missing automation id");
                 return Err(CliExit::usage().into());
             };
             let runs = storage.list_automation_runs(id, 50)?;
             if runs.is_empty() {
-                println!("No run history for `{id}`.");
+                cliprintln!("No run history for `{id}`.");
                 return Ok(());
             }
-            println!("Run history for `{id}` ({}):", runs.len());
-            println!();
-            println!(
+            cliprintln!("Run history for `{id}` ({}):", runs.len());
+            cliprintln!();
+            cliprintln!(
                 "{:<38} {:<9} {:<10} {:<8} STARTED",
-                "RUN", "TRIGGER", "OUTCOME", "BACKEND"
+                "RUN",
+                "TRIGGER",
+                "OUTCOME",
+                "BACKEND"
             );
             for run in &runs {
-                println!(
+                cliprintln!(
                     "{:<38} {:<9} {:<10} {:<8} {}",
                     run.id,
                     run.trigger.as_str(),
@@ -1655,17 +1703,17 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
         }
         "run" => {
             let Some(id) = rest.first() else {
-                eprintln!("ragent automation run: missing automation id");
+                cliprintln_err!("ragent automation run: missing automation id");
                 return Err(CliExit::usage().into());
             };
             let config = ragent_config::Config::load().unwrap_or_default();
             let automation = config.automation_config();
             if !automation.is_enabled() {
-                eprintln!("ragent automation run: the automation service is disabled");
+                cliprintln_err!("ragent automation run: the automation service is disabled");
                 return Err(CliExit::failure().into());
             }
             let Some(def) = automation.get(id).filter(|d| d.enabled) else {
-                eprintln!("ragent automation run: no enabled automation `{id}`");
+                cliprintln_err!("ragent automation run: no enabled automation `{id}`");
                 return Err(CliExit::failure().into());
             };
             // Insert the run record in the running state. The agent turn is
@@ -1682,7 +1730,7 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
             // A failure leaves the row pending, which the message below explains.
             // INTENTIONAL: best-effort closure of the just-inserted run row.
             let _ = storage.finish_automation_run(&run.id, ragent_types::RunOutcome::Error, None);
-            println!(
+            cliprintln!(
                 "Recorded manual run `{}` for `{id}` on backend `{}`. Run the live `ragent \
                  serve` or TUI session to execute it.",
                 run.id,
@@ -1694,19 +1742,24 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
             let config = ragent_config::Config::load().unwrap_or_default();
             let automation = config.automation_config();
             if automation.automations.is_empty() {
-                println!("No automations configured under the `automation` block in ragent.json.");
+                cliprintln!(
+                    "No automations configured under the `automation` block in ragent.json."
+                );
                 return Ok(());
             }
             let now = chrono::Utc::now();
-            println!(
+            cliprintln!(
                 "Configured automations ({}), service {}:",
                 automation.automations.len(),
                 if automation.is_enabled() { "on" } else { "off" }
             );
-            println!();
-            println!(
+            cliprintln!();
+            cliprintln!(
                 "{:<20} {:<9} {:<16} {:<8} NEXT DUE",
-                "ID", "TRIGGER", "SCHEDULE", "BACKEND"
+                "ID",
+                "TRIGGER",
+                "SCHEDULE",
+                "BACKEND"
             );
             for def in &automation.automations {
                 let next_due = def
@@ -1715,7 +1768,7 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
                     .and_then(|expr| ragent_agent::automation::compute_next_due(expr, now))
                     .map(|t| t.to_rfc3339())
                     .unwrap_or_else(|| "-".to_string());
-                println!(
+                cliprintln!(
                     "{:<20} {:<9} {:<16} {:<8} {}",
                     def.id,
                     def.trigger.label(),
@@ -1727,9 +1780,9 @@ pub fn handle_automation_command(args: &[String], storage: std::sync::Arc<Storag
             Ok(())
         }
         other => {
-            eprintln!("ragent automation: unknown subcommand `{other}`");
-            eprintln!();
-            eprint!("{}", automation_usage());
+            cliprintln_err!("ragent automation: unknown subcommand `{other}`");
+            cliprintln_err!();
+            cliprint_err!("{}", automation_usage());
             Err(CliExit::usage().into())
         }
     }

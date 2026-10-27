@@ -1,5 +1,5 @@
 //! Tests-only coverage for the tool-registry surface in `tool/mod.rs`:
-//! register/get/list/definitions/hidden/remove_all/version, the definition
+//! register/get/list/definitions/remove_all/version, the definition
 //! cache invalidation, the allowed-tool helpers, and the `ToolContext` default
 //! registry.
 
@@ -85,7 +85,7 @@ fn registry_remove_all_is_a_noop_for_empty_and_removes_named() {
 }
 
 #[test]
-fn definitions_cache_is_shared_then_invalidated_on_hidden_change() {
+fn definitions_cache_is_shared_then_invalidated_on_register() {
     let registry = ToolRegistry::new();
     registry.register(stub("a"));
     registry.register(stub("b"));
@@ -99,41 +99,20 @@ fn definitions_cache_is_shared_then_invalidated_on_hidden_change() {
     assert_eq!(first.len(), 2);
     assert!(first.windows(2).all(|w| w[0].name <= w[1].name));
 
-    registry.set_hidden(&["b".to_string()]);
-    let after_hidden = registry.definitions();
+    registry.register(stub("c"));
+    let after_register = registry.definitions();
     assert!(
-        !Arc::ptr_eq(&first, &after_hidden),
-        "hidden change invalidates cache"
+        !Arc::ptr_eq(&first, &after_register),
+        "registration invalidates cache"
     );
-    assert_eq!(after_hidden.len(), 1);
-    assert_eq!(after_hidden[0].name, "a");
-}
-
-#[test]
-fn hidden_and_hidden_definitions() {
-    let registry = create_default_registry();
-    assert_eq!(registry.hidden().len(), 0);
-
-    registry.set_hidden(&["read".to_string(), "bash".to_string()]);
-    assert_eq!(
-        registry.hidden(),
-        vec!["bash".to_string(), "read".to_string()]
-    );
-
-    let hidden_defs = registry.hidden_definitions();
-    let names: Vec<&str> = hidden_defs.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, vec!["bash", "read"]);
-
-    // Hidden tools remain registered and executable.
-    assert!(registry.get("read").is_some());
-    let defs = registry.definitions();
-    assert!(!defs.iter().any(|d| d.name == "read"));
+    assert_eq!(after_register.len(), 3);
+    assert!(after_register.windows(2).all(|w| w[0].name <= w[1].name));
 }
 
 #[test]
 fn default_registry_exposes_expected_tools() {
     let registry = create_default_registry();
-    for name in ["read", "bash", "think", "plan_enter"] {
+    for name in ["read", "Bash", "think", "EnterPlanMode"] {
         assert!(
             registry.list().contains(&name.to_string()),
             "default registry must expose {name}"
@@ -167,5 +146,5 @@ fn build_allowed_tool_set_none_is_empty_and_some_adds_always_allowed() {
     );
 
     assert!(is_allowed_tool("read", &allowed));
-    assert!(!is_allowed_tool("bash", &allowed));
+    assert!(!is_allowed_tool("Bash", &allowed));
 }

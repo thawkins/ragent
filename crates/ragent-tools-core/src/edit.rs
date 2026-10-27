@@ -100,7 +100,7 @@ pub struct EditTool;
 #[async_trait::async_trait]
 impl Tool for EditTool {
     fn name(&self) -> &'static str {
-        "edit"
+        "Edit"
     }
 
     /// Returns a human-readable description of what the tool does.
@@ -126,7 +126,7 @@ impl Tool for EditTool {
          that snippet instead of guessing; multiple-match errors list numbered \
          candidate blocks, so extend old_string with unique context from the \
          one you want. Retry a failing needle at most twice, then re-read the \
-         file fresh and rebuild, or switch to `write`/`patch`. Matching is \
+         file fresh and rebuild, or switch to `Write`/`patch`. Matching is \
          byte-for-byte exact by default (indentation, whitespace, and line \
          endings must match precisely); if exact matching fails, a fallback \
          cascade retries with whitespace-flexible and indent-normalised \
@@ -143,7 +143,7 @@ impl Tool for EditTool {
          are matched and preserved (a CRLF span stays CRLF after replacement). \
          Required parameters: `file_path` (string), `old_string` (string), and \
          `new_string` (string). Use an empty `old_string` on a non-existent \
-         file to create it (prefer `create`/`write` for new files); use an \
+         file to create it (prefer `create`/`Write` for new files); use an \
          empty `new_string` to delete the matched text. Optional: `dry_run` \
          (boolean) resolves the match and previews the result without writing \
          - use it when the needle is long or the match is uncertain. Legacy \
@@ -262,7 +262,7 @@ impl Tool for EditTool {
             let outcome = format!("no-change rejected in {}", path.display());
             log_edit_operation(
                 &ctx.working_dir,
-                "edit",
+                "Edit",
                 &path,
                 old_string,
                 new_string,
@@ -285,7 +285,7 @@ impl Tool for EditTool {
         if let Err(ref e) = content {
             log_edit_operation(
                 &ctx.working_dir,
-                "edit",
+                "Edit",
                 &path,
                 old_string,
                 new_string,
@@ -313,7 +313,7 @@ impl Tool for EditTool {
                 &ctx.working_dir,
                 &path,
                 EntryExtras {
-                    tool: "edit",
+                    tool: "Edit",
                     old_str: old_string,
                     new_str: new_string,
                     outcome: &format!("stale-file rejected: {e}"),
@@ -343,7 +343,7 @@ impl Tool for EditTool {
                         &ctx.working_dir,
                         &path,
                         EntryExtras {
-                            tool: "edit",
+                            tool: "Edit",
                             old_str: old_string,
                             new_str: new_string,
                             outcome: &err,
@@ -370,7 +370,7 @@ impl Tool for EditTool {
                         &ctx.working_dir,
                         &path,
                         EntryExtras {
-                            tool: "edit",
+                            tool: "Edit",
                             old_str: old_string,
                             new_str: new_string,
                             outcome: &err,
@@ -398,7 +398,7 @@ impl Tool for EditTool {
                         &ctx.working_dir,
                         &path,
                         EntryExtras {
-                            tool: "edit",
+                            tool: "Edit",
                             old_str: old_string,
                             new_str: new_string,
                             outcome: &err,
@@ -426,7 +426,7 @@ impl Tool for EditTool {
                         &ctx.working_dir,
                         &path,
                         EntryExtras {
-                            tool: "edit",
+                            tool: "Edit",
                             old_str: old_string,
                             new_str: new_string,
                             outcome: &err,
@@ -448,7 +448,7 @@ impl Tool for EditTool {
                 &ctx.working_dir,
                 &path,
                 EntryExtras {
-                    tool: "edit",
+                    tool: "Edit",
                     old_str: old_string,
                     new_str: new_string,
                     outcome: "success (dry-run preview)",
@@ -493,7 +493,7 @@ impl Tool for EditTool {
         if let Err(ref e) = write_result {
             log_edit_operation(
                 &ctx.working_dir,
-                "edit",
+                "Edit",
                 &path,
                 old_string,
                 new_string,
@@ -540,7 +540,7 @@ impl Tool for EditTool {
             &ctx.working_dir,
             &path,
             EntryExtras {
-                tool: "edit",
+                tool: "Edit",
                 old_str: old_string,
                 new_str: new_string,
                 outcome: "success",
@@ -599,7 +599,7 @@ async fn create_file(
     if path.exists() {
         log_edit_operation(
             &ctx.working_dir,
-            "edit",
+            "Edit",
             path,
             "",
             new_string,
@@ -624,7 +624,7 @@ async fn create_file(
         if let Err(ref e) = parent_result {
             log_edit_operation(
                 &ctx.working_dir,
-                "edit",
+                "Edit",
                 path,
                 "",
                 new_string,
@@ -641,7 +641,7 @@ async fn create_file(
     if let Err(ref e) = write_result {
         log_edit_operation(
             &ctx.working_dir,
-            "edit",
+            "Edit",
             path,
             "",
             new_string,
@@ -673,7 +673,7 @@ async fn create_file(
     }
     log_edit_operation(
         &ctx.working_dir,
-        "edit",
+        "Edit",
         path,
         "",
         new_string,

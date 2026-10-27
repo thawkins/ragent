@@ -37,7 +37,7 @@ use ragent_types::event::EventBus;
 use ragent_types::llm::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -376,7 +376,6 @@ pub use ragent_tools_core::check_path_within_root;
 /// Tool registry for managing available tools by name.
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
-    hidden: RwLock<HashSet<String>>,
 }
 
 impl ToolRegistry {
@@ -385,7 +384,6 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
-            hidden: RwLock::new(HashSet::new()),
         }
     }
 
@@ -416,29 +414,15 @@ impl ToolRegistry {
             .contains_key(name)
     }
 
-    /// Replace the set of hidden (invisible) tool names.
-    pub fn set_hidden(&self, names: &[String]) {
-        let mut hidden = self
-            .hidden
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *hidden = names.iter().cloned().collect();
-    }
-
-    /// Return the definitions of all registered, non-hidden tools.
+    /// Return the definitions of all registered tools.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let tools = self
             .tools
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hidden = self
-            .hidden
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut defs: Vec<ToolDefinition> = tools
             .values()
-            .filter(|tool| !hidden.contains(tool.name()))
             .map(|tool| ToolDefinition {
                 name: tool.name().to_string(),
                 description: tool.description().to_string(),

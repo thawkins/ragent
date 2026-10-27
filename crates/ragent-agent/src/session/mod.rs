@@ -9,20 +9,40 @@ pub mod acp_dispatch;
 pub mod archive;
 pub mod cache;
 pub mod compaction_ops;
+/// The one ordered tool-dispatch pipeline (spec `uniformtools` FR-012, FR-021).
+///
+/// Public because it is the module the loop's single call site lives in, and
+/// because a caller outside the loop (a direct resolver caller, and the
+/// integration tests that guard the stage wording and ordering) names it. The
+/// pipeline's own `run` and its outcome constructors stay `pub(crate)`: the loop
+/// is the only caller that may execute a stage sequence.
+pub mod dispatch;
 pub mod history;
 pub mod loop_capture;
 pub mod loop_state;
 pub mod loop_steps;
+/// The unresolved-approval tracker that blocks a tool result for a call whose
+/// permission verdict has not resolved (spec `uniformtools` FR-013).
+pub mod pending;
 pub mod permissions;
 pub mod processor;
 pub mod profiler;
 pub mod prompt_builders;
+/// The one shape a tool call's terminal outcome takes (spec `uniformtools`
+/// FR-012, FR-014, FR-021).
+pub(crate) mod refusal_outcome;
 /// Remote-backend turn dispatch: relay a turn to a second ragent server over
 /// REST+SSE and mirror its event stream locally (spec `openhands` FR-021,
 /// FR-031, FR-034).
 pub mod remote_dispatch;
 pub mod stream_buffer;
 pub(crate) mod text_toolcalls;
+/// The one construction site for a tool call refused *before* it ran (spec
+/// `uniformtools` FR-008, FR-009, FR-014, FR-021).
+pub mod tool_input_error;
+/// The one did-you-mean candidate pool for an unregistered tool name (spec
+/// `uniformtools` FR-021, FR-033).
+pub mod tool_suggestion;
 pub mod verification;
 
 use crate::event::FinishReason;

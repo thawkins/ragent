@@ -1,4 +1,4 @@
-//! `skill_manage` - Runtime management of the skill registry.
+//! The `Skill` tool (`skill_manage` module) - runtime management of the skill registry.
 //!
 //! Implements JCODEPLAN M8 T-071: lets the agent inspect, load, reload, and
 //! invoke skills on demand without restarting the session. Works against the
@@ -31,7 +31,7 @@ pub struct SkillManageTool;
 #[async_trait::async_trait]
 impl Tool for SkillManageTool {
     fn name(&self) -> &'static str {
-        "skill_manage"
+        "Skill"
     }
 
     fn description(&self) -> &'static str {
@@ -100,7 +100,7 @@ impl Tool for SkillManageTool {
             "load" => action_load(&input, ctx, &skill_dirs).await,
             "reload" => action_reload(&input, ctx, &skill_dirs).await,
             other => Err(anyhow::anyhow!(
-                "Unknown skill_manage action '{other}'. Valid actions: list, read, load, reload"
+                "Unknown Skill action '{other}'. Valid actions: list, read, load, reload"
             )),
         }
     }
@@ -225,7 +225,7 @@ async fn read_or_load(
                 available.join(", ")
             },
             "\nHint: add a directory under .ragent/skills/<name>/SKILL.md (project) or \
-             ~/.ragent/skills/<name>/SKILL.md (personal) and run skill_manage action=reload.",
+             ~/.ragent/skills/<name>/SKILL.md (personal) and run Skill action=reload.",
         )
     })?;
 
@@ -233,6 +233,16 @@ async fn read_or_load(
         crate::skill::invoke::invoke_skill(skill, args, &ctx.session_id, &ctx.working_dir)
             .await
             .with_context(|| format!("Failed to invoke skill '{name}'"))?;
+
+    // A declared `allowed-tools` entry that names no registered tool is a
+    // capability the manifest silently loses, so report it here - the point at
+    // which this skill's list becomes a restriction (FR-029). Reporting on the
+    // per-turn prompt path would warn about every discovered manifest instead.
+    crate::tool::allowed_tools::report_skill_allowed_tools_once(
+        &ctx.tool_registry,
+        &skill.name,
+        &skill.allowed_tools,
+    );
 
     let header = if action == "load" {
         format!(

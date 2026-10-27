@@ -8,7 +8,7 @@
 //!   (FR-031), the refusal of tools with no sandbox adapter (FR-031), and workspace
 //!   path confinement (FR-020, FR-035).
 //! - **Live** cases guarded on `podman`/`docker` plus a small image (FR-009,
-//!   FR-020): a `bash` command runs *inside* the sandbox, a file created there is
+//!   FR-020): a `Bash` command runs *inside* the sandbox, a file created there is
 //!   absent from the host working directory, and the 7-layer validator still gates
 //!   the command (FR-002).
 
@@ -33,7 +33,7 @@ const TEST_IMAGE: &str = "docker.io/library/alpine:latest";
 ///
 /// The container backend routes on `tool.name()` and reads `input`; it does not
 /// call the tool's `execute`. Using a named double lets a test drive every branch
-/// (routed `bash`/file tool, refused tool) without constructing the real tool, and
+/// (routed `Bash`/file tool, refused tool) without constructing the real tool, and
 /// the run counter proves the tool never executed on the host.
 struct NamedTool {
     name: &'static str,
@@ -530,7 +530,7 @@ async fn sandbox_routes_file_tools_inside_the_container() {
     let payload = "alpha\nneedle-in-haystack\nomega\n";
 
     // write -> read -> grep -> glob -> list, all sandbox-routed.
-    let (write, _runs) = NamedTool::new("write");
+    let (write, _runs) = NamedTool::new("Write");
     ExecutionBackend::execute_tool(
         &backend,
         BackendToolCall {
@@ -565,7 +565,7 @@ async fn sandbox_routes_file_tools_inside_the_container() {
         read_out.content
     );
 
-    let (grep, _runs) = NamedTool::new("grep");
+    let (grep, _runs) = NamedTool::new("Grep");
     let grep_out = ExecutionBackend::execute_tool(
         &backend,
         BackendToolCall {
@@ -582,7 +582,7 @@ async fn sandbox_routes_file_tools_inside_the_container() {
         grep_out.content
     );
 
-    let (glob, _runs) = NamedTool::new("glob");
+    let (glob, _runs) = NamedTool::new("Glob");
     let glob_out = ExecutionBackend::execute_tool(
         &backend,
         BackendToolCall {

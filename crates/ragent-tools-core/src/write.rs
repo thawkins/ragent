@@ -17,7 +17,7 @@ pub struct WriteTool;
 #[async_trait::async_trait]
 impl Tool for WriteTool {
     fn name(&self) -> &'static str {
-        "write"
+        "Write"
     }
     fn description(&self) -> &'static str {
         "Write content to a file, creating parent directories if needed. \

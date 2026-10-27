@@ -82,7 +82,7 @@ async fn test_invoke_preserves_fork_metadata() {
     skill.context = Some(SkillContext::Fork);
     skill.agent = Some("explore".to_string());
     skill.model = Some("anthropic:claude-haiku".to_string());
-    skill.allowed_tools = vec!["read".to_string(), "grep".to_string()];
+    skill.allowed_tools = vec!["read".to_string(), "Grep".to_string()];
 
     let result = invoke_skill(&skill, "", "s1", Path::new("/tmp"))
         .await
@@ -94,7 +94,7 @@ async fn test_invoke_preserves_fork_metadata() {
         result.model_override.as_deref(),
         Some("anthropic:claude-haiku")
     );
-    assert_eq!(result.allowed_tools, vec!["read", "grep"]);
+    assert_eq!(result.allowed_tools, vec!["read", "Grep"]);
 }
 
 #[tokio::test]
@@ -208,7 +208,7 @@ async fn test_invoke_forked_skill_sets_metadata() {
     skill.context = Some(SkillContext::Fork);
     skill.agent = Some("explore".to_string());
     skill.model = Some("anthropic/claude-haiku".to_string());
-    skill.allowed_tools = vec!["read".to_string(), "grep".to_string()];
+    skill.allowed_tools = vec!["read".to_string(), "Grep".to_string()];
 
     let invocation = invoke_skill(&skill, "src/main.rs", "s1", Path::new("/tmp"))
         .await
@@ -220,7 +220,7 @@ async fn test_invoke_forked_skill_sets_metadata() {
         invocation.model_override.as_deref(),
         Some("anthropic/claude-haiku")
     );
-    assert_eq!(invocation.allowed_tools, vec!["read", "grep"]);
+    assert_eq!(invocation.allowed_tools, vec!["read", "Grep"]);
     assert_eq!(invocation.content, "Review the code in src/main.rs");
 }
 

@@ -20,8 +20,8 @@ impl Tool for CodeIndexDependenciesTool {
         "Query file-level dependencies from the code index. Required parameter: \
          'path' (relative file path). Optional 'direction': 'imports' (what this \
          file uses, default) or 'dependents' (what uses this file). USE THIS instead \
-         of `grep` for import/use statements - the index tracks dependency edges that \
-         grep can only approximate with fragile pattern matching."
+         of `Grep` for import/use statements - the index tracks dependency edges that \
+         Grep can only approximate with fragile pattern matching."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -52,8 +52,8 @@ impl Tool for CodeIndexDependenciesTool {
             Some(idx) => idx,
             None => {
                 return Ok(codeindex_not_available(
-                    "Use `grep` to search for import/use statements manually.",
-                    &["grep"],
+                    "Use `Grep` to search for import/use statements manually.",
+                    &["Grep"],
                 ));
             }
         };

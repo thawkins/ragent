@@ -397,7 +397,7 @@ fn test_codeindex_tools_are_hardwired_allowed() {
     ] {
         assert!(is_hardwired_codeindex_tool(name), "{name}");
     }
-    assert!(!is_hardwired_codeindex_tool("grep"));
+    assert!(!is_hardwired_codeindex_tool("Grep"));
     // The graph tools are not part of the six-name auto-approved subset.
     assert!(!is_hardwired_codeindex_tool("codeindex_explain"));
 }
@@ -407,7 +407,7 @@ fn test_skill_always_allowed_tools_set() {
     assert_eq!(SKILL_ALWAYS_ALLOWED_TOOLS.len(), 7);
     for name in [
         "think",
-        "ask_user",
+        "AskUserQuestion",
         "agent_complete",
         "model_info",
         "ragent_info",
@@ -422,21 +422,26 @@ fn test_skill_always_allowed_tools_set() {
 fn test_hardwired_auto_approved_predicate_branches() {
     assert!(is_hardwired_auto_approved_tool("codeindex_search"));
     assert!(is_hardwired_auto_approved_tool("team_status"));
-    assert!(is_hardwired_auto_approved_tool("task_create"));
+    assert!(is_hardwired_auto_approved_tool("TaskCreate"));
+    assert!(is_hardwired_auto_approved_tool("TaskGet"));
+    assert!(is_hardwired_auto_approved_tool("TaskList"));
+    assert!(is_hardwired_auto_approved_tool("TaskUpdate"));
     assert!(is_hardwired_auto_approved_tool("new_agent"));
-    assert!(is_hardwired_auto_approved_tool("ask_user"));
+    assert!(is_hardwired_auto_approved_tool("AskUserQuestion"));
+    // A retired spelling is not a tool any more, so it is not auto-approved.
+    assert!(!is_hardwired_auto_approved_tool("task_create"));
     for name in ["model_info", "ragent_info", "tool_info", "commands_info"] {
         assert!(is_hardwired_auto_approved_tool(name), "{name}");
     }
-    assert!(!is_hardwired_auto_approved_tool("bash"));
+    assert!(!is_hardwired_auto_approved_tool("Bash"));
     assert!(!is_hardwired_auto_approved_tool("read"));
 }
 
 #[test]
 fn test_interactive_tool_predicate() {
-    assert!(is_interactive_tool("ask_user"));
-    assert!(!is_interactive_tool("bash"));
-    assert!(!is_interactive_tool("ask_user_extra"));
+    assert!(is_interactive_tool("AskUserQuestion"));
+    assert!(!is_interactive_tool("Bash"));
+    assert!(!is_interactive_tool("AskUserQuestion_extra"));
 }
 
 #[test]
@@ -507,27 +512,33 @@ fn test_destructive_git_invocation_flags() {
 #[test]
 fn test_bash_destructive_command_detection() {
     assert!(is_destructive_tool_for_test(
-        "bash",
+        "Bash",
         &json!({"command": "rm -rf target"})
     ));
     assert!(is_destructive_tool_for_test(
-        "bash",
+        "Bash",
         &json!({"command": "cargo install ripgrep"})
     ));
     assert!(is_destructive_tool_for_test(
-        "bash",
+        "Bash",
         &json!({"command": "ls && npm install"})
     ));
     assert!(!is_destructive_tool_for_test(
-        "bash",
+        "Bash",
         &json!({"command": "ls -la"})
     ));
     assert!(!is_destructive_tool_for_test(
-        "bash",
+        "Bash",
         &json!({"command": "cargo test"})
     ));
     // A missing command field is not destructive.
-    assert!(!is_destructive_tool_for_test("bash", &json!({})));
+    assert!(!is_destructive_tool_for_test("Bash", &json!({})));
+    // The retired spelling is no longer the shell tool, so its command is not
+    // inspected at all.
+    assert!(!is_destructive_tool_for_test(
+        "bash",
+        &json!({"command": "rm -rf target"})
+    ));
 }
 
 #[test]
@@ -537,7 +548,7 @@ fn test_extract_resource_from_input_key_precedence() {
         "a.rs"
     );
     assert_eq!(
-        extract_resource_from_input_for_test(&json!({"command": "ls"}), "bash"),
+        extract_resource_from_input_for_test(&json!({"command": "ls"}), "Bash"),
         "ls"
     );
     assert_eq!(
@@ -545,7 +556,7 @@ fn test_extract_resource_from_input_key_precedence() {
         "https://x"
     );
     assert_eq!(
-        extract_resource_from_input_for_test(&json!({"pattern": "fn main"}), "grep"),
+        extract_resource_from_input_for_test(&json!({"pattern": "fn main"}), "Grep"),
         "fn main"
     );
     assert_eq!(
@@ -715,7 +726,7 @@ async fn test_permission_auto_approve_short_circuits() {
         "s",
         "tool:execute",
         "tool:bash",
-        "bash",
+        "Bash",
         Some(true),
         None,
         false,

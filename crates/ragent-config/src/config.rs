@@ -10,6 +10,7 @@ use crate::gcf::GcfConfig;
 use crate::i18n::I18nConfig;
 use crate::openai::OpenAiConfig;
 use crate::security_analyzer::SecurityAnalyzerConfig;
+use crate::tools::ToolsConfig;
 use anyhow::bail;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -171,10 +172,6 @@ pub struct Config {
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
-    /// Tool-family visibility switches.
-    /// When a switch is `false`, all tools in that family are hidden from the LLM.
-    #[serde(default)]
-    pub tool_visibility: ToolVisibilityConfig,
     /// Agent-loop performance configuration (AgentPerf FR-027).
     ///
     /// Controls the per-step wall-clock budget, the per-stream stall
@@ -190,19 +187,10 @@ pub struct Config {
     /// deprecated alias via [`TelemetryConfig::apply_legacy_flag`](crate::telemetry::TelemetryConfig::apply_legacy_flag).
     #[serde(default)]
     pub telemetry: crate::telemetry::TelemetryConfig,
-    /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
-    /// Hidden tools remain registered and executable; they are simply not advertised to the model.
-    ///
-    /// Example - suppress all GitHub and GitLab tools:
-    /// ```json
-    /// { "hidden_tools": ["github_list_issues", "github_get_issue", "gitlab_list_mrs"] }
-    /// ```
-    #[serde(default)]
-    pub hidden_tools: Vec<String>,
     /// YOLO mode - bypass command validation and tool restrictions.
     #[serde(default)]
     pub yolo: bool,
-    /// Edit-operation logging enabled for `edit` and `multi_edit`.
+    /// Edit-operation logging enabled for `Edit` and `multi_edit`.
     #[serde(default)]
     pub edit_log: bool,
     /// Activity-log recording enabled (default: `true`).
@@ -333,6 +321,15 @@ pub struct Config {
     /// refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_analyzer: Option<SecurityAnalyzerConfig>,
+    /// Tool-name alias resolution, alias advertisement and the payload trace
+    /// (spec `uniformtools` FR-015, FR-017).
+    ///
+    /// Default: every switch off, and the whole section is omitted from a
+    /// serialised config while it is at those defaults, so a build that has
+    /// never seen the section writes a byte-identical `ragent.json` and
+    /// resolves every inbound name against the registry alone.
+    #[serde(default, skip_serializing_if = "ToolsConfig::is_default")]
+    pub tools: ToolsConfig,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -376,10 +373,8 @@ impl Default for Config {
             compaction: CompactionConfig::default(),
             gcf: GcfConfig::default(),
             gitlab: GitLabIntegrationConfig::default(),
-            tool_visibility: ToolVisibilityConfig::default(),
             agent_perf: AgentPerfConfig::default(),
             telemetry: crate::telemetry::TelemetryConfig::default(),
-            hidden_tools: Vec::new(),
             yolo: false,
             edit_log: false,
             activity_log: true,
@@ -398,6 +393,7 @@ impl Default for Config {
             i18n: None,
             openai: None,
             security_analyzer: None,
+            tools: ToolsConfig::default(),
             config_paths: Vec::new(),
         }
     }
@@ -452,154 +448,6 @@ const MIN_INPUT_QUEUE_CAPACITY: usize = 1;
 ///
 /// Mirrors the two-digit queue counter, which clamps at `99` (FR-009).
 const MAX_INPUT_QUEUE_CAPACITY: usize = 99;
-
-/// Tool-family visibility configuration.
-///
-/// Controls which tool families are advertised to the LLM. Each switch
-/// corresponds to a group of related tools. When a switch is `false`,
-/// all tools in that family are suppressed from `ToolRegistry::definitions()`.
-/// Tools remain registered and executable regardless of visibility.
-///
-/// All fields are public so that callers which have a [`ToolVisibilityConfig`]
-/// in hand (e.g. the TUI `/tools` handler) can mark a switch as explicitly
-/// user-set before persisting the config.
-#[derive(Debug, Clone, Default)]
-pub struct ToolVisibilitySpecified {
-    /// `true` when `github` was explicitly set in the source JSON or via a setter.
-    pub github: bool,
-    /// `true` when `gitlab` was explicitly set in the source JSON or via a setter.
-    pub gitlab: bool,
-    /// `true` when `teams` was explicitly set in the source JSON or via a setter.
-    pub teams: bool,
-    /// `true` when `agents` was explicitly set in the source JSON or via a setter.
-    pub agents: bool,
-    /// `true` when `plan` was explicitly set in the source JSON or via a setter.
-    pub plan: bool,
-    /// `true` when `codeindex` was explicitly set in the source JSON or via a setter.
-    pub codeindex: bool,
-    /// `true` when `masterfetch` was explicitly set in the source JSON or via a setter.
-    pub masterfetch: bool,
-}
-
-/// Tool-family visibility configuration.
-///
-/// The config loader tracks which switches were explicitly present in the
-/// source JSON so merge operations can preserve base values for omitted fields.
-///
-/// The `codeindex` switch is serialised only when the user has *explicitly* set
-/// it (tracked by [`ToolVisibilitySpecified::codeindex`]). This lets the default
-/// config omit the key so code-level default changes propagate, while ensuring
-/// that an explicit user toggle (e.g. `/tools codeindex on|off`) is written to
-/// disk and survives a restart - even when a global config disagrees.
-#[derive(Debug, Clone)]
-pub struct ToolVisibilityConfig {
-    /// GitHub tools (github_list_issues, github_get_issue, github_create_issue, etc.).
-    pub github: bool,
-    /// GitLab tools (gitlab_list_issues, gitlab_get_issue, gitlab_create_mr, etc.).
-    pub gitlab: bool,
-    /// Team coordination tools (team_create, team_spawn, team_message, etc.).
-    pub teams: bool,
-    /// Autonomous sub-agent tools (new_agent, list_agents, cancel_agent, etc.).
-    pub agents: bool,
-    /// Plan-mode tools (plan_enter, plan_exit).
-    pub plan: bool,
-    /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
-    /// Default `true` - codeindex tools are visible when the subsystem is enabled.
-    /// When serialised, this field is only written if the user explicitly set it
-    /// (via [`ToolVisibilityConfig::set_codeindex`] or by having it present in the
-    /// loaded JSON).
-    pub codeindex: bool,
-    /// Masterfetch web-access tools (mf_fetch, mf_crawl, mf_search,
-    /// mf_screenshot, mf_cache_clear, mf_version).
-    /// Default `true` - masterfetch tools are visible by default.
-    /// When serialised, this field is only written if the user explicitly set it
-    /// (tracked by [`ToolVisibilitySpecified::masterfetch`]).
-    pub masterfetch: bool,
-    /// Tracks which switches were explicitly set, so merge/serialise can
-    /// distinguish "user set this" from "this is just the default".
-    pub specified: ToolVisibilitySpecified,
-}
-
-impl ToolVisibilityConfig {
-    /// Iterate over every tool-visibility switch and its enabled state.
-    pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
-        [
-            ("github", self.github),
-            ("gitlab", self.gitlab),
-            ("teams", self.teams),
-            ("agents", self.agents),
-            ("plan", self.plan),
-            ("codeindex", self.codeindex),
-            ("masterfetch", self.masterfetch),
-        ]
-        .into_iter()
-    }
-    /// Explicitly set the `codeindex` switch and mark it as user-specified.
-    ///
-    /// Use this (rather than direct field assignment) when persisting a user
-    /// toggle such as `/tools codeindex on` / `/tools codeindex off`, so the
-    /// value is written to the config file and overrides any global-config
-    /// default on reload.
-    pub fn set_codeindex(&mut self, enabled: bool) {
-        self.codeindex = enabled;
-        self.specified.codeindex = true;
-    }
-
-    /// Merge explicitly-specified fields from `overlay` into `self`.
-    ///
-    /// Only fields whose corresponding `specified` flag is set on the overlay
-    /// are copied; unspecified fields are left untouched on `self`. The
-    /// `specified` flags are propagated so a subsequent serialise writes the
-    /// field explicitly and the value survives a reload.
-    pub fn merge_specified(&mut self, overlay: &Self) {
-        macro_rules! merge_field {
-            ($field:ident) => {
-                if overlay.specified.$field {
-                    self.$field = overlay.$field;
-                    self.specified.$field = true;
-                }
-            };
-        }
-        merge_field!(github);
-        merge_field!(gitlab);
-        merge_field!(teams);
-        merge_field!(agents);
-        merge_field!(plan);
-        merge_field!(codeindex);
-        merge_field!(masterfetch);
-    }
-}
-
-impl Serialize for ToolVisibilityConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        // Non-codeindex switches are always serialised (they default to false
-        // and have no skip). `codeindex` is serialised only when explicitly set.
-        let mut count = 5; // github, gitlab, teams, agents, plan
-        if self.specified.codeindex {
-            count += 1;
-        }
-        if self.specified.masterfetch {
-            count += 1;
-        }
-        let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
-        s.serialize_field("github", &self.github)?;
-        s.serialize_field("gitlab", &self.gitlab)?;
-        s.serialize_field("teams", &self.teams)?;
-        s.serialize_field("agents", &self.agents)?;
-        s.serialize_field("plan", &self.plan)?;
-        if self.specified.codeindex {
-            s.serialize_field("codeindex", &self.codeindex)?;
-        }
-        if self.specified.masterfetch {
-            s.serialize_field("masterfetch", &self.masterfetch)?;
-        }
-        s.end()
-    }
-}
 
 /// Agent-loop performance configuration (AgentPerf FR-027).
 ///
@@ -713,7 +561,6 @@ impl AgentPerfConfig {
         problems
     }
 }
-
 /// Agentic loop defaults (spec `agentloop`, FR-013 - FR-015).
 ///
 /// Configured under the `loop` key in `ragent.json`. These are the
@@ -825,148 +672,6 @@ impl LoopConfig {
     }
 }
 
-impl Default for ToolVisibilityConfig {
-    fn default() -> Self {
-        Self {
-            github: false,
-            gitlab: false,
-            teams: false,
-            agents: false,
-            plan: false,
-            codeindex: true,
-            masterfetch: true,
-            specified: ToolVisibilitySpecified::default(),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ToolVisibilityConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize, Default)]
-        struct RawToolVisibilityConfig {
-            github: Option<bool>,
-            gitlab: Option<bool>,
-            teams: Option<bool>,
-            agents: Option<bool>,
-            plan: Option<bool>,
-            codeindex: Option<bool>,
-            masterfetch: Option<bool>,
-        }
-
-        let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
-        Ok(Self {
-            github: raw.github.unwrap_or_else(default_false),
-            gitlab: raw.gitlab.unwrap_or_else(default_false),
-            teams: raw.teams.unwrap_or_else(default_false),
-            agents: raw.agents.unwrap_or_else(default_false),
-            plan: raw.plan.unwrap_or_else(default_false),
-            codeindex: raw.codeindex.unwrap_or_else(default_true),
-            masterfetch: raw.masterfetch.unwrap_or_else(default_true),
-            specified: ToolVisibilitySpecified {
-                github: raw.github.is_some(),
-                gitlab: raw.gitlab.is_some(),
-                teams: raw.teams.is_some(),
-                agents: raw.agents.is_some(),
-                plan: raw.plan.is_some(),
-                codeindex: raw.codeindex.is_some(),
-                masterfetch: raw.masterfetch.is_some(),
-            },
-        })
-    }
-}
-
-const fn default_false() -> bool {
-    false
-}
-
-/// Map a visibility switch to the list of tool names it governs.
-pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
-    match switch {
-        "github" => Some(&[
-            "github_list_issues",
-            "github_get_issue",
-            "github_create_issue",
-            "github_comment_issue",
-            "github_close_issue",
-            "github_list_prs",
-            "github_get_pr",
-            "github_create_pr",
-            "github_merge_pr",
-            "github_review_pr",
-        ]),
-        "gitlab" => Some(&[
-            "gitlab_list_issues",
-            "gitlab_get_issue",
-            "gitlab_create_issue",
-            "gitlab_comment_issue",
-            "gitlab_close_issue",
-            "gitlab_list_mrs",
-            "gitlab_get_mr",
-            "gitlab_create_mr",
-            "gitlab_merge_mr",
-            "gitlab_approve_mr",
-            "gitlab_list_pipelines",
-            "gitlab_get_pipeline",
-            "gitlab_cancel_pipeline",
-            "gitlab_retry_pipeline",
-            "gitlab_list_jobs",
-            "gitlab_get_job",
-            "gitlab_get_job_log",
-            "gitlab_cancel_job",
-            "gitlab_retry_job",
-        ]),
-        "teams" => Some(&[
-            "team_approve_plan",
-            "team_assign_task",
-            "team_broadcast",
-            "team_cleanup",
-            "team_create",
-            "team_idle",
-            "team_memory_read",
-            "team_memory_write",
-            "team_message",
-            "team_read_messages",
-            "team_shutdown_ack",
-            "team_shutdown_teammate",
-            "team_spawn",
-            "team_status",
-            "team_submit_plan",
-            "team_task_claim",
-            "team_task_complete",
-            "team_task_create",
-            "team_task_list",
-            "team_wait",
-        ]),
-        "agents" => Some(&[
-            "cancel_agent",
-            "list_agents",
-            "new_agent",
-            "agent_complete",
-            "wait_agents",
-        ]),
-        "plan" => Some(&["plan_enter", "plan_exit"]),
-        "codeindex" => Some(&[
-            "codeindex_search",
-            "codeindex_status",
-            "codeindex_symbols",
-            "codeindex_references",
-            "codeindex_dependencies",
-            "codeindex_reindex",
-        ]),
-        "masterfetch" => Some(&[
-            "mf_fetch",
-            "mf_crawl",
-            "mf_search",
-            "mf_screenshot",
-            "mf_cache_clear",
-            "mf_version",
-        ]),
-        _ => None,
-    }
-}
 /// Configuration for LLM streaming behaviour (timeouts, retries).
 ///
 /// The two timeouts serve distinct purposes:
@@ -2145,6 +1850,10 @@ impl Config {
             let mut overlay: Self = serde_json::from_str(&content)
                 .map_err(|e| Self::json_parse_error(label, &content, e))?;
             overlay.specified_default_agent = specified;
+            // FR-031: the inline route is a configuration mechanism like any
+            // other, so it refuses a retired `tools.aliases` spelling too and
+            // names the variable in place of a file path (T-042).
+            Self::reject_retired_alias_spellings(&overlay.tools, &label)?;
             config = Self::merge(config, overlay);
         }
 
@@ -2226,8 +1935,54 @@ impl Config {
         let mut config: Self = serde_json::from_str(content)
             .map_err(|e| Self::json_parse_error(&label, content, e))?;
         config.specified_default_agent = specified;
+        // FR-031: a `tools.aliases` entry that names a retired ragent tool
+        // spelling is refused here, where the file is known, rather than dropped
+        // quietly (T-042).
+        Self::reject_retired_alias_spellings(&config.tools, &label)?;
 
         Ok(config)
+    }
+
+    /// Refuses every `tools.aliases` entry that names a retired ragent tool
+    /// spelling, naming the configuration source it came from (FR-031).
+    ///
+    /// Shared by [`Config::parse_file`] - which serves the global file, the
+    /// project file and `RAGENT_CONFIG` - and the `RAGENT_CONFIG_CONTENT`
+    /// route, so both configuration paths give the same answer. `label` names
+    /// that source (`config file '<path>'`, or the environment variable), which
+    /// is the first thing the reader needs to find the entry.
+    ///
+    /// Every offending entry is listed, one per line, because a table copied
+    /// from an old dump carries several and fixing them one reload at a time is
+    /// the failure mode the message exists to avoid. A target that names no
+    /// *registered* tool is deliberately not refused: a plugin or MCP tool may
+    /// be bridged after loading, so that entry is reported once at run time and
+    /// refused when used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming `label`, the offending spelling and its `after`
+    /// replacement when [`ToolsConfig::validate_alias_spellings`] reports any
+    /// offender.
+    pub fn reject_retired_alias_spellings(
+        tools: &crate::tools::ToolsConfig,
+        label: &str,
+    ) -> anyhow::Result<()> {
+        let offenders = tools.validate_alias_spellings();
+        if offenders.is_empty() {
+            return Ok(());
+        }
+        let mut message = format!(
+            "Invalid config in {label}: {} `tools.aliases` entr{} names a renamed ragent \
+             tool spelling, which FR-031 forbids:",
+            offenders.len(),
+            if offenders.len() == 1 { "y" } else { "ies" }
+        );
+        for offender in &offenders {
+            message.push_str("\n  - ");
+            message.push_str(&offender.reason());
+        }
+        Err(anyhow::anyhow!(message))
     }
 
     /// Save the config back to a file.
@@ -2756,27 +2511,6 @@ impl Config {
         Ok(path)
     }
 
-    /// Compute the complete hidden-tool set from both legacy per-tool overrides
-    /// and the tool-family visibility switches.
-    #[must_use]
-    pub fn effective_hidden_tools(&self) -> Vec<String> {
-        let mut hidden: std::collections::HashSet<String> =
-            self.hidden_tools.iter().cloned().collect();
-
-        for (switch, enabled) in self.tool_visibility.iter_switches() {
-            if enabled {
-                continue;
-            }
-            if let Some(names) = tool_family_names(switch) {
-                hidden.extend(names.iter().map(|name| (*name).to_string()));
-            }
-        }
-
-        let mut hidden: Vec<String> = hidden.into_iter().collect();
-        hidden.sort();
-        hidden
-    }
-
     /// Resolve the message input-queue capacity (spec `inputqueue` FR-015).
     ///
     /// Returns the configured `input_queue_capacity`, clamped to `1..=99` (the
@@ -3261,9 +2995,6 @@ impl Config {
             base.serper_api_key = overlay.serper_api_key;
         }
 
-        // hidden_tools: union of base and overlay (both lists are honoured)
-        Self::union_into(&mut base.hidden_tools, overlay.hidden_tools);
-
         // code_index: overlay takes precedence only for explicitly set fields.
         // The `specified` flags from the overlay are propagated onto the base so
         // that a subsequent serialise (e.g. save_to_source) writes the field
@@ -3286,10 +3017,12 @@ impl Config {
             base.code_index.specified.extra_exclude_patterns = true;
         }
 
-        // tool_visibility: overlay takes precedence only for explicitly set fields.
-        // Propagate `specified` flags so an explicit toggle persists on save.
-        base.tool_visibility
-            .merge_specified(&overlay.tool_visibility);
+        // Tool-name aliases (spec `uniformtools` FR-015): the section merges
+        // field-wise - the two opt-in booleans OR, the alias entries union per
+        // spelling with the overlay winning a collision - so a project file can
+        // add one spelling without discarding the user-global table, and only an
+        // explicit `aliases: false` turns resolution off.
+        base.tools.merge(&overlay.tools);
 
         // Compaction: overlay takes precedence.
         base.compaction = overlay.compaction;

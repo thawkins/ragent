@@ -32,18 +32,21 @@
 //! itself, and nothing consults the table on a dispatch path (NFR-006). `before`
 //! spellings are retired, not aliased (FR-026).
 //!
-//! ## The FR-023 invariants name the post-rename registry
+//! ## The FR-023 invariants name the registry as the table lands
 //!
 //! FR-023 orders the work as table-then-rename, and states the invariants
-//! against the registry as it stands when the table lands: every `before` was a
-//! registered name, and every `after` was *not* registered. The table landed in
-//! that pre-rename state; the rename (T-031) flipped the two registry-facing
-//! assertions in the same change that renamed the tools, which is FR-034's
-//! atomic-landing rule. They now assert the post-rename registry: every `before`
-//! is gone and every `after` is registered. The table's own facts - the exact
-//! thirteen pairs, ASCII-identifier shape, both columns unique, ascending by
-//! `after` - did not change, and neither flipped assertion was relaxed to make
-//! the flip easy.
+//! against the registry as it stands when the table lands: every `before` **is**
+//! a registered name, and every `after` **is not**. The table landed in that
+//! pre-rename state (task T-030), so the invariant test asserts exactly that.
+//!
+//! The rename (T-031) flips the two registry-facing assertions in the same
+//! change that renames the tools, which is FR-034's atomic-landing rule: the
+//! cases are renamed with them (`..._every_before_is_retired...` and
+//! `..._every_after_is_registered...`) rather than left asserting a state the
+//! tree no longer has. The table's own facts - the exact thirteen pairs,
+//! ASCII-identifier shape, both columns unique, ascending by `after` - do not
+//! change across that flip, and neither flipped assertion may be relaxed to
+//! make the flip easy.
 
 /// One row of the FR-023 rename table.
 ///

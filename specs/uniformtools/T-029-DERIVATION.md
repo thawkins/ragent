@@ -502,6 +502,21 @@ ragent Tools, Coverage, Sources - so `Anthropic Tools` is `sheet4.xml` and
 `ragent Tools` is `sheet5.xml` under this workbook, and the reader resolves them
 through the relationship ids rather than by position.
 
+**Re-verified when the record was closed.** Both readers were run again against
+the workbook in the tree, and every figure in this document that they can
+reproduce was checked mechanically rather than re-read from the prose: the two
+sheet shapes in section 1, the 53 padded rows and the 37/94 token counts in
+section 2.1, the 215 / 121 / 20 / 40 / 34 pair accounting and its 90 / 20 / 18 /
+22 tool columns in section 3, the 90 / 18 / 18 row view in section 3.1, the 15
+candidates, 13 pairs and 2 refusals in sections 4 and 5, the 9 / 5 / 4 split in
+section 6, every clause breakdown in section 7 (8 targets over 20 pairs at
+clause A, 40 pairs over 18 tools at clause B, 18 entry forms over 121 pairs at
+clause C, 4 `Exact` targets with no pair, 58 / 2 / 88 rows), and the
+9-pair/2-refusal result of dropping the `trim()` in section 2.1. The Appendix A
+lists were compared element for element against a fresh derivation and match.
+Three numbers in an earlier draft did not survive that check and were corrected
+in place; section 9 and section 10 each say which and why.
+
 ## 9. Invariants the 13 pairs satisfy, for T-030's test
 
 Hand-checked here; enforced by the test T-030 ships, which does not read the
@@ -522,16 +537,23 @@ workbook.
   cannot collide with an existing tool. Verified by extracting every name a tool
   class can report - the `fn name(&self) -> &'static str { "..." }` literal form
   and the `name: "..."` field form used by the team tools - from every non-test
-  source file, which yields 212 candidate names. Intersecting with the 13 `after`
-  values gives the empty set, and all 13 `before` values are present. The scan is
+  source file, which yields **246** candidate names (165 `fn name()` literals
+  plus 107 `name:` field literals, de-duplicated). The figure first written here
+  was 212; no combination of the two extraction patterns reproduces it on this
+  tree, so it is corrected. Intersecting the 246 with the 13 `after` values
+  gives the empty set, and all 13 `before` values are present. The scan is
   deliberately over-inclusive (it also catches provider display names and
   non-registry string fields), which is safe for a collision test;
-- a raw text search for `"Bash"` finds two literals in non-test source and neither
-  registers a tool: the FR-023 table row itself
-  (`crates/ragent-agent/src/tool/rename.rs:66`) and a language name in
-  `crates/ragent-agent/src/memory/knowledge_graph.rs:263`. The 15 test-file
-  occurrences are hook matchers, display assertions and the table's own invariant
-  test (section 10);
+- a raw text search for the adopted spelling `"Bash"` finds **two** literals in
+  non-test source and neither registers a tool: the FR-023 table row itself
+  (`crates/ragent-agent/src/tool/rename.rs:75` where T-030 committed it; the
+  table now lives at `crates/ragent-types/src/tool_rename.rs:75`) and a language
+  name in `crates/ragent-agent/src/memory/knowledge_graph.rs:263`. The other
+  **13** occurrences are all in the test tree - hook matchers, display
+  assertions and the table's own invariant test (section 10) - so 2 + 13 = 15
+  is the whole of the literal across the workspace. This bullet first read "The
+  15 test-file occurrences" and anchored the table row at `:66`; both are
+  corrected, and section 10 explains where the 13 come from;
 - the `after` column is unique (13 distinct values);
 - the `before` column is unique (13 distinct values);
 - the table is ascending by `after`.
@@ -553,38 +575,118 @@ workbook.
 - **T-038** carries the test churn. Note the scale, with the scan pinned so the
   number is reproducible rather than recollected. Count every occurrence of one
   of the 13 retired spellings as a double-quoted or backticked literal
-  (`"(name)"` or `` `(name)` ``) in a `.rs` file:
+  (`"(name)"` or `` `(name)` ``) in a `.rs` file. Measured on the **pre-rename
+  tree** (`1.0.149`) with the FR-023 table and its invariant test added - i.e.
+  the tree this derivation was written against, before T-031 moved a single
+  spelling:
 
   | Bucket | Occurrences | Files |
   |---|---|---|
-  | non-test source (`crates/*/src` + `src/`), FR-023 table **excluded** | **381** | **77** |
-  | non-test source including the FR-023 table itself | 395 | 78 |
-  | non-test source plus `crates/*/benches` (table excluded) | 387 | 78 |
-  | test files under `crates/*/tests`, FR-023 invariant test **excluded** | **773** | **160** |
-  | the same, invariant test included | 776 | 161 |
-  | the same plus the root `tests/` directory (10 files, 4 occurrences) | 777 | 162 |
-  | the same plus the root `tests/` directory and the invariant test | 780 | 163 |
+  | non-test source (`crates/*/src` + `src/`), FR-023 table **excluded** | **377** | **76** |
+  | non-test source including the FR-023 table itself | 391 | 77 |
+  | non-test source plus `crates/*/benches` (table excluded) | 383 | 77 |
+  | test files under `crates/*/tests`, FR-023 invariant test **excluded** | **775** | **160** |
+  | the same, invariant test included | 778 | 161 |
+  | the same plus the root `tests/` directory (10 files, 4 occurrences) | 779 | 162 |
+  | the same plus the root `tests/` directory and the invariant test | 782 | 163 |
 
-  The two figures T-038 should work from are the bold ones: **381 occurrences
-  in 77 non-test source files** and **773 in 160 test files**. Three earlier
-  numbers are superseded and should not be reused: `PLAN.md`'s pre-work note read
-  388/79 for the source bucket (this task corrected it to 381/77), its T-038 row
-  reads "~159 test files (770 literal hits)" (this count is 160 files / 773
-  hits), and an earlier draft of this section repeated the 388/79. No scan
-  reproduces 388/79, and 381/77 is what the counting rule above yields on the
-  tree as committed.
+  The two figures T-038 should work from are the bold ones: **377 occurrences
+  in 76 non-test source files** (the T-033 job) and **775 in 160 test files**
+  (the T-038 job).
 
-  The counts move as prose is written - source comments count, `docs/`,
-  `CHANGELOG.md` and this document do not - so T-033 and T-038 must re-run the
-  scan rather than trust any number written here.
+  **Every figure this section first carried is wrong, and it is worth saying
+  exactly how**, because a reader who quoted them (as `PLAN.md` and T-038's row
+  did) needs to know which mistake they inherited:
+
+  - **The source column was measured with the single-quote-inclusive rule.**
+    Accepting `'name'` as well as `"name"` and `` `name` `` yields 381
+    occurrences with the table excluded, 395 with it included and 387 with
+    `crates/*/benches` added - exactly the three occurrence figures the table
+    used to show. The rule this document states is quoted-or-backticked, so the
+    correct figures are 4 lower in each case: 377, 391 and 383. The four
+    literals that make the difference are all prose about the retired names and
+    are listed under "widening experiments" below.
+  - **The source column's file counts were each one high.** The three source
+    rows read 77, 78 and 78; the any-quote rule yields 76, 77 and 77 files, and
+    the stated rule yields the same 76, 77 and 77 - the four single-quoted
+    literals sit in files that already contain a quoted or backticked one, so
+    the file count does not move between the two rules. The file column is
+    therefore one high on every source row, consistently, while the *test*
+    column's file counts are all correct. Both columns of that table should be
+    re-measured, not trusted; the commands below do it.
+  - **The test column's occurrence counts were two low.** The file counts (160,
+    161, 162, 163) reproduce exactly; the occurrences do not. The stated rule
+    yields 775 / 778 / 779 / 782 against the recorded 773 / 776 / 777 / 780, so
+    every row in that column is short by two. Because the file column was right,
+    the error was invisible: only the occurrence column shifted.
+  - **`PLAN.md`'s older 388/79** matches nothing on any tree under any rule.
+
+  Re-run the commands below rather than trusting the table; the counts move as
+  prose is written. Source comments count; `docs/`, `CHANGELOG.md` and this
+  document do not. The `grep -v` covers both possible homes for the table (it
+  was `crates/ragent-agent/src/tool/rename.rs` when this derivation was written
+  and is `crates/ragent-types/src/tool_rename.rs` now), so the same pair of
+  commands is correct on either tree.
+
+  ```bash
+  PAT='["`](ask_user|bash|edit|plan_enter|plan_exit|glob|grep|skill_manage|task_create|task_get|task_list|task_update|write)["`]'
+
+  # source bucket, FR-023 table excluded: occurrences, then files
+  find crates/*/src src -name '*.rs' -type f \
+    | grep -vE 'tool_rename\.rs$|tool/rename\.rs$' \
+    | xargs grep -ohE "$PAT" | wc -l
+  find crates/*/src src -name '*.rs' -type f \
+    | grep -vE 'tool_rename\.rs$|tool/rename\.rs$' \
+    | xargs grep -lE "$PAT" | wc -l
+
+  # test bucket, invariant test excluded: occurrences, then files
+  find crates/*/tests -name '*.rs' -type f | grep -v 'test_tool_rename_table.rs' \
+    | xargs grep -ohE "$PAT" | wc -l
+  find crates/*/tests -name '*.rs' -type f | grep -v 'test_tool_rename_table.rs' \
+    | xargs grep -lE "$PAT" | wc -l
+  ```
+
+  On the derivation-time tree those print `377`, `76`, `775`, `160`.
+
+  Per-spelling split of the 377, so T-033 and T-038 know which name carries
+  the weight (`bash` alone is a fifth of the source bucket, which is why it is
+  also the name with the most non-tool meanings):
+
+  | Spelling | Source occurrences (table excluded) |
+  |---|---|
+  | `bash` | 81 |
+  | `edit` | 65 |
+  | `grep` | 60 |
+  | `write` | 55 |
+  | `glob` | 39 |
+  | `ask_user` | 19 |
+  | `task_get` | 11 |
+  | `task_update` | 10 |
+  | `task_create` | 9 |
+  | `task_list` | 9 |
+  | `plan_enter` | 7 |
+  | `plan_exit` | 7 |
+  | `skill_manage` | 5 |
+  | **Total** | **377** |
+
+  **For orientation after the landing.** The table above is the size of the job
+  as this derivation saw it. On the tree as committed (`1.0.149` + the rename,
+  `d6abcd4a`) the same rule gives a different shape, because that commit
+  migrated most of the source and none of the tests: **370** occurrences in
+  **78** non-test source files, and **836** in **167** test files (839/168
+  with the invariant test, 840/169 and 843/170 with the root `tests/`
+  directory). T-033 and T-038 must measure the tree in front of them; neither
+  column transfers.
 
   Two widening experiments, recorded so a reader does not have to redo them:
-  adding the single-quoted form changes nothing for the source bucket - there
-  are four such literals and all four are prose about the retired names
-  (`agent/mod.rs:760` names `'grep'` and `'glob'`, `tool/aliases.rs:94` names
-  `'write'`, `:140` names `'bash'`) - and including `crates/*/benches` adds the
-  six literals in `crates/ragent-bench/benches/agent_loop.rs`, which build
-  `MessagePart::ToolCall` records and a `MockLlmScript` with the `bash` spelling.
+  adding the single-quoted form adds exactly the four literals in **two**
+  files - `crates/ragent-agent/src/agent/mod.rs:658` names `'grep'` and
+  `'glob'`, `crates/ragent-agent/src/tool/aliases.rs:94` names `'write'` and
+  `:140` names `'bash'` - and all four are prose about the retired names, so
+  they stay outside the rule. Including `crates/*/benches` adds exactly the
+  six literals in `crates/ragent-bench/benches/agent_loop.rs` (five `bash`,
+  one `write`), which build `MessagePart::ToolCall` records and a
+  `MockLlmScript` with the retired spelling.
 - **T-033/T-034** migration must not touch the five tie-break losers
   (`apply_patch`, `bash_reset`, `create`, `patch`, `update_file`), the two
   refusal claimants (`mf_fetch`, `webfetch`, `mf_search`, `websearch`) or
@@ -601,30 +703,45 @@ workbook.
     the rename's implementation - the 13 pairs are a fixed table, not a
     transformation. Its one existing assertion
     (`crates/ragent-tui/tests/test_tool_display.rs:459`) keeps passing unchanged
-    because `bash` really does become `Bash`.
-  - Ten test call sites already pass `"Bash"` as a hook matcher or as the tool
+    because `bash` really does become `Bash`. (Both line numbers are the
+    pre-rename ones; on the committed tree they are `:168` and `:474`, and the
+    function's rule is unchanged.)
+  - Eight test call sites already pass `"Bash"` as a hook matcher or as the tool
     name a hook guard is asked about: `crates/ragent-agent/tests/test_plugin_hooks.rs:134`,
-    `:143`, `:144`, `:265`, `:269`,
-    `crates/ragent-agent/tests/test_agent_skill_hooks_extra.rs:778`, `:793`,
-    `:794`, `:817`, and `crates/ragent-plugins/tests/test_manifest.rs:834`.
+    `:143`, `:144`, `crates/ragent-agent/tests/test_agent_skill_hooks_extra.rs:778`,
+    `:793`, `:794`, `:817`, and `crates/ragent-plugins/tests/test_manifest.rs:834`.
     Those matchers start matching a real tool once the rename lands, which is the
     outcome FR-028 wants; they need no migration, so T-038 should leave them
-    untouched rather than "update" a matcher that is already correct. The first
-    eight predate this derivation; `test_plugin_hooks.rs:265` and `:269` are the
-    pair added with the shared-decoder guard test, which asks the guard about
-    `Bash` for the same reason.
+    untouched rather than "update" a matcher that is already correct. This
+    bullet originally read "ten call sites" and listed two further line numbers,
+    `test_plugin_hooks.rs:265` and `:269`; that file has 247 lines, so neither
+    line exists and both are removed. Eight is the count that resolves.
   - Five more test literals across three files spell `Bash` and are also already
     correct: `crates/ragent-tui/tests/test_tool_display.rs:459`
     (`capitalize_tool_name("bash") == "Bash"`),
-    `crates/ragent-tui/tests/test_text_selection.rs:497` (an either-spelling
-    contains check), and three in `crates/ragent-agent/tests/test_tool_rename_table.rs`
-    (the FR-023 table's own pinned list and two lookup assertions). With the ten
-    above that accounts for all 15 `"Bash"` literals in the test tree.
+    `crates/ragent-tui/tests/test_text_selection.rs:503` (an either-spelling
+    contains check; this bullet first said `:497`, which is the middle of the
+    buffer-dump loop above the assertion), and three in
+    `crates/ragent-agent/tests/test_tool_rename_table.rs`
+    (the FR-023 table's own pinned list and two lookup assertions). With the
+    eight above that accounts for all **13** `"Bash"` literals in the test tree.
+    This bullet and the one above originally totalled 15; the corrected pairs
+    are 8 matcher sites + 5 display/table literals = 13, which is what the
+    invariant bullet in section 9 now records alongside the 2 in non-test
+    source (the FR-023 table row and the `knowledge_graph.rs` language name).
 - **T-029 touches no Rust file.** The task is a derivation and a record, not an
   implementation: no source edit, no test edit, no new dependency, no tool
   renamed. The files it writes are this document, one `CHANGELOG.md` entry, one
   corrected expected value in `TESTPLAN.md` (TC-019 step 3) and one corrected
   count in `PLAN.md`. T-030 is the first task that writes code.
+- **One observation for whoever picks up T-030 (recorded, not acted on).** The
+  FR-023 table's home moved after this derivation: it was committed at
+  `crates/ragent-agent/src/tool/rename.rs` and now sits at
+  `crates/ragent-types/src/tool_rename.rs` behind a one-line re-export, so
+  `ragent-config` can read it (FR-031). Section 9's table-row anchor is given
+  for both locations. This document does not prescribe the location - FR-023
+  only requires one module - but a reader comparing paths should know the
+  move happened and that no derivation number depends on it.
 
 ---
 

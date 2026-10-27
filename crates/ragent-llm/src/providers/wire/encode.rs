@@ -37,7 +37,7 @@
 
 use std::borrow::Cow;
 
-use ragent_types::{ChatContent, ChatMessage, ContentPart, ToolDefinition};
+use ragent_types::{ChatContent, ChatMessage, ContentPart, RagentError, ToolDefinition};
 
 use super::{ArgsEncoding, IdField, ResultCarrier, ToolEnvelope, ToolWireProfile};
 
@@ -64,6 +64,14 @@ pub const HF_TOOL_PREFIX: &str = "t_";
 /// rather than a per-envelope number because a reallocation on the first encode
 /// of a tool set is invisible next to the cache hit that follows it (NFR-001).
 const ITEM_BYTES: usize = 128;
+
+/// The provider id a Responses-path [`RagentError::WireLoss`] names (FR-018).
+///
+/// The refusal is reported from the encoder, where the family that cannot carry
+/// the construct is known, so the encoder names the provider that carries that
+/// family. The id is the registry's, not a label invented here: an error that
+/// names no provider is not the error FR-018 asks for.
+const RESPONSES_PROVIDER_ID: &str = "openai_responses";
 
 /// The encoded tool list plus the slice of it the caller assigns to its body.
 ///
@@ -342,6 +350,22 @@ pub struct MessageContext<'a> {
     /// `tool_call_id` and the native `tool_name`; no profile field records that
     /// request, so the caller states it. Inert for every other family.
     pub mirror_tool_name: bool,
+    /// The format whose rule marks the results this encoder writes for a caller
+    /// that assembles its own `messages` array (FR-014, T-017).
+    ///
+    /// The four carriers this module writes already apply [`mark_error`]
+    /// themselves, so the default (`None`) is correct for them. A dialect that
+    /// cannot call the carrier - local Ollama adds a `tool_name` key the OpenAI
+    /// `role:"tool"` shape has no place for - names its format here instead, and
+    /// the encoder marks the result by
+    /// [`ToolFormat::result_content`](crate::provider::tool_cache::ToolFormat::result_content):
+    /// the `ERROR: ` prefix exactly where the format's declared profile has no
+    /// native error flag, and the content untouched otherwise.
+    ///
+    /// Naming the *format* rather than a boolean keeps one derivation: the caller
+    /// cannot decide for itself that its family needs no marker, and a profile
+    /// that gains native support changes the marking with no call site edited.
+    pub error_marking: Option<crate::provider::tool_cache::ToolFormat>,
 }
 
 /// The textual marker a wire shape without a native error flag carries
@@ -376,6 +400,7 @@ impl Default for MessageContext<'_> {
             name_prefix: None,
             allow_images: true,
             mirror_tool_name: false,
+            error_marking: None,
         }
     }
 }
@@ -479,10 +504,13 @@ impl MessageFamily {
 /// [`ToolWireProfile::args_encoding`], so the four carriers of FR-006 - and the
 /// id inside each - are written here once rather than in seven provider modules.
 ///
-/// Two constructs are *not* carried yet, and both are recorded rather than
-/// silently handled: an image part on the Responses input path, and a signed
-/// reasoning part for a profile that declares `echo_reasoning`. FR-018's
-/// `WireLoss` refusal is T-007 and reasoning replay is T-018.
+/// Two constructs are *not* carried, and both are recorded rather than silently
+/// handled: an image part on the Responses input path, and a signed reasoning
+/// part for a profile that declares `echo_reasoning == false`. FR-018's
+/// `WireLoss` refusal is what this form returns for the first of them (and for a
+/// message role the Responses input list has no item for); a reasoning block is
+/// replayed by the one family whose profile declares `echo_reasoning` (FR-011)
+/// and omitted everywhere else, which is a declared omission rather than a loss.
 ///
 /// # Examples
 ///
@@ -515,6 +543,25 @@ pub fn encode_message(
     msg: &ChatMessage,
     ctx: &MessageContext<'_>,
 ) -> Vec<serde_json::Value> {
+    encode_message_fallible(profile, msg, ctx).unwrap_or_default()
+}
+
+/// Encode one message, reporting a construct this profile cannot carry (FR-018).
+///
+/// [`encode_message`] is this function with that report dropped, for the six
+/// families that carry every construct the canonical message type holds. Only the
+/// Responses input list has a construct it cannot write (an image part), so only a
+/// caller that must refuse rather than strip uses this form.
+///
+/// # Errors
+///
+/// `Err(RagentError::WireLoss)` when the message holds a construct the profile's
+/// input shape has no slot for. The caller shall not issue the request.
+pub fn encode_message_fallible(
+    profile: ToolWireProfile,
+    msg: &ChatMessage,
+    ctx: &MessageContext<'_>,
+) -> Result<Vec<serde_json::Value>, RagentError> {
     let Some(family) = MessageFamily::of(profile) else {
         // A declared profile with no message vocabulary is a build defect, not a
         // request condition: the coverage test fails the build for it. In a
@@ -525,7 +572,7 @@ pub fn encode_message(
             carrier = profile.result_carrier.as_str(),
             "no message vocabulary for this wire profile; omitting the message"
         );
-        return Vec::new();
+        return Ok(Vec::new());
     };
     debug_assert_eq!(
         family.result_carrier(),
@@ -533,13 +580,55 @@ pub fn encode_message(
         "the message family derived from a profile must write that profile's carrier"
     );
     match family {
-        MessageFamily::OpenAiChat => openai_chat_message(profile, msg, ctx),
-        MessageFamily::OllamaNative => ollama_native_message(profile, msg, ctx),
-        MessageFamily::AnthropicMessages => anthropic_message(msg, ctx),
-        MessageFamily::BedrockConverse => converse_message(msg, ctx),
-        MessageFamily::GeminiContents => gemini_message(profile, msg, ctx),
+        MessageFamily::OpenAiChat => Ok(openai_chat_message(profile, msg, ctx)),
+        MessageFamily::OllamaNative => Ok(ollama_native_message(profile, msg, ctx)),
+        MessageFamily::AnthropicMessages => Ok(anthropic_message(profile, msg, ctx)),
+        MessageFamily::BedrockConverse => Ok(converse_message(msg, ctx)),
+        MessageFamily::GeminiContents => Ok(gemini_message(profile, msg, ctx)),
         MessageFamily::ResponsesInput => responses_items(profile, msg, ctx),
     }
+}
+
+/// Encode a whole conversation into the entries `profile`'s family puts on the
+/// wire, in order (FR-006).
+///
+/// This is the loop every provider module used to write for itself: six of the
+/// seven now call it with no extra context at all, and the two that need one pass
+/// it here instead of rewriting the per-message shape.
+///
+/// # Errors
+///
+/// As [`encode_message_fallible`]: `Err(RagentError::WireLoss)` for the first
+/// message holding a construct the profile cannot carry.
+pub fn encode_messages(
+    profile: ToolWireProfile,
+    messages: &[ChatMessage],
+    ctx: &MessageContext<'_>,
+) -> Result<Vec<serde_json::Value>, RagentError> {
+    encode_messages_fallible(profile, messages, ctx)
+}
+
+/// Encode a whole conversation, reporting a construct the profile cannot carry
+/// (FR-018).
+///
+/// [`encode_messages`] is this function; it exists under its own name so a caller
+/// that must refuse rather than strip reads as if it does. The first message
+/// holding an uncarriable construct fails the whole conversation, so a request is
+/// never issued with a silently shortened history.
+///
+/// # Errors
+///
+/// `Err(RagentError::WireLoss)` for that first message.
+pub fn encode_messages_fallible(
+    profile: ToolWireProfile,
+    messages: &[ChatMessage],
+    ctx: &MessageContext<'_>,
+) -> Result<Vec<serde_json::Value>, RagentError> {
+    let mut out = Vec::with_capacity(messages.len());
+    for msg in messages {
+        out.extend(encode_message_fallible(profile, msg, ctx)?);
+    }
+    Ok(out)
 }
 
 /// The family's name rewrite, applied wherever a tool name is written.
@@ -660,8 +749,13 @@ fn openai_chat_message(
                     return serde_json::Value::Null;
                 };
                 // FR-014: `role:"tool"` has no error flag, so the profile
-                // declares `false` and the content takes the `ERROR: ` prefix.
-                let (content, _) = mark_error(profile, content, *is_error);
+                // declares `false` and the content takes the `ERROR: ` prefix -
+                // unless the caller named its own format for a dialect carrier
+                // (`ctx.error_marking`), whose declared profile decides instead.
+                let (content, _) = match ctx.error_marking {
+                    Some(format) => (format.result_content(content, *is_error), false),
+                    None => mark_error(profile, content, *is_error),
+                };
                 let mut entry = serde_json::Map::new();
                 entry.insert("role".to_string(), serde_json::json!("tool"));
                 if let IdField::Key(key) = profile.id_field {
@@ -686,22 +780,62 @@ fn openai_chat_message(
     })]
 }
 
+/// The `content` of an ordinary OpenAI-family message whose text reaches the wire
+/// as a plain string, as the native `/api/chat` shape requires.
+///
+/// The sibling of [`openai_content`] on the same rule: only a *text* part becomes
+/// a string, because collapsing anything else would write `"content": null` and
+/// lose the part. Text parts join with a newline, which is what the block form
+/// conveys as two blocks; native Ollama has no block form.
+fn joined_text(parts: &[ContentPart]) -> serde_json::Value {
+    let rendered: Vec<serde_json::Value> = parts
+        .iter()
+        .filter_map(|part| match part {
+            ContentPart::Text { text } => Some(serde_json::json!({
+                "type": "text",
+                "text": text
+            })),
+            ContentPart::ToolUse { .. }
+            | ContentPart::ToolResult { .. }
+            | ContentPart::ImageUrl { .. }
+            | ContentPart::Reasoning { .. } => None,
+        })
+        .collect();
+    match rendered.as_slice() {
+        [] => serde_json::json!([]),
+        [only] if only["type"] == "text" => only["text"].clone(),
+        _ => serde_json::json!(rendered),
+    }
+}
+
 /// Native Ollama `/api/chat`: the text of a message always reaches the wire as a
 /// string, images travel beside it, tool calls carry object arguments, and a
 /// result names its tool instead of keying it by id.
+///
+/// A message whose text and images are all the profile can carry is written as the
+/// single `{role, content}` entry the native shape expects. A message that *also*
+/// holds tool calls or results is written as that entry followed by one entry per
+/// construct - the calls on an assistant turn, a `role:"tool"` result naming its
+/// tool on a user turn - because a shape that dropped one of them would be
+/// `WireLoss` by another route (FR-018): the history would be silently short.
+///
+/// The assistant entry is only emitted when the message actually holds text. The
+/// native shape rejects an assistant turn whose `content` is empty and carries no
+/// calls, and an assistant turn that did nothing but call a tool has no text at
+/// all; writing a bare `{"role":"assistant","content":""}` for it makes the
+/// endpoint refuse the whole request, which is worse than the empty entry it
+/// avoids.
 fn ollama_native_message(
     profile: ToolWireProfile,
     msg: &ChatMessage,
     ctx: &MessageContext<'_>,
 ) -> Vec<serde_json::Value> {
     let (content, images) = match &msg.content {
-        ChatContent::Text(text) => (text.clone(), Vec::new()),
+        ChatContent::Text(text) => (serde_json::json!(text), Vec::new()),
         ChatContent::Parts(parts) => {
-            let mut texts: Vec<&str> = Vec::new();
             let mut images: Vec<&str> = Vec::new();
             for part in parts {
                 match part {
-                    ContentPart::Text { text } => texts.push(text),
                     ContentPart::ImageUrl { url } if ctx.allow_images => {
                         // The native endpoint takes raw base64, without the
                         // `data:<mime>;base64,` prefix.
@@ -712,19 +846,21 @@ fn ollama_native_message(
                     }
                     // A historical image is dropped so a non-vision model is not
                     // rejected for an attachment from an earlier turn.
-                    ContentPart::ImageUrl { .. }
+                    ContentPart::Text { .. }
+                    | ContentPart::ImageUrl { .. }
                     | ContentPart::ToolUse { .. }
                     | ContentPart::ToolResult { .. }
                     | ContentPart::Reasoning { .. } => {}
                 }
             }
-            (texts.join("\n"), images)
+            (joined_text(parts), images)
         }
     };
 
     let ChatContent::Parts(parts) = &msg.content else {
         return vec![serde_json::json!({ "role": msg.role, "content": content })];
     };
+    let has_text = parts.iter().any(|p| matches!(p, ContentPart::Text { .. }));
     let tool_calls: Vec<serde_json::Value> = parts
         .iter()
         .filter_map(|part| match part {
@@ -737,57 +873,69 @@ fn ollama_native_message(
             _ => None,
         })
         .collect();
+    let results: Vec<serde_json::Value> = parts
+        .iter()
+        .filter_map(|part| {
+            let ContentPart::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } = part
+            else {
+                return None;
+            };
+            // The native shape has no id slot: it names the tool, and the map
+            // is the only place the name survives. It is never derived from
+            // the id, and an id the history no longer carries goes out
+            // unnamed rather than guessed (FR-019). It also has no error flag,
+            // so an error carries the FR-014 `ERROR: ` prefix.
+            let (content, _) = mark_error(profile, content, *is_error);
+            let name = ctx
+                .tool_names
+                .and_then(|names| names.get(tool_use_id.as_str()))
+                .map_or("", String::as_str);
+            Some(serde_json::json!({
+                "role": "tool",
+                "name": name,
+                "content": content
+            }))
+        })
+        .collect();
+
+    // A turn that carries no tool construct is the ordinary entry, with the
+    // string content and the `images` array beside it.
+    if tool_calls.is_empty() && results.is_empty() {
+        let mut entry = serde_json::json!({ "role": msg.role, "content": content });
+        if !images.is_empty() {
+            entry["images"] = serde_json::json!(images);
+        }
+        return vec![entry];
+    }
+
+    // Otherwise the constructs travel as their own entries (FR-018).
+    let mut entries = Vec::with_capacity(1 + tool_calls.len() + results.len());
+    if has_text {
+        entries.push(serde_json::json!({ "role": msg.role, "content": content }));
+    }
     if !tool_calls.is_empty() {
-        return vec![serde_json::json!({
+        entries.push(serde_json::json!({
             "role": "assistant",
             "content": "",
             "tool_calls": tool_calls
-        })];
+        }));
     }
-    let results: Vec<&ContentPart> = parts
-        .iter()
-        .filter(|part| matches!(part, ContentPart::ToolResult { .. }))
-        .collect();
-    if !results.is_empty() {
-        return results
-            .iter()
-            .filter_map(|part| {
-                let ContentPart::ToolResult {
-                    tool_use_id,
-                    content,
-                    is_error,
-                } = part
-                else {
-                    return None;
-                };
-                // The native shape has no id slot: it names the tool, and the map
-                // is the only place the name survives. It is never derived from
-                // the id, and an id the history no longer carries goes out
-                // unnamed rather than guessed (FR-019). It also has no error flag,
-                // so an error carries the FR-014 `ERROR: ` prefix.
-                let (content, _) = mark_error(profile, content, *is_error);
-                let name = ctx
-                    .tool_names
-                    .and_then(|names| names.get(tool_use_id.as_str()))
-                    .map_or("", String::as_str);
-                Some(serde_json::json!({
-                    "role": "tool",
-                    "name": name,
-                    "content": content
-                }))
-            })
-            .collect();
-    }
-    let mut entry = serde_json::json!({ "role": msg.role, "content": content });
-    if !images.is_empty() {
-        entry["images"] = serde_json::json!(images);
-    }
-    vec![entry]
+    entries.extend(results);
+    entries
 }
 
-/// Anthropic Messages content blocks: `tool_use` on an assistant turn,
+/// Anthropic Messages content blocks: `thinking` on an assistant turn (only for
+/// a profile that declares `echo_reasoning`), `tool_use` on an assistant turn,
 /// `tool_result` keyed by `tool_use_id` in a user turn.
-fn anthropic_message(msg: &ChatMessage, ctx: &MessageContext<'_>) -> Vec<serde_json::Value> {
+fn anthropic_message(
+    profile: ToolWireProfile,
+    msg: &ChatMessage,
+    ctx: &MessageContext<'_>,
+) -> Vec<serde_json::Value> {
     let content = match &msg.content {
         ChatContent::Text(text) => serde_json::json!(text),
         ChatContent::Parts(parts) => serde_json::json!(
@@ -825,9 +973,10 @@ fn anthropic_message(msg: &ChatMessage, ctx: &MessageContext<'_>) -> Vec<serde_j
                                 .unwrap_or(url.as_str())
                         }
                     })),
-                    // FR-011: replayed only for an `echo_reasoning` profile
-                    // (T-018).
-                    ContentPart::Reasoning { .. } => None,
+                    // FR-011: replayed only for an `echo_reasoning` profile, as
+                    // a signed `thinking` block, ahead of the tool-use block of
+                    // the same assistant turn.
+                    ContentPart::Reasoning { .. } => reasoning_block(profile, part),
                 })
                 .collect::<Vec<serde_json::Value>>()
         ),
@@ -836,6 +985,39 @@ fn anthropic_message(msg: &ChatMessage, ctx: &MessageContext<'_>) -> Vec<serde_j
         "role": msg.role,
         "content": content
     })]
+}
+
+/// The signed `thinking` block FR-011 replays, or `None` for a profile that
+/// omits reasoning.
+///
+/// Two constructs are deliberately kept apart: the reasoning *text* and the
+/// provider's *signature* over it. Anthropic verifies the signature of the
+/// replayed block, so a block whose signature was dropped (or a signature whose
+/// text was dropped) is a rejected or unverifiable turn. A block that was
+/// recorded without a signature is replayed without the key (T-001's omission
+/// rule): fabricating an empty `signature` would claim the provider signed a
+/// block it did not.
+///
+/// The block also precedes the turn's `tool_use` blocks, which is where the
+/// provider requires it: the thinking that decided a call has to arrive before
+/// the call it decided.
+fn reasoning_block(profile: ToolWireProfile, part: &ContentPart) -> Option<serde_json::Value> {
+    if !profile.echo_reasoning {
+        return None;
+    }
+    let ContentPart::Reasoning { text, signature } = part else {
+        // Only reasoning reaches here; a changed caller must not write a
+        // `thinking` block for anything else.
+        return None;
+    };
+    let mut block = serde_json::json!({
+        "type": "thinking",
+        "thinking": text
+    });
+    if let Some(signature) = signature {
+        block["signature"] = serde_json::json!(signature);
+    }
+    Some(block)
 }
 
 /// Bedrock Converse content blocks: `toolUse` on an assistant turn, `toolResult`
@@ -980,13 +1162,28 @@ fn gemini_image_part(url: &str) -> serde_json::Value {
 
 /// The Responses input list: a message item for the text content, then one item
 /// per tool construct (`function_call` and `function_call_output`).
+///
+/// One construct *is* refused rather than dropped: an image part has no item
+/// shape on the Responses input path, so a history that carries one fails the
+/// request instead of silently losing it (FR-018). The refusal lives here, in the
+/// family that cannot carry the construct, because this is the only place that
+/// knows which constructs the shape has a slot for.
+///
+/// A message *role* the input list does not accept is refused for the same
+/// reason and under the same requirement: the shape has no item for it, so the
+/// turn cannot be written without losing it, and the encoder's own signature
+/// (`impl Into<String>`) lets an unknown role reach it. A text part, a tool call,
+/// a tool result and a reasoning part all have their slot; a role does not.
 fn responses_items(
     profile: ToolWireProfile,
     msg: &ChatMessage,
     ctx: &MessageContext<'_>,
-) -> Vec<serde_json::Value> {
+) -> Result<Vec<serde_json::Value>, RagentError> {
     let Some(role) = responses_role(&msg.role) else {
-        return Vec::new();
+        return Err(RagentError::WireLoss {
+            construct: format!("role:{}", msg.role),
+            provider: RESPONSES_PROVIDER_ID.to_string(),
+        });
     };
     let mut items = Vec::new();
     match &msg.content {
@@ -1031,17 +1228,26 @@ fn responses_items(
                             "output": output
                         }));
                     }
-                    // A text part already reached the wire above, and an image has
-                    // no item shape on the Responses input path; FR-018's
-                    // `WireLoss` refusal for the image is T-007.
-                    ContentPart::Text { .. }
-                    | ContentPart::ImageUrl { .. }
-                    | ContentPart::Reasoning { .. } => {}
+                    // A text part already reached the wire above.
+                    ContentPart::Text { .. } => {}
+                    // FR-018: the Responses input list has no image slot, so the
+                    // request is refused rather than silently stripped.
+                    ContentPart::ImageUrl { .. } => {
+                        return Err(RagentError::WireLoss {
+                            construct: "ImageUrl".to_string(),
+                            provider: RESPONSES_PROVIDER_ID.to_string(),
+                        });
+                    }
+                    // FR-011: the Responses API has no signed-reasoning input
+                    // item, so a reasoning part is omitted rather than refused -
+                    // the omission is declared by the profile
+                    // (`echo_reasoning == false`), not forced by the shape.
+                    ContentPart::Reasoning { .. } => {}
                 }
             }
         }
     }
-    items
+    Ok(items)
 }
 
 /// The roles the Responses input list accepts, or `None` for a role it has no

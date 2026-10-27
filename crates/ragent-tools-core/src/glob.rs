@@ -24,7 +24,7 @@ pub struct GlobTool;
 #[async_trait::async_trait]
 impl Tool for GlobTool {
     fn name(&self) -> &'static str {
-        "glob"
+        "Glob"
     }
 
     /// Returns a human-readable description of what the tool does.

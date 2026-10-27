@@ -9,7 +9,7 @@ use std::process::Output;
 
 /// Maximum combined output length before truncation is applied.
 ///
-/// Matches the `bash` tool's limit: keep the first 15k chars + last 15k chars
+/// Matches the `Bash` tool's limit: keep the first 15k chars + last 15k chars
 /// with a separator.  This prevents a single command with huge output from
 /// blowing the model's context window.
 const MAX_OUTPUT: usize = 30_000 + 1_000; // first + last + separator allowance

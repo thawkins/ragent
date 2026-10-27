@@ -10,16 +10,16 @@
 //!
 //! | Alias name          | Canonical tool | Notes                              |
 //! |---------------------|----------------|------------------------------------|
-//! | `update_file`       | `write`        | `content` pass-through            |
-//! | `run_code`          | `bash`         | `code` -> `command`                |
-//! | `ask_user`          | (self)         | free-text or multiple-choice user prompt, with a default/fallback option |
+//! | `update_file`       | `Write`        | `content` pass-through            |
+//! | `run_code`          | `Bash`         | `code` -> `command`               |
+//! | `AskUserQuestion`   | (self)         | free-text or multiple-choice user prompt, with a default/fallback option |
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use super::{Tool, ToolContext, ToolOutput};
-// `bash` and `write` were agent-local dormant duplicates removed in
+// `Bash` and `Write` were agent-local dormant duplicates removed in
 // DCREMOVALPLAN M3. The canonical `BashTool`/`WriteTool` implementations live
 // in `ragent-tools-core` and implement that crate's `Tool` trait, so we bridge
 // them back to the agent-local `Tool` trait via `ExtractedCoreToolAdapter`
@@ -80,7 +80,7 @@ fn extract_command(input: &mut Value) -> Option<String> {
 // update_file -> write
 // ---------------------------------------------------------------------------
 
-/// Alias for `write`. Accepts `path` and `content`.
+/// Alias for `Write`. Accepts `path` and `content`.
 pub struct UpdateFileTool;
 
 #[async_trait::async_trait]
@@ -91,7 +91,7 @@ impl Tool for UpdateFileTool {
 
     fn description(&self) -> &'static str {
         "Write new content to an existing file, replacing its current contents. \
-         This is an alias for the canonical 'write' tool and accepts exactly the same \
+         This is an alias for the canonical 'Write' tool and accepts exactly the same \
          parameters. REQUIRED parameters: 'path' (string, file to create or overwrite) and \
          'content' (string, new file contents). Common gotcha: 'path' must be relative to \
          the session working directory; missing either parameter will fail."
@@ -113,6 +113,21 @@ impl Tool for UpdateFileTool {
         "file:write"
     }
 
+    /// Writes `content` to `path` through the canonical `Write` implementation.
+    ///
+    /// The alias's whole contribution is its surface: the name `update_file`,
+    /// the `update_file` row in the permission and loop-state tables, and the
+    /// schema above, which advertises `path` and `content` and nothing else.
+    /// The write itself is `ragent-tools-core`'s, because a second copy of the
+    /// file-writing code is exactly the duplication `write::WriteTool` exists to
+    /// prevent. The forward is reviewed by the NFR-008 guard (spec
+    /// `uniformtools`): its per-line exemption table records this site and the
+    /// reason it is not a wrapper standing in for a retired name.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the canonical `Write` returns: a missing `path` or
+    /// `content`, a parent directory that cannot be created, or a failed write.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         delegate(
             &ExtractedCoreToolAdapter::new(std::sync::Arc::new(write::WriteTool)),
@@ -127,7 +142,7 @@ impl Tool for UpdateFileTool {
 // Bash execution aliases
 // ---------------------------------------------------------------------------
 
-/// Alias for `bash`. Accepts `code` (maps to `command`).
+/// Alias for `Bash`. Accepts `code` (maps to `command`).
 pub struct RunCodeTool;
 
 #[async_trait::async_trait]
@@ -137,7 +152,7 @@ impl Tool for RunCodeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Run a shell command or code snippet as an alias for the canonical 'bash' tool. \
+        "Run a shell command or code snippet as an alias for the canonical 'Bash' tool. \
          REQUIRED parameter: at least one of 'code' or 'command' (string, the shell command \
          or snippet to execute). The tool maps 'code' to the canonical 'command' parameter. \
          Optional: 'timeout' (integer seconds, default 120). Common gotcha: if neither 'code' \
@@ -175,7 +190,7 @@ impl Tool for RunCodeTool {
 
 /// Prompts the user for input during a session, then blocks until they respond.
 ///
-/// Some models emit `ask_user` when they want to prompt the user for input.
+/// Some models emit `AskUserQuestion` when they want to prompt the user for input.
 /// Supports two modes:
 ///
 /// - **Free-text**: shows an editable text input area and returns the typed
@@ -187,7 +202,7 @@ pub struct AskUserTool;
 #[async_trait::async_trait]
 impl Tool for AskUserTool {
     fn name(&self) -> &'static str {
-        "ask_user"
+        "AskUserQuestion"
     }
 
     fn description(&self) -> &'static str {
@@ -226,6 +241,14 @@ impl Tool for AskUserTool {
         })
     }
 
+    /// `ask_user`, not `ask_user_question` and not the tool's own name
+    /// (FR-028).
+    ///
+    /// The family is permission vocabulary and predates the rename: the tool is
+    /// called `AskUserQuestion` now, while the category a `"permission":
+    /// "ask_user"` rule keys on is unchanged. Renaming it would silently
+    /// un-govern every rule written against it, which is exactly the state the
+    /// rename is required to preserve.
     fn permission_category(&self) -> &'static str {
         "ask_user"
     }
@@ -299,7 +322,7 @@ impl Tool for AskUserTool {
 }
 
 /// Resolve which option index should be pre-selected (and used on timeout) for
-/// a multiple-choice `ask_user` request.
+/// a multiple-choice `AskUserQuestion` request.
 ///
 /// Resolution order:
 ///

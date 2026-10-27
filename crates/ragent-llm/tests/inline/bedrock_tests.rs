@@ -138,6 +138,10 @@ fn test_converse_tool_config() {
 
 #[test]
 fn test_mime_to_converse_format() {
+    // The helper moved beside its only caller (FR-006): the request-side image
+    // shape is the shared encoder's, so the mapping is tested where it lives.
+    use crate::provider::wire::encode::mime_to_converse_format;
+
     assert_eq!(mime_to_converse_format("image/png"), "png");
     assert_eq!(mime_to_converse_format("image/jpeg"), "jpeg");
     assert_eq!(mime_to_converse_format("image/gif"), "gif");
@@ -488,13 +492,13 @@ async fn test_converse_chat_stream_text_tool_and_finish() {
         "event: messageStart\n",
         "data: {\"usage\":{\"inputTokens\":9}}\n\n",
         "event: contentBlockStart\n",
-        "data: {\"start\":{\"toolUse\":{\"toolUseId\":\"tu1\",\"name\":\"calc\"}}}\n\n",
+        "data: {\"contentBlockIndex\":0,\"start\":{\"toolUse\":{\"toolUseId\":\"tu1\",\"name\":\"calc\"}}}\n\n",
         "event: contentBlockDelta\n",
         "data: {\"delta\":{\"text\":\"Hi\"}}\n\n",
         "event: contentBlockDelta\n",
-        "data: {\"delta\":{\"toolUse\":{\"input\":\"{\\\"x\\\":1}\"}}}\n\n",
+        "data: {\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"{\\\"x\\\":1}\"}}}\n\n",
         "event: contentBlockStop\n",
-        "data: {}\n\n",
+        "data: {\"contentBlockIndex\":0}\n\n",
         "event: metadata\n",
         "data: {\"usage\":{\"outputTokens\":4}}\n\n",
         "event: messageStop\n",
@@ -544,6 +548,167 @@ async fn test_converse_chat_stream_text_tool_and_finish() {
             |e| matches!(e, StreamEvent::Finish { reason } if *reason == FinishReason::ToolUse)
         )
     );
+}
+
+/// FR-005: two `toolUse` blocks opened in one response keep their own argument
+/// fragments and close in the order their own stop frames arrive.
+///
+/// The four fragments interleave `1, 0, 1, 0` and the stop frames arrive `1, 0`,
+/// so a parser that attributes a fragment to the call it opened last cannot pass:
+/// the first block would absorb the second's input and the ends would not pair.
+#[tokio::test]
+async fn test_converse_chat_stream_keeps_two_parallel_tool_use_blocks_apart() {
+    let sse = concat!(
+        "event: contentBlockStart\n",
+        "data: {\"contentBlockIndex\":0,\"start\":{\"toolUse\":{\"toolUseId\":\"tu_a\",\"name\":\"Read\"}}}\n\n",
+        "event: contentBlockStart\n",
+        "data: {\"contentBlockIndex\":1,\"start\":{\"toolUse\":{\"toolUseId\":\"tu_b\",\"name\":\"Grep\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":1,\"delta\":{\"toolUse\":{\"input\":\"{\\\"pattern\\\":\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"{\\\"path\\\":\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":1,\"delta\":{\"toolUse\":{\"input\":\"\\\"fn main\\\"}\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"\\\"a.rs\\\"}\"}}}\n\n",
+        "event: contentBlockStop\n",
+        "data: {\"contentBlockIndex\":1}\n\n",
+        "event: contentBlockStop\n",
+        "data: {\"contentBlockIndex\":0}\n\n",
+        "event: messageStop\n",
+        "data: {\"stopReason\":\"tool_use\"}\n\n",
+    )
+    .to_string();
+    let url = spawn_bedrock_stream(sse).await;
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let events: Vec<StreamEvent> = client
+        .chat(converse_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    // Two starts, each opening its own call under the provider's id.
+    let starts: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallStart { id, name } => Some((id.clone(), name.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        vec![
+            ("tu_a".to_string(), "Read".to_string()),
+            ("tu_b".to_string(), "Grep".to_string()),
+        ],
+        "each toolUse block opens its own call"
+    );
+
+    // Reassembling each call's fragments by id must yield that call's own input.
+    let joined = |id: &str| -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ToolCallDelta {
+                    id: delta_id,
+                    args_json,
+                } if delta_id == id => Some(args_json.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(joined("tu_a"), "{\"path\":\"a.rs\"}");
+    assert_eq!(joined("tu_b"), "{\"pattern\":\"fn main\"}");
+
+    // One end per call, in the order the stop frames named them.
+    let ends: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallEnd { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends, vec!["tu_b".to_string(), "tu_a".to_string()]);
+}
+
+/// FUNC-032: a fragment frame that names no block is skipped, not attributed to
+/// whichever call happens to be open.
+#[tokio::test]
+async fn test_converse_stream_drops_a_frame_that_names_no_block_index() {
+    let sse = concat!(
+        "event: contentBlockStart\n",
+        "data: {\"contentBlockIndex\":0,\"start\":{\"toolUse\":{\"toolUseId\":\"tu_a\",\"name\":\"Read\"}}}\n\n",
+        "event: contentBlockStart\n",
+        "data: {\"contentBlockIndex\":1,\"start\":{\"toolUse\":{\"toolUseId\":\"tu_b\",\"name\":\"Grep\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"{\\\"path\\\":\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"delta\":{\"toolUse\":{\"input\":\"\\\"LEAKED\\\"}\"}}}\n\n",
+        "event: contentBlockDelta\n",
+        "data: {\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"\\\"a.rs\\\"}\"}}}\n\n",
+        "event: contentBlockStop\n",
+        "data: {\"contentBlockIndex\":0}\n\n",
+        "event: contentBlockStop\n",
+        "data: {\"contentBlockIndex\":1}\n\n",
+    )
+    .to_string();
+    let url = spawn_bedrock_stream(sse).await;
+    let client = BedrockConverseClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "amazon.nova-pro-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let events: Vec<StreamEvent> = client
+        .chat(converse_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    let joined = |id: &str| -> String {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ToolCallDelta {
+                    id: delta_id,
+                    args_json,
+                } if delta_id == id => Some(args_json.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        joined("tu_a"),
+        "{\"path\":\"a.rs\"}",
+        "the dropped frame leaked"
+    );
+    assert_eq!(
+        joined("tu_b"),
+        "",
+        "a frame that names no block belongs to no call"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            StreamEvent::ToolCallDelta { args_json, .. } if args_json.contains("LEAKED")
+        )),
+        "an unnamed fragment must not reach any call"
+    );
+    let ends: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallEnd { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends, vec!["tu_a".to_string(), "tu_b".to_string()]);
 }
 
 #[tokio::test]
@@ -622,5 +787,60 @@ fn test_build_bedrock_base_url_endpoint_override() {
     assert_eq!(
         build_bedrock_base_url("us-east-1", Some("https://vpce.example.com/")),
         "https://vpce.example.com"
+    );
+}
+
+/// FR-011: the Bedrock Anthropic shape speaks the same signed-thinking wire as
+/// the first-party API (a `thinking` block with a `signature_delta` inside it),
+/// so a session driven through Bedrock must surface the signature the same way.
+/// Without the arm the signature was parsed as an unrecognised delta type and
+/// dropped, leaving every replayed block unsigned.
+#[tokio::test]
+async fn test_bedrock_anthropic_signature_delta_reaches_the_loop() {
+    let sse = concat!(
+        "event: content_block_start\n",
+        "data: {\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"consider\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-bedrock\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+    )
+    .to_string();
+    let url = spawn_bedrock_stream(sse).await;
+    let client = BedrockAnthropicClient {
+        credentials: sample_creds(),
+        base_url: url,
+        model_id: "anthropic.claude-sonnet-4-20250514-v1:0".to_string(),
+        http: crate::provider::http_client::create_streaming_http_client(),
+    };
+    let events: Vec<StreamEvent> = client
+        .chat(converse_request())
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    let signatures: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ReasoningSignature { signature } => Some(signature.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(signatures, vec!["sig-bedrock"]);
+    let reasoning: String = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ReasoningDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reasoning, "consider",
+        "the signature is not reasoning text, so it never joins the buffer"
     );
 }

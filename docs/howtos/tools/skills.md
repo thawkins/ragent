@@ -9,7 +9,47 @@ prompts, and file context into agent sessions.
 
 ---
 
-## skill_manage
+## Tool restrictions (`allowed-tools`)
+
+A `SKILL.md` frontmatter block may limit the tools the run can call:
+
+```yaml
+---
+name: rename-check
+description: Check the rename landed
+allowed-tools:
+  - Bash
+  - read
+  - Grep
+  - Glob
+---
+```
+
+Resolution is an **exact name comparison** against the registry. There is no
+translation layer, so:
+
+- the thirteen Claude Code spellings the rename adopted resolve as written -
+  `AskUserQuestion`, `Bash`, `Edit`, `EnterPlanMode`, `ExitPlanMode`, `Glob`,
+  `Grep`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `Write`;
+- the tools the rename did **not** touch keep their ragent spelling - `read`,
+  `list`, `think`, `codeindex_search`, and so on;
+- a retired spelling (`bash`, `grep`, `task_create`, ...) matches **nothing**, and
+  neither does `Read`, which was rated too close to `read` to adopt;
+- entries are case-sensitive: `Bash` is not `bash`, and `Read` is not `read`;
+- an empty list means "no restriction", not "no tools".
+
+An entry that matches no registered tool would silently remove a capability, so
+it is reported once per `(entry, skill)` pair - naming the entry and the skill -
+at the moment the skill's list becomes the restriction (`Skill`,
+`/skill <name>` / `/<name>`, and the forked-skill resolver). Fix the manifest;
+the run continues with the entries that did resolve.
+
+YAML reads a bare comma list as one scalar: `allowed-tools: Bash, ReadFile` is a
+single entry named `Bash, ReadFile`. Use the block form above.
+
+---
+
+## Skill
 
 Manage the skill registry at runtime.
 
@@ -25,6 +65,6 @@ Manage the skill registry at runtime.
 
 **Example:**
 ```text
-skill_manage action="list"
-skill_manage action="load" name="code-audit" arguments="crates/ragent-server"
+Skill action="list"
+Skill action="load" name="code-audit" arguments="crates/ragent-server"
 ```

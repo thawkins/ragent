@@ -113,7 +113,7 @@ Message formats:
 
 - Directory and file path lists: `/dirs` (same add/remove/show model).
 - Permission rules and YOLO mode: `docs/howtos/permissions.md`.
-- The bash tool's 7-layer security model: safe-command whitelist, banned
+- The Bash tool's 7-layer security model: safe-command whitelist, banned
   commands, denied patterns, and the user allow/deny layers above.
 - Config files written: `.ragent/ragent.json` (project),
   `~/.config/ragent/ragent.json` (global).

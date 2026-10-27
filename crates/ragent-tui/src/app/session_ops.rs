@@ -442,7 +442,7 @@ impl App {
                         .iter()
                         .map(|part| match part {
                             MessagePart::Text { text } => text.len(),
-                            MessagePart::Reasoning { text } => text.len(),
+                            MessagePart::Reasoning { text, .. } => text.len(),
                             MessagePart::ToolCall { call_id, state, .. } => {
                                 call_id.len()
                                     + state.input.to_string().len()
@@ -796,7 +796,7 @@ impl App {
     /// so it passes through the same 7-layer security model (safe-command
     /// whitelist, banned/denied patterns, directory-escape prevention, syntax
     /// validation, obfuscation detection, and user allow/deny lists) and the
-    /// default 120-second timeout used by the regular `bash` tool. This keeps
+    /// default 120-second timeout used by the regular `Bash` tool. This keeps
     /// bang commands (`! ...`) from bypassing ragent's shell protections.
     pub(crate) fn dispatch_bang_command(&mut self, raw: String) {
         // Strip the leading `!` and trim surrounding whitespace.
@@ -839,7 +839,7 @@ impl App {
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(flag.clone());
 
-        // Build a minimal tool context so the validated `bash` tool can run
+        // Build a minimal tool context so the validated `Bash` tool can run
         // the command with the same security and timeout as a normal tool call.
         let working_dir = crate::app::helpers::current_working_dir();
         let tool_ctx = ToolContext {
@@ -3257,9 +3257,12 @@ impl App {
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
             "gcf" => Some("[on|off|show|help]".to_string()),
-            "tools" => Some(
-                "[list|help|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
-            ),
+            // FR-033: rendered from the one `TOOLS_SUBS` table, so the hint
+            // cannot offer a form the handler refuses or omit one it accepts.
+            "tools" => Some(format!(
+                "[{}]",
+                ragent_agent::tool::command_catalog::TOOLS_SUBS.join("|")
+            )),
             "model" => Some("[show]".to_string()),
             "spec" => Some("[create|add|delete|list|search|validate|status|task|govcreate <specid> <content-ref> <target-folder> [--language <lang>] [--type <type>] [--stack <name>] [--github|--gitlab] [--force]|activate|deactivate|coverage|impl|jtbd|help]".to_string()),
             "router" => {
@@ -4881,7 +4884,7 @@ impl App {
         } else {
             self.push_log_no_agent(
                 LogLevel::Error,
-                "plan_exit called but agent stack is empty".to_string(),
+                "ExitPlanMode called but agent stack is empty".to_string(),
             );
         }
     }

@@ -275,6 +275,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().to_path_buf();
@@ -292,7 +293,7 @@ fn make_agent() -> AgentInfo {
 
 fn write_call() -> Reply {
     Reply::ToolCall {
-        name: "write",
+        name: "Write",
         args: r#"{"path": "out.txt", "content": "hello"}"#.to_string(),
     }
 }
@@ -315,7 +316,7 @@ async fn test_analyzer_allow_permits_action_and_publishes_verdict() -> Result<()
         event_bus.clone(),
         vec![write_call(), Reply::TextOnly("done")],
         r#"{"verdict":"allow","rationale":"safe write"}"#,
-        // No rule for `write`, so the static checker returns `Ask`.
+        // No rule for `Write`, so the static checker returns `Ask`.
         Vec::new(),
         // Pin the analyzer to the scripted analyzer provider; without the model
         // override it would resolve to the session model and never see `analyzer_raw`.

@@ -135,7 +135,7 @@ async fn task_update_missing_task_id_names_the_parameter() {
     let ctx = storage_ctx(dir.path());
 
     let err = registry
-        .get("task_update")
+        .get("TaskUpdate")
         .expect("task_update registered")
         .execute(json!({ "status": "pending" }), &ctx)
         .await
@@ -153,7 +153,7 @@ async fn task_get_unknown_id_reports_not_found() {
     let ctx = storage_ctx(dir.path());
 
     let err = registry
-        .get("task_get")
+        .get("TaskGet")
         .expect("task_get registered")
         .execute(json!({ "task_id": "task-does-not-exist" }), &ctx)
         .await
@@ -171,7 +171,7 @@ async fn task_list_rejects_an_invalid_status_filter() {
     let ctx = storage_ctx(dir.path());
 
     let err = registry
-        .get("task_list")
+        .get("TaskList")
         .expect("task_list registered")
         .execute(json!({ "status": "bogus" }), &ctx)
         .await
@@ -189,7 +189,7 @@ async fn task_create_rejects_a_non_object_metadata_value() {
     let ctx = storage_ctx(dir.path());
 
     let err = registry
-        .get("task_create")
+        .get("TaskCreate")
         .expect("task_create registered")
         .execute(
             json!({ "subject": "s", "description": "d", "metadata": "not-an-object" }),
@@ -210,7 +210,7 @@ async fn task_create_missing_subject_names_the_parameter() {
     let ctx = storage_ctx(dir.path());
 
     let err = registry
-        .get("task_create")
+        .get("TaskCreate")
         .expect("task_create registered")
         .execute(json!({ "description": "d" }), &ctx)
         .await

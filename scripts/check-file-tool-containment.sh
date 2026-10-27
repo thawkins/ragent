@@ -27,9 +27,18 @@ cd "$ROOT"
 TOOLS_DIR="crates/ragent-tools-core/src"
 
 # Tool `name()` values that read or write a caller-supplied filesystem path.
+#
+# The spellings must be the names the tools' `name()` methods return *today*
+# (spec `uniformtools` FR-023, FR-028). Four of them were renamed to their
+# Claude Code spellings (`write`/`edit`/`glob`/`grep` -> `Write`/`Edit`/`Glob`/
+# `Grep`), and this list was left pre-rename: the guard then found no source file
+# for those four, printed `WARN: no source file found ... (moved or renamed?)`
+# and `continue`d - so it checked 13 file tools instead of 17 and still exited 0.
+# A stale literal in a *guard* is worse than one in a message: nothing reads a
+# warning that comes with exit 0.
 FILE_TOOLS=(
-    read write create append_to_file edit multi_edit rm make_directory
-    move_file copy_file file_info diff_files glob grep list patch apply_patch
+    read Write create append_to_file Edit multi_edit rm make_directory
+    move_file copy_file file_info diff_files Glob Grep list patch apply_patch
 )
 
 # Source files exempt from the check, with the reason. Keep this list short and

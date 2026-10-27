@@ -5,7 +5,7 @@
 ## Overview
 
 `/editlog` manages the edit-operation log, a record of every file-edit tool
-call (read, write, edit, multiedit, patch, apply_patch, ...) and whether it
+call (read, Write, Edit, multiedit, patch, apply_patch, ...) and whether it
 succeeded. Use it to diagnose why edits keep failing: `show` summarises
 per-tool success rates and `analyse` inspects the failed `old_str` values to
 characterise why they missed.

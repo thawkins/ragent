@@ -71,6 +71,7 @@ fn test_processor() -> SessionProcessor {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     }
 }
 
@@ -165,6 +166,7 @@ fn default_system_prompt_cache_works_through_cache_module() {
 #[test]
 fn subagent_tool_definitions_are_cached_and_filter_interactive_tools() {
     use ragent_agent::tool::ToolRegistry;
+    use ragent_agent::tool::alias_table::AliasTable;
     use ragent_agent::tool::aliases::{AskUserTool, RunCodeTool};
     use ragent_agent::tool::plan::PlanEnterTool;
 
@@ -174,14 +176,15 @@ fn subagent_tool_definitions_are_cached_and_filter_interactive_tools() {
 
     let cache = SystemPromptCache::new();
     let first = cache
-        .get_subagent_tool_definitions(&registry)
+        .get_subagent_tool_definitions(&registry, &AliasTable::default(), false)
         .expect("filtered definitions");
-    // `ask_user` is interactive and must be excluded from the subagent surface.
-    assert!(first.iter().any(|d| d.name == "plan_enter"));
-    assert!(!first.iter().any(|d| d.name == "ask_user"));
+    // `AskUserQuestion` is interactive and must be excluded from the subagent
+    // surface (the FR-023 rename changed the name, not the rule).
+    assert!(first.iter().any(|d| d.name == "EnterPlanMode"));
+    assert!(!first.iter().any(|d| d.name == "AskUserQuestion"));
 
     let second = cache
-        .get_subagent_tool_definitions(&registry)
+        .get_subagent_tool_definitions(&registry, &AliasTable::default(), false)
         .expect("cached definitions");
     assert!(
         std::sync::Arc::ptr_eq(&first, &second),
@@ -191,12 +194,12 @@ fn subagent_tool_definitions_are_cached_and_filter_interactive_tools() {
     // Registering a tool bumps the registry version, forcing a rebuild.
     registry.register(std::sync::Arc::new(RunCodeTool));
     let third = cache
-        .get_subagent_tool_definitions(&registry)
+        .get_subagent_tool_definitions(&registry, &AliasTable::default(), false)
         .expect("rebuilt definitions");
     assert!(
         !std::sync::Arc::ptr_eq(&second, &third),
         "a registry version change must invalidate the cached surface"
     );
     assert!(third.iter().any(|d| d.name == "run_code"));
-    assert!(!third.iter().any(|d| d.name == "ask_user"));
+    assert!(!third.iter().any(|d| d.name == "AskUserQuestion"));
 }

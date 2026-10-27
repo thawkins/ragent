@@ -17,7 +17,13 @@ use super::ollama_shared::estimate_context_window;
 use super::thinking::{
     binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
 };
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::encode::{MessageContext, encode_message};
+use super::wire::profile_table::OLLAMA_NATIVE;
+use super::wire::trace;
+#[cfg(test)]
+use crate::llm::ChatContent;
+use crate::llm::{ChatRequest, LlmClient, StreamEvent, ToolDefinition};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -340,16 +346,7 @@ impl OllamaCloudClient {
         // Build a map of tool_use_id -> tool_name so we can include both
         // `tool_call_id` (OpenAI format) and `tool_name` (native Ollama format)
         // in tool result messages, satisfying whichever format the model expects.
-        let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
-        for msg in request.messages.iter() {
-            if let ChatContent::Parts(parts) = &msg.content {
-                for part in parts {
-                    if let ContentPart::ToolUse { id, name, .. } = part {
-                        tool_id_to_name.insert(id.clone(), name.clone());
-                    }
-                }
-            }
-        }
+        let tool_id_to_name = super::wire::encode::tool_names_by_id(&request.messages);
 
         if let Some(system) = &request.system {
             messages.push(json!({
@@ -362,124 +359,18 @@ impl OllamaCloudClient {
         // Historical images remain in the chat history as `ContentPart::ImageUrl`,
         // but sending them to a non-vision model (or on older turns) causes
         // Ollama Cloud to reject the request with "this model does not support
-        // image input". Compute the index once and only attach images there.
+        // image input". The rule is a per-turn fact, so it is the one thing this
+        // client passes beside its profile; the per-message shape is the shared
+        // encoder (FR-006).
         let last_user_idx = request.messages.iter().rposition(|m| m.role == "user");
 
         for (idx, msg) in request.messages.iter().enumerate() {
-            // Ollama Cloud requires content to always be a plain string.
-            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
-            // For any message other than the most recent user message, discard
-            // image parts so they are not sent to a model that cannot handle them.
-            let is_last_user = last_user_idx == Some(idx);
-            let (content_str, images): (String, Vec<String>) = match &msg.content {
-                ChatContent::Text(text) => (text.clone(), vec![]),
-                ChatContent::Parts(parts) => {
-                    let mut texts: Vec<String> = Vec::new();
-                    let mut imgs: Vec<String> = Vec::new();
-                    for part in parts {
-                        match part {
-                            ContentPart::Text { text } => texts.push(text.clone()),
-                            ContentPart::ImageUrl { url } => {
-                                if is_last_user {
-                                    // Strip data-URL prefix: "data:image/png;base64,<data>"
-                                    let b64 = if let Some(idx) = url.find(";base64,") {
-                                        url[idx + 8..].to_string()
-                                    } else {
-                                        url.clone()
-                                    };
-                                    imgs.push(b64);
-                                }
-                                // For non-current user messages, silently drop the
-                                // image so a non-vision model is not rejected for
-                                // historical image attachments.
-                            }
-                            ContentPart::ToolUse { .. }
-                            | ContentPart::ToolResult { .. }
-                            | ContentPart::Reasoning { .. } => {}
-                        }
-                    }
-                    (texts.join("\n"), imgs)
-                }
+            let ctx = MessageContext {
+                tool_names: Some(&tool_id_to_name),
+                allow_images: last_user_idx == Some(idx),
+                ..MessageContext::default()
             };
-            let content = json!(content_str);
-
-            match &msg.content {
-                ChatContent::Parts(parts) => {
-                    let tool_results: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-                        .collect();
-                    let tool_uses: Vec<&ContentPart> = parts
-                        .iter()
-                        .filter(|p| matches!(p, ContentPart::ToolUse { .. }))
-                        .collect();
-
-                    if !tool_uses.is_empty() {
-                        // Native Ollama /api/chat format: arguments is a JSON object (not a string),
-                        // and there is no top-level `id` or `type` wrapper.
-                        let tool_calls: Vec<Value> = tool_uses
-                            .iter()
-                            .filter_map(|p| match p {
-                                ContentPart::ToolUse { name, input, .. } => Some(json!({
-                                    "function": {
-                                        "name": name,
-                                        "arguments": input
-                                    }
-                                })),
-                                // FUNC-043: the filter above guarantees only
-                                // ToolUse parts reach here; skip (do not panic)
-                                // if that invariant changes.
-                                _ => None,
-                            })
-                            .collect();
-                        messages.push(json!({
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": tool_calls
-                        }));
-                    } else if !tool_results.is_empty() {
-                        for result in tool_results {
-                            if let ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                                is_error,
-                            } = result
-                            {
-                                // Native Ollama /api/chat format: tool results use `name`, not `tool_call_id`.
-                                // FR-014: the shape has no error flag, so the
-                                // content carries the `ERROR: ` prefix.
-                                let name = tool_id_to_name
-                                    .get(tool_use_id)
-                                    .map_or("", std::string::String::as_str);
-                                messages.push(json!({
-                                    "role": "tool",
-                                    "name": name,
-                                    "content": crate::provider::wire::encode::error_marked(content, *is_error)
-                                }));
-                            }
-                        }
-                    } else {
-                        let mut msg_json = json!({
-                            "role": msg.role,
-                            "content": content
-                        });
-                        if !images.is_empty() {
-                            msg_json["images"] = json!(images);
-                        }
-                        messages.push(msg_json);
-                    }
-                }
-                _ => {
-                    let mut msg_json = json!({
-                        "role": msg.role,
-                        "content": content
-                    });
-                    if !images.is_empty() {
-                        msg_json["images"] = json!(images);
-                    }
-                    messages.push(msg_json);
-                }
-            }
+            messages.extend(encode_message(OLLAMA_NATIVE, msg, &ctx));
         }
 
         // Native `/api/chat` message packing is Ollama Cloud specific; the
@@ -511,6 +402,7 @@ impl LlmClient for OllamaCloudClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/api/chat", self.base_url);
         let body = self.build_request_body(&request, &request.tools);
+        trace::record_body(&request, &body);
 
         tracing::debug!(
             url = %url,
@@ -585,7 +477,16 @@ impl LlmClient for OllamaCloudClient {
             // F6: set once any tool call is seen in the stream; later content
             // deltas are suppressed as duplicate narration.
             let mut tool_calls_seen = false;
-            let mut open_tool_calls: HashMap<String, String> = HashMap::new();
+            // FR-004: the native `/api/chat` shape repeats the call id on every frame
+            // (`OLLAMA_NATIVE` is `StreamKeying::ByCallId`), so the shared accumulator
+            // owns the open calls instead of a `HashMap<String, String>` here.
+            // FR-019: a frame that omits `id` is named by a stream-scoped counter and
+            // the accumulator mints `<provider>_<counter>_<name>` for it. The counter
+            // has to be stream-scoped rather than the frame-local `idx`, which restarts
+            // at zero on every frame: two unnamed calls in two frames would both name
+            // `call@0` and the second would fold onto the first.
+            let mut acc = ToolCallAccumulator::new(OLLAMA_NATIVE, "ollama_cloud");
+            let mut unnamed_calls = 0u64;
             let mut stream_done = false;
             let mut line_count = 0usize;
 
@@ -716,21 +617,44 @@ impl LlmClient for OllamaCloudClient {
                         if has_tool_calls
                             && let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array())
                         {
-                            for (idx, tool_call) in tool_calls.iter().enumerate() {
-                                let tool_call_id = tool_call
-                                    .get("id")
-                                    .and_then(|v| v.as_str()).map_or_else(|| format!("ollama_cloud_tc_{idx}"), ToString::to_string);
+                            for tool_call in tool_calls {
+                                // FR-019: the provider's own id when it gave one; an
+                                // id-less call stays keyed by a stream-scoped counter
+                                // and the accumulator mints
+                                // `<provider>_<counter>_<name>` for it. The counter is
+                                // not the frame-local index, which restarts at zero in
+                                // every frame and would fold two unnamed calls onto the
+                                // first.
                                 let function = tool_call.get("function").unwrap_or(tool_call);
                                 let name = function
                                     .get("name")
                                     .and_then(|v| v.as_str())
-                                    .unwrap_or("tool")
-                                    .to_string();
-
-                                if !open_tool_calls.contains_key(&tool_call_id) {
-                                    open_tool_calls.insert(tool_call_id.clone(), name.clone());
-                                    yield StreamEvent::ToolCallStart { id: tool_call_id.clone(), name: name.clone() };
-                                }
+                                    .unwrap_or("tool");
+                                let key = match tool_call.get("id").and_then(|v| v.as_str()) {
+                                    Some(id) if !id.is_empty() => {
+                                        // The id is the key, so the frames after this
+                                        // one - which may repeat no id at all - reach
+                                        // the same call (FR-004).
+                                        let key = StreamKey::CallId(id.to_string());
+                                        if let Some(event) = acc.open(key.clone(), Some(id), name) {
+                                            yield event;
+                                        }
+                                        key
+                                    }
+                                    _ => {
+                                        // No id: the key is the stream-scoped counter
+                                        // and only makes the call addressable. No id
+                                        // is passed, so the accumulator mints FR-019's
+                                        // `<provider>_<counter>_<name>` for the start.
+                                        unnamed_calls += 1;
+                                        let key =
+                                            StreamKey::CallId(format!("call@{unnamed_calls}"));
+                                        if let Some(event) = acc.open(key.clone(), None, name) {
+                                            yield event;
+                                        }
+                                        key
+                                    }
+                                };
 
                                 if let Some(args) = function.get("arguments") {
                                     let args_json = if let Some(s) = args.as_str() {
@@ -738,11 +662,8 @@ impl LlmClient for OllamaCloudClient {
                                     } else {
                                         args.to_string()
                                     };
-                                    if !args_json.is_empty() {
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tool_call_id.clone(),
-                                            args_json,
-                                        };
+                                    if let Some(event) = acc.delta(&key, &args_json) {
+                                        yield event;
                                     }
                                 }
                             }
@@ -769,7 +690,7 @@ impl LlmClient for OllamaCloudClient {
                                 ragent_types::strutil::truncate_bytes_no_ellipsis(&done_preview, 500);
                             tracing::info!(
                                 model = %model_name,
-                                open_tool_calls = open_tool_calls.len(),
+                                open_calls = acc.open_count(),
                                 done_frame = %done_preview,
                                 "Ollama Cloud: done frame received"
                             );
@@ -795,19 +716,32 @@ impl LlmClient for OllamaCloudClient {
                                     count = tool_calls_arr.len(),
                                     "Ollama Cloud: tool_calls found in done frame"
                                 );
-                                for (idx, tool_call) in tool_calls_arr.iter().enumerate() {
-                                    let tool_call_id = tool_call
+                                for tool_call in tool_calls_arr {
+                                    // FR-019: same rule as the streaming arm - the
+                                    // provider's id when it gave one, otherwise a key
+                                    // from the stream-scoped counter so the
+                                    // accumulator can mint the id.
+                                    let provider_id = tool_call
                                         .get("id")
-                                        .and_then(|v| v.as_str()).map_or_else(|| format!("ollama_cloud_done_tc_{idx}"), ToString::to_string);
+                                        .and_then(|v| v.as_str())
+                                        .filter(|id| !id.is_empty())
+                                        .map(ToString::to_string);
+                                    let key_id = match &provider_id {
+                                        Some(id) => id.clone(),
+                                        None => {
+                                            unnamed_calls += 1;
+                                            format!("unnamed_call_{unnamed_calls}")
+                                        }
+                                    };
+                                    let key = StreamKey::CallId(key_id.clone());
                                     let function = tool_call.get("function").unwrap_or(tool_call);
                                     let name = function
                                         .get("name")
                                         .and_then(|v| v.as_str())
-                                        .unwrap_or("tool")
-                                        .to_string();
-                                    if !open_tool_calls.contains_key(&tool_call_id) {
-                                        open_tool_calls.insert(tool_call_id.clone(), name.clone());
-                                        yield StreamEvent::ToolCallStart { id: tool_call_id.clone(), name: name.clone() };
+                                        .unwrap_or("tool");
+                                    if let Some(event) = acc.open(key.clone(), provider_id.as_deref(), name)
+                                    {
+                                        yield event;
                                     }
                                     if let Some(args) = function.get("arguments") {
                                         let args_json = if let Some(s) = args.as_str() {
@@ -815,15 +749,15 @@ impl LlmClient for OllamaCloudClient {
                                         } else {
                                             args.to_string()
                                         };
-                                        if !args_json.is_empty() {
-                                            yield StreamEvent::ToolCallDelta { id: tool_call_id.clone(), args_json };
+                                        if let Some(event) = acc.delta(&key, &args_json) {
+                                            yield event;
                                         }
                                     }
                                 }
                             }
 
-                        for (id, _name) in open_tool_calls.drain() {
-                            yield StreamEvent::ToolCallEnd { id };
+                        for event in acc.end_all() {
+                            yield event;
                         }
 
                         let reason = match parsed

@@ -82,48 +82,93 @@ is a wrong answer rather than a missing one. Skipping is the FR-004 rule already
 applied elsewhere: *a delta is attributed to the call its key names; a delta that
 names no open call is dropped rather than invented*.
 
-## 4. Tests
+## 4. What was found, not written
 
-`crates/ragent-llm/tests/inline/bedrock_tests.rs` (the file the source's
-`#[cfg(test)] #[path]` hook includes), three Converse cases:
+T-008 (`d6abcd4a` plus the T-008 landing) had already done most of the
+structural half of this task, and honestly recorded why it stopped both Bedrock
+paths already key by the index their frame carries and skip-with-a-warning a
+frame that carries none. What it did *not* do is delete the two last-opened
+helpers; that deletion is this task's (section 5, item 3). Concretely, at the
+start of this task:
 
-1. `test_converse_chat_stream_text_tool_and_finish` - updated, not weakened: the
-   frames now carry the `contentBlockIndex` the wire requires (the text delta is
-   block 1, the tool call block 0). Every original assertion is unchanged.
-2. `test_converse_chat_stream_keeps_two_parallel_tool_use_blocks_apart` - **new**,
-   the FR-005 case. Two `toolUse` blocks open back to back, four argument
-   fragments interleave `1, 0, 1, 0`, and the two stop frames arrive `1, 0`. It
-   asserts the starts are `[tu_a Read, tu_b Grep]`, that reassembling each call's
-   fragments by id yields exactly `{"path":"a.rs"}` and `{"pattern":"fn main"}`
-   (neither absorbing the other's input), and that there is exactly one end per
-   call in stop-frame order.
-3. `test_converse_stream_drops_a_frame_that_names_no_block_index` - **new**, the
-   `FUNC-032` half. A `toolUse` delta with no `contentBlockIndex` between two
-   indexed fragments is not attributed to either open call; the call keeps only
-   the fragments that named it and still ends exactly once.
+- `bedrock.rs` Converse `contentBlockDelta` -> `parsed["contentBlockIndex"]`, with
+  `tracing::warn!` + `continue` when absent;
+- `bedrock.rs` Converse `contentBlockStop` -> the same index, same warning;
+- `bedrock.rs` Anthropic-Messages `input_json_delta` and `content_block_stop` ->
+  `parsed["index"]`, same warning (one rule for both Bedrock paths);
+- `active_tool_call_id` appears in `bedrock.rs` nowhere (the only occurrences in
+  the tree are the T-008/T-009 documents and the source scan's retired list);
+- `test_wire_decode::test_no_stream_attributes_a_frame_to_the_call_opened_last`
+  and `test_a_converse_block_keys_by_content_block_index_not_by_id` are present
+  and green.
 
-`crates/ragent-llm/tests/test_wire_decode.rs`, two cases added:
+So the delta this task actually owed was the **proof at the parser**, not the
+parser. Nothing about the stream arms needed a code change to pass the FR-005
+case - which is exactly why the case had to be written: the property was
+unpinned, so the next edit could have taken it away silently.
 
-4. `test_no_stream_attributes_a_frame_to_the_call_opened_last` - a source scan over
-   `wire/decode.rs`, `bedrock.rs`, `anthropic.rs`, `gemini.rs` and `sse.rs`,
-   failing on `delta_last`, `end_last` and `open.last_mut()`. Structural, because
-   the failure it prevents is a *caller* reaching for the fallback.
-5. `test_a_converse_block_keys_by_content_block_index_not_by_id` - the pure
-   state-machine half: `from_frame(Some(0|1), Some("tu_a"|"tu_b"))` resolves to
-   `Index`, two interleaved calls keep their own fragments, and each ends once.
+## 5. What this task added
 
-## 5. Red proofs
+1. `crates/ragent-llm/tests/inline/bedrock_tests.rs` - two new Converse cases
+   driven through the real event-stream parser (`spawn_bedrock_stream` +
+   `BedrockConverseClient::chat`), not through the accumulator:
+   - `test_converse_chat_stream_keeps_two_parallel_tool_use_blocks_apart` - the
+     FR-005 case. Two `toolUse` starts (`tu_a` Read, `tu_b` Grep), four
+     `toolUse.input` fragments interleaved `1, 0, 1, 0`, two stop frames in the
+     order `1, 0`. Asserts two starts in open order, that the fragments
+     concatenated **by id** are exactly `{"path":"a.rs"}` and
+     `{"pattern":"fn main"}`, and that there is exactly one end per call, in
+     stop-frame order (`tu_b`, then `tu_a`).
+   - `test_converse_stream_drops_a_frame_that_names_no_block_index` - the
+     FUNC-032 half. An unindexed `toolUse` delta sits between two indexed
+     fragments; the named call keeps only its own bytes, no emitted event
+     carries a `LEAKED` marker from the dropped frame, and both calls still end
+     exactly once.
+2. `test_wire_decode::test_no_stream_attributes_a_frame_to_the_call_opened_last`
+   - the source scan's retired list is now `delta_last(`, `end_last(`,
+   `.last_mut()` and `active_tool_call_id`. It previously looked for the bare
+   tokens `delta_last`/`end_last`, which meant the *deletion note* that records
+   why they were removed (`decode.rs` module docs, section 6 below) tripped the
+   scan that documents it. The function-call form and the id name are what the
+   scan is actually about, so the list is narrower and the note can exist.
+3. `crates/ragent-llm/src/providers/wire/decode.rs` - the deletion the task
+   asks for is finished here: the module docs now carry the note the scan names,
+   recording that the two helpers which once offered the last-opened guess are
+   **deleted**, not merely left unused, with the reason (such a helper is the
+   FR-005 failure one method call away for the next provider that cannot find its
+   index). The helper names do not appear as bare tokens in the source, so the
+   scan and the prose cannot trip each other. The historical sentence that
+   spelled the retired field name says "a single-slot `String`" instead, so the
+   prose and the source scan cannot contradict each other. No code was left to
+   remove: neither method existed in the tree when this task started.
+4. `crates/ragent-llm/src/providers/bedrock.rs` - the Converse
+   `contentBlockStart` comment now states the two-arm rule: the index is the
+   key, and the `from_frame` fallback covers only a start that supplies an id and
+   no index - such a block takes no fragment, because the delta and stop arms
+   require the index. Comment only, no behaviour change.
+
+## 6. Red proofs
 
 Each break was applied, the suite run, and the file restored byte-identically from
 `target/temp/` (with `touch`, so cargo could not reuse the broken object file):
 
 | Break | Result |
 |---|---|
-| Converse keys every block by index `1` (the pre-T-008 single-slot behaviour) | both new Converse cases fail: one start instead of two, one end instead of two |
-| Converse ignores `contentBlockIndex` on a delta and uses a fixed block | `test_converse_stream_drops_a_frame_that_names_no_block_index` fails on the reassembled arguments (`""` instead of `{"path":"a.rs"}`) |
-| `end_last` re-added to the accumulator | `test_no_stream_attributes_a_frame_to_the_call_opened_last` fails, naming `wire/decode.rs` and `end_last` |
+Three breaks, run individually, each restored byte-identically from
+`target/temp/t009/` (`cp -p` then `touch`, and `md5sum -c` against
+`target/temp/t009/after.md5`) before the next one:
 
-## 6. What deliberately did not change
+| Break | Result (verbatim from the run) |
+|---|---|
+| Converse start, delta and stop all keyed `StreamKey::Index(1)` (the single-slot behaviour) | **both** new cases fail. Interleaving case: `panicked at bedrock_tests.rs:604: assertion left == right failed: each toolUse block opens its own call` - one start instead of two. Unindexed-frame case: same file, `left: ...` on the argument rejoin. |
+| The `toolUse` delta arm ignores `contentBlockIndex` (`let Some(index) = Some(0u64)`) | `test_converse_stream_drops_a_frame_that_names_no_block_index` fails at the rejoin: `left: "{\"path\":\"LEAKED\"}\"a.rs\"}"`, `right: "{\"path\":\"a.rs\"}"` - the dropped frame leaked into the named call. The interleaving case also reds (`left: "{\"pattern\":{\"path\":\"fn main\"}\"a.rs\"}"`), because both blocks collapse onto block 0. |
+| `end_last` re-added to `ToolCallAccumulator` | `test_no_stream_attributes_a_frame_to_the_call_opened_last` fails: `wire/decode.rs still carries the last-opened attribution 'end_last'` (later, `'delta_last'` and `'active_tool_call_id'` as the retired list was narrowed) |
+
+The first break is the one the old architecture scored: it is what
+`active_tool_call_id` *was*, and it now fails at the parser rather than only at
+the accumulator.
+
+## 7. What deliberately did not change
 
 - **`StreamEvent`** - no field added; the emitted events are the same three.
 - **`tc_<index>`** - still the id an index-keyed call gets when the provider
@@ -133,23 +178,31 @@ Each break was applied, the suite run, and the file restored byte-identically fr
 - **`end_all`** - untouched; it remains the finish-frame drain the OpenAI-family
   providers use, `ByIndex` families closing in index order.
 
-## 7. Verification (all green)
+## 8. Verification (all green)
 
-- `cargo fmt --all -- --check`
-- `cargo clippy -p ragent-llm --all-targets` - no warnings
-- `cargo test -p ragent-llm --test all` - 279 passed, 2 ignored
-- `cargo test -p ragent-llm --lib` - 326 passed
+- `cargo fmt --all -- --check` - clean
+- `cargo check --workspace --all-targets` - clean (1m 14s)
+- `cargo clippy -p ragent-llm --all-targets` - only the pre-existing 19
+  `unnecessary structure name repetition` in `tool_cache.rs` and one
+  `returning the result of a let binding` in `ragent-storage/src/storage.rs:1709`;
+  nothing in a file this task touched
+- `cargo nextest run -p ragent-llm --no-fail-fast` - **632 run, 631 passed, 1
+  failed, 2 skipped**. The one failure is T-010's
+  `test_wire_decode::test_no_module_invents_a_tool_call_id_or_recovers_a_name_from_one`
+  (`ollama_cloud.rs` still mints `_tc_`), red at HEAD and identical without this
+  change.
+- `cargo nextest run -p ragent-llm --lib` - 328 passed
 - `cargo test -p ragent-llm --doc` - 30 passed
-- `cargo check --workspace --all-targets` - clean
-- guard scripts `check-inline-tests`, `check-test-env-isolation`,
-  `check-silent-errors`, `check-security-unwraps`, `check-poison-locks`,
-  `check-shared-guards`, `check-dead-code-reasons` - all pass
+- guard scripts - 12 of 13 pass; `check-bench-regression` exits 2 on
+  "no criterion results directory found at target/criterion" (no bench run, not a
+  code finding)
 - no dependency added (NFR-002), no `unsafe` block (NFR-003), no tool renamed
 
-## 8. What this hands to the next tasks
+## 9. What this hands to the next tasks
 
 - **T-010** can emit `<provider>_<counter>_<name>` from the accumulator's
-  `fallback_id` without touching either Bedrock path: both now pass a real index.
+  fallback id without touching either Bedrock path: both now pass a real index.
+  Its outstanding red is the one named above.
 - **T-011** reconciles duplicate call ids inside `open`, which is where an id first
   becomes known.
 - **T-026** can replay a Converse two-block frame set through `ToolCallAccumulator`

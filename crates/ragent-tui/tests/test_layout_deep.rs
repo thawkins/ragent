@@ -661,7 +661,7 @@ fn render_messages_covers_all_part_and_status_arms() {
         Role::Assistant,
         vec![
             MessagePart::ToolCall {
-                tool: "edit".to_string(),
+                tool: "Edit".to_string(),
                 call_id: "c-edit".to_string(),
                 state: Box::new(ToolCallState {
                     status: ToolCallStatus::Completed,
@@ -732,7 +732,7 @@ fn render_messages_covers_all_part_and_status_arms() {
                 }),
             },
             MessagePart::ToolCall {
-                tool: "bash".to_string(),
+                tool: "Bash".to_string(),
                 call_id: "c-bash".to_string(),
                 state: Box::new(ToolCallState {
                     status: ToolCallStatus::Running,
@@ -743,7 +743,7 @@ fn render_messages_covers_all_part_and_status_arms() {
                 }),
             },
             MessagePart::ToolCall {
-                tool: "write".to_string(),
+                tool: "Write".to_string(),
                 call_id: "c-write".to_string(),
                 state: Box::new(ToolCallState {
                     status: ToolCallStatus::Pending,
@@ -754,7 +754,7 @@ fn render_messages_covers_all_part_and_status_arms() {
                 }),
             },
             MessagePart::ToolCall {
-                tool: "grep".to_string(),
+                tool: "Grep".to_string(),
                 call_id: "c-grep".to_string(),
                 state: Box::new(ToolCallState {
                     status: ToolCallStatus::Error,
@@ -777,6 +777,7 @@ fn render_messages_covers_all_part_and_status_arms() {
             },
             MessagePart::Reasoning {
                 text: "reasoning line one\nreasoning line two".to_string(),
+                signature: None,
             },
             MessagePart::Image(Box::new(ImageData {
                 mime_type: "image/png".to_string(),

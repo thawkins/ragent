@@ -35,6 +35,15 @@ pub mod startup;
 pub mod stderr_spool;
 pub mod strutil;
 pub mod thinking;
+/// The one decoder for accumulated tool-call argument text (spec
+/// `uniformtools` FR-007).
+pub mod tool_args;
+/// The rule that keeps a dynamically sourced tool namespaced and refuses a
+/// bridge whose surfaced name is a retired spelling (spec `uniformtools`
+/// FR-032).
+pub mod tool_bridge;
+/// The FR-023 tool-rename table (spec `uniformtools`).
+pub mod tool_rename;
 pub mod trigger;
 
 // Re-export commonly used types
@@ -66,6 +75,10 @@ pub use message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolCall
 pub use permission::PermissionDecision;
 pub use startup::StartupTimings;
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
+// The decode-failure type the FR-008 refusal constructor takes (spec
+// `uniformtools`), so a caller that names a refusal's argument needs only the
+// crate root.
+pub use tool_args::ToolArgDecodeError;
 // Re-export string utilities for convenient access
 pub use strutil::{
     floor_char_boundary, format_size, truncate_bytes, truncate_bytes_no_ellipsis, truncate_chars,

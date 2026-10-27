@@ -52,7 +52,7 @@ graph LR
     SP --> LLM[LLM Provider]
     SP --> AP[Agent Profile]
     SP --> TR[Tool Registry]
-          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>PDF, web, ...]
+          TR --> Tools[File ops, Bash, GitHub,<br/>code index, memory, teams,<br/>PDF, web, ...]
 
 ```
 
@@ -139,9 +139,7 @@ below documents the current state of all subsystems.
   (click/scroll); a `--category <name>` launch argument pre-selects a row; the
   `StoreEntry` model gains an optional `category` field. The `browser` tool and
   the whole `ragent-tools-extended::browser` CDP module are removed, along with
-  `BrowserConfig` and the `tool_visibility.browser` switch (the remaining `/tools`
-  switches are `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`,
-  `masterfetch`), so the registered tool count falls 152 -> 151 across 22
+  `BrowserConfig`, so the registered tool count falls 152 -> 151 across 22
   categories. `/mcp discover` scans the new ragent-native
   `~/.config/ragent/servers/` directory first, and a startup failure is echoed to
   stdout when the TUI stderr spool is active so it is never silent. Store
@@ -153,16 +151,13 @@ below documents the current state of all subsystems.
   (`office_common`, `office_write`, `office_info`, `libreoffice_common`,
   `libreoffice_write`, `libreoffice_info`) are gone; only the two PDF tools
   (`pdf_read`, `pdf_write`) remain, sharing the new `pdf_common` helper module.
-  The `tool_visibility.office` switch and its `ToolVisibilityConfig` /
-  `ToolVisibilitySpecified` fields, the unused `ragent-tools-extended::docio`
-  helper, and the OOXML/ODF `DocumentFormat::{Docx,Xlsx,Pptx,Odt,Ods,Odp}`
-  variants are removed (those extensions now return an actionable error from
-  `detect_document_format`). The dependencies `docx-rust`, `calamine`,
-  `ooxmlsdk`, `zip`, and `spreadsheet-ods` are dropped, the registered tool
-  count falls 158 -> 152 (23 categories), the sample
-  `assets/officedocs/testword1.docx` is deleted, and the `/tools` switch lists
-  and `tool_visibility` tables drop `office`. Configs that still carry an
-  `office` visibility key are ignored (unknown keys are tolerated).
+  The unused `ragent-tools-extended::docio` helper and the OOXML/ODF
+  `DocumentFormat::{Docx,Xlsx,Pptx,Odt,Ods,Odp}` variants are removed (those
+  extensions now return an actionable error from `detect_document_format`). The
+  dependencies `docx-rust`, `calamine`, `ooxmlsdk`, `zip`, and
+  `spreadsheet-ods` are dropped, the registered tool count falls 158 -> 152
+  (23 categories), and the sample `assets/officedocs/testword1.docx` is
+  deleted.
 - **`/simplify all` code-quality pass (v1.0.126)** — a review-and-fix sweep over
   the changed set: `pdf_write` now confines an `image` element's `image_path`
   through `ctx.check_path_within_workspace` (SEC-tools-extended-002) and reports
@@ -898,6 +893,40 @@ selects a downstream model based on request characteristics.)
 - Per-model metadata (context window, pricing, vision/reasoning flags) mapped from discovery
 - Supports vendor-slug model ids such as `openrouter/anthropic/claude-sonnet-4`
 
+#### Unified Tool-Calling Wire Path (spec `uniformtools` FR-002..FR-004)
+
+Every provider encodes tool definitions, tool results and streamed tool-call
+deltas through one declared contract, so no provider module builds its own tool
+JSON. A client holds a `ToolWireProfile` - nine required decisions, no `Default`
+and no optional field - and dispatches on it:
+
+| Field | Values | What it decides |
+|-------|--------|-----------------|
+| `tool_envelope` | `openai_function`, `anthropic_tool`, `gemini_function_declaration`, `bedrock_tool_spec`, `responses_flat_function` | the wrapper `wire::encode::encode_tools` puts a definition in |
+| `result_carrier` | `tool_role_message`, `user_tool_result_block`, `gemini_function_response`, `responses_function_call_output` | where `encode_message` puts a tool result |
+| `id_field` | a JSON key such as `tool_call_id`, or `synthesised` | which field a call id occupies |
+| `args_encoding` | `json_string`, `json_object` | whether accumulated arguments are a string or an object |
+| `stream_keying` | `by_index`, `by_call_id` | how `wire::decode::ToolCallAccumulator` attributes a delta |
+| `supports_parallel` | `yes` / `no` | whether the step may dispatch concurrently (see the gate below) |
+| `supports_is_error` | `yes` / `no` | native error flag, or the `ERROR: ` prefix |
+| `echo_reasoning` | `yes` / `no` | whether a signed reasoning block is replayed |
+| `synthetic_ids` | `yes` / `no` | whether the harness mints the call id |
+
+The six families (`openai_chat`, `anthropic_messages`, `gemini`,
+`bedrock_converse`, `openai_responses`, `ollama_native`) each have one `const`
+profile, and `wire::profile_table::PROVIDER_WIRE` names the family of every
+registered provider id; `profile_for` is the one lookup the encoders, the
+accumulator, the parallel gate and the wire matrix share. There is no catch-all
+row: an id with no declared contract fails the coverage assertion in
+`crates/ragent-llm/tests/test_wire_profile_table.rs` at build time, so a
+provider cannot join the build without stating its tool-calling terms.
+
+`ragent --wire-matrix` prints that contract per registered provider as one
+aligned ASCII table (ten columns - the provider id plus the nine fields, one row
+per id, sorted, no blank or `-` cell) and exits without contacting a provider or
+executing a tool; a registered id with no row is reported by name and exits
+non-zero rather than printing a hole in the table.
+
 ### 3.2 Tool System
 
 The tool system is the primary way agents interact with the world. Each tool
@@ -1035,10 +1064,193 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `initiative` | Create, checkpoint, list, and close durable project-scoped goals with milestones. |
 | `Skill` | List, read, load, and reload skill packs at runtime. |
 
+### 3.2.1 Tool-Call Wire Path and the One Dispatch Pipeline (spec `uniformtools`)
+
+Four rules apply to every provider and every turn, whichever surface drove it.
+
+**A provider declares its contract, it does not build tool JSON.** The nine
+profile fields in the section above are the contract
+(`ragent_llm::provider::wire::ToolWireProfile`), and one encoder each reads them:
+`encode_tools` for the outbound definition list (its bytes are cached per
+`(ToolFormat, fingerprint)` and a cache hit is byte-identical to the miss),
+`encode_message` for a persisted message - a tool result lands in the profile's
+carrier, keyed by the profile's id field - and `wire::decode::ToolCallAccumulator`
+for streamed deltas, which attributes a fragment by the frame's content-block or
+choice index (or by call id) rather than to whichever call opened last. A
+provider whose stream supplies no id has one minted as
+`<provider>_<counter>_<name>`, deterministic across the step, because a call id
+is replayed in the next request and a fabricated one that changes shape between
+requests breaks result pairing. Two calls carrying the same id in one response
+are reconciled by occurrence order and left as two calls; neither is dropped.
+Tool-use argument JSON is decoded by one shared helper,
+`ragent_types::tool_args::decode_tool_arguments`, which accepts a JSON object, a
+JSON string that decodes to one, and empty or whitespace text (as `{}`), is
+called at most once per call per step, and is not called in the provider layer at
+all. A decode failure produces one refusal value
+(`session::tool_input_error::ToolInputError`) that owns its sentence, its record
+status and therefore its `is_error` flag, so the same failure cannot be worded or
+flagged two ways.
+
+**One ordered dispatch pipeline serves both execution modes.** A step's tool
+calls - sequential or concurrent - are prepared into one list of slots in the
+provider's order (a future for a call that runs, a settled outcome for one that
+is refused) and drained in a single ordered pass, so
+`experimental.parallel_tool_calls` changes the concurrency of a step and never
+the history it records. The stages are named once in `session::dispatch`:
+decode arguments, validate schema, unknown-tool check, repeat guard, pre-tool
+hooks, permission verdict, backend dispatch, result normalisation.
+
+**An unknown name never executes.** A call whose name resolves to no registered
+tool returns a corrective tool result naming what was asked for and the closest
+registered name when one is within the shared similarity threshold - the one
+ranking in `session::tool_suggestion` - and no tool runs. A call whose
+*arguments* fail to decode or validate is refused the same way, before
+dispatch, and the refusal is flagged as an error so the model can correct it.
+
+**A tool result is never indistinguishable from a success.** The canonical
+`ContentPart::ToolResult` carries `is_error`; providers with native support
+transmit the flag, and a profile without it prefixes the text with `ERROR: `, so
+a failed run and a refused call reach the model behind the same marker. A
+result is appended only for a call whose permission verdict resolved, and a
+provider that reports a tool-use finish while the step parsed no complete call is
+treated as a truncation rather than a clean answer (FR-022).
+
+### 3.2.2 Completion and Suggestion Surfaces (FR-033, spec `uniformtools`)
+
+Every surface that offers a tool name is built from the tool **registry**, which is
+the only catalogue of names: the slash-command and tool-name menus, the
+did-you-mean candidate pool, and the lists printed by `--dry-run`, `tool_info` and
+`commands_info`. A retired `before` spelling appears in none of them, and typing one
+produces no completion entry - only the ordinary unknown-tool refusal with the
+did-you-mean hint when a live name is close.
+
+| Surface | Source |
+|---------|--------|
+| did-you-mean pool | `session::tool_suggestion::suggest_tool_name` over `ToolRegistry::list` (one implementation, also re-exported by `session::dispatch`) |
+| `tool_info` | the `ToolContext::tool_registry` it was handed |
+| `--dry-run` tools section | `ToolRegistry::list` + each tool's `permission_category()` |
+| system-prompt tool reference | `ToolRegistry::definitions()` |
+| slash-command subcommand menu | one table per command; `/tools` reads `command_catalog::TOOLS_SUBS` |
+| `commands_info` | `command_catalog::COMMAND_CATALOG` (`/tools` publishes `TOOLS_SUBS`) |
+| `@` file picker | project **paths** only - this field offers no tool name and FR-033 does not add one |
+
+The `/tools` row is the one subcommand table with four readers: the autocomplete menu,
+the parameter hint, the handler (its help page and every usage warning are generated
+from it), and `commands_info`. Adding a `/tools` form means adding it to `TOOLS_SUBS`
+and nowhere else.
+
+### 3.2.3 Tool Surface Agreement (FR-030, spec `uniformtools`)
+
+The registered tool surface is **148 tools in 21 permission families** in the default
+build, and every enumeration of it is checked against the registry rather than
+against a remembered number:
+
+| Enumeration | What it reads | Guard |
+|-------------|---------------|-------|
+| `ToolRegistry::list`, `definitions`, `all_tools` | the registry keys and tool objects | `test_fr030_surface_agreement.rs` case 1 |
+| the sorted name list and its digest | the FR-023 `after` spellings (13 uppercase) | case 2 |
+| `--dry-run` `tools` section (human and `--json`) | `list()` + `permission_category()`, `total` then one row per family | cases 3 and 4 |
+| `tool_info` | `ToolContext::tool_registry.all_tools()` | case 5 |
+| `commands_info` | `command_catalog::COMMAND_CATALOG` (`/tools` publishes `TOOLS_SUBS`) | case 6 |
+| outbound provider `ChatRequest.tools` | `definitions()`, via `get_cached_tool_definitions` | case 7 |
+| `/tools list` | `definitions()` | TUI case 1 |
+| `/bug-report` `Tools registered` line | `list().len()` | TUI case 2 |
+
+`/tools list` reports every tool the registry holds - the same set `definitions()`
+returns and the same set sent to the provider - so its row count is the tool count.
+The family is the leading segment of `permission_category()`, never the tool name:
+`team_wait` reports `agent:spawn`, so the split is `agent` 4 / `team` 19 and a
+name-prefix reading gives the wrong 3 / 20 for the same 148 total.
+
 ### 3.3 Agent System
 
 Agents are typed profiles that define what model, system prompt, tools, and
 permissions a session uses.
+
+#### Parallel Tool Dispatch Gate (FR-010, spec `uniformtools`)
+
+Each provider family declares a tool-calling wire profile, and one of its fields
+is `supports_parallel` - whether the provider can carry several tool calls in one
+step. The agent loop reads that field once per step, before any call is prepared:
+when the user's `experimental.parallel_tool_calls` is on **and** the active
+provider's profile does not permit concurrency, the flag is demoted to `false`
+for the step and one `tracing::info!` names the provider and the reason. Every
+call of that step then runs through the sequential arm of the one ordered
+dispatch pipeline, which since the pipeline consolidation is the same pipeline
+with the same recorded order - so the gate changes the concurrency of a step and
+never the history it produces.
+
+Two boundaries are part of the contract. The gate is a **demotion only**: `true`
+means concurrency is permitted, never switched on, and only the user's own opt-in
+enables it, so a provider that supports parallel calls is untouched. And an id
+with **no** declared profile is gated too (the condition is
+`is_none_or(|p| !p.supports_parallel)`), because a profile table with no
+catch-all means an unnamed provider declares nothing rather than inheriting
+agreement. The `router` provider is gated by its own row and not by the
+downstream provider its classification picks - that selection happens inside the
+router's `chat`, after the decision.
+
+#### Reasoning Echo (FR-011, spec `uniformtools`)
+
+Anthropic's extended thinking attaches an opaque **signature** to every signed
+`thinking` block and requires that block, signature included, to be replayed
+unchanged on the turn that answers a tool call. The block is therefore stored as
+one canonical part with two halves kept apart - the reasoning text and the
+provider's signature over it - and a profile field decides whether it is
+replayed:
+
+- **Recording.** The streamed `ReasoningSignature` frame is kept in its own
+  field beside the reasoning text (never appended to it, or it would be shown to
+  the user and lost as a signature), and both halves are written to the saved
+  `MessagePart::Reasoning`. A retry clears the signature with the text it signed,
+  because a provider verifies the pair together and a fresh block carrying the
+  previous attempt's signature is rejected rather than merely unverified.
+- **Replaying within the turn.** The tool phase writes the reasoning part into
+  the step's assistant message *above* its text, so it precedes both the text and
+  the `tool_use` blocks of that turn. This is not the same path as a history
+  rebuild: the request that answers the call is built from the in-turn message
+  list, so a block that exists only in the persisted record would arrive one turn
+  too late.
+- **Omitting.** `echo_reasoning` is declared per family (`true` for Anthropic
+  Messages, `false` for the other five). The encoder writes
+  `{"type":"thinking","thinking":<text>}` plus `signature` - and writes no
+  `signature` key at all for a block recorded without one, rather than a `null` -
+  only where the profile declares it. Every other family omits the part, and that
+  omission is a declared term of the contract rather than the silent drop it was
+  before.
+
+Neither history converter consults `echo_reasoning`: the omission is a property
+of the wire contract, so deciding it anywhere but the encoder would re-implement
+the profile table.
+
+#### Unresolved Approvals Block the Result (FR-013, spec `uniformtools`)
+
+A tool call's permission verdict is a state, not an event. While it is
+unresolved - the interactive prompt is open and nobody has answered, a client has
+not replied, a checkpoint timer has not fired - the call has no outcome, and the
+model must not be handed one: a turn that continued on an unapproved call's
+output would have acted without approval while reading as if it had been allowed.
+
+That state is tracked rather than assumed. `session::pending::PendingVerdicts`
+holds, per session, the call ids currently at a prompt. The dispatch pipeline's
+permission stage marks a call immediately before it prompts and settles it the
+moment the verdict resolves; a timeout is a denial, so it settles too, and an
+`Ask` that somehow survives the layer is refused as an error rather than reported
+as a success. Before the tool phase appends anything it asks the same tracker,
+through `result_is_appendable`. On an unsettled verdict the call's
+`MessagePart::ToolCall` record is still written - status `Pending`, no output, no
+error, so the provider's `tool_use` is never orphaned - but no
+`ContentPart::ToolResult` is appended and one warning names the call, because a
+silently dropped result would hide a wedged verdict.
+
+Three details are part of the contract. The tracker is keyed by **session and
+call**, because call ids are not globally unique (a provider restarts its
+`call_1` every response, and sessions run concurrently), so one session's verdict
+can never unblock another's call. A **second mark needs no second settle**: the
+bash path raises one prompt per sub-command under a single call id, and the
+verdict is one verdict. And a **denial is a resolved verdict**, so a denial's
+error observation is appended normally - FR-013 forbids appending an unresolved
+call's output, not a refusal.
 
 #### Built-in Agents
 
@@ -1058,11 +1270,11 @@ permissions a session uses.
 #### Agent Features
 
 - **Model binding** — Each agent can specify a `provider/model` or auto-resolve the first available model
-- **Tool visibility** — Agents can restrict which tool categories are exposed. A
-  family switched off is hidden from the model but stays registered;
-  `ToolRegistry::hidden()` / `ToolRegistry::hidden_definitions()` return the
-  complement of `definitions()`, and `/tools` prints the hidden set under a
-  `Disabled by visibility` section.
+- **Tool surface** — Every registered tool is advertised to the model: the
+  request's `tools` array is `definitions()` and the system prompt lists the same
+  set. A tool is absent only when the subsystem that registers it is inactive
+  (the code index registers its ten tools only while enabled), so there is no
+  per-family filter to configure.
 - **Permissions** — Per-agent permission rules merge with global config
 - **Custom prompts** — Markdown/OASF profiles in `~/.ragent/agents/` or `.ragent/agents/`
 
@@ -1275,7 +1487,7 @@ Permission requests include:
 | `permission` | Permission type (`file:write`, `bash`, etc.) |
 | `action` | Requested operation description |
 | `path` | Target path (for file operations) |
-| `command` | Command string (for bash) |
+| `command` | Command string (for `Bash`) |
 | `created_at` | Unix timestamp |
 | `timeout_secs` | Timeout before auto-deny (default 120 s) |
 
@@ -1318,7 +1530,7 @@ Built-in default rules include:
   explicitly allows escaping.
 - Path normalization resolves `..` and symlinks before permission checks.
 - The `dirs` config block can whitelist additional writable roots via `allowlist`/`denylist` glob patterns.
-- `dirs.allowed_roots` declares *additional* directory roots that are valid for path escape checking; the session's `working_dir` is always a valid root, and files under it or under any listed root are reachable by read/write/list/grep tools (FR-017). The `allowed_roots` list extends the working directory; it never replaces it.
+- `dirs.allowed_roots` declares *additional* directory roots that are valid for path escape checking; the session's `working_dir` is always a valid root, and files under it or under any listed root are reachable by the `read`/`Write`/`list`/`Grep` tools (FR-017). The `allowed_roots` list extends the working directory; it never replaces it.
 
 ### 4.6 Secret Redaction
 
@@ -1721,14 +1933,17 @@ provider entry (`thinking`, `env`, `models`) still merges.
     "mode": "default",
     "auto_threshold": 0.80
   },
-  "tool_visibility": {
-    "github": true,
-    "gitlab": true,
-    "teams": true,
-    "agents": true,
-    "plan": true,
-    "codeindex": true,
-    "masterfetch": true
+  // Tool-name alias resolution (spec `uniformtools` FR-015). `aliases: true`
+  // enables the built-in table of provider spellings; an object adds explicit
+  // `"<provider spelling>": "<ragent tool>"` entries on top of it. An entry
+  // naming a retired ragent spelling is a load error (FR-031). `expose_alias_names`
+  // additionally advertises each spelling in the outbound tool list, and
+  // `wire_trace` dumps each step's redacted request body under
+  // `target/temp/wire-trace/` (FR-017). Omitted entirely while all off.
+  "tools": {
+    "aliases": { "WebFetch": "webfetch" },
+    "expose_alias_names": false,
+    "wire_trace": false
   },
   "yolo": false,
   "stream": {
@@ -1940,7 +2155,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/websearch help` | Show `/websearch` subcommand help |
 | `/websearch test` | Test configured web-search backends |
 | `/webapi enable\|disable\|help` | Manage the HTTP REST API |
-| `/tools` | Tool-family visibility: `/tools list` (alias `show`) prints the table, `/tools <switch> on\|off` toggles one, `/tools help` prints help |
+| `/tools` | List every registered tool: `/tools list` (alias `show`) prints the registry with each tool's source and description, `/tools help` prints help |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
@@ -2969,7 +3184,7 @@ Custom agents can be defined in JSON using the Open Agentic Schema Framework
   "description": "Reviews Rust code for idioms and safety",
   "model": "anthropic/claude-sonnet-4-20250514",
   "system_prompt": "You are a meticulous Rust reviewer...",
-  "tools": ["read", "edit", "bash", "codeindex_search"],
+  "tools": ["read", "Edit", "Bash", "codeindex_search"],
   "permissions": [
     { "permission": "file:write", "pattern": "crates/**", "action": "allow" }
   ]
@@ -3022,16 +3237,17 @@ demand when the skill is invoked (`SkillRegistry::catalog()` for discovery,
 ### 12.3 Skill Format
 
 ```yaml
+---
 name: rust-embedded
-prompt: |
-  You are an expert in embedded Rust (no_std, RTIC, embassy).
-context_files:
-  - "assets/skills/rust-embedded/context.md"
-tools:
+description: You are an expert in embedded Rust (no_std, RTIC, embassy).
+allowed-tools:
   - read
-  - edit
-  - bash
+  - Edit
+  - Bash
   - codeindex_search
+---
+
+The skill body follows the closing `---` and is what the model receives.
 ```
 
 ### 12.4 Activation
@@ -3042,6 +3258,30 @@ pack, and a bare `/<name>` trigger invokes a user-invocable pack directly.
 AgentSkills packs discovered under `.agents/skills/` (project) and
 `~/.agents/skills/` (user) appear in the list and are loadable by their
 frontmatter name; on a name clash the existing higher-scope pack is preferred.
+
+### 12.5 Tool restrictions (`allowed-tools`)
+
+A `SKILL.md` frontmatter `allowed-tools` key (a single string or a list) limits
+the tools a skill run may call. Entries resolve by **exact** name comparison
+against the `ToolRegistry`: `tool::build_allowed_tool_set` stores each entry
+verbatim and the per-step filter keeps a definition whose name equals an entry.
+
+There is deliberately **no translation layer**. Because the tool rename adopted
+the Anthropic spellings (`AskUserQuestion`, `Bash`, `Edit`, `Glob`, `Grep`,
+`EnterPlanMode`, `ExitPlanMode`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`,
+`TaskUpdate`, `Write`), a manifest written for Claude Code resolves on the
+registry lookup itself. Nothing consults the `(before, after)` rename table, so a
+retired spelling is unresolved rather than mapped, and `Read` - rated too close to
+`read` and not adopted - is unresolved rather than silently served by `read`.
+
+An entry that matches no registered tool is reported once per `(entry, declarer)`
+by `tool::allowed_tools::report_unresolved_allowed_tools_once`, naming the entry
+and the declaring skill, from the three places a skill's list becomes a
+restriction: `Skill` (`action=read|load`), the TUI `/skill` (and bare `/<name>`)
+trigger, and the forked-skill resolver. The per-turn prompt path deliberately does
+not report - it visits every discovered manifest, including plugin skills the
+session never runs, and a per-turn scan adds cost for an entry that constrains
+nothing that turn (NFR-006).
 
 ---
 
@@ -3277,6 +3517,11 @@ not) also persists its FULL output to `log/subagents/<task-id>.md`, and the
 `SubagentComplete` event carries the real loop `finish_reason`
 (`stop`/`truncation`/`length`/`cancelled`/`error`) recorded by the session
 loop so a provider-side cut is reported as truncation, not a healthy finish.
+A provider that reports a **tool-use finish with no parsed tool call** is
+treated the same way (spec `uniformtools` FR-022): the step is reclassified as
+`Truncation` so the text-format tool-call recovery gets its chance, and a
+reply with no recoverable markup ends the run with the "reply may be
+incomplete" notice instead of being presented as a clean answer.
 `new_agent` takes an optional `detached: bool` (only with `background: true`):
 a detached task is excluded from `list_agents` and `running_background_count`,
 cannot be awaited with `wait_agents`, and its completion is reaped without a
@@ -3772,10 +4017,10 @@ Actions:
   baseline count.
 
 ```jsonc
-skill_manage action="list"
-skill_manage action="read" name="rust-error-handling" arguments="ctx"
-skill_manage action="load" name="rust-error-handling"
-skill_manage action="reload"
+Skill action="list"
+Skill action="read" name="rust-error-handling" arguments="ctx"
+Skill action="load" name="rust-error-handling"
+Skill action="reload"
 ```
 
 Registered under the `skill:manage` permission category.
@@ -4023,8 +4268,8 @@ each tool call into it with `<runtime> exec`:
   container-side mount point when it is an absolute path (default `/projects`).
 - **Dispatch.** `Bash` is validated by the host 7-layer validator before it runs
   (FR-002, FR-037); a file/search subset (`read`, `Write`, `create`,
-  `append_file`, `rm`, `mkdir`, `list`, `Glob`, `Grep`) is translated to confined
-  sandbox `exec` scripts; every other tool is refused with no host fallback
+  `append_to_file`, `rm`, `make_directory`, `list`, `Glob`, `Grep`) is translated
+  to confined sandbox `exec` scripts; every other tool is refused with no host fallback
   (FR-031).
 - **Fail without fallback (FR-031).** A provisioning failure (missing runtime,
   missing or unpullable image) fails the turn with a `Provision` error and never
@@ -4494,6 +4739,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| uncommitted | 2026-10-22 | **Tool visibility removed.** The per-family `tool_visibility` config block (`ToolVisibilityConfig`, `ToolVisibilitySpecified`, `iter_switches`, `tool_family_names`, and the sync between `/codeindex on|off` and `tool_visibility.codeindex`) is deleted, together with the `ToolRegistry::set_hidden` / `hidden()` / `hidden_definitions()` surface and the `/tools <switch> on|off` dispatch arm. Every registered tool is now advertised to the model unconditionally: the definitions sent with each request are the registry's definitions and the system prompt lists the same set, so a tool is absent only when the subsystem that registers it is inactive. `/tools` is reduced to a read-only registry report - `/tools` (help), `/tools list` (alias `show`), `/tools help`; `TOOLS_SUBS` is `["list", "show", "help"]`. The orphaned name-level filter goes with it: the `hidden_tools` config field, `Config::effective_hidden_tools()`, its `merge` union and the `/config show` union-field label are deleted, so a config carrying the key now has it ignored as an unknown key. `DryRunInputs` loses its `hidden_tools` field, so `ragent run --dry-run` no longer reports a hidden-tool count. All documentation that described the switches is removed or rewritten (`docs/howtos/tool-visibility.md` is deleted; `README.md`, `SPEC.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `docs/howtos/{config,permissions,reactagent,office,codeindex,plugins,tutorial}.md` and `docs/howtos/slashcommands/{tools,INDEX,config,reload,codeindex,plugins}.md` follow). |
 | v1.0.149 | 2026-10-21 | **The `/provider` and `/model` setup dialogs are rebuilt on the catalogue list chrome, `/connectors claude` adopts the same design language, and the test suite gains a process-global isolation guard (specs `agentui`, `connectors` FR-047, `pluginstores` FR-054).** Every list-bearing `ProviderSetupStep` (provider, model, router-tier model, agent, configured-provider, provider-config and reset steps) now shares one composition: a slate accent frame titled with the step and subject, a heading strip with a live count, a pinned reversed-video column band, a cursor-filled zebra row list, and a muted key-hint footer; `SelectProvider` gains provider-name/provider-id/`Kind`/`Status` columns, `SelectModel`/`SelectRouterModel` right-align `Context` and `Cost` and spell out the `R`/`V`/`T` legend, and every selector windows around its cursor (the thinking-level list two lines at a time) so a list longer than the dialog keeps the highlighted row painted with `Showing a-b of N` in the legend. A mouse notch over an open setup dialog steps the cursor through the same `handle_provider_setup_key` path and is swallowed elsewhere. The `/connectors claude` browser drops its bespoke layout for the shared `STORE_*` chrome (renamed from `PLUGIN_STORE_*` and now used by both panels), gains a `Categories` navigator above a `Marketplace` navigator with `Name (N)` rows and an `Installed` pseudo-category, three focusable panes (`CataloguePane::Results`/`Categories`/`Marketplaces`), a pinned column-heading row, a one-column bold-green installed lane, and a bottom search box with `[x] clear`; the plugin-store navigators gain the same `Installed` pseudo-category (FR-054). `scripts/check-test-env-isolation.sh` (with `--self-test`) enforces test env isolation across the per-crate `tests/all.rs` binaries, wired into `pre-flight.sh` and CI. `rustls-webpki` 0.103.16 and `webpki-root-certs` 1.0.10 clear RUSTSEC-2026-0382/0383 with no suppression added. Tests: `test_setup_dialog_chrome` (14), `test_setup_selector_scroll` (7), `test_plugin_store_installed_category`, the 54-case connector-catalogue set, and the reworked window/footer suites; `cargo test --workspace` 14,418 passed / 0 failed / 22 ignored, `cargo fmt --check`, clippy, `cargo audit` and `cargo deny check` all clean. **Also released in this version:** the `Esc`-only modal dismissal - the Agents, Teams and output-view overlays lose the bordered ` Close ` bar, `window_frame` derives a one-row legend band instead, and every FR-077 legend ends with `Esc close` (FR-007, FR-018, FR-032, FR-074, FR-077); the keyboard-first Agents/Teams block cursor with the `/team forcecleanup` shutdown race fix (`seed_only` seeding, awaited per-member shutdown) and the 5000 s `TOOL_WATCHDOG_TIMEOUT` (FR-033..FR-046, FR-065, FR-069..FR-070); and the Agent and Team Member panel (FR-006..FR-026) with cooperative sub-agent suspension (FR-035), the widened text-format tool-call recovery (three more dialects plus reasoning-channel scanning), `/yolo on|off|status` with the `--config` write target, the discoverable `SPEC.md`-only spec directory, SEC-ragent-team-003, and the `same-file` Windows path-alias containment. |
 | v1.0.141 | 2026-10-18 | Version bump. Session screenshot renamed to `assets/screens/ragentsession.png` and re-embedded in the README. |
 | v1.0.140 | 2026-10-18 | Version bump. README screenshot additions: `ragentmcpstartup.png` and the session image. |
@@ -4869,15 +5115,6 @@ still override per run with the corresponding flags.
 - TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls
 - `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
 ```jsonc
-    "tool_visibility": {
-      "github": true,
-      "gitlab": true,
-      "teams": true,
-      "agents": true,
-      "plan": true,
-      "codeindex": true,
-      "masterfetch": true
-    },
     // Plugin subsystem (spec `plugins`). `enabled: false` makes the whole
     // subsystem inert (no discovery or loading). Budgets default to 5 s per
     // tool, 10 s per entry point, 64 MiB per JS context.

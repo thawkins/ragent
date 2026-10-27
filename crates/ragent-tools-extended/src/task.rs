@@ -7,7 +7,7 @@
 //! ## Current status
 //!
 //! - **T-006** - Auto-unblock evaluation: `is_available` / `is_blocked`
-//!   derived at read time and surfaced in `task_get` / `task_list`
+//!   derived at read time and surfaced in `TaskGet` / `TaskList`
 //!   output (FR-003, FR-005).
 //! - **T-007** - `TaskCreateTool` implemented (FR-009, FR-011, FR-012).
 //! - **T-008/T-017** - `TaskUpdateTool` implemented with `status=blocked`
@@ -161,7 +161,7 @@ pub struct TaskCreateTool;
 #[async_trait::async_trait]
 impl Tool for TaskCreateTool {
     fn name(&self) -> &'static str {
-        "task_create"
+        "TaskCreate"
     }
 
     /// # Errors
@@ -364,7 +364,7 @@ fn type_str(v: &Value) -> &'static str {
 
 // -- TaskUpdateTool (T-008, T-017, FR-004, FR-005, FR-009) ------------
 
-/// Valid status values for `task_update` (FR-005: `blocked` is NOT
+/// Valid status values for `TaskUpdate` (FR-005: `blocked` is NOT
 /// a storable status - it is derived at read time).
 const UPDATE_STATUSES: &[&str] = &["pending", "in_progress", "completed"];
 
@@ -479,7 +479,7 @@ fn detect_cycle(
 ///
 /// On a `status` transition to `completed`, the auto-unblock evaluation
 /// is implicit: derived `is_available` / `is_blocked` fields are
-/// recomputed at read time by `task_get` / `task_list` (FR-003).  The
+/// recomputed at read time by `TaskGet` / `TaskList` (FR-003).  The
 /// response metadata also includes an `unblocked` array listing task IDs
 /// that became available as a result of this completion.
 pub struct TaskUpdateTool;
@@ -487,7 +487,7 @@ pub struct TaskUpdateTool;
 #[async_trait::async_trait]
 impl Tool for TaskUpdateTool {
     fn name(&self) -> &'static str {
-        "task_update"
+        "TaskUpdate"
     }
 
     /// # Errors
@@ -906,7 +906,7 @@ pub struct TaskGetTool;
 #[async_trait::async_trait]
 impl Tool for TaskGetTool {
     fn name(&self) -> &'static str {
-        "task_get"
+        "TaskGet"
     }
 
     /// # Errors
@@ -997,7 +997,7 @@ impl Tool for TaskGetTool {
 
 // -- TaskListTool (T-010, FR-015) ------------------------------------
 
-/// Valid status filter values for `task_list` (FR-015).
+/// Valid status filter values for `TaskList` (FR-015).
 const LIST_STATUSES: &[&str] = &["pending", "in_progress", "completed", "all"];
 
 /// Lists all tasks for the current session, optionally filtered by
@@ -1012,7 +1012,7 @@ pub struct TaskListTool;
 #[async_trait::async_trait]
 impl Tool for TaskListTool {
     fn name(&self) -> &'static str {
-        "task_list"
+        "TaskList"
     }
 
     /// # Errors

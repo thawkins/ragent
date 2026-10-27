@@ -29,7 +29,7 @@ impl Tool for CreateTool {
          file to create, and `content` (string) - the content to write. If the \
          file already exists, it is truncated and overwritten. To append to an \
          existing file without overwriting, use `append_to_file`. To update a \
-         specific region, use `edit`."
+         specific region, use `Edit`."
     }
 
     fn parameters_schema(&self) -> Value {

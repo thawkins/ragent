@@ -171,6 +171,16 @@ impl App {
                 Default::default()
             }
         };
+        // FR-028: report a hook whose `matcher` names only a retired tool
+        // spelling. The interactive surface's load is here - immediately after
+        // the configuration is read and before any turn runs - so the warning
+        // is in the log window before the first prompt, which is what TC-023
+        // step 4 asks for. The matcher is not rewritten: the file belongs to
+        // its author, and a load-time rewrite would leave the on-disk text
+        // disagreeing with the running session.
+        let _reported_stale_matchers = ragent_agent::hooks::report_retired_matcher_spellings_once(
+            &ragent_agent::hooks::parse_hook_configs(&app_config.hooks),
+        );
         sub.record("App: config reload", t0.elapsed());
 
         let t0 = Instant::now();
@@ -209,7 +219,6 @@ impl App {
             quota_percent: None,
             model_loading_state: None,
             model_download_state: None,
-            tool_visibility: app_config.tool_visibility.clone(),
             current_screen: ScreenMode::Chat,
             tip: tips::random_tip(),
             cwd,

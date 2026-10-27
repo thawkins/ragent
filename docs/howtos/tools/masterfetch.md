@@ -17,8 +17,6 @@ same-domain crawling with a content cache. Outputs carry envelope signals
 **Use cases:** extracting article content, searching multiple engines in
 parallel, crawling a domain.
 
-**Visibility switch:** `masterfetch` (see `docs/howtos/tool-visibility.md`).
-
 `mf_search` runs DuckDuckGo, Brave, OpenAlex, and Wikipedia in parallel (plus
 optional LangSearch / Tavily / Perplexity / Exa / Serper engines when their
 keys are configured). `exclude_engines` removes named backends before any

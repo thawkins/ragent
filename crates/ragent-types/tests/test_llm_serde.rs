@@ -129,6 +129,10 @@ fn every_content_part_variant_round_trips() {
         ContentPart::ImageUrl {
             url: "data:image/png;base64,AAAA".to_string(),
         },
+        ContentPart::Reasoning {
+            text: "think about it".to_string(),
+            signature: Some("sig-1".to_string()),
+        },
     ];
     for part in &parts {
         let json = serde_json::to_string(part).expect("serialize");
@@ -150,6 +154,10 @@ fn every_content_part_variant_round_trips() {
     assert_eq!(
         serde_json::to_value(&parts[3]).expect("serialize")["type"],
         "image_url"
+    );
+    assert_eq!(
+        serde_json::to_value(&parts[4]).expect("serialize")["type"],
+        "reasoning"
     );
 }
 

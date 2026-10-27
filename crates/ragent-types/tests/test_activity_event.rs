@@ -127,7 +127,7 @@ fn permission_decision_carries_principal_and_boundary() {
         RunId::from("run-1"),
         5,
         EventKind::PermissionDecision {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             principal: Principal::Operator,
             boundary: BoundaryTarget::Shell,
             granted: true,

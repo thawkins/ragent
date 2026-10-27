@@ -80,15 +80,15 @@ fn replay_run_with_permissions_and_checkpoints() {
     let run = RunId::from("run-1");
     log.record_permission_decision(
         &run,
-        "bash",
+        "Bash",
         Principal::Operator,
         BoundaryTarget::Shell,
         true,
     )
     .expect("perm");
-    log.record_tool_call(&run, "c1", "bash", r#"{"command":"ls"}"#)
+    log.record_tool_call(&run, "c1", "Bash", r#"{"command":"ls"}"#)
         .expect("call");
-    log.record_tool_result(&run, "c1", "bash", true, "file.txt")
+    log.record_tool_result(&run, "c1", "Bash", true, "file.txt")
         .expect("result");
     log.record_checkpoint(&run, "after-tool").expect("cp");
 

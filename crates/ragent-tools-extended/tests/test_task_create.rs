@@ -1,4 +1,4 @@
-//! todo2tasks T-007: integration tests for the `task_create` tool
+//! todo2tasks T-007: integration tests for the `TaskCreate` tool
 //! (`TaskCreateTool`).
 //!
 //! Verifies FR-009 (blocked_by validation), FR-011 (tool surface),
@@ -605,11 +605,11 @@ async fn test_task_create_active_form() {
 
 // -- Tool metadata ----------------------------------------------------
 
-/// Tool name should be "task_create".
+/// Tool name should be "TaskCreate" (FR-023 `after` spelling).
 #[test]
 fn test_task_create_tool_name() {
     let tool = TaskCreateTool;
-    assert_eq!(tool.name(), "task_create");
+    assert_eq!(tool.name(), "TaskCreate");
 }
 
 /// Tool description should be non-empty and mention "Create".

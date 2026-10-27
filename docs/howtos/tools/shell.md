@@ -19,7 +19,7 @@ parameter immediately. Do not describe what you will run."
 
 ---
 
-## bash
+## Bash
 
 Execute a shell command and return its stdout and stderr. Commands run in the
 agent's working directory in a persistent shell.
@@ -33,8 +33,8 @@ agent's working directory in a persistent shell.
 
 **Example:**
 ```text
-bash command="cargo test -- --nocapture" timeout=1500
-bash command="cargo fmt"
+Bash command="cargo test -- --nocapture" timeout=1500
+Bash command="cargo fmt"
 ```
 
 ---

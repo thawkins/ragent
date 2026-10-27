@@ -14,8 +14,8 @@
 //! `BTreeMap<u64, String>` of open blocks, the OpenAI-family parser in `sse.rs`
 //! held a `HashMap<u64, String>` plus a `HashSet<u64>` of already-started indices,
 //! `bedrock.rs` held a `HashMap<String, String>` on its Anthropic-shaped path and
-//! a single `active_tool_call_id: String` on its Converse path, and `gemini.rs`
-//! held a `Vec` of pending calls flushed at the finish frame. Four structures
+//! a single-slot `String` on its Converse path, and `gemini.rs` held a `Vec` of
+//! pending calls flushed at the finish frame. Four structures
 //! meant four answers to "which call does this delta belong to", and the
 //! single-slot answer is wrong the moment a response carries two tool calls
 //! (FR-005).
@@ -53,6 +53,12 @@
 //! paths now key strictly by the content-block index their frame carries -
 //! `<index>` for the Anthropic Messages shape, `contentBlockIndex` for Converse -
 //! and warn when a frame omits it (FUNC-032).
+//!
+//! The two helpers that once offered that guess are **deleted**, not merely left
+//! unused: a `*_last` method that answers "the call I opened most recently" is
+//! the FR-005 failure one method call away for the next provider that cannot find
+//! its index, so no such method exists here for a caller to reach for. The
+//! source scan in `tests/test_wire_decode.rs` fails if one comes back.
 //!
 //! ## A call the provider names no id for gets a synthetic one (FR-019)
 //!
@@ -136,9 +142,23 @@ const UNNAMED_TOOL: &str = "unnamed";
 struct OpenCall {
     /// The key the provider addresses this call by (FR-004).
     key: StreamKey,
-    /// The call's id: the one the provider gave, or the synthetic one minted for
-    /// it (FR-019). `None` until one of the two exists.
-    id: Option<String>,
+    /// The id the *provider* gave the call, byte for byte (FR-006). `None` until a
+    /// frame carries one, which an index-keyed call may never do.
+    ///
+    /// Kept apart from [`started_id`](Self::started_id) on purpose: the provider's
+    /// id and the id the start carried can differ when FR-020 re-keys a duplicate,
+    /// and only the pinned start id may be repeated to the consumer.
+    provider_id: Option<String>,
+    /// Whether a frame (or [`set_id`](ToolCallAccumulator::set_id)) supplied that id,
+    /// as opposed to [`position`](ToolCallAccumulator::position) seeding it from the
+    /// call-id key so the call is addressable before any frame names it (FR-019).
+    ///
+    /// A key is not an id: a `CallId` key is the provider's id for the native shapes,
+    /// but for an id-less call it is only a handle, and minting must not be skipped
+    /// because the handle looks like one. A handle is written as `call@<counter>` -
+    /// a spelling no provider uses - so a record of it reads as the placeholder it
+    /// is (see the FR-019 source scan in `tests/test_wire_decode.rs`).
+    key_is_id: bool,
     /// The tool name the provider reported, empty until a frame carries it.
     ///
     /// Held beside the id, never inside it: a caller that needs the name reads
@@ -152,24 +172,12 @@ struct OpenCall {
     started_id: Option<String>,
 }
 
-impl OpenCall {
-    /// The id a frame about this call should carry: the pinned start id when a
-    /// start has been emitted, else the id (provider-supplied or synthetic).
-    ///
-    /// An id-less call that has not started yet has no id to name, and no other
-    /// frame can carry one either; [`ToolCallAccumulator::open`] mints the
-    /// synthetic id FR-019 asks for before it emits the start.
-    fn display_id(&self) -> Option<String> {
-        self.started_id.clone().or_else(|| self.id.clone())
-    }
-}
-
 /// A whole tool call a provider hands over in one frame, held until the provider
 /// flushes its frame (Gemini's `functionCall` beside `finishReason`).
 #[derive(Debug)]
 struct DeferredCall {
-    /// The id the accumulator minted for this call (FR-019), e.g.
-    /// `gemini_0_get_weather`.
+    /// The id the accumulator minted for this call and emits on its start, delta
+    /// and end (FR-019), e.g. `gemini_0_get_weather`.
     id: String,
     /// The tool name the provider reported, carried beside the id rather than
     /// inside it.
@@ -304,10 +312,21 @@ impl ToolCallAccumulator {
             return;
         }
         let position = self.position(key.clone());
+        self.store_id(position, id.to_string());
+    }
+
+    /// Write a provider-supplied id onto the call at `position`, and mark the call as
+    /// one whose frames name it (FR-019).
+    ///
+    /// The mark is what separates the two kinds of `StreamKey::CallId` call: one a
+    /// provider genuinely named, and one [`position`](Self::position) had to invent a
+    /// key for because its frames carry no id at all. Only the second kind reaches
+    /// FR-019's mint, and only this flag distinguishes them once the key and the id
+    /// hold the same string.
+    fn store_id(&mut self, position: usize, id: String) {
         let call = &mut self.open[position];
-        if call.started_id.is_none() {
-            call.id = Some(id.to_string());
-        }
+        call.provider_id = Some(id);
+        call.key_is_id = true;
     }
 
     /// Announce the call at `key` with the provider's `id` (when the frame carries
@@ -323,14 +342,13 @@ impl ToolCallAccumulator {
     /// claimed that id - a fresh synthetic id (FR-020).
     pub fn open(&mut self, key: StreamKey, id: Option<&str>, name: &str) -> Option<StreamEvent> {
         let position = self.position(key);
+        if let Some(id) = id.filter(|id| !id.is_empty())
+            && self.open[position].started_id.is_none()
+        {
+            self.store_id(position, id.to_string());
+        }
         {
             let call = &mut self.open[position];
-            if let Some(id) = id
-                && !id.is_empty()
-                && call.started_id.is_none()
-            {
-                call.id = Some(id.to_string());
-            }
             if !name.is_empty() {
                 call.name = name.to_string();
             }
@@ -340,16 +358,29 @@ impl ToolCallAccumulator {
         }
         let name = self.open[position].name.clone();
         // The id the provider asked for, or - when it named none - one minted
-        // here (FR-019) before the start is emitted, so every later frame about
-        // this call carries the same id.
-        let requested = match self.open[position].display_id() {
-            Some(id) => id,
-            None => self.mint_for_unnamed(&name),
+        // here (FR-019). The minted id is pinned on the call *before* the start
+        // event is built, so every later frame about this call reads the same
+        // string and start, delta and end cannot disagree.
+        //
+        // A key is not an id: the key only makes a call addressable, so a call whose
+        // own frames carried no id - Gemini's `functionCall`, an Ollama
+        // `tool_calls[]` entry without one, an OpenAI-compatible frame with an
+        // index and no id - gets FR-019's id minted for it. `key_is_id` is how that
+        // is told apart from a provider that named the call by its key.
+        let id = match self.open[position].provider_id.clone() {
+            Some(id) if self.open[position].key_is_id => {
+                // FR-020: two calls in one response must not reach the consumer
+                // under the same id, or the second result overwrites the first.
+                self.start_id(id, &name)
+            }
+            // Either no id at all, or a key standing in for one: both are an
+            // id-less call as far as FR-019 is concerned.
+            Some(_) | None => {
+                let minted = self.mint_for_unnamed(&name);
+                self.emitted_ids.push(minted.clone());
+                minted
+            }
         };
-        // FR-020: two calls in one response must not reach the consumer under the
-        // same id, or the second result overwrites the first.
-        let id = self.start_id(requested, &name);
-        self.open[position].id = Some(id.clone());
         self.open[position].started_id = Some(id.clone());
         Some(StreamEvent::ToolCallStart { id, name })
     }
@@ -408,11 +439,11 @@ impl ToolCallAccumulator {
             );
             return None;
         };
-        // A call in this list has either an id (provider-supplied or synthesised
-        // by `open`) or a start already emitted, so the fallback below is the
-        // unreachable case rather than the normal one: a frame that cannot be
-        // named cannot be forwarded to a consumer that pairs deltas by id.
-        let Some(id) = call.display_id() else {
+        // Only a call whose start the consumer saw can be named: the consumer
+        // pairs deltas with the pending call that start created, so a delta for a
+        // call that has not started is dropped with a debug line rather than sent
+        // under an id nobody has seen.
+        let Some(id) = call.started_id.clone() else {
             tracing::debug!(
                 key = ?key,
                 "tool-call argument delta for a call with no id yet; dropping it"
@@ -537,19 +568,21 @@ impl ToolCallAccumulator {
     /// The position of the call at `key`, opening it if this is the first frame to
     /// mention the key.
     ///
-    /// An index-keyed call starts with no id - it has one only if a frame supplies
-    /// it - while a call-id-keyed one is named by the key itself.
+    /// The key is what the provider *addresses* a call by; it is not an id, so a
+    /// call opened here carries none until a frame supplies one, and [`open`](Self::open)
+    /// mints FR-019's id for the ones that never do.
     fn position(&mut self, key: StreamKey) -> usize {
         if let Some(position) = self.open.iter().position(|call| call.key == key) {
             return position;
         }
-        let id = match &key {
+        let provider_id = match &key {
             StreamKey::Index(_) => None,
             StreamKey::CallId(id) => Some(id.clone()),
         };
         self.open.push(OpenCall {
             key,
-            id,
+            provider_id,
+            key_is_id: false,
             name: String::new(),
             started_id: None,
         });

@@ -298,3 +298,69 @@ async fn test_openai_chat_error_status_is_surfaced() {
     assert!(err.contains("429"), "error: {err}");
     assert!(err.contains("quota exceeded"), "error: {err}");
 }
+
+#[tokio::test]
+async fn test_openai_chat_rekeys_two_calls_that_share_one_id() {
+    // FR-020 end to end: two `tool_calls[]` entries announce the same id through the
+    // real chat-completions SSE parser. The consumer keys its pending calls by id, so
+    // an unreconciled duplicate would overwrite the first call and only one result
+    // would ever come back.
+    let sse = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_dup\",\"function\":{\"name\":\"Read\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_dup\",\"function\":{\"name\":\"Read\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"a.rs\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"b.rs\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    )
+    .to_string();
+    let url = spawn_sse(sse, "").await;
+    let events: Vec<StreamEvent> = openai_client(url)
+        .chat(request("gpt-4o"))
+        .await
+        .expect("chat")
+        .collect()
+        .await;
+
+    let starts: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallStart { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        vec!["call_dup".to_string(), "openai_0_Read".to_string()],
+        "the duplicated id is re-keyed, not dropped"
+    );
+
+    let deltas: Vec<(String, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallDelta { id, args_json } => Some((id.clone(), args_json.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        deltas,
+        vec![
+            ("call_dup".to_string(), "{\"path\":\"a.rs\"}".to_string()),
+            (
+                "openai_0_Read".to_string(),
+                "{\"path\":\"b.rs\"}".to_string()
+            ),
+        ],
+        "each call keeps its own arguments"
+    );
+
+    let mut ends: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::ToolCallEnd { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    ends.sort();
+    assert_eq!(ends, vec!["call_dup", "openai_0_Read"]);
+}

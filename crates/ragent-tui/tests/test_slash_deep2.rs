@@ -143,7 +143,7 @@ async fn bug_report_with_unknown_session_reports_not_found() {
 // /editlog show + /editlog analyse (populated)
 // ---------------------------------------------------------------------------
 
-const EDITLOG_SUCCESS: &str = r#"{"timestamp":"2025-01-01T00:00:00Z","tool":"edit","file_path":"src/a.rs","old_str":"plain","new_str":"x","outcome":"success","dry_run":false}"#;
+const EDITLOG_SUCCESS: &str = r#"{"timestamp":"2025-01-01T00:00:00Z","tool":"Edit","file_path":"src/a.rs","old_str":"plain","new_str":"x","outcome":"success","dry_run":false}"#;
 const EDITLOG_TAB_FAILURE: &str = "{\"timestamp\":\"2025-01-01T00:00:01Z\",\"tool\":\"edit\",\"file_path\":\"src/b.rs\",\"old_str\":\"\\tindented line\",\"new_str\":\"x\",\"outcome\":\"no match found in src/b.rs\",\"dry_run\":false}";
 const EDITLOG_BLANK_FAILURE: &str = "{\"timestamp\":\"2025-01-01T00:00:02Z\",\"tool\":\"multi_edit\",\"file_path\":\"src/c.rs\",\"old_str\":\"first\\n\\nsecond\",\"new_str\":\"y\",\"outcome\":\"whitespace mismatch\",\"dry_run\":false}";
 
@@ -162,7 +162,7 @@ async fn editlog_show_with_entries_renders_stats_table() {
     let msg = last_message(&app);
     assert!(msg.contains("Success %"), "stats table: {msg}");
     assert!(msg.contains("Failure reasons"), "failure reasons: {msg}");
-    assert!(msg.contains("edit"), "tool column: {msg}");
+    assert!(msg.contains("Edit"), "tool column: {msg}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

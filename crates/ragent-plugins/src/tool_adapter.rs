@@ -57,9 +57,14 @@ const ARGS_GLOBAL: &str = "__ragent_plugin_args";
 
 /// Build the registry name for a plugin tool: `plugin_<pluginid>_<toolname>`
 /// (FR-005, A5).
+///
+/// Delegates to [`ragent_types::tool_bridge::plugin_tool_name`] so the name this
+/// crate registers and the name FR-032 approves are one derivation. A plugin
+/// writes its tool names in JavaScript, which no compiler here can rename, so the
+/// namespace is what keeps a plugin tool called `bash` out of the retired spelling.
 #[must_use]
 pub fn plugin_tool_name(plugin_id: &str, tool_name: &str) -> String {
-    format!("plugin_{plugin_id}_{tool_name}")
+    ragent_types::tool_bridge::plugin_tool_name(plugin_id, tool_name)
 }
 
 /// A plugin-contributed tool bridged into the session tool registry
@@ -173,6 +178,16 @@ impl PluginManager {
     /// `existing` must contain the built-in registry list plus other loaded
     /// plugins' tool names (see [`PluginManager::registered_plugin_tool_names`]).
     ///
+    /// Every contributed name is also put through
+    /// [`check_dynamic_bridge`](ragent_types::tool_bridge::check_dynamic_bridge)
+    /// (FR-032): a name that is not under this plugin's `plugin_<id>_` namespace,
+    /// or that equals a retired `before` spelling, is refused with a sentence
+    /// naming the source, the spelling and its replacement. Each refusal is
+    /// reported once per source and process by
+    /// [`report_bridge_refusals_once`](ragent_types::tool_bridge::report_bridge_refusals_once)
+    /// and costs only its own tool - the rest of the plugin's tools still register,
+    /// so a stale name never takes a plugin or a session down.
+    ///
     /// # Errors
     ///
     /// Returns [`PluginError::NameCollision`] on the first clashing name.
@@ -194,15 +209,26 @@ impl PluginManager {
                 ),
             });
         }
+        // FR-032's two clauses, applied to the name this plugin would register.
+        let source = ragent_types::tool_bridge::plugin_source_label(plugin_id);
+        let prefix = ragent_types::tool_bridge::plugin_tool_prefix(plugin_id);
         let mut ours = BTreeSet::new();
         let mut adapters = Vec::with_capacity(loaded.tools.len());
+        let mut refusals = Vec::new();
         for decl in &loaded.tools {
             let name = plugin_tool_name(plugin_id, &decl.name);
+            if let Err(refusal) =
+                ragent_types::tool_bridge::check_dynamic_bridge(&source, &prefix, &name)
+            {
+                refusals.push(refusal);
+                continue;
+            }
             if existing.contains(&name) || !ours.insert(name.clone()) {
                 return Err(PluginError::NameCollision(name));
             }
             adapters.push(Arc::new(PluginToolAdapter::new(plugin_id, decl.clone())));
         }
+        ragent_types::tool_bridge::report_bridge_refusals_once(&refusals);
         let names = adapters.iter().map(|a| a.name().to_string()).collect();
         for adapter in adapters {
             register(adapter);

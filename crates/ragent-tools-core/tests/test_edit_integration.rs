@@ -1,6 +1,6 @@
 //! Integration tests for the renewed `EditTool` (editrenewal spec).
 //!
-//! The renewed `edit` tool uses **strict exact-match** replacement (FR-004):
+//! The renewed `Edit` tool uses **strict exact-match** replacement (FR-004):
 //! `old_string` must match the file byte-for-byte, including whitespace,
 //! indentation, and line endings. These tests cover exact match, multiple
 //! matches, missing file, stale file, create/delete/update operations,
@@ -620,7 +620,7 @@ async fn test_edit_log_success_writes_jsonl() {
         "log file should contain at least one entry"
     );
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["tool"], "Edit");
     assert!(
         entry["file_path"].as_str().unwrap().ends_with("/a.rs"),
         "file_path should end with /a.rs: {}",
@@ -676,7 +676,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
     let lines: Vec<&str> = content.lines().collect();
     assert_ne!(lines, [] as [&str; 0]);
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["tool"], "Edit");
     assert_eq!(entry["outcome"], "success (dry-run preview)");
     assert_eq!(entry["dry_run"], true);
     assert_eq!(
@@ -729,7 +729,7 @@ async fn test_edit_log_failure_writes_jsonl() {
     let lines: Vec<&str> = content.lines().collect();
     assert_ne!(lines, [] as [&str; 0]);
     let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["tool"], "Edit");
     assert!(
         entry["outcome"].as_str().unwrap().contains("not found"),
         "outcome should record not-found: {}",
@@ -956,7 +956,7 @@ async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
     );
     let content = std::fs::read_to_string(files[0].path()).unwrap();
     let entry: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
-    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["tool"], "Edit");
     assert_eq!(entry["match_lane"], "flexible");
     assert_eq!(entry["outcome"], "success");
 

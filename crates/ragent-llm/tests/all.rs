@@ -130,5 +130,11 @@ mod test_wire_profile;
 #[path = "test_wire_profile_table.rs"]
 mod test_wire_profile_table;
 
+#[path = "test_wire_replay.rs"]
+mod test_wire_replay;
+
 #[path = "test_wire_trace.rs"]
 mod test_wire_trace;
+
+#[path = "test_tool_result_error_marking.rs"]
+mod test_tool_result_error_marking;

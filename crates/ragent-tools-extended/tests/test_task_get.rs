@@ -1,7 +1,7 @@
-//! todo2tasks T-009: integration tests for the `task_get` tool
+//! todo2tasks T-009: integration tests for the `TaskGet` tool
 //! (`TaskGetTool`).
 //!
-//! Verifies FR-014: when `task_get` is called with a `task_id`, the
+//! Verifies FR-014: when `TaskGet` is called with a `task_id`, the
 //! system returns the full task record - `id`, `subject`,
 //! `description`, `active_form`, `status`, `owner`, `metadata`,
 //! `blocked_by`, `blocks` (derived), `created_at`, `updated_at`.
@@ -427,11 +427,11 @@ async fn test_task_get_content_description() {
 
 // -- Tool metadata ---------------------------------------------------
 
-/// Tool name should be "task_get".
+/// Tool name should be "TaskGet" (FR-023 `after` spelling).
 #[test]
 fn test_task_get_tool_name() {
     let tool = TaskGetTool;
-    assert_eq!(tool.name(), "task_get");
+    assert_eq!(tool.name(), "TaskGet");
 }
 
 /// Tool should have a non-empty description.
@@ -513,14 +513,11 @@ async fn test_task_get_in_progress_status() {
 
 // -- Registry registration -------------------------------------------
 
-/// `task_get` should be registered in the extended registry.
+/// `TaskGet` should be registered in the extended registry.
 #[test]
 fn test_task_get_registered() {
     let registry = ragent_tools_extended::create_extended_registry();
-    assert!(
-        registry.contains("task_get"),
-        "task_get should be registered"
-    );
+    assert!(registry.contains("TaskGet"), "TaskGet should be registered");
 }
 
 // -- Empty session ---------------------------------------------------

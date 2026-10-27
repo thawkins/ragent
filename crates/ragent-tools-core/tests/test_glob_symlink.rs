@@ -1,4 +1,4 @@
-//! ANTIPAT F-21: the `glob` walk must not follow symlinks.
+//! ANTIPAT F-21: the `Glob` walk must not follow symlinks.
 //!
 //! `collect_matches` classifies entries via `entry.file_type()` so a symlinked
 //! directory is neither descended into nor matched as a regular file, which

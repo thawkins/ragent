@@ -13,10 +13,44 @@
 //!
 //! No provider is contacted and no registry is built: the profile is a plain
 //! value, which is what NFR-004 asks for.
+//!
+//! Three cases pin properties of the *declaration* rather than of a value,
+//! because they are compile-time properties of the type: that there is no
+//! `Default` and no optional field anywhere a client could inherit a contract
+//! from (FR-002's "a client constructed without a profile **shall** fail to
+//! compile"), that the declared field set is exactly the nine the requirement
+//! names, and that the derives a client depends on (`Copy`, `Eq`, `Hash`,
+//! `Send`, `Sync`) are present and behave. `tests/test_wire_profile_table.rs`
+//! records that it deliberately does not assert the first of these; this is
+//! where it is asserted.
 
 use ragent_llm::provider::wire::{
     ArgsEncoding, IdField, ResultCarrier, StreamKeying, ToolEnvelope, ToolWireProfile,
 };
+
+/// The source text of `wire/mod.rs`, which is where the contract is declared.
+fn profile_declaration() -> String {
+    use std::path::PathBuf;
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("providers")
+        .join("wire")
+        .join("mod.rs");
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+/// The body of the `ToolWireProfile` struct (between its braces).
+fn profile_struct_body(source: &str) -> &str {
+    let start = source
+        .find("pub struct ToolWireProfile {")
+        .expect("ToolWireProfile must be declared in wire/mod.rs");
+    let rest = &source[start..];
+    let end = rest
+        .find("\n}")
+        .expect("the ToolWireProfile declaration must close at column 0");
+    &rest[..end]
+}
 
 /// A representative OpenAI-chat-completions profile.
 fn openai() -> ToolWireProfile {
@@ -270,4 +304,225 @@ fn test_wire_profile_is_const_constructible_and_copy() {
     assert_eq!(OPENAI.tool_envelope, ToolEnvelope::OpenAiFunction);
     // The runtime-built profile agrees with the `const` one field for field.
     assert_eq!(copied, openai());
+}
+
+#[test]
+fn test_wire_profile_declares_exactly_the_nine_named_decisions() {
+    // FR-002 names the nine decisions the profile must cover. This reads the
+    // declaration and pins the field set exactly: a field added without a
+    // decision, or one of the nine silently dropped, fails here rather than in
+    // whichever encoder later reads a field that no longer exists.
+    let source = profile_declaration();
+    let body = profile_struct_body(&source);
+
+    let mut declared: Vec<&str> = Vec::new();
+    for line in body.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("pub ") else {
+            continue;
+        };
+        let Some((name, _)) = rest.split_once(':') else {
+            continue;
+        };
+        declared.push(name.trim());
+    }
+
+    assert_eq!(
+        declared,
+        vec![
+            "tool_envelope",
+            "result_carrier",
+            "id_field",
+            "args_encoding",
+            "stream_keying",
+            "supports_parallel",
+            "supports_is_error",
+            "echo_reasoning",
+            "synthetic_ids",
+        ],
+        "FR-002 names exactly these nine decisions, in this order"
+    );
+
+    // Every field is required: an `Option<...>` would let a client omit a
+    // decision and inherit a plausible default, which is the one thing FR-002
+    // forbids.
+    assert!(
+        !body.contains("Option<"),
+        "no profile field may be optional - a client must state every decision (FR-002)"
+    );
+    // A profile is a contract, not configuration: nothing here is deserialised
+    // from `ragent.json`, so no serde attribute may appear on it.
+    assert!(
+        !body.contains("serde"),
+        "a profile is a declared contract, not a config value (FR-002)"
+    );
+
+    // Each field's own documentation names the requirement that consumes it, so
+    // the declaration stays a map of the feature rather than a bag of flags.
+    for requirement in [
+        "FR-003", "FR-004", "FR-006", "FR-010", "FR-011", "FR-014", "FR-019",
+    ] {
+        assert!(
+            body.contains(requirement),
+            "no field documents {requirement}; every decision names the requirement it serves"
+        );
+    }
+}
+
+#[test]
+fn test_wire_profile_has_no_default_impl_anywhere_in_the_crate() {
+    // FR-002's compile-time clause, as far as a test can reach it: a client
+    // constructed without a profile must fail to compile, which holds only while
+    // no defaulted profile exists for such a client to fall back on. The
+    // declaration is scanned for a `Default` derive and every source file in the
+    // crate for an `impl Default for ToolWireProfile` or a
+    // `ToolWireProfile::default()`, so the escape cannot be added quietly in a
+    // later task.
+    use std::path::{Path, PathBuf};
+
+    let source = profile_declaration();
+    let struct_at = source
+        .find("pub struct ToolWireProfile {")
+        .expect("the declaration must exist");
+    // The attributes immediately above the declaration, i.e. the contiguous run
+    // of `#[...]` lines after the last doc comment. Comments are skipped because
+    // the declaration's own documentation talks about the `Default` impl it does
+    // not have.
+    let derive_line = source[..struct_at]
+        .lines()
+        .rev()
+        .map(str::trim)
+        .take_while(|line| line.starts_with("#["))
+        .find(|line| line.starts_with("#[derive("))
+        .expect("the declaration must carry a derive list");
+    assert!(
+        !derive_line.contains("Default"),
+        "ToolWireProfile must not derive Default - a defaulted profile is a silent, \
+         wrong contract for every client that forgot to declare one (FR-002); got \
+         {derive_line:?}"
+    );
+
+    fn rust_sources(dir: &Path, found: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rust_sources(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                found.push(path);
+            }
+        }
+    }
+
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sources = Vec::new();
+    rust_sources(&src, &mut sources);
+    assert!(!sources.is_empty(), "the crate must contain source files");
+
+    for path in sources {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        for retired in [
+            "impl Default for ToolWireProfile",
+            "ToolWireProfile::default()",
+        ] {
+            assert!(
+                !text.contains(retired),
+                "{} introduces `{retired}`; a client without a profile must fail to \
+                 compile rather than inherit one (FR-002)",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_wire_profile_is_send_sync_static_and_fully_derived() {
+    // A profile is held as a field of a client, and `LlmClient: Send + Sync`, so
+    // the value has to be shareable across the async boundary and live as long as
+    // the client. The bounds are checked by the compiler here rather than assumed
+    // from the field types, which is what makes them a contract.
+    fn assert_shareable<T: Send + Sync + 'static>() {}
+    fn assert_copy_eq_hash<T: Copy + Eq + std::hash::Hash + std::fmt::Debug>() {}
+    assert_shareable::<ToolWireProfile>();
+    assert_copy_eq_hash::<ToolWireProfile>();
+
+    // The derives the bounds above stand on, read from the declaration: a
+    // field-carrying struct cannot gain these by accident, and losing one is a
+    // compile error in `assert_shareable` only after the fact.
+    let source = profile_declaration();
+    let struct_at = source
+        .find("pub struct ToolWireProfile {")
+        .expect("the declaration must exist");
+    let derives: &str = &source[..struct_at];
+    let derive_line = derives
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with("#[derive("))
+        .expect("ToolWireProfile must carry a derive list");
+    for expected in ["Debug", "Clone", "Copy", "PartialEq", "Eq", "Hash"] {
+        assert!(
+            derive_line.contains(expected),
+            "ToolWireProfile must derive {expected}; got {derive_line:?}"
+        );
+    }
+
+    // `Hash` is what lets a profile key a map, and two equal profiles must hash
+    // equally - the property a cache keyed by profile depends on.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let hash_of = |profile: ToolWireProfile| {
+        let mut hasher = DefaultHasher::new();
+        profile.hash(&mut hasher);
+        hasher.finish()
+    };
+    assert_eq!(hash_of(openai()), hash_of(openai()));
+    assert_ne!(
+        hash_of(openai()),
+        hash_of(anthropic()),
+        "two different contracts must not collide in a profile-keyed cache"
+    );
+}
+
+#[test]
+fn test_wire_profile_representatives_match_the_declared_table_constants() {
+    // The six representative profiles above are this file's own copies, which is
+    // what lets the cases read as statements about a *family* rather than about
+    // the table. That freedom is only sound while each copy still equals the
+    // constant T-003 declares for it: a drifted copy would make every assertion
+    // in this file true of a contract nothing speaks. This case is the binding.
+    use ragent_llm::provider::wire::profile_table::{
+        ANTHROPIC_MESSAGES, BEDROCK_CONVERSE, GEMINI, OPENAI_CHAT, OPENAI_RESPONSES,
+    };
+
+    for (label, local, declared) in [
+        ("openai", openai(), OPENAI_CHAT),
+        ("anthropic", anthropic(), ANTHROPIC_MESSAGES),
+        ("gemini", gemini(), GEMINI),
+        ("responses", responses(), OPENAI_RESPONSES),
+        ("bedrock", bedrock(), BEDROCK_CONVERSE),
+    ] {
+        assert_eq!(
+            local, declared,
+            "the `{label}` representative in this file has drifted from the declared \
+             family constant; every assertion in this file is about the copy"
+        );
+    }
+
+    // The declared table states the same agreement between `synthetic_ids` and
+    // `id_field` that the family copy asserts (FR-019): a profile that says it
+    // supplies no ids must not also name a key to write them under, and vice
+    // versa. Checked over the table so a new row cannot declare the pair
+    // inconsistently.
+    use ragent_llm::provider::wire::profile_table::PROVIDER_WIRE;
+    for (id, profile) in PROVIDER_WIRE {
+        let synthesises = matches!(profile.id_field, IdField::Synthesised);
+        assert_eq!(
+            profile.synthetic_ids, synthesises,
+            "{id:?}: `synthetic_ids` and `id_field` must agree - a provider that omits \
+             ids cannot name a key, and one that names a key cannot be id-less (FR-019)"
+        );
+    }
 }

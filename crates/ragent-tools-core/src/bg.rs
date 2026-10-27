@@ -84,7 +84,7 @@ impl BackgroundCommand {
     ///
     /// `id` is the caller-assigned task identifier (usually a UUID). `command`
     /// is run through the same shell discovery and security checks as the
-    /// [`bash`](crate::bash) tool. `session_id` identifies the owning session so
+    /// [`Bash`](crate::bash) tool. `session_id` identifies the owning session so
     /// lifecycle events can be routed to the correct TUI panel.
     ///
     /// # Errors

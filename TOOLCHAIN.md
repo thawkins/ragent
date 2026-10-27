@@ -24,7 +24,7 @@ ship inside the rustup toolchain and are listed for completeness.
 | Plugin | Purpose in ragent |
 | --- | --- |
 | `cargo-llvm-cov` | Coverage measurement (`/rust-hygiene` and the STATS.md coverage table) |
-| `cargo-nextest` | Faster parallel test runner used by CI flows |
+| `cargo-nextest` | **The test runner.** `cargo test` is replaced by `cargo nextest run` for every test run; only `cargo test --doc` remains (nextest does not run doc tests) |
 | `cargo-audit` | Security advisory audit (part of the standard hygiene check) |
 | `cargo-deny` | License / advisory / duplicate-crate gate (`deny.toml`) |
 | `cargo-outdated` | Dependency freshness checks |
@@ -48,6 +48,58 @@ for p in llvm-cov nextest audit deny outdated udeps machete semver-checks \
   cargo install "cargo-$p" --locked
 done
 ```
+
+### Test running: `cargo nextest`, not `cargo test`
+
+The workspace runs its tests with `cargo-nextest` (0.9.149 at the time of
+writing, invoked as `cargo nextest run`). The configuration is checked in at
+`.config/nextest.toml`; CI installs the binary with
+`taiki-e/install-action@nextest` and runs
+`cargo nextest run --workspace --profile ci --no-fail-fast`, followed by
+`cargo test --workspace --doc` for the doc tests nextest never runs.
+
+Why the switch: the workspace links one integration-test binary per crate (18
+`tests/all.rs` targets, ~14,500 tests). `cargo test` runs every test of a binary
+inside that one process, so a wedged test blocks its neighbours and a
+process-global mutation leaks between tests. Nextest runs each test in its own
+process, schedules them across the machine, prints a failure's captured output
+the moment it happens, and kills any single test that exceeds the configured
+`slow-timeout` (150 s) instead of stalling the whole run. A full workspace run
+measured 14,458 tests in 174-262 s wall clock on the reference machine.
+
+Command forms (the full list is in `AGENTS-LANGUAGE.md`, "Test Commands"):
+
+```bash
+cargo nextest run                                      # whole workspace
+cargo nextest run -p ragent-agent                      # one crate
+cargo nextest run -p ragent-agent -E 'test(test_unified_dispatch::)'   # one module
+cargo nextest run --workspace --no-fail-fast           # every failure in one pass
+cargo nextest list                                     # what would run
+cargo test --workspace --doc                           # doc tests only
+```
+
+`cargo test -p <crate> --test all <module>::` still works and is still correct;
+it is simply no longer what CI or the guidance uses.
+
+Cross-process exclusion belongs in the nextest config, not in the test file. A
+`#[serial]` attribute (or a file-local `Mutex`) orders tests inside one process,
+which is exactly what nextest does not give you: serial_test publishes its lock
+key as `SERIAL_TEST_RETRY_KEY` in the parent environment, and each test process
+starts from its own saved environment, so two siblings take different keys. When
+a fixture is written into the repository — the tool-rename guard's seeded stale
+literal is the case that surfaced this — declare a group instead:
+
+```toml
+[test-groups]
+tool-rename-guard = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/^test_tool_rename_guard::/)'
+test-group = 'tool-rename-guard'
+```
+
+The same block is repeated for `profile.ci`. `max-threads` is enforced by the
+runner across processes, so the tests are ordered for real.
 
 ### Already good -- do not change
 

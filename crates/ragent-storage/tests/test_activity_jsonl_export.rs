@@ -242,15 +242,15 @@ fn export_jsonl_matches_read_run() {
         .expect("msg");
     log.record_permission_decision(
         &run,
-        "bash",
+        "Bash",
         ragent_types::activity::Principal::Operator,
         ragent_types::activity::BoundaryTarget::Shell,
         true,
     )
     .expect("perm");
-    log.record_tool_call(&run, "c1", "bash", r#"{"command":"ls"}"#)
+    log.record_tool_call(&run, "c1", "Bash", r#"{"command":"ls"}"#)
         .expect("call");
-    log.record_tool_result(&run, "c1", "bash", true, "file.txt")
+    log.record_tool_result(&run, "c1", "Bash", true, "file.txt")
         .expect("result");
     log.record_termination(&run, TerminationReason::Completed)
         .expect("term");

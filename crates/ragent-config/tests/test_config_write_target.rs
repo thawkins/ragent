@@ -174,7 +174,7 @@ fn test_save_to_source_targets_the_explicit_config_file() {
             .expect("seed JSON");
 
     let mut config = Config::load().expect("load config");
-    config.tool_visibility.set_codeindex(false);
+    config.yolo = true;
     config.save_to_source().expect("save to source");
 
     let on_disk = std::fs::read_to_string(&explicit).expect("read explicit config");
@@ -187,7 +187,7 @@ fn test_save_to_source_targets_the_explicit_config_file() {
         written, before,
         "the explicit file must receive the save, got:\n{on_disk}"
     );
-    assert_eq!(written["yolo"], serde_json::json!(false));
+    assert_eq!(written["yolo"], serde_json::json!(true));
     assert!(
         !Config::global_config_path().expect("global path").exists(),
         "save_to_source must not fall back to the user-global file"

@@ -25,7 +25,7 @@
 //!
 //! Per the spec constraints, the gatherer does **not** reimplement file
 //! discovery or grep - it delegates entirely to the `LocalTool`
-//! implementation. In production this wraps the existing `glob`, `grep`,
+//! implementation. In production this wraps the existing `Glob`, `Grep`,
 //! `read`, and `list` tools from `crates/ragent-tools-core`.
 
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ pub const DEFAULT_GLOBS: &[&str] = &[
 /// Maximum number of local sources to capture in a single gather call.
 pub const DEFAULT_MAX_LOCAL_SOURCES: usize = 10;
 
-/// Trait abstracting the existing `glob` / `grep` / `read` / `list` tools
+/// Trait abstracting the existing `Glob` / `Grep` / `read` / `list` tools
 /// used by [`LocalGatherer`].
 #[async_trait]
 pub trait LocalTool: Send + Sync {
@@ -302,7 +302,7 @@ impl LocalGatherer {
                         // redundant `is_file()` syscall here would make
                         // the gatherer untestable against the in-memory
                         // fake used by the test suite, and in production
-                        // `glob` already filters directories.
+                        // `Glob` already filters directories.
                         out.push(LocalCandidate { path, kind });
                     }
                 }

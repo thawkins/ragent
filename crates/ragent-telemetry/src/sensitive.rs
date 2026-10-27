@@ -70,7 +70,7 @@ pub const MIN_B64_RUN_LEN: usize = 20;
 /// Maximum length of a `tool.name` attribute value accepted by the allow-list
 /// (SEC-052).
 ///
-/// Registered tool names are short identifiers (`bash`, `codeindex_search`,
+/// Registered tool names are short identifiers (`Bash`, `codeindex_search`,
 /// `plugin_<id>_<tool>`); anything longer is rejected rather than exported.
 pub const MAX_TOOL_NAME_LEN: usize = 64;
 

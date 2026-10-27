@@ -1,11 +1,11 @@
-//! todo2tasks T-008 / T-017: integration tests for the `task_update` tool
+//! todo2tasks T-008 / T-017: integration tests for the `TaskUpdate` tool
 //! (`TaskUpdateTool`).
 //!
 //! Verifies:
 //! - FR-005: Reject `status=blocked` with a clear error listing valid
 //!   statuses (`pending`, `in_progress`, `completed`).
 //! - FR-009: Reject foreign/non-existent `blocked_by` references at
-//!   `task_update` boundary (via `add_blocked_by` and `add_blocks`).
+//!   `TaskUpdate` boundary (via `add_blocked_by` and `add_blocks`).
 //! - FR-004: Reject dependency cycles (via `add_blocked_by` and `add_blocks`).
 //! - FR-003: Auto-unblock evaluation on `completed` transition.
 //! - FR-013: Clear, actionable error messages.
@@ -687,11 +687,11 @@ async fn test_task_update_add_blocked_by_not_array() {
 
 // -- Tool metadata -----------------------------------------------------
 
-/// Tool name should be "task_update".
+/// Tool name should be "TaskUpdate" (FR-023 `after` spelling).
 #[test]
 fn test_task_update_tool_name() {
     let tool = TaskUpdateTool;
-    assert_eq!(tool.name(), "task_update");
+    assert_eq!(tool.name(), "TaskUpdate");
 }
 
 /// Tool description should mention task_id and status.

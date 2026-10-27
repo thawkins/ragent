@@ -159,6 +159,6 @@ async fn test_analyze_tool_action_empty_response_is_fail_safe() {
         chunks: vec![],
         delay: None,
     });
-    let verdict = analyze_tool_action(&client, "m", "bash", "{}", 5).await;
+    let verdict = analyze_tool_action(&client, "m", "Bash", "{}", 5).await;
     assert_eq!(verdict.decision, PermissionAction::Ask);
 }

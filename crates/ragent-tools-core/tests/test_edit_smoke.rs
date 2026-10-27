@@ -1,4 +1,4 @@
-//! Behavioural smoke test for EDITPLAN T-14: strict exact-byte `edit` matching.
+//! Behavioural smoke test for EDITPLAN T-14: strict exact-byte `Edit` matching.
 //!
 //! Drives `ragent-tools-core` directly (the same code path that `ragent run` uses):
 //!

@@ -78,6 +78,9 @@ mod test_agent_thinking_defaults;
 #[path = "test_agentskills_discovery.rs"]
 mod test_agentskills_discovery;
 
+#[path = "test_approval_blocks_result.rs"]
+mod test_approval_blocks_result;
+
 #[path = "test_ask_user_default.rs"]
 mod test_ask_user_default;
 
@@ -171,11 +174,32 @@ mod test_dynamic_trigger;
 #[path = "test_editrenewal_aliases.rs"]
 mod test_editrenewal_aliases;
 
+#[path = "test_escape_hatch_audit.rs"]
+mod test_escape_hatch_audit;
+
 #[path = "test_execution_backend_runtime.rs"]
 mod test_execution_backend_runtime;
 
 #[path = "test_file_ops.rs"]
 mod test_file_ops;
+
+#[path = "test_fr026_no_alias_survives.rs"]
+mod test_fr026_no_alias_survives;
+
+#[path = "test_fr028_state_survival.rs"]
+mod test_fr028_state_survival;
+
+#[path = "test_fr029_allowed_tools.rs"]
+mod test_fr029_allowed_tools;
+
+#[path = "test_fr030_surface_agreement.rs"]
+mod test_fr030_surface_agreement;
+
+#[path = "test_fr032_bridge_containment.rs"]
+mod test_fr032_bridge_containment;
+
+#[path = "test_fr033_completion_sources.rs"]
+mod test_fr033_completion_sources;
 
 #[path = "test_fuzzy_reference.rs"]
 mod test_fuzzy_reference;
@@ -327,6 +351,9 @@ mod test_ms03_bash_split;
 #[path = "test_ms03_team_guards.rs"]
 mod test_ms03_team_guards;
 
+#[path = "test_nfr006_rename_cost.rs"]
+mod test_nfr006_rename_cost;
+
 #[path = "test_no_percall_regex.rs"]
 mod test_no_percall_regex;
 
@@ -350,6 +377,9 @@ mod test_orchestrator_transport;
 
 #[path = "test_os_info_tool.rs"]
 mod test_os_info_tool;
+
+#[path = "test_parallel_gate.rs"]
+mod test_parallel_gate;
 
 #[path = "test_perf022_jsonl_mailbox.rs"]
 mod test_perf022_jsonl_mailbox;
@@ -561,11 +591,38 @@ mod test_tool_adapter_events;
 #[path = "test_tool_adapters_extra2.rs"]
 mod test_tool_adapters_extra2;
 
+#[path = "test_tool_arg_decode_routing.rs"]
+mod test_tool_arg_decode_routing;
+
+#[path = "test_tool_alias_resolution.rs"]
+mod test_tool_alias_resolution;
+
+#[path = "test_tool_alias_exposure.rs"]
+mod test_tool_alias_exposure;
+
+#[path = "test_refusal_outcome.rs"]
+mod test_refusal_outcome;
+
+#[path = "test_tool_alias_table.rs"]
+mod test_tool_alias_table;
+
 #[path = "test_tool_info.rs"]
 mod test_tool_info;
 
+#[path = "test_tool_input_error.rs"]
+mod test_tool_input_error;
+
 #[path = "test_tool_registry_extra.rs"]
 mod test_tool_registry_extra;
+
+#[path = "test_tool_rename_atomic_landing.rs"]
+mod test_tool_rename_atomic_landing;
+
+#[path = "test_tool_rename_guard.rs"]
+mod test_tool_rename_guard;
+
+#[path = "test_tool_rename_table.rs"]
+mod test_tool_rename_table;
 
 #[path = "test_tool_repeat_guard.rs"]
 mod test_tool_repeat_guard;
@@ -579,11 +636,11 @@ mod test_task_suspend_resume;
 #[path = "test_tool_task_adapters.rs"]
 mod test_tool_task_adapters;
 
-#[path = "test_tool_visibility.rs"]
-mod test_tool_visibility;
-
 #[path = "test_trigger_runtime.rs"]
 mod test_trigger_runtime;
+
+#[path = "test_unified_dispatch.rs"]
+mod test_unified_dispatch;
 
 #[path = "test_updater.rs"]
 mod test_updater;

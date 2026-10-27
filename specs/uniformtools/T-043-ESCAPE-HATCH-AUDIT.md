@@ -17,6 +17,31 @@ what was found, what was exempted and why, and how each claim is now checked by
 `crates/ragent-agent/tests/test_escape_hatch_audit.rs` rather than by a sentence
 in a changelog. **No key, variable or flag was added.**
 
+## The fifth orphan-module defect in this spec
+
+`test_escape_hatch_audit.rs` (565 lines, 8 cases) landed with `d6abcd4a` - but
+`crates/ragent-agent/tests/all.rs` had **no `#[path]` line for it**, so none of the
+eight cases had ever run. `cargo test -p ragent-agent --test all
+test_escape_hatch_audit::` printed `running 0 tests`. The predicates were prose
+that looked executable: the file was in the tree, `cargo fmt` formatted it and
+`clippy` linted it, so nothing in CI said a word.
+
+Registering it was the first act of this task, and the audit is only a claim
+because of it. The line is:
+
+```rust
+#[path = "test_escape_hatch_audit.rs"]
+mod test_escape_hatch_audit;
+```
+
+This is the same defect class as `tool_args`, `tool_rename`, `tool_input_error`
+and the `tools` config section (§T-012, T-030, T-013 and T-020 records): a
+module or test file landed without its declaration, so it never compiled and its
+cases never ran. The lesson recorded in each record is the same and is now
+observed in five places - **a test file that is not registered is not a test, and
+a green suite does not prove it ran.** The way to check is the `running N tests`
+line, not the exit code: a filter that matches nothing exits 0.
+
 ## Headline result
 
 Exactly one supported mechanism can name a tool, and therefore exactly one can
@@ -26,11 +51,11 @@ Every other candidate surface was inspected and none names a rename spelling.
 
 | # | Surface | Inspected | Naming a rename spelling | Checked by |
 |---|---|---|---|---|
-| 1 | `ragent.json` keys | 339 field declarations and serde `rename`/`alias` values across the 24 sources of `crates/ragent-config` | 1, exempted with a written reason (below) | `test_no_config_field_name_is_a_rename_spelling` |
+| 1 | `ragent.json` keys | 369 field declarations and serde `rename`/`alias` values (365 + 4) across the 24 sources of `crates/ragent-config` | 1, exempted with a written reason (below) | `test_no_config_field_name_is_a_rename_spelling` |
 | 2 | environment variables | 67 reads over 35 distinct names in non-test production source | 0 | `test_no_environment_variable_is_named_a_rename_spelling` |
 | 3 | the resolution path itself | `tool/alias_table.rs` and `tool/rename.rs` | 0 - neither reads an environment nor loads a config | `test_tool_name_resolution_reads_no_environment_and_no_config_file` |
 | 4 | CLI flags, aliases and subcommands | 79 names in `src/main.rs` and `src/cli.rs` | 0 | `test_no_cli_flag_or_subcommand_is_a_rename_spelling` |
-| 5 | the `tools` section's key set | 3 keys | 3, all non-tool-name and pinned | `test_tools_section_has_no_fourth_key_that_could_name_a_tool` |
+| 5 | the `tools` section's key set | 3 keys | 0 - none is a rename spelling, and the set is pinned so a fourth cannot appear silently | `test_tools_section_has_no_fourth_key_that_could_name_a_tool` |
 | 6 | plugin, connector, agent, hook and skill settings | 387 settings across 28 files | 0 | `test_no_dynamic_source_setting_is_named_a_rename_spelling` |
 | 7 | the built-in alias table | 4 rows | 0 | `test_a_retired_spelling_never_resolves_through_the_builtin_table` |
 
@@ -90,9 +115,9 @@ Three probes proved the scan rather than the prose:
 
 | Probe | Reported |
 |---|---|
-| a private `write: bool` on `ToolsConfig` | `crates/ragent-config/src/tools.rs:69 declares write` |
-| an `env::var_os("write")` in `mcp/npx_cache.rs` | `crates/ragent-agent/src/mcp/npx_cache.rs:80 reads write` |
-| a private `Skill: Option<String>` on the private `CodexManifest` | `crates/ragent-plugins/src/manifest.rs:410 declares Skill` |
+| a private `write: bool` on `ToolsConfig` | `crates/ragent-config/src/tools.rs:68 declares write` |
+| an `env::var_os("write")` added to `mcp/npx_cache.rs` | `crates/ragent-agent/src/mcp/npx_cache.rs:80 reads write` |
+| a private `Skill: Option<String>` on the private `CodexManifest` | `crates/ragent-plugins/src/manifest.rs:409 declares Skill` |
 
 The third probe is why the config scan was widened from `pub` fields to struct
 and enum bodies: the first draft read only `pub` fields and let that private
@@ -151,7 +176,7 @@ would silently become `--bash`, which is exactly the loud compatibility flag
 FR-031 forbids. The test resolves that derivation the way clap does (`_` to `-`).
 
 Verified by adding `#[arg(long, global = true)] bash: bool` to `Cli`; the test
-reported `src/main.rs:87 derives the flag --bash`. Reverted.
+reported `src/main.rs:99 derives the flag --bash`. Reverted.
 
 `--tool-alias` is not a flag. The parser rejects it and exits **2**:
 
@@ -174,6 +199,20 @@ serialised key set of a fully populated section. This matters because a fourth k
 in `tools` could only be one that names a tool - FR-031 forbids adding one, and
 `tools.aliases` is the single key that can carry a tool name (with T-042's
 per-entry rejection).
+
+The case is deliberately a *surface* check, not the substantive one, and the two
+are worth telling apart:
+
+- it catches a fourth key that is serialised (proved red with a
+  `legacy_aliases: bool` that serialises: `left: ["aliases", "expose_alias_names",
+  "legacy_aliases", "wire_trace"]`);
+- it does **not** catch a fourth key marked `skip_serializing_if` while at its
+  default - proved by re-running the same probe with
+  `#[serde(default)]` alone: the case passed. That is not a hole in FR-031,
+  because the key that would matter is one *named* after a tool, and predicate 1
+  reports that field name directly (`crates/ragent-config/src/tools.rs:68
+  declares write` for the same probe shape). Pinning the key set is the
+  documentation half; predicate 1 is the enforcement half.
 
 ### 6. Dynamic-source settings
 
@@ -220,14 +259,32 @@ key, variable or flag" asks for.
 ## Verification
 
 - `cargo test -p ragent-agent --test all test_escape_hatch_audit::` - 8 passed.
-- Each predicate was proved to fire, one violation at a time, and every edit was
-  reverted: a config field named `write` (`crates/ragent-config/src/tools.rs:69`),
-  an environment read named `write` (`crates/ragent-agent/src/mcp/npx_cache.rs:80`),
-  a derived `--bash` CLI flag (`src/main.rs:87`), and a manifest setting named
-  `Skill`. The stale-exemption branch was proved by emptying `EXEMPTIONS`, which
-  reported `crates/ragent-config/src/config.rs:96 declares bash`.
-- `cargo fmt --check` clean; `cargo clippy -p ragent-agent --all-targets` shows no
-  new warning.
+- Every predicate was proved to fire, one violation at a time, and every edit was
+  reverted and `md5sum`-checked byte-identical against a pre-probe copy:
+
+  | Predicate | Probe | Reported |
+  |---|---|---|
+  | 1 | a private `write: bool` on `ToolsConfig` (first field, and again last) | `crates/ragent-config/src/tools.rs:68 declares write` |
+  | 2 | `env::var_os("Bash")` in `npx_cache.rs` | `crates/ragent-agent/src/mcp/npx_cache.rs:80 reads Bash` |
+  | 3 | `std::env::var("RAGENT_ALIASES")` in `tool/rename.rs` | `crates/ragent-agent/src/tool/rename.rs contains std::env` |
+  | 4 | `#[arg(long, global = true)] bash: bool` on `Cli` | `src/main.rs:99 derives the flag --bash` |
+  | 5 | a fourth `tools` key (`legacy_aliases`, serialised) | `left: ["aliases", "expose_alias_names", "legacy_aliases", "wire_trace"]` |
+  | 6 | a private `Skill: Option<String>` on a private connector/manifest struct | `crates/ragent-plugins/src/manifest.rs:409 declares Skill` |
+  | 7 | a `bash -> Bash` row added to `BUILTIN_PROVIDER_ALIASES` | `the built-in alias table resolves the retired spelling bash onto a tool` |
+
+- Two further red proofs cover the guards' own guards:
+  - emptying `EXEMPTIONS` made case 1 report the exempted site
+    (`crates/ragent-config/src/config.rs:96 declares bash`), proving the
+    exemption is doing work rather than the scan being blind;
+  - pointing case 1 at a nonexistent directory made it fail with
+    `the configuration scan found only 0 key(s)`, proving the inspection floor
+    catches a disarmed scan rather than passing vacuously.
+- The floor thresholds are set just below the measured counts (369 config / 67
+  environment / 79 CLI / 387 dynamic), so ordinary growth never fails the build
+  but a scan that stops reading its inputs does.
+- `cargo fmt --all -- --check` clean; `cargo clippy -p ragent-agent --all-targets`
+  reports only the crate's pre-existing `pub(crate) ... inside private module`
+  warnings and no new warning from this file.
 - No test writes into the repository: every file the predicates read is opened
-  read-only, and the scratch trees the CLI probes used lived under
-  `target/temp/` and were deleted.
+  read-only, and the CLI probes (`--tool-alias`, the `RAGENT_TOOL_ALIAS` dry-run
+  comparison) used `target/temp/` scratch space that was deleted afterwards.

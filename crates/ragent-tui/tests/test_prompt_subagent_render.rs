@@ -62,7 +62,7 @@ fn test_prompt_subagent_excludes_interactive_tools() {
     // The detailed tool reference renders tool headings as `### \`name\``.
     // (Plain-text mentions of `ask_user` in the AGENTS.md guidance are not
     // tool-reference entries and are irrelevant to FR-005.)
-    for tool in ["ask_user", "question"] {
+    for tool in ["AskUserQuestion", "question"] {
         let heading = format!("### `{tool}`");
         assert!(
             !text.contains(&heading),

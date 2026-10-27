@@ -1008,32 +1008,6 @@ async fn reload_config_reports_parse_failure_for_config_and_mcp() {
 }
 
 // ---------------------------------------------------------------------------
-// /tools - visibility save failure
-// ---------------------------------------------------------------------------
-
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tools_visibility_save_failure_is_reported() {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let (_g, _e, temp, mut app) = isolated_app();
-    let ragent_dir = temp.path().join(".ragent");
-    let original = std::fs::metadata(&ragent_dir)
-        .expect("stat .ragent")
-        .permissions();
-    ragent_config::Config::invalidate_load_cache();
-    std::fs::set_permissions(&ragent_dir, std::fs::Permissions::from_mode(0o500))
-        .expect("chmod .ragent");
-
-    app.execute_slash_command("/tools github on").await;
-    std::fs::set_permissions(&ragent_dir, original).expect("restore .ragent mode");
-
-    assert_eq!(app.status, "tools: github on (unsaved)");
-    let text = last_message(&app);
-    assert!(text.contains("saving config failed"), "text: {text}");
-}
-
-// ---------------------------------------------------------------------------
 // /yolo - persist failure
 // ---------------------------------------------------------------------------
 

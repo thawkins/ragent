@@ -1,8 +1,8 @@
 //! `/tools` and `/thinking` TUI dispatch tests.
 //!
-//! `/tools` reads and writes the tool-family visibility switches; with an
-//! isolated project the writes land in the tempdir config. `/thinking` is a
-//! read-only report over the active model's supported levels.
+//! `/tools` lists the whole registered catalogue - the family visibility
+//! switches it used to read and write are gone. `/thinking` is a read-only
+//! report over the active model's supported levels.
 #![allow(unsafe_code)]
 #![cfg(test)]
 // The isolation harness holds a process-global mutex across the async test body
@@ -48,42 +48,37 @@ async fn tools_bare_help_and_show_list() {
 }
 
 #[tokio::test]
-async fn tools_single_switch_reports_state() {
+async fn tools_list_includes_every_family_tool() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.execute_slash_command("/tools github").await;
+    app.execute_slash_command("/tools list").await;
     assert_eq!(app.status, "tools");
-    assert!(last_message(&app).contains("github"));
+    let text = last_message(&app);
+    // Tools from the former `github`, `teams`, `agents`, `plan` and
+    // `codeindex` families are advertised like any other tool.
+    assert!(text.contains("github_list_issues"), "text: {text}");
+    assert!(text.contains("team_create"), "text: {text}");
+    assert!(text.contains("new_agent"), "text: {text}");
+    assert!(text.contains("EnterPlanMode"), "text: {text}");
+    assert!(text.contains("codeindex_search"), "text: {text}");
 }
 
 #[tokio::test]
-async fn tools_toggle_switch_on_and_off() {
+async fn tools_invalid_subcommand_is_rejected() {
     let (_g, _e, _t, mut app) = isolated_app();
+    app.execute_slash_command("/tools not-a-subcommand").await;
+    assert_eq!(app.status, "tools error");
+
+    app.execute_slash_command("/tools github").await;
+    assert_eq!(app.status, "tools error");
+
     app.execute_slash_command("/tools teams on").await;
-    assert_eq!(app.status, "tools: teams on");
-    assert!(app.tool_visibility.teams);
-
-    app.execute_slash_command("/tools teams off").await;
-    assert_eq!(app.status, "tools: teams off");
-    assert!(!app.tool_visibility.teams);
-}
-
-#[tokio::test]
-async fn tools_invalid_switch_is_rejected() {
-    let (_g, _e, _t, mut app) = isolated_app();
-    app.execute_slash_command("/tools not-a-switch").await;
-    assert_eq!(app.status, "tools error");
-
-    app.execute_slash_command("/tools not-a-switch on").await;
-    assert_eq!(app.status, "tools error");
-
-    app.execute_slash_command("/tools github maybe").await;
     assert_eq!(app.status, "tools error");
 }
 
 #[tokio::test]
 async fn tools_too_many_args_shows_usage() {
     let (_g, _e, _t, mut app) = isolated_app();
-    app.execute_slash_command("/tools github on extra").await;
+    app.execute_slash_command("/tools list extra").await;
     assert_eq!(app.status, "tools error");
 }
 

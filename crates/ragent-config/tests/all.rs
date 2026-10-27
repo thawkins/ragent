@@ -120,6 +120,9 @@ mod test_plugins_config;
 #[path = "test_research_config.rs"]
 mod test_research_config;
 
+#[path = "test_retired_alias_spelling.rs"]
+mod test_retired_alias_spelling;
+
 #[path = "test_config_write_target.rs"]
 mod test_config_write_target;
 
@@ -141,8 +144,11 @@ mod test_telemetry_config;
 #[path = "test_thinking_config.rs"]
 mod test_thinking_config;
 
-#[path = "test_tool_visibility.rs"]
-mod test_tool_visibility;
+#[path = "test_tools_config.rs"]
+mod test_tools_config;
+
+#[path = "test_tools_config_load.rs"]
+mod test_tools_config_load;
 
 #[path = "test_user_dirs_helpers.rs"]
 mod test_user_dirs_helpers;

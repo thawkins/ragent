@@ -302,7 +302,7 @@ fn extract_content_pattern_branches_for_every_detector() {
     // thiserror + tracing + serde + #[test] all in one edit.
     let file = dir.path().join("src").join("lib.rs");
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({
             "path": file.to_string_lossy(),
             "content": "thiserror::Error\ntracing::info!(\"x\")\n#[derive(Debug)] struct S; let _: Serialize;\n#[test] fn t() {}"
@@ -326,7 +326,7 @@ fn extract_python_typescript_and_markdown_tags() {
 
     // Python file: tag `python`; no content_parts -> generic parent fallback.
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": dir.path().join("pkg/app.py").to_string_lossy() }),
         "ok",
         true,
@@ -337,7 +337,7 @@ fn extract_python_typescript_and_markdown_tags() {
     );
     // TypeScript file: tag `typescript`.
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": dir.path().join("web/app.tsx").to_string_lossy() }),
         "ok",
         true,
@@ -348,7 +348,7 @@ fn extract_python_typescript_and_markdown_tags() {
     );
     // Markdown doc: tag `documentation`, content_parts empty -> fallback.
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": dir.path().join("docs/guide.md").to_string_lossy() }),
         "ok",
         true,
@@ -369,7 +369,7 @@ fn extract_root_level_file_without_content_yields_no_candidate() {
 
     // A bare file in the working dir root: parent is "." -> returns None.
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": dir.path().join("notes.md").to_string_lossy() }),
         "ok",
         true,
@@ -412,7 +412,7 @@ fn extract_track_failure_caps_at_twenty_and_resolves() {
     // 21 failures -> the tracker's 20-entry cap must drop the oldest.
     for i in 0..21 {
         engine.on_tool_result(
-            "bash",
+            "Bash",
             &json!({ "command": format!("make {i}") }),
             "boom",
             false,
@@ -424,7 +424,7 @@ fn extract_track_failure_caps_at_twenty_and_resolves() {
     }
     // A later success resolves against the most recent failure.
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!({ "command": "make 21" }),
         "fine",
         true,
@@ -458,7 +458,7 @@ fn extract_dedup_against_stored_memory_suppresses_candidate() {
         .expect("seed");
 
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": dir.path().join(rel).to_string_lossy() }),
         "ok",
         true,
@@ -482,7 +482,7 @@ fn extract_unquoted_failure_command_and_duplicate_resolution() {
     // A failure whose recorded input is a plain string (no surrounding
     // quotes) exercises the `unwrap_or` branch in detect_error_resolution.
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!("cargo build"),
         "boom",
         false,
@@ -492,7 +492,7 @@ fn extract_unquoted_failure_command_and_duplicate_resolution() {
         dir.path(),
     );
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!("cargo build"),
         "ok",
         true,
@@ -510,7 +510,7 @@ fn extract_auto_store_reads_setting_and_creates_memory() {
     let mut rx = bus.subscribe();
 
     engine.on_tool_result(
-        "edit",
+        "Edit",
         &json!({
             "path": dir.path().join("tests/a.rs").to_string_lossy(),
             "new_str": "anyhow::Result<()>"
@@ -545,7 +545,7 @@ fn extract_session_summary_with_legacy_path_key() {
     let messages = vec![SessionMessageSummary {
         role: "assistant".to_string(),
         tool_calls: vec![ToolCallSummary {
-            tool_name: "write".to_string(),
+            tool_name: "Write".to_string(),
             input: json!({ "path": edited.to_string_lossy() }),
             success: true,
         }],
@@ -666,7 +666,7 @@ async fn history_tool_result_marker_and_error_fallbacks() {
         "s1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "c1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Error,

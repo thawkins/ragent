@@ -44,7 +44,7 @@ impl Fixture {
         std::fs::write(
             bp_dir.join("task-seed.json"),
             json!([{
-                "tool": "bash",
+                "tool": "Bash",
                 "args": { "command": format!("touch {}", marker.display()) }
             }])
             .to_string(),
@@ -170,7 +170,7 @@ async fn blueprint_bash_seed_runs_when_the_category_is_allowed() {
 
     assert!(
         fixture.marker.exists(),
-        "an explicitly allowed blueprint `bash` seed should execute"
+        "an explicitly allowed blueprint `Bash` seed should execute"
     );
 }
 

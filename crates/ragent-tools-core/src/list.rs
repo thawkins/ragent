@@ -29,7 +29,7 @@ impl Tool for ListTool {
          No parameters are required. Optional parameters: `path` (string) - \
          the directory to list (default: working directory); `depth` (integer) \
          - maximum recursion depth (default: 2). Returns a formatted tree \
-         with directories sorted before files. Use `glob` instead if you need \
+         with directories sorted before files. Use `Glob` instead if you need \
          pattern matching rather than browsing."
     }
 
@@ -133,7 +133,7 @@ fn list_recursive(
         .collect();
 
     // SEC-028: classify via the directory entry's own file type so a symlinked
-    // directory is NOT followed by the recursive descent (matching `glob`). A
+    // directory is NOT followed by the recursive descent (matching `Glob`). A
     // symlink is neither descended into nor reported as a directory.
     let is_dir_entry = |e: &std::fs::DirEntry| e.file_type().is_ok_and(|ft| ft.is_dir());
 

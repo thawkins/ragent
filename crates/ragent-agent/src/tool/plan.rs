@@ -21,7 +21,7 @@ pub struct PlanEnterTool;
 #[async_trait::async_trait]
 impl Tool for PlanEnterTool {
     fn name(&self) -> &'static str {
-        "plan_enter"
+        "EnterPlanMode"
     }
 
     /// # Errors
@@ -110,7 +110,7 @@ pub struct PlanExitTool;
 #[async_trait::async_trait]
 impl Tool for PlanExitTool {
     fn name(&self) -> &'static str {
-        "plan_exit"
+        "ExitPlanMode"
     }
 
     /// # Errors

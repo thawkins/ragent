@@ -206,6 +206,7 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -355,6 +356,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -594,6 +596,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -746,6 +749,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -951,6 +955,7 @@ async fn test_pre_send_compaction_skipped_notice_emitted_once_per_turn() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

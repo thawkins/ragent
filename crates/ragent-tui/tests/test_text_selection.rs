@@ -81,6 +81,7 @@ fn make_app() -> App {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -453,7 +454,7 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
         "tm-s1",
         Role::Assistant,
         vec![MessagePart::ToolCall {
-            tool: "bash".to_string(),
+            tool: "Bash".to_string(),
             call_id: "c1".to_string(),
             state: Box::new(ToolCallState {
                 status: ToolCallStatus::Completed,
@@ -500,7 +501,7 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
     }
 
     assert!(
-        all_text.contains("Bash") || all_text.contains("bash"),
+        all_text.contains("Bash"),
         "output overlay should include tool name, got:\n{all_text}"
     );
     assert!(

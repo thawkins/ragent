@@ -251,6 +251,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().to_path_buf();
@@ -297,7 +298,7 @@ async fn test_pre_loop_snapshot_captured_before_first_write() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "loop_written.txt", "content": "written by the loop"}"#
                     .to_string(),
             },
@@ -458,13 +459,13 @@ async fn test_change_summary_counts_match_induced_changes() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args:
                     r#"{"path": "existing.txt", "content": "modified contents\nnow two lines\n"}"#
                         .to_string(),
             },
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "brand_new.txt", "content": "created by the loop\n"}"#
                     .to_string(),
             },
@@ -537,7 +538,7 @@ async fn test_rollback_restores_pre_loop_contents() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "existing.txt", "content": "mutated by the loop"}"#.to_string(),
             },
             ScriptedReply::TextOnly("done"),
@@ -735,7 +736,7 @@ async fn test_rollback_decline_keeps_loop_changes() -> Result<()> {
         event_bus.clone(),
         vec![
             ScriptedReply::ToolCallNamed {
-                name: "write",
+                name: "Write",
                 args: r#"{"path": "existing.txt", "content": "mutated by the loop"}"#.to_string(),
             },
             ScriptedReply::TextOnly("done"),

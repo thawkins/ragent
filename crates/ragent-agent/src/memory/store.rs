@@ -18,8 +18,7 @@
 //! # Storage
 //!
 //! Structured memories are persisted in the `memories` and `memory_tags`
-//! SQLite tables, with a `memories_fts` FTS5 virtual table for full-text
-//! search. The CRUD methods live on [`crate::storage::Storage`].
+//! SQLite tables. The CRUD methods live on [`crate::storage::Storage`].
 
 use serde::{Deserialize, Serialize};
 

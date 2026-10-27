@@ -12,6 +12,15 @@ after discovery via the `/mcp discover` TUI command, or after `/mcp connect
 <id>` enables and connects a server live. Servers bridged from an enabled
 plugin's `mcpServers` section connect as `<plugin-id>.<server>` at startup.
 
+The `mcp_` namespace is what keeps a server out of the bare ragent namespace:
+a server that offers a tool called `bash` gets `mcp_<server>_bash`, which is not
+the retired `bash` and cannot make it resolvable. A bridge whose surfaced name
+falls outside that namespace, or that equals a name this build retired, is
+refused with a message naming the server, the spelling and the name to use
+instead; the rest of that server's tools keep working, and the refusal is
+reported once rather than on every reconnect. Connector servers obey the same
+rule - they reach the registry through this bridge under a dotted id.
+
 ---
 
 ## mcp_tool

@@ -38,6 +38,7 @@ fn update_message_rewrites_parts_and_resyncs_fts() {
         },
         MessagePart::Reasoning {
             text: "reasoning text".to_string(),
+            signature: None,
         },
     ];
     msg.touch();

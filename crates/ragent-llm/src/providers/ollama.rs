@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::{
@@ -27,6 +27,9 @@ use ragent_types::ThinkingConfig;
 use ragent_types::event::FinishReason;
 
 use super::ollama_shared::estimate_context_window;
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::profile_table::OPENAI_CHAT;
+use super::wire::trace;
 
 /// Default Ollama server address.
 const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
@@ -302,6 +305,7 @@ impl LlmClient for OllamaClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request, &request.tools);
+        trace::record_body(&request, &body);
 
         let mut req_builder = self
             .http
@@ -369,7 +373,9 @@ impl LlmClient for OllamaClient {
             // F6: set once any tool call is seen in the stream; later content
             // deltas are suppressed as duplicate narration.
             let mut tool_calls_seen = false;
-            let mut tool_call_ids: BTreeMap<u64, String> = BTreeMap::new();
+            // FR-004: the `/v1/chat/completions` shape keys tool calls by
+            // `tool_calls[].index`; the shared accumulator owns the open calls.
+            let mut acc = ToolCallAccumulator::new(OPENAI_CHAT, "ollama");
             let mut stream_done = false;
             let mut yielded_event = false;
 
@@ -525,21 +531,17 @@ impl LlmClient for OllamaClient {
                         {
                             for tc in tool_calls {
                                 let index = tc["index"].as_u64().unwrap_or(0);
+                                let key = StreamKey::Index(index);
 
                                 if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
+                                    acc.set_id(&key, id);
                                 }
 
                                 if let Some(function) = tc.get("function") {
-                                    if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
+                                    if let Some(name) = function["name"].as_str()
+                                        && let Some(event) = acc.open(key.clone(), None, name)
+                                    {
+                                        yield event;
                                         yielded_event = true;
                                     }
 
@@ -549,15 +551,9 @@ impl LlmClient for OllamaClient {
                                     let args_json = super::tool_cache::tool_arguments_json(function);
                                     if let Some(args) =
                                         args_json.filter(|args| !args.is_empty())
+                                        && let Some(event) = acc.delta(&key, &args)
                                     {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args,
-                                        };
+                                        yield event;
                                         yielded_event = true;
                                     }
                                 }
@@ -566,10 +562,10 @@ impl LlmClient for OllamaClient {
 
                           // Finish reason
                           if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                              // End pending tool calls in index order (see the
-                              // openai provider for the rationale).
-                              for id in tool_call_ids.values() {
-                                  yield StreamEvent::ToolCallEnd { id: id.clone() };
+                              // End the open calls in index order (see the shared
+                              // accumulator for the rationale).
+                              for event in acc.end_all() {
+                                  yield event;
                               }
 
                               let reason = match finish_reason {

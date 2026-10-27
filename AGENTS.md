@@ -309,10 +309,18 @@ When reading files with the `read` tool:
   for the review and rollout plan.
 - Add a new test as one more `#[path = ...] mod ...;` line in the crate's
   `tests/all.rs` — never as a new top-level file that becomes its own binary.
-- Run one consolidated file by filter: `cargo test -p <crate> --test all test_foo::`
-  (test names keep their `test_foo::` file prefix inside the `all` binary).
-- Merging binaries merges process state. Every crate's `tests/all.rs` therefore
-  defines one binary-wide lock:
+- Run one consolidated file by filter:
+  `cargo nextest run -p <crate> -E 'test(test_foo::)'` (test names keep their
+  `test_foo::` file prefix inside the `all` binary). The workspace runs tests
+  with `cargo nextest`, not `cargo test` — see "Test Commands" in
+  `@AGENTS-LANGUAGE.md` and the configuration in `.config/nextest.toml`.
+- Merging binaries merges process state. Under `cargo test` a child module runs
+  in the `all` binary's single process alongside every other child. `cargo
+  nextest` runs every test in its own process and removes most of that, but it is
+  not a licence to share a mutable global: a `static` registry or a shared
+  scratch directory is still one object per binary, and tests within one crate
+  can still interleave over a filesystem path. Every crate's `tests/all.rs`
+  therefore defines one binary-wide lock:
 
   ```rust
   pub fn global_env_mutex() -> &'static std::sync::Mutex<()> { /* OnceLock */ }
@@ -321,12 +329,26 @@ When reading files with the `read` tool:
 
   A test that mutates or observes a process-global (cwd, `XDG_CONFIG_HOME`,
   `HOME`, `PATH`, a `static` registry) takes `crate::global_env_lock()` for as
-  long as it needs the value stable — never a file-local mutex, which under one
-  binary per crate only serialises the children that happen to share that file.
+  long as it needs the value stable — never a file-local mutex, which only
+  serialises the children that happen to share that file. Where a shared
+  *directory* rather than an environment variable is the thing being raced, the
+  first choice is a directory of the test's own (a `tempdir`, or a
+  `target/temp/<unique-name>` root) and the lock is the fallback.
   `#[serial]` remains fine for globals that need no value control; the shared
   lock is preferred where the test must also *force* a value (`HOME`, the SSRF
   bypass, an API-key variable) while it runs. Never weaken an assertion or add a
   target just to regain isolation.
+  **Neither a file-local `Mutex` nor `#[serial]` orders two nextest test
+  processes.** serial_test publishes its lock key as `SERIAL_TEST_RETRY_KEY` in
+  the parent environment and each test process starts from its own saved
+  environment, so two siblings pick different keys and enter their "serial"
+  sections together. Where the exclusion has to hold across processes — a
+  fixture written into the repository, a shared `target/temp/` path, a scan of
+  the checked-in tree — declare it in `.config/nextest.toml`: a
+  `[test-groups]` entry with `max-threads = 1` plus a
+  `[[profile.default.overrides]]` (and a `profile.ci` twin) whose `filter`
+  selects those tests, and keep the in-process lock for `cargo test` runs.
+  `test_tool_rename_guard` / group `tool-rename-guard` is the worked example.
 - **Every crate must actually declare that lock, and every mutating test must
   take the SAME one.** Two tests in one crate that each hold a *different*
   private mutex — or one that is `#[serial]` while the other takes a file-local

@@ -244,7 +244,7 @@ fn multi_step_loop_events() -> Vec<StreamEvent> {
         },
         StreamEvent::ToolCallStart {
             id: "toolu_mock_002".to_string(),
-            name: "grep".to_string(),
+            name: "Grep".to_string(),
         },
         StreamEvent::ToolCallDelta {
             id: "toolu_mock_002".to_string(),

@@ -69,13 +69,8 @@ async fn test_tool_info_returns_valid_json_with_counts_and_every_tool() {
     let parsed = parse_output_json(&output);
 
     let names = registry_handle.list();
-    let expected_total = names.len() + registry_handle.hidden().len();
+    let expected_total = names.len();
     assert_eq!(parsed["total"].as_u64().unwrap() as usize, expected_total);
-    let visible = parsed["visible"].as_u64().unwrap() as usize;
-    assert_eq!(
-        visible + parsed["hidden"].as_u64().unwrap() as usize,
-        expected_total
-    );
 
     let tools: Vec<&Value> = parsed["tools"]
         .as_array()
@@ -83,10 +78,9 @@ async fn test_tool_info_returns_valid_json_with_counts_and_every_tool() {
         .iter()
         .collect();
     assert_eq!(tools.len(), expected_total);
-    // Sorted by name and exactly the registry's full set (visible + hidden).
+    // Sorted by name and exactly the registry's full set.
     let reported_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     let mut expected: Vec<String> = names;
-    expected.extend(registry_handle.hidden());
     expected.sort();
     assert_eq!(
         reported_names,
@@ -99,9 +93,8 @@ async fn test_tool_info_returns_valid_json_with_counts_and_every_tool() {
 }
 
 #[tokio::test]
-async fn test_tool_info_marks_hidden_and_reports_categories() {
+async fn test_tool_info_lists_every_tool_and_reports_categories() {
     let registry_handle = Arc::new(create_default_registry());
-    registry_handle.set_hidden(&["read".to_string(), "write".to_string()]);
     let tool = registry_handle
         .get("tool_info")
         .expect("tool_info registered");
@@ -116,8 +109,7 @@ async fn test_tool_info_marks_hidden_and_reports_categories() {
         .iter()
         .find(|t| t["name"] == "read")
         .expect("read present");
-    assert_eq!(read_entry["hidden"], true);
-    assert_eq!(parsed["hidden"], 2);
+    assert!(read_entry.get("hidden").is_none());
 
     let tool_info_entry = tools
         .iter()

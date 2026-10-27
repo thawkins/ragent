@@ -114,9 +114,9 @@ fn test_render_u64_histogram() {
         .u64_histogram("ragent.tool.duration.count")
         .with_boundaries(vec![10.0, 100.0])
         .build();
-    hist.record(5, &[opentelemetry::KeyValue::new("tool", "bash")]);
-    hist.record(50, &[opentelemetry::KeyValue::new("tool", "bash")]);
-    hist.record(500, &[opentelemetry::KeyValue::new("tool", "bash")]);
+    hist.record(5, &[opentelemetry::KeyValue::new("tool", "Bash")]);
+    hist.record(50, &[opentelemetry::KeyValue::new("tool", "Bash")]);
+    hist.record(500, &[opentelemetry::KeyValue::new("tool", "Bash")]);
 
     let text = render_prometheus_text(&handle);
     assert!(

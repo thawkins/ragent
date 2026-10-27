@@ -120,6 +120,7 @@ fn bench_serialize_message(c: &mut Criterion) {
             },
             MessagePart::Reasoning {
                 text: "Let me consider the tradeoffs.".to_string(),
+                signature: None,
             },
         ],
     );

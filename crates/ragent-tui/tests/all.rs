@@ -143,6 +143,11 @@ mod test_event_handler_more;
 mod test_event_swarm_research_deep;
 #[path = "test_force_cleanup_modal.rs"]
 mod test_force_cleanup_modal;
+
+#[path = "test_fr030_surface_agreement.rs"]
+mod test_fr030_surface_agreement;
+#[path = "test_fr033_completion_surfaces.rs"]
+mod test_fr033_completion_surfaces;
 #[path = "test_gcf_command.rs"]
 mod test_gcf_command;
 #[path = "test_gcf_indicator.rs"]
@@ -473,8 +478,6 @@ mod test_thinking_selector;
 mod test_tool_display;
 #[path = "test_tool_event_state.rs"]
 mod test_tool_event_state;
-#[path = "test_tools_visibility_command.rs"]
-mod test_tools_visibility_command;
 #[path = "test_widgets_and_events_extra.rs"]
 mod test_widgets_and_events_extra;
 #[path = "test_window_lifecycle.rs"]

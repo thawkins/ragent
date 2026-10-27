@@ -142,14 +142,14 @@ fn test_initiative_input_summary_checkpoint() {
 #[test]
 fn test_skill_manage_input_summary_list() {
     let input = json!({"action": "list"});
-    let summary = tool_input_summary("skill_manage", &input, "/tmp");
+    let summary = tool_input_summary("Skill", &input, "/tmp");
     assert!(!summary.contains("[skill]"), "got: {summary}");
 }
 
 #[test]
 fn test_skill_manage_input_summary_load() {
     let input = json!({"action": "load", "name": "simplify"});
-    let summary = tool_input_summary("skill_manage", &input, "/tmp");
+    let summary = tool_input_summary("Skill", &input, "/tmp");
     assert!(!summary.contains("[skill]"));
     assert!(summary.contains("simplify"));
 }

@@ -625,7 +625,10 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), StageError> {
         if entry.is_dir() {
             continue;
         }
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| StageError::Io(format!("zip entry {i} name: {e}")))?
+            .to_string();
         let rel = safe_relative_path(&name)?;
         let dest = staging.join(&rel);
         if let Some(parent) = dest.parent() {

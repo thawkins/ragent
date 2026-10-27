@@ -177,21 +177,21 @@ async fn container_scripts_reach_the_image_check_for_every_routed_tool() {
         ),
         ("read", json!({ "path": "./nested/file.rs", "end_line": 9 })),
         ("create", json!({ "path": "src/new.rs", "content": "hi" })),
-        ("write", json!({ "path": "src/w.rs", "content": "hi" })),
+        ("Write", json!({ "path": "src/w.rs", "content": "hi" })),
         (
-            "append_file",
+            "append_to_file",
             json!({ "path": "src/a.rs", "content": "more" }),
         ),
         ("rm", json!({ "path": "src/dead.rs" })),
-        ("mkdir", json!({ "path": "src/gen" })),
+        ("make_directory", json!({ "path": "src/gen" })),
         ("list", json!({ "path": "." })),
         ("list", json!({ "path": "src", "depth": 4 })),
-        ("glob", json!({ "pattern": "**/*.rs" })),
-        ("glob", json!({ "pattern": "src/**/*.ts", "path": "src" })),
-        ("glob", json!({ "pattern": "a/b", "path": "src" })),
-        ("grep", json!({ "pattern": "needle" })),
+        ("Glob", json!({ "pattern": "**/*.rs" })),
+        ("Glob", json!({ "pattern": "src/**/*.ts", "path": "src" })),
+        ("Glob", json!({ "pattern": "a/b", "path": "src" })),
+        ("Grep", json!({ "pattern": "needle" })),
         (
-            "grep",
+            "Grep",
             json!({ "pattern": "x", "path": "src", "case_insensitive": true, "include": "*.rs", "exclude": "vendor/*" }),
         ),
     ];
@@ -228,8 +228,8 @@ async fn container_file_tools_require_their_path_parameter() {
     for (tool, input, needle) in [
         ("read", json!({}), "path"),
         ("create", json!({ "path": "x" }), "content"),
-        ("glob", json!({}), "pattern"),
-        ("grep", json!({}), "pattern"),
+        ("Glob", json!({}), "pattern"),
+        ("Grep", json!({}), "pattern"),
     ] {
         let err = dispatch_file_tool(&backend, &context, tool, input).await;
         assert!(
@@ -247,7 +247,8 @@ async fn container_path_rejects_empty_and_parent_dir_escapes() {
     assert!(empty.to_string().contains("must not be empty"), "{empty}");
 
     for bad in ["../etc/passwd", "a/../../b", "/projects/../../etc/shadow"] {
-        let err = dispatch_file_tool(&backend, &context, "mkdir", json!({ "path": bad })).await;
+        let err =
+            dispatch_file_tool(&backend, &context, "make_directory", json!({ "path": bad })).await;
         assert!(
             err.to_string().contains("FR-035") || err.to_string().contains("escape"),
             "path {bad} should be rejected: {err}"
@@ -280,7 +281,7 @@ async fn container_rm_rejects_wildcards() {
 #[tokio::test]
 async fn container_bash_missing_command_and_banned_command_fail_before_provisioning() {
     let (backend, context) = imageless_backend();
-    // A `bash` call with no `command` fails on the required parameter.
+    // A `Bash` call with no `command` fails on the required parameter.
     let missing = dispatch_file_tool(&backend, &context, "Bash", json!({})).await;
     assert!(missing.to_string().contains("command"), "{missing}");
 

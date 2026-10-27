@@ -292,8 +292,19 @@ fn test_encode_tools_bytes_match_the_pre_fold_builders() {
     // hand-written builders produced before `encode_tools` replaced them, captured
     // from the old `build_*` functions. Pinning them makes a refactor that changes
     // key order, adds a field or drops the comma separator fail here rather than in
-    // a provider request at run time. (`serde_json`'s default map sorts keys, so the
-    // order is stable without the `preserve_order` feature.)
+    // a provider request at run time.
+    //
+    // Key order is not stable across builds here, and pinning it as a fixed string
+    // would be the wrong assertion. This workspace's graph contains TWO copies of
+    // `serde_json`: `ragent-llm` links one without `preserve_order` (a sorted map),
+    // and `ragent-agent`'s `gcf` dependency enables the feature in a second copy
+    // (insertion order). Cargo unifies features per build, and whether the crate
+    // under test links the sorted or the insertion-ordered copy depends on the build
+    // graph, so the same source encodes the same tools to different bytes in
+    // different runs - measured, both ways. The key *sets* and the byte *lengths* are
+    // identical either way, which is what these cases pin; a comparison of `Value`s
+    // would not catch a field added or dropped, so the structural checks below stay
+    // string-level.
     let one = [ToolDefinition {
         name: "Read".to_string(),
         description: "d".to_string(),
@@ -304,25 +315,25 @@ fn test_encode_tools_bytes_match_the_pre_fold_builders() {
             "openai",
             OPENAI_CHAT,
             None,
-            r#"{"tools":[{"function":{"description":"d","name":"Read","parameters":{}},"type":"function"}]}"#,
+            r#"{"tools":[{"type":"function","function":{"name":"Read","description":"d","parameters":{}}}]}"#,
         ),
         (
             "anthropic",
             ANTHROPIC_MESSAGES,
             None,
-            r#"{"tools":[{"description":"d","input_schema":{},"name":"Read"}]}"#,
+            r#"{"tools":[{"name":"Read","description":"d","input_schema":{}}]}"#,
         ),
         (
             "gemini",
             GEMINI,
             None,
-            r#"{"tools":[{"functionDeclarations":[{"description":"d","name":"Read","parameters":{}}]}]}"#,
+            r#"{"tools":[{"functionDeclarations":[{"name":"Read","description":"d","parameters":{}}]}]}"#,
         ),
         (
             "bedrock",
             BEDROCK_CONVERSE,
             None,
-            r#"{"tools":[{"toolSpec":{"description":"d","inputSchema":{"json":{}},"name":"Read"}}]}"#,
+            r#"{"tools":[{"toolSpec":{"name":"Read","description":"d","inputSchema":{"json":{}}}}]}"#,
         ),
         (
             "responses",
@@ -334,16 +345,31 @@ fn test_encode_tools_bytes_match_the_pre_fold_builders() {
             "huggingface",
             OPENAI_CHAT,
             Some("t_"),
-            r#"{"tools":[{"function":{"description":"d","name":"t_Read","parameters":{}},"type":"function"}]}"#,
+            r#"{"tools":[{"type":"function","function":{"name":"t_Read","description":"d","parameters":{}}}]}"#,
         ),
     ];
     for (label, profile, prefix, expected) in cases {
         let cached = encode_tools(profile, prefix, &one);
+        let got = String::from_utf8_lossy(&cached.bytes).into_owned();
         assert_eq!(
-            String::from_utf8_lossy(&cached.bytes),
-            expected,
-            "{label}: the folded encoder must emit the bytes the old builder emitted"
+            got.len(),
+            expected.len(),
+            "{label}: the wrapper, separators or field count changed (key order may \
+             differ between builds, the byte count may not): got {got}, want {expected}"
         );
+        // The same members in either order: serialising both sides with one process
+        // sorts both, so this compares the field set without depending on which
+        // `serde_json` copy the encoder linked.
+        let want: serde_json::Value = serde_json::from_str(expected).expect("expected parses");
+        let have: serde_json::Value = serde_json::from_str(&got).expect("encoder output parses");
+        assert_eq!(
+            have, want,
+            "{label}: the folded encoder must emit the members the old builder emitted"
+        );
+        // No byte-for-byte comparison: whichever `serde_json` copy this build linked
+        // decides the key order, and both orders are correct output (measured - the
+        // same source emits each of them in a different build). The members and the
+        // length above are the parts that may not change.
     }
 }
 
@@ -421,4 +447,275 @@ fn test_responses_provider_asks_the_encoder_for_its_tool_array() {
         "{} must serve its tool array from the shared cache (FR-003)",
         path.display()
     );
+}
+
+// ---------------------------------------------------------------------------
+// FR-003, full tree (T-027): no provider module builds its own tool JSON
+// ---------------------------------------------------------------------------
+
+/// A Rust source file under `src/providers/`, with its comment lines removed.
+///
+/// Comments are stripped first because the tree's module docs and comments
+/// legitimately *name* the envelope keys when explaining where the shapes now
+/// live (for example `encode.rs` says "`{"toolSpec":{...}}`"), and a scan that
+/// fired on prose would have to be narrowed until it stopped seeing the defect
+/// it exists for. Only code can build JSON.
+fn provider_sources(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|e| panic!("cannot read an entry of {}: {e}", dir.display()))
+                .path()
+        })
+        .collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            provider_sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let raw = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            let code = strip_rust_comments(&raw);
+            out.push((path, code));
+        }
+    }
+}
+
+/// Remove `//`-to-end-of-line and `/* */` comments from Rust source, leaving
+/// string and character literals intact.
+///
+/// This is a small scanner rather than a lexer: it tracks whether it is inside a
+/// string (honouring `\` escapes), a character literal or a block comment, and
+/// nothing else. That is exactly enough to answer "is this key text in code",
+/// and it never rewrites line numbers, so a reported line is the file's line.
+fn strip_rust_comments(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut out = String::with_capacity(source.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        match byte {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                let mut depth = 1usize;
+                while i < bytes.len() && depth > 0 {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        // Keep line structure so reported lines stay correct.
+                        if bytes[i] == b'\n' {
+                            out.push('\n');
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            b'"' => {
+                out.push('"');
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        out.push(bytes[i] as char);
+                        if let Some(next) = bytes.get(i + 1) {
+                            out.push(*next as char);
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                    if bytes[i - 1] == b'"' {
+                        break;
+                    }
+                }
+            }
+            b'\'' => {
+                // A character literal (or a lifetime; neither opens a string).
+                out.push('\'');
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        out.push(bytes[i] as char);
+                        if let Some(next) = bytes.get(i + 1) {
+                            out.push(*next as char);
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    out.push(bytes[i] as char);
+                    let closed = bytes[i] == b'\'';
+                    i += 1;
+                    if closed {
+                        break;
+                    }
+                    if bytes[i - 1] == b'\n' {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                out.push(byte as char);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Every envelope key the tree's five item shapes are built from.
+///
+/// `wire::encode::item_json` is the one place allowed to name any of them; a
+/// provider module that names one is building a definition object itself. The
+/// Responses item keys (`description`, `parameters`, `name`, `type`) are not
+/// listed: they are shared with unrelated message bodies, which is why
+/// `test_responses_provider_asks_the_encoder_for_its_tool_array` scopes them to
+/// the one module that used to build a Responses array.
+///
+/// `"tool_use"` is deliberately absent even though Anthropic's *item* is tagged
+/// with it: the identical literal is the Anthropic stream's content-block type and
+/// its `stop_reason`, so the only files the plain string could scan are the ones
+/// where it means something else. The Anthropic item is caught by
+/// `"input_schema"`, which no message shape uses.
+const ENVELOPE_KEYS: [&str; 8] = [
+    "\"input_schema\"",
+    "\"inputSchema\"",
+    "\"toolSpec\"",
+    "\"functionDeclarations\"",
+    "\"function_declarations\"",
+    "\"tool_call\"",
+    "\\\"type\\\":\\\"function\\\"",
+    "\"type\": \"function\"",
+];
+
+#[test]
+fn test_no_provider_module_writes_an_envelope_key() {
+    // FR-003 over the whole provider tree: every module under
+    // `crates/ragent-llm/src/providers/` (the folder `ragent-llm` declares as its
+    // provider layer, `wire/` included) must leave the tool envelope to
+    // `wire::encode::item_json`. The encoder's own module is the single
+    // exemption, and it is named rather than skipped by pattern, so a *second*
+    // module in `wire/` cannot inherit it.
+    //
+    // This is the tree-wide half of the scan T-004 scoped to the six modules the
+    // fold touched, and it adds the keys the scoped version deliberately left out
+    // (the Bedrock `inputSchema`, the snake-case `function_declarations` spelling a
+    // second family could introduce, and the two OpenAI function spellings the
+    // tool-call carrier uses).
+    use std::path::PathBuf;
+
+    let providers = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("providers");
+    let mut sources: Vec<(PathBuf, String)> = Vec::new();
+    provider_sources(&providers, &mut sources);
+    assert!(
+        sources.len() > 20,
+        "the scan found only {} provider sources; it is meant to walk the whole \
+         `providers/` tree",
+        sources.len()
+    );
+
+    let encoder = providers.join("wire").join("encode.rs");
+    let mut offenders: Vec<String> = Vec::new();
+    for (path, code) in &sources {
+        if *path == encoder {
+            continue;
+        }
+        for key in ENVELOPE_KEYS {
+            if !code.contains(key) {
+                continue;
+            }
+            for (number, line) in code.lines().enumerate() {
+                if line.contains(key) {
+                    offenders.push(format!("{}:{}: {key}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "a provider module builds its own tool envelope literal (FR-003): every \
+         definition shape belongs to `wire::encode::item_json`. Offenders:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn test_no_provider_module_writes_a_tool_body_key_literal() {
+    // FR-003's other half: a provider may *assign* the encoded list, but it may
+    // not name the body key itself. The key comes from the format
+    // (`ToolFormat::body_key`), which derives it from the declared envelope, so an
+    // assignment cannot drift from the profile - and, because the scan above only
+    // sees shapes, the key is the one place a hand-built list would still show.
+    use std::path::PathBuf;
+
+    let providers = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("providers");
+    let mut sources: Vec<(PathBuf, String)> = Vec::new();
+    provider_sources(&providers, &mut sources);
+
+    // The two constants in `tool_cache.rs` are the keys' single definition.
+    let cache = providers.join("tool_cache.rs");
+    let mut offenders: Vec<String> = Vec::new();
+    for (path, code) in &sources {
+        if *path == cache || *path == providers.join("wire").join("encode.rs") {
+            continue;
+        }
+        for key in ["[\"tools\"]", "[\"toolConfig\"]"] {
+            for (number, line) in code.lines().enumerate() {
+                if line.contains(key) {
+                    offenders.push(format!("{}:{}: {key}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "a provider names the tool body key itself instead of asking its format \
+         (`ToolFormat::body_key`, FR-003). Offenders:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
+fn test_every_tool_body_key_is_the_one_the_encoder_wraps() {
+    // The scan above is only worth something if the key a format reports is the
+    // key its encoded payload actually fits under: `body_key` says where the
+    // payload goes, `encode_tools` decides the payload's shape. Bedrock is the
+    // case that matters (it takes the whole `{"tools":[...]}` object under
+    // `toolConfig`), and a family that reported the wrong key would produce a
+    // body the provider silently ignores.
+    for format in ToolFormat::ALL {
+        let cached = cached_tools(*format, &[tool("Read")]);
+        let payload = std::str::from_utf8(&cached.bytes).expect("encoded tools are UTF-8");
+        let key = format.body_key();
+        match format.tool_envelope() {
+            ragent_llm::provider::wire::ToolEnvelope::BedrockToolSpec => {
+                assert_eq!(
+                    key, "toolConfig",
+                    "{format:?} keeps the whole wrapper, so its body key is `toolConfig`"
+                );
+                assert!(
+                    payload.starts_with("{\"tools\":["),
+                    "{format:?}: the `toolConfig` body takes the whole wrapper, got {payload}"
+                );
+            }
+            _ => assert_eq!(
+                key, "tools",
+                "{format:?} assigns the inner array, so its body key is `tools`"
+            ),
+        }
+    }
 }

@@ -40,6 +40,21 @@ pub enum StreamEvent {
     },
     /// The model finished the reasoning block.
     ReasoningEnd,
+    /// The provider's signature over the reasoning block it just streamed.
+    ///
+    /// Anthropic (and the Bedrock Anthropic shape) send the signature as a
+    /// `signature_delta` *inside* the thinking block, after the thinking text,
+    /// and require it to be echoed back with the block on the turn that answers
+    /// a tool call. It is its own event rather than a field on
+    /// [`Self::ReasoningEnd`] because the two arrive in separate frames under
+    /// different `type` values, and it is not a [`Self::ReasoningDelta`] because
+    /// a signature is not reasoning text: an agent that appended it to the
+    /// reasoning buffer would show it to the user and lose it as a signature
+    /// (FR-011).
+    ReasoningSignature {
+        /// The provider's opaque signature over the block.
+        signature: String,
+    },
     /// An incremental chunk of response text.
     TextDelta {
         /// The text fragment.
@@ -179,8 +194,15 @@ pub enum ContentPart {
         id: String,
         /// Name of the tool to invoke.
         name: String,
-        // TODO: Replace `Value` with a typed struct for tool-use input.
         /// JSON input arguments for the tool.
+        ///
+        /// Deliberately `Value`, not a typed struct - see
+        /// `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. This part is
+        /// replayed to the provider on every subsequent step (FR-006, FR-018),
+        /// so the payload must round-trip unchanged; a struct with a fixed
+        /// field set would drop any key the provider sent that the struct does
+        /// not model, and the model's next turn would see a different call than
+        /// the one it made.
         input: Value,
     },
     /// The result returned from a tool execution.
@@ -236,8 +258,19 @@ pub struct ToolDefinition {
     pub name: String,
     /// Human-readable description of what the tool does.
     pub description: String,
-    // TODO: Replace `Value` with a typed JSON Schema struct.
     /// JSON Schema describing the tool's accepted parameters.
+    ///
+    /// Deliberately `Value`, not a typed JSON Schema struct - see
+    /// `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. The field is
+    /// forwarded, not interpreted: in-tree tools hand-write schema literals
+    /// (155 uses of `additionalProperties`, 44 of `enum`, and further
+    /// `items`/`format`/`default`/`pattern`/`minimum`/`maximum`), and MCP
+    /// servers and plugins supply arbitrary JSON Schema ragent cannot enumerate
+    /// (`$ref`, `oneOf`/`anyOf`, `if`/`then`/`else`, `patternProperties`,
+    /// vendor extensions). A typed subset would either drop keywords the model
+    /// is told about, or need a schema crate - which NFR-002 forbids. FR-003
+    /// additionally needs the encoded bytes to be identical on a cache hit and
+    /// a miss, which only a faithful pass-through can guarantee.
     pub parameters: Value,
 }
 

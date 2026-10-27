@@ -4,7 +4,7 @@
 //! password, sudo normally opens `/dev/tty` directly to prompt the user. In a
 //! non-interactive agent context this either hangs (if a tty is inherited) or
 //! fails opaquely. This module wires sudo's `SUDO_ASKPASS` mechanism into
-//! ragent's existing question dialog (the same one the `ask_user` tool uses)
+//! ragent's existing question dialog (the same one the `AskUserQuestion` tool uses)
 //! so a credential request is surfaced as a prominent popup instead of a
 //! buried tty prompt.
 //!

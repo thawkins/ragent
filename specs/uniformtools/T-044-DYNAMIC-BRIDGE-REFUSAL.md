@@ -6,14 +6,37 @@ Spec: `uniformtools` FR-032. Status: completed.
 > system **shall** refuse the bridge with an error naming the source, the spelling
 > and its `after` replacement, and **shall** keep the rest of that source working.
 
+## The state this task found
+
+The source file and all three test files existed on disk and were tracked by git,
+but none of them were reachable from the build:
+
+- `crates/ragent-types/src/lib.rs` had **no `pub mod tool_bridge;`**, so the whole
+  rule file was dead: not compiled, not linted, and invisible to every call site.
+- `crates/ragent-types/tests/all.rs`, `crates/ragent-agent/tests/all.rs` and
+  `crates/ragent-plugins/tests/all.rs` had **no `#[path]` line** for their
+  `test_fr032_*` file, so none of the 16 cases had ever compiled either.
+- `McpToolWrapper` had no `ragent_prefix_for`, `bridge_server_tools` did not exist,
+  and `register_plugin_tools` did no FR-032 check at all.
+
+This is the fifth instance of the same class this spec has hit (T-012's `tool_args.rs`,
+T-036's `allowed_tools.rs`, T-034's and T-040's test registrations). A file that no
+`mod` line reaches is a file that has never run, and `git ls-files` reports it as
+present. The fixes are one declaration and three registrations, and they are as much
+part of this task as the rule itself - the rule is only real once it compiles.
+
+The three call sites described below had also not been migrated: each built its
+wrappers (or its collision check) itself and consulted nothing.
+
 ## What was added
 
-### `crates/ragent-types/src/tool_bridge.rs` (new, ~330 lines)
+### `crates/ragent-types/src/tool_bridge.rs` (new, 403 lines)
 
 The rule lives in `ragent-types` because three call sites in two crates ask it and
 `ragent-plugins` cannot depend on `ragent-agent` (the dependency runs the other
 way). `ragent-types` already owns the FR-023 table, so it is the leaf crate both
-already depend on.
+already depend on; `ragent-plugins`' `Cargo.toml` gained the direct
+`ragent-types` dependency it had previously reached only transitively.
 
 | Item | Purpose |
 |---|---|
@@ -65,6 +88,7 @@ unchanged surfaces it verbatim, and then the arm fires with the useful sentence
 |---|---|---|
 | `SessionProcessor::set_mcp_client` | built wrappers itself | `bridge_server_tools` per connected server |
 | TUI `App::register_mcp_tools` | built wrappers itself | `bridge_server_tools`; stale scan uses `ragent_prefix_for` |
+| TUI `App::tool_source` | reached the prefix via `ragent_name_for(&server.id, "")` | `ragent_prefix_for`, so the `/tools` source column and the stale scan cannot disagree either |
 | `PluginManager::register_plugin_tools` | collision check only | also `check_dynamic_bridge` per contributed name, refusals collected and reported once |
 
 Connector servers need no separate call site: a connector's servers are bridged as
@@ -148,15 +172,16 @@ all.
 
 | Edit | Observed |
 |---|---|
-| `if false && !surfaced.starts_with(prefix)` | case 7 failed (`Bash` bridged as if namespaced) |
-| retired-spelling `find` pinned to `"bash"` | cases 5, 6, 7 and the prefix-agnostic case failed |
-| ledger `insert` with no `continue` | case 9's "silent on reconnect" assertion failed (1, expected 0) |
-| `plugin_tool_name` returning the bare tool name | both `test_fr032_plugin_bridge` cases failed - exactly the regression the plugin backstop exists for |
+| `if false && !surfaced.starts_with(prefix)` | `any_other_bare_name_is_refused_for_not_being_namespaced` failed (`Bash` bridged as if namespaced) |
+| retired-spelling `find` pinned to `"bash"` | `a_bridge_that_stops_namespacing_is_refused_with_the_replacement_named` and `the_rule_is_prefix_agnostic_so_a_new_bridge_uses_its_own_namespace` failed |
+| ledger `insert` with no `continue` | `a_refusal_is_reported_once_per_source_and_name` failed (`left: 1 / right: 0` on the reconnect assertion) |
+| `plugin_tool_name` returning the bare tool name | `a_plugin_tool_named_after_a_retired_spelling_registers_under_its_namespace` failed (`left: [] / right: ["plugin_codex-shell_bash"]`) |
+| `continue` removed after a refusal in `bridge_server_tools_named` | `a_refused_tool_costs_one_tool_and_the_rest_of_the_server_keeps_working` (`left: ["mcp_srv_notes_read", "bash", "mcp_srv_keep_me"]`) and `a_bridge_that_stopped_namespacing_refuses_every_tool_but_still_returns` failed |
 
 Restored from `target/temp/t044bak/`; `md5sum` after restore:
 `2c479445db9558e039d365374711b345` (`tool_bridge.rs`),
-`8143a289f74dee976878c93704440d6f` (`mcp_tool.rs`),
-`e803a74409580b1547c3f826983b1069` (`tool_adapter.rs`). Files were `touch`ed after
+`6c4d0c81cda8384c9d494ec047fa5640` (`mcp_tool.rs`),
+`5a7e09f0ae9d20173dd55f120dcdf362` (`tool_adapter.rs`). Files were `touch`ed after
 restore: a `cp -p` leaves an older mtime, and cargo then reuses the broken object
 file.
 
@@ -167,15 +192,25 @@ file.
 - `cargo clippy` on `ragent-types`, `ragent-plugins`, `ragent-agent`, `ragent-tui`
   with `--all-targets` - no findings in the touched files (only the pre-existing
   `pub(crate)`-in-private-module noise elsewhere in the workspace).
-- `ragent-types --test all` 422 passed; `--doc` 46 passed / 2 ignored.
-- `ragent-plugins --test all` 495 passed.
+- `ragent-types --test all` 427 passed; `--doc` 46 passed / 2 ignored.
+- `ragent-plugins --test all` 494 passed.
 - `ragent-connectors --test all` 369 passed.
-- `ragent-agent --test all` 1877 passed / 1 ignored (103 s).
+- `ragent-agent --test all` 1724 passed / 1 ignored (103 s); `test_mcp_tool_wrapper::`
+  17 passed and `test_nfr006_rename_cost::` 6 passed under it.
+- `ragent-tui --test all mcp` 48 passed. The full `ragent-tui --test all` run is
+  3648 passed / **3 failed**, and those 3 are pre-existing at HEAD and unrelated to
+  this change: the `Alt+T` -> `ToggleTasksPanel` input-mapping trio
+  (`test_input_more::alt_toggle_keys_map_to_actions`,
+  `test_input_queue_menu_binding::test_other_alt_keys_are_unaffected`,
+  `test_memory_panel::test_toggle_memory_mutually_excludes_tasks_panel`). The TUI
+  code path this task touched (`register_mcp_tools`) is covered by the 48-case MCP
+  selection, which is green.
 - `ragent run --dry-run` still reports **148 visible tools** across 21 families, so
   FR-030's count is untouched.
 - Eight guard scripts pass: `check-inline-tests`, `check-file-tool-containment`,
   `check-shared-guards`, `check-silent-errors`, `check-security-unwraps`,
-  `check-poison-locks`, `check-dead-code-reasons`, `check-test-env-isolation`.
+  `check-poison-locks`, `check-dead-code-reasons`, `check-test-env-isolation`, plus
+  `check-tool-rename`.
 
 ## Why nothing is consulted per tool call (NFR-006)
 

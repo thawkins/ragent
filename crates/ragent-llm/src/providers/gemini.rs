@@ -14,7 +14,13 @@ use super::thinking::{
     full_reasoning_levels, gemini_thinking_config_from_request, gemini_thinking_levels_for_model,
 };
 use super::tool_cache::{ToolFormat, cached_tools};
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
+use super::wire::decode::ToolCallAccumulator;
+use super::wire::encode::{MessageContext, encode_messages, tool_names_by_id};
+use super::wire::profile_table::GEMINI;
+use super::wire::trace;
+#[cfg(test)]
+use crate::llm::ChatContent;
+use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -400,8 +406,6 @@ impl GeminiClient {
 
     /// Build the JSON request body for the Gemini API.
     fn build_request_body(&self, request: &ChatRequest) -> Value {
-        let mut contents = Vec::new();
-
         // System instruction is handled separately in Gemini API
         let mut system_instruction: Option<Value> = None;
         if let Some(system) = &request.system {
@@ -410,82 +414,19 @@ impl GeminiClient {
                 "role": "user"
             }));
         }
-        for msg in request.messages.iter() {
-            let role = match msg.role.as_str() {
-                "assistant" => "model",
-                _ => "user",
-            };
 
-            let parts = match &msg.content {
-                ChatContent::Text(text) => {
-                    vec![json!({ "text": text })]
-                }
-                ChatContent::Parts(content_parts) => {
-                    content_parts
-                        .iter()
-                        .map(|part| match part {
-                            ContentPart::Text { text } => json!({ "text": text }),
-                            ContentPart::ImageUrl { url } => {
-                                // Handle data URIs for images
-                                if url.starts_with("data:") {
-                                    let mime = url
-                                        .strip_prefix("data:")
-                                        .and_then(|s| s.split(';').next())
-                                        .unwrap_or("image/jpeg");
-                                    let base64_data =
-                                        url.find(',').map(|i| &url[i + 1..]).unwrap_or(url);
-                                    json!({
-                                        "inlineData": {
-                                            "mimeType": mime,
-                                            "data": base64_data
-                                        }
-                                    })
-                                } else {
-                                    // For non-data URLs, we can't directly use them in Gemini
-                                    // Gemini requires inline data or Google Cloud Storage URIs
-                                    json!({ "text": format!("[Image: {}]", url) })
-                                }
-                            }
-                            ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                                is_error,
-                            } => {
-                                // Gemini uses functionResponse for tool results;
-                                // it has no error flag, so an error carries the
-                                // FR-014 `ERROR: ` prefix.
-                                let result =
-                                    crate::provider::wire::encode::error_marked(content, *is_error);
-                                json!({
-                                    "functionResponse": {
-                                        "name": tool_use_id.split('_').next().unwrap_or("tool"),
-                                        "response": {
-                                            "result": result
-                                        }
-                                    }
-                                })
-                            }
-                            // FR-011: Gemini has no signed-reasoning channel.
-                            ContentPart::Reasoning { .. } => Value::Null,
-                            ContentPart::ToolUse { id: _, name, input } => {
-                                // Gemini uses functionCall for tool invocations
-                                json!({
-                                    "functionCall": {
-                                        "name": name,
-                                        "args": input
-                                    }
-                                })
-                            }
-                        })
-                        .collect()
-                }
-            };
-
-            contents.push(json!({
-                "role": role,
-                "parts": parts
-            }));
-        }
+        // The `contents` array is the one shared encoder (FR-006). Gemini's
+        // function-response carrier names the tool and carries no id, so the name
+        // comes from the id-to-name map - never from splitting the id (FR-019).
+        let tool_names = tool_names_by_id(&request.messages);
+        let ctx = MessageContext {
+            tool_names: Some(&tool_names),
+            ..MessageContext::default()
+        };
+        let contents = match encode_messages(GEMINI, &request.messages, &ctx) {
+            Ok(contents) => contents,
+            Err(loss) => return json!({ "error": loss.to_string() }),
+        };
 
         let mut body = json!({
             "contents": contents,
@@ -529,7 +470,7 @@ impl GeminiClient {
             // `functionDeclarations` wrapper) instead of building a fresh
             // `Vec<Value>` on every call.
             let cached = cached_tools(ToolFormat::Gemini, &request.tools);
-            body["tools"] = cached.gemini_tools_array();
+            body[ToolFormat::Gemini.body_key()] = cached.gemini_tools_array();
         }
 
         body
@@ -543,6 +484,7 @@ impl LlmClient for GeminiClient {
         request: ChatRequest,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body).context("serialise Gemini request body")?;
 
         // Use streaming endpoint
@@ -592,11 +534,12 @@ impl LlmClient for GeminiClient {
             // previous chunk so a UTF-8 sequence split across TCP chunks is not
             // corrupted.
             let mut pending_utf8: Vec<u8> = Vec::new();
-            let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
-            // Stream-scoped call counter: ids must stay unique for the whole
-            // stream even though the pending buffer is drained at each
-            // finishReason flush (a length-derived id would collide there).
-            let mut next_tool_call_id: u64 = 0;
+            // FR-004: `functionCall` arrives as a whole call in one frame and must
+            // not be emitted before the `finishReason` that may share that frame has
+            // been read (F2), so it is deferred in the shared accumulator and
+            // flushed per frame. The accumulator also mints the call id (FR-019), so
+            // Gemini no longer invents an `fc_...` spelling of its own.
+            let mut acc = ToolCallAccumulator::new(GEMINI, "gemini");
             // Bounded retries for a line that stays unparseable even after more
             // data arrives. A genuinely malformed line (e.g. truncated garbage
             // from a proxy) would otherwise be re-queued on every chunk and
@@ -753,31 +696,23 @@ impl LlmClient for GeminiClient {
                                             .as_object()
                                             .map(|o| json!(o).to_string())
                                             .unwrap_or_else(|| "{}".to_string());
-                                        let id = format!("fc_{}_{}", name, next_tool_call_id);
-                                        next_tool_call_id += 1;
 
-                                        // Buffer tool call to emit at end
-                                        pending_tool_calls.push((id, name, args));
+                                        // Buffer the whole call to emit at the
+                                        // finishReason flush, or at end of stream;
+                                        // the id it will carry is the
+                                        // accumulator's to mint (FR-019).
+                                        acc.defer(name, args);
                                     }
                                 }
                             }
 
                             // Handle finish reason
                             if let Some(finish_reason) = candidate["finishReason"].as_str() {
-                                // Emit any pending tool calls (drain: ownership
-                                // makes the clones below unnecessary)
-                                for (id, name, args) in
-                                    std::mem::take(&mut pending_tool_calls)
-                                {
-                                    yield StreamEvent::ToolCallStart {
-                                        id: id.clone(),
-                                        name,
-                                    };
-                                    yield StreamEvent::ToolCallDelta {
-                                        id: id.clone(),
-                                        args_json: args,
-                                    };
-                                    yield StreamEvent::ToolCallEnd { id };
+                                // Emit any pending tool calls; the accumulator
+                                // drains its buffer, so a later end-of-stream flush
+                                // cannot repeat a call already emitted (F2).
+                                for event in acc.flush_deferred() {
+                                    yield event;
                                 }
 
                                 let reason = match finish_reason {
@@ -808,21 +743,12 @@ impl LlmClient for GeminiClient {
                         }
             }
 
-            // F2: end-of-stream flush. A `functionCall` pushed into the
-            // pending buffer after the finishReason flush (or in a stream
-            // that ends without a finishReason frame) was previously dropped
-            // here. Emit any remaining buffered calls; ids are unique per
-            // stream, so no call can be re-emitted.
-            for (id, name, args) in pending_tool_calls {
-                yield StreamEvent::ToolCallStart {
-                    id: id.clone(),
-                    name,
-                };
-                yield StreamEvent::ToolCallDelta {
-                    id: id.clone(),
-                    args_json: args,
-                };
-                yield StreamEvent::ToolCallEnd { id };
+            // F2: end-of-stream flush. A `functionCall` deferred after the
+            // finishReason flush (or in a stream that ends without a finishReason
+            // frame) was previously dropped here. Emit any remaining buffered calls;
+            // the accumulator drains its buffer, so no call can be emitted twice.
+            for event in acc.flush_deferred() {
+                yield event;
             }
 
             // Ensure we emit a finish event if not already done

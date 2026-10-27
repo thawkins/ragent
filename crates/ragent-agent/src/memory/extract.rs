@@ -139,7 +139,7 @@ impl ExtractionEngine {
     /// Inspects the tool name, input, result, and success status to
     /// identify potential memory extractions:
     ///
-    /// - **File edits** (`edit`, `write`, `create`, `multiedit`):
+    /// - **File edits** (`Edit`, `Write`, `create`, `multiedit`):
     ///   Extract coding patterns from file paths and edit content.
     /// - **Bash errors**: Track failures for error-resolution detection.
     /// - **Bash successes after failures**: Extract the error + resolution.
@@ -171,13 +171,13 @@ impl ExtractionEngine {
         }
 
         // 1. Track bash failures for error-resolution detection.
-        if !success && tool_name == "bash" {
+        if !success && tool_name == "Bash" {
             self.track_failure(session_id, tool_name, input, result_content);
             return;
         }
 
         // 2. Detect error resolution: bash success after a recent failure.
-        if success && tool_name == "bash" {
+        if success && tool_name == "Bash" {
             if let Some(candidate) = self.detect_error_resolution(
                 session_id,
                 input,
@@ -196,7 +196,7 @@ impl ExtractionEngine {
         if success
             && matches!(
                 tool_name,
-                "edit" | "write" | "create" | "multiedit" | "multi_edit"
+                "Edit" | "Write" | "create" | "multiedit" | "multi_edit"
             )
         {
             if let Some(candidate) =
@@ -483,7 +483,7 @@ impl ExtractionEngine {
             .unwrap_or_else(|e| e.into_inner());
         let recent_failures: Vec<&FailedToolCall> = tracker
             .iter()
-            .filter(|f| f.session_id == session_id && f.tool_name == "bash")
+            .filter(|f| f.session_id == session_id && f.tool_name == "Bash")
             .collect();
 
         if recent_failures.is_empty() {
@@ -563,7 +563,7 @@ impl ExtractionEngine {
                     // Track edited files.
                     if matches!(
                         tc.tool_name.as_str(),
-                        "edit" | "write" | "create" | "multiedit" | "multi_edit"
+                        "Edit" | "Write" | "create" | "multiedit" | "multi_edit"
                     ) {
                         // Accept both canonical (file_path) and legacy (path) param names.
                         if let Some(path) = tc

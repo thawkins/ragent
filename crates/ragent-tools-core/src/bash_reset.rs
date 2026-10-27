@@ -22,7 +22,7 @@ impl Tool for BashResetTool {
         "Reset the persistent shell state for the current session, clearing \
          any saved working-directory changes and environment variables. This \
          has no required parameters. Use it when the shell is in a bad state or \
-         when you want the next `bash` invocation to start fresh from the \
+         when you want the next `Bash` invocation to start fresh from the \
          agent's working directory. It is a no-op if no persistent shell state \
          exists."
     }

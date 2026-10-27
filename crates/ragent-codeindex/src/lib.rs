@@ -121,6 +121,14 @@ pub struct CodeIndex {
     /// every `status()` poll rescanned the whole tree; the cache is refreshed
     /// only on a full reindex (where the size meaningfully changes).
     cached_index_size: std::sync::Mutex<Option<u64>>,
+    /// PERF-CODEX-STATUS: `(edge_count, node_count)` from the last successful
+    /// graph node count. `graph_node_count` de-duplicates the union of both
+    /// endpoint columns of `graph_edges`, so on a large repository it is a
+    /// multi-second scan; `try_status` runs on the TUI render path and must not
+    /// pay it on every poll. The edge count is the invalidation key - edge
+    /// totals only change when the graph is rebuilt, so an unchanged edge count
+    /// means an unchanged node set.
+    cached_graph_nodes: std::sync::Mutex<Option<(u64, u64)>>,
 }
 
 impl CodeIndex {
@@ -163,6 +171,7 @@ impl CodeIndex {
             graph_total: AtomicU32::new(0),
             graph_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
+            cached_graph_nodes: std::sync::Mutex::new(None),
         })
     }
 
@@ -186,6 +195,7 @@ impl CodeIndex {
             graph_total: AtomicU32::new(0),
             graph_done: AtomicU32::new(0),
             cached_index_size: std::sync::Mutex::new(None),
+            cached_graph_nodes: std::sync::Mutex::new(None),
         })
     }
 
@@ -388,7 +398,7 @@ impl CodeIndex {
     ///
     /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
     /// background reindex). Callers should retry briefly or fall back to
-    /// `grep` rather than blocking the agent loop.
+    /// `Grep` rather than blocking the agent loop.
     pub fn try_symbols(&self, filter: &SymbolFilter) -> Result<Option<Vec<Symbol>>> {
         let store = match self.store.try_lock() {
             Ok(g) => g,
@@ -495,17 +505,36 @@ impl CodeIndex {
             stats.fts_doc_count = fts.doc_count().unwrap_or(0);
         }
 
-        // Graph dataset counts.  A brief lock is acceptable here: this runs
-        // three COUNT queries, which are fast on the indexed edge tables.
+        // Graph dataset counts. `edge_count` and `community_count` are plain
+        // COUNT(*)s over the indexed edge tables, but `graph_node_count` has to
+        // de-duplicate the union of both endpoint columns - on a large
+        // repository that is a multi-second scan, and this method runs on the
+        // TUI render path. So the node count is served from the last value this
+        // process computed instead of being recomputed on every status poll
+        // (PERF-CODEX-STATUS); an unchanged edge count means an unchanged node
+        // set, so the cached value is refreshed exactly when the graph moves.
         if let Ok(store) = self.store.try_lock() {
-            if let (Ok(e), Ok(n), Ok(c)) = (
-                store.edge_count(),
-                store.graph_node_count(),
-                store.community_count(),
-            ) {
+            if let (Ok(e), Ok(c)) = (store.edge_count(), store.community_count()) {
                 stats.graph_total_edges = e;
-                stats.graph_nodes = n;
                 stats.graph_communities = c;
+                match self.cached_graph_nodes.lock() {
+                    Ok(mut cached) => {
+                        if let Some((edges, nodes)) = *cached
+                            && edges == e
+                        {
+                            stats.graph_nodes = nodes;
+                        } else if let Ok(n) = store.graph_node_count() {
+                            stats.graph_nodes = n;
+                            *cached = Some((e, n));
+                        }
+                    }
+                    // A poisoned cache only costs a recomputation.
+                    Err(_) => {
+                        if let Ok(n) = store.graph_node_count() {
+                            stats.graph_nodes = n;
+                        }
+                    }
+                }
             }
         }
 

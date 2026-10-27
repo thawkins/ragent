@@ -1483,7 +1483,7 @@ pub async fn spawn_background_shell(
 #[async_trait::async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &'static str {
-        "bash"
+        "Bash"
     }
 
     /// Returns a human-readable description of what the tool does.
@@ -1515,6 +1515,12 @@ impl Tool for BashTool {
         })
     }
 
+    /// `bash:execute`, not the tool's own name (FR-028).
+    ///
+    /// `Bash` reports the family `bash:execute`, which is permission vocabulary
+    /// and unchanged by the rename: a `"permission": "bash"` rule written before
+    /// it keeps governing this tool. The family looks like a missed migration
+    /// and is the requirement.
     fn permission_category(&self) -> &'static str {
         "bash:execute"
     }

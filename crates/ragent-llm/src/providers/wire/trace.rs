@@ -105,6 +105,31 @@ pub fn root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_ROOT))
 }
 
+/// The file [`record_body`] would write for this send, or `None` while the trace
+/// is disabled.
+///
+/// Split out of [`record_body`] so the "inert" half of FR-017 is observable
+/// without a filesystem: a disabled trace has no destination at all. While
+/// enabled it consumes one step number for the request's session, exactly as a
+/// write would, so call it only when the send is about to happen.
+#[must_use]
+pub fn next_path(request: &ChatRequest) -> Option<PathBuf> {
+    if !is_enabled() {
+        return None;
+    }
+    Some(path_for(request))
+}
+
+/// The destination for `request`, consuming one step number for its session.
+///
+/// Private on purpose: the step counter only advances for a call that is really
+/// going to write, so an "is the trace on" question can never skip a step.
+fn path_for(request: &ChatRequest) -> PathBuf {
+    let session = session_component(request.session_id.as_deref());
+    let step = next_step(&session);
+    root().join(format!("{session}-{step:04}.json"))
+}
+
 /// Write `body` - the request body a provider is about to send for `request` -
 /// to the trace directory (FR-017).
 ///
@@ -124,9 +149,7 @@ pub fn record_body(request: &ChatRequest, body: &Value) {
     if !is_enabled() {
         return;
     }
-    let session = session_component(request.session_id.as_deref());
-    let step = next_step(&session);
-    let file_name = format!("{session}-{step:04}.json");
+    let path = path_for(request);
     let dir = root();
     if let Err(error) = std::fs::create_dir_all(&dir) {
         tracing::warn!(
@@ -137,7 +160,6 @@ pub fn record_body(request: &ChatRequest, body: &Value) {
         return;
     }
     let text = render(body);
-    let path = dir.join(file_name);
     if let Err(error) = write_atomic(&path, &text) {
         tracing::warn!(
             path = %path.display(),
@@ -194,9 +216,45 @@ fn render(body: &Value) -> String {
 }
 
 /// Redact every credential in `value`, by key name and then by value.
+///
+/// The key-name pass runs first so a credential-named field cannot survive at
+/// all; the value pass then catches a credential that sits under an innocuous
+/// key (an MCP server's `env` entry, a header map, a URL query string) by
+/// matching the shapes the shared sanitizer recognises anywhere in a string.
 fn redact(value: &mut Value) {
     redact_named_keys(value, 0);
-    ragent_types::sanitize::redact_json_value(value, MAX_REDACT_DEPTH);
+    redact_matched_values(value, 0);
+}
+
+/// Run the shared [`ragent_types::sanitize::redact_secrets`] matcher over every
+/// string in `value`.
+///
+/// [`ragent_types::sanitize::redact_json_value`] redacts a whole string *value*,
+/// which is right for a log field and wrong for a request body: a body's
+/// `system` prompt or tool description legitimately mentions `api_key=...` or a
+/// `Bearer` header shape while explaining one, and blanking the whole string
+/// would destroy the document the trace exists to show. Matching inside the
+/// string is the same shared pattern set and the same placeholder - only the
+/// whole-value replacement is dropped - so the trace redacts exactly what the
+/// sanitizer redacts, and nothing else.
+fn redact_matched_values(value: &mut Value, depth: usize) {
+    if depth > MAX_REDACT_DEPTH {
+        return;
+    }
+    match value {
+        Value::String(text) => *text = ragent_types::sanitize::redact_secrets(text),
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                redact_matched_values(item, depth + 1);
+            }
+        }
+        Value::Object(map) => {
+            for entry in map.values_mut() {
+                redact_matched_values(entry, depth + 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Replace the value of every credential-named key with the shared placeholder.

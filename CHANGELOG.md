@@ -2,27 +2,1782 @@
 
 ## [Unreleased]
 
+## [1.0.150] - 2026-10-26
+
+Release 1.0.150: the `uniformtools` spec lands - one canonical tool-call model
+shared by every provider family, a per-family wire profile table, Claude-compatible
+tool names with no retired spelling surviving, and a failed tool result marked on
+every family - alongside the removal of the tool-visibility switch subsystem, four
+dependency upgrades (`tantivy` 0.27, `calamine` 0.37, `rust_xlsxwriter` 0.101,
+`zip` 9), and a workspace-wide `cargo clippy`, `cargo audit` and `cargo deny`
+clean-up that leaves all ten hygiene checks green.
+
+### Added
+- **The no-alias guard is one program in two forms, and it is asserted to be
+  (spec `uniformtools` NFR-009).** `scripts/check_tool_rename.py` was the only
+  implementation in name only: the shell wrapper carried its own copy of the
+  self-test fixture and the crate test carried a third, the guard had no
+  machine-readable report so no case could compare the two forms, and it had no
+  `--root` so every fixture-writing case scanned the checkout. It now has
+  `--check`, `--json`, `--self-test`, `--exemptions` and `--root DIR`;
+  `scripts/check-tool-rename.sh` is a 67-line wrapper with no predicate logic,
+  and `crates/ragent-agent/tests/test_tool_rename_guard.rs` reads `--json` and
+  asserts the same verdict, the same hits and the same wording the script prints.
+  A private copy of the tree under `target/temp/` is where the predicate
+  fixtures now live, so a seeded violation is never visible to a sibling test.
+  Two defects fell out of the work: the dependency map skipped the root
+  `Cargo.toml`, leaving the root package and `ragent-agent` with no dependency
+  edges so predicate (g) was structurally blind in them; and a scan of another
+  tree was judged against this checkout's FR-023 table, so a tree without one
+  passed. Both are fixed and both are red-proved. Predicate (f) now reports both
+  sites of a duplicate registration instead of only the later one, reads a
+  registry key as a string literal rather than a backticked word, and skips a
+  `name()` body that forwards to the wrapped tool. Sixteen cases, all passing.
+
+- **One recorded replay fixture per provider family proves the tool path end to
+  end, without a provider (spec `uniformtools` NFR-004).** The unified path had
+  per-provider stream tests and direct encoder tests, but nothing that drove one
+  family's *decode* and fed its output into that family's *encode* - so a decoder
+  and an encoder that agreed only with each other passed every test. New
+  `crates/ragent-llm/tests/test_wire_replay.rs` replays a recorded response body
+  per family through a loopback listener and the family's own client
+  (`OPENAI_CHAT`, `ANTHROPIC_MESSAGES`, `GEMINI`, `BEDROCK_CONVERSE`,
+  `OPENAI_RESPONSES`, `OLLAMA_NATIVE`), asserts the id the decode must produce -
+  including the id minted for a model that names none - checks the captured
+  request for that family's envelope, and re-encodes the decoded call in the
+  family's own vocabulary: `tool_calls` with a string `arguments` for OpenAI,
+  `tool_use` with an object `input` behind the signed `thinking` block for
+  Anthropic, `functionCall`/`functionResponse` for Gemini, `toolUse`/`toolResult`
+  with the native `status` for Converse, `function_call`/`function_call_output`
+  for the Responses input list, and a name-keyed `role:"tool"` message for native
+  Ollama. A seventh case pins the other half of the requirement: the encoders are
+  pure, so encoding the same history twice with every declared family produces
+  identical entries. Writing the fixtures found a defect the tree had: the native
+  Ollama encoder wrote a message holding text *and* a tool construct as one entry
+  in a two-way race, so an assistant turn that narrated and called a tool lost the
+  call, and a user turn carrying narrative text lost its tool result. It now
+  writes the ordinary text entry followed by one entry per construct, and its
+  text follows the same rule as the block form (only a text part becomes a
+  string). Red-proved three ways, each reverted byte-identically.
+
+- **Signed reasoning is recorded and replayed on the turn that answers a tool
+  call (spec `uniformtools` FR-011).** Anthropic's extended thinking requires the
+  signed `thinking` block that accompanied a tool call to come back, unchanged,
+  on the turn that answers it; nothing in ragent did that. The canonical part and
+  the `signature_delta` stream event already existed, but the loop collected the
+  signature and recorded nothing (`LlmStepResult` had no signature field and the
+  saved part was built as `{ text }`), both history converters dropped the part
+  outright, and the tool phase never wrote a reasoning part into `chat_messages`
+  at all - so the echoing request, which is built from `chat_messages`, had
+  nothing to send and the block would have arrived a turn late even after a
+  converter fix. All three gaps are closed: the streamed signature is kept beside
+  its text (and cleared with it on a retry, since a provider verifies the pair
+  together), the saved record carries both halves, the converters forward
+  `ContentPart::Reasoning { text, signature }` without consulting
+  `echo_reasoning` (the omission is the encoder's decision), and the tool phase
+  pushes the block above the text so it precedes the `tool_use` it decided. The
+  encoder gained the `thinking` arm, gated on the profile's `echo_reasoning` and
+  writing `signature` only when the record has one, so an unsigned block gains no
+  key and no `null`. Every other family's arm is unchanged and documented as the
+  declared omission. New cases in `test_loop_steps_harness.rs` (7 -> 9) drive the
+  real loop with a scripted signed-reasoning-and-call stream and assert on the
+  second captured request that the block precedes the call with both halves
+  intact - the half a test driving `encode_message` cannot see. Red-proved three
+  ways, each reverted byte-identically: deleting the within-turn push, dropping
+  the signature from it, and flipping `ANTHROPIC_MESSAGES.echo_reasoning`.
+
+### Removed
+
+- **Tool visibility is gone: every registered tool is advertised, with no
+  per-family switch.** The `tool_visibility` config block
+  (`ToolVisibilityConfig`, `ToolVisibilitySpecified`, `iter_switches`,
+  `tool_family_names`, and the sync that kept `tool_visibility.codeindex` in step
+  with `/codeindex on|off`) is deleted, as are the `ToolRegistry::set_hidden` /
+  `hidden()` / `hidden_definitions()` surface and the `/tools <switch> on|off`
+  dispatch arm. A tool is now absent from the model only when the subsystem that
+  registers it is inactive, so the definitions sent with each request are the
+  registry's definitions and the system prompt lists the same set. `/tools` is a
+  read-only registry report - `/tools` (help), `/tools list` (alias `show`),
+  `/tools help`; `TOOLS_SUBS` is `["list", "show", "help"]`. `hidden_tools`, the
+  name-level filter left without a consumer by that removal, goes too: the config
+  field, `Config::effective_hidden_tools()`, its `merge` union and the
+  `/config show` union-field label are deleted, and `DryRunInputs` loses its
+  `hidden_tools` field so `ragent run --dry-run` reports no hidden-tool count. A
+  config still carrying either key parses (unknown keys are tolerated) and the
+  value is ignored. The stale `tools_visibility_save_failure_is_reported` case is
+  deleted with the code path it drove, and the removal is asserted by
+  `test_slash_tools` (`/tools github`, `/tools teams on` -> `tools error`) and by
+  the former-family advertising case. Documentation follows:
+  `docs/howtos/tool-visibility.md` is deleted and `README.md`, `SPEC.md`,
+  `QUICKSTART.md`, `TUI-QUICKSTART.md`,
+  `docs/howtos/{config,permissions,reactagent,office,codeindex,plugins,tutorial}.md`
+  and `docs/howtos/slashcommands/{tools,INDEX,config,reload,codeindex,plugins}.md`
+  are corrected (`config.md` renumbers its sections 7.13..7.40 after dropping its
+  `tool_visibility` and `hidden_tools` entries, and the `tools/INDEX.md` category
+  table loses its visibility-switch column).
+
 ### Changed
 
-- **Tool renames for Claude Code compatibility (spec `uniformtools` FR-023 to FR-030, T-031, NFR-007).** Thirteen tools take their Claude Code spelling so a Claude-published skill resolves without translation; every documentation reference, bundled-skill body, and agent prompt now uses the new name. The old spelling fails with an unknown-tool error (no alias is kept).
+- **A failed tool result is marked on every family, including the one that
+  builds its own message array (spec `uniformtools` FR-014).** A tool result's
+  `is_error` flag already came from the recorded `ToolCallStatus`, and the shared
+  encoder already wrote the literal `ERROR: ` prefix where a profile has no
+  native error flag. One path escaped that rule: a *dialect* that cannot call the
+  shared result carrier - local Ollama adds a `tool_name` key the OpenAI
+  `role:"tool"` shape has no place for - packed its own `messages` array and sent
+  a failed call's output with no marker at all, so an error was
+  indistinguishable from a success on that provider alone. `MessageContext` now
+  carries `error_marking: Option<ToolFormat>`, and the encoder marks that result
+  by `ToolFormat::result_content`: the `ERROR: ` prefix exactly where the
+  format's declared `supports_is_error` is `false`, the content untouched
+  otherwise. The caller names its *format* rather than deciding for itself, so a
+  profile that gains native support changes the marking with no call site
+  edited. Every format now also answers the question through
+  `ToolFormat::transmits_is_error_natively` (its declared message profile's own
+  field, `message_profile`, and nothing else), and `message_name_prefix` keeps
+  HuggingFace's definition-time `t_` rewrite out of the message layer, where it
+  would edit history that is keyed by call id for no gain. Proven at both ends:
+  `tests/test_tool_result_error_marking.rs` (7 cases, one of which captures the
+  real Ollama request off a throw-away HTTP server and asserts a failed result
+  carries `ERROR: ` while a successful one in the same request stays
+  byte-identical) plus a new positive half in
+  `test_tool_input_error::every_history_converter_forwards_the_record_status_to_the_wire_flag`,
+  so a converter writing `is_error: false` everywhere can no longer pass the
+  existing negative scan. Red-proved three ways, each reverted byte-identically:
+  the marking removed from the OpenAI carrier reds both marker cases; the named
+  format left off the Ollama dialect's context reds the end-to-end case with the
+  unprefixed text; and the name rewrite carried into the message layer reds the
+  definition-rewrite case.
 
-  | Before | After |
-  |---|---|
-  | `ask_user` | `AskUserQuestion` |
-  | `bash` | `Bash` |
-  | `edit` | `Edit` |
-  | `plan_enter` | `EnterPlanMode` |
-  | `plan_exit` | `ExitPlanMode` |
-  | `glob` | `Glob` |
-  | `grep` | `Grep` |
-  | `skill_manage` | `Skill` |
-  | `task_create` | `TaskCreate` |
-  | `task_get` | `TaskGet` |
-  | `task_list` | `TaskList` |
-  | `task_update` | `TaskUpdate` |
-  | `write` | `Write` |
+- **A construct the wire shape cannot carry is refused, not dropped (spec
+  `uniformtools` FR-018).** The Responses-API input list has no item for two
+  things a canonical history can hold, and both are now `WireLoss` errors that
+  name the construct and the provider - so no request is issued with a
+  silently shortened conversation. The image part already refused; the message
+  *role* did not. `ChatMessage::role` is a `String`, the input list accepts
+  `user`, `assistant`, `system` and `developer` only, and any other role was
+  answered with an empty item list, which dropped the turn. It now fails with
+  `construct: "role:<role>"` / `provider: "openai_responses"`, and the two
+  refusals read that provider id from one constant instead of two literals. The
+  refusal stays in the family that cannot carry the construct: the other five
+  profiles keep their own role policies, and a case asserts that. Proven at the
+  boundary that matters -
+  `ResponsesApiClient::build_request_body`, the function `chat` applies `?` to -
+  rather than only in the encoder.
+  `crates/ragent-llm/tests/test_wire_encode_message.rs` grew from 36 to 38
+  cases; red-proved three ways, each reverted byte-identically.
 
-  Update any hook `matcher`, permission rule, or `allowed_tools` list that names an old spelling to the new one.
+- **An unresolved permission verdict now blocks the tool result, not just the
+  call (spec `uniformtools` FR-013).** The permission layer already awaited a
+  prompt before dispatching, but nothing tracked the interval: the tool phase
+  appended a result for every outcome it was handed, so a call whose verdict
+  never resolved - a wedged wait, an aborted task, a dropped future - could still
+  put its output in front of the model. The unresolved interval is now a state
+  the two sides share: `session::pending::PendingVerdicts` holds, per session,
+  the call ids currently at a prompt; the dispatch pipeline's permission stage
+  marks a call immediately before the prompt and settles it the moment the
+  verdict resolves (an allow, a deny, a policy refusal and a timeout all clear
+  it), and the tool phase reads the same tracker through `result_is_appendable`
+  before it appends. On an unsettled verdict the call's record is still written -
+  status `Pending`, no output, no error, so the provider's `tool_use` is not
+  orphaned - but no tool result is appended and one warning names the call, so
+  the turn cannot continue on an unapproved call's output and a wedged verdict is
+  visible instead of silent. The tracker is keyed by session as well as call
+  because call ids are not globally unique, and `begin` is idempotent because the
+  bash path raises one prompt per sub-command under one call id.
+  `crates/ragent-agent/tests/test_approval_blocks_result.rs`, which existed but
+  was never listed in `tests/all.rs` and so had never run, is now nine cases in
+  the `all` target covering the mark/settle ordering, the append decision, the
+  bash two-prompt case and both end-to-end write outcomes.
+
+- **Parallel tool dispatch is now gated on the provider's wire profile (spec
+  `uniformtools` FR-010).** `ToolWireProfile::supports_parallel` was declared,
+  set on all six families and printed by the wire matrix, but nothing read it:
+  the agent loop's per-step flag was the `experimental.parallel_tool_calls`
+  setting and nothing else. A provider that cannot carry two calls in one step
+  would therefore be sent a concurrent dispatch the moment a user turned the
+  setting on. The loop now demotes that opt-in for the step - one assignment,
+  before the first call is prepared, with one `tracing::info!` naming the
+  provider and the reason - so every call runs through the sequential arm, which
+  is the same ordered pipeline with the same recorded order (FR-012). The gate
+  only ever demotes: `true` means concurrency is *permitted*, never switched on,
+  and a provider that supports parallel calls is untouched. The condition is
+  `is_none_or(|profile| !profile.supports_parallel)`, which covers both a
+  profile that says `false` and a provider id with no declared profile - FR-002
+  has no catch-all and no `Default`, so an unnamed id declares nothing and must
+  not be read as permitting everything. `supports_parallel`'s own documentation
+  now states that contract, and `profile_table`'s docs no longer claim the
+  router's downstream family is resolved (it is not: the selection happens
+  inside `RouterClient::chat`, after this decision; recorded in the task doc).
+  `crates/ragent-agent/tests/test_parallel_gate.rs`, which existed as a
+  never-included source guard and so never ran, is now five cases in the `all`
+  target covering the demotion, its absence, the single log line, the gate's
+  position, and the rows the cases depend on.
+
+- **A provider's tool-use finish with no parsed tool call is now treated as a
+  truncation, so a lost call can no longer end the turn as a clean reply
+  (spec `uniformtools` FR-022).** Several providers report
+  `finish_reason: tool_use` while narrating the invocation as text, and a cut
+  short of its `ToolCallEnd` produces the same finish with nothing in the
+  accumulator. Either way the turn used to end as if the model had answered:
+  no tool ran, and the reply was recorded as a normal stop. `call_llm_step` now
+  reclassifies that step as `Truncation` before the truncation-continuation kick
+  and the text-recovery path, and publishes one notice naming the cut, so the
+  existing F9 text scan gets its chance to salvage a narrated call and, when
+  there is none, the run ends with the "reply may be incomplete" warning instead
+  of a silent tool-use turn. The boundary is deliberate: a call that *opened*
+  is a parsed call, so its cut-off arguments still go to the normal dispatch
+  pipeline and are refused as an invalid-argument tool result the model can
+  correct - louder and more actionable than a truncation notice. The rule lives
+  in one place, `SessionProcessor::finish_was_tool_use_without_a_call`, and the
+  old assertion in `test_processor_more_paths` that pinned a bare
+  `Finish { ToolUse }` to `ToolUse` now pins `Truncation`.
+
+- **Tests run under `cargo-nextest`: `cargo test` is replaced by
+  `cargo nextest run` for every test run in the workspace.** The configuration is
+  checked in at `.config/nextest.toml`; CI installs the binary with
+  `taiki-e/install-action@nextest` and runs
+  `cargo nextest run --workspace --profile ci --no-fail-fast`, followed by
+  `cargo test --workspace --doc` for the doc tests nextest never runs. The
+  workspace links one integration-test binary per crate (18 `tests/all.rs`
+  targets, ~14,500 tests), and `cargo test` runs every test of a binary inside
+  that one process - so a wedged test blocked its neighbours and a
+  process-global mutation leaked between tests. Nextest gives every test its own
+  process, schedules them across the machine, prints a failure's captured output
+  the moment it happens, and kills any single test that exceeds the configured
+  150 s `slow-timeout` instead of stalling the run. A full workspace run
+  measured 14,458 tests in 174-262 s wall clock on the reference machine.
+  Guidance is updated in `AGENTS.md` ("Test Layout"), `AGENTS-LANGUAGE.md`
+  ("Test Commands", the `cargo test` -> `cargo nextest` command table and the
+  per-file filter form), `TOOLCHAIN.md` (a new "Test running" section and the
+  plugin table row), `README.md`, `QUICKSTART.md`, `STATS.md`, `pre-flight.sh`
+  and the `/rust-hygiene` skill. `cargo test -p <crate> --test all <module>::`
+  still works and remains the correct form when a doc test or an in-process run
+  is what is wanted.
+
+### Fixed
+
+- **`ResearchIo::atomic_write` no longer races itself, and an item can no longer
+  be left half-created (found while switching the test runner).** The temp file
+  was `<path>.tmp`, a name every writer of the same path shared, so two writers
+  (a `create` publishing `RESEARCH.md` and `CORPA.md`, a run marking the item in
+  progress, or two HTTP requests) raced on one temp name: the loser's `rename`
+  failed because the winner had already moved the file, its write was lost to an
+  I/O error, and the shared name also collapsed a dotted file name
+  (`item.v1.md` -> `item.v1.tmp`). Measured before the fix with two threads
+  writing one path 80 times each: 15 `FileNotFoundError` losses; after, 0. The
+  temp name now carries the process id and a counter, and `create` holds a
+  per-item write lock for the whole publication so the pair lands as one step.
+  Two further defects in the same path: `persist_frontmatter` returned a
+  `NotFound` I/O error when it ran before `RESEARCH.md` existed, leaving an item
+  directory with only `CORPA.md` (the `POST /research` background run marks the
+  item in progress immediately after `create`, so this is a live path, not a
+  test-only one) - it now writes the frontmatter alone; and `ResearchManager::show`
+  reported an existing item directory with no `RESEARCH.md` as an I/O error
+  (HTTP 500) instead of "not found" - it now reports `NotFound`. A new
+  `ResearchManager::show_validated` and `ResearchIo::item_write_lock_path` are
+  the shared entry points.
+
+- **The server's research test sandbox no longer deletes itself mid-run.**
+  `research_sandbox` wiped `target/temp/ragent-server-research` once per test
+  process, and that wipe is what made `test_research_routes` fail 4 runs in 20:
+  it removed the `isolated/` vault trees of every test already running in the
+  same process, so a test's `create` succeeded and the following `GET` saw
+  `404`, or an item was published with only one of its file pair. The root is
+  now created and never wiped (each caller's path is already unique by pid plus
+  a counter), and the seven other server test files that only need a vault root
+  take the per-test root too, so no two tests share a vault. With the sandbox
+  left alone, `test_research_routes` went from 16/20 and 18/20 in parallel runs
+  to 20/20, and the whole `ragent-server` crate to 200/200.
+
+- **The tool-rename guard tests are ordered across processes by a nextest
+  `test-group` instead of a file-local `Mutex`.** `test_tool_rename_guard`
+  invokes `scripts/check_tool_rename.py` against the whole checked-in tree, and
+  two of its tests plant a temporary file in `crates/` that the guard then
+  reports. A file-local `Mutex` only orders the tests inside one process, so
+  under nextest (one process per test) `test_guard_passes_on_the_checked_in_tree`
+  scanned the tree while its sibling's fixture was on disk and failed on a file
+  that sibling had planted. Adding `#[serial]` does not help: serial_test
+  publishes its lock key as `SERIAL_TEST_RETRY_KEY` in the parent environment and
+  each test process starts from its own saved environment, so two siblings take
+  different keys - verified by watching the pair fail on try 1 and pass on try 2
+  of `--retries 2`. `.config/nextest.toml` now declares a `tool-rename-guard`
+  test group with `max-threads = 1`, which the runner enforces across processes.
+  Guidance on the cross-process limit of `#[serial]` is in `AGENTS.md`,
+  `AGENTS-LANGUAGE.md` and `TOOLCHAIN.md`.
+
+### Added
+
+- **No alias survives the tool rename, on any inbound path (spec `uniformtools`
+  FR-026, task T-032).** `crates/ragent-agent/tests/test_fr026_no_alias_survives.rs`
+  (9 cases) proves the three clauses of the no-alias rule rather than asserting
+  them in prose: no retired spelling is a registry key, a tool's reported name or
+  a model-facing definition; no pair resolves both of its spellings and no key
+  disagrees with the name its tool reports, so a second registration or a
+  forwarding wrapper cannot hide; and a retired-spelling call is recorded as an
+  `Error` with the unknown-tool refusal and its did-you-mean hint, driven through
+  a real `SessionProcessor` turn - the one path the TUI prompt, `ragent run`, the
+  OpenAI-compatible `/v1` surface and the ACP server all share, with a source case
+  pinning that none of the four resolves a tool name of its own. Two findings
+  shaped the file and are recorded in `specs/uniformtools/T-032-NO-ALIAS.md`:
+  FR-026's own case-folding note permits `bash` to reach `Bash` at the dispatch
+  lookup (nine of the thirteen pairs differ only by letter case, and the registry
+  `get` still refuses the retired one), and clause 2's wrapper check cannot be a
+  source scan - a seeded wrapper under a retired spelling survived five scan
+  shapes, so the check compares the registry against the names the tools report
+  and a seeded defect proves that comparison sees one. No production source
+  changed: the proof found the requirements already met. Tests only.
+- **Every provider now calls tools through one declared wire contract and one
+  dispatch pipeline (spec `uniformtools`, FR-002..FR-004, FR-007, FR-010,
+  FR-012, FR-013, FR-019, FR-020, FR-021, FR-022; NFR-005).** The tool path is
+  documented from the outside in for the first time: `SPEC.md` gains a
+  "Unified Tool-Calling Wire Path" section under the provider catalogue (the six
+  families, the nine `ToolWireProfile` fields, the `PROVIDER_WIRE` table with no
+  catch-all row, the build-time coverage assertion, and the `--wire-matrix`
+  table) and a "Tool-Call Wire Path and the One Dispatch Pipeline" section under
+  the tool system (one encoder each for definitions, messages and stream
+  deltas; one argument decoder; one ordered pipeline for both execution modes;
+  the unknown-tool refusal and its did-you-mean hint; an error result that is
+  never indistinguishable from a success; the parallel gate; the unresolved
+  verdict; the tool-use-without-a-call truncation). The `ragent-llm` crate
+  `DOCS.md` states the chain end to end and records that the `router` row is
+  nominal, so a consumer needing the effective contract for a router session
+  resolves the downstream provider instead of reading that row. Documentation
+  only: no behaviour changed in this change, and every string the change
+  introduces is ASCII (NFR-005).
+
+- **Two tool calls in one response that carry the same id are reconciled instead
+  of merged (spec `uniformtools` T-011, FR-020).** A local model asked for two
+  calls "with the same id `call_dup`" does exactly that, and a server replaying a
+  cached frame produces the same shape unasked. Both calls then reached the same
+  history under one id, and the consumer finds its pending call with
+  `tool_calls.iter_mut().find(|t| t.id == id)` - so the second start overwrote the
+  first: one call's arguments were replaced by the other's and only one result
+  could come back. `ToolCallAccumulator` now keeps a per-response `emitted_ids`
+  ledger of every id a start has gone out under; `start_id(requested, name)`
+  returns the first claim unchanged and re-keys a later one to a freshly minted
+  `<provider>_<counter>_<name>` with one `tracing::warn!` naming the duplicated
+  id, and `synthetic_id` walks its counter past every id the response has used so
+  the replacement is never itself the duplicate. The warning sits on the
+  start-emitting branch only, so a provider that repeats the whole frame each step
+  takes `open`'s existing `started_id` return and cannot multiply the line; a
+  repeated frame under the same *key* stays idempotence rather than a collision,
+  which is why a call-id-keyed family re-keys nothing. The ledger deliberately
+  survives `end`, because two sequential calls in one response collide exactly as
+  two parallel ones do. `azure_resource.rs`'s `AzureAnthropicClient` was folded
+  onto the accumulator in the same task - it parsed the Anthropic Messages shape
+  with a private `BTreeMap<u64, String>` and emitted `ToolCallStart` directly,
+  outside the accumulator, skipping the end of any block the server left unnamed -
+  making it the tenth accumulator site. Five new cases in `test_wire_decode.rs`
+  (parallel duplicate, sequential duplicate, a re-key that must skip an occupied
+  synthetic id, a repeated frame that must not be a collision, and a capturing
+  `tracing::Subscriber` counting WARN lines across repeated frames - the only way
+  to see "warn once"), the same collision end to end through the real SSE parser
+  in `test_openai_provider_extra.rs`, and the parallel-block case through
+  `AzureAnthropicClient`; both source scans now cover `azure_resource.rs`.
+  Proven red four ways, each restored byte-identically.
+
+- **A tool call no provider names an id for now gets the id FR-019 asks for, and
+  nothing reads a tool name back out of it (spec `uniformtools` T-010).** Four
+  spellings existed and none was `<provider>_<counter>_<name>`: Gemini invented
+  `fc_<name>_<n>` and the encoder later recovered the tool name by splitting that
+  id on `_`, Ollama Cloud invented `ollama_cloud_tc_<index>` per frame, and the
+  shared OpenAI-compatible parser fell back to `tc_<index>`. Gemini's recovery was
+  the requirement's forbidden half and failed concretely: a call to `read_file`
+  produced `fc_read_file_0`, which split to `read` - a different registered tool
+  once the rename lands. The accumulator now owns every synthetic id:
+  `ToolCallAccumulator::new(profile, provider)` takes the provider id,
+  `synthetic_id` formats `<provider>_<counter>_<name>` from a per-stream counter
+  (walking past any id the response already used) and logs one
+  `tracing::debug!` naming the provider, `open` pins the id on the call before
+  emitting the start so start, delta and end agree, and `defer(name, args)` mints
+  its own instead of taking one. `fallback_id` and its `tc_<index>` are deleted;
+  an `OpenCall` now records the id a *frame supplied* apart from the key it is
+  addressed by, so a key is never mistaken for an id, and a delta reaching a call
+  whose start was never emitted is dropped with a debug line rather than sent
+  under an invented id. The name-recovery half is gone from `wire/encode.rs`: the
+  Gemini `functionResponse` name comes from `tool_names_by_id` only, and an id
+  the history no longer carries goes out unnamed and logged. `sse.rs` carries a
+  new `OpenAiSseSpec::provider_id` because a call id is replayed in the next
+  request and must read as an id, not the capitalised display label. Ollama Cloud
+  keys its id-less calls by a *stream-scoped* counter, because the frame-local
+  index restarted at zero and folded every unnamed call onto the first. No
+  canonical type changed: the name was already on `ToolCallStart { id, name }`,
+  `ContentPart::ToolUse` and `MessagePart::ToolCall`. New cases drive the real
+  Gemini and Ollama Cloud streams with two unnamed calls each, and a ten-module
+  source scan fails on a re-minted id, a name-shaped key, or a `split('_')` name
+  recovery; proven red three times.
+
+- **Bedrock Converse keeps two parallel tool calls apart, and the rule is now
+  pinned at the parser (spec `uniformtools` T-009, FR-005).**
+  `crates/ragent-llm/tests/inline/bedrock_tests.rs` gained the two cases the
+  Converse stream needed. `test_converse_chat_stream_keeps_two_parallel_tool_use_blocks_apart`
+  drives two `toolUse` starts and four `toolUse.input` fragments interleaved
+  `1, 0, 1, 0` through the real event-stream parser and asserts two starts,
+  fragments rejoined by id to exactly `{"path":"a.rs"}` and `{"pattern":"fn main"}`,
+  and one end per call in the model's stop-frame order;
+  `test_converse_stream_drops_a_frame_that_names_no_block_index` asserts an
+  unindexed fragment reaches no call rather than being folded onto whichever call
+  is open. `test_wire_decode::test_no_stream_attributes_a_frame_to_the_call_opened_last`
+  narrowed its retired list to `delta_last(`, `end_last(`, `.last_mut()` and
+  `active_tool_call_id`, and the `wire::decode` module docs now record why the two
+  last-opened helpers are deleted rather than merely unused: a helper that answers
+  "the call I opened most recently" is the failure one method call away. Proven
+  red three times (all three Converse arms keyed to one block; the delta arm
+  ignoring `contentBlockIndex`; `end_last` re-added), each restored
+  byte-identically.
+
+- **Every provider family now writes its tool-result carrier through one
+  encoder, so the four carriers of FR-006 exist in one file instead of eight
+  copies (spec `uniformtools` T-006).** The request-side message loop was
+  duplicated across `anthropic`, both `bedrock` clients, `gemini`,
+  `huggingface`, `ollama_cloud`, `openai_compat` and `openai_responses` - eight
+  arms over seven files - and they had drifted: only three of them read the
+  profile they were supposed to dispatch on, two were byte-for-byte copies of a
+  neighbour, and the Responses copy filtered every tool construct out of the
+  input list so a tool exchange never reached the API at all.
+  `wire::encode::encode_message(profile, &ChatMessage, &MessageContext)` now
+  writes the result carrier named by `ResultCarrier`, the id under the key
+  `IdField` names, and the arguments in the shape `ArgsEncoding` declares;
+  `MessageFamily::of` derives the vocabulary from the profile's envelope, carrier
+  and argument encoding, which is how the two families that share a carrier name
+  but differ in part shape (Anthropic `tool_result` vs Converse `toolResult`;
+  OpenAI's id-keyed `role:"tool"` vs native Ollama's name-keyed one) stay apart
+  without the caller deciding. `MessageContext` carries only the four facts a
+  profile cannot: `tool_names` (the id-to-name map the two name-keyed carriers
+  need, built by the one `tool_names_by_id` scan), `name_prefix`
+  (HuggingFace's `t_`), `allow_images` (native Ollama's most-recent-turn rule)
+  and `mirror_tool_name` (local Ollama's id-and-name result). `encode_messages`
+  and `encode_messages_fallible` are the conversation-level form the provider
+  modules call, so six of them pass a profile and `MessageContext::default()` and
+  nothing else. Two dialect switches died with the loops:
+  `OpenAiCompatSpec::strict_single_text_collapse` (the shared encoder collapses a
+  single *text* part and nothing else, which is the strict rule Copilot asked
+  for - Copilot's copy used to collapse an image part into `"content": null`) and
+  `bedrock::mime_to_converse_format` (moved to `wire::encode` beside its only
+  caller). Gemini's `functionResponse` name now comes from that map rather than
+  from `tool_use_id.split('_').next()`, which FR-019 forbids. The Responses input
+  list gains `function_call` / `function_call_output` items (FR-018), keeping the
+  existing `ImageUrl` -> `WireLoss` refusal in the family that has no slot for
+  it. `crates/ragent-llm/tests/test_wire_encode_message.rs` grew from 23 to 36
+  cases: the conversation form must equal the per-message loop for every declared
+  profile, a refused construct must refuse the whole conversation and not leak
+  into the five families that carry images, the single-text collapse now has its
+  image counter-case, and the Copilot/local-Ollama dialects are pinned as spec
+  fields rather than copies. Seven red proofs, each reverted byte-identically.
+
+- **No provider module can build its own tool JSON: the FR-003 scan now walks
+  the whole provider tree, and the body key is derived rather than typed
+  (spec `uniformtools` T-027, FR-003).** The guard that landed with the encoder
+  fold covered six modules and three keys, so it proved the change without
+  keeping the tree true afterwards. Three cases in
+  `crates/ragent-llm/tests/test_wire_encode.rs` now hold the claim:
+  `test_no_provider_module_writes_an_envelope_key` walks every `.rs` file under
+  `crates/ragent-llm/src/providers/` (recursively, `wire/` included), strips
+  line and nested block comments first - with string and character literals
+  honoured, so a module doc that *names* a shape cannot fire it - and fails
+  naming each offending `file:line: key` for the eight keys a definition object
+  can be built from (`input_schema`, `inputSchema`, `toolSpec`,
+  `functionDeclarations`, `function_declarations`, `tool_call`, and the OpenAI
+  `function` spelling in both `json!` and JSON-string form). `wire/encode.rs`'s
+  `item_json`, the one definition site, is the single exemption and is named by
+  path, so a second `wire/` module cannot inherit it. `"tool_use"` was removed
+  from the key list after measuring eight hits and no true one: it is the
+  Anthropic stream's content-block type and its `stop_reason` in exactly the
+  files where the item never appears, and the Anthropic item is carried by
+  `"input_schema"`, which no message shape uses. The one production change is
+  what made the second scan possible: each provider used to open its body key as
+  a literal (`body["tools"]`, `body["toolConfig"]`), which a scan could only
+  read by exempting the place that wrote it. `ToolFormat::body_key` derives the
+  key from `tool_envelope()` (`toolConfig` for
+  `BedrockToolSpec`, `tools` for the other five) behind the `TOOLS_KEY` /
+  `BEDROCK_TOOLS_KEY` constants, so the six assignments read
+  `body[ToolFormat::<Family>.body_key()]` with no change on the wire, and
+  `test_no_provider_module_writes_a_tool_body_key_literal` can refuse the
+  literals everywhere else. `test_every_tool_body_key_is_the_one_the_encoder_wraps`
+  closes the gap that would have made both scans worthless: a format reporting
+  the wrong key passes them and still puts the payload where nothing reads it.
+  Red-proved three ways (a seeded `json!` envelope in `xai.rs`, a file no scan
+  had ever listed; `gemini.rs` reverted to `body["tools"]`; a wrong `body_key`
+  expectation, since the alternative - a wrong arm in source - is rejected by
+  the compiler's exhaustive match), all restored byte-identically.
+
+- **The OpenAI Responses API now serves its tool array from the one shared
+  encoder, so no provider module in the tree builds a tool definition array
+  (spec `uniformtools` T-005, FR-003).** `openai_responses.rs` carried a
+  hand-written `Vec<Value>` of flattened `{"type","name","description",
+  "parameters"}` items - the same shape the encoder's `ResponsesFlatFunction`
+  arm produced, but derived a second time, and reachable only through a cache
+  key that did not exist. `ToolFormat` gained the `OpenAiResponses` key
+  (resolving to the `OPENAI_RESPONSES` profile, no name prefix) and the module
+  now assigns `cached_tools(ToolFormat::OpenAiResponses, &request.tools)
+  .responses_tools_array()`, with the same `request.tools.is_empty()` early
+  check every other family uses, so an empty registry still leaves `tools`
+  absent rather than sending `[]`. `ToolFormat::ALL` and
+  `ToolFormat::tool_envelope` make the FR-003 coverage assertion total and
+  two-directional without a hand-written list: every envelope the provider table
+  declares has a cache key, and every key's envelope is one the table declares.
+  The TUI's `tool_format_for_provider` gained the `openai_responses` arm, so a
+  Responses session's context panel measures that session's own envelope - 51
+  tokens of per-tool overhead against 532 for a chat session over the same 148
+  definitions (it measured the chat buffer both times before). The case that
+  matters is the equality: `test_build_request_body_tools_come_from_the_shared_encoder`
+  compares the built body against the encoder's payload, because a hand-built
+  array of the right shape passes every shape assertion and fails only a
+  comparison against the derivation. Four red proofs. While landing, the
+  pre-fold byte pin in `test_wire_encode.rs` was found passing under `--test
+  all` alone and failing in a wider run in both directions: the graph carries
+  two copies of `serde_json` (`gcf` enables `preserve_order` for
+  `ragent-agent`'s copy while `ragent-llm`'s sorts), so which copy a build
+  links decides the key order the encoder emits. The case now pins each
+  envelope's byte length and field set instead of an order that depends on the
+  build graph; key order was never part of FR-003.
+
+- **A `tools.aliases` entry that names a retired ragent tool spelling now stops
+  the configuration load instead of quietly mapping it (spec `uniformtools`
+  T-042, FR-031).** FR-031 is an unwanted-behaviour requirement: no supported
+  configuration mechanism may make a retired `before` spelling resolvable, and
+  `tools.aliases` is the one section that carries tool names. Three entry forms
+  are refused - a source key equal to a `before` spelling (`"bash": "Bash"`), a
+  target value equal to one (`"WebFetch": "bash"`), and the self-mapping form of
+  either spelling of a renamed tool (`"Bash": "Bash"`, `"bash": "bash"`), which
+  asks for two spellings of one tool (FR-026). The error names the configuration
+  source, the offending spelling and its `after` replacement, and lists **every**
+  offender in one message rather than the first, because a table copied from an
+  old dump carries several. `ToolsConfig::validate_alias_spellings` returns them
+  as `RetiredAliasSpelling` values and `Config::reject_retired_alias_spellings`
+  renders the loader's text, called from `parse_file` (the global file, the
+  project file and `RAGENT_CONFIG`) and from the `RAGENT_CONFIG_CONTENT` route,
+  which names the variable in place of a path. `ragent run --dry-run` parses the
+  same files through its own path, so the readiness report applies the same check
+  and no longer says "Config loaded" for a file the next load refuses. The check
+  is deliberately *not* a serde deserialiser: a deserialiser cannot name the file
+  it is reading. A self-mapping of a spelling the rename never touched
+  (`"think": "think"`) is not an offender - it asks for no second spelling of a
+  renamed tool and the table drops it as a no-op (D7) - which is why the rule is
+  a rename-table lookup rather than a `key == value` test. The resolver half is
+  unchanged in intent and now tested: `AliasTable::from_aliases` skips an entry
+  whose key or target is a retired spelling (defence in depth for a section built
+  in memory, since a file never reaches it), `unresolved_targets` lists the
+  entries whose target this build does not register, and
+  `report_unresolved_targets_once` logs each once per process behind a
+  poison-tolerant seen-set - per entry, not per turn, because the table is
+  rebuilt every turn and a repeated warning trains the reader to ignore it. An
+  unresolved target is refused at the moment it is used, by the unknown-tool
+  refusal that already names the spelling the client sent; it is never a load
+  error, because a plugin or MCP tool may be bridged after the configuration was
+  read. The FR-023 table moved to `crates/ragent-types/src/tool_rename.rs`
+  (re-exported as `ragent_agent::tool::rename`, so no call site changed) because
+  `ragent-config` sits below `ragent-agent` and could not read a table held
+  there. Eleven cases in
+  `crates/ragent-config/tests/test_retired_alias_spelling.rs` (previously
+  unregistered in `tests/all.rs`, so it ran nothing) drive the real loader
+  through `RAGENT_CONFIG`, two more in `test_dry_run_extra.rs` pin the readiness
+  report's agreement with it, and four in `test_tool_alias_table.rs` pin the
+  resolver half. Three red proofs.
+
+- **`tools.wire_trace` writes the redacted request body of every provider send
+  to `target/temp/wire-trace/<session>-<step>.json` (spec `uniformtools` T-023,
+  FR-017).** The switch is off by default, and while it is off the recorder
+  returns before touching the filesystem - no trace directory is created, so a
+  default run leaves the tree byte-identical. `prepare_client` sets it once per
+  turn from the turn's resolved config (after the automation backend override),
+  so flipping the key takes effect on the next turn without a restart. One file
+  per send, named with the flattened session id and a per-session step counter,
+  written atomically (temp file then rename) so a crash cannot leave a truncated
+  trace that reads like a truncated request. Redaction is two passes over the
+  shared sanitizer: credential-named fields are replaced wholesale (string values
+  only - a tool's JSON schema legitimately declares a `token` property, and
+  masking it would destroy the document the trace exists to show), then the
+  shared `redact_secrets` matcher runs over every string and replaces only the
+  matched span, so a `system` prompt that explains an `api_key=...` shape keeps
+  its prose while the credential inside it is replaced. Every byte is ASCII (non
+  ASCII characters become `\uXXXX` escapes), so the file is safe to paste into a
+  terminal. The recorder is called by thirteen sends over twelve provider
+  modules (`anthropic`, `openai`, `openai_responses`, `azure_foundry`,
+  `azure_resource`, `gemini`, `huggingface`, `ollama`, `ollama_cloud`,
+  `openrouter`, `copilot`, and both Bedrock clients), with `mock_llm_client` (no
+  wire) and `router_client` (delegates to a client that records) exempt and the
+  reason recorded at the guard. `crates/ragent-llm/tests/test_wire_trace.rs`
+  pins the eight obligations, including two source guards for the failures that
+  would otherwise be silent - a provider that skipped the call, and a switch
+  that was never set from config. Six red proofs.
+- **One ordered tool-dispatch pipeline: the sequential and concurrent arms now
+  record the same calls, in the same order, through the same stages (spec
+  `uniformtools` T-014, FR-012, FR-021).** Every tool call - whether its step runs
+  the calls one at a time or concurrently - goes through one pipeline whose stages
+  are fixed and run once each: decode the arguments, resolve the tool (the
+  unknown-tool refusal with its did-you-mean hint), validate the schema, the loop
+  restriction, the plan gate, the interactive-tool block, the pre-tool hooks, the
+  repeat guard, the concurrency permit, the security analyzer, the permission
+  verdict and backend dispatch, and result normalisation. Six defects were in the
+  way, two of which were only visible by comparing the two arms:
+  `ToolDispatchContext` borrowed the turn, so the context could not move into the
+  spawned task and the loop built a second, owned copy of every borrow per call -
+  it now owns its fields, is built once and moved, and the concurrent arm is the
+  sequential arm's task in a list; `ResolvedToolCall.tool` was
+  `Result<_, Box<ToolInputError>>`, three spellings of one refusal, and the box is
+  gone so the sentence, record status and `is_error` flag come from one value;
+  `suggest_tool_name` was a second did-you-mean ranking beside the loop's copy, now
+  one function reached by both; `canonical_dispatch_name` asked the resolved tool
+  for its `name()` and could rewrite a name onto itself, and now rewrites only on a
+  unique case-insensitive match; the join-failure outcome had no constructor, and
+  both arms assembled the same nine-field tuple by hand - they now call
+  `ToolDispatchPipeline::synthesised`; and **the two arms applied outcomes in
+  different orders**, because the sequential arm recorded a refused call inline in
+  the prepare loop while the concurrent arm recorded as the batch completed, so a
+  step whose first call was refused wrote two different histories depending on
+  `experimental.parallel_tool_calls`. A step is now a list of slots in the
+  provider's order - a future for a call that runs, an already-settled outcome for
+  a call the prepare loop refused - and the drain walks the whole list once after
+  every call has been prepared, so neither arm can record a call ahead of the call
+  the provider listed before it. A refused call also now reaches the model with the
+  `Error: ` marker a failed run uses, where it used to arrive as a bare sentence.
+  Three new cases in `crates/ragent-agent/tests/test_unified_dispatch.rs` (both
+  modes record a refused-first step in order, the concurrent arm keeps one slot per
+  call and drains in one ordered pass, the permission stage raises exactly one
+  prompt per call in both modes), a rewritten structural guard, and a new
+  `crates/ragent-agent/tests/test_refusal_outcome.rs` pinning the terminal shape of
+  every stopped call. Separately, `test_sandbox_secrets` and
+  `test_container_backend` start containers from a name derived from the workspace
+  path and collided under nextest's one-process-per-test model, so
+  `.config/nextest.toml` gained a `max-threads = 1` group covering both - the
+  cross-process exclusion that cannot be a file-local lock.
+
+- **`ragent --wire-matrix` prints every registered provider's declared tool-calling
+  contract as one aligned table and exits without touching the network (spec
+  `uniformtools` T-022, FR-016).**
+  The table's rows come from the provider registry rather than a hand-maintained list,
+  and every cell is a value from the same `profile_for` lookup the encoders and the
+  stream accumulator dispatch on - so the table cannot go stale against what a session
+  actually sends. Ten columns: the provider id plus the nine `ToolWireProfile` fields
+  (envelope, result carrier, id field, argument encoding, stream keying, parallel,
+  is-error, reasoning, synthetic ids). Columns are padded to the widest cell including
+  the heading, separated by two spaces, and each line is `trim_end`ed so no row carries
+  invisible trailing whitespace; the four booleans print `yes`/`no`, never a blank and
+  never `-`. Rows are sorted by provider id because the registry enumerates from a
+  `HashMap` - without the sort two runs of the same binary would print different row
+  orders. A registered provider with no declared profile is an error naming it (exit 1,
+  the runtime-failure code: a broken build, not a mistyped flag) rather than a row of
+  blanks or a partial table that looks complete. The flag is `global = true`, so it is
+  accepted in any position like `--version`, and it is answered immediately after
+  `--version` and before the panic hook, the crash-marker read, the config load,
+  `Storage::open`, the secret-registry seed and the MCP connect loop - which is what
+  makes "no provider contacted, no tool executed" true by construction rather than by
+  inspection (measured at 10 ms against the ~2 s a full start takes). Deliberately not
+  included: a `--json` form (FR-016 asks for an aligned table, and a second rendering
+  would be a second contract to keep in step) and any config interaction (the report
+  describes compile-time contracts). The `router` row prints its declared
+  `openai_function` family; resolving the per-request downstream family is the
+  effective-contract work, and omitting the row would leave a registered provider with
+  no row at all. Twelve new tests: eight on the renderer in
+  `crates/ragent-llm/tests/test_wire_matrix.rs` and four end-to-end on the binary in
+  `tests/test_wire_matrix_flag.rs` (including the check that every provider
+  `ragent models` names has a row).
+
+- **Every provider stream now shares one keyed tool-call tracker (spec `uniformtools`
+  T-008, FR-004).**
+  Nine stream parsers each kept their own answer to "which open tool call does this frame
+  belong to", and the answers disagreed: a `BTreeMap<u64, String>` in `anthropic.rs` and
+  `azure_resource.rs`, a `HashMap<u64, String>` plus a `HashSet<u64>` of started indices in
+  `sse.rs` and its three copies, a `HashMap<String, String>` keyed by id on `bedrock.rs`'s
+  Anthropic-shaped path (whose `iter().last()` attributed every fragment and every stop to
+  an *arbitrary* open block), a single `active_tool_call_id: String` on the Converse path
+  (where a second parallel `toolUse` block overwrote the first, losing one call's arguments
+  and concatenating both into the other), and a `Vec<(id, name, args)>` plus its own
+  `next_tool_call_id` counter in `gemini.rs`. Ten construction sites over nine modules now
+  delegate to `wire::decode::ToolCallAccumulator`, keyed by the family's declared
+  `StreamKeying`: `open`/`set_id`/`delta`/`end` for a keyed frame, `defer`/`flush_deferred`
+  for a provider that hands over a whole call in one frame (Gemini's `functionCall`, which
+  must not be emitted before the `finishReason` sharing its frame has been read), and
+  `end_all` to close a finished stream with `ByIndex` families in index order and
+  `ByCallId` families in open order. A delta whose frame names no open call is **dropped**
+  with a `tracing::debug!` rather than folded onto whichever call happens to be open - that
+  fold is exactly what merges two parallel calls - and both Bedrock paths now skip and warn
+  on a frame with no block index (FUNC-032), the rule `sse.rs` already applied to a
+  `tool_calls[]` entry with no `index`. One behaviour therefore changes: a Converse delta
+  that omits `contentBlockIndex` used to be attributed to the last-opened call and is now
+  dropped, because a missing argument is recoverable and a wrong one is not - which is also
+  why `wire::decode` carries no last-opened helper for a caller to reach for. The
+  per-provider `dedup_tool_call_start` opt-out is **deleted** rather than defaulted to
+  `true`: FR-004 says exactly one start per call, and a switch that could turn that off was
+  a contract with a way out of it. Unchanged by design: `StreamEvent` (no field, no
+  variant, so the agent loop, the TUI and every existing provider test compile as they
+  were), and the `tc_<index>` / `fc_<name>_<n>` / `<x>_tc_<idx>` id *spellings* (FR-019 is
+  T-010; `sse.rs` now passes `None` and lets the accumulator mint). Proof:
+  `crates/ragent-llm/tests/test_wire_decode.rs`'s
+  `test_the_provider_modules_no_longer_keep_their_own_tool_call_maps` - a source scan over
+  all nine modules for the seven retired bookkeeping names - was **red at `HEAD`**
+  (`anthropic.rs does not use the shared accumulator`) and is green. Proven red three more
+  ways, each restored byte-identically and `md5sum`-checked: `delta` choosing the last open
+  call reds five cases, dropping `open`'s `started_id` guard reds three, and passing an
+  empty tool name from `sse.rs` reds both OpenRouter stream cases. `--lib` 323 passed,
+  `--doc` 30 passed, `--test all` 294 passed with the four remaining failures all owned by
+  still-pending T-006/T-010/T-023 work in files this change does not touch.
+
+- **One tool-definition encoder, one unchanged cache (spec `uniformtools` T-004, FR-003, NFR-001).**
+  `crates/ragent-llm/src/providers/tool_cache.rs` held a byte cache plus five near-identical
+  builders (`build_openai`, `build_anthropic`, `build_gemini`, `build_bedrock`,
+  `build_huggingface`) that each repeated the same nine lines of framing, re-derived their own
+  `payload_start` / `payload_end` pair, and - in three cases - recomputed the same `buf.len() - 1`
+  while a fourth hard-coded `9`. They are gone. `crates/ragent-llm/src/providers/wire/encode.rs`
+  holds `encode_tools(profile, name_prefix, tools)`, which frames the list once and builds each
+  item from `profile.tool_envelope` through `item_json` - now the only definition of the five item
+  shapes in the workspace. The one real difference between the families, Bedrock assigning the
+  whole `{"tools":[...]}` object to `toolConfig` while the other four assign the inner array, is
+  one arm of one `match` on `tool_envelope`; it is also why `payload_start`/`payload_end` stay
+  private, with `byte_len = payload_end - payload_start` serving both request-size estimation and
+  the TUI's context measurement. `tool_cache.rs` is 198 lines (from 373): `ToolFormat`, the key,
+  the two public functions, and `tool_arguments_json` (moved unchanged - it is decode-side, and
+  T-012 asserts on it there). The cache's contract FR-003 names is untouched: `cached_tools(format,
+  tools) -> Arc<CachedTools>`, `invalidate_tool_cache()`, the re-exported `CachedTools` and its
+  four accessors keep their signatures and bodies, so all eight `crates/*/src` call sites compile
+  unchanged; the key is still `(ToolFormat, fingerprint)` over name/description/parameters in that
+  order, the lookup is under the lock, the encode is outside it, and the double-checked insert
+  still wins first - so a hit stays byte-identical to a miss by construction rather than by two
+  implementations agreeing. `ToolFormat` survives precisely because it carries no encoding rule:
+  it resolves to `(format_profile, name_prefix)` and `tool_envelope` reads the profile, so a new
+  envelope is added to `ToolEnvelope` + `format_profile` and nothing else (six keys today, with
+  `OpenAiResponses` added by T-005). The HuggingFace `t_` prefix became a `name_prefix` argument
+  (`Option<&str>`, `Cow::Borrowed` when absent) rather than a sixth envelope, because FR-002 says a
+  family declares one profile and the router's difference is a wire-name rewrite. Proof:
+  `tests/test_wire_encode.rs` grew to 12 task cases, including
+  `test_encode_tools_bytes_match_the_pre_fold_builders` - the exact pre-fold byte strings for all
+  five builders plus the prefixed sixth row, safe to pin because `serde_json` sorts keys and no
+  feature enables `preserve_order` - and `tests/inline/tool_cache_tests.rs` went 9 -> 8 cases by
+  folding its per-envelope shape re-assertions into one `ToolFormat::ALL` loop and covering what it
+  had never covered: the key's two components **separately**, the invalidation path, and that
+  `byte_len` is the length of the slice the caller actually assigns. That file's local `cache_lock()`
+  was measured rather than assumed - with the eight acquisitions deleted, 4 of 8 consecutive `--lib`
+  runs failed with 2-3 cases red; restored, 5 consecutive runs and a `--test-threads=32` run are
+  green. Six red proofs, each restored byte-identically, `md5sum -c`-verified and `touch`ed:
+  `input_schema` -> `inputSchema` in the Anthropic arm (reds the test binary *and*, through the
+  shape loop, the lib binary); a hand-built `functionDeclarations` in `gemini.rs`; the format
+  dropped from the key (`OpenAi and Anthropic share one cache entry, so the format is not in the
+  key`); the description dropped from the fingerprint; `invalidate_tool_cache` made a no-op; and
+  `HuggingFace => None` for its prefix. Verified: fmt clean; clippy with no finding in a touched
+  file (19 pre-existing `unnecessary structure name repetition` warnings elsewhere); `ragent-llm
+  --lib` 323 passed; `--doc` 30; `--test all` 293 passed / 2 ignored with exactly the 5 pre-existing
+  decode / encode_message / trace guard failures that T-006, T-008 and T-023 own, none in a file
+  this task touched; all twelve guard scripts PASS. No dependency added (NFR-002), no `unsafe`
+  (NFR-003), no tool renamed.
+- **Every test fixture and assertion that named a renamed tool now names the adopted spelling, and no assertion was relaxed (spec `uniformtools` T-038, FR-026, FR-030).**
+  T-029's pinned scan was re-run on three trees rather than trusted: it reproduces **775 occurrences / 160 files** on the
+  pre-rename `1.0.149` exactly (which is the check that it is the same scan), reports **839 / 168** on `d6abcd4a` - the
+  tree this task started from, and larger because that commit added the FR-023/FR-028/FR-029/FR-031/FR-032 guard files,
+  which name retired spellings by design - and reports **295 / 77** now. The work is **447 code literals migrated across
+  81 files plus 89 comment-prose lines across 39 files** (+2 088 / -769 over 136 files in `crates/*/tests`, `tests/` and
+  `crates/*/benches`), leaving **201 code literals in 63 files, every one classified rather than exempted**: 60 are
+  error-message text (`fs::write(..).expect("write")` - the English verb), 31 are FR-028 permission types, categories or
+  request fields (`Permission::{Edit,Bash,PlanEnter,PlanExit}`, `permission_category()`'s `bash:execute` / `file:write` /
+  `ask_user`, which FR-028 keeps unchanged), 9 a shell program (`Command::new("bash")`, `parts(&["bash", ..])`), 10 the
+  `bash.allowlist` / `bash.denylist` config **section**, 1 a language id (`("bash", Language::Shell)`), 6 a GovCreate
+  **stage** id (`stopped_before: "write"`), 5 an agent capability tag, 1 the `bash` memory tag, 1 a scratch-dir tag or
+  JSON-schema enum value, 2 English prose in a description or error wording, and 75 across 23 files are **retirement
+  assertions** - the FR-023 invariant, the FR-028 verbatim replay, the FR-029 allowed-tools report, the FR-031 alias
+  refusal, the FR-032 bridge refusal and the NFR-006 cost proofs must name the retired spelling to assert it is retired,
+  which is precisely why T-034 excludes `tests/` from the guard and why widening the guard here would force all of them
+  to be relaxed. The mechanical pass was not mechanical in effect: 196 replacements changed what a test *feeds* the code,
+  and 12 files then needed their fixtures brought into line with the assertion the pass had already corrected -
+  `test_compaction_serializer.rs` (the assertion was kept and its expected string moved to `Bash`),
+  `test_text_toolcalls.rs` (the extractor returns what the model wrote, so the fixture JSON must say `Bash` / `Grep`),
+  `test_hooks.rs` (`HookWarning.tool` reports the spelling it was handed rather than normalising it),
+  `inline/skill_loader.rs` (FR-029 stores the declared spelling verbatim), `inline/loop_dialog_tests.rs` and
+  `test_misc_modules_deep.rs` (the `tool_set_field` round trip), the three TUI status/log-string files,
+  `test_text_selection.rs` (a blind rewrite produced `contains("Bash") || contains("Bash")` - a duplicate condition that
+  collapsed to `contains("Bash")`), `test_activity_projection_branches.rs` (a live `PermissionDecision`/`ToolCall` fixture
+  takes the adopted spelling; `MutationRejected.attempted` is free text and stayed `"edit"`) and `test_fixtures.rs`.
+  Two fixtures were reverted because the pass moved the wrong side: `test_hooks.rs`'s matcher probe, and
+  `test_permission_helpers.rs`'s `is_interactive_tool("ask_user")`, which is a *negative* assertion. Assertion count in
+  `crates/*/tests` rose 35 980 -> 37 183 and **no test file lost a single assertion**. Six red proofs, each restored
+  byte-identically, `md5sum`-verified and `touch`ed (`cp -p` keeps the old mtime, so cargo would reuse the broken
+  object): the interactive-tool assertion reverted to `ask_user`; a `test_hooks` fixture reverted to `write` against a
+  `Write` assertion (`left: "write" / right: "Write"`); `test_tool_event_state`'s assertion reverted to `write`
+  (`left: "Write" / right: "write"`); the `test_text_toolcalls` fixture JSON reverted to `bash`; `test_hook_warning_flagged`'s
+  expected string reverted to `hook warning on bash`; and - tying the test side to the production side it depends on -
+  `crates/ragent-tools-core/src/write.rs`'s `Tool::name()` reverted to `"write"`, which fails **both** FR-023 registry
+  halves at once. Verified: fmt clean; `cargo check --workspace --all-targets` with no errors or new warnings; clippy
+  clean in every touched file; `ragent-agent --test all` **1741 passed / 1 ignored**; `ragent-tui --test all` **3654 passed**
+  with the **3 pre-existing** `Alt+T` -> `ToggleTasksPanel` failures (identical to the baseline) and `ragent-tui --lib`
+  142 passed; the ten other crates pass under `--no-fail-fast`; `ragent-llm --test all` keeps its **6 pre-existing**
+  `test_wire_*` guard failures (T-004/T-005/T-006/T-017/T-019 are not done) and none of them is in a file this task
+  touched; all twelve guard scripts pass. One cross-binary flake is recorded rather than smoothed over: a full
+  `--all-targets` run reported 162 `ragent-tui` failures with `current dir: Os { code: 2, kind: NotFound }` because a
+  parallel crate's test `set_current_dir`s into a `TempDir` another deletes under it - the crate's `global_env_lock`
+  only serialises its own binary, and no single-crate run reproduces it. No production file changed.
+- **The FR-027 source guard now runs in CI, and the crate test that proves it has
+  finally run at all (spec `uniformtools` T-034, FR-027).** The guard itself
+  (`scripts/check_tool_rename.py`, `scripts/check-tool-rename.sh`) already existed and
+  worked; what was wrong was everything around it. `crates/ragent-agent/tests/test_tool_rename_guard.rs`
+  was tracked by git but had **no `#[path]` line in `tests/all.rs`**, so
+  `cargo test -p ragent-agent --test all test_tool_rename_guard::` reported
+  `running 0 tests` and exited 0 - the sixth instance of this spec's orphan-file class,
+  and the second where the orphan was the spec's own guard for the requirement under
+  revision. Registered, and two cases added to the two that existed: `--exemptions` must
+  name **both** structural exemptions (the FR-023 table and the `CHANGELOG.md` entry)
+  and print exactly one non-blank `reason:` line per per-line entry, with the printed
+  count compared against the count the listing declares; and a retired literal seeded
+  into `crates/*/tests/` must pass and not be reported, because a test may name a
+  retired spelling to assert that it is retired (FR-030's digest case and FR-023's
+  invariant cases all do). Three further defects: the guard was **not wired into CI or
+  `pre-flight.sh`** although `PLAN.md` claimed it was, so both now run `--self-test`
+  then the guard beside `check-silent-errors`; `scripts/check-tool-rename.sh` carried
+  non-ASCII in its own header, seeded fixture and self-test messages, violating the
+  ASCII rule (NFR-009) in the guard that enforces it on other files; and its header
+  documented the wrong predicate set ("single-quoted" literals, which are Rust chars
+  and never scanned, and an `EXEMPT_LINES` symbol that does not exist). The OASF
+  permission list the task expected to need an exemption needs **none** - the literals
+  in `crates/ragent-agent/src/agent/oasf.rs` are doc-comment prose on lines 160-161 and
+  comments are outside the scan, so the file has zero code literals; recording two
+  entries would have added two dead ones, which the guard's reverse check rejects, so
+  `--exemptions` states the scope decision in its own section instead. The 39 entries
+  across 20 files were re-audited: 11 permission-type (FR-028), 5 shell-program, 3
+  shell allow/deny lists, 2 config-section, 4 language/runtime, 6 GovCreate stage-id,
+  4 English verb/pluralize, 1 stored memory tag, 3 slash-command triggers - an entry
+  for a tool-name site would be a defect. Red-proved twelve ways, each restored
+  byte-identically and `md5sum`-checked: four exemption defects (deleted, dead line,
+  widened literals, a non-retired spelling), two seeds (a backticked literal in a
+  crate, a literal in root `src/`), three `--exemptions` regressions (the
+  `CHANGELOG.md` line, the declared count, the `reason:` line), and three negative
+  proofs (substrings are not hits, `tests/` is out of scope, the table's own
+  `before:` fields are never reported). `test_tool_rename_guard::` 4 passed;
+  `ragent-agent --test all` 1739 passed / 1 ignored; the guard exits 0 with
+  `39 reviewed exemption(s) all match` in **0.79 s** over 670 files (NFR-009); the
+  other eight guards pass.
+- **The tool surface is pinned at 148 across every enumeration that reports it, and
+  `/bug-report` now records the number FR-030 names (spec `uniformtools` T-037,
+  FR-030).** Two guard files, split beside the surfaces they pin and **both
+  previously unregistered** (the seventh instance of this spec's orphan-file class, and
+  the agent one additionally did not compile: its `DryRunInputs` literal predated
+  `hidden_tools`). `crates/ragent-agent/tests/test_fr030_surface_agreement.rs` (7
+  cases) asserts the three registry enumerations agree element for element; that the
+  148 sorted names hold 13 uppercase, that those are exactly `TOOL_RENAMES`' `after`
+  column, and that the list hashes to
+  `308d92d9d975666cf1f815369e18cc7b457c1c0dcbab004c45f2835100368321`; that `--dry-run`
+  (human and `--json`) reports `148 visible tools` plus the whole 21-row family table
+  compared row for row against the registry's own grouping; that `tool_info`'s `total`
+  and name list match; that `commands_info` is intact and its `/tools` row equals
+  `TOOLS_SUBS`; and that one real turn's outbound `ChatRequest.tools` - and the
+  `ToolsSent` event beside it - is the registry's `definitions()`.
+  `crates/ragent-tui/tests/test_fr030_surface_agreement.rs` (2 cases) pins
+  `/tools list` and `/bug-report`. Fixing the assertions to match the live tree exposed
+  three defects the drafts had papered over: the canary families were the name-prefix
+  split `agent` 3 / `team` 20 where `permission_category()` gives `agent` 4 / `team` 19
+  (`team_wait` is `agent:spawn`); `/tools list` renders `Visible Tools (n total, m
+  disabled):` in one or two blocks with `n + m = 148`, not a flat 148-row block (a
+  visible-block-only count reads 92 under the shipped default config); and
+  `/bug-report`'s `Tools registered` line **did not exist** - its `Tools visible` figure
+  counted enabled family switches (1), never tools - so `handle_bug_report` now writes
+  `- **Tools registered**: {registry.list().len()}` as the first line of
+  `## Tool Configuration`, keeping the switch count beside it. Proven red five ways: a
+  missing `PlanEnterTool` registration (147 on every surface), the pre-rename digest,
+  the stale canary pair, the `Tools registered` line removed, and the `/tools list`
+  renderer skipping a row. `cargo test -p ragent-agent --test all` 1737 passed / 1
+  ignored; `ragent-tui` 3654 passed with the 3 pre-existing `Alt+T` failures unchanged;
+  `ragent run --dry-run` still reports 148 visible tools across 21 families.
+- **No completion or suggestion surface can complete a retired tool spelling, and
+  the `/tools` menu can no longer offer a form the handler refuses (spec
+  `uniformtools` T-045, FR-033).** `command_catalog::TOOLS_SUBS` is now `pub` and is
+  the single source the four readers of one list share: the autocomplete menu
+  (`get_command_suggestions`), the parameter hint (`get_parameter_hint`, rendered
+  `[list|show|github|...|help]`), the `/tools` handler (its help page and every usage
+  warning are generated from it), and `commands_info`. Before this they were four
+  hand-written copies that disagreed - the menu and the hint omitted `show`, the hint
+  omitted `masterfetch` and advertised a bare `[on|off]` that is not a subcommand, and
+  `/tools show` appeared in no help text. The did-you-mean pool was also implemented
+  twice (once inline in `processor::unknown_tool_error`, once as
+  `session::dispatch::suggest_tool_name`), each with its own ranking and its own
+  `edit_distance`; both now read the new `session::tool_suggestion::suggest_tool_name`,
+  with `dispatch::suggest_tool_name` kept as a one-line re-export so no call site moved.
+  **Both guard files existed, were tracked, and had never compiled**: neither
+  `test_fr033_completion_sources.rs` nor `test_fr033_completion_surfaces.rs` was
+  registered in its crate's `tests/all.rs` - the sixth instance of that orphan-file
+  class in this spec. Tests: 6 cases in `ragent-agent/tests/test_fr033_completion_sources.rs`
+  (`suggest_tool_name`, `tool_info`, the `--dry-run` tools section, `commands_info`, the
+  system-prompt tool reference) and 4 in
+  `ragent-tui/tests/test_fr033_completion_surfaces.rs` (the `/tools` menu and hint, menu
+  against handler, the whole slash surface, and the `@` picker pinned to paths so no
+  completion surface is added); every derived surface is driven with a **foreign**
+  registry (one `zzq_` stub tool, registered in reverse) so a hard-coded surface fails.
+  Proven red eight ways - menu reverted, hint reverted, `tool_info` reading
+  `create_default_registry()` (`Some(148)` vs `Some(2)`), `--dry-run` total pinned to
+  148 (`"148 visible tools"` vs `"3 visible tools"`), the pool drawn from `TOOL_RENAMES`
+  (`ask_user` answered with `ask_user`), the handler refusing an offered `show`, a
+  retired spelling added to the `/memory` suggestions, and the `@` picker widened to
+  tool names. `cargo test -p ragent-agent --test all` 1730 passed / 1 ignored;
+  `ragent-tui` 3652 passed with the 3 pre-existing `Alt+T` failures unchanged;
+  `ragent run --dry-run` still reports 148 visible tools across 21 families.
+- **A dynamically sourced tool can no longer reintroduce a retired name, and the
+  rule is now actually compiled (spec `uniformtools` T-044, FR-032).** MCP tools
+  (`mcp_<server>_<tool>`), connector servers (the same bridge under a dotted
+  `<connector-id>.<server>` id), plugin tools (`plugin_<id>_<tool>`) and any future
+  skill-contributed tool are namespaced, so none can occupy a bare ragent name; a
+  bridge that surfaces a name equal to a FR-023 `before` spelling, or outside its
+  source's prefix, is refused with a sentence naming the source, the spelling and
+  the `after` replacement, reported once per source and name, while every other
+  tool from that source keeps working. The rule is one implementation in the new
+  `ragent_types::tool_bridge` (`check_dynamic_bridge`,
+  `report_bridge_refusals_once`, and the MCP/plugin manglings all call sites now
+  share), reached from the new `ragent_agent::tool::mcp_tool::bridge_server_tools`
+  (used by `SessionProcessor::set_mcp_client` and the TUI's `register_mcp_tools`)
+  and from `PluginManager::register_plugin_tools`; `plugin_tool_name` and
+  `McpToolWrapper::ragent_name_for` delegate to it, and the TUI's stale-server scan
+  and `/tools` source column use the new `McpToolWrapper::ragent_prefix_for` instead
+  of `ragent_name_for(id, "")`. **The feature was inert before this change**:
+  `ragent-types/src/lib.rs` had no `pub mod tool_bridge;` and none of the three
+  `tests/all.rs` files registered their `test_fr032_*` file, so the rule and its
+  16 cases had never compiled - the fifth instance of that class in this spec.
+  Tests: 9 cases in `ragent-types/tests/test_fr032_dynamic_bridge.rs`, 5 in
+  `ragent-agent/tests/test_fr032_bridge_containment.rs` (all `#[serial]` on the
+  process-wide ledger) and 2 in `ragent-plugins/tests/test_fr032_plugin_bridge.rs`;
+  `cargo test -p ragent-agent --test all` 1724 passed / 1 ignored, and
+  `ragent run --dry-run` still reports 148 visible tools across 21 families.
+- **The rename is now proved to add no per-step cost (spec `uniformtools` T-040,
+  NFR-006).** Three clauses that fail in three different ways are pinned by
+  `crates/ragent-agent/tests/test_nfr006_rename_cost.rs`: (1) tool names stay
+  borrowed `&str` values compared directly - the bindings name `&str` and
+  `Option<&'static str>` explicitly, so an allocating `fn name(&self) -> String`
+  or `Rename::after_of -> Option<String>` is a compile error rather than a slow
+  path; (2) no dispatch step consults the FR-023 table to translate a name - a
+  **function-granular** source scan over `session/`, `tool/` and `backend/`, plus
+  a workspace-wide exemption list carrying a written reason per entry, checked in
+  both directions so a dead exemption is reported too; (3) resolution, the repeat
+  guard and the definition cache key on the new spelling - the adopted spelling is
+  the registry key while `get(before)` is `None`, `definitions()` shares one
+  sorted `Arc` of adopted names while the serialised tool cache fingerprints the
+  name so `Bash` and `bash` are different entries, and the repeat guard
+  accumulates five `Bash` calls and denies the sixth while `bash`/`Bash`
+  alternating never accumulates.
+  The scan is function-granular because a file-granular exemption would permit a
+  rename lookup inside `resolve_inbound_tool_name` (the per-call resolver):
+  `alias_table.rs` holds that function *and* the legitimate once-per-turn
+  `from_aliases`, so exempting the file would exempt the dispatch path with it.
+  No production file changed.
+- **A skill whose `allowed-tools` names an unregistered entry now says so, and
+  the Claude spellings resolve without a translation layer (spec `uniformtools`
+  T-036, FR-029).** Adopting the thirteen Claude Code spellings (`AskUserQuestion`,
+  `Bash`, `Edit`, `Glob`, `Grep`, `EnterPlanMode`, `ExitPlanMode`, `Skill`,
+  `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `Write`) means a manifest
+  written for Claude Code resolves on the registry lookup itself; nothing maps an
+  entry through the rename table, so a retired spelling stays unresolved and
+  `Read` - rated `Close` and not adopted - is reported rather than quietly
+  answered by `read`. An entry that names no registered tool used to shrink the
+  model's surface in silence; `ragent_agent::tool::allowed_tools` now reports it
+  with `report_skill_allowed_tools_once`, naming the entry and the declaring
+  skill, from the three places a skill's list becomes a restriction - `Skill`
+  (`read`/`load`), the TUI `/skill` (and bare `/<name>`) trigger, and the forked
+  skill resolver. A process-wide per-`(declarer, entry)` ledger keeps a second
+  invocation silent while a *different* skill naming the same stale entry still
+  reports, and the per-turn prompt path deliberately does not report at all:
+  it visits every discovered manifest, including plugin skills the session never
+  runs.
+- **A hook whose `matcher` names a retired tool spelling is now reported at
+  load instead of silently never firing (spec `uniformtools` T-035, FR-028).**
+  A `matcher` names tools, and the rename retired thirteen spellings: a hook
+  written as `"matcher": "bash"` matches nothing now, because the registry holds
+  `Bash`. Nothing in the configuration parser could notice, so the hook was
+  simply disabled and its author never told. `HookConfig::retired_matcher_spellings`
+  exposes the stale part of a matcher as `(retired, adopted)` pairs and
+  `report_retired_matcher_spellings_once` logs one `warn!` per stale entry,
+  naming the spelling, its replacement and the trigger. It is called at the two
+  places a hook list is created - immediately after `Config::load()` in the TUI's
+  `App::new`, and where `loop_steps.rs` derives a turn's `parsed_hook_configs`
+  for the headless surfaces (`ragent run`, the server, ACP) - and a process-wide
+  per-entry ledger keeps the per-turn rebuild from repeating the same sentence.
+  A matcher naming an *adopted* spelling, a name the rename never touched, and a
+  hook with no matcher are all silent. The matcher is never rewritten: the file
+  belongs to its author, and a load-time rewrite would leave the on-disk text
+  disagreeing with the running session. The same class of stale literal was
+  found in a **guard**: `scripts/check-file-tool-containment.sh`'s `FILE_TOOLS`
+  list was still spelled pre-rename, so it found no source file for
+  `write`/`edit`/`glob`/`grep`, warned, `continue`d and exited 0 - checking 13
+  file tools instead of 17. Both are now the adopted spellings.
+
+- **Every document that names a renamed tool now names the adopted spelling, and
+  `CHANGELOG.md` carries its own `Renamed` table (spec `uniformtools` T-039,
+  NFR-007).** Measured with one whole-token regex over the NFR-007 scope - the
+  four root documents, the fifteen crate `DOCS.md` files and the 129 pages under
+  `docs/howtos/` - **643 lines in 59 files** named a retired spelling before and
+  **596 in 55 files** after, so **74 documentation lines across 25 documents**
+  were rewritten (100 lines added, including the roster entries the long-form
+  names filled in) and 13 `CHANGELOG.md` table rows moved into their own
+  `Renamed` section.
+
+  The migration is not a find-and-replace: `README.md`'s per-family rosters,
+  `SPEC.md`'s agent-schema `tools` array and sandbox routed-tool subset,
+  `crates/ragent-tools-core/DOCS.md`'s `create_core_registry` list (ten of whose
+  twenty-four names were stale: five retired spellings and five short forms the
+  function has never registered), every per-tool heading and `text`
+  example under `docs/howtos/tools/`, and the two PreToolUse hook examples that
+  compared `"$TOOL" = "bash"` are each a statement about what the build
+  registers. The remaining 596 lines are **classified rather than exempted**,
+  and the classes sum exactly to the total: 119 a fenced shell block or shell command
+  example, 84 a filesystem path or Rust module (`ragent-tools-core::bash`,
+  `bash_lists`, `edit_log`), 127 the FR-028 permission vocabulary, 17 the
+  `bash` config section or `/bash` command, 25 the shell program `bash`, 14 the
+  rename's own prose, and 210 the English verb, a common noun or a config key.
+
+  Six further sites outside the document list were migrated because a prompt, a
+  log line and a user-facing hint are documentation to the reader they address:
+  `ToolVisibilityConfig::plan`'s doc comment, `SkillInfo::clear_body_cache`'s doc
+  comment, the Skill tool's not-found hint (`run skill_manage action=reload` ->
+  `run Skill action=reload`), the TUI's `"plan_exit called but agent stack is
+  empty"` log line, and two test comments.
+
+  **Two documentation defects were found beyond the spellings.**
+  `docs/howtos/permissions.md`'s hardwired-rules snippet still showed
+  `tool_name.starts_with("task_")` and `tool_name == "ask_user"`, neither of
+  which the tree has held since T-033 - the one page a reader consults to learn
+  what a hardwired tool is described a function that no longer existed, and now
+  shows the real `TASK_TOOLS` list, `AskUserQuestion` and the three `*_info`
+  tools. And `docs/howtos/config.md`'s permission-type table put tool names
+  (`Edit`, `Write`, `bash`, `EnterPlanMode`, `ExitPlanMode`) in the *Name*
+  column where the permission types belong, so the rename looked like it should
+  change them; the column now spells the permission spelling and a note names
+  the tool.
+
+  `CHANGELOG.md` gains a `### Renamed` section at the end of this `Unreleased`
+  entry: 13 rows, `before` -> `after`, the unchanged 148-tool count, the no-alias
+  statement, and the two non-migrations a reader will most plausibly get wrong
+  (the FR-028 permission vocabulary is unchanged, and `read` is absent because
+  the workbook rates Claude's `Read` as `Close`). The T-031 bullet now points at
+  it instead of carrying a second copy - its first draft put the section inside
+  `### Added`, which made a `### Renamed` heading a sub-heading of the wrong
+  section.
+
+  Verified: `cargo fmt --all -- --check` clean, `cargo check --workspace
+  --all-targets` clean, clippy clean in every touched file, `ragent-agent --test
+  all` 1741 passed / 1 ignored, `ragent-tui --test all` 3654 with only the three
+  pre-existing `Alt+T` cases, `ragent-config` 417, `ragent-tools-core` 394,
+  `scripts/check-tool-rename.sh` exits 0 with all 39 exemptions matching, and
+  `--dry-run` is still 148 tools over 21 families. The 131 committed howto PDFs
+  are deliberately not regenerated: they are release-step artifacts with no
+  checked-in regeneration command in any of the three `pdf/` trees, and
+  rebuilding them would bury a 74-line documentation change under binary churn -
+  recorded so the release step knows it is due. Recorded in
+  `specs/uniformtools/T-039-DOCS.md`.
+
+### Changed
+
+- **State written before the rename keeps working, and the three ways it could
+  have broken silently are now pinned by tests (spec `uniformtools` T-035,
+  FR-028).** `permission_category()` is permission *vocabulary*, derived
+  independently of the tool name, so a `"permission": "bash"` rule still governs
+  the tool now called `Bash` and `"ask_user"` still governs
+  `AskUserQuestion` - both look like a missed migration and are the requirement.
+  A stored `MessagePart::ToolCall` replays to the provider verbatim, because the
+  pre-rename build sent that spelling and a continued turn has to match it
+  (`tool_use` and `tool_result` must agree); and the destructive-action
+  classifier answers `false` for a name it does not recognise rather than
+  mapping it or failing, so an unknown stored name is non-destructive.
+  `crates/ragent-agent/tests/test_fr028_state_survival.rs` (9 cases) asserts the
+  13 per-tool category literals, the 32-value vocabulary as a set, the report
+  and its silence (per tool, per guard form, per list), verbatim replay for all
+  thirteen pairs plus a name that never existed, a storage round trip, and the
+  non-destructive unknown name. Recorded in
+  `specs/uniformtools/T-035-STATE-SURVIVAL.md`.
+
+- **No non-test site keys on a retired tool spelling any more, and the eleven
+  descriptions that told the model to do so were the most expensive ones (spec
+  `uniformtools` T-033, FR-027).** FR-027 is ubiquitous: every source site that
+  compares, matches, lists or stores a renamed name had to move in the same
+  change as the rename, because a stale literal is a silent behavioural change
+  the compiler cannot catch. The migration was driven by a fresh scan rather
+  than by the task text, which names a floor ("including at least"): 166
+  quoted/backticked before-literals across 54 non-test files, each read before
+  being changed. The guards were the dangerous half - `INTERACTIVE_TOOLS` had
+  already moved to `AskUserQuestion` but `is_hardwired_auto_approved_tool` still
+  compared `ask_user`, so the two halves of one rule disagreed about the tool's
+  name, and the `"task_"` **prefix** was replaced by an explicit `TASK_TOOLS`
+  list (a prefix named a retired spelling *and* admitted any future tool whose
+  name merely began with those five characters). `LOOP_WRITE_TOOLS`,
+  `LOOP_ALWAYS_ALLOWED_TOOLS`, the history write-tool list, the `Bash` branches
+  in `processor.rs` / `permissions.rs` / `memory/extract.rs`, the skill
+  `allowed_tools` lists and the alias delegation targets followed.
+  **The in-container routing table was quietly broken**: `container_script`
+  matched `append_file` and `mkdir`, but the registry registers
+  `append_to_file` and `make_directory`, so those arms returned `Ok(None)` and
+  every `docker`/`podman` call to either tool fell to the refuse path. The
+  routed-tool test that was meant to prove the translation had been driving the
+  same stale names, so it asserted a provisioning failure the route never
+  reached - it looked green while proving nothing; both the arms and the table
+  now use the registered spellings. Fourteen `log_edit_operation` call sites in
+  `tools-core/src/edit.rs` recorded the literal `"edit"` as the edit log's
+  `tool` field, so every new `edits-*.jsonl` record named a tool the registry no
+  longer holds; they record `Edit` (the *filename* label is not a tool name and
+  stays). `message_widget.rs`'s pretty-printers - the reason FR-027 is
+  user-visible, since a real `Bash` call had been falling through to the generic
+  argument dump - key on the adopted spellings, and `canonical_tool_name` now
+  resolves a retired spelling through `Rename::after_of`, so a session resumed
+  from pre-rename history (FR-028 replays stored records verbatim) keeps its rich
+  rendering. The eleven `description()` bodies that named a *different* tool by
+  its old spelling are migrated - `bash_reset`/`rm` said `bash`,
+  `append_to_file`/`create`/`multi_edit` said `edit`, `list` said `glob`, four
+  `codeindex_*` tools said `grep` (their `fallback_tools` metadata too), and
+  `edit` said `write` - as is the code-index guidance prompt that said "instead
+  of grep" and the agent profiles that said "Use read, grep, glob" and "using
+  the bash tool": a stale description instructs the model to make a call that
+  now fails. `scripts/check-tool-rename.sh` (T-034's predicate (e)) now reports
+  zero unexempted lines; the four it still names are FR-028's state-driven
+  values, each with a written per-line reason - `AskUserQuestion`'s
+  `permission_category()`, the two permission-type comparisons, and the shell
+  word used as a memory tag. `permission_category()` values, the `Permission`
+  enum's display strings, shell program names, language ids, the
+  `bash.allowlist` config section, the OASF permission-type doc list, the
+  GovCreate `"write"` stage id and the spec testable-verb table are deliberately
+  untouched: none of them is a tool name. Recorded in
+  `specs/uniformtools/T-033-MIGRATION-SITES.md`.
+
+- **A tool call refused before it ran is now built in one place, and that place
+  owns its sentence, its record status, and therefore its `is_error` flag (spec
+  `uniformtools` T-013, FR-008, FR-009, FR-014).**
+  `crates/ragent-agent/src/session/tool_input_error.rs` landed with `d6abcd4a`
+  holding `ToolInputError` (`Undecodable` / `SchemaViolation` / `UnknownTool`,
+  `status()`, `is_error()`, `into_anyhow()`, and one `Display` that quotes the
+  parser and says the tool did not run) plus a 7-case contract file - but
+  `crates/ragent-agent/src/session/mod.rs` never declared
+  `pub mod tool_input_error;`, so nothing compiled it, and `tests/all.rs` had no
+  `#[path]` line for the contract file, so its cases had never run. The third
+  orphan-module defect in this spec (after `tool_args` and `tool_rename`), and
+  the one with the clearest cost: the two gates the task names were still
+  hand-rolling what the module exists to unify. The loop's decode gate (B1)
+  formatted its own sentence (`Invalid arguments JSON for tool '<t>': ...`) and
+  wrote a `ToolCallStatus::Error` literal, and the in-task schema gate (B3)
+  produced `anyhow!("Invalid tool arguments: {schema_err}")` - a second wording,
+  a second style, and no "the tool was not executed" at all. Now the decode gate
+  builds `ToolInputError::undecodable_with_reason`/`undecodable` (keeping the B3
+  behaviour that a non-object payload is *also* missing every required
+  parameter, stated in the one sentence so the model can fix the call in a single
+  retry) and takes its status from `refusal.status()`; the schema gate builds
+  `ToolInputError::schema_violation(...).into_anyhow()`, whose `Display` and
+  `{:#}` render the identical text, so both gates speak the same words. The
+  decode gate's `parsed_input` now carries `ragent_types::ToolArgDecodeError`
+  rather than a `String`, so the constructor quotes the decoder's own value
+  instead of a re-parsed rendering; `pub use tool_args::ToolArgDecodeError;` at
+  the `ragent-types` root makes that type nameable. `is_error` needed no new
+  code - the loop's single append site already writes `status.is_error()`, so
+  once the status comes from the refusal the flag does too. **A fourth defect
+  surfaced the moment the contract cases could run**: `schema_refusal_names_the_parameter_and_its_type`
+  failed, because FR-009 requires the refusal to name the offending parameter
+  *and its declared type* and `ragent-tools-core`'s `validate_required_args` said
+  only `missing required parameter 'destination'`. The declared type, which the
+  validator already read one line later for the type-mismatch case, is now read
+  before the presence check and reported (`..., which is declared as type
+  'string'`); the old message is kept verbatim for a required field that
+  declares no type, and no caller's control flow changes. Tests: the 7 existing
+  contract cases now run, plus `both_gates_build_their_refusal_with_the_shared_constructor`
+  (the positive half of the guard - the negative scan for a stray refusal
+  sentence is satisfiable by a gate that states no sentence at all, so this case
+  names the constructor calls both gates must make and the three pre-T-013
+  sentence fragments that must not reappear);
+  `test_processor_more_paths.rs` gained
+  `test_schema_violation_names_the_parameter_and_is_marked_on_the_wire` and
+  `test_non_object_arguments_are_still_refused` gained a resend assertion and an
+  FR-014 assertion - both read `ContentPart::ToolResult { is_error, .. }` off the
+  *captured provider request*, because only the request proves what the provider
+  receives. Proven red four ways (decode gate back to a hand-rolled sentence;
+  in-task gate back to the `anyhow!`; the validator back to the presence-only
+  message; the append site's `is_error` back to `false`), each restored
+  byte-identically and `md5sum`-checked. Recorded in
+  `specs/uniformtools/T-013-REFUSAL-WIRING.md`.
+
+- **"One `ToolWireProfile` per provider family" is now a checked property rather
+  than a convention (spec `uniformtools` T-003, FR-002).**
+  `crates/ragent-llm/src/providers/wire/profile_table.rs` gained
+  `FAMILIES: &[(&str, ToolWireProfile)]` - six entries, ascending, each label its
+  family `const` name in lower case. The six family constants and the 15-row
+  `PROVIDER_WIRE` table already existed (`d6abcd4a`); what was missing was any way
+  to assert the **left** side of that many-to-one map. Eight ids name
+  `OPENAI_CHAT`, so the table alone cannot tell one shared declared contract from
+  fifteen equal literals; a row could write a struct literal and so declare a
+  seventh profile while passing every value-level case; and a new
+  `pub const X: ToolWireProfile` could be added to the module without ever being
+  listed. `tests/test_wire_profile_table.rs` therefore gained three cases that
+  fail separately - `..._declares_every_family_once` (the list holds six families,
+  each named by a row, each pair distinct, labels non-blank/ASCII/lower-case and
+  ascending), `..._every_row_names_a_declared_family` (a row assigns an id to a
+  declared family, never composing a contract at the row) and
+  `..._source_declares_no_family_outside_the_list` (the module's family `const`
+  declarations and `FAMILIES` hold the same set) - and
+  `..._envelopes_and_carriers_agree_with_the_family` was rewritten to read
+  `FAMILIES` instead of repeating the six constants. Proved red five ways: a
+  seventh `MAVERICK` constant, a `("xai", ToolWireProfile { .. })` row, the
+  `gemini` row deleted, the `router` row deleted, and a `"Gemini"` label. The
+  composed-row break is the one that matters: the envelope/carrier case stayed
+  **green** under it and only the new family-membership case caught it.
+  `FAMILIES` is read by tests only, so no request path gained an indirection.
+  Recorded in `specs/uniformtools/T-003-FAMILY-PROFILES.md`.
+
+- **The FR-023 rename table is now compiled, reachable, and covered by a test
+  that runs (spec `uniformtools` T-030, FR-023).** `TOOL_RENAMES: [Rename; 13]`
+  holds the thirteen `(before, after)` pairs T-029 derived, ascending by `after`,
+  with four lookups (`after_of`, `before_of`, `is_retired`, `is_rename_spelling`).
+  It lives in `crates/ragent-types/src/tool_rename.rs` and is re-exported
+  unchanged at the path the task names, `crates/ragent-agent/src/tool/rename.rs`
+  - the body sits one crate lower because FR-031 makes the **config loader** read
+  it, and `ragent-config` cannot depend on `ragent-agent`, so every migration site
+  still spells `ragent_agent::tool::rename::{Rename, TOOL_RENAMES}`.
+
+  **Three defects of `d6abcd4a` had to be fixed before the task existed**, all the
+  same class - source that was committed but never compiled or run:
+  `pub mod tool_rename;` was missing from `crates/ragent-types/src/lib.rs`;
+  `pub mod rename;` was missing from `crates/ragent-agent/src/tool/mod.rs`, so
+  neither the 170-line table nor its re-export compiled; and
+  `crates/ragent-agent/tests/test_tool_rename_table.rs` had no `#[path]` line in
+  `tests/all.rs`, so its 8 cases had never run. That last one matters more than
+  the others: an unregistered test is not a weak test, it is no test, and the file
+  nobody had run still asserted the **post**-rename registry
+  (`every_before_is_retired`, `every_after_is_registered`), which is a state T-031
+  has not produced yet - registering it unmodified would have failed 6 of 8 cases
+  on a correct tree. It is now 9 cases reconciled with FR-023's own sentence
+  (every `before` **is** registered, every `after` **is not**): the exact thirteen
+  pinned pairs, ascending by `after`, FR-023(a)/(b)-identifier/(c)/(d), the four
+  lookups agreeing with the array, and the workbook clause pinned as two
+  independent assertions - `crates/ragent-agent/Cargo.toml` names no `calamine`/
+  `umya-spreadsheet`/`simple_excel_writer`, and no `src/` or `tests/` file names
+  `write_xlsx(`, `read_xlsx(`, `Workbook::open` or `calamine::`.
+  `ragent-tools-core/src/xlsx.rs` is a writer with no reader, so cross-checking the
+  table against `tools.xlsx` would need a new external crate and breach NFR-002; it
+  stays TC-019's manual step, and the guard allows `tools.xlsx` in prose because
+  both module docs explain why they do not open it.
+
+  The two registry-facing cases describe the **pre**-rename tree on purpose -
+  FR-023 orders the work table-then-rename and states the invariants "as the
+  registry stands when the table lands" - and T-031 flips both in the same commit
+  that renames the tools (FR-034's atomic-landing rule), renaming the cases with
+  them rather than relaxing an assertion. Red-proved seven ways, each restored
+  byte-identically and verified by `md5sum`: a registered `after` (`read`), a
+  duplicate `after` (`Bash` twice), a non-identifier `after` (`Ask-User-Question`),
+  an unregistered `before` (`grep_all`), a duplicate `before` (`grep` twice), a
+  seeded `read_xlsx(` literal in `tool/rename.rs`, and a seeded `calamine` line in
+  `crates/ragent-agent/Cargo.toml`. `crates/ragent-types/DOCS.md` gained the
+  `tool_rename` module. Recorded in `specs/uniformtools/T-030-RENAME-TABLE.md`.
+
+- **The three typed-`Value` TODOs in the canonical tool record are now a
+  recorded decision, and all three markers are gone (spec `uniformtools` T-025,
+  FR-001).** `crates/ragent-types` carried a
+  `TODO: Replace \`Value\` with a typed struct` marker on three sites since
+  `340c32cc` ("Version: 1.0.121 more fixes on mcp"), so every reader since had to
+  re-litigate it: `ToolCallState::input` and
+  `::output` (`src/message/mod.rs`), `ContentPart::ToolUse::input` and
+  `ToolDefinition::parameters` (`src/llm.rs`). All four fields stay
+  `serde_json::Value`, and each now carries a `///` doc comment that states the
+  decision in place and points at
+  `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`, which records the reasoning.
+
+  The shape is owned by whichever tool was called, and the callee set is open at
+  run time - 148 built-in tools each hand-write a `parameters_schema()`, and
+  every MCP server or plugin adds more after the binary was compiled - so no
+  compile-time type can describe it. `ContentPart::ToolUse::input` is replayed to
+  the provider every step, so a struct with a fixed field set would drop any key
+  it does not model and the model's next turn would see a different call than the
+  one it made (FR-006, FR-018); `Value` round-trips the payload unchanged.
+  `ToolDefinition::parameters` is forwarded JSON Schema, not interpreted - 155
+  `additionalProperties` keyword literals across 205 source files holding 159
+  `parameters_schema()` implementations, plus one non-literal site in
+  `mcp_tool.rs` that copies a server's `inputSchema` key by key - so a typed
+  subset would either shed keywords the model is told about (breaking FR-003's
+  cache-hit-equals-miss guarantee) or need a schema crate, which NFR-002 forbids.
+  A typed struct's promised guarantee is already delivered by behaviour:
+  `tool_args::decode_tool_arguments` returns an object or a corrective error, and
+  `validate_required_args` checks it against the callee's own schema before
+  dispatch - which covers bridged tools a type could not.
+
+  Nothing changes at any call site, no public item is added, and no persisted
+  form changes. New `crates/ragent-types/tests/test_typed_args_decision.rs` (6
+  hermetic cases) pins the decision so it cannot drift back: each field is still
+  declared with the type the decision kept, no removed marker survives anywhere
+  in `src/`, each of the four fields carries a doc comment naming the record, and
+  the record still names its three sites plus FR-001 and NFR-002. **The test file
+  had also been registered nowhere** - it existed in the tree with no `#[path]`
+  line in `crates/ragent-types/tests/all.rs`, so none of its cases had ever run;
+  it is registered now. Red-proved three ways, each restored byte-identically and
+  verified by `md5sum`: the marker re-introduced into `ContentPart::ToolUse` (the
+  scan names `llm.rs`), the record reference stripped from one doc block (the
+  documentation case names `pub parameters: Value,`), and the field re-spelled
+  `serde_json::Value` (both the type case and the documentation case fail while
+  the code still compiles), which is the case a compiler could never catch.
+
+- **Declarative tool-name alias resolution, applied before the unknown-tool check
+  (spec `uniformtools` T-019, FR-015).** `crates/ragent-agent/src/tool/alias_table.rs`
+  holds the table and the one resolver. `BUILTIN_PROVIDER_ALIASES` is the
+  post-rename table D7 requires - `WebFetch` -> `webfetch`, `WebSearch` ->
+  `websearch`, `file_search` -> `codeindex_search`, `web_search` -> `websearch`,
+  ascending by spelling - because the thirteen spellings FR-023 adopts (`Bash`,
+  `Edit`, `Write`, ...) are now ragent names themselves and an entry for one
+  would be the second spelling FR-026 forbids. `code_interpreter` is deliberately
+  absent (an OpenAI hosted tool with no local execution) and `Read` is absent
+  (the case-insensitive did-you-mean hint already covers it).
+
+  `AliasTable::from_tools_config` builds the table once per turn from
+  `tools.aliases`; `resolve_inbound_tool_name` applies it in
+  `SessionProcessor::process_message`, before the tool-dispatch phase. Three
+  guards are the requirement rather than defensive noise: a **registered name
+  always wins**, so a stray entry can neither shadow nor re-point a tool and an
+  adopted spelling resolves by lookup rather than by a table read (NFR-006); an
+  **unmapped name is never guessed at**, so a near miss still reaches the
+  unknown-tool error with its did-you-mean hint; and an **unregistered target is
+  ignored**, so the call is refused naming the spelling the client actually sent
+  instead of failing later against a name nobody sent. A self-mapping is dropped
+  as a no-op, and an entry whose key or target is a retired spelling is skipped
+  (the resolver half of FR-031; the loader half is T-042). An unresolved target is
+  reported once per process, per entry, and refused when used.
+
+  Because the rewrite happens before dispatch, one canonical name reaches the
+  unknown-tool check, the loop restriction, `LOOP_WRITE_TOOLS`, the
+  destructive-action classifier, the hooks, the permission layer, the repeat
+  guard, the telemetry key and the `MessagePart::ToolCall` record, and the
+  provider spelling never reaches the persisted form (FR-001). With
+  `tools.aliases` absent the table is empty and behaviour is unchanged, which is
+  FR-015's third clause.
+
+  **Two orphan-latent defects were found and fixed in the same change.** The
+  module landed with `d6abcd4a` but `crates/ragent-agent/src/tool/mod.rs` never
+  declared `pub mod alias_table;`, so the 312 lines did not compile; and neither
+  test file had a `#[path]` line in `crates/ragent-agent/tests/all.rs`, so all 29
+  cases had never run. `crates/ragent-agent/tests/test_tool_alias_table.rs` (25
+  cases: default-off for an absent key, `false` and `{}`; the built-in table's
+  ordering, ASCII shape, and agreement with the registry row by row; no entry is
+  either column of FR-023; case-sensitivity; self-mapping dropped; an explicit
+  entry winning a built-in collision; `true` + entries composing after a merge;
+  the six resolver guards; and the three FR-031 ledger cases) and
+  `test_tool_alias_resolution.rs` (4 end-to-end cases through `process_message`
+  asserting the recorded `ToolCall`: the resolved call runs and is recorded under
+  the canonical name, the same call is refused with `Unknown tool: 'Frobnicate'`
+  when aliases are off, an unregistered target still refuses, and a registered
+  name is never re-pointed) are now registered. Red-proved three ways, each
+  restored byte-identically and verified by `md5sum`: the resolver loop
+  short-circuited (the end-to-end case fails on "the canonical name is what
+  history records"), the registry-first guard removed (`left: Some("calculator")`),
+  and the unregistered-target guard removed (3 cases fail). Recorded in
+  `specs/uniformtools/T-019-ALIAS-TABLE.md`.
+
+- **Tool-call arguments are decoded by one shared helper on every path (spec
+  `uniformtools` T-012, FR-007).** `crates/ragent-types/src/tool_args.rs` landed
+  with `d6abcd4a` but was **never declared** - `crates/ragent-types/src/lib.rs`
+  had no `pub mod tool_args;`, so nothing compiled it and its 11 contract cases
+  had no `#[path]` line and never ran. The module is now declared and its tests
+  registered, and all **seven** sites that decode a call's accumulated argument
+  text call `decode_tool_arguments`: the loop's B1 gate and `writes_in_spec_dir`
+  (`session/processor.rs`), the hook guard matcher and the Claude event payload
+  (`hooks/mod.rs`), and the log preview, `update_tool_call_input` and
+  `drain_pending_tool_args` (`crates/ragent-tui/src/app/event_handler.rs`). The
+  three accepted shapes now behave identically everywhere: a JSON object passes
+  through, a JSON **string** that decodes to one is decoded, and empty or
+  whitespace-only text is `{}`. Two behaviours change as a result: whitespace
+  arguments used to be a corrective "invalid arguments JSON" error and now run a
+  parameterless tool, and a double-encoded payload used to reach the tool as a
+  JSON *string* and now arrives as the object the server meant. A hook guard
+  (`Bash(git commit:*)`) and a plugin hook now read the arguments of such a call
+  instead of seeing nothing.
+
+  `crates/ragent-agent/tests/test_tool_arg_decode_routing.rs` (4 cases) is the
+  guard, because the failure FR-007 names is a *future* decode site, which no
+  contract test of the helper can see: it scans `crates/ragent-agent/src`,
+  `crates/ragent-tui/src` and `src` for a bare `serde_json::from_str` on
+  `args_json` / `tool_input` / `(args)` and names the file and the offending
+  lines; asserts the three known decode files route through the helper (the
+  positive half, so a file is not "clean" merely by never decoding); pins the
+  helper's three branches and its single `pub fn decode`; and re-asserts that no
+  provider module names the helper. Behaviour is pinned by 3 cases in
+  `test_processor_more_paths.rs` (whitespace arguments run `tool_info` with
+  `input == {}` and no corrective error; a double-encoded payload reaches `think`
+  as `{"thought":"decoded"}`; `[1, 2]` is still refused naming "an array") and 1
+  in the TUI's `test_tool_event_state.rs`. Red-proved three ways (the B1 gate
+  reverted - both behaviour cases fail; then the TUI site, then the hook matcher -
+  the routing scan fails naming each file), each restored byte-identically.
+  Recorded in `specs/uniformtools/T-012-ARGUMENT-DECODER.md`.
+
+- **The tool-calling wire contract is now a declared, non-defaultable type (spec
+  `uniformtools` T-002, FR-002).** `crates/ragent-llm/src/providers/wire/mod.rs`
+  states the nine decisions the requirement names - tool envelope, result carrier,
+  id field, argument encoding, stream keying, parallel support, `is_error`
+  support, reasoning echo and synthetic-id need - as
+  `ToolWireProfile { tool_envelope, result_carrier, id_field, args_encoding,
+  stream_keying, supports_parallel, supports_is_error, echo_reasoning,
+  synthetic_ids }`, with the five supporting enums (`ToolEnvelope` 5 variants,
+  `ResultCarrier` 4, `IdField::{Key, Synthesised}`, `ArgsEncoding` 2,
+  `StreamKeying` 2) and an `as_str()` ASCII label on each for the wire matrix
+  (FR-016). `IdField::Synthesised` prints `synthesised` rather than nothing, so
+  the one family that supplies no id still has a printable cell (NFR-005).
+
+  Three properties of the declaration are the point rather than the plumbing:
+
+  - there is **no `Default` impl, no `Option` field and no optional
+    constructor**, so a client that states no profile has nothing to inherit and
+    T-003's coverage assertion over `PROVIDER_WIRE` is a build-time guarantee
+    instead of a convention;
+  - no field carries a serde attribute: a profile is a statement of what a
+    provider's wire format *is*, not a configurable knob that could claim a
+    contract its client does not speak;
+  - every field's documentation names the requirement and the task that reads
+    it, including the four whose consumer is later work (`supports_parallel`
+    T-015, `supports_is_error` T-017, `echo_reasoning` T-018, `synthetic_ids`
+    T-008/T-010). All nine are declared at once because a decision added per
+    task would mean a client encoded requests it never described.
+
+  `crates/ragent-llm/tests/test_wire_profile.rs` gained three cases pinning the
+  declaration rather than a value - the exact nine `pub` fields in order with no
+  `Option`/serde and every requirement documented; no `Default` derive and no
+  `impl Default`/`ToolWireProfile::default()` anywhere under the crate; and the
+  `Send + Sync + 'static` / `Copy + Eq + Hash + Debug` bounds with equal profiles
+  hashing equally - plus a fourth closing a real gap: the file's five
+  representative profiles must still equal the `const` T-003 declares for each,
+  and `synthetic_ids` must agree with `id_field` on every `PROVIDER_WIRE` row, so
+  eight passing cases cannot be true of a drifted copy. Red-proved four ways
+  (`impl Default` appended, field order swapped, `(FR-010)` deleted from a doc,
+  `GEMINI.synthetic_ids` flipped), each restored byte-identically. Recorded in
+  `specs/uniformtools/T-002-TOOL-WIRE-PROFILE.md`.
+
+- **The pre-rename tool-surface baseline is recorded, so the rename is checked
+  against a measurement rather than a recollection (spec `uniformtools` T-041,
+  FR-030).** `specs/uniformtools/T-041-BASELINE.md` now holds what the surface
+  actually is before T-031 renames a tool, measured on the tree at `d6abcd4a`
+  (debug binary `sha256 231360ca...`, `rustc 1.99.1`): **148 registered tools**,
+  with `list()`, `definitions()` and `all_tools()` element-for-element identical
+  and sorted; **21 permission families summing to 148** with the full membership
+  table; **32 distinct `permission_category()` values**; the **148-name list**
+  with both digest forms (`a833f0f1...` newline-joined without a trailing
+  newline, `e5c5ff82...` with one) and the predicted post-rename digest
+  `308d92d9...`; **0 names carrying an ASCII uppercase letter** before the rename
+  against **13 after it**; longest name 22 bytes; and 50 of the 148 names whose
+  first `_` segment is not their family.
+
+  The canary pair is **`agent` 4 / `team` 19**, not 3 / 20: `team_wait`'s
+  permission category is `agent:spawn`, so it counts in `agent`. A name-prefix
+  reading of the list produces 3 / 20 and is wrong, which is exactly why the
+  guard compares the whole 21-row table rather than one pair.
+
+  Two surface defects are recorded rather than smoothed over, because FR-030
+  names surfaces that do not report what the requirement assumes:
+
+  - `/tools list`'s header is `Visible Tools (<n> total, <m> disabled):`, and the
+    visible block holds 92 of the 148 under the shipped default configuration
+    (56 hidden). `n + m = 148` and the total row count is 148; asserting 148 rows
+    in the visible block fails on a correct tree.
+  - `/bug-report` has **no** `Tools registered` line. Its `- **Tools visible**: 1`
+    counts enabled tool-family visibility switches, not tools. Relatedly,
+    `--dry-run`'s "148 visible tools" comes from `list()`, which ignores the
+    hidden set, so the label and the number disagree.
+  - The three guard files T-037 and T-046 will own still pin the wrong canary
+    pair (`agent` 3 / `team` 20); they are named in the record so the correction
+    is not discovered by a failing test on a correct tree.
+
+  No Rust source file, test, dependency or tool name changed: all nine scratch
+  probes were deleted after the measurement, and `PLAN.md`'s T-041 row,
+  `TESTPLAN.md`'s TC-024 and TC-027 now carry the measured figures.
+
+- **The tool-rename set is now a recorded derivation rather than a table of
+  judgement calls (spec `uniformtools` T-029, FR-024, FR-025).**
+  `specs/uniformtools/T-029-DERIVATION.md` records how `tools.xlsx` produces
+  exactly the thirteen FR-023 pairs and the two refused targets, as the
+  mechanical result of two rules: FR-024's three clauses (the Anthropic row is
+  `Exact`, the ragent row is `Exact`, and the ragent cell names the target as
+  one of its `/`-separated entries) and FR-025's exact-spelling tie-break for
+  collisions. The document closes the books twice - once over the 215
+  `(row, token)` pairs (121 fail clause C, 20 clause A, 40 clause B, 34 survive
+  into 15 candidate targets) and once over the 148 ragent rows - and explains
+  why the two views differ by exactly two rows. `WebFetch` (claimed by
+  `mf_fetch` and `webfetch`) and `WebSearch` (`mf_search`, `websearch`) are
+  recorded as refusals rather than renames because no claimant's capitalised
+  spelling matches, and `bash_reset`, `apply_patch`, `patch`, `create` and
+  `update_file` are recorded as tie-break losers that keep their names.
+  Trimming each `/`-separated entry is load-bearing: without it the derivation
+  reports 9 pairs instead of 13, losing the four `task_*` renames.
+  - The record's `"Bash"` and candidate-name counts were re-measured while
+    closing it and three figures in the first draft did not reproduce; they are
+    corrected in place with the reason ("212 candidate names" is 246, "the 15
+    test-file occurrences" is 13, and one table-row anchor was off by nine
+    lines). The scale table is likewise corrected: on the pre-rename tree a
+    quoted-or-backticked scan finds **377** occurrences in **76** non-test
+    source files and **775** in **160** test files, not the 381/77 and 773/160
+    the section first carried. `PLAN.md`'s pre-work note and T-038's row are
+    updated to match, and the section now carries the exact commands that
+    reproduce the numbers, so T-033 and T-038 measure the tree in front of them
+    rather than trusting a written figure.
+  - No Rust file, test, dependency or tool name changed: T-029 is a derivation
+    and a record. T-030 is the first task that writes code.
+
+- **The canonical `ContentPart` now carries a tool result's error flag and a
+  reasoning block (spec `uniformtools` T-001, FR-014, FR-011).** `ToolResult`
+  gained `is_error: bool` and `ContentPart` gained a fifth variant,
+  `Reasoning { text, signature: Option<String> }` - the two fields the unified
+  provider encoders read. `is_error` defaults to `false` when absent so a
+  session persisted before the flag still loads, and is written even when
+  `false` so an explicit success is never indistinguishable from a record that
+  predates the field; `signature` is omitted rather than written as `null` when
+  a provider supplies none. Recording the representation is this change;
+  transmitting the flag (FR-014) and replaying the signed block (FR-011) are
+  the wire tasks that consume it. Six new cases in
+  `crates/ragent-types/tests/test_canonical_tool_parts.rs` pin the wire shape,
+  including the two red-proved invariants above, and
+  `test_llm_serde::every_content_part_variant_round_trips` now covers the fifth
+  variant it had been silently skipping.
+
+- **Tool renames for Claude Code compatibility (spec `uniformtools` FR-023 to FR-030, T-031, NFR-007).** Thirteen tools take their Claude Code spelling so a Claude-published skill resolves without translation. The old spelling fails with an unknown-tool error - no alias is kept, and `ToolRegistry::get("bash")` is `None`. The registered tool count is unchanged at 148: thirteen names changed and nothing was added, removed, merged or split.
+
+  Every in-tree site that *keys* on a renamed name moved with it, because the compiler cannot see a string: the permission guards (`INTERACTIVE_TOOLS`, `SKILL_ALWAYS_ALLOWED_TOOLS`, the task auto-approve list - which was a `"task_"` prefix test and is now an explicit four-name list, so it no longer admits anything starting with those five characters), the loop restriction lists, the history write-tool list, the `Bash` dispatch branch and spec-dir write match, the memory-extraction tool matches, the container backend's routing arms (a mis-keyed arm silently refuses the call instead of routing it), the research adapter's registry lookups, `tool_family_names("plan")`, the TUI's input/result summaries and inline-diff arms, and nine tool `description()` bodies that told the model to call the old spelling.
+
+  Update any hook `matcher`, permission rule, or `allowed_tools` list that names
+  an old spelling to the new one. The complete mapping is the `Renamed` table at
+  the end of this release's `Unreleased` entry.
+
+### Added
+
+- **`tools.expose_alias_names` now reaches the outbound tool list, through one
+  projection every advertising surface shares (spec `uniformtools` T-021,
+  FR-015).** `AliasTable::outbound_definitions(&[ToolDefinition], expose)` in
+  `crates/ragent-agent/src/tool/alias_table.rs` is the one place an alias spelling
+  is added to a tool list. With the switch off, or an empty table, it returns the
+  registry's own names unchanged - FR-015's "where neither is enabled, behaviour
+  shall be unchanged" expressed in code. With it on, each entry adds at most one
+  advertised definition, and only when the spelling is not already registered (a
+  registration always wins, so an entry mapping a registered name elsewhere cannot
+  advertise a second `Bash`), its target is registered (an entry whose target this
+  build does not hold is refused at use, so it is never offered), and the name is
+  not already present. The advertised entry copies its target's description and
+  parameter schema, and the list stays sorted by name. The wire list
+  (`session/processor.rs`), the system prompt's tool reference
+  (`session/loop_steps.rs`) and both definition caches (`session/cache.rs`) read
+  that projection, and every one of their cache keys now carries the switch and
+  the alias table as well as the registry version - a per-turn config value the
+  registry version never observed, which is exactly how a stale list survives a
+  `/config save`. 14 new tests (12 in
+  `crates/ragent-agent/tests/test_tool_alias_exposure.rs`, 2 end-to-end in
+  `test_tool_alias_resolution.rs` reading the tools array the processor actually
+  sends), and the projection deliberately carries no FR-023 table read: the table
+  already refuses to hold a retired spelling, so a second lookup would put a
+  rename scan on a path every tool call pays for and buy nothing.
+  `crates/ragent-agent/tests/test_nfr006_rename_cost.rs` refused the first draft
+  for that reason. Recorded in
+  `specs/uniformtools/T-021-EXPOSE-ALIAS-NAMES.md`.
+
+- **The rename's atomic-landing rule is now a green guard instead of a review
+  note, and the guard caught two defects on the way in (spec `uniformtools`
+  T-046, FR-034).** FR-034 is state-driven: every commit the rename lands in must
+  leave the tree with exactly one spelling of each FR-023 pair resolving, so a
+  `git bisect` never lands on a tree that honours both names or neither.
+  `crates/ragent-agent/tests/test_tool_rename_atomic_landing.rs` (7 cases) pins
+  the tree half of that against the **live registry**: every pair resolves one
+  spelling - and it is `after` - across `list()`, `all_tools()` and
+  `definitions()`; `get(before)` is `None` for all thirteen and no registry key
+  carries a `before`; the three enumerations are element-for-element identical;
+  the tool stored under an `after` key reports `after` from `Tool::name()` and no
+  stored tool reports a `before` (the half-renamed detector - a tree that moves
+  the key but not the name, or the reverse, compiles and passes a key-only
+  check); 21 permission families with `agent` 4 / `team` 19; 148 names and 148
+  definitions; no enumeration repeats a name. All three states FR-034 forbids were
+  proven red by temporarily breaking `Tool::name()` and the alias registration,
+  each restored byte-identically. Measured on this tree: 148 tools, 13 names
+  carrying an ASCII uppercase letter, sorted-name digest
+  `308d92d9d975666cf1f815369e18cc7b457c1c0dcbab004c45f2835100368321`, and a
+  26-name symmetric difference against the pre-rename list that is **exactly** the
+  FR-023 table (reconstructing the before-list backwards reproduces
+  `T-041-BASELINE.md`'s measured `a833f0f1...` digest). The scoped
+  `git log -S` query - scoped to the `Tool::name()` return, because an unscoped
+  search matches an OpenAPI schema name in `1e08279f` - returns zero commits for
+  all thirteen `after` spellings, so the cut has exactly one side with the old
+  spelling and the rename has never landed. **Two defects surfaced.** The test
+  file had shipped in `d6abcd4a` and was never registered in
+  `crates/ragent-agent/tests/all.rs` - the fifth orphan-module defect in this spec
+  after `tool_args`, `tool_rename`, `tool_input_error` and the `tools` config
+  section - so its 7 cases reported `running 0 tests` and exited 0; registered
+  now, it reports `running 7 tests ... 7 passed`, and the habit that catches this
+  class is to read that line, never the exit code. And
+  `cargo test -p ragent-llm --lib` **did not compile at `HEAD`**: `d6abcd4a`
+  removed `ChatContent` from `providers/anthropic.rs`'s imports while the
+  `#[path]`-included `tests/inline/anthropic_tests.rs` uses it twice through
+  `use super::*`, so two `E0433`s meant the crate's unit suite had never run; a
+  one-word import and `--lib` reports 324 passed. `FR030_CANARY_FAMILIES` was also
+  corrected from the predicted `agent` 3 / `team` 20 to the measured 4 / 19 - the
+  pair `--dry-run` prints, and the one T-041 §8.1 named this file as owing. The
+  landing commit itself is still owed and FR-034 is right to refuse it: clause 2
+  fails on this tree for a T-038 input literal
+  (`loop_dialog_tests.rs:100` types `"read, edit, bash"` while line 115 asserts
+  `["read", "Edit", "Bash"]` - `parse_comma_list` is verbatim by design), six
+  pre-existing `ragent-llm` wire-layer scans, and three pre-existing TUI
+  tasks-panel cases. The record also found that 20 `tests/test_*.rs` files across
+  six crates have no `#[path]` line and contribute zero cases, and that twelve of
+  them cannot be registered because they name APIs that exist in no compiled
+  module - so clause 2 cannot yet see them. Recorded in
+  `specs/uniformtools/T-046-ATOMIC-LANDING.md` §6.1.
+  `scripts/check-tool-rename.sh` reported 26 predicate-(e) lines at that time, all
+  T-033's; T-033 has since migrated them and the guard now reports zero, with four
+  reviewed per-line FR-028 exemptions.
+
+- **No configuration key, environment variable, CLI flag or plugin/connector/
+  agent setting can bring a retired tool spelling back, and now a test proves it
+  (spec `uniformtools` T-043, FR-031).** FR-031 is an unwanted-behaviour
+  requirement: if a supported mechanism would make a retired `before` spelling
+  resolvable, it must not be honoured, and no such mechanism may be added. The
+  audit is recorded in `specs/uniformtools/T-043-ESCAPE-HATCH-AUDIT.md` and
+  covers 369 `ragent.json` field declarations and serde `rename`/`alias` values
+  across the 24 sources of `crates/ragent-config`, 67 environment reads over 35
+  distinct names, 79 CLI names in `src/main.rs` and `src/cli.rs` (2 explicit
+  `long` names, 2 aliases, 6 subcommands and 69 field-derived flags), 387
+  plugin/connector/agent/hook/skill settings across 28 files, and the built-in
+  alias table. **Nothing was added** - the workspace's key, variable and flag
+  vocabulary is unchanged - and exactly one mechanism was exempted with a written
+  reason: `bash` in `crates/ragent-config/src/config.rs` is the shell-command
+  allowlist/denylist *section* (`bash.allowlist`, `bash.denylist`), named for the
+  `bash:execute` permission family FR-028 keeps unchanged; it configures which
+  shell commands may run and names or registers no tool. The seven predicates run
+  as `crates/ragent-agent/tests/test_escape_hatch_audit.rs` (8 cases): no config
+  field or serde name, no environment variable *name*, no environment or config
+  read on the resolution path, no CLI flag or subcommand, no fourth `tools` key,
+  no dynamic-source setting and no built-in alias row can be a rename spelling -
+  plus one case pinning `EXEMPTIONS` to that single reviewed entry. Each scanning
+  case asserts a **floor** on how many names it inspected (369 / 67 / 79 / 387),
+  so a scan that stops reading its inputs fails instead of passing vacuously; and
+  each of the seven was red-proved by seeding one violation and reverting it
+  byte-identically (`md5sum`-checked). `--tool-alias` is not a flag (the parser
+  exits 2), and `RAGENT_TOOL_ALIAS` is read nowhere (`--dry-run --json` output is
+  byte-identical with and without it, SHA-256 compared). **The case file and all
+  eight of its cases already existed and had never run**: it landed with
+  `d6abcd4a` but `crates/ragent-agent/tests/all.rs` carried no `#[path]` line for
+  it, so `test_escape_hatch_audit::` printed `running 0 tests` and the audit was
+  prose that looked executable - the fifth orphan-module defect in this spec
+  after `tool_args`, `tool_rename`, `tool_input_error` and the `tools` config
+  section. Registering it is what makes the seven claims above checkable.
+- **The two optional tool features now have one config section, and its silence
+  is the default (spec `uniformtools` T-020, FR-015, FR-017).**
+  `crates/ragent-config/src/tools.rs` holds `ToolsConfig { aliases,
+  expose_alias_names, wire_trace }` behind a new `Config::tools` field, with
+  `is_default`, `merge`, a custom `Deserialize`/`Serialize` pair for the two
+  forms `tools.aliases` accepts, and `TOOLS_ALIASES_KEY` used verbatim in every
+  load error so a reader is sent to the key they wrote. **The module and both of
+  its test files already existed** - `tools.rs` landed with `d6abcd4a` along with
+  24 value cases in `tests/test_tools_config.rs` and 11 FR-031 cases in
+  `tests/test_retired_alias_spelling.rs` - but `lib.rs` never declared
+  `pub mod tools;`, `Config` had no `tools` field, and neither test file had a
+  `#[path]` line in `crates/ragent-config/tests/all.rs`, so nothing compiled and
+  none of the 35 cases had ever run. The fourth orphan-module defect in this spec
+  (after `tool_args`, `tool_rename` and `tool_input_error`).
+
+  `tools.aliases` is a four-state value rather than a boolean, because absent,
+  `true`, `false` and an object each say something different: absent means "this
+  layer has no opinion", `true` requests the built-in provider-spelling table,
+  `false` switches resolution off *and drops inherited entries*, and an object
+  contributes its entries. `{}` is an object, not the `false` switch - collapsing
+  the two would let a project file that merely declares an empty table wipe the
+  user-global one, and would rewrite the author's `{}` as `false` on a round-trip.
+  The merge therefore uses three different rules for three kinds of value
+  (`Config::merge_inner` gains one line, `base.tools.merge(&overlay.tools)`, so
+  the global-to-project, `RAGENT_CONFIG` and `RAGENT_CONFIG_CONTENT` paths all
+  share it): the two opt-in booleans OR, so a layer that enables one cannot be
+  silently switched off by a layer that omits the key; alias entries union per
+  spelling with the overlay winning a collision, so one project entry does not
+  discard the user's table; and only an explicit `false` clears. The section is
+  deliberately **not** stripped by `merge_project`: an alias resolves a *name*,
+  not a capability, so the resolved call still passes the unknown-tool check, the
+  loop restriction, the destructive classifier, the hooks, the permission layer
+  and the 7-layer bash validation, and a registered name always wins so no entry
+  can shadow or re-point a tool. The refused spelling FR-031 needs is a per-entry
+  load-time rejection (`ToolsConfig::validate_alias_spellings`, T-042's caller),
+  not a blanket ban.
+
+  Serialisation is the half a struct test cannot see: the whole section is
+  omitted while `is_default()` and each key while it is at its own default, so a
+  build that has never seen `tools` writes a byte-identical `ragent.json` and the
+  first unrelated `save_to_source` cannot introduce a key the user never wrote.
+  A malformed value - a bare string, or an entry whose target is not a string -
+  is a load error naming both accepted forms and what was found, because a typo
+  must not quietly disable resolution. Tests: the 24 value cases now run, plus a
+  new `crates/ragent-config/tests/test_tools_config_load.rs` (5 cases through the
+  **real layered loader** in a sandboxed temp tree: global+project entry union
+  with both booleans surviving, a project `false` switching the global table off,
+  `save_to_source` writing the section and reloading it, a never-configured save
+  writing no `tools` key, and a non-boolean switch refused with the file named).
+  Red-proved three ways, each restored byte-identically and `md5sum`-checked: the
+  `merge_inner` line removed (7 value cases + 3 loader cases fail), the
+  `skip_serializing_if` removed (`"tools": {}` appears in the saved default
+  config), and the `#[path]` registration removed (0 cases run - a green suite
+  proving nothing). `ragent-config` is 417 passed; `cargo clippy -p ragent-config
+  --all-targets`, `cargo fmt --all -- --check` and
+  `scripts/check-test-env-isolation.sh` are clean. Documented in
+  `docs/howtos/config.md` (a new 7.42 section, the merge-strategy table row, and
+  the full example file) and recorded in
+  `specs/uniformtools/T-020-CONFIG-KEYS.md`.
+
+### Renamed
+
+The tool spellings this release changes, `before` -> `after`, one row per pair,
+in the order `crates/ragent-types/src/tool_rename.rs` records them. Thirteen
+names change and nothing is added, removed, merged or split, so the registered
+count stays at 148.
+
+| Before | After |
+|---|---|
+| `ask_user` | `AskUserQuestion` |
+| `bash` | `Bash` |
+| `edit` | `Edit` |
+| `plan_enter` | `EnterPlanMode` |
+| `plan_exit` | `ExitPlanMode` |
+| `glob` | `Glob` |
+| `grep` | `Grep` |
+| `skill_manage` | `Skill` |
+| `task_create` | `TaskCreate` |
+| `task_get` | `TaskGet` |
+| `task_list` | `TaskList` |
+| `task_update` | `TaskUpdate` |
+| `write` | `Write` |
+
+There is no alias behind the table: `ToolRegistry::get` answers `None` for the
+`before` column, so a configuration, hook `matcher`, `allowed_tools` entry or
+slash alias that still names one of those spellings stops resolving, and is
+reported with its replacement named rather than silently translated. A
+`tools.aliases` source key or target value equal to a `before` name is a load
+error (FR-031), and a hook `matcher` naming one loads with a warning.
+
+Two things in the table are **not** a spelling an upgrader has to migrate:
+
+- the **permission vocabulary** is unchanged by the rename.
+  `permission_category()` still reports `"bash"` / `"bash:execute"` for `Bash`
+  and `"ask_user"` for `AskUserQuestion`, and
+  `Permission::{Edit,Bash,PlanEnter,PlanExit}` keep their existing display
+  strings, so a `{ "permission": "bash", ... }` rule needs no edit;
+- `read` is deliberately absent. The workbook rates Claude's `Read` as `Close`
+  rather than `Exact`, so the ragent tool keeps its name; a Claude-spelled
+  `allowed_tools` entry naming `Read` is reported as unresolved rather than
+  silently narrowed to `read`.
+
+### Dependencies
+
+- **`zip` 7 -> 9 across the workspace.** The breaking change is
+  `ZipEntry::name()`, which now returns `Result<Cow<str>, ZipError>` instead of a
+  `&str`: a name that cannot be decoded is reported rather than replaced with
+  lossy text. Both call sites (`crates/ragent-plugins/src/add.rs`,
+  `crates/ragent-connectors/src/manifest.rs`) propagate the error, so a corrupt
+  archive entry now fails the install with the archive named instead of unpacking
+  under a mangled name.
+- **`tantivy` 0.26 -> 0.27** (`crates/ragent-codeindex`), **`calamine`
+  0.34 -> 0.37** and **`rust_xlsxwriter` 0.94 -> 0.101**. No source change was
+  needed for the three; the code-index search path, the spreadsheet reader and
+  the spreadsheet writer are exercised by their existing suites.
+
+### Fixed
+
+- **The hygiene suite is green again end to end, and the suppressions it was
+  hiding behind are gone.** `cargo check`, `cargo check --tests`,
+  `cargo nextest run` (14,571 passed, 16 skipped), `cargo test --doc` (18 suites,
+  0 failed), the dead-code lint
+  (`-D unreachable_pub -D dead_code -D unused_imports`),
+  `scripts/check-dead-code-reasons.sh`, `cargo clippy -D warnings`,
+  `cargo fmt --check`, `cargo audit` (0 advisories) and `cargo deny check`
+  (advisories, bans, licenses, sources) all pass. Two lints were fixed rather
+  than suppressed: a `let_and_return` in `crates/ragent-storage/src/storage.rs`
+  and 31 `use_self` sites in `crates/ragent-llm/src/providers/tool_cache.rs`.
+  Four doc-test examples in `ragent-agent` were corrected (`agent/mod.rs`,
+  `session/archive.rs`, `tool/mod.rs`, `team/mod.rs`), the last of which had been
+  probing the plan gate with `Bash` - a tool the gate does not cover, so the
+  example could not have failed the way it claimed.
+- **The release workflow's `cargo-audit` job no longer carries a hand-maintained
+  `--ignore` list.** It ran its own copy of the advisory suppressions, which
+  drift from `.cargo/audit.toml` the moment either is edited; it now runs plain
+  `cargo audit` and reads the checked-in configuration. `deny.toml` lost two
+  stale suppression entries for advisories that no longer resolve, and
+  `.cargo/audit.toml` is down to the three advisories actually outstanding
+  (RUSTSEC-2026-0194, -0195, RUSTSEC-2024-0436).
 
 ## [1.0.149] - 2026-10-21
 
@@ -215,6 +1970,57 @@ and output-view modals drop their Close button in favour of `Esc`.
   entry above, which renamed them so both catalogue panels share one set.)
 
 ### Fixed
+
+- **The same stall, second cause: the status-bar code-index poll recomputed the
+  graph node count on the TUI render path.**
+  `CodeIndex::try_status` (called by `App::refresh_code_index_stats` every 1-5 s
+  while the status bar is live) ran `IndexStore::graph_node_count`, which is
+  `COUNT(*)` over the de-duplicated `UNION` of both endpoint columns of
+  `graph_edges`. On a repository whose graph holds ~765k edges that is a
+  multi-second scan, and it ran on the main thread inside the render loop -
+  confirming via `eu-stack` showed the main thread in
+  `refresh_code_index_stats -> try_status -> graph_node_count -> sqlite3_step`
+  while a bash tool call appeared to hang.
+  - The node count is now memoised against the edge count (`edge_count` is a
+    plain `COUNT(*)` and only moves when the graph is rebuilt, so it is the
+    correct invalidation key). The first poll after a build still pays the scan;
+    every later poll is free, and a rebuild refreshes the value.
+  - `crates/ragent-codeindex/tests/test_status_graph_fields.rs` covers it: the
+    edge count is read live and never memoised, a cold poll reports the real
+    node count, and a graph rebuild refreshes the cached value.
+
+- **ragent stalling with a CPU core pinned while no shell command was running
+  (startup message-search index warm-up).**
+  `Storage::warm_message_search_index`, launched at every startup on a background
+  thread, asked "which messages have no FTS row" with
+  `LEFT JOIN messages_fts f ON f.message_id = m.id WHERE f.message_id IS NULL`.
+  `messages_fts.message_id` is declared `UNINDEXED`, so SQLite could not seek it and
+  planned the statement as `SCAN m` + `SCAN f VIRTUAL TABLE INDEX 0: LEFT-JOIN`: an
+  O(messages x fts-rows) nested scan reading every row's full document. On this
+  repo's own history that is ~20.8k messages x ~16.2k index rows - roughly 3.4 x
+  10^8 full-table comparisons - so the thread never finished. The observable symptom
+  was a ragent process burning a core for tens of minutes with no bash command in
+  `top`: the agent loop looked stalled immediately after a tool call, and the CPU was
+  ragent's own SQLite scan, not a child process. Confirmed with `eu-stack` on the live
+  process (`warm_message_search_index` -> `MappedRows::next` -> `fts5NextMethod` ->
+  `vdict` overflow-page reads).
+  - The warm-up now reconciles the two rowid domains instead of joining on the
+    UNINDEXED column: it reads `messages_fts_content.id` (the FTS5 content shadow
+    table, one row per index rowid) and `messages.rowid`, then repairs only the rows
+    that disagree. On a warm database that is zero rows and no rewrite, and it no
+    longer reads the `parts` column of every message - only of the rows it repairs.
+  - A row is repaired when it is missing from the index, when its index row names a
+    different message, or when its indexed text no longer matches the message (an
+    interrupted write or an in-place shadow-table edit leaves the token index pointing
+    at stale text). Index rows whose message no longer exists are dropped: each one
+    used to turn every later `DELETE FROM messages_fts WHERE message_id = ?` into a
+    full virtual-table scan.
+  - `crates/ragent-storage/tests/test_warm_index_scan.rs` guards the fix: the query
+    plan must rowid-seek the shadow table rather than scan the virtual table, the
+    chosen lookup must be the rowid diff (the old join survives only as the portable
+    fallback), one missing row is backfilled and nothing else is touched, a stale
+    in-place content rewrite is repaired once and repaired idempotently, and a warm
+    run finds nothing to do.
 
 - **Flaky integration-test failures caused by process-global races under
   one-test-binary-per-crate.** Each crate builds a single `all` test binary from its

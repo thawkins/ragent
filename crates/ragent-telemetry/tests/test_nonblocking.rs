@@ -402,8 +402,8 @@ fn test_noop_recorder_methods_never_panic() {
     llm.record_rate_limit("provider", Some(75.0), Some(40.0));
 
     let tool = ToolRecorder::disabled();
-    tool.record_invocation("bash");
-    tool.record_duration("bash", 10.0);
+    tool.record_invocation("Bash");
+    tool.record_duration("Bash", 10.0);
 
     let session = SessionRecorder::disabled();
     session.record_session_start();

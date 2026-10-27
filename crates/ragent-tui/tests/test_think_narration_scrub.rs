@@ -108,7 +108,10 @@ fn test_reasoning_part_with_narrated_markup_is_scrubbed() {
         "Reasoning before acting.\n<tool_call>\n{{\"name\": \"grep\", \"arguments\": {{}}}}\n<tool_call>"
     );
     let lines = render_parts(vec![
-        MessagePart::Reasoning { text },
+        MessagePart::Reasoning {
+            text,
+            signature: None,
+        },
         MessagePart::Text {
             text: "visible answer".to_string(),
         },
@@ -124,6 +127,7 @@ fn test_reasoning_part_with_narrated_markup_is_scrubbed() {
 fn test_reasoning_part_ordinary_text_is_preserved() {
     let lines = render_parts(vec![MessagePart::Reasoning {
         text: "step 1: plan\nstep 2: execute".to_string(),
+        signature: None,
     }]);
     let joined = lines.join("\n");
     assert!(joined.contains("step 1: plan"), "got: {joined}");

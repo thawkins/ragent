@@ -17,8 +17,15 @@
 //! * the same scripted step produces the same sequence of outcomes whether the
 //!   session runs the calls sequentially or concurrently - so the two paths
 //!   cannot drift apart;
-//! * the agent loop itself holds no stage: it calls the pipeline once, and the
-//!   pipeline names each stage exactly once, in order (a source guard).
+//! * the agent loop itself duplicates no stage: it calls the one stage body, and
+//!   that body names each stage exactly once, in order (source guards).
+//!
+//! The stage *ordering* lives in `src/session/dispatch.rs`, which the loop now
+//! calls once per call for both arms: the sequential arm awaits the pipeline's
+//! future and the concurrent arm collects it into `join_all`, so neither can run
+//! a stage the other does not. The source guards below read that module and the
+//! loop's single call site; the behavioural cases pin what a caller observes.
+//! See `specs/uniformtools/T-014-DISPATCH-PIPELINE.md`.
 //!
 //! Every case uses offline tools (`think`, `calculator`) or a tool that refuses
 //! before executing, so nothing here touches the network or writes to the
@@ -42,7 +49,7 @@ use ragent_agent::session::SessionManager;
 use ragent_agent::session::processor::{CachedConfig, SessionProcessor};
 use ragent_agent::storage::Storage;
 use ragent_agent::tool;
-use ragent_config::permission::PermissionRule;
+use ragent_config::permission::{Permission, PermissionAction, PermissionRule};
 use ragent_config::{Capabilities, Config as RagentConfig, Cost, StreamConfig};
 
 const PROVIDER_ID: &str = "ollama";
@@ -270,6 +277,7 @@ fn make_processor(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let tmp = tempfile::tempdir().expect("tempdir");
     Ok(Harness {
@@ -301,13 +309,18 @@ fn first_tool_call_state(reply: &Message) -> Option<(String, ToolCallStatus, Opt
 
 /// Drains the bus and reports whether any permission prompt was published.
 fn saw_permission_prompt(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> bool {
-    let mut saw = false;
+    count_permission_requests(rx) > 0
+}
+
+/// Drains the bus and counts the permission prompts published on it.
+fn count_permission_requests(rx: &mut tokio::sync::broadcast::Receiver<Event>) -> usize {
+    let mut count = 0;
     while let Ok(event) = rx.try_recv() {
         if matches!(event, Event::PermissionRequested { .. }) {
-            saw = true;
+            count += 1;
         }
     }
-    saw
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -692,6 +705,147 @@ async fn test_sequential_and_parallel_paths_produce_the_same_outcomes() -> Resul
     Ok(())
 }
 
+/// The outcomes come back in the provider's order in *both* modes, including a
+/// refusal at the head of the step.
+///
+/// `test_sequential_and_parallel_paths_produce_the_same_outcomes` compares the
+/// two modes after sorting by tool name, which is the right comparison for
+/// "same verdict" - but it deliberately cannot see an ordering difference. The
+/// concurrent arm used to answer a refused call in the prepare loop, where its
+/// record was appended while its siblings were still running, so a step whose
+/// first call was refused produced two different histories depending on
+/// `parallel_tool_calls`. This case asserts the order directly, unsorted.
+///
+/// The step is built so that "appended where it was decided" and "appended when
+/// it completed" both differ from the expected order: the refused call is first
+/// and the two tools that run are slow (`bash_reset` takes the session's shell),
+/// so the refusals' records would come out last rather than first. The case is
+/// a source guard *as well as* a behavioural one, because the arms are
+/// distinguishable only in timing: it asserts that the concurrent arm feeds the
+/// step's slots into one drain - a single `join_all` over every call of the step
+/// - and that a refused call pushes a settled slot instead of calling the record
+/// handler inline.
+#[tokio::test]
+async fn test_outcomes_keep_the_provider_order_in_both_modes() -> Result<()> {
+    /// A tool that takes long enough for a completion-order append to differ
+    /// from the provider's order: it waits on the session's persistent shell.
+    const SLOW_TOOL: &str = "bash_reset";
+    for parallel in [false, true] {
+        let event_bus = Arc::new(EventBus::new(4096));
+        let config = serde_json::json!({
+            "experimental": { "parallel_tool_calls": parallel }
+        })
+        .to_string();
+        // Deliberately neither alphabetical nor in completion order: a call
+        // refused by its schema, then two slow ones that run.
+        let harness = make_processor(
+            event_bus,
+            vec![
+                ScriptedReply::Tools(vec![
+                    (
+                        "move_file".to_string(),
+                        r#"{"source": "a.txt"}"#.to_string(),
+                    ),
+                    (SLOW_TOOL.to_string(), "{}".to_string()),
+                    (SLOW_TOOL.to_string(), "{}".to_string()),
+                ]),
+                ScriptedReply::Text("done".to_string()),
+            ],
+            Vec::new(),
+            true,
+            &config,
+        )?;
+        let session = harness
+            .processor
+            .session_manager
+            .create_session(harness.working_dir.clone())
+            .expect("session created");
+
+        let reply = harness
+            .processor
+            .process_message(
+                &session.id,
+                "run three things in order",
+                &make_agent(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .expect("the step runs to completion in both modes");
+
+        let recorded: Vec<(String, ToolCallStatus)> = reply
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                MessagePart::ToolCall { tool, state, .. } => {
+                    Some((tool.clone(), state.status.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            recorded.len(),
+            3,
+            "every call of the step is recorded (parallel_tool_calls = {parallel}): \
+             {recorded:?}"
+        );
+        assert_eq!(
+            recorded[0],
+            ("move_file".to_string(), ToolCallStatus::Error),
+            "the refused call is recorded first, where the provider listed it \
+             (parallel_tool_calls = {parallel}): {recorded:?}"
+        );
+        assert_eq!(
+            recorded[1].0, SLOW_TOOL,
+            "the second call keeps its position (parallel_tool_calls = \
+             {parallel}): {recorded:?}"
+        );
+        assert_eq!(
+            recorded[2].0, SLOW_TOOL,
+            "the third call keeps its position (parallel_tool_calls = \
+             {parallel}): {recorded:?}"
+        );
+    }
+    Ok(())
+}
+
+/// The concurrent arm applies the step's outcomes in the provider's order, and
+/// it does so by draining one list of slots rather than by handling each result
+/// where it was produced (FR-012).
+///
+/// This is the half of the ordering rule a behavioural case cannot pin from the
+/// outside: with three fast calls the two shapes happen to agree, so only the
+/// source shows that the refused call occupies its own position in the list the
+/// drain walks.
+#[test]
+fn parallel_arm_drains_one_ordered_list_of_slots() {
+    let loop_source = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
+    // The step is a list in the provider's order, holding either a future (a
+    // call that runs) or an outcome already decided (a refused call).
+    assert!(
+        loop_source.contains("type PendingStepCall =")
+            && loop_source.contains("Result<StepOutcomeSlot, Box<ToolStepResult>>"),
+        "the concurrent arm must keep one slot per call of the step, in the \
+         provider's order (FR-012)"
+    );
+    // A refused call pushes its settled outcome into that list...
+    assert!(
+        loop_source.contains("futures.push(Err(Box::new(("),
+        "a refused call must occupy its position in the step's slot list rather \
+         than append its record where it was decided (FR-012)"
+    );
+    // ...and the drain walks the whole list once, after every call of the step
+    // has been prepared, so no record is written ahead of its neighbours.
+    assert!(
+        loop_source.contains("join_all(futures.into_iter().map(|slot|"),
+        "the concurrent arm must drain the step's slots in one ordered pass \
+         (FR-012)"
+    );
+    assert!(
+        loop_source.contains("for (result, stalled_tool, panic_msg, _order) in results"),
+        "the drained outcomes must be applied in the list's order (FR-012)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Source guards: one loop call site, one pipeline, stages in order
 // ---------------------------------------------------------------------------
@@ -712,24 +866,69 @@ fn read_workspace_file(relative: &str) -> String {
 /// The agent loop calls the pipeline exactly once and names no stage of its own,
 /// so the sequential and concurrent shapes provably share every stage (FR-012).
 #[test]
-fn agent_loop_calls_the_one_pipeline_and_names_no_stage() {
+fn agent_loop_calls_the_one_stage_body_and_duplicates_no_refusal() {
     let loop_source = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
-    let pipeline_calls = loop_source.matches("ToolDispatchPipeline::run").count();
+    // Stages 1-3 (decode, resolve, validate) have exactly one implementation,
+    // in the pipeline module, and the loop reaches it through one call rather
+    // than inlining a second. One definition, and one call site in the loop.
+    let pipeline_source = read_workspace_file("crates/ragent-agent/src/session/dispatch.rs");
+    let definitions = pipeline_source.matches("fn resolve_call(").count();
+    assert_eq!(
+        definitions, 1,
+        "the decode/resolve/validate stages must have exactly one definition \
+         (FR-012); found {definitions}"
+    );
+    assert_eq!(
+        loop_source.matches("fn resolve_call(").count(),
+        0,
+        "the agent loop must not carry its own copy of the decode/resolve/\
+         validate stages (FR-012)"
+    );
+    let calls = loop_source
+        .lines()
+        .filter(|line| line.contains("resolve_tool_call("))
+        .count();
+    assert_eq!(
+        calls, 1,
+        "the agent loop must reach the decode/resolve/validate stages through \
+         exactly one call to `resolve_tool_call` (FR-012); found {calls}"
+    );
+    // Every stage after those three has one owner too: the loop calls the
+    // pipeline once per call and states no stage of its own.
+    let pipeline_calls = loop_source
+        .lines()
+        .filter(|line| line.contains("ToolDispatchPipeline::run("))
+        .count();
     assert_eq!(
         pipeline_calls, 1,
-        "the agent loop must reach the dispatch stages through exactly one call \
-         to ToolDispatchPipeline::run (FR-012); found {pipeline_calls}"
+        "the agent loop must run every call through exactly one pipeline \
+         entry point (FR-012); found {pipeline_calls}"
     );
-    for stage in [
-        "run_pre_tool_use_hooks_decoded",
-        "check_tool_repeat_guard",
-        "is_destructive_tool(",
-        "analyze_tool_action",
+    // The three ways a call stops without a tool result are built by the
+    // pipeline's constructors, not re-assembled in the loop.
+    for constructor in ["fn refusal(", "fn denial(", "fn synthesised("] {
+        let pipeline_uses = pipeline_source.matches(constructor).count();
+        assert!(
+            pipeline_uses > 0,
+            "the dispatch pipeline must build its `{constructor}` outcomes \
+             through its own constructor (FR-012, FR-014)"
+        );
+    }
+    assert!(
+        loop_source.contains("ToolDispatchPipeline::refusal(")
+            || loop_source.contains("ToolDispatchPipeline::synthesised("),
+        "the agent loop answers a refused or failed call with the pipeline's \
+         constructor rather than an inline tuple (FR-012)"
+    );
+    for duplicate in [
+        "fn denied_tool_call(",
+        "fn unknown_tool_error(",
+        "synthetic_error_result",
     ] {
         assert!(
-            !loop_source.contains(stage),
-            "the agent loop must not call the dispatch stage `{stage}` itself; \
-             the one pipeline owns the order (FR-012)"
+            !loop_source.contains(duplicate),
+            "the agent loop must not carry its own `{duplicate}`; the one \
+             pipeline shapes every terminal outcome (FR-012)"
         );
     }
 }
@@ -818,17 +1017,25 @@ fn unknown_tool_refusal_precedes_every_guard() {
     );
 
     // And the loop computes those stages before it can reach a guard: the call
-    // to `resolve_tool_call` sits ahead of the one call to the pipeline.
+    // to `resolve_call` sits ahead of the pipeline entry point that runs the
+    // guards, and the loop no longer names a guard of its own.
     let loop_source = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
     let resolve_position = loop_source
-        .find("dispatch::resolve_tool_call(")
+        .find("resolve_tool_call(")
         .expect("the loop resolves a call before dispatching it");
     let pipeline_position = loop_source
         .find("ToolDispatchPipeline::run(")
-        .expect("the loop's one pipeline call");
+        .expect("the loop runs the one pipeline");
     assert!(
         resolve_position < pipeline_position,
-        "the loop must decode/resolve/validate a call before the pipeline's guards"
+        "the loop must decode/resolve/validate a call before the pipeline's \
+         guards run (FR-012, FR-021)"
+    );
+    assert!(
+        !loop_source.contains("crate::session::permissions::check_tool_repeat_guard(")
+            && !loop_source.contains("check_tool_repeat_guard("),
+        "the repeat guard must run in the pipeline, not in the loop body \
+         (FR-012)"
     );
 }
 
@@ -881,6 +1088,13 @@ async fn test_tool_name_and_argument_key_case_variants_still_dispatch() -> Resul
         tool, "calculator",
         "the record is written with the registered spelling, so the permission \
          layer and the history agree with the registry"
+    );
+    // Both the name and the argument key were folded onto the registered
+    // spelling by the ONE pipeline the call ran through: not by a second loop
+    // stage, and not by the tool body guessing.
+    assert!(
+        error.is_none(),
+        "a folded name and key reach the tool with nothing to report: {error:?}"
     );
     let result_text = reply
         .parts
@@ -986,5 +1200,130 @@ async fn test_an_unmatched_name_is_still_refused_after_folding() -> Result<()> {
         message.contains("Unknown tool: 'ZWXYZ'"),
         "the refusal still names the spelling the model sent: {message}"
     );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// FR-012: the permission stage is inside the pipeline, in both modes
+// ---------------------------------------------------------------------------
+
+/// The permission stage is a stage of the one pipeline, so the same call raises
+/// the same `PermissionRequested` and the same verdict in both modes.
+///
+/// `test_sequential_and_parallel_paths_produce_the_same_outcomes` compares the
+/// *recorded outcomes* of two modes. That leaves one gap: a mode could reach the
+/// identical final state through a different route - for instance one arm
+/// dispatching straight to a backend while the other consulted the permission
+/// checker - and the outcomes would still match. This case closes the gap by
+/// observing the *events*: exactly one prompt per call, in both modes.
+///
+/// Each prompt is answered as soon as it is published, so the case costs one
+/// permission round trip per call rather than one 120-second timeout per call.
+#[tokio::test]
+async fn test_the_permission_stage_runs_once_per_call_in_both_modes() -> Result<()> {
+    for parallel in [false, true] {
+        let event_bus = Arc::new(EventBus::new(4096));
+        let mut rx = event_bus.subscribe();
+        let config = serde_json::json!({
+            "experimental": { "parallel_tool_calls": parallel }
+        })
+        .to_string();
+        // An `Ask` verdict prompts, and a prompt nobody answers is held for the
+        // full 120-second permission timeout - four prompts (two modes, two
+        // calls each) would stall this case for eight minutes. Answer each
+        // prompt as it is published; the count below is unaffected because the
+        // counter reads the request events, not the replies.
+        let answer_bus = event_bus.clone();
+        let responder = tokio::spawn(async move {
+            let mut replies_rx = answer_bus.subscribe();
+            loop {
+                match replies_rx.recv().await {
+                    Ok(Event::PermissionRequested {
+                        session_id,
+                        request_id,
+                        ..
+                    }) => answer_bus.publish(Event::PermissionReplied {
+                        session_id,
+                        request_id,
+                        allowed: false,
+                        decision: ragent_agent::permission::PermissionDecision::Once,
+                    }),
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+        let harness = make_processor(
+            event_bus,
+            vec![
+                ScriptedReply::Tools(vec![
+                    (
+                        "move_file".to_string(),
+                        r#"{"source": "a.txt", "destination": "b.txt"}"#.to_string(),
+                    ),
+                    (
+                        "move_file".to_string(),
+                        r#"{"source": "c.txt", "destination": "d.txt"}"#.to_string(),
+                    ),
+                ]),
+                ScriptedReply::Text("done".to_string()),
+            ],
+            // An `Ask` verdict for the write category `move_file` declares,
+            // with `auto_approve: false`, holds each call for a prompt: the
+            // prompt's presence is evidence the permission stage ran, and its
+            // absence would be evidence a mode skipped it.
+            vec![PermissionRule {
+                permission: Permission::Custom("file:write".to_string()),
+                pattern: Some("**".to_string()),
+                action: PermissionAction::Ask,
+            }],
+            false,
+            &config,
+        )?;
+        let session = harness
+            .processor
+            .session_manager
+            .create_session(harness.working_dir.clone())
+            .expect("session created");
+
+        let reply = harness
+            .processor
+            .process_message(
+                &session.id,
+                "move two files",
+                &make_agent(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .expect("the step runs to completion in both modes");
+        responder.abort();
+
+        let prompts = count_permission_requests(&mut rx);
+        let states: Vec<_> = reply
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                MessagePart::ToolCall { tool, state, .. } => {
+                    Some((tool.clone(), state.status.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("move_file".to_string(), ToolCallStatus::Error),
+                ("move_file".to_string(), ToolCallStatus::Error),
+            ],
+            "both calls are held by the permission stage and refused while \
+             unattended (parallel_tool_calls = {parallel})"
+        );
+        assert_eq!(
+            prompts, 2,
+            "the permission stage ran exactly once per call whether the step \
+             ran sequentially or concurrently (parallel_tool_calls = {parallel})"
+        );
+    }
     Ok(())
 }

@@ -349,7 +349,7 @@ fn test_tool_recorder_record_invocation_increments_counter() {
 
     rec.record_invocation("read");
     rec.record_invocation("read");
-    rec.record_invocation("write");
+    rec.record_invocation("Write");
 
     rt.block_on(async {
         provider.force_flush().expect("flush");
@@ -762,7 +762,7 @@ fn test_disabled_permission_recorder_is_noop() {
     let rec = PermissionRecorder::disabled();
     assert!(!rec.is_enabled());
     rec.record_approved("Bash");
-    rec.record_denied("edit");
+    rec.record_denied("Edit");
 }
 
 #[test]
@@ -775,7 +775,7 @@ fn test_permission_recorder_record_approved_increments_counter() {
 
     rec.record_approved("Bash");
     rec.record_approved("Bash");
-    rec.record_approved("edit");
+    rec.record_approved("Edit");
 
     rt.block_on(async {
         provider.force_flush().expect("flush");
@@ -806,8 +806,8 @@ fn test_permission_recorder_record_denied_increments_counter() {
     };
 
     rec.record_denied("Bash");
-    rec.record_denied("edit");
-    rec.record_denied("edit");
+    rec.record_denied("Edit");
+    rec.record_denied("Edit");
 
     rt.block_on(async {
         provider.force_flush().expect("flush");
@@ -838,7 +838,7 @@ fn test_permission_recorder_attributes_include_tool_name() {
     };
 
     rec.record_approved("Bash");
-    rec.record_denied("edit");
+    rec.record_denied("Edit");
 
     rt.block_on(async {
         provider.force_flush().expect("flush");
@@ -888,7 +888,7 @@ fn test_permission_recorder_attributes_include_tool_name() {
             })
             .any(|dp| {
                 dp.attributes()
-                    .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "edit")
+                    .any(|kv| kv.key.as_str() == "tool.name" && kv.value.as_str() == "Edit")
             })
     });
     assert!(

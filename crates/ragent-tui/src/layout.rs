@@ -8284,7 +8284,7 @@ fn messages_to_lines(
                                     )));
                                 }
                             }
-                        } else if tool != "edit"
+                        } else if tool != "Edit"
                             && let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, cwd)
                         {
@@ -8307,7 +8307,7 @@ fn messages_to_lines(
                         }
                     }
                 }
-                MessagePart::Reasoning { text } => {
+                MessagePart::Reasoning { text, .. } => {
                     // SEC-080: reasoning text is model output and may embed an
                     // escape sequence; neutralise before rendering.
                     let text = sanitize_terminal(text);

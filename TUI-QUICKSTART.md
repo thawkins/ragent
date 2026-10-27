@@ -1002,23 +1002,20 @@ the code index and memory directories exist.
 
 ---
 
-## 3.2 Tool visibility toggles
+## 3.2 Tool listing
 
-Some large tool families are hidden from the model by default to keep prompts
-small. Use `/tools` for the help block, `/tools list` (alias `/tools show`) to
-render the visibility table, and `/tools <switch> on|off` to enable or disable a
-switch persistently.
+Every tool the registry holds is advertised to the model. `/tools` shows the
+help block and `/tools list` (alias `/tools show`) prints one row per registered
+tool with its source and description.
 
 ```text
 /tools
 /tools list
-/tools masterfetch on
-/tools teams on
-/tools github off
 ```
 
-Valid switches: `github`, `gitlab`, `teams`, `agents`, `plan`,
-`codeindex`, `masterfetch`. Changes are saved to `ragent.json`.
+A tool you expect but do not see is not registered: the subsystem that owns it is
+inactive. The ten codeindex tools, for example, appear only while the code index
+is on (`/codeindex on`).
 
 ---
 

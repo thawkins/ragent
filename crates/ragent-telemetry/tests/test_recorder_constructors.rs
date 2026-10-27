@@ -219,7 +219,7 @@ fn test_recorder_new_constructors_with_enabled_registry() {
 
     let perm = PermissionRecorder::new(registry.clone());
     perm.record_approved("read");
-    perm.record_denied("write");
+    perm.record_denied("Write");
 
     let comp = CompressionRecorder::new(registry.clone());
     comp.record_compression(2000, 1000, 0.5);

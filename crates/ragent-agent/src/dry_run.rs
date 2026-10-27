@@ -2,7 +2,7 @@
 //!
 //! Implements `ragent --dry-run` and `ragent config check`.  The report loads
 //! configuration, resolves provider/model auth state, discovers skills,
-//! enumerates visible tools, and performs lightweight MCP connectivity checks
+//! enumerates the registered tools, and performs lightweight MCP connectivity checks
 //! without invoking any LLM or executing any tool.  The result is returned as a
 //! structured [`ReadinessReport`] that can be printed for humans or serialised
 //! as JSON for CI/CD consumption.
@@ -154,8 +154,6 @@ pub struct DryRunInputs {
     /// Current working directory for skill discovery and project config
     /// resolution.
     pub working_dir: PathBuf,
-    /// Tool names hidden from the LLM (computed from `tool_visibility`).
-    pub hidden_tools: Vec<String>,
 }
 
 /// Run the full dry-run readiness check and return the report plus an exit
@@ -174,7 +172,7 @@ pub async fn run_dry_run(inputs: DryRunInputs) -> (ReadinessReport, u8) {
     let skills_section = skills_section(&config, &inputs.working_dir);
     sections.push(skills_section);
 
-    let tools_section = tools_section(&inputs.tool_registry, &inputs.hidden_tools);
+    let tools_section = tools_section(&inputs.tool_registry);
     sections.push(tools_section);
 
     let mcp_section = mcp_section(&config).await;
@@ -360,7 +358,7 @@ fn load_config_file(path: &Path) -> Result<Config, String> {
 }
 
 fn parse_config_str(content: &str, source: &str) -> Result<Config, String> {
-    serde_json::from_str(content).map_err(|e| {
+    let config: Config = serde_json::from_str(content).map_err(|e| {
         let line = e.line();
         let column = e.column();
         let problematic_line = content
@@ -370,7 +368,13 @@ fn parse_config_str(content: &str, source: &str) -> Result<Config, String> {
         format!(
             "Failed to parse {source} at line {line}, column {column}: {e}\nProblematic line: {problematic_line}"
         )
-    })
+    })?;
+    // FR-031 (T-042): the readiness report parses the same files the real
+    // loader reads, so it applies the same `tools.aliases` spelling check.
+    // Left out, `--dry-run` would report "Config loaded" for a file the next
+    // real load refuses - the readiness report would be worse than useless.
+    Config::reject_retired_alias_spellings(&config.tools, source).map_err(|e| e.to_string())?;
+    Ok(config)
 }
 
 fn provider_section(config: &Config, inputs: &DryRunInputs) -> ReadinessSection {
@@ -529,8 +533,7 @@ fn skills_section(config: &Config, working_dir: &Path) -> ReadinessSection {
     }
 }
 
-fn tools_section(tool_registry: &ToolRegistry, hidden_tools: &[String]) -> ReadinessSection {
-    tool_registry.set_hidden(hidden_tools);
+fn tools_section(tool_registry: &ToolRegistry) -> ReadinessSection {
     let names = tool_registry.list();
     let mut family_counts: HashMap<String, usize> = HashMap::new();
     let mut unknown_category = 0usize;
@@ -554,7 +557,7 @@ fn tools_section(tool_registry: &ToolRegistry, hidden_tools: &[String]) -> Readi
     items.push(ReadinessItem {
         name: "total".to_string(),
         status: ReadinessStatus::Ready,
-        message: format!("{} visible tools", names.len()),
+        message: format!("{} registered tools", names.len()),
     });
 
     for (family, count) in families {

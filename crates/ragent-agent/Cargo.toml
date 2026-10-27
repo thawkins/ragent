@@ -102,6 +102,10 @@ serial_test = "4"
 ragent-tools-core = { path = "../ragent-tools-core" }
 criterion = { workspace = true, features = ["async_tokio"] }
 axum = { workspace = true }
+# Captures the FR-010 parallel-dispatch demotion notice from a scoped
+# subscriber (`tests/test_parallel_gate.rs`) instead of asserting on source text.
+tracing-subscriber = { workspace = true }
+
 [[bench]]
 name = "agent_loop"
 harness = false

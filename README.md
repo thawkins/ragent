@@ -55,13 +55,13 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 
 ![ragent tool session](assets/screens/ragentsession.png)
 
-- **File** (27) — read, write, create, edit, multiedit, apply_patch, patch, rm,
-  move, copy, mkdir, append, file_info, diff, glob, list, grep, the `update_file`
-  alias, get_env, the PDF pair (`pdf_read`, `pdf_write`), the structured-memory
-  trio (`memory_store`, `memory_recall`, `memory_forget`), plus
-  `conversation_search` and `session_search`. Read-only tools require `file:read`;
-  mutating tools require `file:write`
-- **Bash** (3) — bash, bash_reset and the `run_code` alias. Bash carries 7-layer
+- **File** (27) — read, Write, create, Edit, multiedit, apply_patch, patch, rm,
+  move_file, copy_file, make_directory, append_to_file, file_info, diff_files,
+  Glob, list, Grep, the `update_file` alias, get_env, the PDF pair (`pdf_read`,
+  `pdf_write`), the structured-memory trio (`memory_store`, `memory_recall`,
+  `memory_forget`), plus `conversation_search` and `session_search`.
+  Read-only tools require `file:read`; mutating tools require `file:write`
+- **Bash** (3) — Bash, bash_reset and the `run_code` alias. Bash carries 7-layer
   security: safe-command whitelist, banned commands, denied patterns,
   directory-escape prevention, syntax validation, obfuscation detection, and user
   allowlist/denylist
@@ -84,9 +84,9 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   coordination surface
 - **Agent** (4) — new_agent, cancel_agent, list_agents, wait_agents
 - **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
-- **Task** (4) — task_create, task_update, task_get, task_list
+- **Task** (4) — TaskCreate, TaskUpdate, TaskGet, TaskList
 - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
-- **Plan** (2) — plan_enter, plan_exit
+- **Plan** (2) — EnterPlanMode, ExitPlanMode
 - **None** (8) — calculator, think, agent_complete, ragent_info (running version,
   build time, git commit, compiler, plus this instance's pid, uptime, memory and
   thread count), os_info (read-only host report: OS identity and Linux
@@ -94,8 +94,9 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   hardware, memory, uptime, and process environment; also `/osinfo show`),
   tool_info and commands_info (registry and slash-command dumps)
 - One each: **model** (model_info), **network** (http_request), **system**
-  (mf_version, mf_cache_clear), **skill** (skill_manage), **storage** (initiative),
-  **ask_user** (ask_user)
+  (mf_version, mf_cache_clear), **skill** (Skill), **storage** (initiative),
+  **ask_user** (AskUserQuestion - the group name is the permission family, which
+  the rename left unchanged)
 - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers,
   plus the dynamically registered per-server bridge tools
 - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
@@ -425,11 +426,14 @@ coverage run 9m 58s / 15.82 GiB).
 
 Every crate builds **one** integration-test binary from its `tests/` tree
 (`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
-each `tests/test_*.rs` file), so a full `cargo test` links 19 targets instead of
-~950. Run one file by filter:
+each `tests/test_*.rs` file), so a full run links 19 targets instead of ~950.
+Tests run under [cargo-nextest](https://nexte.st) (`.config/nextest.toml`): every
+test gets its own process, so a wedged test cannot block its neighbours. Run one
+file by filter:
 
 ```bash
-cargo test -p ragent-tui --test all test_slash_commands::
+cargo nextest run -p ragent-tui -E 'test(test_slash_commands::)'
+cargo test --workspace --doc   # doc tests: nextest does not run them
 ```
 
 ## Quick Start
@@ -568,15 +572,6 @@ live in the user-global config. Rejected keys are logged at `warn!`.
     // truncation in the compaction prompt (default 2000).
     // "summary_tokens": 1500,
     // "tool_output_max_chars": 2000
-  },
-  "tool_visibility": {
-    "github": true,
-    "gitlab": true,
-    "teams": true,
-    "agents": true,
-    "plan": true,
-    "codeindex": true,
-    "masterfetch": true
   },
   // Execution backend (spec `openhands` FR-001, FR-026). Omitted = `local`
   // (host execution, FR-019). `backends` declares the registry entries the

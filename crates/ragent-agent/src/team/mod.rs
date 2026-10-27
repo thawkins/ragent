@@ -59,3 +59,49 @@ pub use swarm::{
     build_decomposition_user_prompt, parse_decomposition, parse_decomposition_with_default,
 };
 pub use task::{Task, TaskList, TaskStatus, TaskStore};
+
+// -- Guard helpers ---------------------------------------------------------------
+
+/// The reason a teammate whose plan awaits the lead's verdict may not run
+/// `tool_name`, or `None` when the call is allowed (T-307).
+///
+/// The rule itself lives here, next to the team runtime, rather than inside the
+/// session processor: it is a team policy, and the processor only asks the
+/// question (spec `uniformtools` FR-012 keeps the dispatch pipeline's stages
+/// named in one place, and this is the stage's predicate).
+///
+/// Read-only tools and the team coordination tools stay available - that is how
+/// a teammate learns the verdict and how the lead inspects the work - while a
+/// mutating tool would let a plan reach the workspace before it is approved.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_agent::team::plan_gate_denial;
+///
+/// // Read-only tools are never blocked by a pending plan.
+/// assert_eq!(plan_gate_denial("read", false, true), None);
+/// // A teammate with a pending plan cannot mutate work.
+/// assert!(plan_gate_denial("Write", false, true).is_some());
+/// // The lead is never gated: it is the one who approves.
+/// assert_eq!(plan_gate_denial("Write", true, true), None);
+/// ```
+#[must_use]
+pub fn plan_gate_denial(tool_name: &str, is_lead: bool, plan_pending: bool) -> Option<String> {
+    if is_lead || !plan_pending {
+        return None;
+    }
+    // A team coordination tool is how the teammate learns the verdict and how
+    // the lead is answered, so it stays available; everything that is not a
+    // workspace write (reading, searching, computing) is not blocked either.
+    if tool_name.starts_with("team_")
+        || !crate::session::loop_state::LOOP_WRITE_TOOLS.contains(&tool_name)
+    {
+        return None;
+    }
+    Some(format!(
+        "plan pending: '{tool_name}' is a mutating tool and your plan has not been \
+         approved yet - wait for the lead's verdict with the team_* tools, or ask \
+         the lead to approve the plan, before changing any work"
+    ))
+}

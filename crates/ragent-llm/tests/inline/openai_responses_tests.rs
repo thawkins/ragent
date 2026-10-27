@@ -97,6 +97,97 @@ fn test_build_request_body_with_tools() {
 }
 
 #[test]
+fn test_build_request_body_tools_come_from_the_shared_encoder() {
+    // FR-003 / T-005: the body's `tools` must *equal* the encoder's payload, not
+    // merely "be an array of the right length". An inline array that produced the
+    // right shape would satisfy every shape assertion and still be the state
+    // FR-003 forbids, so the comparison is against the shared cache.
+    let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
+    let tools = vec![
+        ToolDefinition {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+        },
+        ToolDefinition {
+            name: "write".to_string(),
+            description: "Write a file".to_string(),
+            parameters: json!({"type": "object"}),
+        },
+    ];
+    let request = ChatRequest {
+        model: "gpt-5.6".to_string(),
+        messages: Arc::new(vec![ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("go".to_string()),
+        }]),
+        tools: Arc::new(tools),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        system: None,
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+
+    let body = client.build_request_body(&request).expect("body builds");
+    let expected =
+        cached_tools(ToolFormat::OpenAiResponses, &request.tools).responses_tools_array();
+    assert_eq!(
+        body["tools"], expected,
+        "the Responses tool array must be the encoder's payload, not a re-derived one"
+    );
+
+    let items = body["tools"].as_array().expect("tools is an array");
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["type"], "function");
+    assert_eq!(items[0]["name"], "read");
+    assert_eq!(
+        items[0]["parameters"]["properties"]["path"]["type"],
+        "string"
+    );
+    assert!(
+        items[0].get("function").is_none(),
+        "the Responses item is flattened: {}",
+        items[0]
+    );
+}
+
+#[test]
+fn test_build_request_body_omits_tools_when_the_list_is_empty() {
+    // Routing the array through the encoder must not quietly add `"tools":[]`:
+    // some Responses deployments reject an empty tool list, so an empty registry
+    // has to leave the field absent (the guard the inline array carried).
+    let client = ResponsesApiClient::new("test-key", "https://api.openai.com");
+    let request = ChatRequest {
+        model: "gpt-5.6".to_string(),
+        messages: Arc::new(vec![ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("Hello".to_string()),
+        }]),
+        tools: Arc::new(vec![]),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        system: None,
+        options: HashMap::new(),
+        session_id: None,
+        request_id: None,
+        stream_timeout_secs: None,
+        thinking: None,
+    };
+
+    let body = client.build_request_body(&request).expect("body builds");
+    assert!(
+        body.get("tools").is_none(),
+        "an empty tool list must leave the field absent, not send []: {body}"
+    );
+}
+
+#[test]
 fn test_build_request_body_with_thinking() {
     use ragent_types::thinking::{ThinkingConfig, ThinkingLevel};
 

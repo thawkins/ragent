@@ -655,7 +655,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                  tasks including writing code, debugging, reviewing, and explaining code. \
                  You have access to tools for reading, writing, and editing files, executing \
                  shell commands, and searching codebases. \
-                 Use 'grep' or 'search' to find text/code patterns, 'glob' to find files by name, \
+                 Use 'Grep' or 'search' to find text/code patterns, 'Glob' to find files by name, \
                  'list' to view directory contents, and 'read' to view file contents. \
                  Always prefer using tools to verify your assumptions rather than guessing.",
             )),
@@ -680,7 +680,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             prompt: Some(Arc::from(
                 "You are a build agent specializing in compiling, testing, and debugging \
                  software projects. Focus on running builds, fixing compilation errors, \
-                 running tests, and ensuring code quality. Use bash commands to interact \
+                 running tests, and ensuring code quality. Use Bash commands to interact \
                  with build systems and test frameworks.",
             )),
             permission: default_permissions(),
@@ -727,7 +727,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             model: None,
             prompt: Some(Arc::from(
                 "You are an exploration agent specializing in understanding codebases. \
-                 Use read, grep, glob, and list tools to navigate and understand code. \
+                 Use read, Grep, Glob, and list tools to navigate and understand code. \
                  Provide concise, accurate answers about code structure, patterns, and logic. \
                  Do NOT modify any files.",
             )),
@@ -1568,6 +1568,7 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<Arc<AgentInfo>>, Vec<String>)
 ///
 /// ```
 /// use std::path::Path;
+/// use std::sync::Arc;
 /// use ragent_agent::agent::{AgentInfo, build_system_prompt};
 ///
 /// let mut agent = AgentInfo::new("helper", "A helpful agent");
@@ -3019,7 +3020,7 @@ fn build_system_prompt_with_storage_inner(
          - Use tools to verify information rather than guessing\n\
          - Read files before editing them to understand context\n\
          - Make precise, targeted changes\n\
-         - Test changes when possible using the bash tool\n\
+         - Test changes when possible using the Bash tool\n\
          - Explain what you're doing and why\n\n",
     );
 

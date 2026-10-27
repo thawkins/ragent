@@ -6,7 +6,7 @@
 //! NEW branches reached only through a live [`ResearchSession`] built by
 //! `build_research_session`:
 //!
-//! - the `AgentLocalTool` adapters (`glob` / `grep` / `read` / `list_specs` /
+//! - the `AgentLocalTool` adapters (`Glob` / `Grep` / `read` / `list_specs` /
 //!   `spec_title`) driven by `LocalGatherer::gather`, and
 //! - the `AgentWebSearchTool` / `AgentWebFetchTool` adapters driven by
 //!   `WebGatherer::gather`: the `mf_search` metadata fallback shape, the
@@ -134,21 +134,21 @@ fn body() -> String {
 
 // -- AgentLocalTool via LocalGatherer::gather --------------------------------
 
-/// `LocalGatherer::gather` drives every `AgentLocalTool` method: `glob`
-/// enumerates candidates, `grep` scores them (parsing the tool's `path:line:text`
+/// `LocalGatherer::gather` drives every `AgentLocalTool` method: `Glob`
+/// enumerates candidates, `Grep` scores them (parsing the tool's `path:line:text`
 /// output), `read` extracts the body / spec title, and `list` enumerates specs.
 #[tokio::test]
 async fn local_gatherer_drives_agent_local_tool_methods() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let registry = registry_of(vec![
         Arc::new(StubTool {
-            name: "glob",
+            name: "Glob",
             // One candidate file per glob call; de-duplicated to a single path.
             content: "src/widget.rs\n".to_string(),
             metadata: None,
         }) as Arc<dyn Tool>,
         Arc::new(StubTool {
-            name: "grep",
+            name: "Grep",
             content: "src/widget.rs:12:let widget = 1;\n".to_string(),
             metadata: None,
         }) as Arc<dyn Tool>,
@@ -170,7 +170,7 @@ async fn local_gatherer_drives_agent_local_tool_methods() {
     let session = session_for(registry, tmp.path().to_path_buf());
     assert!(
         session.local().is_some(),
-        "glob/grep/read/list must enable local gathering"
+        "Glob/Grep/read/list must enable local gathering"
     );
     assert!(session.web().is_none(), "no web tools were registered");
 

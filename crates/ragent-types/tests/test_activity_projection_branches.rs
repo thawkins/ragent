@@ -124,7 +124,7 @@ fn apply_project_accumulates_every_kind() {
         ev(
             next(),
             EventKind::PermissionDecision {
-                tool: "bash".into(),
+                tool: "Bash".into(),
                 principal: Principal::Policy,
                 boundary: BoundaryTarget::Other("custom".into()),
                 granted: false,
@@ -284,7 +284,7 @@ fn pending_tool_calls_excludes_answered_calls() {
             1,
             EventKind::ToolCall {
                 tool_call_id: "in-flight".into(),
-                tool: "bash".into(),
+                tool: "Bash".into(),
                 args: "{}".into(),
             },
         ),

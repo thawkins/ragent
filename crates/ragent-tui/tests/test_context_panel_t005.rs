@@ -18,19 +18,27 @@ fn test_tool_metadata_token_count_is_positive_with_default_registry() {
 }
 
 #[test]
-fn test_tool_metadata_token_count_decreases_with_hidden_tools() {
-    // FR-007: wrapper overhead is per-tool, so hiding tools must shrink it.
-    let app = support::make_app();
-    let full = app.tool_metadata_token_count();
-    app.session_processor.tool_registry.set_hidden(&[
-        "read".to_string(),
-        "write".to_string(),
-        "bash".to_string(),
-    ]);
-    let reduced = app.tool_metadata_token_count();
+fn test_tool_metadata_measures_the_selected_providers_own_envelope() {
+    // FR-007 / T-005: `tool_metadata_token_count` measures the wire bytes of the
+    // *selected provider's own* envelope, minus the raw definition bytes. The
+    // Responses envelope is 519 bytes smaller than the chat one over the default
+    // registry (each item drops the nested `function` wrapper), so a Responses
+    // session must report strictly *less* overhead than a chat session sent the
+    // same definitions. A session measured with the wrong envelope, or one that
+    // re-derives the array instead of reading the cache, does not.
+    let mut app = support::make_app();
+    app.agent_info.model = None;
+    app.selected_model = Some("openai/gpt-5.6".to_string());
+    let chat = app.tool_metadata_token_count();
+
+    app.selected_model = Some("openai_responses/gpt-5.6".to_string());
+    let responses = app.tool_metadata_token_count();
+
+    assert!(chat > 0, "the chat envelope has per-tool overhead");
     assert!(
-        reduced < full,
-        "hiding tools should reduce metadata count: full={full}, reduced={reduced}"
+        responses < chat,
+        "a Responses session ({responses}) must measure a smaller per-tool envelope \
+         than a chat session ({chat}) over the same definitions"
     );
 }
 

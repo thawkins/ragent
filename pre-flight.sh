@@ -147,6 +147,13 @@ print_step "Silent error-suppression guard..."
 bash "$(dirname "$0")/scripts/check-silent-errors.sh" --self-test || print_failure "Silent error guard self-test failed"
 bash "$(dirname "$0")/scripts/check-silent-errors.sh" || print_failure "Silent error guard failed"
 
+# Retired tool-spelling guard (uniformtools FR-027 / T-034, NFR-008 predicate (e)):
+# a renamed `before` name surviving as a quoted or backticked literal in non-test
+# source keys on a name nothing registers any more.
+print_step "Retired tool-spelling guard..."
+bash "$(dirname "$0")/scripts/check-tool-rename.sh" --self-test || print_failure "Tool-rename guard self-test failed"
+bash "$(dirname "$0")/scripts/check-tool-rename.sh" || print_failure "Tool-rename guard failed"
+
 # PERFPLAN F-5: agent-loop bench regression guard (skipped in --quick mode).
 if [[ "${QUICK_MODE}" != "true" ]]; then
     print_step "Agent-loop bench regression guard..."
@@ -175,19 +182,33 @@ fi
 # =============================================================================
 print_header "4. Test Suite"
 
+# Tests run under cargo-nextest (see AGENTS-LANGUAGE.md, "Test Commands" and
+# .config/nextest.toml). Nextest does not run doc tests, so the doc pass stays on
+# `cargo test`.
+if ! command -v cargo-nextest &> /dev/null; then
+    print_step "Installing cargo-nextest..."
+    cargo install cargo-nextest --locked --quiet
+fi
+
 if $QUICK_MODE; then
     print_step "Running quick tests (lib only)..."
-    if cargo test --workspace --lib 2>&1; then
+    if cargo nextest run --workspace --lib 2>&1; then
         print_success "Quick tests passed"
     else
         print_failure "Quick tests failed"
     fi
 else
     print_step "Running full test suite..."
-    if timeout 600 cargo test --workspace 2>&1; then
+    if timeout 600 cargo nextest run --workspace --no-fail-fast 2>&1; then
         print_success "All tests passed"
     else
         print_failure "Tests failed"
+    fi
+    print_step "Running doc tests..."
+    if cargo test --workspace --doc 2>&1; then
+        print_success "Doc tests passed"
+    else
+        print_failure "Doc tests failed"
     fi
 fi
 

@@ -18,7 +18,7 @@ use crate::ToolOutput;
 /// Returned by every codeindex tool when `ctx.code_index` is `None` (the index
 /// is disabled or has not been initialised). The `fallback_hint` is appended
 /// to the user-facing message, and `fallback_tools` lists alternative tools
-/// the user can try (e.g. `["grep"]`, `["grep", "glob"]`, or `[]` if none).
+/// the user can try (e.g. `["Grep"]`, `["Grep", "Glob"]`, or `[]` if none).
 ///
 /// # Arguments
 ///
@@ -55,12 +55,12 @@ pub fn busy_output(name: &str) -> ToolOutput {
         content: format!(
             "Code index is currently busy (re-indexing in progress). \
              The `{name}` tool could not acquire the index lock. \
-             Wait a moment and retry, or use `grep` / `glob` as fallback tools."
+             Wait a moment and retry, or use `Grep` / `Glob` as fallback tools."
         ),
         metadata: Some(json!({
             "error": "codeindex_busy",
             "busy": true,
-            "fallback_tools": ["grep", "glob"]
+            "fallback_tools": ["Grep", "Glob"]
         })),
     }
 }

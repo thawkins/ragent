@@ -478,7 +478,7 @@ fn test_hook_warning_and_tool_result_flagged() {
     let (n1, v1) = parts(&Event::HookWarning {
         session_id: "s".into(),
         hook_command: "lint".into(),
-        tool: "write".into(),
+        tool: "Write".into(),
         stderr: "warning".into(),
     });
     assert_eq!(n1, "hook_warning");
@@ -486,7 +486,7 @@ fn test_hook_warning_and_tool_result_flagged() {
 
     let (n2, v2) = parts(&Event::ToolResultFlagged {
         session_id: "s".into(),
-        tool: "write".into(),
+        tool: "Write".into(),
         hook_command: "lint".into(),
         reason: "style".into(),
     });
@@ -498,7 +498,7 @@ fn test_hook_warning_and_tool_result_flagged() {
 fn test_security_verdict() {
     let (name, v) = parts(&Event::SecurityVerdict {
         session_id: "s".into(),
-        tool: "bash".into(),
+        tool: "Bash".into(),
         verdict: "deny".into(),
         rationale: "dangerous".into(),
     });

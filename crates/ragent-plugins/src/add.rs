@@ -752,7 +752,10 @@ fn extract_zip(bytes: &[u8], staging: &Path) -> Result<(), ExtractError> {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| ExtractError::Message(format!("zip entry {i}: {e}")))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| ExtractError::Message(format!("zip entry {i} name: {e}")))?
+            .to_string();
         if entry.is_dir() {
             continue;
         }

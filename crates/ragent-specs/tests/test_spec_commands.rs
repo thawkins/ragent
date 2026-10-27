@@ -385,9 +385,9 @@ fn add_prompt_contains_existing_content_and_numbering() {
     assert!(p.contains("FR-002"));
     assert!(p.contains("NFR-001"));
     assert!(p.contains("T-002"));
-    // The prompt now instructs the LLM to use the `edit` tool directly,
+    // The prompt now instructs the LLM to use the `Edit` tool directly,
     // matching /spec create and /spec update. No delimited text blocks.
-    assert!(p.contains("`edit` tool"));
+    assert!(p.contains("`Edit` tool"));
     assert!(p.contains("NOT rewrite"));
     assert!(!p.contains("---NEW REQUIREMENTS---"));
     assert!(!p.contains("---END---"));
@@ -553,8 +553,8 @@ fn build_add_prompt_includes_spec_md_and_plan_md_content() {
     // The prompt must include the existing content for context.
     assert!(prompt.contains("FR-001"));
     assert!(prompt.contains("T-001"));
-    // The prompt must instruct the LLM to use the edit tool directly.
-    assert!(prompt.contains("`edit` tool"));
+    // The prompt must instruct the LLM to use the Edit tool directly.
+    assert!(prompt.contains("`Edit` tool"));
     assert!(prompt.contains("FR-019"));
     assert!(prompt.contains("T-040"));
     // No delimited text blocks - the LLM writes files directly.

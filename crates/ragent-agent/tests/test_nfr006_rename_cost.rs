@@ -23,13 +23,15 @@
 //!
 //! ## Why the source scan is function-granular
 //!
-//! A file-granular exemption would be too coarse to mean anything: four of the
-//! twelve legitimate table reads live in a file that *also* holds a dispatch-path
-//! function, so exempting `alias_table.rs` wholesale would happily allow
-//! `Rename::after_of` inside `resolve_inbound_tool_name` - the resolver the
-//! dispatch pipeline calls for every tool call. Every exemption below therefore
-//! names the one function it covers, and the scan reports the enclosing `fn` of
-//! each hit.
+//! A file-granular exemption would be too coarse to mean anything:
+//! `crates/ragent-agent/src/tool/alias_table.rs` holds **two** functions the
+//! dispatch path touches and exactly **one** that reads the table.
+//! `from_aliases` (once per turn, building the table from the config) is the
+//! legitimate read; `resolve_inbound_tool_name` (once per tool call) is the
+//! dispatch resolver. Exempting the file wholesale would happily allow
+//! `Rename::after_of` inside the resolver - the red proof below does exactly
+//! that and this guard reports it, because every exemption names the one
+//! function it covers and the scan reports the enclosing `fn` of each hit.
 //!
 //! ## What this file deliberately does not do
 //!
@@ -100,8 +102,9 @@ struct TableReader {
 
 /// Every legitimate reader of the FR-023 table in non-test source (NFR-006).
 ///
-/// Six *functions* and six module-scope items, in four crates. Two of them sit in
-/// the dispatch crate and are the reason the exemption has to be per function:
+/// Ten *functions* and four module-scope items, in four crates (`ragent-types`,
+/// `ragent-agent`, `ragent-config`, `ragent-tui`). Two of them sit in the
+/// dispatch crate and are the reason the exemption has to be per function:
 /// see the module docs.
 const TABLE_READERS: &[TableReader] = &[
     TableReader {
@@ -150,11 +153,11 @@ const TABLE_READERS: &[TableReader] = &[
         reason: "drops a configured `tools.aliases` entry naming a retired spelling; runs \
                  once per turn when the table is built from the config, never per tool call",
     },
-    TableReader {
-        file: "crates/ragent-agent/src/hooks/mod.rs",
-        function: "",
-        reason: "module import for the load-time matcher report below",
-    },
+    // `hooks/mod.rs` reaches the table by its full path inside
+    // `retired_matcher_spellings` and has no module-scope import of it, so the
+    // function entry below is the only one that can match. A module-scope entry
+    // here would be an exemption nothing matches, which the reverse check
+    // rejects - see the note on `alias_table.rs` above for the same lesson.
     TableReader {
         file: "crates/ragent-agent/src/hooks/mod.rs",
         function: "retired_matcher_spellings",
@@ -171,11 +174,10 @@ const TABLE_READERS: &[TableReader] = &[
         function: "after_spelling_of",
         reason: "the both-columns lookup the load-time self-mapping rule needs",
     },
-    TableReader {
-        file: "crates/ragent-tui/src/widgets/message_widget.rs",
-        function: "",
-        reason: "module import for the transcript display arm below",
-    },
+    // `message_widget.rs` names the table by its full path inside
+    // `canonical_tool_name` and imports nothing from it, so that function entry
+    // is the only one that can match; a module-scope entry would be a dead
+    // exemption and the reverse check rejects those.
     TableReader {
         file: "crates/ragent-tui/src/widgets/message_widget.rs",
         function: "canonical_tool_name",
@@ -510,9 +512,21 @@ fn test_tool_names_stay_borrowed_and_the_table_lookup_borrows_too() {
 ///
 /// Three properties together: the adopted spelling resolves on the plain registry
 /// lookup (no table read - the scan above is what proves *that* half), the retired
-/// spelling is absent from the map so `get` refuses it, and the case-folded
-/// fallback of `resolve` is what answers a case variant - and it answers with the
-/// *registered* spelling, not with the spelling it was handed.
+/// spelling is absent from the map so `get` refuses it, and the registry holds
+/// exactly one case-insensitive match per case-only pair - the *registered*
+/// spelling - so a folded fallback can only ever answer with the adopted name.
+///
+/// ## What this case does not assert, and why
+///
+/// The folded fallback itself lives in `ToolRegistry::resolve`, which is defined
+/// only inside `crates/ragent-agent/src/session/dispatch.rs` - a module that is
+/// committed but **never declared** (`session/mod.rs` has no `mod dispatch;`, and
+/// no build dependency file lists it), so it has never compiled and no registry in
+/// this tree has the method. Asserting it at runtime would be asserting a method
+/// that does not exist; the cost half that *is* reachable is the dispatch-tree
+/// scan in case 1. This case therefore pins the registry *data* any folded
+/// fallback must read, which is the part that survives when T-014 declares the
+/// pipeline.
 #[test]
 fn test_resolution_keys_on_the_new_spelling() {
     let registry = create_default_registry();
@@ -537,28 +551,40 @@ fn test_resolution_keys_on_the_new_spelling() {
             pair.before
         );
 
-        // A word-changing pair (`ask_user` -> `AskUserQuestion`) is not a case
-        // variant, so the folded fallback cannot reach it either.
+        // The registry is a `HashMap<String, _>` read with the borrowed `&str` a
+        // tool reports; that is the same cost the old spelling paid, and the
+        // folded match below costs one comparison per candidate, not a table scan.
+        let matches: Vec<String> = registry
+            .list()
+            .into_iter()
+            .filter(|candidate| candidate.eq_ignore_ascii_case(pair.before))
+            .collect();
+
         if !pair.before.eq_ignore_ascii_case(pair.after) {
+            // A word-changing pair (`ask_user` -> `AskUserQuestion`) is not a case
+            // variant, so no folded match exists to reach it - which is why the
+            // retired spelling must stay unreachable rather than "resolve to
+            // something".
             assert!(
-                registry.resolve(pair.before).is_none(),
-                "{} differs from {} by more than letter case, so it must not resolve",
+                matches.is_empty(),
+                "{} differs from {} by more than letter case, so no folded match \
+                 may exist, found {matches:?}",
                 pair.before,
                 pair.after
             );
             continue;
         }
 
-        // A case-only pair (`bash` -> `Bash`) is reachable by the folded fallback,
-        // and the answer carries the registered spelling - which is why every later
-        // stage sees one name.
-        let folded = registry
-            .resolve(pair.before)
-            .unwrap_or_else(|| panic!("{} must reach {} by case folding", pair.before, pair.after));
+        // A case-only pair (`bash` -> `Bash`) has exactly one folded match, and it
+        // is the registered spelling rather than the spelling that was asked for:
+        // that is what makes a folded fallback answer with one canonical name and
+        // why every later stage sees the same string.
         assert_eq!(
-            folded.name(),
-            pair.after,
-            "the folded lookup must answer with the registered spelling"
+            matches,
+            vec![pair.after.to_string()],
+            "{} must have exactly one folded match, the registered spelling {}",
+            pair.before,
+            pair.after
         );
     }
 }

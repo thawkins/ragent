@@ -277,6 +277,7 @@ impl BenchModelRunner for LiveBenchModelRunner {
                                 StreamEvent::ReasoningStart
                                 | StreamEvent::ReasoningDelta { .. }
                                 | StreamEvent::ReasoningEnd
+                                | StreamEvent::ReasoningSignature { .. }
                                 | StreamEvent::ToolCallStart { .. }
                                 | StreamEvent::ToolCallDelta { .. }
                                 | StreamEvent::ToolCallEnd { .. }

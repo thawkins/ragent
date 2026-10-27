@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde_json::Value;
 use tokio::sync::RwLock;
 
-use crate::mcp::McpClient;
+use crate::mcp::{McpClient, McpToolDef};
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -44,12 +44,25 @@ impl McpToolWrapper {
     /// This is the single source of truth for the mangling: the TUI's `/mcp`
     /// surfaces and the registry reconcile pass must derive the same name
     /// without constructing a wrapper (which clones the schema and the client
-    /// handle just to reach [`Self::ragent_name`]).
+    /// handle just to reach [`Self::ragent_name`]). The derivation itself lives
+    /// in [`ragent_types::tool_bridge`], so the name FR-032 checks and the name
+    /// this wrapper registers cannot disagree.
     #[must_use]
     pub fn ragent_name_for(server_id: &str, tool_name: &str) -> String {
-        let safe_server = server_id.replace(['-', '.', '/'], "_");
-        let safe_tool = tool_name.replace(['-', '.', '/'], "_");
-        format!("mcp_{safe_server}_{safe_tool}")
+        ragent_types::tool_bridge::mcp_tool_name(server_id, tool_name)
+    }
+
+    /// The registry-name prefix (`mcp_<server>_`) every tool of `server_id`
+    /// carries.
+    ///
+    /// The TUI's stale-server scan matches registered names against this prefix
+    /// and [`ragent_types::tool_bridge::check_dynamic_bridge`] demands it, so
+    /// both read one derivation. Before this existed the scan reached the prefix
+    /// through `ragent_name_for(server_id, "")`, which is a registry name that
+    /// must never be registered.
+    #[must_use]
+    pub fn ragent_prefix_for(server_id: &str) -> String {
+        ragent_types::tool_bridge::mcp_tool_prefix(server_id)
     }
 
     /// Create a new wrapper for a specific MCP tool.
@@ -137,4 +150,86 @@ impl Tool for McpToolWrapper {
             metadata: None,
         })
     }
+}
+
+/// The outcome of bridging one MCP server's advertised tools (FR-032).
+///
+/// Containment is structural rather than a convention: a tool that FR-032 refuses
+/// simply has no entry in [`wrappers`](Self::wrappers), so a caller cannot
+/// accidentally register it alongside its siblings.
+pub struct BridgedServerTools {
+    /// One wrapper per tool that may be registered, in advertisement order.
+    pub wrappers: Vec<McpToolWrapper>,
+    /// One refusal per tool that may not be, in advertisement order.
+    pub refusals: Vec<ragent_types::tool_bridge::BridgeRefusal>,
+}
+
+/// Bridges one MCP server's advertised tools into ragent wrappers, refusing any
+/// tool whose surfaced name breaks FR-032 and reporting each refusal once.
+///
+/// This is the single MCP registration path: [`set_mcp_client`] and the TUI's
+/// `register_mcp_tools` both call it, so a connector's servers - which reach the
+/// registry as the bridged `<connector-id>.<server-id>` and therefore arrive here
+/// under a dotted id - are covered by the same rule.
+///
+/// A refused tool costs exactly one tool: the rest of the server still bridges and
+/// the session stays usable. Refusals are logged the first time this server offers
+/// them and silently afterwards.
+///
+/// [`set_mcp_client`]: crate::session::SessionProcessor::set_mcp_client
+pub fn bridge_server_tools(
+    server_id: &str,
+    tools: &[McpToolDef],
+    client: Arc<RwLock<McpClient>>,
+) -> BridgedServerTools {
+    bridge_server_tools_named(server_id, tools, client, McpToolWrapper::ragent_name_for)
+}
+
+/// [`bridge_server_tools`] with the name mangler supplied by the caller.
+///
+/// With the real mangler every surfaced name is `mcp_<server>_<tool>`, so FR-032
+/// can never refuse and the containment property would be untestable. Taking the
+/// function as a parameter lets a test drive the regression the backstop exists
+/// for - a call site that stopped namespacing - and observe that it costs one
+/// tool rather than the server.
+#[doc(hidden)]
+pub fn bridge_server_tools_named(
+    server_id: &str,
+    tools: &[McpToolDef],
+    client: Arc<RwLock<McpClient>>,
+    name_for: impl Fn(&str, &str) -> String,
+) -> BridgedServerTools {
+    let source = ragent_types::tool_bridge::mcp_source_label(server_id);
+    let prefix = McpToolWrapper::ragent_prefix_for(server_id);
+    let mut wrappers = Vec::with_capacity(tools.len());
+    let mut refusals = Vec::new();
+    for tool in tools {
+        let surfaced = name_for(server_id, &tool.name);
+        if let Err(refusal) =
+            ragent_types::tool_bridge::check_dynamic_bridge(&source, &prefix, &surfaced)
+        {
+            refusals.push(refusal);
+            continue;
+        }
+        let mut wrapper = McpToolWrapper::new(
+            server_id,
+            &tool.name,
+            &tool.description,
+            tool.parameters.clone(),
+            Arc::clone(&client),
+        );
+        // The wrapper registers the name the check just approved, not a second
+        // derivation of it: otherwise the mangler and the check could disagree and
+        // a refused name would still reach the registry.
+        wrapper.ragent_name = surfaced;
+        tracing::debug!(
+            server_id = %server_id,
+            tool = %tool.name,
+            ragent_name = %wrapper.ragent_name,
+            "Bridging MCP tool"
+        );
+        wrappers.push(wrapper);
+    }
+    ragent_types::tool_bridge::report_bridge_refusals_once(&refusals);
+    BridgedServerTools { wrappers, refusals }
 }

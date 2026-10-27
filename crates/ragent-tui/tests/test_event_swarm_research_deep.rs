@@ -284,13 +284,13 @@ async fn hook_warning_truncates_a_long_stderr_and_arms_expiry() {
     app.handle_event(Event::HookWarning {
         session_id: "s1".to_string(),
         hook_command: "lint.sh".to_string(),
-        tool: "write".to_string(),
+        tool: "Write".to_string(),
         stderr: long.clone(),
     })
     .await;
     assert_eq!(
         app.status,
-        format!("hook warning: write - {}...", &long[..80]),
+        format!("hook warning: Write - {}...", &long[..80]),
         "stderr over 80 chars is truncated"
     );
     assert!(app.status_set_at.is_some(), "the toast arms status expiry");
@@ -312,15 +312,15 @@ async fn tool_result_flagged_sets_a_warn_status_and_error_log() {
     let mut app = new_app("s1");
     app.handle_event(Event::ToolResultFlagged {
         session_id: "s1".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
         hook_command: "guard.sh".to_string(),
         reason: "secret detected".to_string(),
     })
     .await;
-    assert_eq!(app.status, "[warn] bash flagged");
+    assert_eq!(app.status, "[warn] Bash flagged");
     assert!(logged(
         &app,
-        "[flag] tool bash flagged by guard.sh: secret detected"
+        "[flag] tool Bash flagged by guard.sh: secret detected"
     ));
 }
 
@@ -603,6 +603,7 @@ async fn reasoning_delta_appends_to_an_existing_reasoning_part() {
         Role::Assistant,
         vec![MessagePart::Reasoning {
             text: "first".to_string(),
+            signature: None,
         }],
     ));
 
@@ -614,7 +615,7 @@ async fn reasoning_delta_appends_to_an_existing_reasoning_part() {
 
     assert_eq!(app.messages.len(), 1, "the existing message is reused");
     match app.messages[0].parts.last() {
-        Some(MessagePart::Reasoning { text }) => assert_eq!(text, "first second"),
+        Some(MessagePart::Reasoning { text, .. }) => assert_eq!(text, "first second"),
         other => panic!("expected a reasoning part, got {other:?}"),
     }
     assert!(app.stream_in_bytes > 0, "the delta is accounted for");
@@ -635,7 +636,7 @@ async fn reasoning_delta_starts_a_new_message_after_a_user_turn() {
     assert_eq!(app.messages.len(), 2, "a fresh assistant message is pushed");
     assert_eq!(app.messages[1].role, Role::Assistant);
     match app.messages[1].parts.first() {
-        Some(MessagePart::Reasoning { text }) => assert_eq!(text, "thinking"),
+        Some(MessagePart::Reasoning { text, .. }) => assert_eq!(text, "thinking"),
         other => panic!("expected a leading reasoning part, got {other:?}"),
     }
 }

@@ -28,7 +28,7 @@ The first argument defaults to `all` when omitted.
 |---|---|
 | `/reload` | Reload everything (config + agents + MCP + skills) |
 | `/reload all` | Same as bare `/reload` |
-| `/reload config` | Re-read `ragent.json`, refresh provider detection, selected model, context window, thinking level, code index flag, and tool visibility |
+| `/reload config` | Re-read `ragent.json`, refresh provider detection, selected model, context window, thinking level, and code index flag |
 | `/reload agents` | Rebuild the builtin and custom agent list, preserving the current selection |
 | `/reload mcp` | Rebuild the MCP server display list from config, preserving connected status and tools |
 | `/reload skills` | Confirm skills are re-read from disk on next use (no persistent cache) |
@@ -66,8 +66,7 @@ From: /reload
 ```
 
 This refreshes provider detection, the selected model and its context window,
-the thinking level, `code_index_enabled`, tool visibility, and the bash and
-directory lists.
+the thinking level, `code_index_enabled`, and the bash and directory lists.
 
 ### Reload agents only
 

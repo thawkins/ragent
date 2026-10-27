@@ -47,30 +47,8 @@ Both are implemented in `crates/ragent-tools-extended/src/` (modules
 
 ## 2. Enabling the tools
 
-The PDF family is **registered and visible by default** -- there is no
-`office` visibility switch. The seven `/tools` switches (`github`, `gitlab`,
-`teams`, `agents`, `plan`, `codeindex`, `masterfetch`) are unrelated
-to this family.
-
-Two consequences of the visibility model remain relevant if a caller hides the
-tools by name (for example via a custom config overlay):
-
-- When a tool is hidden, it is suppressed from the tool definitions the model
-  sees, so the model will not discover or call it on its own.
-- Tools remain **registered and executable regardless of visibility** -- a call
-  by name still runs. Visibility only affects advertising, not executability.
-
-For reference, the default visibility switches are:
-
-| Switch | Default |
-|---|---|
-| `github` | `false` (hidden) |
-| `gitlab` | `false` (hidden) |
-| `teams` | `false` (hidden) |
-| `agents` | `false` (hidden) |
-| `plan` | `false` (hidden) |
-| `codeindex` | `true` |
-| `masterfetch` | `true` |
+The PDF family needs no switch: both tools register at startup and every
+registered tool is advertised to the model. `/tools list` shows them.
 
 ---
 
@@ -249,10 +227,8 @@ Sample PDF files for manual testing live in `assets/pdf/` (`Profile.pdf`,
 
 | Command | Effect |
 |---|---|
-| `/tools` | Show the tools/visibility help |
-| `/tools list` | List the tool-family visibility table plus every visible and disabled tool |
-
-The PDF family has no visibility switch, so there is no `/tools pdf` command.
+| `/tools` | Show the `/tools` help |
+| `/tools list` | List every registered tool with its source and description |
 
 ### Configuration (`ragent.json`)
 
@@ -274,11 +250,10 @@ array of `ragent.json`, exactly as for the plain file tools.
 
 ## 10. Testing and sample files
 
-- Behavioural coverage for the PDF tools is indirect: the visibility listing
-  includes the PDF tool names
-  (`crates/ragent-agent/tests/test_tool_visibility.rs`), the TUI slash-command
-  test exercises `/tools`, and the step-log input summary for `pdf_read` is
-  locked in by `crates/ragent-tui/tests/test_tool_display.rs`.
+- Behavioural coverage for the PDF tools is indirect: the `/tools` listing
+  includes the PDF tool names, the TUI slash-command test exercises `/tools`,
+  and the step-log input summary for `pdf_read` is locked in by
+  `crates/ragent-tui/tests/test_tool_display.rs`.
 - Sample asset files (`assets/pdf/Profile.pdf`, `assets/pdf/vibeSDLC.pdf`) are
   informal manual fixtures; nothing in `tests/` references them, so they are not
   CI coverage.
@@ -298,4 +273,4 @@ array of `ragent.json`, exactly as for the plain file tools.
   `/tools`.
 - `crates/ragent-tools-extended/DOCS.md` -- curated descriptions of the
   extended tool families.
-- `SPEC.md` -- full configuration schema including `tool_visibility`.
+- `SPEC.md` -- full configuration schema.

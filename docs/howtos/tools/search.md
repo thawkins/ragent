@@ -16,7 +16,7 @@ Use codeindex tools for code symbol queries."
 
 ---
 
-## grep
+## Grep
 
 Search file contents for a Rust-syntax regex pattern using ripgrep, respecting
 `.gitignore` rules. Binary files are skipped automatically.
@@ -35,6 +35,6 @@ Search file contents for a Rust-syntax regex pattern using ripgrep, respecting
 
 **Example:**
 ```text
-grep pattern="TODO" path="src" include="*.rs"
-grep pattern="unsafe code" case_insensitive=true
+Grep pattern="TODO" path="src" include="*.rs"
+Grep pattern="unsafe code" case_insensitive=true
 ```

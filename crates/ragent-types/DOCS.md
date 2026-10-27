@@ -45,6 +45,9 @@ Dev-dependencies: tokio (full), serial_test.
 - **startup** — Startup timing instrumentation (`StartupTimings`).
 - **strutil** — UTF-8-safe string truncation utilities.
 - **thinking** — Provider-agnostic thinking/reasoning configuration types.
+- **tool_args** — The one decoder for accumulated tool-call argument text (spec `uniformtools` FR-007): a JSON object, a JSON string that decodes to one, or empty/whitespace as `{}`, with `ToolArgDecodeError` naming the failure for the corrective error of FR-008. `ToolArgDecodeError` is also re-exported at the crate root, because it is the argument type of the refusal constructor (`ragent_agent::session::tool_input_error`).
+- **tool_bridge** — The FR-032 rule for dynamically sourced tools: `check_dynamic_bridge(source, prefix, surfaced)` refuses a surfaced name that equals a `before` spelling (returning the pair, so the sentence carries the table's own values) or that is not under the source's `prefix`, and `report_bridge_refusals_once` logs each refusal once per source and name behind a process-wide ledger. Also owns the two manglings every call site now shares (`mcp_tool_name`/`mcp_tool_prefix` folding `-` `.` `/`; `plugin_tool_name`/`plugin_tool_prefix` leaving the plugin id unfolded, because it keys the store entry and the `plugin:<id>` permission category) and the one-wording source labels. It lives here because `ragent-plugins` and `ragent-agent` both ask it and cannot depend on each other. Registration-time only - nothing on a dispatch path calls it (NFR-006).
+- **tool_rename** — The FR-023 tool-rename table: `TOOL_RENAMES`, one checked-in `[Rename; 13]` of `(before, after)` pairs ascending by `after`, plus the `Rename` lookups (`after_of`, `before_of`, `is_retired`, `is_rename_spelling`). It sits in this leaf crate so `ragent-config` can refuse a retired `tools.aliases` spelling without depending on `ragent-agent`; `ragent_agent::tool::rename` re-exports it. It is not a translation layer - nothing consults it on a dispatch path (NFR-006).
 - **trigger** — Trigger envelope types for the trigger system.
 
 ### Re-exported items
@@ -73,15 +76,31 @@ Dev-dependencies: tokio (full), serial_test.
 - **EventBus** (struct) — Broadcasts `Event` values via a Tokio broadcast channel.
 - **EventId** / **MessageId** / **RunId** / **SessionId** (newtypes) — Typed identifiers.
 - **ChatContent** (enum) / **ChatMessage** (struct) / **ChatRequest** (struct) — LLM conversation primitives.
-- **ContentPart** (enum) — Typed content block in a ChatMessage.
+- **ContentPart** (enum) — Typed content block in a ChatMessage. `ToolUse::input` is `serde_json::Value` so a replayed call round-trips byte for byte (FR-006/FR-018; spec `uniformtools` T-025).
 - **LlmFinishReason** (type alias) — Re-export of `event::FinishReason`.
 - **StreamEvent** (enum) — Events emitted by an LLM streaming response.
-- **ToolDefinition** (struct) — Schema describing a tool the LLM may invoke.
+- **ToolDefinition** (struct) — Schema describing a tool the LLM may invoke. Its `parameters` is `serde_json::Value` on purpose (spec `uniformtools` T-025): the field is forwarded, not interpreted, so a typed subset could only drop keywords or add a schema crate (NFR-002).
 - **ImageData** (struct) — An image attachment reference.
 - **Message** (struct) / **MessagePart** (enum) / **Role** (enum) — Conversation message types.
-- **ToolCallState** (struct) / **ToolCallStatus** (enum) — Tool call lifecycle.
+- **ToolCallState** (struct) / **ToolCallStatus** (enum) — Tool call lifecycle. `input` is `serde_json::Value` (decoded by `tool_args::decode_tool_arguments`) and `output` is `Option<Value>`; both stay untyped because the shape is owned by the callee and the callee set is open at run time (spec `uniformtools` T-025).
 - **PermissionDecision** (enum) — User's response to a permission request.
 - **StartupTimings** (struct) — Collected timings for every instrumented startup stage.
 - **ThinkingConfig** (struct) / **ThinkingDisplay** (enum) / **ThinkingLevel** (enum) — Thinking configuration.
 - **truncate_bytes** / **truncate_bytes_no_ellipsis** / **truncate_chars** (fns) — String truncation.
 - **TriggerActionKind** (enum) / **TriggerEnvelope** (struct) / **TriggerFired** (struct) / **TriggerRule** (struct) / **TriggerRuleId** (newtype) / **TriggerRuleStatus** (enum) / **TriggerSourceKind** (enum) — Trigger types.
+
+## Design decisions
+
+- **Tool-call JSON stays `serde_json::Value` (T-025, FR-001).** Four fields hold
+  tool-call JSON untyped: `ToolCallState::input` and `::output`
+  (`message`), `ContentPart::ToolUse::input` (`llm`) and
+  `ToolDefinition::parameters` (`llm`). This is a recorded decision, not an open
+  TODO: the arguments shape is owned by the callee and the callee set is open at
+  run time (148 built-in tools plus whatever an MCP server or plugin registers
+  after the binary was compiled), the wire record must round-trip the payload
+  unchanged (FR-006, FR-018), and the parameters field is forwarded JSON Schema -
+  155 `additionalProperties` keyword literals in tree, and arbitrary third-party
+  documents beyond them - so a typed subset could only drop keywords or add a
+  schema crate, which NFR-002 forbids. Full rationale:
+  `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md`. Guarded by
+  `tests/test_typed_args_decision.rs`.

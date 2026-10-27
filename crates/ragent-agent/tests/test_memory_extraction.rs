@@ -63,7 +63,7 @@ fn disabled_engine_is_inert_for_tool_and_session_hooks() {
     let mut rx = bus.subscribe();
 
     engine.on_tool_result(
-        "edit",
+        "Edit",
         &json!({ "path": "/tmp/x/tests/a.rs", "new_str": "anyhow::Result" }),
         "ok",
         true,
@@ -97,9 +97,9 @@ fn bash_failure_then_success_extracts_error_resolution_event() {
     let (engine, storage, bus, dir) = fixture(true, true);
     let mut rx = bus.subscribe();
 
-    // 1. A bash failure is tracked.
+    // 1. A Bash failure is tracked.
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!({ "command": "cargo build" }),
         "error: could not compile",
         false,
@@ -109,9 +109,9 @@ fn bash_failure_then_success_extracts_error_resolution_event() {
         dir.path(),
     );
 
-    // 2. A subsequent bash success resolves it.
+    // 2. A subsequent Bash success resolves it.
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!({ "command": "cargo build" }),
         "Finished dev profile",
         true,
@@ -126,6 +126,7 @@ fn bash_failure_then_success_extracts_error_resolution_event() {
     let (content, category, tags) = &candidates[0];
     assert_eq!(category, "error");
     assert!(content.contains("failed with"), "content: {content}");
+    // The memory tag stays the shell word `bash` (FR-028: a tag is not a tool name).
     assert!(tags.iter().any(|t| t == "bash"));
     assert!(tags.iter().any(|t| t == "error-resolution"));
 }
@@ -136,7 +137,7 @@ fn error_resolution_auto_stored_when_confirmation_disabled() {
     let mut rx = bus.subscribe();
 
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!({ "command": "make" }),
         "boom",
         false,
@@ -146,7 +147,7 @@ fn error_resolution_auto_stored_when_confirmation_disabled() {
         dir.path(),
     );
     engine.on_tool_result(
-        "bash",
+        "Bash",
         &json!({ "command": "make" }),
         "now fine",
         true,
@@ -179,7 +180,7 @@ fn file_edit_extracts_test_and_rust_patterns() {
 
     let file = dir.path().join("tests").join("thing.rs");
     engine.on_tool_result(
-        "edit",
+        "Edit",
         &json!({
             "path": file.to_string_lossy(),
             "new_str": "anyhow::Result<()>\n#[tokio::test] async fn t() {}"
@@ -212,7 +213,7 @@ fn config_file_edit_extracts_config_tag() {
     let mut rx = bus.subscribe();
 
     engine.on_tool_result(
-        "write",
+        "Write",
         &json!({ "path": format!("{}/settings.toml", dir.path().display()) }),
         "ok",
         true,
@@ -234,7 +235,7 @@ fn edit_without_path_produces_no_candidate() {
     let mut rx = bus.subscribe();
 
     engine.on_tool_result(
-        "edit",
+        "Edit",
         &json!({ "new_str": "anyhow::Result" }),
         "ok",
         true,
@@ -255,7 +256,7 @@ fn duplicate_edit_candidate_is_suppressed() {
     let path = dir.path().join("tests").join("dup.rs");
     let input = json!({ "path": path.to_string_lossy(), "new_str": "fn x() {}" });
     for _ in 0..2 {
-        engine.on_tool_result("edit", &input, "ok", true, "s1", &storage, &bus, dir.path());
+        engine.on_tool_result("Edit", &input, "ok", true, "s1", &storage, &bus, dir.path());
     }
 
     assert_eq!(
@@ -275,12 +276,12 @@ fn session_end_extracts_workflow_summary() {
         role: "assistant".to_string(),
         tool_calls: vec![
             ToolCallSummary {
-                tool_name: "edit".to_string(),
+                tool_name: "Edit".to_string(),
                 input: json!({ "file_path": edited.to_string_lossy() }),
                 success: true,
             },
             ToolCallSummary {
-                tool_name: "bash".to_string(),
+                tool_name: "Bash".to_string(),
                 input: json!({ "command": "cargo test" }),
                 success: false,
             },
@@ -371,7 +372,7 @@ fn word_overlap_dedup_detects_near_identical_content() {
 
     let path = dir.path().join("tests").join("overlap.rs");
     engine.on_tool_result(
-        "edit",
+        "Edit",
         &json!({
             "path": path.to_string_lossy(),
             "new_str": "anyhow::Result<()>"

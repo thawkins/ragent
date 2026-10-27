@@ -188,13 +188,34 @@ impl ResearchIo {
         research_root.join(".index.json")
     }
 
-    /// Write `content` to `path` atomically (write to `<path>.tmp`, then rename).
+    /// Write `content` to `path` atomically (write to a sibling temp file, then
+    /// rename it onto `path`).
+    ///
+    /// The temp name carries the process id and a counter, not just the
+    /// extension: two writers of the same path in one process (a `create` and a
+    /// concurrent `refresh_index`, or the same item written from two tasks)
+    /// would otherwise share one `<path>.tmp` and their renames would race -
+    /// the loser's `rename` fails because the winner already moved the file,
+    /// and the losing write is lost with an I/O error. `path.with_extension
+    /// ("tmp")` also collapses a dotted file name (`item.v1.md` ->
+    /// `item.v1.tmp`), so the name is built from the file name instead.
     pub async fn atomic_write(path: impl AsRef<Path>, content: &str) -> Result<()> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let tmp = path.with_extension("tmp");
+        let file_name = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("tmp");
+        let tmp = path.with_file_name(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::write(&tmp, content).await?;
         match fs::rename(&tmp, path).await {
             Ok(()) => Ok(()),
@@ -220,6 +241,19 @@ impl ResearchIo {
     pub async fn create_item_dirs(research_root: &Path, name: &ResearchName) -> Result<()> {
         fs::create_dir_all(Self::sources_dir(research_root, name)).await?;
         Ok(())
+    }
+
+    /// The lock file that serialises writers of one item's files.
+    ///
+    /// `research_md_path` and `corpa_md_path` live in the same directory, and
+    /// [`Self::atomic_write`] renames a temp file onto them. A writer that
+    /// rewrites `RESEARCH.md` while another publishes the pair must not be
+    /// interleaved with it, or a reader can observe the new `RESEARCH.md` beside
+    /// a missing (or half-published) `CORPA.md`. Writers of one item take this
+    /// lock; readers never do.
+    #[must_use]
+    pub fn item_write_lock_path(research_root: &Path, name: &ResearchName) -> PathBuf {
+        Self::item_dir(research_root, name).join(".write.lock")
     }
 
     /// Recursively remove a research item directory.

@@ -3,11 +3,11 @@
 //!
 //! [`crate::provider::wire`] defines the *shape* of a tool-calling contract;
 //! this module states the values. There is one [`ToolWireProfile`] `const` per
-//! wire family and a [`PROVIDER_WIRE`] table naming, for every registered
-//! provider id, the family that provider speaks. [`profile_for`] is the lookup
-//! the encoders (T-004 onward), the stream accumulator (T-008), the parallel
-//! gate (T-015), the error-flag encoder (T-017) and the wire matrix (T-022)
-//! share.
+//! wire family, [`FAMILIES`] names every one of them, and a [`PROVIDER_WIRE`]
+//! table names, for every registered provider id, the family that provider
+//! speaks. [`profile_for`] is the lookup the encoders (T-004 onward), the stream
+//! accumulator (T-008), the parallel gate (T-015), the error-flag encoder (T-017)
+//! and the wire matrix (T-022) share.
 //!
 //! The coverage assertion lives in `tests/test_wire_profile_table.rs` and fails
 //! when a provider is registered without a row, so a provider cannot be added
@@ -21,11 +21,15 @@
 //! The families are the six wire formats the tree actually implements:
 //! `OPENAI_CHAT` (chat completions), `ANTHROPIC_MESSAGES`, `GEMINI`,
 //! `BEDROCK_CONVERSE`, `OPENAI_RESPONSES` and `OLLAMA_NATIVE` (the native
-//! `/api/chat` shape). Several providers share a family because they speak the
-//! same wire format: `openai`, `azure_foundry`, `copilot`, `openrouter`, `xai`,
-//! `generic_openai`, `huggingface` and local `ollama` all build their request
-//! body through `OpenAiCompat`, and `huggingface`'s `t_` tool-name prefix is a
-//! name transformation inside the same envelope, not a different contract.
+//! `/api/chat` shape). [`FAMILIES`] lists each one exactly once, under its
+//! `const` name in lower case, which is what turns "one profile per family" into
+//! an assertion: the table is many-to-one, so on its own it cannot tell a shared
+//! declared contract from fifteen literals that happen to be equal today. Several
+//! providers share a family because they speak the same wire format: `openai`,
+//! `azure_foundry`, `copilot`, `openrouter`, `xai`, `generic_openai`,
+//! `huggingface` and local `ollama` all build their request body through
+//! `OpenAiCompat`, and `huggingface`'s `t_` tool-name prefix is a name
+//! transformation inside the same envelope, not a different contract.
 //!
 //! ## Two providers have a second client behind the same id
 //!
@@ -53,10 +57,17 @@
 //! profile. The row therefore names [`OPENAI_CHAT`] - the family of the
 //! canonical request the router forwards unchanged - and any consumer that
 //! needs the effective contract for a router session must resolve the
-//! downstream provider rather than read this row. That resolution is T-015's
-//! and T-017's work; stating the row here keeps the wire matrix populated (every
-//! cell printable, TC-002) instead of special-casing one provider out of the
-//! table.
+//! downstream provider rather than read this row. Stating the row here keeps
+//! the wire matrix populated (every cell printable, TC-002) instead of
+//! special-casing one provider out of the table.
+//!
+//! FR-010's gate (T-015) reads this row like any other, so it demotes a router
+//! step only if the row itself says `supports_parallel == false`. A downstream
+//! provider that declares `false` is not honoured through the gate: the
+//! downstream selection happens inside `RouterClient::chat`, after the agent
+//! loop has already chosen sequential or concurrent for the step. That gap is
+//! recorded rather than hidden - see
+//! `specs/uniformtools/T-015-PARALLEL-GATE.md`.
 
 use super::{ArgsEncoding, IdField, ResultCarrier, StreamKeying, ToolEnvelope, ToolWireProfile};
 
@@ -120,8 +131,8 @@ pub const GEMINI: ToolWireProfile = ToolWireProfile {
 /// `status` field, arguments as a JSON object.
 ///
 /// `supports_is_error` is `true` because Converse carries `status: "error"` on
-/// a `toolResult`; the encoder that writes it is T-017's, and until then the
-/// field is the declared contract rather than the current behaviour.
+/// a `toolResult`; the encoder writes that `status` and does not add FR-014's
+/// text marker beside a native flag (T-017).
 pub const BEDROCK_CONVERSE: ToolWireProfile = ToolWireProfile {
     tool_envelope: ToolEnvelope::BedrockToolSpec,
     result_carrier: ResultCarrier::UserToolResultBlock,
@@ -173,8 +184,40 @@ pub const OLLAMA_NATIVE: ToolWireProfile = ToolWireProfile {
     synthetic_ids: true,
 };
 
+/// The complete set of declared wire families: one [`ToolWireProfile`] per
+/// family, under the ASCII label the family is known by (FR-002).
+///
+/// Each label is the family's `const` name in lower case, so the list and the
+/// declarations above can be checked against each other mechanically. Two
+/// properties make this list load-bearing rather than a convenience:
+///
+/// - **Every [`PROVIDER_WIRE`] row names one of these.** A row is an
+///   id-to-family assignment, never a contract composed at the row, so a
+///   provider cannot quietly speak a seventh profile that no family declares.
+/// - **Every family `const` in this module is listed here.** A constant that no
+///   row and no list names is dead contract, and a family added without being
+///   registered would let the wire matrix (FR-016) miss it.
+///
+/// Both directions are asserted in `tests/test_wire_profile_table.rs`, which is
+/// also the only reader: production code reads the family `const`s directly or
+/// goes through [`profile_for`], so this list adds no indirection to a request
+/// path.
+pub const FAMILIES: &[(&str, ToolWireProfile)] = &[
+    ("anthropic_messages", ANTHROPIC_MESSAGES),
+    ("bedrock_converse", BEDROCK_CONVERSE),
+    ("gemini", GEMINI),
+    ("ollama_native", OLLAMA_NATIVE),
+    ("openai_chat", OPENAI_CHAT),
+    ("openai_responses", OPENAI_RESPONSES),
+];
+
 /// Every registered provider id and the family it declares (FR-002), ordered by
 /// provider id.
+///
+/// Every row names a member of [`FAMILIES`] - the same contract object, not an
+/// equal one built here - which is what makes "one profile per provider family"
+/// mean exactly `openai` and `openrouter` speak the same declared terms rather
+/// than two identical literals.
 ///
 /// The list is a slice rather than a fixed-size array so registering a provider
 /// does not change this type; the coverage assertion in

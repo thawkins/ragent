@@ -22,6 +22,13 @@
 //! | 4 | no CLI flag, alias or subcommand equals a rename spelling | `--bash` would be a flag, and flags fail loudly |
 //! | 5 | the `tools` section has exactly its three documented keys | a fourth key could only be one that names a tool |
 //! | 6 | no plugin, connector, agent, hook or skill setting is named one | those settings are the remaining third-party surfaces |
+//! | 7 | the `before` spellings resolve to nothing through the built-in table | one config can switch the table on without writing an entry |
+//!
+//! Two further cases guard the guard: the exemption list is pinned to the one
+//! reviewed entry, and each of the four counting scans (1, 2, 4 and 6) asserts a
+//! **floor** on how many names it inspected ("it found 369 when the audit was
+//! written"), so a scan that silently stops finding anything fails the build
+//! instead of passing vacuously.
 //!
 //! ## What "named" means, and why the match is whole-name
 //!
@@ -225,6 +232,7 @@ fn serde_name_attributes(source: &str) -> Vec<(usize, String)> {
 #[test]
 fn test_no_config_field_name_is_a_rename_spelling() {
     let mut offenders = Vec::new();
+    let mut inspected = 0usize;
     for path in production_sources_under("crates/ragent-config/src") {
         let relative = path
             .strip_prefix(workspace_root())
@@ -236,12 +244,18 @@ fn test_no_config_field_name_is_a_rename_spelling() {
             .into_iter()
             .chain(serde_name_attributes(&source));
         for (line, name) in candidates {
+            inspected += 1;
             if !is_rename_spelling(&name) || exemption_for(&relative, &name).is_some() {
                 continue;
             }
             offenders.push(format!("{relative}:{line} declares `{name}`"));
         }
     }
+    assert!(
+        inspected > 300,
+        "the configuration scan found only {inspected} key(s); it found 369 when the \
+         audit was written, so the predicate has been disarmed, not satisfied"
+    );
     assert!(
         offenders.is_empty(),
         "a configuration key may not be named a rename spelling (FR-031):\n  {}\n\
@@ -288,9 +302,9 @@ fn test_no_environment_variable_is_named_a_rename_spelling() {
         }
     }
     assert!(
-        inspected > 0,
-        "the environment-variable scan found no read at all - the predicate has \
-         been disarmed, not satisfied"
+        inspected > 50,
+        "the environment-variable scan found only {inspected} read(s); it found 67 when \
+         the audit was written, so the predicate has been disarmed, not satisfied"
     );
     assert!(
         offenders.is_empty(),
@@ -402,9 +416,9 @@ fn test_no_cli_flag_or_subcommand_is_a_rename_spelling() {
         }
     }
     assert!(
-        inspected > 40,
-        "the CLI scan found only {inspected} name(s); the predicate has been \
-         disarmed, not satisfied"
+        inspected > 60,
+        "the CLI scan found only {inspected} name(s); it found 79 when the audit was \
+         written, so the predicate has been disarmed, not satisfied"
     );
     assert!(
         offenders.is_empty(),
@@ -490,9 +504,9 @@ fn test_no_dynamic_source_setting_is_a_rename_spelling() {
         }
     }
     assert!(
-        inspected > 100,
-        "the dynamic-source scan found only {inspected} settings; the predicate has \
-         been disarmed, not satisfied"
+        inspected > 300,
+        "the dynamic-source scan found only {inspected} settings; it found 387 when the \
+         audit was written, so the predicate has been disarmed, not satisfied"
     );
     assert!(
         offenders.is_empty(),

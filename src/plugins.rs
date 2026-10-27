@@ -30,6 +30,7 @@
 
 use anyhow::Result;
 
+use crate::cli_out::{cliprint, cliprintln};
 use ragent_plugins::{PLUGIN_SUBCOMMANDS, render_help, run_plugin_subcommand, subcommand_of};
 
 /// Render the `ragent plugins` help block from the shared
@@ -59,7 +60,7 @@ pub fn run_cli(args: &[String]) -> Result<()> {
 
     // A bare `ragent plugins` renders usage (FR-014 parity).
     if text.is_empty() {
-        println!("{}", cli_usage());
+        cliprintln!("{}", cli_usage());
         return Ok(());
     }
 
@@ -74,12 +75,12 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     // (`show`, or `<codex|claude> add|remove|list`); anything else renders the
     // usage block.
     if sub == "marketplace" && !ragent_plugins::marketplace_command_requested(rest) {
-        println!("{}", cli_usage());
+        cliprintln!("{}", cli_usage());
         return Ok(());
     }
     // `help` and any unrecognised subcommand both render the usage block.
     if sub == "help" || !known {
-        println!("{}", cli_usage());
+        cliprintln!("{}", cli_usage());
         return Ok(());
     }
 
@@ -104,7 +105,7 @@ pub fn run_cli(args: &[String]) -> Result<()> {
     } else {
         run_plugin_subcommand_offline(&workdir, sub, rest).unwrap_or_else(|| render_help(sub))
     };
-    print!("{}", cli_body(&report));
+    cliprint!("{}", cli_body(&report));
     Ok(())
 }
 

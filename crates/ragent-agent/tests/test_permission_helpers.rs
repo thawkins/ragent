@@ -20,7 +20,7 @@ fn test_extract_resource_prefers_path() {
 #[test]
 fn test_extract_resource_falls_back_through_known_keys() {
     assert_eq!(
-        extract_resource_from_input_for_test(&json!({ "command": "ls" }), "bash"),
+        extract_resource_from_input_for_test(&json!({ "command": "ls" }), "Bash"),
         "ls"
     );
     assert_eq!(
@@ -28,7 +28,7 @@ fn test_extract_resource_falls_back_through_known_keys() {
         "https://x"
     );
     assert_eq!(
-        extract_resource_from_input_for_test(&json!({ "pattern": "fn main" }), "grep"),
+        extract_resource_from_input_for_test(&json!({ "pattern": "fn main" }), "Grep"),
         "fn main"
     );
     assert_eq!(
@@ -58,8 +58,8 @@ fn test_hardwired_auto_approved_covers_expected_families() {
         "team_create",
         "new_agent",
         "agent_complete",
-        "task_list",
-        "ask_user",
+        "TaskList",
+        "AskUserQuestion",
         "model_info",
         "ragent_info",
         "tool_info",
@@ -74,7 +74,7 @@ fn test_hardwired_auto_approved_covers_expected_families() {
 
 #[test]
 fn test_hardwired_auto_approved_rejects_untrusted_tools() {
-    for tool in ["bash", "write", "edit", "rm", "read", "glob"] {
+    for tool in ["Bash", "Write", "Edit", "rm", "read", "Glob"] {
         assert!(
             !is_hardwired_auto_approved_tool_for_test(tool),
             "{tool} must NOT be hardwired auto-approved"
@@ -84,7 +84,9 @@ fn test_hardwired_auto_approved_rejects_untrusted_tools() {
 
 #[test]
 fn test_is_interactive_tool_only_ask_user() {
-    assert!(is_interactive_tool("ask_user"));
-    assert!(!is_interactive_tool("bash"));
+    assert!(is_interactive_tool("AskUserQuestion"));
+    assert!(!is_interactive_tool("Bash"));
     assert!(!is_interactive_tool("read"));
+    // The retired spelling is not a tool any more, so it is not interactive.
+    assert!(!is_interactive_tool("ask_user"));
 }

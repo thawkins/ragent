@@ -192,3 +192,45 @@ async fn test_gemini_call_in_stream_without_finish_reason_is_flushed() {
     assert!(args.contains("command"));
     assert_eq!(ends, 1);
 }
+
+#[tokio::test]
+async fn test_gemini_unnamed_calls_get_distinct_provider_counter_name_ids() {
+    // FR-019: `functionCall` carries no id slot at all, so every Gemini call is
+    // unnamed and the accumulator mints `<provider>_<counter>_<name>` for it. Two
+    // calls to the same tool must still be distinguishable, and the name reaches the
+    // consumer whole (an id is never split to recover it).
+    let sse = concat!(
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"a.rs\"}}},{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"b.rs\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        ""
+    );
+
+    let url = spawn_gemini_sse_server(sse.to_string())
+        .await
+        .expect("server");
+    let client = GeminiProvider
+        .create_client("", Some(&url), &HashMap::new())
+        .await
+        .expect("client");
+
+    let mut stream = client
+        .chat(make_request("gemini-2.0-flash"))
+        .await
+        .expect("chat");
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event);
+    }
+
+    let (starts, args, ends) = drain_events(&events);
+    assert_eq!(
+        starts,
+        vec![
+            ("gemini_0_read_file".to_string(), "read_file".to_string()),
+            ("gemini_1_read_file".to_string(), "read_file".to_string()),
+        ],
+        "each unnamed call gets its own FR-019 id"
+    );
+    assert_eq!(args.matches("a.rs").count(), 1, "args: {args}");
+    assert_eq!(args.matches("b.rs").count(), 1, "args: {args}");
+    assert_eq!(ends, 2, "one end per call");
+}

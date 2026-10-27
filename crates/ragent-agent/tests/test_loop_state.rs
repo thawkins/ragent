@@ -197,13 +197,13 @@ fn test_spec_allows_tool_with_and_without_tool_set() {
     let mut spec = LoopSpec::new("coder", "goal");
     // No tool set: every tool allowed (FR-008 "empty list means all tools").
     assert!(spec.allows_tool("read"));
-    assert!(spec.allows_tool("bash"));
+    assert!(spec.allows_tool("Bash"));
 
-    spec.tool_set = vec!["read".to_string(), "grep".to_string()];
+    spec.tool_set = vec!["read".to_string(), "Grep".to_string()];
     assert!(spec.allows_tool("read"));
-    assert!(spec.allows_tool("grep"));
-    assert!(!spec.allows_tool("bash"));
-    assert!(!spec.allows_tool("write"));
+    assert!(spec.allows_tool("Grep"));
+    assert!(!spec.allows_tool("Bash"));
+    assert!(!spec.allows_tool("Write"));
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn test_loop_spec_serde_round_trip() {
         verify_cmd: Some("cargo test".to_string()),
         scope: vec!["src/**".to_string()],
         read_only: vec!["tests/**".to_string()],
-        tool_set: vec!["read".to_string(), "edit".to_string()],
+        tool_set: vec!["read".to_string(), "Edit".to_string()],
         max_steps: Some(25),
         cost_limit: Some(100_000),
         checkpoints: false,

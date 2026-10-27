@@ -157,6 +157,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

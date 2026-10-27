@@ -8,24 +8,25 @@
 
 FR-001 requires every tool invocation, from every provider, to be represented
 as exactly one canonical record carrying a non-empty `id`, a `name`, and
-**decoded JSON `input`**. Three places in `ragent-types` still carried a
-`TODO: Replace Value with a typed struct` marker against that record:
+**decoded JSON `input`**. Three sites in `ragent-types` (four fields) still
+carried a `TODO: Replace Value with a typed struct` marker against that record:
 
 | # | Site | Field |
 |---|------|-------|
-| 1 | `crates/ragent-types/src/message/mod.rs:100` | `ToolCallState::input` (`Value`) and `ToolCallState::output` (`Option<Value>`) |
-| 2 | `crates/ragent-types/src/llm.rs:182` | `ContentPart::ToolUse::input` (`Value`) |
-| 3 | `crates/ragent-types/src/llm.rs:210` | `ToolDefinition::parameters` (`Value`) |
+| 1 | `crates/ragent-types/src/message/mod.rs` (`ToolCallState`) | `input` (`Value`) and `output` (`Option<Value>`) |
+| 2 | `crates/ragent-types/src/llm.rs` (`ContentPart::ToolUse`) | `input` (`Value`) |
+| 3 | `crates/ragent-types/src/llm.rs` (`ToolDefinition`) | `parameters` (`Value`) |
 
-This document is the recorded decision the task asks for: **all three stay
+This document is the recorded decision the task asks for: **all four fields stay
 `serde_json::Value`, and each is now documented in place as a deliberate design
 choice rather than as an open TODO.** The reasoning is below; the inline docs
 at each site state the short form and point here.
 
 ## Decision
 
-`serde_json::Value` is kept for every one of the three fields. No new type, no
-new dependency, no change to any on-the-wire shape.
+`serde_json::Value` is kept for every one of the four fields. No new type, no
+new dependency, no change to any on-the-wire shape, and no change at any call
+site.
 
 ## Why a typed struct is the wrong answer here
 
@@ -82,13 +83,32 @@ Measured over the in-tree schema literals actually in the tree
 keyword spread alone rules out a small closed struct:
 
 ```
-additionalProperties 138   "items" 27    "format" 18   "default" 6
-"enum"                46   "pattern" 9   "minimum" 5   "maximum" 1
-"const" 2
+additionalProperties 155   properties 152   required 107   enum 44
+items                 27   format       9   pattern    5   minimum 5
+maximum                1   default      4
 ```
 
-and the third-party schemas ragent forwards are not limited to that set at all -
-an MCP server may send `$ref`, `oneOf`/`anyOf`, `if`/`then`/`else`,
+Reproduce it with (`target/temp/` scratch script, not checked in):
+
+```sh
+for k in additionalProperties properties required enum items format \
+         pattern minimum maximum default; do
+  n=$(grep -rho "\"$k\"[[:space:]]*:" \
+        crates/ragent-tools-core/src crates/ragent-tools-extended/src \
+        crates/ragent-tools-vcs/src crates/ragent-agent/src/tool | wc -l)
+  printf '%-22s %s\n' "$k" "$n"
+done
+```
+
+155 `additionalProperties` keyword literals across 205 source files holding 159
+`parameters_schema()` implementations - and one further, non-literal site
+(`crates/ragent-agent/src/tool/mcp_tool.rs` sets
+`obj.entry("additionalProperties")` while translating an MCP server's
+`inputSchema`, so even a keyword count understates the forwarding: ragent copies
+whole third-party documents key by key).
+
+The third-party schemas ragent forwards are not limited to that set at all - an
+MCP server may send `$ref`, `oneOf`/`anyOf`, `if`/`then`/`else`,
 `patternProperties` or a vendor extension, and ragent has no way to enumerate
 them ahead of time.
 
@@ -98,7 +118,7 @@ forbidden by this spec:
 - **drop the keywords it does not model** - changes the bytes the model is told.
   FR-003 requires the encoder's cache hit to be byte-identical to a miss and
   forbids a provider from constructing its own tool array, so a typed subset that
-  silently shed, say, `additionalProperties` (138 occurrences among the in-tree
+  silently shed, say, `additionalProperties` (155 occurrences among the in-tree
   schema literals) would hand every provider a different tool contract than the
   one this repository declares;
 - **be an opaque newtype around `Value`** - which is `Value` with extra steps
@@ -147,7 +167,8 @@ never interprets `output` - it hands it to the provider's result encoder - so
 
 ## What was done instead of a new type
 
-1. **All three markers are gone.** Each is replaced by a `///` doc comment that
+1. **All three markers are gone** (four fields, because the first marker covered
+   both `input` and `output`). Each is replaced by a `///` doc comment that
    records the decision, names the reason, and points at this document:
    - `ToolCallState::input` / `ToolCallState::output`
      (`crates/ragent-types/src/message/mod.rs`);
@@ -156,8 +177,11 @@ never interprets `output` - it hands it to the provider's result encoder - so
 2. **A structural guard pins the decision**, so it cannot silently flip back to
    an undocumented TODO or to a lossy typed field:
    `crates/ragent-types/tests/test_typed_args_decision.rs`.
-3. **The crate documentation records it** (`crates/ragent-types/DOCS.md`) and the
-   `CHANGELOG.md` Unreleased section names the task.
+3. **The documentation records it**: a new "Design decisions" section in
+   `crates/ragent-types/DOCS.md`, a paragraph appended to design decision **D1**
+   in `specs/uniformtools/SPEC.md` (which is the section that fixes the shape of
+   the canonical record), an automated counterpart on **TC-017** in
+   `specs/uniformtools/TESTPLAN.md`, and the `CHANGELOG.md` Unreleased section.
 
 ## The guard (`tests/test_typed_args_decision.rs`)
 
@@ -170,11 +194,55 @@ The test is hermetic - it reads the crate's own `src/` tree from
 | `ContentPart::ToolUse::input` is declared `Value` | Same, for the wire-side record |
 | `ToolDefinition::parameters` is declared `Value` | Same, for the forwarded schema |
 | No `TODO: Replace \`Value\` with a typed` marker remains in `src/` | The marker cannot come back undocumented |
-| Each of the three sites carries a doc comment naming the decision record | Documentation cannot be dropped from one site while others keep it |
-| The decision record `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md` exists and names all three sites | The referenced rationale stays resolvable |
+| Each of the four decided fields carries a doc comment naming the decision record | Documentation cannot be dropped from one field while the others keep it |
+| The decision record `specs/uniformtools/T-025-TYPED-ARGS-DECISION.md` exists and names the three sites, FR-001 and NFR-002 | The referenced rationale stays resolvable |
 
 The test does not assert on prose wording beyond those anchors, so the
 explanations stay editable.
+
+**The test file had also been registered nowhere.** It existed in the tree - it
+landed with `d6abcd4a`, the same commit that added the 22 task records - but
+`crates/ragent-types/tests/all.rs` had no `#[path = "test_typed_args_decision.rs"]`
+line, so this crate's single `all` target never compiled it and none of the six
+cases had ever run. Registering it is part of this task; the file now reports
+`6 passed` where it previously reported nothing at all. (This is the third
+orphan-latent defect of the same class found in `uniformtools` so far, after
+`ragent-types/tool_args.rs` and the `ragent-agent` alias pair in T-019.)
+
+## Verification
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy -p ragent-types --all-targets` | no warnings |
+| `cargo test -p ragent-types --test all test_typed_args_decision::` | 6 passed (previously 0 - the file was unreachable) |
+| `cargo test -p ragent-types --test all` | 418 passed / 0 failed |
+| `cargo doc -p ragent-types --no-deps` | no new warning at any edited line (the 14 remaining are pre-existing: unresolved `Rename::*` links, `Regex`, `reject_symlink_*`, and the private-item link at `llm.rs:119`) |
+| 8 guard scripts (`check-inline-tests`, `check-dead-code-reasons`, `check-silent-errors`, `check-security-unwraps`, `check-poison-locks`, `check-test-env-isolation`, `check-shared-guards`, `check-file-tool-containment`) | all PASS |
+
+`scripts/check-tool-rename.sh` is red at this commit (158 hits), but not from
+this task: none of them is in `ragent-types`, and every file it names is
+unmodified here - it is the migration guard whose sites T-033 and T-038 have not
+landed yet, and it was already red before T-025 started.
+
+The guard was red-proved three ways. Each edit was restored from a saved copy,
+`touch`ed (a restored file keeps its old mtime and cargo will happily reuse the
+broken object file), and verified by `md5sum`:
+
+| Red proof | Result |
+|---|---|
+| `TODO: Replace \`Value\` with a typed struct for tool-use input.` put back above `ContentPart::ToolUse::input` | `test_no_typed_value_todo_marker_remains_in_src` FAILS naming `llm.rs`; the other 5 pass |
+| The record reference stripped from `ToolDefinition::parameters`' doc block | `test_every_decided_field_documents_the_decision_record` FAILS naming `pub parameters: Value,` |
+| The field re-spelled `pub input: serde_json::Value,` - same type, different spelling, so the file still compiles | the type case and the documentation case both FAIL while the crate builds: exactly the drift a compiler cannot catch |
+
+Each restore was checked back to the byte-identical file: `md5sum`
+`0175c95497881c20cd7644c31e5ed187` for
+`crates/ragent-types/src/message/mod.rs` and
+`510b2ffd0398e396cb173336b05410e9` for `crates/ragent-types/src/llm.rs` at the
+time of the proofs. (The `llm.rs` hash later moved to
+`68957b0da0affe3edcffcf771fd4a1c8` for a prose reflow under the 100-column
+limit; the reflow is a doc-comment line wrap only, and the guard is re-run
+green afterwards.)
 
 ## Consequences
 
@@ -188,7 +256,7 @@ explanations stay editable.
   argument against FR-003/FR-018. This document is the written record that the
   current `Value` is a decision, not an oversight - which is exactly what the
   TODO asked for and could not itself express.
-- **`crates/ragent-config`'s three sibling markers are out of scope.** The
+- **The `ragent-config` sibling markers are out of scope.** The
   `TODO: Replace \`Value\` with typed ...` comments in
   `crates/ragent-config/src/{permission.rs,config.rs}` were not named by this
   task (it names `ragent-types`) and remain tracked separately

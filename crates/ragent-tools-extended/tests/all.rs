@@ -200,9 +200,6 @@ mod test_mf_urlnorm;
 #[path = "test_mf_version.rs"]
 mod test_mf_version;
 
-#[path = "test_mf_visibility.rs"]
-mod test_mf_visibility;
-
 #[path = "test_mf_wikipedia.rs"]
 mod test_mf_wikipedia;
 

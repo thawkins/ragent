@@ -229,6 +229,7 @@ async fn test_poll_end_to_end_with_registry_backed_manager() {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
 
     let manager = Arc::new(ragent_agent::task::AgentManager::new(

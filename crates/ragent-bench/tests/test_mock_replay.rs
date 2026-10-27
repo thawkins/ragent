@@ -170,7 +170,7 @@ fn test_mock_llm_client_factory_returns_replayable_arc() {
 
 #[test]
 fn test_mock_client_chat_replays_full_script_verbatim() {
-    let script = MockLlmScript::single_tool_call("grep", "{\"pattern\":\"x\"}");
+    let script = MockLlmScript::single_tool_call("Grep", "{\"pattern\":\"x\"}");
     let client = MockLlmClient::new(script);
     let events = replay(&client);
     assert_eq!(events.len(), 5);
@@ -183,6 +183,6 @@ fn test_mock_client_chat_replays_full_script_verbatim() {
     assert_eq!(second.len(), 5);
     assert!(matches!(
         &second[0],
-        StreamEvent::ToolCallStart { name, .. } if name == "grep"
+        StreamEvent::ToolCallStart { name, .. } if name == "Grep"
     ));
 }

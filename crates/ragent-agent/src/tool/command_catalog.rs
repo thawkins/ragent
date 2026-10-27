@@ -22,6 +22,32 @@ pub struct CommandCatalogEntry {
     pub flags: &'static [&'static str],
 }
 
+/// The one `/tools` subcommand table (spec `uniformtools` FR-033).
+///
+/// This is the single source every surface that offers a `/tools` form reads:
+/// `commands_info` publishes it, the TUI autocomplete menu
+/// (`get_command_suggestions`, `crates/ragent-tui/src/app/slash.rs`) offers it,
+/// the menu's parameter hint (`get_parameter_hint`,
+/// `crates/ragent-tui/src/app/session_ops.rs`) is rendered from it, and the
+/// `/tools` handler derives both its accepted set and the forms its
+/// help page and usage warning print from it.
+///
+/// Before FR-033 each of those four places carried its own hand-written copy and
+/// they disagreed - the menu omitted `show`, the hint omitted `show` and
+/// `masterfetch` and advertised a bare `[on|off]` that is not a subcommand.
+/// `get_command_suggestions`, once the origin of these values, now reads this
+/// table instead.
+///
+/// The seven family switches (`github`, `gitlab`, `teams`, `agents`, `plan`,
+/// `codeindex`, `masterfetch`) are gone: tool-family visibility was removed and
+/// every registered tool is advertised, so there is nothing left for a switch to
+/// turn off.
+///
+/// The split from `--flags` is purely lexical (a leading `--` or `-h` marks a
+/// flag), so the accepted aliases `--help`, `-h` and `usage` stay out of the
+/// suggestion list.
+pub const TOOLS_SUBS: &[&str] = &["list", "show", "help"];
+
 /// Subcommand suggestions mirrored from `get_command_suggestions`
 /// (`crates/ragent-tui/src/app/slash.rs`), which does not split plain
 /// subcommands from `--flags`; the split here is purely lexical (a leading
@@ -34,18 +60,6 @@ const AGENT_SUBS: &[&str] = &["list", "switch", "help"];
 const THINKING_LEVELS: &[&str] = &["auto", "off", "low", "medium", "high"];
 const CODEINDEX_SUBS: &[&str] = &["on", "off", "sync", "help"];
 const GCF_SUBS: &[&str] = &["on", "off", "show", "help"];
-const TOOLS_SUBS: &[&str] = &[
-    "list",
-    "show",
-    "github",
-    "gitlab",
-    "teams",
-    "agents",
-    "plan",
-    "codeindex",
-    "masterfetch",
-    "help",
-];
 const ON_OFF_HELP: &[&str] = &["on", "off", "help"];
 const WEBSEARCH_SUBS: &[&str] = &["show", "test", "search", "help"];
 const HELP_ONLY: &[&str] = &["help"];
@@ -602,7 +616,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "tools",
-        description: "Tool visibility: /tools (help) | /tools list | /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help",
+        description: "List every registered tool: /tools (help) | /tools list|show | /tools help",
         subcommands: TOOLS_SUBS,
         flags: EMPTY,
     },

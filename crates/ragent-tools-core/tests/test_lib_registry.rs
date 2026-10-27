@@ -45,12 +45,14 @@ fn test_core_registry_tool_surface_is_complete() {
         names.len()
     );
 
-    // Names that must be present in the core registry.
+    // Names that must be present in the core registry. Five of these are
+    // FR-023 `after` spellings: the rename (spec `uniformtools` T-031) changed
+    // the registered name, not the tool.
     for expected in [
         "read",
-        "write",
+        "Write",
         "create",
-        "edit",
+        "Edit",
         "multi_edit",
         "patch",
         "append_to_file",
@@ -60,11 +62,11 @@ fn test_core_registry_tool_surface_is_complete() {
         "make_directory",
         "file_info",
         "diff_files",
-        "bash",
+        "Bash",
         "bash_reset",
         "open",
-        "grep",
-        "glob",
+        "Grep",
+        "Glob",
         "list",
         "think",
         "calculator",
@@ -108,7 +110,7 @@ fn test_registry_remove_and_clear_and_contains() {
 }
 
 #[test]
-fn test_registry_definitions_respects_hidden_tools() {
+fn test_registry_definitions_lists_every_registered_tool() {
     let registry = create_core_registry();
     let visible = registry.definitions();
     assert!(visible.len() >= 20);
@@ -126,14 +128,11 @@ fn test_registry_definitions_respects_hidden_tools() {
         assert_eq!(def.parameters["type"], "object");
     }
 
-    registry.set_hidden(&["read".to_string(), "write".to_string()]);
-    let hidden = registry.definitions();
-    let names: Vec<&str> = hidden.iter().map(|d| d.name.as_str()).collect();
-    assert!(!names.contains(&"read"), "hidden tool still advertised");
-    assert!(!names.contains(&"write"), "hidden tool still advertised");
-    assert!(names.contains(&"grep"));
-    // Hidden tools remain executable.
-    assert!(registry.contains("read"));
+    // Every registered tool is advertised: there is no hidden set.
+    let names: Vec<&str> = visible.iter().map(|d| d.name.as_str()).collect();
+    assert!(names.contains(&"read"));
+    assert!(names.contains(&"Write"));
+    assert!(names.contains(&"Grep"));
 }
 
 #[test]

@@ -108,7 +108,7 @@ fn test_wait_agents_long_result_diverts_to_batch_file() {
 #[test]
 fn test_other_tools_still_truncated_at_12k() {
     let big = "x".repeat(20_000);
-    let out = tool_result_content_for_llm("bash", &big, None);
+    let out = tool_result_content_for_llm("Bash", &big, None);
     assert!(out.contains("tool result truncated for context"));
     assert!(out.len() < big.len());
 }

@@ -48,8 +48,10 @@
 use ragent_types::event::EventBus;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 /// Cap a string at `max` characters, trimming whitespace.
 fn cap_stderr(stderr: &str, max: usize) -> String {
@@ -271,6 +273,166 @@ impl HookConfig {
             }
         })
     }
+
+    /// The parts of this hook's `matcher` that name a retired tool spelling,
+    /// as `(retired spelling, adopted replacement)` pairs (FR-028).
+    ///
+    /// This is the derivation behind [`report_retired_matcher_spellings_once`];
+    /// it is public so a caller can decide what to do with a stale matcher and
+    /// so a test can assert the derivation without capturing a log line.
+    ///
+    /// The matcher is split exactly as [`Self::matches_tool`] splits it (`|`
+    /// and `,`), and only the bare tool name before any `Name(pattern)` guard
+    /// is resolved - the guard pattern is argument text, not a tool name. Both
+    /// columns are the FR-023 table's own `&'static str`, so the reporting path
+    /// allocates nothing beyond the returned `Vec`.
+    ///
+    /// A matcher naming the **adopted** spelling reports nothing: that is the
+    /// correct spelling, and warning about it would be noise on every hook the
+    /// rename has already fixed. A name the rename never touched, an empty
+    /// matcher, and `None` are equally silent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_agent::hooks::{HookConfig, HookTrigger};
+    ///
+    /// let hook = HookConfig {
+    ///     trigger: HookTrigger::PreToolUse,
+    ///     command: "true".to_string(),
+    ///     timeout_secs: 1,
+    ///     plugin_root: None,
+    ///     matcher: Some("bash|edit".to_string()),
+    /// };
+    /// assert_eq!(
+    ///     hook.retired_matcher_spellings(),
+    ///     vec![("bash", "Bash"), ("edit", "Edit")]
+    /// );
+    /// ```
+    #[must_use]
+    pub fn retired_matcher_spellings(&self) -> Vec<(&'static str, &'static str)> {
+        let Some(matcher) = self.matcher.as_deref() else {
+            return Vec::new();
+        };
+        matcher
+            .split(['|', ','])
+            .filter_map(|part| {
+                let part = part.trim();
+                let name = match part.split_once('(') {
+                    Some((name, _guard)) => name.trim(),
+                    None => part,
+                };
+                // The retired spelling is matched **case-sensitively**: the
+                // adopted spelling of nine pairs differs only in case, so an
+                // ASCII-case-insensitive lookup would report `Bash` as a stale
+                // `bash` and warn about every correct matcher. The table's own
+                // columns are `&'static str`, so both halves of the pair are
+                // recovered without an allocation.
+                ragent_types::tool_rename::TOOL_RENAMES
+                    .iter()
+                    .find(|pair| pair.before == name)
+                    .map(|pair| (pair.before, pair.after))
+            })
+            .collect()
+    }
+}
+
+/// The `(retired spelling, adopted spelling)` pairs already reported (FR-028).
+///
+/// Process-wide rather than per-session because the hook list is rebuilt from
+/// the configuration on every turn: a naive `warn!` at the point the list is
+/// built would emit the same sentence on every step and train the reader to
+/// ignore it. Per *entry* rather than per list, so adding a second stale
+/// matcher still reports.
+///
+/// Poison-tolerant and a `OnceLock`, matching the other ledgers in this crate
+/// ([`crate::tool::alias_table`]'s `unresolved_targets_seen` and
+/// [`crate::tool::allowed_tools`]'s `unresolved_entries_seen`).
+fn retired_matcher_spellings_seen() -> &'static Mutex<HashSet<(String, String)>> {
+    static SEEN: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Clears the retired-matcher ledger, so a test can observe the first report.
+///
+/// The ledger is process-wide (see [`report_retired_matcher_spellings_once`])
+/// and this crate's test binary shares one process across every file, so a test
+/// that asserts "the first call reports and the second is silent" has to start
+/// from a known state. Mirrors
+/// `alias_table::reset_unresolved_targets_for_test`.
+#[doc(hidden)]
+pub fn reset_retired_matcher_spellings_for_test() {
+    retired_matcher_spellings_seen()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+}
+
+/// The stale pairs one hook config reports, for an integration test.
+///
+/// Integration tests live in a separate crate and reach the public accessor
+/// through this `#[doc(hidden)]` alias so a test reads the derivation directly
+/// rather than re-implementing the split.
+#[doc(hidden)]
+#[must_use]
+pub fn retired_matcher_spellings_for_test(hook: &HookConfig) -> Vec<(String, String)> {
+    hook.retired_matcher_spellings()
+        .into_iter()
+        .map(|(before, after)| (before.to_string(), after.to_string()))
+        .collect()
+}
+
+/// Logs each hook whose `matcher` names only a retired spelling, once per entry
+/// per process (FR-028).
+///
+/// A hook matcher that names a `before` spelling silently stops matching after
+/// the rename: the tool is registered under its `after` name, so the hook is
+/// disabled without its author knowing. This report names the spelling, its
+/// replacement and the trigger, and it is made at **load** - once, when the hook
+/// list is first built - rather than on every turn.
+///
+/// The matcher is never rewritten here. The configuration file belongs to its
+/// author, and a load-time rewrite would leave the on-disk text disagreeing with
+/// the running session, which is worse than a warning because the next reader
+/// would believe the file.
+///
+/// Returns the number of entries reported by this call, so a caller (and a test)
+/// can tell "first report" from "already reported". A config whose matchers all
+/// name the adopted spelling reports nothing and returns zero.
+pub fn report_retired_matcher_spellings_once(hooks: &[HookConfig]) -> usize {
+    let seen = retired_matcher_spellings_seen();
+    let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut reported = 0usize;
+    for hook in hooks {
+        for (before, after) in hook.retired_matcher_spellings() {
+            if !seen.insert((before.to_string(), after.to_string())) {
+                continue;
+            }
+            reported += 1;
+            tracing::warn!(
+                retired = %before,
+                adopted = %after,
+                trigger = %hook.trigger,
+                "{}",
+                retired_matcher_report(before, after, &hook.trigger.to_string())
+            );
+        }
+    }
+    reported
+}
+
+/// The sentence a stale-matcher report emits (FR-028).
+///
+/// Split out from [`report_retired_matcher_spellings_once`] so the wording -
+/// which must name the spelling, its replacement and the trigger - is
+/// assertable without capturing a tracing subscriber.
+#[must_use]
+pub fn retired_matcher_report(before: &str, after: &str, trigger: &str) -> String {
+    format!(
+        "hook matcher names the retired tool spelling `{before}` (at `{trigger}`): the \
+         tool is registered as `{after}` now, so this matcher matches nothing and the \
+         hook never runs - spell the entry `{after}` (FR-028)"
+    )
 }
 
 /// Whether a Claude `Name(pattern)` guard matches a tool's JSON arguments.
@@ -297,9 +459,14 @@ fn guard_matches_tool_input(pattern: &str, tool_input: &str) -> bool {
 
 /// The strings a guard pattern is compared against: the raw tool input, plus
 /// every scalar string nested inside it.
+///
+/// The nested strings come from the shared argument decoder (FR-007), so a
+/// guard sees the same values the tool receives - including the double-encoded
+/// string form a provider may emit - rather than a shape this module parses on
+/// its own.
 fn candidates_for(tool_input: &str) -> Vec<String> {
     let mut candidates = vec![tool_input.to_string()];
-    if let Ok(value) = serde_json::from_str::<Value>(tool_input) {
+    if let Ok(value) = ragent_types::tool_args::decode_tool_arguments(tool_input) {
         collect_string_values(&value, &mut candidates);
     }
     candidates
@@ -389,7 +556,10 @@ fn claude_event_payload(
         obj.insert("tool_name".into(), Value::String(name.to_string()));
     }
     if let Some(input) = tool_input {
-        let value = serde_json::from_str::<Value>(input).unwrap_or(Value::Null);
+        // FR-007: the argument object comes from the shared decoder, so a hook
+        // reads the same `tool_input` the tool receives - the double-encoded
+        // string form included - rather than a shape this module re-parses.
+        let value = ragent_types::tool_args::decode_tool_arguments(input).unwrap_or(Value::Null);
         obj.insert("tool_input".into(), value);
     }
     if let Some(output) = tool_output {
@@ -549,6 +719,30 @@ pub fn run_pre_tool_use_hooks(
         return PreToolUseResult::NoDecision;
     }
 
+    run_pre_tool_use_hook_list(
+        &matching,
+        working_dir,
+        tool_name,
+        tool_input,
+        session_id,
+        event_bus,
+    )
+}
+
+/// Runs one already-matched list of `PreToolUse` hooks.
+///
+/// This is the body both public entry points share, so
+/// [`run_pre_tool_use_hooks`] and [`run_pre_tool_use_hooks_decoded`] cannot
+/// decide differently about the same hook: they differ only in which argument
+/// text they hand it.
+fn run_pre_tool_use_hook_list(
+    matching: &[HookConfig],
+    working_dir: &Path,
+    tool_name: &str,
+    tool_input: &str,
+    session_id: &str,
+    event_bus: Option<&EventBus>,
+) -> PreToolUseResult {
     for hook in matching {
         let mut cmd = std::process::Command::new("sh");
         cmd.arg("-c")
@@ -698,6 +892,60 @@ pub fn run_pre_tool_use_hooks(
     PreToolUseResult::NoDecision
 }
 
+/// Run hooks for PreToolUse, handed the decode the caller has already performed.
+///
+/// The dispatch pipeline decodes a tool call's arguments exactly once
+/// (spec `uniformtools` FR-007, FR-012) and then runs the pre-tool hooks. This
+/// entry point is that stage: it matches and runs the same hooks as
+/// [`run_pre_tool_use_hooks`], but the hook-facing argument text comes from
+/// `decoded` rather than from re-serialising `raw_input`, so a hook and the tool
+/// that runs after it observe one parse.
+///
+/// `raw_input` is still passed to [`HookConfig::matches_tool`]: the matcher
+/// inspects the text a hook was declared against, and a value that decoded to
+/// `Value::Null` (an undecodable payload) must not silently become the
+/// substring `null` in a hook's match.
+///
+/// # Returns
+///
+/// The same [`PreToolUseResult`] as [`run_pre_tool_use_hooks`]:
+/// `NoDecision` when no hook matches or none decides.
+pub fn run_pre_tool_use_hooks_decoded(
+    hooks: &[HookConfig],
+    working_dir: &Path,
+    tool_name: &str,
+    raw_input: &str,
+    decoded: Option<&serde_json::Value>,
+    session_id: &str,
+    event_bus: Option<&EventBus>,
+) -> PreToolUseResult {
+    // The one argument text every hook sees: the caller's decode when it has
+    // one, the raw payload otherwise. Serialising here rather than inside the
+    // hook loop keeps the payload identical for every hook of the call.
+    let tool_input = decoded.map_or_else(
+        || raw_input.to_string(),
+        |value| serde_json::to_string(value).unwrap_or_else(|_| raw_input.to_string()),
+    );
+    // The matcher keeps reading the raw payload, so routing decisions stay
+    // exactly what they were before this stage took a decode.
+    let matching: Vec<HookConfig> = hooks
+        .iter()
+        .filter(|h| h.trigger == HookTrigger::PreToolUse && h.matches_tool(tool_name, raw_input))
+        .cloned()
+        .collect();
+    if matching.is_empty() {
+        return PreToolUseResult::NoDecision;
+    }
+    run_pre_tool_use_hook_list(
+        &matching,
+        working_dir,
+        tool_name,
+        &tool_input,
+        session_id,
+        event_bus,
+    )
+}
+
 /// Run hooks for PostToolUse asynchronously.
 ///
 /// This function runs hooks asynchronously and allows them to modify the tool
@@ -742,6 +990,87 @@ pub async fn run_post_tool_use_hooks(
         };
     }
 
+    run_post_tool_use_hook_list(
+        &matching,
+        working_dir,
+        tool_name,
+        tool_input,
+        tool_output,
+        success,
+        session_id,
+        event_bus,
+    )
+    .await
+}
+
+/// Run hooks for PostToolUse asynchronously, handed the decode the caller has
+/// already performed (spec `uniformtools` FR-007, FR-012).
+///
+/// The dispatch pipeline decodes a tool call's arguments exactly once and runs
+/// the `PostToolUse` stage against the same value the tool ran with. This entry
+/// point is that stage: `decoded` supplies the hook-facing argument text, while
+/// `raw_input` stays the text [`HookConfig::matches_tool`] inspects, exactly as
+/// in [`run_pre_tool_use_hooks_decoded`].
+///
+/// # Returns
+///
+/// The same [`PostToolUseResult`] as [`run_post_tool_use_hooks`].
+#[allow(clippy::too_many_arguments)]
+pub async fn run_post_tool_use_hooks_decoded(
+    hooks: &[HookConfig],
+    working_dir: &Path,
+    tool_name: &str,
+    raw_input: &str,
+    decoded: Option<&serde_json::Value>,
+    tool_output: &str,
+    success: bool,
+    session_id: &str,
+    event_bus: Option<&EventBus>,
+) -> PostToolUseResult {
+    let tool_input = decoded.map_or_else(
+        || raw_input.to_string(),
+        |value| serde_json::to_string(value).unwrap_or_else(|_| raw_input.to_string()),
+    );
+    let matching: Vec<HookConfig> = hooks
+        .iter()
+        .filter(|h| h.trigger == HookTrigger::PostToolUse && h.matches_tool(tool_name, raw_input))
+        .cloned()
+        .collect();
+    if matching.is_empty() {
+        return PostToolUseResult::Ok {
+            modified_output: None,
+            additional_context: Vec::new(),
+        };
+    }
+    run_post_tool_use_hook_list(
+        &matching,
+        working_dir,
+        tool_name,
+        &tool_input,
+        tool_output,
+        success,
+        session_id,
+        event_bus,
+    )
+    .await
+}
+
+/// Runs one already-matched list of `PostToolUse` hooks.
+///
+/// The body both post-tool entry points share, so a decoded caller and a raw
+/// caller cannot interpret an exit code, a `modified_output` or a
+/// `hookSpecificOutput.additionalContext` differently.
+#[allow(clippy::too_many_arguments)]
+async fn run_post_tool_use_hook_list(
+    matching: &[HookConfig],
+    working_dir: &Path,
+    tool_name: &str,
+    tool_input: &str,
+    tool_output: &str,
+    success: bool,
+    session_id: &str,
+    event_bus: Option<&EventBus>,
+) -> PostToolUseResult {
     let mut last_modified_output: Option<serde_json::Value> = None;
     let mut warn_message: Option<String> = None;
     let mut flagged_reason: Option<String> = None;

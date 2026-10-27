@@ -9,7 +9,7 @@
 //!   checked independently,
 //! - stripping the `timeout [nnn]` wrapper prefix,
 //! - identifying tools that are hardwired to auto-approve (codeindex, team,
-//!   task, `ask_user`), and
+//!   task, `AskUserQuestion`), and
 //! - driving the interactive permission prompt via the event bus.
 
 use std::collections::HashMap;
@@ -167,14 +167,14 @@ pub fn extract_command_name(command: &str) -> String {
 /// Return `true` if the tool is hardwired to auto-approve (no interactive
 /// prompt). Covers codeindex tools, team tools, sub-agent tools
 /// (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`,
-/// `agent_complete`), `task_*` (T-011, FR-017),
-/// and `ask_user`.
+/// `agent_complete`), the four `Task*` tools (T-011, FR-017),
+/// and `AskUserQuestion`.
 pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
     is_hardwired_codeindex_tool(tool_name)
         || tool_name.starts_with("team_")
         || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("task_")
-        || tool_name == "ask_user"
+        || TASK_TOOLS.contains(&tool_name)
+        || tool_name == "AskUserQuestion"
         || tool_name == "model_info"
         || tool_name == "ragent_info"
         || tool_name == "tool_info"
@@ -195,6 +195,14 @@ pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
     AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
 }
 
+/// The four task tools (FR-017), by their FR-023 `after` spellings.
+///
+/// A `"task_"` **prefix** test used to stand in for this list. It admitted any
+/// name starting with those five characters and named a retired spelling while
+/// doing so, so the rename (spec `uniformtools`) replaced it with the explicit
+/// set the registry actually registers.
+const TASK_TOOLS: &[&str] = &["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"];
+
 const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
     "new_agent",
     "cancel_agent",
@@ -208,7 +216,7 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
 /// server, forked skill) have no attached user, so these are filtered from
 /// the tool surface and denied at dispatch - an unanswered interactive
 /// dialog would otherwise block the sub-agent run until the watchdog.
-pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["ask_user"];
+pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["AskUserQuestion"];
 
 /// Return `true` when `tool_name` waits on live user interaction and must
 /// be denied in sub-agent runs ([`INTERACTIVE_TOOLS`]).
@@ -284,9 +292,27 @@ pub(crate) const BASH_DESTRUCTIVE_COMMANDS: &[&str] = &[
 /// operations are marked; destructive git variants are keyed on the request
 /// flags (`git_push` only with `force`, `git_reset` only for hard modes, so
 /// read-only git workflows are not blocked). `false` when the call is not
-/// destructive and the normal permission path applies unchanged. `bash` is
+/// destructive and the normal permission path applies unchanged. `Bash` is
 /// special-cased: its sub-commands are scanned for destructive command
 /// prefixes.
+///
+/// # An unrecognised name is non-destructive (FR-028)
+///
+/// A stored `MessagePart::ToolCall` recorded before the rename carries the
+/// spelling it was written with, and FR-028 replays it verbatim, so this
+/// function is handed names this build does not register. The answer for such a
+/// name is `false`: the classifier may not invent a mapping the dispatch path
+/// does not have, and it must not fail. That also covers a retired spelling -
+/// `bash` is an *unrecognised* name now, and only `Bash` reaches the shell
+/// branch.
+///
+/// Do not "tidy up" this to answer `true` for an unknown name, and do not merge
+/// it with [`is_destructive_git_invocation`]'s `_ => true` arm: the inner
+/// wildcard is reachable only for a name already in [`DESTRUCTIVE_GIT_TOOLS`],
+/// where defaulting to destructive is the safe direction for a checkpoint. The
+/// outer answer must be `false`, or every unknown stored name becomes
+/// destructive. `crates/ragent-agent/tests/test_fr028_state_survival.rs` case 9
+/// pins the distinction.
 pub(crate) fn is_destructive_tool(tool_name: &str, input: &Value) -> bool {
     if DESTRUCTIVE_TOOLS.contains(&tool_name) {
         return true;
@@ -294,7 +320,7 @@ pub(crate) fn is_destructive_tool(tool_name: &str, input: &Value) -> bool {
     if DESTRUCTIVE_GIT_TOOLS.contains(&tool_name) {
         return is_destructive_git_invocation(tool_name, input);
     }
-    if tool_name == "bash" {
+    if tool_name == "Bash" {
         let command = input.get("command").and_then(Value::as_str).unwrap_or("");
         return bash_has_destructive_command(command);
     }
@@ -489,7 +515,7 @@ async fn prompt_for_permission(
 /// introspection tools that must not be removed from the LLM's tool list.
 pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
     "think",
-    "ask_user",
+    "AskUserQuestion",
     "agent_complete",
     "model_info",
     "ragent_info",

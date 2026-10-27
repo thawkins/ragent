@@ -342,20 +342,14 @@ Configured per provider and per model; model-level overrides provider-level.
 | `provider.<id>.thinking.level` | `String` | provider-dependent | Reasoning effort (e.g. `low`/`medium`/`high`). |
 | `provider.<id>.models.<id>.thinking.budget_tokens` | `int` | provider-dependent | Token budget for reasoning. |
 
-### Tool visibility
+### Tool surface
 
-`tool_visibility` switches hide tool families from tool definitions and prompt
-listings (the tools stay registered and executable):
-
-| Key | Default |
-|---|---|
-| `tool_visibility.github` | `false` |
-| `tool_visibility.gitlab` | `false` |
-| `tool_visibility.teams` | `false` |
-| `tool_visibility.agents` | `false` |
-| `tool_visibility.plan` | `false` |
-| `tool_visibility.codeindex` | `true` |
-| `tool_visibility.masterfetch` | `true` |
+Every tool the registry holds is advertised to the model: the definitions sent
+with each request are the registry's definitions, and the system prompt lists
+the same set. There is no switch that hides a family from the model; a missing
+tool means the subsystem that registers it is not active (for example the code
+index registers its ten tools only while `/codeindex on`). `/tools list` prints
+the live set.
 
 ### The `loop` section — `/loop` only, not the core loop
 

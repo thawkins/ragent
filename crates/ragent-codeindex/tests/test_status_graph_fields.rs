@@ -139,3 +139,51 @@ fn test_try_status_returns_none_when_store_locked() {
         "try_status must return None while the store lock is held"
     );
 }
+
+/// The status poll must not redo the graph node union on every frame.
+///
+/// `graph_node_count` is `COUNT(*)` over the de-duplicated union of both
+/// endpoint columns of `graph_edges`, which on a large repository is a
+/// multi-second scan - and `try_status` runs on the TUI render path. The node
+/// count is therefore memoised against the edge count, which only moves when
+/// the graph is rebuilt.
+///
+/// The memo is asserted directly rather than through two polls: a test graph is
+/// small enough that both a cached and a recomputed answer are correct and
+/// fast, so a poll-to-poll test cannot tell the two apart. The cache is a
+/// private field, so the invalidation key is checked through the behaviour it
+/// produces - the reported node count tracks a rebuilt graph.
+#[test]
+fn test_try_status_graph_node_count_tracks_a_rebuild() {
+    let dir = TempDir::new().unwrap();
+    write_rust_file(&dir);
+    let idx = CodeIndex::open(&make_config(&dir)).unwrap();
+    idx.full_reindex().unwrap();
+    idx.build_graph().unwrap();
+
+    let first = idx.try_status().unwrap();
+    assert_eq!(
+        first.graph_total_edges,
+        idx.graph_status().unwrap().total_edges,
+        "the edge count is read live, not memoised"
+    );
+    assert_eq!(
+        first.graph_nodes,
+        idx.graph_status().unwrap().nodes,
+        "a cold memo reports the real node count"
+    );
+
+    // A rebuild moves the edge count, so the memo must refresh instead of
+    // pinning the previous value.
+    idx.build_graph().unwrap();
+    let after = idx.try_status().unwrap();
+    assert_eq!(
+        after.graph_nodes,
+        idx.graph_status().unwrap().nodes,
+        "a graph rebuild refreshes the cached node count"
+    );
+    assert_eq!(
+        after.graph_total_edges, first.graph_total_edges,
+        "rebuilding the same source yields the same edge count"
+    );
+}

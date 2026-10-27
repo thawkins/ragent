@@ -235,21 +235,15 @@ community detection):
 /codeindex graph build
 ```
 
-### 4.4 Initialise git and enable GitHub tools
+### 4.4 Initialise git and connect GitHub
 
 ```text
 Initialise a git repository, create an initial commit with all scaffold
 files, and set the remote to git@github.com:myuser/my-app.git
 ```
 
-If GitHub tools are not visible, enable them:
-
-```text
-/tools github on
-```
-
-This persists to `ragent.json`. See `docs/howtos/tool-visibility.md` for
-the full list of switches and defaults.
+Every registered tool is advertised to the model, so the GitHub tools are
+available as soon as the session starts. To see them, run `/tools list`.
 
 ### 4.5 Authenticate with GitHub
 
@@ -648,7 +642,6 @@ executing), and `/queue help` shows the usage.
 | `docs/howtos/spec.md` | Spec management and SDD workflow |
 | `docs/howtos/research.md` | Research system and report synthesis |
 | `docs/howtos/reverse.md` | Repository reverse-engineering |
-| `docs/howtos/tool-visibility.md` | Hiding and exposing tool families |
 
 ---
 

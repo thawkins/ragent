@@ -174,6 +174,7 @@ fn make_processor() -> anyhow::Result<(
         active_loop_interrupts: parking_lot::RwLock::new(HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().to_path_buf();
@@ -211,7 +212,7 @@ async fn test_goal_loop_composes_structured_goal_into_system_prompt() -> Result<
     spec.verify_cmd = Some("cargo test".to_string());
     spec.scope = vec!["src/**".to_string(), "tests/**".to_string()];
     spec.read_only = vec!["tests/**".to_string()];
-    spec.tool_set = vec!["bash".to_string(), "read".to_string()];
+    spec.tool_set = vec!["Bash".to_string(), "read".to_string()];
     spec.max_steps = Some(12);
     spec.cost_limit = Some(40_000);
     processor.start_loop(&session.id, spec).await;
@@ -246,7 +247,7 @@ async fn test_goal_loop_composes_structured_goal_into_system_prompt() -> Result<
         "read-only constraints rendered: {system}"
     );
     assert!(
-        system.contains("`bash`") || system.contains("bash"),
+        system.contains("`Bash`") || system.contains("Bash"),
         "tool set rendered: {system}"
     );
     assert!(

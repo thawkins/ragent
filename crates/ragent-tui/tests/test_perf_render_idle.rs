@@ -115,7 +115,7 @@ async fn test_pending_message_cache_group_forces_safety_paint() {
     app.handle_event(ragent_agent::event::Event::ToolCallStart {
         session_id: sid.clone(),
         call_id: "call-1".to_string(),
-        tool: "bash".to_string(),
+        tool: "Bash".to_string(),
     })
     .await;
 

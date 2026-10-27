@@ -2045,123 +2045,42 @@ impl App {
         }
     }
 
-    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 7] {
-        [
-            ("github", self.tool_visibility.github),
-            ("gitlab", self.tool_visibility.gitlab),
-            ("teams", self.tool_visibility.teams),
-            ("agents", self.tool_visibility.agents),
-            ("plan", self.tool_visibility.plan),
-            ("codeindex", self.tool_visibility.codeindex),
-            ("masterfetch", self.tool_visibility.masterfetch),
-        ]
-    }
-
-    pub(crate) fn tool_visibility_state(&self, switch: &str) -> Option<bool> {
-        self.tool_visibility_switches()
-            .into_iter()
-            .find_map(|(name, enabled)| (name == switch).then_some(enabled))
-    }
-
-    pub(crate) fn set_tool_visibility_state(&mut self, switch: &str, enabled: bool) -> bool {
-        match switch {
-            "github" => {
-                self.tool_visibility.github = enabled;
-                self.tool_visibility.specified.github = true;
-            }
-            "gitlab" => {
-                self.tool_visibility.gitlab = enabled;
-                self.tool_visibility.specified.gitlab = true;
-            }
-            "teams" => {
-                self.tool_visibility.teams = enabled;
-                self.tool_visibility.specified.teams = true;
-            }
-            "agents" => {
-                self.tool_visibility.agents = enabled;
-                self.tool_visibility.specified.agents = true;
-            }
-            "plan" => {
-                self.tool_visibility.plan = enabled;
-                self.tool_visibility.specified.plan = true;
-            }
-            "codeindex" => self.tool_visibility.set_codeindex(enabled),
-            "masterfetch" => {
-                self.tool_visibility.masterfetch = enabled;
-                self.tool_visibility.specified.masterfetch = true;
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    /// Build the `/tools` report: the tool-family visibility table, then the
-    /// full tool list - visible tools plus any disabled by a family visibility
-    /// switch (hidden from the model but still registered).
+    /// Build the `/tools` report: every registered tool, with the source it
+    /// comes from and a one-line description.
     ///
-    /// Both listings share one column layout and one header so the disabled
-    /// section is directly comparable with the visible one.
-    pub(crate) fn render_tool_visibility_table(&self) -> String {
-        let mut output = String::from(
-            "From: /tools\nTool Family Visibility\n\n```text\nfamily     state\n------     -----\n",
-        );
-        for (name, enabled) in self.tool_visibility_switches() {
-            output.push_str(&format!(
-                "{name:<10} {}\n",
-                if enabled { "on" } else { "off" }
-            ));
-        }
-        output.push_str("```\n\n");
-
-        // List all currently visible tools from the registry, plus the tools
-        // disabled by a family visibility switch (hidden from the model but
-        // still registered), shown in red.
+    /// Every registered tool is listed - there is no family switch that hides a
+    /// tool from the model, so the listing and the tool definitions the agent
+    /// sends are the same set.
+    pub(crate) fn render_tool_list(&self) -> String {
+        // The message window's markdown pipeline joins a heading line onto the
+        // `From: /tools` line (paragraph soft breaks do not survive html2text),
+        // so the blank line after the header keeps `Tools (N total):` on a line
+        // of its own. The table below follows the same rule.
         let defs = self.session_processor.tool_registry.definitions();
-        let disabled = self.session_processor.tool_registry.hidden_definitions();
-        if defs.is_empty() && disabled.is_empty() {
-            output.push_str("No tools are currently visible.\n");
-        } else {
-            output.push_str(&format!(
-                "Visible Tools ({} total, {} disabled):\n\n",
-                defs.len(),
-                disabled.len()
-            ));
-            output.push_str(&format!(
-                "```text\n{:<56} {:<24} description\n{:<56} {:<24} -----------\n",
-                "name", "source", "----", "------"
-            ));
-            for def in defs.iter() {
-                // Name (56) + spacer + source (24) + spacer = 82 columns of the
-                // message window's 118 inner columns; the description is
-                // hard-truncated to 30 so no row can reach the right border.
-                output.push_str(&self.tool_row(
-                    &self.session_processor.tool_registry,
-                    &def.name,
-                    &def.description,
-                ));
-            }
-            if !disabled.is_empty() {
-                output.push_str(&format!(
-                    "\nDisabled by visibility ({}):\n\n",
-                    disabled.len()
-                ));
-                for def in &disabled {
-                    output.push_str(&self.tool_row(
-                        &self.session_processor.tool_registry,
-                        &def.name,
-                        &def.description,
-                    ));
-                }
-            }
-            output.push_str("```\n");
+        if defs.is_empty() {
+            return String::from("From: /tools\n\nNo tools are registered.\n");
         }
-
+        let mut output = String::from("From: /tools\n\n");
+        output.push_str(&format!("Tools ({} total):\n\n", defs.len()));
+        output.push_str(&format!(
+            "```text\n{:<56} {:<24} description\n{:<56} {:<24} -----------\n",
+            "name", "source", "----", "------"
+        ));
+        for def in defs.iter() {
+            // Name (56) + spacer + source (24) + spacer = 82 columns of the
+            // message window's 118 inner columns; the description is
+            // hard-truncated to 30 so no row can reach the right border.
+            output.push_str(&self.tool_row(
+                &self.session_processor.tool_registry,
+                &def.name,
+                &def.description,
+            ));
+        }
+        output.push_str("```\n");
         output
     }
 
     /// Render one `/tools` table row: name (56), source (24), description (30).
-    ///
-    /// Shared by the visible and hidden tool listings so both stay aligned.
     fn tool_row(
         &self,
         registry: &ragent_agent::tool::ToolRegistry,
@@ -2186,9 +2105,6 @@ impl App {
     ///   mangled name alone;
     /// - `plugin:<id>` when the tool was registered by a plugin
     ///   (name `plugin_<id>_<tool>`);
-    /// - `visibility:<switch>` when the tool belongs to a tool-family
-    ///   visibility switch (`github`, `gitlab`, `teams`, `agents`,
-    ///   `plan`, `codeindex`, `masterfetch`);
     /// - `internal` otherwise (a core or built-in tool).
     fn tool_source(&self, registry: &ragent_agent::tool::ToolRegistry, name: &str) -> String {
         if let Some(tool) = registry.get(name) {
@@ -2197,14 +2113,13 @@ impl App {
             }
         } else if let Some(suffix) = name.strip_prefix("mcp_") {
             // Fallback for a name not live in the registry: match the exact
-            // `ragent_name_for` prefix of a live server first so a server id
+            // `ragent_prefix_for` prefix of a live server first so a server id
             // containing `_` is not truncated at its first segment.
             if let Some(client) = self.session_processor.mcp_client.get()
                 && let Ok(guard) = client.try_read()
             {
                 for server in guard.servers() {
-                    let prefix =
-                        ragent_agent::tool::McpToolWrapper::ragent_name_for(&server.id, "");
+                    let prefix = ragent_agent::tool::McpToolWrapper::ragent_prefix_for(&server.id);
                     if name.starts_with(&prefix) {
                         return format!("mcp:{}", server.id);
                     }
@@ -2220,20 +2135,7 @@ impl App {
             }
             return "plugin".to_string();
         }
-        for (switch, _enabled) in self.tool_visibility_switches() {
-            if let Some(names) = ragent_config::tool_family_names(switch)
-                && names.contains(&name)
-            {
-                return format!("visibility:{switch}");
-            }
-        }
         "internal".to_string()
-    }
-
-    pub(crate) fn sync_tool_visibility_from_config(&mut self, cfg: &ragent_agent::Config) {
-        self.tool_visibility = cfg.tool_visibility.clone();
-        let hidden = cfg.effective_hidden_tools();
-        self.session_processor.tool_registry.set_hidden(&hidden);
     }
 
     pub(crate) fn populate_directory_menu(

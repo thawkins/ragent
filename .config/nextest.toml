@@ -1,0 +1,96 @@
+# cargo-nextest configuration for the ragent workspace.
+#
+# `cargo nextest run` replaces `cargo test` for the workspace's test runs; see
+# AGENTS-LANGUAGE.md ("Test Commands") for the command forms and TOOLCHAIN.md
+# ("Required cargo plugins") for the install line.
+#
+# Why nextest here: the workspace links one integration-test binary per crate
+# (18 `tests/all.rs` targets), and `cargo test` runs every test *inside* that one
+# process, so the process-global isolation rules in AGENTS.md ("Test Layout")
+# could only be enforced by serialising the whole binary. Nextest runs each test
+# in its own process and schedules them across the machine, so a wedged test
+# cannot block its neighbours and a process-global mutation cannot leak between
+# two tests.
+#
+#   cargo nextest run                                  # everything
+#   cargo nextest run -p ragent-agent                  # one crate
+#   cargo nextest run -E 'test(test_unified_dispatch::)'   # filter a module
+#   cargo nextest run --workspace --no-fail-fast       # CI shape
+#   cargo nextest list                                 # what would run
+#
+# Doc tests are not nextest tests - nextest never runs them. Use
+# `cargo test --doc` (or `cargo test --workspace --doc`), which is the one
+# remaining `cargo test` form the workspace uses.
+
+[store]
+# Per-run artefacts (junit.xml, failure captures) live under the git-ignored
+# `target/`, never beside the sources.
+dir = "target/nextest"
+
+[profile.default]
+# Print a failure's captured output as soon as it happens, and again in the
+# final summary - a single 14k-test run is too long to scroll back through.
+failure-output = "immediate-final"
+# A test that exceeds the slow-timeout period is killed. The period is above
+# the slowest legitimate case (the full `ragent-agent` loop suites finish in
+# seconds, and an unanswered permission prompt is held for 120 s before its own
+# verdict), so a termination here means a genuine hang, not a slow machine.
+slow-timeout = { period = "150s", terminate-after = 1 }
+# One process per test, scheduled across the machine's cores.
+test-threads = "num-cpus"
+
+[profile.default.junit]
+# A machine-readable summary for CI annotations; harmless when unused.
+path = "junit.xml"
+
+[profile.ci]
+# CI wants every failure in one pass and no retries masking a flake.
+fail-fast = false
+failure-output = "immediate-final"
+retries = 0
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# -- Process groups --------------------------------------------------------
+#
+# A `#[serial]` attribute orders tests inside ONE process. Nextest runs every
+# test in its own process, so serial_test's shared lock key - published as
+# `SERIAL_TEST_RETRY_KEY` in the parent environment - is captured by each test
+# process from its own saved environment and differs between them; two sibling
+# processes then enter their "serial" sections together. Where a test's
+# exclusion has to hold across processes, define the exclusion here instead.
+
+[test-groups]
+# The sandbox cases - `test_sandbox_secrets` and `test_container_backend` -
+# start real containers from a name derived from the workspace path
+# (`ragent-sandbox-<hash>`), so two of them running at once collide on that name
+# and the loser fails with "the container name ... is already in use". They share
+# one group so the exclusion covers the cross-file collision too; serialising
+# them is the only form that holds across processes, because a file-local lock
+# cannot.
+test-group-sandbox = { max-threads = 1 }
+
+# The tool-rename guard tests invoke `scripts/check_tool_rename.py` against the
+# whole checked-in tree. Most now scan a scratch copy under `target/temp/`, but
+# two still seed into the checkout: `--self-test` writes its fixture into
+# `crates/ragent-tools-core/src/`, and the `tests/` scope probe is checked for a
+# moment too. With one thread they no longer scan the tree while a sibling's
+# fixture is on disk.
+tool-rename-guard = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/^test_tool_rename_guard::/)'
+test-group = 'tool-rename-guard'
+
+[[profile.ci.overrides]]
+filter = 'test(/^test_tool_rename_guard::/)'
+test-group = 'tool-rename-guard'
+
+[[profile.default.overrides]]
+filter = '(test(/^test_sandbox_secrets::/) | test(/^test_container_backend::/))'
+test-group = 'test-group-sandbox'
+
+[[profile.ci.overrides]]
+filter = '(test(/^test_sandbox_secrets::/) | test(/^test_container_backend::/))'
+test-group = 'test-group-sandbox'

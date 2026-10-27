@@ -4,8 +4,8 @@
 
 [advisories]
 # Report `informational = "unsound"` advisories as failures too (default is
-# "none", which silently skips them). This is what makes the RUSTSEC-2026-0253
-# `lru` entry below an *enforced* suppression instead of an undetected one.
+# "none", which silently skips them), so a re-introduced unsound dependency is
+# never silently masked.
 unsound = "all"
 # Ignore advisories for vulnerabilities in transitive deps we cannot directly control.
 ignore = [
@@ -21,30 +21,17 @@ ignore = [
     #  floor.)
     # (RUSTSEC-2026-0192 is no longer ignored: ttf-parser is absent from the
     #  current tree.)
+    # (RUSTSEC-2026-0367 / -0368 / -0369 are no longer ignored: the zip
+    #  extraction hardening advisories no longer match the tree.)
     # RUSTSEC-2026-0194: quick-xml quadratic duplicate-attribute check.
     # quick-xml 0.39 is a direct dep; upgrade blocked by ooxmlsdk 0.3 compatibility.
     { id = "RUSTSEC-2026-0194", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
     # RUSTSEC-2026-0195: quick-xml unbounded namespace declarations.
     # Same compatibility constraint as RUSTSEC-2026-0194.
     { id = "RUSTSEC-2026-0195", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
-    # RUSTSEC-2026-0253: lru LruCache::pop() use-after-free due to lack of panic safety.
-    # ragent's direct lru is 0.18 (fixed) and ratatui 0.30 / printpdf 0.12
-    # pull lru >= 0.18; the remaining 0.16.4 copy is pinned by tantivy 0.26,
-    # whose latest release still requires lru ^0.16.3 (fixed only in 0.18.2).
-    # ragent never calls LruCache::pop().
-    { id = "RUSTSEC-2026-0253", reason = "remaining copy pinned by tantivy 0.26 (requires lru ^0.16.3); ragent never calls LruCache::pop()" },
-    # RUSTSEC-2026-0367 / -0368 / -0369: zip extraction hardening (SUID/SGID bit
-    # preservation, symlink target/permission confinement), fixed in zip >= 9.0.0.
-    # zip 7.2.0 is a transitive dependency of calamine 0.34 (latest 0.36.1 still
-    # requires zip ^8.6) and rust_xlsxwriter 0.94 (latest 0.99.1 requires zip
-    # ^8.3); no release accepts zip >= 9.0.0 yet, so no upgrade path exists.
-    # ragent never calls the affected ZipArchive::extract() /
-    # ZipStreamReader::extract() APIs - its direct zip use is in-memory
-    # ZipArchive::new + by_index with manual path-contained writes
-    # (SEC-032/070/ANTIPAT M17), and it never runs as a privileged extractor.
-    { id = "RUSTSEC-2026-0367", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
-    { id = "RUSTSEC-2026-0368", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
-    { id = "RUSTSEC-2026-0369", reason = "zip >= 9.0.0 unavailable (calamine/rust_xlsxwriter pin 7.2.0); affected extract() APIs never called" },
+    # (RUSTSEC-2026-0253 is no longer ignored: tantivy was upgraded from 0.26
+    #  to 0.27, which drops the lru ^0.16.3 requirement, so the only lru left
+    #  in the tree is 0.18.5 - above the 0.18.2 patched floor.)
 ]
 
 [licenses]

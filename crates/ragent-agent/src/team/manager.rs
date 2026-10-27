@@ -1903,6 +1903,12 @@ impl TeamManagerInterface for TeamManager {
     fn lead_session_id(&self) -> Option<&str> {
         Some(&self.lead_session_id)
     }
+
+    /// PERF-027: the plan-approval gate's query, delegated to the cached
+    /// inherent method so the pipeline's per-call check does not hit disk.
+    fn is_plan_pending(&self, agent_id: &str) -> bool {
+        Self::is_plan_pending(self, agent_id)
+    }
 }
 
 // -- Helper --------------------------------------------------------------------

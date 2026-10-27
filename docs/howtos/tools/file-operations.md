@@ -66,7 +66,7 @@ read path="src/lib.rs" start_line=201 num_lines=100
 
 ---
 
-## write
+## Write
 
 Write content to a file, overwriting it in full; creates parent directories
 as needed.
@@ -80,7 +80,7 @@ as needed.
 
 **Example:**
 ```text
-write path="src/new.rs" content="fn main() {}\n"
+Write path="src/new.rs" content="fn main() {}\n"
 ```
 
 ---
@@ -105,7 +105,7 @@ create path="docs/notes.md" content="# Notes\n"
 
 ---
 
-## edit
+## Edit
 
 Replace exactly one occurrence of `old_string` with `new_string` in a file.
 Always read the target section first and copy `old_string` verbatim, including
@@ -125,7 +125,7 @@ the needle from.
 
 **Example:**
 ```text
-edit file_path="src/main.rs" old_string="fn main() {" new_string="fn main() -> Result<()> {"
+Edit file_path="src/main.rs" old_string="fn main() {" new_string="fn main() -> Result<()> {"
 ```
 
 ---
@@ -304,7 +304,7 @@ for the same side.
 
 ---
 
-## glob
+## Glob
 
 Find files matching a glob pattern by recursively searching directories.
 Hidden entries and common generated directories (`node_modules`, `target`)

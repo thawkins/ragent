@@ -18,7 +18,6 @@ This guide covers every part of that pipeline:
 
 > **Scope:** Permission rules, bash safety, autopilot, YOLO, and the
 > permission dialog. For the full tool catalog see `docs/howtos/tools/INDEX.md`.
-> For hiding/exposing tool families see `docs/howtos/tool-visibility.md`.
 > For custom agent definitions (which carry their own permission rules) see
 > `docs/howtos/custom-agents.md`. For lifecycle hooks that can also veto
 > tool calls see `docs/howtos/hooks.md`. For the TUI walkthrough see
@@ -60,7 +59,7 @@ The decision flow has five stages, applied in order:
 Tool Call
    │
    ▼
-1. Hardwired rules      ── codeindex, team, task, agent, ask_user, model_info tools auto-approve
+1. Hardwired rules      ── codeindex, team, task, agent, AskUserQuestion, model_info tools auto-approve
    │
    ▼
 2. Auto-approve flags   ── --yes / auto_approve / YOLO short-circuit to Allow
@@ -240,6 +239,32 @@ while `"git:write"` (which has no standard variant) becomes
 `Permission::Custom("git:write")`. Both the exact custom string and the
 normalized form are checked during rule evaluation, so a rule keyed on
 `Permission::Edit` matches a tool reporting `"file:write"`.
+
+### A category is permission vocabulary, not a tool name
+
+A category is derived from *what a tool does*, independently of the name that
+tool is registered under (FR-028). The rename (spec `uniformtools` FR-023) moved
+thirteen tool *names*; it moved no category, so a rule you wrote against one
+keeps governing the tool:
+
+```json
+{ "permission": "bash", "action": "allow", "pattern": "git status*" }
+```
+
+still allows the tool now called `Bash`, and
+
+```json
+{ "permission": "ask_user", "action": "allow" }
+```
+
+still allows the tool now called `AskUserQuestion`.
+
+Both of those read like a missed migration and are the requirement. The rename
+took the tool names to Claude Code's spellings; the families `bash` and
+`ask_user` are ragent's own permission vocabulary and are unchanged, which is
+why `permission_category()` still reports `bash:execute` for `Bash` and
+`ask_user` for `AskUserQuestion`. `specs/uniformtools/T-041-BASELINE.md` records
+32 distinct categories across the registry, before and after the rename.
 
 ### Default Permission Ruleset
 
@@ -764,7 +789,7 @@ the following safety checks are skipped:
 | Directory escape check (Layer 4)   | No        | Still enforced                           |
 | Syntax validation (Layer 5)        | No        | Still enforced                           |
 
-The bypass is implemented as early returns in the bash tool and
+The bypass is implemented as early returns in the Bash tool and
 `check_permission_with_prompt`:
 
 ```rust
@@ -1060,9 +1085,12 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
     is_hardwired_codeindex_tool(tool_name)
         || tool_name.starts_with("team_")
         || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
-        || tool_name.starts_with("task_")
-        || tool_name == "ask_user"
+        || TASK_TOOLS.contains(&tool_name)
+        || tool_name == "AskUserQuestion"
         || tool_name == "model_info"
+        || tool_name == "ragent_info"
+        || tool_name == "tool_info"
+        || tool_name == "commands_info"
 }
 
 pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
@@ -1077,6 +1105,8 @@ pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
     AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
 }
 
+const TASK_TOOLS: &[&str] = &["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"];
+
 const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
     "new_agent",
     "cancel_agent",
@@ -1086,12 +1116,16 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
 ];
 ```
 
+The four `Task*` tools are an explicit list rather than a `task_` prefix test:
+a prefix admits any future name starting with those five characters, and it
+named a spelling the rename retired.
+
 | Tool family             | Tools                                                     |
 |-------------------------|-----------------------------------------------------------|
 | Codeindex (read-only)   | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` |
 | Sub-agent management    | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` |
-| Team tools              | All tools starting with `team_` (20 tools)                |
-| Task management         | All tools starting with `task_` (`TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`) |
+| Team tools              | All tools starting with `team_` (19 tools)                |
+| Task management         | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`          |
 | Interactive question    | `AskUserQuestion`                                                |
 | Model introspection     | `model_info`                                              |
 
@@ -1146,25 +1180,13 @@ entries from all sources are combined.
   },
 
   // YOLO mode — bypass all command validation and tool restrictions
-  "yolo": false,
-
-  // Tool-family visibility (hides tools from the LLM, does not affect permissions)
-  "tool_visibility": {
-    "github": true,
-    "gitlab": true,
-    "teams": true,
-    "agents": true,
-    "plan": true,
-    "codeindex": true
-  }
+  "yolo": false
 }
 ```
 
-> **Note:** `tool_visibility` controls whether tools are **advertised** to
-> the LLM. Hidden tools are still registered and executable — they are
-> simply not included in the tool definitions sent to the model. This is
-> different from permissions, which control whether a tool call is
-> **allowed** to execute. See `docs/howtos/tool-visibility.md` for details.
+> **Note:** every registered tool is advertised to the model. Permissions,
+> not advertising, control whether a tool call is **allowed** to execute;
+> see the rule sections above.
 
 ### 11.3 CLI Flags
 
@@ -1461,7 +1483,6 @@ override any `allow` rules.
 |-----------------------------------|------------------------------------------------|
 | `docs/howtos/tutorial.md`         | TUI walkthrough, keybindings, getting started  |
 | `docs/howtos/tools/INDEX.md`      | Complete tool catalog with schemas (by category) |
-| `docs/howtos/tool-visibility.md`  | Hiding and exposing tool families              |
 | `docs/howtos/custom-agents.md`    | Custom agent definitions with permission rules |
 | `docs/howtos/hooks.md`            | PreToolUse/PostToolUse lifecycle hooks          |
 | `docs/howtos/llmsecurity.md`      | LLM security analyzer (tightening-only layer)  |

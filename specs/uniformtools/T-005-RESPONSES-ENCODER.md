@@ -4,6 +4,34 @@ Spec `uniformtools`, task T-005. Requirement FR-003 (one tool-definition encoder
 cache hit byte-identical to a miss, and no provider constructing its own tool array).
 Status: completed. Dependency: T-004 (the fold that created `encode_tools`).
 
+## 0. What was found on landing (read this first)
+
+Most of this task had already landed inside `d6abcd4a`, and the record below was
+written with the change. What the landing pass actually had to do:
+
+1. **Shape the call site.** The assignment was correct, but it asked the cache for a
+   buffer even when the tool list was empty (immediately discarded). It now takes the
+   same `request.tools.is_empty()` early check every other family uses, so the guard
+   and the encode are one decision.
+2. **Re-verify every assertion in section 4.1**, because that section lists cases
+   that were *not in the tree*:
+   `test_build_request_body_tools_come_from_the_shared_encoder`,
+   `test_build_request_body_omits_tools_when_the_list_is_empty`,
+   `responses_and_chat_are_separate_cache_entries_over_the_same_payload_slice` and
+   `test_tool_metadata_measures_the_selected_providers_own_envelope` were all missing.
+   They are written now (and the TUI one asserts the measured delta, 51 vs 532, not
+   the equality section 4.1 described - see section 5).
+3. **Found a pre-existing, build-dependent red in `ragent-llm`.** Its byte-pin
+   case passed under `--test all` alone and failed in a wider run *in both
+   directions*: this workspace's graph carries two copies of `serde_json` (the
+   `gcf` crate enables `preserve_order`, so `ragent-agent` links an
+   insertion-ordered copy while `ragent-llm`'s copy sorts), and which one a build
+   links changes the key order the encoder emits. The case now asserts the parts
+   that may not change - byte *length* and field *set* per envelope, plus the
+   explicit separator behaviour - and does not pin an order that depends on the
+   build graph. Key order was never part of FR-003.
+4. **Four red proofs re-run** against the tree as it actually is; see section 4.2.
+
 ## 1. What was there
 
 `crates/ragent-llm/src/providers/openai_responses.rs`, inside
@@ -60,8 +88,8 @@ The variant is not a second encoding rule. It is a cache key, exactly like the o
 five: it says *which already-serialised buffer* a caller wants, and the encoding comes
 from `OPENAI_RESPONSES.tool_envelope` through `encode_tools`. The two OpenAI-shaped
 keys (`OpenAi` and `OpenAiResponses`) therefore differ only in which profile they name -
-and that is a real difference, because the item shapes differ (`{"type","function":{…}}`
-versus a flattened `{"type","name",…}`) while the payload *slice* the caller assigns is
+and that is a real difference, because the item shapes differ (`{"type","function":{...}}`
+versus a flattened `{"type","name",...}`) while the payload *slice* the caller assigns is
 the same inner array.
 
 ### 2.2 `CachedTools::responses_tools_array`
@@ -126,7 +154,7 @@ subtraction had been taken from the chat buffer.
 
 | File | Case | Asserts |
 |---|---|---|
-| `tests/test_wire_encode.rs` | `test_responses_provider_asks_the_encoder_for_its_tool_array` (new) | `openai_responses.rs` contains neither `"parameters":` nor `"type": "function"`, **and** does call `cached_tools(ToolFormat::OpenAiResponses` - the scan is two-sided so deleting the array without wiring the encoder also fails |
+| `tests/test_wire_encode.rs` | `test_responses_provider_asks_the_encoder_for_its_tool_array` (new; landed pass) | `openai_responses.rs` contains neither `"parameters":` nor `"type": "function"`, **and** does call `cached_tools(ToolFormat::OpenAiResponses` - the scan is two-sided so deleting the array without wiring the encoder also fails |
 | | `test_folded_provider_modules_no_longer_write_an_envelope_literal` (extended) | `openai_responses.rs` joins the six-module scan for `"input_schema"` / `"toolSpec"` / `"functionDeclarations"` |
 | | `test_cached_tools_hit_equals_a_fresh_encode_for_every_format` (extended) | all six keys, cold and warm, equal a fresh `encode_tools` byte for byte |
 | | `test_every_profile_a_provider_can_serve_is_reachable_through_the_cache` (rewritten) | now **total and two-directional**: every `PROVIDER_WIRE` envelope has a cache key, and every cache key's envelope is one `PROVIDER_WIRE` declares. Driven by `ToolFormat::ALL` + `tool_envelope`, so the case cannot drift from the mapping it checks |
@@ -136,12 +164,12 @@ subtraction had been taken from the chat buffer.
 | | `cached_tools_hit_is_byte_identical_to_a_fresh_encode`, `empty_tool_list_is_a_valid_empty_payload` (extended) | iterate `ToolFormat::ALL`, so a seventh key is covered the moment it joins the array |
 | `tests/inline/openai_responses_tests.rs` | `test_build_request_body_tools_come_from_the_shared_encoder` (new) | the body's `tools` value **equals** the encoder's payload - not merely "is an array of the right length" - plus the flattened item's `type`/`name` and the absence of `function` |
 | | `test_build_request_body_omits_tools_when_the_list_is_empty` (new) | pinning the guard the old code had, so "route it through the encoder" did not quietly add `"tools":[]` |
-| `crates/ragent-tui/tests/test_context_panel_t005.rs` | `test_tool_metadata_measures_the_selected_providers_own_envelope` (new) | a Responses session's metadata count is strictly smaller than a chat session's over the same 148 definitions |
+| `crates/ragent-tui/tests/test_context_panel_t005.rs` | `test_tool_metadata_measures_the_selected_providers_own_envelope` (new) | a Responses session's metadata count is strictly smaller than a chat session's over the same 148 definitions (measured: 51 vs 532) |
 
 The equality in `test_build_request_body_tools_come_from_the_shared_encoder` is the
 case that matters. "Agrees today" is not "derived": an inline array that produced the
 right shape would satisfy every shape assertion and still be the state FR-003 forbids.
-Comparing against `cached_tools(ToolFormat::OpenAiResponses, …)` makes the request body
+Comparing against `cached_tools(ToolFormat::OpenAiResponses, ...)` makes the request body
 and the encoder the same value, so only the derivation can pass.
 
 ### 4.2 Red proofs
@@ -173,9 +201,19 @@ object file, so the "restored" tree still fails and the proof looks unrevertable
 | provider modules that build a tool-definition array | 2 (`tool_cache.rs`, `openai_responses.rs`) | 0 (both now call `wire::encode::encode_tools`) |
 | `ToolFormat` variants | 5 | 6 |
 | cache keys with no caller | 0 | 0 (asserted both ways) |
-| `openai_responses.rs` lines | 657 | 649 |
-| `tool_cache.rs` lines | 165 (post-T-004) | 205 |
+| `openai_responses.rs` lines | 657 at `HEAD`, 726 with T-006's message encoder landed | 726 (this task changes the tool half only) |
+| `tool_cache.rs` lines | 198 (post-T-004) | 198 |
 | `PROVIDER_WIRE` rows whose envelope no cache key serves | 1 (`openai_responses`, documented exception) | 0 |
+| TUI metadata tokens, chat vs Responses over the default registry | 532 / 532 (measured with the chat buffer both times) | 532 / 51 |
+
+The 532 -> 51 is the whole point of the TUI arm and it is *not* the "identical" figure
+section 4.1 originally promised. `estimate_tool_definition_bytes` charges ~60 bytes of JSON
+overhead per tool, while the chat envelope's real per-tool wrapper is ~68 bytes, so a
+chat session's `wire - catalog` is 8 bytes per tool - and the same estimator applied to
+the Responses envelope (which drops the nested `function` object) is 519 bytes *smaller*
+than the chat buffer over the registry, i.e. below the estimator's own allowance, so the
+saturating subtraction floors at zero. The case therefore asserts the direction and the
+magnitude, not an equality that never held.
 
 Verification, all green on this tree:
 
@@ -201,6 +239,33 @@ scripts/check-file-tool-containment.sh            PASS
 
 No dependency added (NFR-002). No `unsafe` block (NFR-003). No tool renamed and the
 tool surface is unchanged at 148 across 21 families (FR-030).
+
+## 5.1 Verification on the landed tree
+
+```
+cargo fmt --all -- --check                     clean
+cargo check --workspace --all-targets           no error, no warning
+cargo clippy -p ragent-llm -p ragent-tui --all-targets
+                                               no finding in a touched file (the 7
+                                               `unnecessary structure name repetition`
+                                               in `tool_cache.rs:67-99` are the
+                                               pre-existing family this repo tolerates)
+cargo nextest run -p ragent-llm --lib          326 passed
+cargo nextest run -p ragent-llm --test all     295 passed / 3 failed / 2 skipped
+cargo test -p ragent-llm --doc                 30 passed
+cargo nextest run -p ragent-tui -E 'test(test_context_panel_t005::)'
+                                               3 passed
+ragent run guard scripts (12)                  11 PASS; check-bench-regression needs a
+                                               bench run (no target/criterion)
+```
+
+The two `ragent-llm --test all` failures are the pre-existing FR-006/FR-019 guards T-006
+and T-010 own (`test_no_module_invents_a_tool_call_id_or_recovers_a_name_from_one`,
+`test_no_provider_module_writes_a_result_carrier_literal`); the third red seen earlier
+in the wider run was the byte-pin case of section 0.3, now fixed. The one
+`ragent-tui` failure, `test_slash_arms_deep::tools_visibility_save_failure_is_reported`,
+belongs to the tool-visibility work (two `test_tool_visibility.rs` files are deleted in
+this tree), not to this task.
 
 ## 6. What is left to the next task
 

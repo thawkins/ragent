@@ -42,7 +42,7 @@ use tower::ServiceExt;
 enum Reply {
     /// A plain assistant text response.
     Text(String),
-    /// A single `write` tool call requesting `path` = `content`.
+    /// A single `Write` tool call requesting `path` = `content`.
     Write { path: String, content: String },
 }
 
@@ -92,7 +92,7 @@ impl LlmClient for ScriptedClient {
                 vec![
                     StreamEvent::ToolCallStart {
                         id: "call_1".to_string(),
-                        name: "write".to_string(),
+                        name: "Write".to_string(),
                     },
                     StreamEvent::ToolCallDelta {
                         id: "call_1".to_string(),
@@ -216,6 +216,7 @@ fn state_with(replies: Vec<Reply>, token: &str) -> (AppState, Arc<EventBus>) {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
         bg_service: std::sync::OnceLock::new(),
     });
 
@@ -228,7 +229,7 @@ fn state_with(replies: Vec<Reply>, token: &str) -> (AppState, Arc<EventBus>) {
         rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         coordinator: None,
         research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: std::sync::Arc::new(crate::research_sandbox::research_root()),
+        research_root: std::sync::Arc::new(crate::research_sandbox::isolated_research_root()),
     };
     (state, event_bus)
 }

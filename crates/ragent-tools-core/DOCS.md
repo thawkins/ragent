@@ -27,7 +27,7 @@ Dev-dependencies: tempfile, filetime.
 - **ToolContext** (struct) — `{ session_id, working_dir, event_bus, read_timestamps, canonical_cache }` — passed to every `execute()`.
 - **Tool** (trait) — `name()`, `description()`, `parameters_schema()`, `permission_category()`, `async execute()`.
 - **ToolRegistry** (struct) — `RwLock<HashMap<String, Arc<dyn Tool>>>` + hidden set; methods: `new`, `register`, `get`, `list`, `contains`, `remove`, `clear`, `set_hidden`, `definitions`.
-- **create_core_registry** (fn) — Registers all core tools (apply_patch, read, write, create, edit, multiedit, patch, copy, move, rm, mkdir, append, file_info, diff, glob, list, grep, bash, bash_reset, open, agent_complete, think, get_env, calculator).
+- **create_core_registry** (fn) — Registers all core tools (apply_patch, read, Write, create, Edit, multiedit, patch, copy_file, move_file, rm, make_directory, append_to_file, file_info, diff_files, Glob, list, Grep, Bash, bash_reset, open, agent_complete, think, get_env, calculator).
 
 ### Path security
 
@@ -37,6 +37,21 @@ Dev-dependencies: tempfile, filetime.
 - **is_alias_within** (fn) — Walks parents comparing dev/inode (bind-mount / symlink detection).
 - **same_file_identity** (fn) — Platform-specific file identity comparison.
 - **CleanPath** (trait + impl) — In-place `.`/`..` cleaning without touching disk.
+
+### Argument validation
+
+- **schema** (module) — `validate_required_args(schema, input)`, the conservative
+  check the dispatch pipeline runs before a tool executes (spec `uniformtools`
+  FR-009): every field in the schema's `required` array is present, and a
+  required property that declares a primitive `type` matches it. Unknown/extra
+  fields, optional fields, enums, patterns and compound types are deliberately
+  not enforced, so a tool keeps its own more precise errors. A violation names
+  the offending parameter **and its declared type** (`missing required parameter
+  'destination', which is declared as type 'string'`), because FR-009 asks the
+  corrective result to state both.
+- **fold_argument_keys(schema, input)** (fn, same module) — Renames argument keys
+  that differ from a declared property only by letter case onto the declared
+  spelling, before validation.
 
 ### Compatibility re-exports
 

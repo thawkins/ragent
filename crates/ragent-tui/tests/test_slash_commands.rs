@@ -88,6 +88,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
         active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
+        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -2822,32 +2823,35 @@ async fn test_slash_system_preserves_argument_whitespace() {
 // -- /tools ----------------------------------------------------------
 
 #[tokio::test]
-async fn test_slash_tools_lists_visibility_switches() {
+async fn test_slash_tools_list_renders_every_registered_tool() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools list").await;
 
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
     let text = app.messages.last().unwrap().text_content();
+    let expected = app.session_processor.tool_registry.definitions().len();
     assert!(
-        text.contains("Tool Family Visibility"),
-        "should show visibility heading"
+        text.contains(&format!("Tools ({expected} total):")),
+        "should head the list with the registry size: {text}"
     );
-    assert!(text.contains("github"), "should list github switch");
-    assert!(text.contains("teams"), "should list teams switch");
-    assert!(text.contains("agents"), "should list agents switch");
-    assert!(text.contains("plan"), "should list plan switch");
-    assert!(text.contains("codeindex"), "should list codeindex switch");
+    assert!(
+        !text.contains("Tool Family Visibility"),
+        "the family visibility table is gone: {text}"
+    );
+    assert!(text.contains("read"), "should list the read tool");
+    assert!(
+        text.contains("codeindex_search"),
+        "should list every registered tool, not a visible subset"
+    );
 }
 
 #[tokio::test]
 async fn test_slash_tools_default_shows_help() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools").await;
 
@@ -2858,211 +2862,50 @@ async fn test_slash_tools_default_shows_help() {
         "should document /tools list"
     );
     assert!(
-        text.contains("Valid switches:"),
-        "should list the valid switches"
-    );
-    assert!(
         !text.contains("Tool Family Visibility"),
         "default /tools no longer renders the table"
     );
 }
 
 #[tokio::test]
-async fn test_slash_tools_show_alias_still_lists_visibility_switches() {
+async fn test_slash_tools_show_alias_lists_registered_tools() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools show").await;
 
     assert_eq!(app.status, "tools");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Tool Family Visibility"));
-}
-
-#[tokio::test]
-async fn test_slash_tools_shows_single_switch_state() {
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    app.execute_slash_command("/tools github").await;
-
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`github` is currently **off**"));
+    assert!(text.contains("Tools ("));
+    assert!(text.contains("read"));
 }
 
 #[tokio::test]
 async fn test_slash_tools_help_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools help").await;
 
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("`/tools list`"));
     assert!(text.contains("`/tools help`"));
-    assert!(text.contains("`/tools <switch> on|off`"));
-    assert!(text.contains("`github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`"));
-}
-#[tokio::test]
-async fn test_slash_tools_list_alias_lists_visibility_switches() {
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    app.execute_slash_command("/tools list").await;
-
-    assert_eq!(app.status, "tools");
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Tool Family Visibility"));
-    assert!(text.contains("github"));
-    assert!(text.contains("teams"));
-    assert!(text.contains("agents"));
-    assert!(text.contains("plan"));
-    assert!(text.contains("codeindex"));
-    // Verify the visible tools list is included.
-    assert!(text.contains("Visible Tools"), "should list visible tools");
-    assert!(text.contains("read"), "should include the read tool");
-}
-
-#[tokio::test]
-#[allow(clippy::await_holding_lock)]
-async fn test_slash_tools_teams_on_shows_team_tools() {
-    let lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard {
-        prev: original_cwd,
-        lock,
-        temp: None,
-    };
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    let hidden = ragent_agent::tool_family_names("teams")
-        .expect("teams family")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    app.session_processor.tool_registry.set_hidden(&hidden);
-
     assert!(
-        !app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "team_create")
+        !text.contains("switch"),
+        "no visibility switches remain: {text}"
     );
+}
+
+#[tokio::test]
+async fn test_slash_tools_rejects_a_removed_visibility_switch() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/tools github").await;
+    assert_eq!(app.status, "tools error");
 
     app.execute_slash_command("/tools teams on").await;
-
-    assert!(app.tool_visibility.teams);
-    assert_eq!(app.status, "tools: teams on");
-    assert!(
-        app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "team_create")
-    );
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`teams` visibility is now **on**"));
-}
-
-#[tokio::test]
-#[allow(clippy::await_holding_lock)]
-async fn test_slash_tools_agents_on_shows_agent_tools() {
-    let lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard {
-        prev: original_cwd,
-        lock,
-        temp: None,
-    };
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    let hidden = ragent_agent::tool_family_names("agents")
-        .expect("agents family")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    app.session_processor.tool_registry.set_hidden(&hidden);
-
-    assert!(
-        !app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "new_agent")
-    );
-
-    app.execute_slash_command("/tools agents on").await;
-
-    assert!(app.tool_visibility.agents);
-    assert_eq!(app.status, "tools: agents on");
-    assert!(
-        app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "new_agent")
-    );
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`agents` visibility is now **on**"));
-}
-
-#[tokio::test]
-#[allow(clippy::await_holding_lock)]
-async fn test_slash_tools_plan_on_shows_plan_tools() {
-    let lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard {
-        prev: original_cwd,
-        lock,
-        temp: None,
-    };
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
-
-    let hidden = ragent_agent::tool_family_names("plan")
-        .expect("plan family")
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
-    app.session_processor.tool_registry.set_hidden(&hidden);
-
-    assert!(
-        !app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "plan_enter")
-    );
-
-    app.execute_slash_command("/tools plan on").await;
-
-    assert!(app.tool_visibility.plan);
-    assert_eq!(app.status, "tools: plan on");
-    assert!(
-        app.session_processor
-            .tool_registry
-            .definitions()
-            .iter()
-            .any(|d| d.name == "plan_enter")
-    );
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("`plan` visibility is now **on**"));
+    assert_eq!(app.status, "tools error");
 }
 
 #[tokio::test]
@@ -4690,12 +4533,12 @@ async fn test_slash_task_help() {
         "help should mention /task list: {text}"
     );
     assert!(
-        text.contains("task_create"),
-        "help should mention task_create tool: {text}"
+        text.contains("TaskCreate"),
+        "help should mention TaskCreate tool: {text}"
     );
     assert!(
-        text.contains("task_update"),
-        "help should mention task_update tool: {text}"
+        text.contains("TaskUpdate"),
+        "help should mention TaskUpdate tool: {text}"
     );
     assert_eq!(app.status, "task help");
 }
@@ -4709,10 +4552,10 @@ async fn test_slash_task_add_delegates_hint() {
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("task_create"),
-        "/task add should mention task_create tool: {text}"
+        text.contains("TaskCreate"),
+        "/task add should mention TaskCreate tool: {text}"
     );
-    assert_eq!(app.status, "Use agent tool: task_create");
+    assert_eq!(app.status, "Use agent tool: TaskCreate");
 }
 
 #[tokio::test]
@@ -4724,10 +4567,10 @@ async fn test_slash_task_update_delegates_hint() {
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("task_update"),
-        "/task update should mention task_update tool: {text}"
+        text.contains("TaskUpdate"),
+        "/task update should mention TaskUpdate tool: {text}"
     );
-    assert_eq!(app.status, "Use agent tool: task_update");
+    assert_eq!(app.status, "Use agent tool: TaskUpdate");
 }
 
 #[tokio::test]
@@ -4739,10 +4582,10 @@ async fn test_slash_task_get_delegates_hint() {
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("task_get"),
-        "/task get should mention task_get tool: {text}"
+        text.contains("TaskGet"),
+        "/task get should mention TaskGet tool: {text}"
     );
-    assert_eq!(app.status, "Use agent tool: task_get");
+    assert_eq!(app.status, "Use agent tool: TaskGet");
 }
 
 #[tokio::test]
@@ -4754,8 +4597,8 @@ async fn test_slash_task_create_alias_for_add() {
 
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("task_create"),
-        "/task create should mention task_create tool: {text}"
+        text.contains("TaskCreate"),
+        "/task create should mention TaskCreate tool: {text}"
     );
 }
 

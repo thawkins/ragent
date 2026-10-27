@@ -37,7 +37,7 @@ tree-sitter-cmake = "0.7"
 tree-sitter-groovy = "0.1"
 tree-sitter-kotlin-ng = "1"
 tree-sitter-xml = "0.7"
-tantivy = "0.26"
+tantivy = "0.27"
 notify = "8.2"
 lru = { workspace = true }
 ragent-types = { path = "../ragent-types" }

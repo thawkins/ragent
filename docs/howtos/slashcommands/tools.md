@@ -1,26 +1,37 @@
 # /tools
-> Toggle tool visibility: /tools [github|gitlab|teams|agents|plan|codeindex|masterfetch] [on|off] | /tools help
+> List every registered tool: /tools (help) | /tools list|show | /tools help
 
 ## Overview
 
-`/tools` has two behaviours. The bare form (and `/tools show`) prints the tool
-visibility table - the current on/off state of every visibility switch. With a
-switch name it reports that switch's state, and with a switch plus a state
-word it toggles the visibility of that tool family for the session and saves
-the choice to the active config source.
+`/tools` reports the live tool registry. The bare form prints the help page;
+`/tools list` (alias `/tools show`) prints one row per registered tool with its
+source and description.
 
-The implementation accepts seven switches: `github`, `gitlab`, `teams`,
-`agents`, `plan`, `codeindex` and `masterfetch`. Toggling a switch rewrites
-`tool_visibility` in the config source and invalidates the session
-processor's config cache so the change takes effect immediately.
+The command has no switches and changes no state. Every tool the registry holds
+is advertised to the model, so the listing is exactly the set the model is given.
+A tool absent from the list means the subsystem that registers it is not active -
+for example the ten codeindex tools register only while the code index is on.
+
+## One table, four readers (FR-033)
+
+`command_catalog::TOOLS_SUBS` is the single source of the forms `/tools`
+accepts. Everything that offers one reads it:
+
+- the autocomplete menu (`get_command_suggestions`) - so the menu offers exactly
+  these words;
+- the parameter hint (`get_parameter_hint`), rendered as `[<word>|<word>|...]`;
+- this command's handler, which derives both its accepted set and the forms its
+  help page and every usage warning print;
+- `commands_info`, whose `tools` entry publishes the same `subcommands` array.
+
+If you add a `/tools` form, add it to `TOOLS_SUBS` and nowhere else.
 
 ## Syntax
 
 ```
-/tools                        # show the visibility table (same as: show)
-/tools show                   # same as bare form
-/tools <switch>               # read one switch's state
-/tools <switch> on|off        # set one switch (enable/disable also accepted)
+/tools                        # help
+/tools list                   # list every registered tool
+/tools show                   # same as list
 /tools help                   # usage help (aliases: --help, -h, usage)
 ```
 
@@ -28,86 +39,52 @@ processor's config cache so the change takes effect immediately.
 
 | Form | Description |
 | --- | --- |
-| `/tools` | Render the tool visibility table |
-| `/tools show` | Same as the bare form |
-| `/tools <switch>` | Report whether `<switch>` is currently on or off |
-| `/tools <switch> on` | Enable the switch (`enable` also accepted) |
-| `/tools <switch> off` | Disable the switch (`disable` also accepted) |
+| `/tools` | Show the help page |
+| `/tools list` | List every registered tool with its source and description |
+| `/tools show` | Same as `/tools list` |
 | `/tools help` | Print usage help |
-
-Switches (all seven accepted): `github`, `gitlab`, `teams`,
-`agents`, `plan`, `codeindex`, `masterfetch`.
 
 ## Examples
 
-Show the visibility table:
+Show the help page:
 
 ```
 /tools
 ```
 
-Read a single switch:
+List the registered tools:
 
 ```
-/tools teams
-```
-
-Turn the GitHub tool family off for this project:
-
-```
-/tools github off
-```
-
-Re-enable codeindex tools:
-
-```
-/tools codeindex on
-```
-
-Disable the masterfetch tool family:
-
-```
-/tools masterfetch off
-```
-
-Print the usage help:
-
-```
-/tools help
+/tools list
 ```
 
 ## Output
 
-Visibility table (bare form): one row per switch with its on/off state.
-
-Single switch read:
+Help page:
 
 ```
-`teams` is currently **on**.
+/tools
+
+## /tools - Tool list
+
+| Subcommand | Description |
+|---|---|
+| `/tools` | Show this help |
+| `/tools list` | List every registered tool with its source and description |
+| `/tools show` | Same as `/tools list` |
+| `/tools help` | Show this help |
 ```
 
-Successful toggle (the config is saved and the config cache invalidated):
+Usage warning for an unrecognised form:
 
 ```
-[ok] `<switch>` visibility is now **on**.
+From: /tools
+[warn] Usage: `/tools list`, `/tools show`, `/tools help`.
 ```
-
-Invalid state word:
-
-```
-[warn] Usage: /tools <switch> on|off
-```
-
-Config save failure (the in-session change still applied):
-
-```
-[warn] `<switch>` visibility changed ... but saving config failed: <error>
-```
-
-and the status bar notes `tools: <switch> ... (unsaved)`.
 
 ## Related
 
-- `/config show` - inspect the resolved configuration including tool visibility
+- `/config show` - inspect the resolved configuration
 - `/reload config` - re-read `ragent.json` after manual edits
-- `tool_visibility` section in `ragent.json` - persistent equivalent of these switches
+- [`docs/howtos/tools/INDEX.md`](../tools/INDEX.md) - the tool catalogue by
+  category

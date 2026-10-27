@@ -161,6 +161,6 @@ See [`docs/howtos/config.md`](../config.md) §7.35 and
 
 - [`docs/howtos/plugins.md`](../plugins.md) - the full plugin-system manual
 - `/reload` - reload customizations after plugin files change
-- `/tools` - toggle tool visibility (plugin tools are always advertised while enabled)
+- `/tools` - list every registered tool, plugin tools included
 - `ragent plugins <sub>` - CLI parity for the same subcommands
 - `specs/plugins/SPEC.md` - the full plugin-system specification

@@ -86,13 +86,31 @@ Use the Bash tool to run the following `cargo` commands.
 
 Test running is very very expensive, it can take 40 minutes to run a full test suite, you have to strive to minimize the number of times a test suite is run, if you need to run a full test suite, make sure you capture the output in a file and use that file to run any subsequent passes that require reinterpretation of the output instead of rerunning the test suite.
 
-- `cargo test` — Run all tests
-- `cargo test <test_function_name>` — Run specific test function
-- `cargo test -- --nocapture` — Run tests with output visible
-- `cargo test --lib` — Test library only (skip integration tests)
+**The workspace runs tests with `cargo nextest`, not `cargo test`.** Every test
+runs in its own process scheduled across the machine, so a wedged test cannot
+block its neighbours and a process-global mutation cannot leak between two tests.
+The configuration lives in `.config/nextest.toml`.
+
+- `cargo nextest run` — Run every test in the workspace
+- `cargo nextest run -p <crate>` — Run one crate
+- `cargo nextest run -p <crate> -E 'test(<name>)'` — Run tests matching a filter;
+  `-E 'test(test_foo::)'` isolates one `tests/test_foo.rs` module, and
+  `-E 'test(a) + test(b)'` unions filters
+- `cargo nextest run --workspace --no-fail-fast` — The CI shape: every failure in
+  one pass
+- `cargo nextest list` — List what would run, without running it
+- `cargo nextest run <filter>` — A bare trailing argument is a substring filter
+  over test names; prefer `-E 'test(...)'`, which is an exact expression
+- `cargo nextest run --success-output immediate` — Show output for passing tests
+  too (`failure-output` is already `immediate-final`)
+- `cargo nextest run -j 1` — Sequential execution, for diagnosing an interleaving
+- `cargo test --doc` — The one remaining `cargo test` form: **nextest does not run
+  doc tests**
 - **Test Timeout**: All test runs should have a 1500 second timeout to prevent hanging
-  - Use `timeout 1500 cargo test` on Unix/Linux
-  - Use `cargo test --test-threads=1` for sequential execution if needed
+  - Use `timeout 1500 cargo nextest run` on Unix/Linux
+  - `.config/nextest.toml` additionally kills any single test that runs longer
+    than 150 s, so a hang is reported as a failed test rather than a stalled run
+
 
 ### Test Organization
 
@@ -152,14 +170,35 @@ Rules for this model:
   module are all preserved.
 - **Test names keep their file prefix.** A test defined in `test_foo.rs` is named
   `test_foo::<fn>` inside the `all` binary.
-- **Run a single file by filter, not by `--test`.** `cargo test -p <crate> --test test_foo` no longer exists; use `cargo test -p <crate> --test all test_foo::`
-  (the `test_foo::` module prefix isolates that file).
-- **Merging binaries merges process state.** A child module no longer runs in its
-  own process, so process-global resources (env vars, cwd, `static` registries)
-  that were previously isolated between test files now race. When two files touch
-  the same global, serialise the mutating tests with `#[serial]`
-  (`serial_test`) — never by weakening an assertion or by splitting into more
-  targets just to regain isolation.
+- **Run a single file by filter, not by `--test`.** `cargo test -p <crate> --test test_foo` no longer exists; use the filter form
+  `cargo nextest run -p <crate> -E 'test(test_foo::)'` (the `test_foo::` module
+  prefix isolates that file). The same filter works under `cargo test` as
+  `cargo test -p <crate> --test all test_foo::`, which is the form `cargo test`
+  still needs when a doc test or an in-process run is what you want.
+- **Merging binaries merges process state.** Under `cargo test` a child module
+  runs in the `all` binary's single process alongside every other child, so
+  process-global resources (env vars, cwd, `static` registries) that were
+  previously isolated between test files now race. `cargo nextest` runs every
+  test in its own process and so removes most of that, but it is not a licence to
+  share a mutable global: a `static` registry or a shared scratch directory is
+  still one object per binary, and tests within one crate can still interleave
+  over a filesystem path. When two files touch the same global, serialise the
+  mutating tests with `#[serial]` (`serial_test`) or the crate's
+  `global_env_lock()` — never by weakening an assertion or by splitting into more
+  targets just to regain isolation. Prefer giving a test its own directory (a
+  per-test temp dir or a `target/temp/<unique-name>` path) over serialising.
+- **`#[serial]` orders one process; nextest runs one process per test.** Where a
+  test's exclusion must hold across *processes* — a fixture written into the
+  repository, a shared `target/temp/` path, a scan of the checked-in tree — a
+  `Mutex` or `#[serial]` in the test file does not provide it: serial_test
+  publishes its lock key as `SERIAL_TEST_RETRY_KEY` in the parent environment
+  and each nextest test process starts from its own saved environment, so two
+  siblings take different keys and run together. Define the exclusion in
+  `.config/nextest.toml` instead: a `[test-groups]` table with
+  `max-threads = 1` plus a `[[profile.default.overrides]]` (and a `profile.ci`
+  twin) whose `filter` selects the tests. `test_tool_rename_guard` is the worked
+  example (`tool-rename-guard` group). A file-local `Mutex` is still correct for
+  an in-process run (`cargo test`), which is why it stays alongside the group.
 - **Do not weaken an assertion to make a consolidated build pass.** A cross-file
   failure is a real test-isolation bug; mark `#[serial]` or fix the shared state.
 - **`crate::` in a `#[path]`-included source module resolves at the target root.**
@@ -176,7 +215,9 @@ Rules for this model:
   carries the allow (clippy's `duplicate_mod` is the only such case; all other
   `#![...]` inner attributes stay on the child files).
 - **Prefer a `check-*` guard update, not a new target, for CI.** Convert
-  `cargo test -p <crate> --test <file>` to `cargo test -p <crate> --test all <file>::` — the `::` suffix keeps the filter anchored to that module.
+  `cargo test -p <crate> --test <file>` to
+  `cargo nextest run -p <crate> -E 'test(<file>::)'` — the `::` suffix keeps the
+  filter anchored to that module.
 
 ## Lint & Format Commands
 
@@ -374,4 +415,4 @@ Before publishing or reviewing Rust code, ensure:
 - [ ] **Performance**: Efficient use of iterators, minimal allocations
 - [ ] **API Design**: Functions are predictable, flexible, and type-safe
 - [ ] **Future Proofing**: Private fields in structs, sealed traits where appropriate
-- [ ] **Tooling**: Code passes `cargo fmt`, `cargo clippy`, and `cargo test`
+- [ ] **Tooling**: Code passes `cargo fmt`, `cargo clippy`, and `cargo nextest run`

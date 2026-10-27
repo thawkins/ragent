@@ -8,12 +8,21 @@
 //! owns one parser parameterised by [`OpenAiSseSpec`]; both providers delegate
 //! so the fixed behaviours (explicit index, start de-duplication) apply to
 //! both and the remaining OpenRouter-specific reasoning routing is explicit.
+//!
+//! Tool-call bookkeeping is not this module's: the open calls live in
+//! [`ToolCallAccumulator`] under the family's declared
+//! [`stream_keying`](crate::provider::wire::ToolWireProfile::stream_keying)
+//! (FR-004), so "one start per call, one end per started call" holds here for
+//! the same reason it holds for every other provider. The old per-provider
+//! `dedup_tool_call_start` opt-out is gone: a switch that could turn the
+//! guarantee off was a contract with a way out of it.
 
 use futures::StreamExt;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::pin::Pin;
 
+use super::wire::decode::{StreamKey, ToolCallAccumulator};
+use super::wire::profile_table::OPENAI_CHAT;
 use crate::llm::StreamEvent;
 use crate::provider::http_client::redact_frame;
 use ragent_types::event::FinishReason;
@@ -25,13 +34,18 @@ use ragent_types::event::FinishReason;
 pub(crate) struct OpenAiSseSpec {
     /// Provider label used in diagnostic log fields and error messages.
     pub provider_label: String,
+    /// The provider id a synthesised tool-call id is built from (FR-019).
+    ///
+    /// Deliberately separate from [`provider_label`](Self::provider_label): a call
+    /// id is recorded in history and replayed in the next request, so it must read
+    /// as an id (`openai_0_read`, `openrouter_0_read`), not as a display label
+    /// (`OpenAI_0_read`).
+    pub provider_id: String,
     /// Optional base URL logged on an empty stream (OpenRouter only).
     pub base_url: Option<String>,
     /// Route `delta.reasoning` / `delta.reasoning_content` into
     /// `Reasoning*` events (OpenRouter).
     pub parse_reasoning: bool,
-    /// Emit `ToolCallStart` at most once per tool-call index (OpenAI).
-    pub dedup_tool_call_start: bool,
     /// Treat a `usage`-only frame as a yielded event (OpenRouter).
     pub usage_marks_yielded: bool,
     /// Append the "requested model is not loaded" hint to the empty-stream
@@ -44,9 +58,11 @@ impl OpenAiSseSpec {
     pub(crate) fn openai(provider_label: String) -> Self {
         Self {
             provider_label,
+            // The one OpenAI-compatible client that reaches this parser is the
+            // OpenAI one; a second caller supplies its own id.
+            provider_id: "openai".to_string(),
             base_url: None,
             parse_reasoning: false,
-            dedup_tool_call_start: true,
             usage_marks_yielded: false,
             rich_empty_stream_hint: true,
         }
@@ -56,9 +72,9 @@ impl OpenAiSseSpec {
     pub(crate) fn openrouter(base_url: String) -> Self {
         Self {
             provider_label: "OpenRouter".to_string(),
+            provider_id: "openrouter".to_string(),
             base_url: Some(base_url),
             parse_reasoning: true,
-            dedup_tool_call_start: false,
             usage_marks_yielded: true,
             rich_empty_stream_hint: false,
         }
@@ -84,6 +100,7 @@ pub(crate) fn parse_openai_sse_stream(
     let rate_limit_event = super::openai::parse_openai_rate_limit_headers(response.headers());
     let stream = response.bytes_stream();
     let provider_name = spec.provider_label.clone();
+    let provider_id = spec.provider_id.clone();
     let base_url = spec.base_url.clone();
 
     let event_stream = async_stream::stream! {
@@ -94,14 +111,16 @@ pub(crate) fn parse_openai_sse_stream(
         // previous chunk so a UTF-8 sequence split across TCP chunks is not
         // corrupted.
         let mut pending_utf8: Vec<u8> = Vec::new();
-        let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
+        // FR-004: the chat-completions family declares `StreamKeying::ByIndex`,
+        // so every tool-call frame is keyed by its `tool_calls[].index` and the
+        // accumulator owns the open-call state (no per-provider map, no
+        // de-duplication switch).
+        // FR-019: the accumulator mints `<provider>_<counter>_<name>` for a call
+        // the server left unnamed, so it takes the provider ID - a call id is
+        // replayed in the next request and an id, not a display label.
+        let mut acc = ToolCallAccumulator::new(OPENAI_CHAT, &provider_id);
         let mut in_reasoning_block = false;
         let mut yielded_event = false;
-        // A2: indices whose ToolCallStart has already been emitted, so a
-        // provider repeating `function.name` across delta frames cannot
-        // produce duplicate Start events.
-        let mut started_tool_call_indices: std::collections::HashSet<u64> =
-            std::collections::HashSet::new();
 
         if let Some(ev) = rate_limit_event {
             yield ev;
@@ -300,32 +319,18 @@ pub(crate) fn parse_openai_sse_stream(
                                 );
                                 continue;
                             };
+                            let key = StreamKey::Index(index);
 
                             if let Some(id) = tc["id"].as_str() {
-                                tool_call_ids.insert(index, id.to_string());
+                                acc.set_id(&key, id);
                             }
 
                             if let Some(function) = tc.get("function") {
-                                let tc_id = tool_call_ids
-                                    .get(&index)
-                                    .cloned()
-                                    .unwrap_or_else(|| format!("tc_{index}"));
-                                if let Some(name) = function["name"].as_str() {
-                                    // A2: guard against duplicate Start events
-                                    // when `function.name` repeats across delta
-                                    // frames for the same index. Scoped to the
-                                    // Start emission only so a repeated-name
-                                    // frame that also carries arguments still
-                                    // yields its delta below.
-                                    let emit_start = !spec.dedup_tool_call_start
-                                        || started_tool_call_indices.insert(index);
-                                    if emit_start {
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id.clone(),
-                                            name: name.to_string(),
-                                        };
-                                        yielded_event = true;
-                                    }
+                                if let Some(name) = function["name"].as_str()
+                                    && let Some(event) = acc.open(key.clone(), None, name)
+                                {
+                                    yield event;
+                                    yielded_event = true;
                                 }
 
                                 // F4: accept both argument forms. String form
@@ -333,11 +338,10 @@ pub(crate) fn parse_openai_sse_stream(
                                 // (llama.cpp / vLLM servers) is serialised
                                 // whole.
                                 let args_json = super::tool_cache::tool_arguments_json(function);
-                                if let Some(args) = args_json.filter(|args| !args.is_empty()) {
-                                    yield StreamEvent::ToolCallDelta {
-                                        id: tc_id,
-                                        args_json: args,
-                                    };
+                                if let Some(args) = args_json.filter(|args| !args.is_empty())
+                                    && let Some(event) = acc.delta(&key, &args)
+                                {
+                                    yield event;
                                     yielded_event = true;
                                 }
                             }
@@ -353,11 +357,9 @@ pub(crate) fn parse_openai_sse_stream(
 
                         // End any pending tool calls in index order so consumers
                         // pairing Start/End events by sequence see a deterministic
-                        // order (HashMap iteration is arbitrary).
-                        let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
-                        ends.sort_unstable_by_key(|(idx, _)| *idx);
-                        for (_, id) in ends {
-                            yield StreamEvent::ToolCallEnd { id };
+                        // order; `end_all` sorts by index for a `ByIndex` family.
+                        for event in acc.end_all() {
+                            yield event;
                         }
 
                         let reason = match finish_reason {

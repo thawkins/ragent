@@ -126,7 +126,6 @@ fn inputs(working_dir: PathBuf, config_path: Option<PathBuf>) -> DryRunInputs {
         provider_registry: Arc::new(create_provider_registry()),
         tool_registry: Arc::new(create_tool_registry()),
         working_dir,
-        hidden_tools: Vec::new(),
     }
 }
 
@@ -360,6 +359,68 @@ async fn test_project_config_invalid_blocked() {
             .any(|i| i.message.contains("Failed to parse"))
     );
     assert_eq!(exit, 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_project_config_with_a_retired_alias_spelling_is_blocked() {
+    // FR-031 (T-042): the readiness report parses the same files the real
+    // loader reads, so a `tools.aliases` entry naming a retired ragent tool
+    // spelling blocks the config section here exactly as it stops the real load.
+    let (_xdg, _g1, _g2, _g3) = isolate();
+    let work = TempDir::new().expect("work");
+    let project_dir = work.path().join(".ragent");
+    std::fs::create_dir_all(&project_dir).expect("mkdir project");
+    std::fs::write(
+        project_dir.join("ragent.json"),
+        r#"{"tools": {"aliases": {"bash": "Bash"}}}"#,
+    )
+    .expect("write project");
+
+    let (report, exit) =
+        ragent_agent::dry_run::run_dry_run(inputs(work.path().to_path_buf(), None)).await;
+
+    let cfg = section(&report, "config");
+    assert_eq!(cfg.status, ReadinessStatus::Blocked);
+    let blocked = cfg
+        .items
+        .iter()
+        .find(|i| i.status == ReadinessStatus::Blocked)
+        .unwrap_or_else(|| panic!("a blocked config item is reported: {cfg:?}"));
+    assert!(
+        blocked.message.contains("bash") && blocked.message.contains("Bash"),
+        "the report must name the retired spelling and its replacement: {}",
+        blocked.message
+    );
+    assert_eq!(exit, 1);
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_project_config_with_an_unregistered_alias_target_still_loads() {
+    // The other half of FR-031: an alias target this build does not register is
+    // not a load error, because a plugin or MCP tool may be bridged after the
+    // configuration was read. The readiness report must agree with the loader.
+    let (_xdg, _g1, _g2, _g3) = isolate();
+    let work = TempDir::new().expect("work");
+    let project_dir = work.path().join(".ragent");
+    std::fs::create_dir_all(&project_dir).expect("mkdir project");
+    std::fs::write(
+        project_dir.join("ragent.json"),
+        r#"{"tools": {"aliases": {"WebFetch": "tool_from_a_plugin_bridged_later"}}}"#,
+    )
+    .expect("write project");
+
+    let (report, _exit) =
+        ragent_agent::dry_run::run_dry_run(inputs(work.path().to_path_buf(), None)).await;
+
+    let cfg = section(&report, "config");
+    assert!(
+        !cfg.items
+            .iter()
+            .any(|i| i.status == ReadinessStatus::Blocked),
+        "an unregistered alias target must not block the readiness report: {cfg:?}"
+    );
 }
 
 #[tokio::test]
@@ -611,7 +672,7 @@ async fn test_tools_unknown_category_warning() {
     assert_eq!(uncategorized.status, ReadinessStatus::Warning);
     assert!(uncategorized.message.contains("no family prefix"));
     let total = item(tools, "total");
-    assert_eq!(total.message, "1 visible tools");
+    assert_eq!(total.message, "1 registered tools");
 }
 
 // ---------------------------------------------------------------------------

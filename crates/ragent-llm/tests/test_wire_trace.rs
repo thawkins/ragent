@@ -3,10 +3,10 @@
 //! `tools.wire_trace` writes each step's request body to
 //! `target/temp/wire-trace/<session>-<step>.json`, redacted and ASCII-only, and
 //! is inert while the setting is absent or `false`. These tests pin the three
-//! halves that can silently regress: the default is off *and writes nothing*,
-//! an enabled trace redacts every credential shape, and every provider that
-//! builds a body of its own actually records it - a provider that quietly skips
-//! the call would make the trace incomplete without any error.
+//! halves that can silently regress: the default is off *and writes nothing*, an
+//! enabled trace redacts every credential shape, and every provider that builds a
+//! body of its own actually records it - a provider that quietly skips the call
+//! would make the trace incomplete without any error.
 //!
 //! The switch and the trace root are process-wide (see
 //! [`ragent_llm::provider::wire::trace`]), so every test here takes
@@ -74,6 +74,13 @@ fn request(session_id: &str) -> ChatRequest {
     }
 }
 
+/// A request with no session id, which must still name a file.
+fn sessionless_request() -> ChatRequest {
+    let mut built = request("unused");
+    built.session_id = None;
+    built
+}
+
 /// The body a provider would put on the wire for [`request`].
 fn body() -> serde_json::Value {
     serde_json::json!({
@@ -123,6 +130,10 @@ fn test_wire_trace_is_inert_by_default() {
     assert!(
         !trace::is_enabled(),
         "the payload trace must default to off (FR-017)"
+    );
+    assert!(
+        trace::next_path(&request(session)).is_none(),
+        "a disabled trace must have no destination at all (FR-017)"
     );
     trace::record_body(&request(session), &body());
 
@@ -214,11 +225,21 @@ fn test_wire_trace_redacts_every_credential() {
     clear(session);
     trace::set_enabled(true);
 
+    // Real-shaped credentials: the shared sanitizer's patterns have length
+    // floors (`sk-` needs 20+ characters, `Bearer` 20+), so a short placeholder
+    // would pass this test without being redacted by anything.
+    const SK: &str = "sk-live-abcdefghijklmnopqrstuvwxyz0123456789";
+    const BEARER: &str = "Bearer abcdefghijklmnopqrstuvwxyz0123456789";
+    const GITHUB: &str = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    // An innocuous key whose value is a credential: only the value pass can
+    // catch this, so it is what proves that pass runs.
+    const INNOCUOUS_KEY: &str = "x-note";
+
     let mut body = body();
-    body["api_key"] = serde_json::json!("sk-live-abcdefghijklmnopqrstuvwxyz");
+    body["api_key"] = serde_json::json!(SK);
     body["headers"] = serde_json::json!({
-        "Authorization": "Bearer ghp_abcdefghijklmnopqrstuvwxyz0123",
-        "x-note": "sk-test-0123456789abcdef",
+        "Authorization": BEARER,
+        INNOCUOUS_KEY: GITHUB,
     });
     trace::record_body(&request(session), &body);
     trace::set_enabled(false);
@@ -227,11 +248,7 @@ fn test_wire_trace_redacts_every_credential() {
     assert_eq!(files.len(), 1);
     let text = std::fs::read_to_string(&files[0]).expect("read the trace file");
 
-    for secret in [
-        "sk-live-abcdefghijklmnopqrstuvwxyz",
-        "ghp_abcdefghijklmnopqrstuvwxyz0123",
-        "sk-test-0123456789abcdef",
-    ] {
+    for secret in [SK, BEARER, GITHUB] {
         assert!(
             !text.contains(secret),
             "credential `{secret}` survived redaction: {text}"
@@ -288,36 +305,25 @@ fn test_wire_trace_output_is_ascii() {
 /// The step counter restarts in each process and the trace root is shared, so a
 /// fixed file name can survive from an earlier run and be overwritten rather than
 /// added. Both directories this test inspects are cleared first and the session id
-/// carries this process's pid, so the assertions are about the names this run
-/// produced.
+/// carries this test's own prefix, so the claim is about the names this call
+/// produced rather than about the whole directory.
 #[test]
 fn test_wire_trace_file_name_is_sanitised() {
     use_scratch_root();
     let _guard = crate::global_env_lock();
-    let pid = std::process::id();
-    let session = format!("../escape/attempt-{pid}");
-    let flattened = format!("___escape_attempt-{pid}");
-    clear(&flattened);
+    // `..`, a `/` separator and every other non-alphanumeric character become
+    // `_`, so the id can neither escape the root nor nest a directory inside it.
+    const ESCAPING: &str = "../t023-escape/../../etc";
+    const FLATTENED: &str = "___t023-escape_______etc";
+    clear(FLATTENED);
     clear("no-session");
-    assert!(
-        trace_files(&flattened).is_empty() && trace_files("no-session").is_empty(),
-        "the scratch tree must be clean before this test records anything"
-    );
     trace::set_enabled(true);
 
-    let mut request = request(&session);
-    request.session_id = Some(session.clone());
-    trace::record_body(&request, &body());
-
-    let mut absent = request.clone();
-    absent.session_id = None;
-    trace::record_body(&absent, &body());
+    trace::record_body(&request(ESCAPING), &body());
+    trace::record_body(&sessionless_request(), &body());
     trace::set_enabled(false);
 
-    // A path separator in the id must not create a nested directory or escape the
-    // trace root: the whole id is flattened into one file sitting directly in the
-    // root, named entirely in ASCII (NFR-005).
-    let escaped = trace_files(&flattened);
+    let escaped = trace_files(FLATTENED);
     assert_eq!(
         escaped.len(),
         1,
@@ -332,24 +338,20 @@ fn test_wire_trace_file_name_is_sanitised() {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    assert_eq!(name, format!("{flattened}-0001.json"));
+    assert_eq!(name, format!("{FLATTENED}-0001.json"));
     assert!(name.is_ascii(), "a trace file name must be ASCII: {name}");
 
-    // An absent id renders as `no-session` rather than an empty name. The trace
-    // switch is process-wide, so a provider test running concurrently in this
-    // binary can record its own session-less send in the same window: the claim is
-    // that `no-session` is a name this facility produces, not that this call is the
-    // only producer.
+    // An absent id renders as `no-session` rather than an empty name.
     let no_session = trace_files("no-session");
-    assert!(
-        !no_session.is_empty(),
+    assert_eq!(
+        no_session.len(),
+        1,
         "an absent session id must render as `no-session`: {no_session:?}"
     );
-    assert!(
-        no_session
-            .iter()
-            .all(|path| path.parent() == Some(trace::root().as_path())),
-        "every `no-session` file sits directly in the trace root: {no_session:?}"
+    assert_eq!(
+        no_session[0].parent(),
+        Some(trace::root().as_path()),
+        "the `no-session` file sits directly in the trace root"
     );
 }
 
@@ -389,7 +391,7 @@ fn test_every_provider_records_its_body() {
             continue;
         }
         checked += 1;
-        if !source.contains("wire::trace::record_body") {
+        if !source.contains("trace::record_body") {
             offenders.push(name);
         }
     }
@@ -422,7 +424,7 @@ fn test_agent_loop_sets_the_switch_from_config() {
     .expect("read the agent loop step source");
 
     assert!(
-        loop_source.contains("wire::trace::set_enabled(session_config.tools.wire_trace)"),
+        loop_source.contains("trace::set_enabled(session_config.tools.wire_trace)"),
         "the loop must drive the trace switch from `tools.wire_trace` (FR-017)"
     );
 }

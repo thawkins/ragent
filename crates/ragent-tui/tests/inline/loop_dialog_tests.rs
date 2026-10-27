@@ -97,7 +97,7 @@ fn test_build_spec_applies_defaults_and_parsed_fields() {
     state.verify_cmd_field.insert_str("cargo test");
     state.scope_field.insert_str("src/**, tests/**");
     state.read_only_field.insert_str("tests/**");
-    state.tool_set_field.insert_str("read, edit, bash");
+    state.tool_set_field.insert_str("read, Edit, Bash");
     state.max_steps_field.insert_str("40");
     state.cost_limit_field.insert_str("5000");
     state.checkpoints = false;

@@ -18,6 +18,7 @@ use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use crate::provider::http_client;
 use crate::provider::http_client::{MAX_ERROR_BODY_BYTES, read_body_capped};
 use crate::provider::thinking::{full_reasoning_levels, openrouter_reasoning_payload_from_request};
+use crate::provider::wire::trace;
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 
@@ -466,6 +467,7 @@ impl LlmClient for OpenRouterClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>> {
         let url = format!("{}/api/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request);
+        trace::record_body(&request, &body);
         let body_bytes = serde_json::to_vec(&body).context("serialise OpenRouter request body")?;
 
         tracing::debug!(

@@ -516,8 +516,8 @@ fn test_disabled_recorders_ignore_toggles() {
     llm.record_rate_limit("provider", Some(75.0), Some(40.0));
 
     let tool = ToolRecorder::disabled();
-    tool.record_invocation("bash");
-    tool.record_duration("bash", 10.0);
+    tool.record_invocation("Bash");
+    tool.record_duration("Bash", 10.0);
 
     let session = SessionRecorder::disabled();
     session.record_session_start();
@@ -559,9 +559,9 @@ fn test_tool_recorder_record_invocation_is_toggle_gated() {
     let registry = registry_with_toggles(&provider, toggles);
     let recorder = ToolRecorder::new(registry);
 
-    recorder.record_invocation("bash");
+    recorder.record_invocation("Bash");
     // The sibling metric is still emitted.
-    recorder.record_duration("bash", 12.0);
+    recorder.record_duration("Bash", 12.0);
 
     let metrics = flush_and_collect(&provider, &exporter, &rt);
     assert!(
