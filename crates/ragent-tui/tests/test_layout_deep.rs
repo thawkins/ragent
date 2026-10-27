@@ -922,6 +922,7 @@ fn mcp_discover_rows_all_sources_and_feedback_variants() {
             args: Vec::new(),
             env: HashMap::new(),
             source: McpDiscoverySource::SystemPath,
+            definition_file: None,
         },
         DiscoveredMcpServer {
             id: "npm-server".to_string(),
@@ -932,6 +933,7 @@ fn mcp_discover_rows_all_sources_and_feedback_variants() {
             source: McpDiscoverySource::NpmGlobal {
                 prefix_dir: PathBuf::from("/usr/lib"),
             },
+            definition_file: None,
         },
         DiscoveredMcpServer {
             id: "registry-server".to_string(),
@@ -942,6 +944,7 @@ fn mcp_discover_rows_all_sources_and_feedback_variants() {
             source: McpDiscoverySource::McpRegistry {
                 registry_dir: PathBuf::from("/opt/registry"),
             },
+            definition_file: None,
         },
     ];
     let mut app = support::make_app();

@@ -8,6 +8,8 @@
 //! allocations that the `json!` macro would create.
 
 use axum::response::sse::Event as SseEvent;
+use std::borrow::Cow;
+
 use ragent_agent::event::{Event, FinishReason};
 use ragent_agent::sanitize::redact_secrets_cow;
 use serde::Serialize;
@@ -78,6 +80,9 @@ struct QuestionReqP<'a> {
     options: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     default_index: Option<usize>,
+    /// Tells a remote surface to mask the typed answer (a sudo password).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    secret: bool,
 }
 
 #[derive(Serialize)]
@@ -493,22 +498,37 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             question,
             options,
             default_index,
+            secret,
         } => to_data(&QuestionReqP {
             session_id,
             request_id,
             question,
             options,
             default_index: *default_index,
+            secret: *secret,
         }),
         Event::QuestionAnswered {
             session_id,
             request_id,
             response,
-        } => to_data(&QuestionAnswerP {
-            session_id,
-            request_id,
-            response,
-        }),
+            secret,
+        } => {
+            // A secret answer is the sudo askpass password. It is replaced
+            // outright rather than pattern-redacted: a password need not look
+            // like an API key, so shape-matching would leak it. The in-process
+            // event keeps the real value (the askpass helper reads it from the
+            // bus); only the wire form is masked (audit high finding).
+            let redacted = if *secret {
+                Cow::Borrowed(crate::routes::REDACTED)
+            } else {
+                redact_secrets_cow(response)
+            };
+            to_data(&QuestionAnswerP {
+                session_id,
+                request_id,
+                response: &redacted,
+            })
+        }
 
         Event::AgentSwitched {
             session_id,

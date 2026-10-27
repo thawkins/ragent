@@ -237,6 +237,7 @@ async fn question_dialog_with_options() {
         options: vec!["a".to_string(), "b".to_string(), "c".to_string()],
         default_index: Some(0),
         expire_at_ms: None,
+        secret: false,
     });
     assert!(handle_key(&mut app, key(KeyCode::Down)).await.is_none());
     assert_eq!(app.question_selected_index, 1);
@@ -274,6 +275,7 @@ async fn question_dialog_with_options_esc_dismisses() {
         options: vec!["a".to_string()],
         default_index: None,
         expire_at_ms: None,
+        secret: false,
     });
     assert!(handle_key(&mut app, key(KeyCode::Esc)).await.is_none());
     assert!(app.question_queue.is_empty());
@@ -289,6 +291,7 @@ async fn question_dialog_free_text_edit_and_submit() {
         options: Vec::new(),
         default_index: None,
         expire_at_ms: None,
+        secret: false,
     });
     assert!(
         handle_key(&mut app, key(KeyCode::Char('h')))
@@ -328,6 +331,7 @@ async fn question_dialog_free_text_esc_dismisses() {
         options: Vec::new(),
         default_index: None,
         expire_at_ms: None,
+        secret: false,
     });
     app.pending_question_input = "typed".to_string();
     assert!(handle_key(&mut app, key(KeyCode::Esc)).await.is_none());

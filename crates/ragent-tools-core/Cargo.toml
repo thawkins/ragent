@@ -3,6 +3,7 @@ autotests = false
 name = "ragent-tools-core"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 authors = ["Tim Hawkins"]
 description = "Essential file, shell, and search tools for ragent"

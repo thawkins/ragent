@@ -114,6 +114,7 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
             .to_string(),
         options: Vec::new(),
         default_index: None,
+        secret: false,
     })
     .await;
     assert_eq!(app.question_queue.len(), 1, "dialog should be queued");
@@ -138,6 +139,7 @@ async fn test_research_clarification_dialog_round_trip_publishes_answer() {
         session_id,
         request_id,
         response,
+        ..
     } = answer
     else {
         panic!("expected QuestionAnswered, got {answer:?}");
@@ -164,6 +166,7 @@ async fn test_research_clarification_dismissed_marker_rejected() {
             .to_string(),
         options: Vec::new(),
         default_index: None,
+        secret: false,
     })
     .await;
 

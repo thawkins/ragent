@@ -429,7 +429,8 @@ fn remote_decoder_covers_every_event_arm() {
             request_id: "q1".to_string(),
             question: "?".to_string(),
             options: vec!["a".to_string()],
-            default_index: Some(1)
+            default_index: Some(1),
+            secret: false,
         }
     );
     // Wrong-typed / missing option fields collapse to empty/None.
@@ -439,7 +440,8 @@ fn remote_decoder_covers_every_event_arm() {
             request_id: "q2".to_string(),
             question: String::new(),
             options: Vec::new(),
-            default_index: None
+            default_index: None,
+            secret: false,
         }
     );
     // An unknown event name is preserved.

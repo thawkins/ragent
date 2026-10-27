@@ -507,6 +507,7 @@ async fn permission_requested_duplicate_and_other_session_are_ignored() {
 async fn question_requested_clamps_an_out_of_range_default_index() {
     let mut app = new_app("s1");
     app.handle_event(Event::QuestionRequested {
+        secret: false,
         session_id: "s1".to_string(),
         request_id: "q1".to_string(),
         question: "Pick one".to_string(),
@@ -519,6 +520,7 @@ async fn question_requested_clamps_an_out_of_range_default_index() {
 
     // A duplicate request id is dropped.
     app.handle_event(Event::QuestionRequested {
+        secret: false,
         session_id: "s1".to_string(),
         request_id: "q1".to_string(),
         question: "Pick one".to_string(),
@@ -1263,6 +1265,7 @@ async fn research_clarify_question_dismissal_cancels_the_run() {
     for _ in 0..100 {
         match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
             Ok(Ok(Event::QuestionRequested {
+                secret: false,
                 session_id,
                 request_id,
                 ..
@@ -1271,6 +1274,7 @@ async fn research_clarify_question_dismissal_cancels_the_run() {
                     session_id,
                     request_id,
                     response: "[User dismissed question]".to_string(),
+                    secret: false,
                 });
                 asked = true;
                 break;

@@ -335,7 +335,16 @@ impl BackgroundCommand {
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        debug!(error = %e, %task_id_stdout, "stdout reader error");
+                        // A dead background stream is a real failure: at `debug`
+                        // it was invisible, so a truncated capture looked like a
+                        // clean finish.
+                        warn!(
+                            error = %e,
+                            task_id = %task_id_stdout,
+                            command = %command_stdout,
+                            stream = "stdout",
+                            "background command reader failed"
+                        );
                         break;
                     }
                 }
@@ -363,7 +372,13 @@ impl BackgroundCommand {
                     }
                     Ok(None) => break,
                     Err(e) => {
-                        debug!(error = %e, %task_id_stderr, "stderr reader error");
+                        warn!(
+                            error = %e,
+                            task_id = %task_id_stderr,
+                            command = %command,
+                            stream = "stderr",
+                            "background command reader failed"
+                        );
                         break;
                     }
                 }

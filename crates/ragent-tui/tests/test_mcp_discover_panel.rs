@@ -108,6 +108,7 @@ fn discovered(id: &str) -> DiscoveredMcpServer {
         args: Vec::new(),
         env: std::collections::HashMap::new(),
         source: McpDiscoverySource::SystemPath,
+        definition_file: None,
     }
 }
 
@@ -205,7 +206,11 @@ async fn mcp_discover_space_enables_then_disables_the_highlighted_server() {
     press(&mut app, KeyCode::Char(' ')).await;
 
     let state = app.mcp_discover.as_ref().expect("dialog open");
-    assert!(state.enabled[0], "the toggled row must read enabled");
+    assert!(
+        state.enabled[0],
+        "the toggled row must read enabled (feedback: {:?})",
+        state.feedback
+    );
     assert!(
         state
             .feedback

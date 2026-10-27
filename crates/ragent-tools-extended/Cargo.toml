@@ -3,6 +3,7 @@ autotests = false
 name = "ragent-tools-extended"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 authors = ["Tim Hawkins"]
 description = "Extended document, web, memory, and code index tools for ragent"
@@ -63,6 +64,12 @@ optional = true
 [features]
 default = []
 embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+# Integration-test only: compiles in the `RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF`
+# escape hatch so the fetch/crawl tools can be exercised against a loopback
+# test server. Never enabled by a workspace member or a release build, so a
+# shipped binary cannot be talked out of its SSRF guard by an environment
+# variable (audit high finding).
+test-ssrf-bypass = []
 # Spec `openhands` FR-029 (T-017): opt-in bundled headless-browser driver. Off
 # by default (no new mandatory runtime dependency, assumption A10). When on,
 # `mf_screenshot` is registered only while an engine binary resolves on `PATH`.

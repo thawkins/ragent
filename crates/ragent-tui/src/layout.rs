@@ -5894,7 +5894,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         .split(chat_area);
 
     // Use v2 status bar with responsive design
-    crate::layout_statusbar::render_status_bar_v2(frame, app, chunks[0]);
+    crate::layout_statusbar::render_status_bar(frame, app, chunks[0]);
 
     if team_strip {
         crate::teammate_strip::render(frame, app, chunks[1]);
@@ -9045,7 +9045,15 @@ fn render_question_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(70, 40, frame.area());
     frame.render_widget(Clear, area);
 
-    let input_display = format!("> {}_", app.pending_question_input);
+    // A secret question (the sudo askpass password) masks every typed character,
+    // the same way the provider API-key field does, so a password is never
+    // painted in clear text while it is being entered (audit high finding).
+    let input_display = if req.secret {
+        let masked = "*".repeat(app.pending_question_input.chars().count());
+        format!("> {masked}_")
+    } else {
+        format!("> {}_", app.pending_question_input)
+    };
     let text = vec![
         Line::from(Span::styled(
             "Agent Question",
@@ -9309,10 +9317,13 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
     // + rows + feedback(1) + hints(1) + borders(2).
     let body_rows = total.max(1) as u16;
     let dialog_height = (body_rows + 8).clamp(9, 40);
+    // Wide enough for the fixed columns plus an absolute defining-file path:
+    // the former 90-column cap clipped every path past `servers/...`, which hid
+    // the very column that tells a bridged row from a configured one.
     let area = {
         let full = frame.area();
         let h = dialog_height.min(full.height.saturating_sub(4));
-        let w = full.width.min(90);
+        let w = full.width.min(170);
         ratatui::layout::Rect {
             x: (full.width.saturating_sub(w)) / 2,
             y: (full.height.saturating_sub(h)) / 2,
@@ -9415,7 +9426,10 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
         .add_modifier(Modifier::BOLD);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            format!("     {:<20}  {:<38}  {}", "ID", "Name", "Source"),
+            format!(
+                "     {:<20}  {:<38}  {}",
+                "ID", "Name", "Source / Defined in"
+            ),
             heading_style,
         ))),
         heading_area,
@@ -9443,12 +9457,19 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &mut App) {
                 ragent_agent::mcp::McpDiscoverySource::SystemPath => "PATH",
                 ragent_agent::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global",
                 ragent_agent::mcp::McpDiscoverySource::McpRegistry { .. } => "MCP registry",
+                ragent_agent::mcp::McpDiscoverySource::Plugin { .. } => "plugin",
+                ragent_agent::mcp::McpDiscoverySource::Connector { .. } => "connector",
             };
             let row = format!(
                 " {marker} {:<20}  {:<38}  {}",
                 truncate_bytes_no_ellipsis(&srv.id, 20),
                 name,
-                source,
+                match &srv.definition_file {
+                    // A bridged server shows the file that declares it, so the
+                    // user can see `/mcp remove` would not be the right command.
+                    Some(path) => format!("{} [{}]", source, path.display()),
+                    None => source.to_string(),
+                },
             );
             let style = if is_enabled {
                 enabled_style

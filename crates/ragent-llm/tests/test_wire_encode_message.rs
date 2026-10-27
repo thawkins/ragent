@@ -726,6 +726,45 @@ fn test_native_ollama_strips_the_data_uri_and_keeps_images_to_the_turn_allowed()
 }
 
 #[test]
+fn test_native_ollama_content_is_always_a_string() {
+    // Native Ollama declares `content` as a Go `string`. Any other JSON value - an
+    // image-only user turn, or a part list holding nothing but constructs - makes the
+    // endpoint reject the entire request with `json: cannot unmarshal array into Go
+    // struct field ... of type string`, which is what a session that had posted an
+    // image then saw on every later turn.
+    let ctx = MessageContext::default();
+    let image_only = message(
+        "user",
+        vec![ContentPart::ImageUrl {
+            url: "data:image/png;base64,AAA".to_string(),
+        }],
+    );
+    let encoded = encode_message(OLLAMA_NATIVE, &image_only, &ctx);
+    assert_eq!(
+        encoded[0]["content"],
+        serde_json::json!(""),
+        "an image-only turn still writes a string content: {}",
+        encoded[0]
+    );
+    assert_eq!(encoded[0]["images"][0], "AAA");
+
+    // Two text parts concatenate into one string rather than an array of blocks.
+    let two_texts = message(
+        "user",
+        vec![
+            ContentPart::Text {
+                text: "first".to_string(),
+            },
+            ContentPart::Text {
+                text: "second".to_string(),
+            },
+        ],
+    );
+    let encoded = encode_message(OLLAMA_NATIVE, &two_texts, &ctx);
+    assert_eq!(encoded[0]["content"], serde_json::json!("first\nsecond"));
+}
+
+#[test]
 fn test_responses_input_carries_tool_history_instead_of_only_text() {
     // FR-018's subject is that the Responses path used to drop every non-text part.
     // The carrier now reaches the wire; the `WireLoss` policy for the constructs

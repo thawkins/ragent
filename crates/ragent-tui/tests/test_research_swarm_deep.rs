@@ -1195,6 +1195,7 @@ fn deadline_timed_question_wakes_within_a_second() {
             options: vec!["a".to_string()],
             default_index: Some(0),
             expire_at_ms: Some(1),
+            secret: false,
         });
     let now = Instant::now();
     let deadline = ragent_tui::compute_next_deadline_test(&app, now);

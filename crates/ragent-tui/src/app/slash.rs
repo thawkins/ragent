@@ -664,7 +664,13 @@ where
     S: std::hash::BuildHasher,
     H: std::hash::BuildHasher,
 {
-    let mut merged = ragent_agent::plugin::plugin_mcp_servers(working_dir, configured);
+    // Bridged servers (plugin *and* connector legs) are part of the live set: a
+    // connector-bridged server must appear in `/mcp` exactly like a plugin one.
+    let mut merged: Vec<(String, ragent_agent::McpServerConfig)> =
+        crate::app::mcp_bridge::merged_mcp_servers(working_dir, configured)
+            .into_iter()
+            .map(|(id, config, _source)| (id, config))
+            .collect();
     // Preserve servers the live client reports that are not in the merged
     // configuration set (e.g. a server registered after startup); the display
     // list must never forget a connected server just because a config reload
@@ -732,7 +738,7 @@ pub(crate) fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLoca
     }
 
     out.push_str("\nMCP servers discovered:\n\n");
-    out.push_str("| Server | Found in | Command |\n|---|---|---|\n");
+    out.push_str("| Server | Found in | Command | Defined in |\n|---|---|---|---|\n");
     for location in locations {
         for server in &location.servers {
             let mut command = server.executable.to_string_lossy().into_owned();
@@ -742,15 +748,66 @@ pub(crate) fn render_mcp_config(locations: &[ragent_agent::mcp::McpDiscoveryLoca
                     command.push_str(arg);
                 }
             }
+            // A bridged server's definition lives in its owner's manifest, which
+            // `/mcp remove` must not prune; the column makes that visible before
+            // the command is run.
+            let defined_in = match &server.definition_file {
+                Some(path) => path.display().to_string(),
+                None => "-".to_string(),
+            };
             out.push_str(&format!(
-                "| {} | {} | {} |\n",
+                "| {} | {} | {} | {} |\n",
                 cell(&server.id),
                 cell(&location.label),
-                cell(&command)
+                cell(&command),
+                cell(&defined_in)
             ));
         }
     }
     out
+}
+
+/// The file that declares each MCP server: the user-global `ragent.json` for a
+/// configured server, or the manifest (or external `mcp.json`) of the plugin
+/// that contributes a bridged one.
+///
+/// Keyed by server id so the `/mcp` list can print a `Defined in:` block, which
+/// replaced a seventh table column that wrapped every header cell.
+pub(crate) fn mcp_declaration_files<S: std::hash::BuildHasher>(
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
+    working_dir: &std::path::Path,
+) -> std::collections::HashMap<String, String> {
+    let configured_path = ragent_agent::Config::global_config_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "ragent.json".to_string());
+    let mut out: std::collections::HashMap<String, String> = configured
+        .keys()
+        .map(|id| (id.clone(), configured_path.clone()))
+        .collect();
+    for bridged in crate::app::mcp_bridge::bridged_servers(working_dir, configured) {
+        if let Some(path) = bridged.source_file {
+            out.insert(bridged.id, path.display().to_string());
+        }
+    }
+    out
+}
+
+/// The owner of every bridged MCP server, as `(origin label, owner id)`.
+///
+/// A configured `ragent.json` entry is absent from the map: it is the user's own,
+/// not a plugin's or a connector's.
+pub(crate) fn mcp_bridged_owners<S: std::hash::BuildHasher>(
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
+    working_dir: &std::path::Path,
+) -> std::collections::HashMap<String, (&'static str, String)> {
+    crate::app::mcp_bridge::bridged_servers(working_dir, configured)
+        .into_iter()
+        .map(|server| {
+            let label = server.origin.label();
+            let owner = server.origin.owner().to_string();
+            (server.id, (label, owner))
+        })
+        .collect()
 }
 
 /// Whether an MCP server is enabled, for display purposes.
@@ -5527,7 +5584,7 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                 match sub {
                     "help" => {
                         self.append_assistant_text(
-                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers, their enabled state and their tools |\n| `/mcp config` | Show where ragent looks for MCP definitions, counts per location, and servers found |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Enable a server and connect it now (no restart needed) |\n| `/mcp disconnect <id>` | Disable a server and disconnect it now; the choice persists globally |\n| `/mcp help` | Show this help |\n\nEnabled state is stored globally in `<state dir>/mcp_state.json`, so a server\ndisabled here stays disabled in every project. A newly added server is enabled\nby default.",
+                            "From: /mcp help\n\n## /mcp \u{2014} Model Context Protocol servers\n\n| Subcommand | Description |\n|---|---|\n| `/mcp` | Show all registered servers, their enabled state and their tools |\n| `/mcp config` | Show where ragent looks for MCP definitions, counts per location, and servers found |\n| `/mcp discover` | Scan the environment for known MCP servers and open the discover dialog |\n| `/mcp connect <id>` | Enable a server and connect it now (no restart needed) |\n| `/mcp disconnect <id>` | Disable a server and disconnect it now; the choice persists globally |\n| `/mcp remove <id>` | Disconnect a configured server and delete its `ragent.json` entry |\n| `/mcp help` | Show this help |\n\nEnabled state is stored globally in `<state dir>/mcp_state.json`, so a server\ndisabled here stays disabled in every project. A newly added server is enabled\nby default.\n\nBridged servers are refused by `/mcp remove`: a server whose definition lives in\nthe `mcpServers` section of an installed plugin, or in a connector's manifest,\nis removed with `/plugins remove <id>` or `/connectors remove <id>` instead.",
                         );
                         self.status = "mcp: help".to_string();
                         return;
@@ -5565,6 +5622,34 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                             feedback: None,
                         });
 
+                        return;
+                    }
+                    "remove" => {
+                        match mcp_args.get(1).copied() {
+                            None => {
+                                self.status = "Usage: /mcp remove <id>".to_string();
+                            }
+                            Some("help") => {
+                                self.append_assistant_text(
+                                    "From: /mcp remove help\n\n## /mcp remove <id>\n\n\
+                                     Disconnects the server and deletes its definition from the\n\
+                                     file that declares it. A configured server's entry lives in\n\
+                                     the `mcp` section of the user-global `ragent.json`; every\n\
+                                     other key in that file is preserved.\n\n\
+                                     Bridged servers are refused: a server declared by an\n\
+                                     installed plugin is removed with `/plugins remove <id>`\n\
+                                     and one declared by a connector with\n\
+                                     `/connectors remove <id>`. `/mcp disconnect <id>` still\n\
+                                     stops a bridged server without uninstalling its owner.\n",
+                                );
+                                self.status = "mcp: remove help".to_string();
+                            }
+                            Some(id) => {
+                                let report = self.remove_mcp_server(id).await;
+                                self.append_assistant_text(&report);
+                                self.status = "mcp: remove".to_string();
+                            }
+                        }
                         return;
                     }
                     "connect" | "disconnect" => {
@@ -5672,7 +5757,38 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
                                 self.mcp_servers.len()
                             ));
                         }
-                        out.push_str("\nSubcommands: /mcp discover  /mcp connect <id>  /mcp disconnect <id>\n");
+                        // The defining file of each server, as a separate block:
+                        // adding it as a seventh column wrapped every header cell
+                        // past the message width, so it is keyed by id instead.
+                        if !self.mcp_servers.is_empty() {
+                            let declared = mcp_declaration_files(&configured, &self.cwd_path);
+                            out.push_str("\nDefined in:\n\n");
+                            for server in &self.mcp_servers {
+                                let source = declared
+                                    .get(&server.id)
+                                    .cloned()
+                                    .unwrap_or_else(|| "-".to_string());
+                                out.push_str(&format!("- `{}`: {}\n", server.id, source));
+                            }
+                        }
+                        // Who owns each server: a bridged server's definition
+                        // lives in its plugin or connector manifest, so `/mcp
+                        // remove` is not the right command for it and the list
+                        // must say whose it is.
+                        let owners = mcp_bridged_owners(&configured, &self.cwd_path);
+                        if !owners.is_empty() {
+                            out.push_str("\nManaged by:\n\n");
+                            for server in &self.mcp_servers {
+                                let Some((origin, owner)) = owners.get(&server.id) else {
+                                    continue;
+                                };
+                                out.push_str(&format!("- `{}`: {origin} `{owner}`\n", server.id));
+                            }
+                        }
+                        out.push_str(
+                            "\nSubcommands: /mcp discover  /mcp connect <id>  \
+                             /mcp disconnect <id>  /mcp remove <id>\n",
+                        );
                         self.append_assistant_text(&out);
                     }
                 }
@@ -11899,7 +12015,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                 }
                 Err(e) => {
-                    tracing::debug!(error = %e, "Failed to invoke skill");
+                    // A skill the user asked for did not run: that is a visible
+                    // failure, not debug detail.
+                    tracing::warn!(error = %e, "Failed to invoke skill");
                 }
             }
         });

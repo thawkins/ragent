@@ -70,6 +70,7 @@ fn discovered_server_to_config_is_disabled_by_default() {
         args: vec!["--root".to_string(), "/tmp".to_string()],
         env: std::collections::HashMap::new(),
         source: McpDiscoverySource::SystemPath,
+        definition_file: None,
     };
 
     let config = server.to_config();

@@ -459,12 +459,14 @@ fn convert_extracted_event(event: ragent_tools_core::event::Event) -> Option<Eve
             question,
             options,
             default_index,
+            secret,
         } => Some(Event::QuestionRequested {
             session_id,
             request_id,
             question,
             options,
             default_index,
+            secret,
         }),
         _ => None,
     }
@@ -485,10 +487,12 @@ fn convert_core_event(event: Event) -> Option<ragent_tools_core::event::Event> {
             session_id,
             request_id,
             response,
+            secret,
         } => Some(ragent_tools_core::event::Event::QuestionAnswered {
             session_id,
             request_id,
             response,
+            secret,
         }),
         _ => None,
     }

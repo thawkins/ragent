@@ -126,6 +126,24 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex pattern")
 });
 
+/// Connection-string userinfo: `scheme://user:secret@host`.
+///
+/// The password half of a `DATABASE_URL`-style variable is a live credential
+/// whose name carries no credential word, so it is masked by shape rather than
+/// by key name (audit high finding). Kept as its own pattern, applied as a
+/// second pass, because the `regex` crate has no look-around: the `@` must be
+/// consumed to anchor the password's end, and folding this arm into
+/// [`SECRET_PATTERN`] would insert two capture groups ahead of the generic
+/// arm's key group and silently renumber `${1}` (which must stay the key +
+/// separator for `redact_secrets_owned`).
+///
+/// Group 1 is the scheme and user (re-emitted so the URL stays readable), and
+/// group 2 is the `@` (re-emitted so the host stays attached).
+static CONNSTRING_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(r"([a-z][a-z0-9+.\-]*://[^\s:/@]+:)[^\s@/]{3,}(@)").expect("valid regex pattern")
+});
+
 /// Global in-memory registry of known secret values.
 ///
 /// Secrets registered here are redacted by exact substring match in
@@ -443,8 +461,14 @@ fn redact_secrets_owned(msg: &str, registry_empty: bool) -> String {
     // token/apikey/secret/password arm captures the key + separator as group 1
     // and re-inserts it (`${1}`) so JSON/config structure survives redaction;
     // for every other arm group 1 is empty.
-    SECRET_PATTERN
-        .replace_all(&result, "${1}[REDACTED]")
+    let pass1 = SECRET_PATTERN.replace_all(&result, "${1}[REDACTED]");
+
+    // Layer 3: connection-string passwords (`scheme://user:password@host`),
+    // which no `SECRET_PATTERN` arm covers because the variable name carries no
+    // credential word. Group 1 re-emits the scheme and user, group 2 re-emits
+    // the `@`, so only the password is blanked and the URL stays readable.
+    CONNSTRING_PATTERN
+        .replace_all(&pass1, "${1}[REDACTED]${2}")
         .into_owned()
 }
 

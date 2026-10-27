@@ -367,7 +367,13 @@ impl Tool for TeamCreateTool {
                                             // INTENTIONAL: best-effort store cleanup
                                             let _ = ts.remove_task(&id);
                                         }
-                                        tracing::warn!(task_id = %id, feedback = %feedback, "TaskCreated hook rejected seeded task");
+                                        // The feedback is the hook's own stdout: redact
+                                        // it before it reaches the log (audit finding).
+                                        tracing::warn!(
+                                            task_id = %id,
+                                            feedback = %ragent_types::sanitize::redact_secrets(&feedback),
+                                            "TaskCreated hook rejected seeded task"
+                                        );
                                     }
                                 }
                             }

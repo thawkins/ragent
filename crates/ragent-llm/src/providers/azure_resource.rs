@@ -48,7 +48,9 @@ use ragent_config::{Capabilities, Cost};
 pub(crate) const DEFAULT_AZURE_CONTEXT_WINDOW: usize = 128_000;
 
 /// A single Azure resource entry parsed from `azureresources.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+///
+/// `Debug` is hand-written (below) so the inline `api_key` never prints.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 pub struct AzureResourceEntry {
     /// Unique identifier for this resource (used as model ID).
     pub id: String,
@@ -74,6 +76,29 @@ pub struct AzureResourceEntry {
     /// API type: "openai" or "anthropic". Defaults to "openai".
     #[serde(default, rename = "api_type")]
     pub api_type: Option<String>,
+}
+
+/// Hand-written so the inline `api_key` never reaches a log or panic payload.
+///
+/// [`AzureResourceEntry`] is held inside the `Debug`-derived
+/// `ProviderSetupStep::SelectAzureResource` in the TUI, so a derived `Debug` here
+/// would print a live credential through any `{:?}` of the app state (audit high
+/// finding). Every other field prints unchanged; `api_key` is reported only as
+/// whether it is set.
+impl std::fmt::Debug for AzureResourceEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AzureResourceEntry")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("endpoint", &self.endpoint)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("api_key_env", &self.api_key_env)
+            .field("context_window", &self.context_window)
+            .field("capabilities", &self.capabilities)
+            .field("thinking", &self.thinking)
+            .field("api_type", &self.api_type)
+            .finish()
+    }
 }
 
 /// Top-level structure of `azureresources.json`.

@@ -854,7 +854,7 @@ fn run_pre_tool_use_hook_list(
                             command = %hook.command,
                             tool = %tool_name,
                             exit_code = 1,
-                            stderr = %capped_stderr,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PreToolUse hook exited with code 1 - allowing with warning"
                         );
                         if let Some(bus) = event_bus {
@@ -872,7 +872,7 @@ fn run_pre_tool_use_hook_list(
                             command = %hook.command,
                             tool = %tool_name,
                             exit_code = ?code,
-                            stderr = %capped_stderr,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PreToolUse hook failed with exit code >=3 - falling through to normal permission flow"
                         );
                     }
@@ -1177,8 +1177,8 @@ async fn run_post_tool_use_hook_list(
                             trigger = "post_tool_use",
                             command = %command,
                             tool = %tool_name,
-                            exit_code = 1,
-                            stderr = %capped_stderr,
+                            exit_code = ?code,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PostToolUse hook exited with code 1 - warning"
                         );
                         if let Some(bus) = event_bus {
@@ -1197,7 +1197,7 @@ async fn run_post_tool_use_hook_list(
                             command = %command,
                             tool = %tool_name,
                             exit_code = ?code,
-                            stderr = %capped_stderr,
+                            stderr = %ragent_types::sanitize::redact_secrets(&capped_stderr),
                             "PostToolUse hook failed with exit code >=3"
                         );
                     }
@@ -1417,11 +1417,16 @@ pub fn fire_hooks(
                 }
                 match run_hook_command_async(cmd, payload).await {
                     Ok(out) if !out.status.success() => {
+                        // Hook output is arbitrary user content: redact it so an
+                        // echoed credential never reaches the log (audit finding;
+                        // matches the PreToolUse/PostToolUse sites above).
                         tracing::warn!(
                             trigger = %trigger_s,
                             command = %command,
                             exit_code = ?out.status.code(),
-                            stderr = %String::from_utf8_lossy(&out.stderr),
+                            stderr = %ragent_types::sanitize::redact_secrets(
+                                &String::from_utf8_lossy(&out.stderr)
+                            ),
                             "Hook exited with non-zero status"
                         );
                     }

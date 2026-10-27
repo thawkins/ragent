@@ -9,7 +9,7 @@ configuration, and common workflows.
 
 ## Prerequisites
 
-- **Rust 1.85+** (edition 2024) — install via [rustup](https://rustup.rs)
+- **Rust 1.91+** (edition 2024) — install via [rustup](https://rustup.rs)
 - An LLM provider: **Anthropic**, **OpenAI**, **Hugging Face**, **Amazon Bedrock**, or a local **Ollama** server
 
 ## Installation
@@ -28,7 +28,7 @@ cp target/release/ragent ~/.local/bin/
 ragent --version    # or: ragent -V
 ```
 
-Requires Rust 1.85+ (edition 2024, pinned toolchain `stable`). Incremental
+Requires Rust 1.91+ (edition 2024, pinned toolchain `stable`). Incremental
 compilation is disabled workspace-wide (`.cargo/config.toml` `[build]
 incremental = false`, repeated in `[profile.dev]`/`[profile.test]`), because the
 `sccache` wrapper cannot cache incremental artifacts - expect full rebuilds.
@@ -884,7 +884,13 @@ ragent-native `~/.config/ragent/servers/` directory, npm global `node_modules`,
 definitions found at each location (and a `(missing)` marker for an absent
 directory) followed by the individual servers discovered. Use `/mcp discover` to
 scan and install interactively, and `/mcp connect <id>` / `/mcp disconnect <id>`
-to toggle a server live.
+to toggle a server live. `/mcp remove <id>` deletes a configured server's
+`ragent.json` entry (preserving every other key) and clears its enable-ledger
+row, so a re-added server starts enabled; a server bridged from a plugin or a
+connector is refused by name and is removed with `/plugins remove <id>` or
+`/connectors remove <id>` instead. `/mcp config` and the discover dialog both
+name the manifest that declares each server, so a bridged row is
+distinguishable from your own `ragent.json` entry before any removal.
 
 UI internationalisation is opt-in and English by default. Install a locale
 message catalog at `<project>/.ragent/locales/<locale>.json` (or

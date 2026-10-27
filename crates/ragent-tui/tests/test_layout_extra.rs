@@ -832,6 +832,7 @@ fn render_mcp_discover_overlay() {
             args: Vec::new(),
             env: HashMap::new(),
             source: McpDiscoverySource::SystemPath,
+            definition_file: None,
         }],
         enabled: vec![true],
         selected: 0,
@@ -969,6 +970,7 @@ fn render_question_dialog_multiple_choice_and_free_text() {
         options: vec!["alpha".to_string(), "beta".to_string()],
         default_index: Some(1),
         expire_at_ms: None,
+        secret: false,
     });
     let _ = render(&mut app, 120, 40);
 
@@ -980,6 +982,7 @@ fn render_question_dialog_multiple_choice_and_free_text() {
         options: Vec::new(),
         default_index: None,
         expire_at_ms: None,
+        secret: false,
     });
     app.pending_question_input = "half typed".to_string();
     let _ = render(&mut app, 120, 40);

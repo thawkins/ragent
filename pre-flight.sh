@@ -199,7 +199,10 @@ if $QUICK_MODE; then
     fi
 else
     print_step "Running full test suite..."
-    if timeout 600 cargo nextest run --workspace --no-fail-fast 2>&1; then
+    # `ragent-tools-extended/test-ssrf-bypass` compiles in the loopback escape
+    # hatch the fetch/crawl integration tests need. Off by default, so a
+    # release build keeps its SSRF guard regardless of the environment.
+    if timeout 600 cargo nextest run --workspace --features ragent-tools-extended/test-ssrf-bypass --no-fail-fast 2>&1; then
         print_success "All tests passed"
     else
         print_failure "Tests failed"

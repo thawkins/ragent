@@ -1244,6 +1244,7 @@ async fn test_ask_user_question_answered() -> Result<()> {
     tokio::spawn(async move {
         while let Ok(event) = resp_rx.recv().await {
             if let Event::QuestionRequested {
+                secret: false,
                 request_id,
                 session_id,
                 ..
@@ -1254,6 +1255,7 @@ async fn test_ask_user_question_answered() -> Result<()> {
                     session_id: sid.clone(),
                     request_id,
                     response: "42".into(),
+                    secret: false,
                 });
                 break;
             }

@@ -1401,6 +1401,7 @@ async fn event_permission_and_question_queue_push() {
     assert_eq!(app.permission_queue.len(), 1);
 
     app.handle_event(Event::QuestionRequested {
+        secret: false,
         session_id: "sess-1".to_string(),
         request_id: "q1".to_string(),
         question: "Proceed?".to_string(),

@@ -321,6 +321,7 @@ fn discovered(id: &str) -> ragent_agent::mcp::discovery::DiscoveredMcpServer {
         args: Vec::new(),
         env: std::collections::HashMap::new(),
         source: ragent_agent::mcp::discovery::McpDiscoverySource::SystemPath,
+        definition_file: None,
     }
 }
 

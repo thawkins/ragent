@@ -2,6 +2,168 @@
 
 ## [Unreleased]
 
+## [1.0.151] - 2026-10-27
+
+Release 1.0.151: a workspace-wide security-hardening pass driven by the fresh
+`docs/reports/code-audit.md` (81 findings, 21 high) - a credential no longer
+reaches a log line, an SSE stream or a `{:?}` dump; the masterfetch SSRF test
+bypass becomes a compile-time feature so a shipped binary cannot be talked out
+of its guard; the sudo askpass password is masked in the TUI and redacted on the
+wire. Alongside it: `quick-xml` 0.42 clears both CVSS-7.5 DoS advisories, the
+workspace gains a `rust-version` floor of 1.91, `/mcp remove` lands with
+plugin/connector-bridged servers refused by name, the `_npx` cache repair takes a
+cross-process `flock`, and the `ms0-regression` CI job is green again.
+
+### Added
+- **`/mcp remove <id>`** (`/mcp remove help` documents it) disconnects a
+  configured MCP server and deletes its entry from the `mcp` section of the
+  user-global `ragent.json`, through a new general
+  `Config::edit_global_config(edit)` that reads, mutates and writes the file as
+  raw JSON so every key the edit does not touch survives (serialising the
+  *merged* config would have dropped keys this build does not model). Every
+  other key in the file is preserved, an empty `mcp` object is removed rather
+  than left as `{}`, the enable-ledger row is cleared so a re-added server starts
+  enabled again, and the session-side disconnect runs first so a failed write
+  leaves the running state consistent with the file.
+- **A bridged MCP server is refused by `/mcp remove`, and `/mcp` says whose it
+  is.** A server whose definition lives in a plugin manifest (or the external
+  `mcp.json` the manifest names) or in a connector's `connector.json` belongs to
+  that owner: pruning it would leave the owner installed declaring a server list
+  it no longer has. The refusal names `/plugins remove <id>` or
+  `/connectors remove <id>`, while `/mcp disconnect <id>` still stops the server
+  without uninstalling the owner.
+- **`/mcp` and `/mcp config` name the file that declares each server.** A new
+  `McpDiscoverySource::Plugin { plugin_id }` / `Connector { connector_id }` pair
+  and a `DiscoveredMcpServer::definition_file` field let both reports show the
+  declaration's absolute path (the plugin manifest, its external `mcp.json`, or
+  the connector's `connector.json`) beside the source, so a bridged row is
+  distinguishable from a `ragent.json` entry before `/mcp remove` is run. The
+  discover dialog widens from a 90- to a 170-column ceiling so the column is not
+  clipped. `PluginMcpContribution::source_file` carries the resolved path from
+  the plugin bridge (confinement-checked against the plugin root).
+- **`/mcp connect` accepts a connector-bridged id**, not only a plugin one. The
+  bridge now resolves both owners through one `app::mcp_bridge` module
+  (`merged_mcp_servers`, `bridged_servers`, `resolve_config`, `find_bridged`,
+  `is_bridged_source`, `bridged_discover_rows`, `bridged_removal_refusal`), which
+  `set_mcp_server_enabled` and `/mcp discover` share.
+- **`test-ssrf-bypass`, an integration-test-only feature of
+  `ragent-tools-extended`.** The loopback escape hatch
+  (`RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF`) is now compiled in only under this
+  feature; absent from `default` and from every release build, so a shipped
+  binary enforces the SSRF rules unconditionally. `pre-flight.sh` and the CI
+  workspace test step pass it explicitly (CI job `ms0-regression` names it on
+  the M0.5 step that needs it).
+
+### Changed
+- **`quick-xml` 0.42** (from 0.39), clearing RUSTSEC-2026-0194 (quadratic
+  duplicate-attribute check) and RUSTSEC-2026-0195 (unbounded namespace
+  declarations) with no suppression left behind: both are removed from
+  `.cargo/audit.toml` and `deny.toml`. The earlier justification citing an
+  `ooxmlsdk` compatibility constraint was stale - `ooxmlsdk` was never a
+  dependency. `parse_caption_xml` follows the 0.42 API (`QName` comparison
+  against `&str`, `Cow<str>` values).
+- **`rust-version = "1.91"`** is the workspace floor, inherited by every crate
+  through `rust-version.workspace = true`. `edition = "2024"` needs 1.85, but the
+  source uses `slice::as_chunks` (1.88) and several `const`-context
+  stabilisations from 1.91, so the previous (absent, then understated) floor was
+  a claim clippy rejects.
+- **`render_status_bar_v2` is `render_status_bar`**, and the status bar no longer
+  paints a git status glyph. The hardcoded `HEALTHY` dot claimed the working tree
+  was clean whether or not it was, which is worse than showing only the branch.
+- The TUI's `/mcp config` report keeps a seven-column table only where it fits:
+  the defining file moved out of the table into a `Defined in:` block keyed by
+  server id, because a seventh column wrapped every header cell.
+
+### Fixed
+- **Native Ollama rejected any request whose message had no text part.**
+  `joined_text` emitted `[]` (an array) for an image-only user turn or a part
+  list holding nothing but constructs, and Ollama declares `content` as a Go
+  `string`, so the whole request failed with `json: cannot unmarshal array into
+  Go struct field ... of type string`. The value is now always a string: text
+  parts concatenate with a newline, and a turn with no text becomes `""`.
+- **An interrupted `npx` run poisoned the package for every later session.** A
+  retired `node_modules/.<name>-<8 alnum>` directory left behind by a killed
+  launcher makes every subsequent `reify` fail `ENOTEMPTY` before the server
+  writes a byte of MCP framing, which the transport can only report as
+  `connection closed: initialize response`. The repair pass now runs once per
+  process before the first child is spawned and takes a cross-process `flock`
+  (`fs2::FileExt::try_lock_exclusive`, 5 s budget) instead of the in-crate
+  `team::lockfile` helper.
+- **A dead background-command reader, a failed Prometheus scrape write and a
+  failed `!cmd` / agent resume were logged at `debug`, invisible at the default
+  level.** All five sites are `warn!` now, with the peer address, task id, stream
+  and command as structured fields so a truncated capture is attributable.
+- **A failed credential encryption did not say why.** `encrypt_key_with_context`
+  already failed closed on an AEAD error; the error value and the AAD length are
+  now carried into the log so the failure can be attributed.
+- **`ms0-regression` CI job failed with `error: no tests to run` (exit 4).** The
+  job's ANTIPAT M0.5 step filtered on `test(test_channels::)`, but the
+  `send_channel_message` tool and its `crates/ragent-tools-extended/tests/test_channels.rs`
+  suite were deleted in 1.0.130. A nextest filter that selects nothing is a
+  failure, so the job had been red since that release (the consolidation review
+  had recorded it as a harmless no-op). The step now runs the M0.5 cover that
+  actually exists - `test_mf_security::` (the masterfetch SSRF validator suite),
+  `test_legacy_web_ssrf::` (`http_request`/`webfetch` SSRF guards) and
+  `test_mf_supplement::` (the capped body readers) - 139 tests, all passing, and
+  names `--features test-ssrf-bypass` explicitly because the supplement suite
+  drives loopback test servers.
+  `docs/reports/testconsolidation-review.md` section 8.4 is corrected: the step
+  was a build failure, not a no-op.
+- **Five test files existed but were never compiled or run** - each crate sets
+  `autotests = false` with one `[[test]] name = "all"`, and these had no `#[path]`
+  line. `test_mcp_npx_cache_repair`, `test_tool_argument_decode_sites`,
+  `test_mcp_bridged_surfaces`, `test_mcp_remove` and `test_modules_arms_deep` are
+  now included from their crate's `tests/all.rs`.
+
+### Security
+- **The masterfetch SSRF bypass is a compile-time feature, not an environment
+  read in the production path.** Setting `RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF` let
+  the fetch/crawl tools reach loopback, private ranges and internal services in
+  any shipped binary. It now requires `--features test-ssrf-bypass`, and the
+  `#[cfg(not(feature = ...))]` arm returns `false` unconditionally.
+- **The sudo askpass password never leaves the process verbatim, and is masked
+  while it is typed.** `Event::QuestionRequested` and `Event::QuestionAnswered`
+  carry a `secret: bool` (default `false`, so an older peer interoperates); the
+  TUI renders each character as `*` exactly as the provider API-key field does,
+  and `event_to_parts` replaces a secret answer outright rather than
+  pattern-redacting it, because a password need not look like an API key. The
+  in-process event keeps the real value - the askpass helper reads it from the
+  bus - so only the wire form is masked.
+- **`InputField` and `AzureResourceEntry` no longer derive `Debug`.** `InputField`
+  backs the provider setup dialog's API-key step, and `AzureResourceEntry`
+  carries an inline `api_key`; both were held inside `Debug`-derived app state, so
+  any `{:?}`, panic payload or debug log wrote a live credential. Hand-written
+  impls report the text as `<redacted>` (with its length) and the key as
+  `<redacted>` when set, and every other field prints unchanged.
+- **Connection-string passwords are redacted by shape.** A `DATABASE_URL`-style
+  value (`scheme://user:pass@host`) carries no credential word in its name and
+  matches no existing pattern, so a new `CONNSTRING_PATTERN` pass masks the
+  password half while re-emitting the scheme, user and `@` so the URL stays
+  readable. `get_env`'s name list additionally covers `URL`, `DATABASE`, `DSN`
+  and `CONN` (`scheme://user:[REDACTED]@host`) as a second line of defence.
+- **More live credentials are seeded into the redaction registry at startup** -
+  `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`,
+  `HF_TOKEN`, `AZURE_AI_FOUNDRY_API_KEY`, the three `AWS_*` variables, and the
+  server's own `RAGENT_TOKEN` bearer (previously registered nowhere, so an echo
+  survived redaction; a bare 32-hex Azure key matches no generic pattern at all).
+- **Hook output, dynamic-context `stderr` and hook feedback are redacted before
+  they are logged.** The PreToolUse/PostToolUse hook sites, `fire_hooks`,
+  `skill::context::execute_command` and `team_create`'s TaskCreated-hook
+  rejection now route the text through `ragent_types::sanitize::redact_secrets`,
+  matching the sibling sites in the same files.
+- **User memory content is no longer logged.** The duplicate-candidate and
+  awaiting-confirmation `debug!`/`info!` lines printed a content prefix; they
+  report the character count and content hash instead.
+- **Tool-watchdog timeouts carry structured fields** (`tool`, `call_id`,
+  `timeout_ms`) rather than only a formatted message, so a structured consumer
+  can attribute the abort without parsing text.
+- **`.gitignore` covers the credential-bearing files this codebase writes** -
+  `azureresources.json`, `.mcp.json`/`mcp.json`, root `ragent.json` (anchored, so
+  `.ragent/ragent.json` project configs stay trackable), `*.crt`/`*.cer`/`*.der`,
+  `node_modules/` and `*.log`.
+- `docs/reports/code-audit.md` is rewritten from the fresh 81-finding audit and
+  records which findings this release closes.
+
 ## [1.0.150] - 2026-10-26
 
 Release 1.0.150: the `uniformtools` spec lands - one canonical tool-call model

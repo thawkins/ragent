@@ -42,10 +42,10 @@
 //! retired directories at all, and a mid-flight `reify` has no live package, so
 //! neither is touched.
 
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use crate::team::lockfile::{LockFile, LockMode};
+use fs2::FileExt as _;
 
 /// How long to wait for another ragent process to finish its own sweep.
 const REPAIR_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -129,17 +129,16 @@ pub fn repair_default_npx_cache() -> Option<RepairReport> {
     // other holder is doing exactly the same thing - so a timeout degrades to a
     // best-effort sweep rather than a failure.
     let lock_target = root.join(".ragent-repair");
-    let _lock =
-        match LockFile::acquire_timeout(&lock_target, LockMode::Exclusive, REPAIR_LOCK_TIMEOUT) {
-            Ok(lock) => Some(lock),
-            Err(error) => {
-                tracing::debug!(
-                    error = %error,
-                    "npx cache repair lock contended; sweeping anyway"
-                );
-                None
-            }
-        };
+    let _lock = match acquire_repair_lock(&lock_target) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                "npx cache repair lock contended; sweeping anyway"
+            );
+            None
+        }
+    };
 
     let report = repair_npx_cache(&root);
     if report.is_empty() {
@@ -154,6 +153,33 @@ pub fn repair_default_npx_cache() -> Option<RepairReport> {
         );
     }
     Some(report)
+}
+
+/// Acquire the cross-process repair lock, giving up after
+/// [`REPAIR_LOCK_TIMEOUT`].
+///
+/// An advisory `flock` on a companion file serialises concurrent ragent
+/// processes; the lock is released when the returned [`File`] is dropped.
+fn acquire_repair_lock(lock_target: &Path) -> std::io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_target)?;
+
+    let deadline = std::time::Instant::now() + REPAIR_LOCK_TIMEOUT;
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(file),
+            Err(error) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(error);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+    }
 }
 
 /// Sweep every install directory under `npx_root` and remove poisonous retired

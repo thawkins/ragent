@@ -23,12 +23,10 @@ ignore = [
     #  current tree.)
     # (RUSTSEC-2026-0367 / -0368 / -0369 are no longer ignored: the zip
     #  extraction hardening advisories no longer match the tree.)
-    # RUSTSEC-2026-0194: quick-xml quadratic duplicate-attribute check.
-    # quick-xml 0.39 is a direct dep; upgrade blocked by ooxmlsdk 0.3 compatibility.
-    { id = "RUSTSEC-2026-0194", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
-    # RUSTSEC-2026-0195: quick-xml unbounded namespace declarations.
-    # Same compatibility constraint as RUSTSEC-2026-0194.
-    { id = "RUSTSEC-2026-0195", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
+    # (RUSTSEC-2026-0194 / -0195 are no longer ignored: quick-xml was bumped
+    #  from 0.39 to 0.42, so both DoS advisories are fixed in the tree. The
+    #  earlier justification citing an `ooxmlsdk` compatibility constraint was
+    #  stale - ooxmlsdk was not a dependency.)
     # (RUSTSEC-2026-0253 is no longer ignored: tantivy was upgraded from 0.26
     #  to 0.27, which drops the lru ^0.16.3 requirement, so the only lru left
     #  in the tree is 0.18.5 - above the 0.18.2 patched floor.)

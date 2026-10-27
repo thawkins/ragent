@@ -403,6 +403,11 @@ pub async fn serve(
 async fn handle_scrape(reader: &Arc<ManualReader>, mut sock: tokio::net::TcpStream) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    // Recorded once so every log line from this connection names its peer.
+    let peer_addr = sock
+        .peer_addr()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
     let mut buf = [0u8; HTTP_READ_BUF];
     let n = match tokio::time::timeout(SCRAPE_READ_TIMEOUT, sock.read(&mut buf)).await {
         Ok(Ok(n)) => n,
@@ -438,11 +443,22 @@ async fn handle_scrape(reader: &Arc<ManualReader>, mut sock: tokio::net::TcpStre
         "HTTP/1.1 {status}\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
+    // A broken scrape is a real failure, not debug detail: at `debug` a
+    // scraper's failed fetch was silently invisible (audit finding).
     if let Err(e) = sock.write_all(response.as_bytes()).await {
-        tracing::debug!(error = %e, "prometheus scrape response write failed");
+        tracing::warn!(
+            error = %e,
+            peer = %peer_addr,
+            status_line = status,
+            "prometheus scrape response write failed"
+        );
     }
     if let Err(e) = sock.flush().await {
-        tracing::debug!(error = %e, "prometheus scrape response flush failed");
+        tracing::warn!(
+            error = %e,
+            peer = %peer_addr,
+            "prometheus scrape response flush failed"
+        );
     }
 }
 

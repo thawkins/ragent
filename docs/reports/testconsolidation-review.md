@@ -339,10 +339,14 @@ allow:
 
 ### 8.4 Known pre-existing issues left alone
 
-* `CI` still invoked `--test test_channels` for `ragent-tools-extended`, but that
-  file has not existed since 1.0.130; it was rewritten to the filter form with
-  the rest, and still selects 0 tests (matching the pre-existing state - the
-  step is now a no-op rather than a build error).
+* *(resolved)* `CI` invoked `--test test_channels` for `ragent-tools-extended`,
+  a file that has not existed since 1.0.130. The consolidation converted it to
+  the filter form `test(test_channels::)`, which selects 0 tests and so makes
+  `cargo nextest` exit 4 (`error: no tests to run`) - a build failure, not the
+  no-op it was thought to be. The `ms0-regression` job now runs the M0.5 cover
+  that actually exists: `test_mf_security::`, `test_legacy_web_ssrf::` and
+  `test_mf_supplement::` (the last needs `--features test-ssrf-bypass` for its
+  loopback servers).
 * `crates/ragent-codeindex/tests/support/mod.rs` still trips
   `-D unreachable_pub` under an explicit `RUSTFLAGS`; it did so in all 16 of its
   former binaries too.

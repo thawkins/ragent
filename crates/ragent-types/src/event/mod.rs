@@ -230,6 +230,12 @@ pub enum Event {
         /// option (`Some(0)` when `options` is non-empty).
         #[serde(default)]
         default_index: Option<usize>,
+        /// Whether the typed answer is a credential (the sudo askpass password)
+        /// and must be rendered masked. The TUI paints `*` per character when
+        /// this is set, the same way it masks the provider API-key field; the
+        /// SSE payload redacts the answer regardless (audit high finding).
+        #[serde(default)]
+        secret: bool,
     },
     /// The user has answered a direct question request.
     QuestionAnswered {
@@ -239,6 +245,13 @@ pub enum Event {
         request_id: String,
         /// The selected or typed response.
         response: String,
+        /// Whether `response` is a credential (the sudo askpass password) and
+        /// must never leave the process verbatim. Set by whoever answers a
+        /// question whose `QuestionRequested` carried `secret: true`. Unlike
+        /// pattern-driven redaction this is authoritative: a password need not
+        /// look like an API key to be masked (audit high finding).
+        #[serde(default)]
+        secret: bool,
     },
     /// The active agent was switched during a session.
     AgentSwitched {

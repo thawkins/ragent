@@ -402,9 +402,14 @@ pub fn encrypt_key_with_context(plaintext: &str, context: &[u8]) -> String {
             blob.extend_from_slice(&ciphertext);
             format!("{ENCRYPT_V3_PREFIX}{}", STANDARD.encode(&blob))
         }
-        Err(_) => {
-            // Fail closed: never fall back to a weaker encoding.
-            tracing::error!("encrypt_key_with_context: AEAD encryption failed");
+        Err(error) => {
+            // Fail closed: never fall back to a weaker encoding. The error is
+            // carried into the log so the failure can be attributed.
+            tracing::error!(
+                error = %error,
+                aad_len = context.len(),
+                "credential encryption failed; refusing to store a weaker encoding"
+            );
             String::new()
         }
     }

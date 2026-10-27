@@ -99,6 +99,7 @@ impl LlmClient for ScriptedClient {
                 session_id: "*".to_string(),
                 request_id: "*".to_string(),
                 response: (*reply).to_string(),
+                secret: false,
             });
         }
         let events: Vec<StreamEvent> = match &reply {
@@ -387,6 +388,7 @@ async fn test_ask_user_still_works_in_primary_run() -> Result<()> {
             loop {
                 match rx.recv().await {
                     Ok(Event::QuestionRequested {
+                        secret: false,
                         session_id: qsid,
                         request_id,
                         ..
@@ -395,6 +397,7 @@ async fn test_ask_user_still_works_in_primary_run() -> Result<()> {
                             session_id: session_id.clone(),
                             request_id,
                             response: "user says go ahead".to_string(),
+                            secret: false,
                         });
                         break;
                     }

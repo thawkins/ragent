@@ -188,7 +188,7 @@ pub mod abbreviations {
 /// Build status bar for a given area.
 ///
 /// Splits the area into 2 lines and renders both with responsive layout.
-pub fn render_status_bar_v2(frame: &mut Frame, app: &mut App, area: Rect) {
+pub fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     let mode = ResponsiveMode::from_width(area.width);
     let config = StatusBarConfig {
         verbose: !matches!(mode, ResponsiveMode::Minimal),
@@ -509,17 +509,13 @@ fn build_line1_center(
     let mut spans = Vec::new();
 
     if let Some(ref branch) = app.git_branch {
-        let (status_icon, status_color) = get_git_status_indicator();
-
+        // Only the branch is shown. A status glyph would need a real
+        // working-tree query: the previous hardcoded "HEALTHY" dot claimed the
+        // tree was clean whether or not it was, which is worse than saying
+        // nothing.
         spans.push(Span::styled(
             format!("{}{} ", t(MessageKey::StatusBranch), branch),
             Style::default().fg(colors::TEXT),
-        ));
-        spans.push(Span::styled(
-            status_icon.to_string(),
-            Style::default()
-                .fg(status_color)
-                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -812,13 +808,6 @@ fn build_line2_right(
 // -----------------------------------------------------------------------------
 // Utility Functions
 // -----------------------------------------------------------------------------
-
-/// Get git status indicator character and color.
-fn get_git_status_indicator() -> (&'static str, Color) {
-    // Default indicator: healthy status
-    // TODO: Integrate with git module to get actual status
-    (indicators::HEALTHY, colors::HEALTHY)
-}
 
 /// Shorten a path using ~ for home directory and truncation.
 fn shorten_path(path: &str, max_len: usize) -> String {

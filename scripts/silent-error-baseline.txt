@@ -11,11 +11,9 @@ crates/ragent-agent/src/research_adapter.rs 5
 crates/ragent-agent/src/session/loop_steps.rs 2
 crates/ragent-agent/src/session/processor.rs 1
 crates/ragent-agent/src/team/mailbox.rs 3
-crates/ragent-agent/src/team/manager.rs 2
 crates/ragent-agent/src/tool/structured_memory.rs 4
 crates/ragent-agent/src/tool/team_spawn.rs 1
 crates/ragent-agent/src/tool/team_task_claim.rs 2
-crates/ragent-agent/src/tool/team_task_complete.rs 2
 crates/ragent-agent/src/tool/team_task_create.rs 1
 crates/ragent-bench/src/model.rs 1
 crates/ragent-codeindex/src/graph/resolve.rs 4

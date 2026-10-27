@@ -109,6 +109,7 @@ async fn core_adapter_converts_session_input_events_during_bash() {
             session_id: session.clone(),
             request_id: "q-1".to_string(),
             response: "option-a".to_string(),
+            secret: false,
         });
         // No core conversion -> `convert_core_event` returns None.
         bus.publish(Event::TextDelta {

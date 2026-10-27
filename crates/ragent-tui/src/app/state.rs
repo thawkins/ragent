@@ -1539,9 +1539,16 @@ pub(crate) fn discovered_mcp_enabled(
     configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig>,
     ledger: &ragent_agent::mcp::McpEnableLedger,
 ) -> bool {
-    configured
-        .get(server_id)
-        .is_some_and(|cfg| !cfg.disabled && ledger.is_enabled(server_id))
+    // A server absent from the `ragent.json` `mcp` section is either a bridged one
+    // (its definition belongs to a plugin or a connector, so it is enabled unless
+    // the ledger records a disable) or a discovery the user has not adopted yet.
+    // Only the dialog's own enabled vector distinguishes the two, so the caller
+    // resolves the ambiguity; here an absent entry follows the ledger, which
+    // counts an absent row as enabled.
+    match configured.get(server_id) {
+        Some(cfg) => !cfg.disabled && ledger.is_enabled(server_id),
+        None => ledger.is_enabled(server_id),
+    }
 }
 
 /// State for the interactive `/plugins list` dialog (spec `plugins` FR-009).
@@ -1616,6 +1623,12 @@ pub struct QuestionRequest {
     /// timeout entirely (free-text questions and askpass prompts, which own
     /// their own timeout).
     pub expire_at_ms: Option<u64>,
+    /// Whether the typed answer is a credential (the sudo askpass password).
+    ///
+    /// When set, the free-text dialog renders each character as `*`, exactly as
+    /// the provider API-key field already does, so a password is not painted in
+    /// clear text (audit high finding).
+    pub secret: bool,
 }
 
 impl QuestionRequest {
@@ -4510,6 +4523,88 @@ impl App {
         self.mcp_enabled_map = ragent_agent::mcp::McpEnableLedger::load().to_map();
     }
 
+    /// `/mcp remove <id>`: disconnect a configured server and delete its entry
+    /// from the user-global `ragent.json`.
+    ///
+    /// A definition that lives in a plugin manifest (or the external `mcp.json`
+    /// it names) belongs to that plugin, and a connector's belongs to the
+    /// connector: pruning either would leave the owner installed declaring a
+    /// server list it no longer has, which the next bridge scan reports as drift.
+    /// Those ids are refused with the owner's own removal command named, while
+    /// `/mcp disconnect` still stops them.
+    ///
+    /// The session-side removal runs first so a failed config write leaves the
+    /// running state consistent with the file; a server that was not connected
+    /// simply has nothing to remove.
+    pub async fn remove_mcp_server(&mut self, server_id: &str) -> String {
+        let configured = ragent_agent::Config::load()
+            .map(|cfg| cfg.mcp)
+            .unwrap_or_default();
+
+        if let Some(bridged) =
+            crate::app::mcp_bridge::find_bridged(&self.cwd_path, &configured, server_id)
+        {
+            return crate::app::mcp_bridge::bridged_removal_refusal(server_id, &bridged);
+        }
+
+        if !configured.contains_key(server_id) {
+            return unknown_mcp_server_msg(server_id);
+        }
+
+        if let Some(client) = self.session_processor.mcp_client.get() {
+            let outcome = {
+                let mut guard = client.write().await;
+                guard.disconnect(server_id).await
+            };
+            if let Err(error) = outcome {
+                tracing::warn!(
+                    server = server_id,
+                    error = %error,
+                    "mcp: disconnect before removal failed; removing the definition anyway"
+                );
+            }
+        }
+
+        let id = server_id.to_string();
+        match ragent_agent::Config::edit_global_config(|object| {
+            let Some(mcp) = object
+                .get_mut("mcp")
+                .and_then(|value| value.as_object_mut())
+            else {
+                return Ok(false);
+            };
+            let removed = mcp.remove(&id).is_some();
+            if mcp.is_empty() {
+                object.remove("mcp");
+            }
+            Ok(removed)
+        }) {
+            Ok(path) => {
+                self.mcp_servers.retain(|server| server.id != server_id);
+                self.mcp_status_map.remove(server_id);
+                // Drop the ledger row too: a server re-added later must start
+                // enabled again rather than inherit a stale disable.
+                let mut ledger = ragent_agent::mcp::McpEnableLedger::load();
+                ledger.clear(server_id);
+                if let Err(error) = ledger.save() {
+                    tracing::warn!(
+                        server = server_id,
+                        error = %error,
+                        "mcp: could not clear the enable-ledger row of a removed server"
+                    );
+                }
+                self.refresh_mcp_enabled_map();
+                format!(
+                    "From: /mcp remove\n\n[ok] removed `{server_id}` from {}",
+                    path.display()
+                )
+            }
+            Err(error) => {
+                format!("From: /mcp remove\n\n[err] could not remove `{server_id}`: {error}")
+            }
+        }
+    }
+
     /// Persist a new enabled state for one MCP server and apply it live.
     ///
     /// The switch is written to the global ledger first, so the choice survives
@@ -4519,17 +4614,16 @@ impl App {
     /// registry), disabling disconnects it and drops its tools. Returns the
     /// report to print.
     pub async fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool) -> String {
-        // One config load serves both the direct lookup and the plugin-bridge
-        // fallback; a second load would read and parse the same files again.
+        // One config load serves both the direct lookup and the bridged fallback;
+        // a second load would read and parse the same files again.
         let configured = ragent_agent::Config::load()
             .map(|cfg| cfg.mcp)
             .unwrap_or_default();
-        let config = configured.get(server_id).cloned().or_else(|| {
-            ragent_agent::plugin::plugin_mcp_servers(&self.cwd_path, &configured)
-                .into_iter()
-                .find(|(id, _)| id == server_id)
-                .map(|(_, cfg)| cfg)
-        });
+        // The bridged lookup covers both owners: a plugin-contributed server and
+        // a connector-contributed one resolve to the config their manifest
+        // declares, so `/mcp connect` accepts the id rather than rejecting it as
+        // unknown.
+        let config = crate::app::mcp_bridge::resolve_config(&self.cwd_path, &configured, server_id);
 
         // Validate before touching the persisted ledger: enabling an unknown
         // server must not silently erase a previously persisted disable entry
@@ -4537,7 +4631,42 @@ impl App {
         if enabled && config.is_none() {
             return unknown_mcp_server_msg(server_id);
         }
+        self.apply_mcp_enabled_state(server_id, enabled, config)
+            .await
+    }
 
+    /// Enable or disable an MCP server whose definition an owner (a plugin or a
+    /// connector) supplies, so no `ragent.json` entry has to exist first.
+    ///
+    /// `/mcp discover` needs this for a bridged row: the definition already lives
+    /// in the owner's manifest, so writing a `ragent.json` copy would shadow it.
+    /// The id is resolved again here because the caller's check predates the
+    /// toggle and the owner's manifest may have changed in between.
+    pub(crate) async fn set_bridged_mcp_server_enabled(
+        &mut self,
+        server_id: &str,
+        enabled: bool,
+    ) -> String {
+        let configured = ragent_agent::Config::load()
+            .map(|cfg| cfg.mcp)
+            .unwrap_or_default();
+        let config = crate::app::mcp_bridge::resolve_config(&self.cwd_path, &configured, server_id);
+        self.apply_mcp_enabled_state(server_id, enabled, config)
+            .await
+    }
+
+    /// Write `enabled` to the global ledger and apply it to the live client.
+    ///
+    /// The shared tail of the two entry points above: the ledger is persisted
+    /// first so a failure leaves the running state untouched, then the live
+    /// client is connected or disconnected. `config` is the definition to connect
+    /// with; a disable needs none.
+    async fn apply_mcp_enabled_state(
+        &mut self,
+        server_id: &str,
+        enabled: bool,
+        config: Option<ragent_agent::McpServerConfig>,
+    ) -> String {
         // Persist to the global ledger first: a failure must leave the running
         // state untouched rather than diverging from what will happen at the
         // next startup.
@@ -4993,6 +5122,7 @@ impl App {
                     session_id: req.session_id.clone(),
                     request_id: req.id.clone(),
                     response: response.clone(),
+                    secret: req.secret,
                 });
             self.push_log_no_agent(
                 LogLevel::Warn,

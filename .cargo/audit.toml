@@ -4,7 +4,5 @@
 # silently masked.
 [advisories]
 ignore = [
-    "RUSTSEC-2026-0194", # quick-xml duplicate attr check; blocked by ooxmlsdk/calamine
-    "RUSTSEC-2026-0195", # quick-xml namespace allocation; blocked by ooxmlsdk/calamine
     "RUSTSEC-2024-0436", # paste unmaintained; transitive via tokenizers 0.21 (embeddings feature)
 ]

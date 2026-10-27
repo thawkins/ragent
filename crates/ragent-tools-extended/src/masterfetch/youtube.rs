@@ -229,21 +229,20 @@ pub fn parse_caption_xml(xml: &str) -> Result<String> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"text" => {
+            Ok(Event::Start(ref e)) if e.name().as_ref() == "text" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"start"
-                        && let Ok(start) = String::from_utf8_lossy(&attr.value).parse::<f64>()
+                    if attr.key.as_ref() == "start"
+                        && let Ok(start) = attr.value.parse::<f64>()
                     {
                         current_start = Some(start);
                     }
                 }
             }
             Ok(Event::Text(e)) => {
-                let text = std::str::from_utf8(e.as_ref()).unwrap_or("");
-                current_text.push_str(text);
+                current_text.push_str(e.as_ref());
             }
-            Ok(Event::End(ref e)) if e.name().as_ref() == b"text" => {
+            Ok(Event::End(ref e)) if e.name().as_ref() == "text" => {
                 let line = current_text.trim();
                 if !line.is_empty() {
                     if let Some(start) = current_start {

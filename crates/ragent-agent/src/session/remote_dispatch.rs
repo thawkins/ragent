@@ -133,6 +133,7 @@ fn publish_update(bus: &EventBus, session_id: &str, update: RemoteUpdate) {
             question,
             options,
             default_index,
+            secret,
         } => {
             bus.publish(Event::QuestionRequested {
                 session_id: session_id.to_string(),
@@ -140,6 +141,7 @@ fn publish_update(bus: &EventBus, session_id: &str, update: RemoteUpdate) {
                 question,
                 options,
                 default_index,
+                secret,
             });
         }
         RemoteUpdate::MessageEnd { .. } => {}

@@ -36,6 +36,8 @@ async fn ask_user_clarification(
         options: Vec::new(),
         // Free-text clarification: no options, so no default to fall back to.
         default_index: None,
+        // A clarification answer is ordinary prose, not a credential.
+        secret: false,
     });
     loop {
         match rx.recv().await {
@@ -43,6 +45,7 @@ async fn ask_user_clarification(
                 session_id: ref answered_session,
                 request_id: ref answered_request,
                 response: ref answer,
+                ..
             }) if answered_session == session_id && answered_request == &request_id => {
                 return Some(answer.clone());
             }

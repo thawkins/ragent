@@ -194,11 +194,29 @@ enum HostKind {
 /// scheme, backslash, URL length, DNS rebinding suffixes, and cloud metadata
 /// hosts, but it allows loopback/private IP literals and the `localhost`
 /// hostname so the fetch pipeline can be exercised against a local test server.
+///
+/// The bypass is compiled only when the crate's `test-ssrf-bypass` feature is
+/// enabled. That feature is absent from `default` and is not enabled by any
+/// workspace member or release build, so a shipped binary cannot be talked out
+/// of its SSRF guard by an environment variable (audit high finding: the guard
+/// was previously disabled by a runtime environment read in the production
+/// path).
+#[cfg(feature = "test-ssrf-bypass")]
 const SSRF_TEST_SKIP_VAR: &str = "RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF";
 
 /// Returns `true` when the test-only SSRF bypass is enabled.
+///
+/// Always `false` unless the crate is built with the `test-ssrf-bypass`
+/// feature, so release builds enforce the SSRF rules unconditionally.
+#[cfg(feature = "test-ssrf-bypass")]
 fn ssrf_test_skip() -> bool {
     std::env::var(SSRF_TEST_SKIP_VAR).is_ok_and(|v| !v.is_empty())
+}
+
+/// Returns `false` unconditionally when the test bypass is not compiled in.
+#[cfg(not(feature = "test-ssrf-bypass"))]
+fn ssrf_test_skip() -> bool {
+    false
 }
 
 /// Validate a hostname - either a domain name or an IP literal - against

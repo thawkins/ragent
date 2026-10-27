@@ -258,6 +258,8 @@ pub enum RemoteUpdate {
         options: Vec<String>,
         /// Optional zero-based default/fallback option index.
         default_index: Option<usize>,
+        /// Whether the typed answer is a credential and must be masked.
+        secret: bool,
     },
     /// Any other remote event, carrying its event name.
     Other {
@@ -885,6 +887,10 @@ fn decode_update(name: &str, data: &str) -> RemoteUpdate {
             question: string("question"),
             options: parse_options(&value),
             default_index: parse_default_index(&value),
+            secret: value
+                .get("secret")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
         },
         other => RemoteUpdate::Other {
             kind: other.to_string(),

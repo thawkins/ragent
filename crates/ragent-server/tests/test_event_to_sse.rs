@@ -232,6 +232,7 @@ fn test_question_requested() {
         question: "Pick one".into(),
         options: vec!["a".into(), "b".into()],
         default_index: Some(1),
+        secret: false,
     });
     assert_eq!(name, "question_requested");
     assert_eq!(v["question"], "Pick one");
@@ -245,10 +246,54 @@ fn test_question_answered() {
         session_id: "s1".into(),
         request_id: "q1".into(),
         response: "a".into(),
+        secret: false,
     });
     assert_eq!(name, "question_answered");
     assert_eq!(v["request_id"], "q1");
     assert_eq!(v["response"], "a");
+}
+
+/// A free-text answer is the sudo askpass password when the question came from
+/// the privileged helper, so the SSE payload must never carry it verbatim.
+///
+/// The in-process event still holds the real value - the askpass helper reads it
+/// from the bus - so only the wire form is redacted.
+#[test]
+fn test_question_answered_redacts_a_password_shaped_answer() {
+    const PASSWORD: &str = "hunter2-correct-horse-battery-staple";
+    let (name, v) = parse_data(&Event::QuestionAnswered {
+        session_id: "s1".into(),
+        request_id: "q1".into(),
+        response: PASSWORD.into(),
+        secret: true,
+    });
+    assert_eq!(name, "question_answered");
+    let response = v["response"].as_str().expect("response is a string");
+    assert_ne!(
+        response, PASSWORD,
+        "the SSE payload must not carry the typed password"
+    );
+    assert!(
+        !response.contains("hunter2"),
+        "no fragment of the password may survive: {response}"
+    );
+    assert!(
+        !response.contains("staple"),
+        "no fragment of the password may survive: {response}"
+    );
+}
+
+/// An ordinary short answer keeps its text: the redaction is shape- and
+/// registry-driven, so a one-word choice is not masked.
+#[test]
+fn test_question_answered_keeps_an_ordinary_answer() {
+    let (_, v) = parse_data(&Event::QuestionAnswered {
+        session_id: "s1".into(),
+        request_id: "q1".into(),
+        response: "yes".into(),
+        secret: false,
+    });
+    assert_eq!(v["response"], "yes");
 }
 
 // -- Agent events ---------------------------------------------------------

@@ -11,11 +11,29 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// Tracks the raw text, a character-index cursor, and an optional keyboard-
 /// selection anchor.  All editing operations are character-oriented so that
 /// multi-byte UTF-8 content behaves correctly.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct InputField {
     text: String,
     cursor: usize,
     anchor: Option<usize>,
+}
+
+/// Hand-written so the field's text never reaches a log or a panic payload.
+///
+/// [`InputField`] backs the provider setup dialog's API-key step, where `text` is
+/// a live provider credential; a derived `Debug` printed it verbatim through any
+/// `{:?}` of the enclosing app state (audit high finding). The cursor and the
+/// selection anchor still print, so a debug dump stays useful for input-handling
+/// bugs, and `text_len` stands in for the content.
+impl std::fmt::Debug for InputField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InputField")
+            .field("text", &"<redacted>")
+            .field("text_len", &self.text.len())
+            .field("cursor", &self.cursor)
+            .field("anchor", &self.anchor)
+            .finish()
+    }
 }
 
 impl InputField {

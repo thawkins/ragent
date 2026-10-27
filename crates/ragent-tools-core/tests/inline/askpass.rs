@@ -143,13 +143,14 @@ async fn test_watch_loop_routes_request_to_dialog_and_writes_response() {
         .expect("event bus closed");
 
     let Event::QuestionRequested {
+        secret: true,
         session_id: ref s,
         request_id: ref rid,
         question: ref q,
         ..
     } = event
     else {
-        panic!("expected QuestionRequested, got {event:?}");
+        panic!("expected a secret QuestionRequested, got {event:?}");
     };
     assert_eq!(s, &session_id);
     assert!(rid.starts_with("askpass-req1"));
@@ -160,6 +161,7 @@ async fn test_watch_loop_routes_request_to_dialog_and_writes_response() {
         session_id: session_id.clone(),
         request_id: rid.clone(),
         response: "supersecret".to_string(),
+        secret: true,
     });
 
     // The response file should appear with the password.
@@ -215,6 +217,7 @@ async fn test_watch_loop_cancel_writes_empty_response() {
         session_id,
         request_id,
         response: DISMISS_MARKER.to_string(),
+        secret: true,
     });
 
     let resp_path = dir.join(format!("response_{id}"));

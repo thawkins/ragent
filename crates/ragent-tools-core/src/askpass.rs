@@ -251,6 +251,8 @@ async fn publish_question_and_wait(
         // No options: a free-text password prompt has no default to fall back
         // to on timeout, so the wait still cancels after `REQUEST_TIMEOUT`.
         default_index: None,
+        // The answer is a password: the TUI must render it masked.
+        secret: true,
     };
     event_bus.publish(request);
 
@@ -270,6 +272,7 @@ async fn publish_question_and_wait(
                         session_id: ref s,
                         request_id: ref rid,
                         response: ref r,
+                        ..
                     }) if s == &session_id && rid == &request_id => {
                         if r.is_empty() || r == DISMISS_MARKER {
                             write_cancel(&response_path);

@@ -2,6 +2,7 @@
 name = "ragent-bench"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Benchmark suite runner for ragent — local AI coding benchmarks"
 

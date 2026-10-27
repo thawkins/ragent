@@ -661,12 +661,13 @@ impl ExtractionEngine {
                 for existing in &results {
                     let overlap = Self::word_overlap(content, &existing.content);
                     if overlap > 0.7 {
+                        // The candidate's text is user memory content and must
+                        // not be logged; its length and overlap are enough to
+                        // identify the duplicate (audit finding).
                         debug!(
-                            "Skipping duplicate candidate (overlap {:.0}%): {}",
-                            overlap * 100.0,
-                            // Char-boundary-safe prefix: raw byte slicing panics
-                            // on multibyte input (FUNC-002).
-                            ragent_types::strutil::truncate_bytes_no_ellipsis(content, 60)
+                            overlap_percent = (overlap * 100.0).round() as u32,
+                            candidate_chars = content.chars().count(),
+                            "Skipping duplicate memory candidate"
                         );
                         return true;
                     }
@@ -735,14 +736,15 @@ impl ExtractionEngine {
 
         if self.config.require_confirmation {
             // Emit event but don't store.
+            // The candidate's text is user memory content and must not be
+            // logged; its length and hash identify it without leaking it.
             info!(
                 category = candidate.category,
                 confidence = candidate.confidence,
                 source = candidate.source,
-                "Memory candidate extracted (awaiting confirmation): {}",
-                // Char-boundary-safe prefix: raw byte slicing panics on
-                // multibyte input (FUNC-002).
-                ragent_types::strutil::truncate_bytes_no_ellipsis(&candidate.content, 80)
+                candidate_chars = candidate.content.chars().count(),
+                content_hash = %hash,
+                "Memory candidate extracted (awaiting confirmation)"
             );
             event_bus.publish(Event::MemoryCandidateExtracted {
                 session_id: session_id.to_string(),

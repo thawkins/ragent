@@ -25,6 +25,23 @@ pub enum McpDiscoverySource {
         /// Path to the registry directory.
         registry_dir: PathBuf,
     },
+    /// Declared by an installed plugin's `mcpServers` object.
+    ///
+    /// A bridged server already has a definition, so `/mcp discover` must not
+    /// write a `ragent.json` entry for it and `/mcp remove` must refuse the id
+    /// (see `ragent_tui::app::mcp_bridge`).
+    Plugin {
+        /// Owning plugin id.
+        plugin_id: String,
+    },
+    /// Declared by an installed connector's `connector.json`.
+    ///
+    /// As with [`McpDiscoverySource::Plugin`], the definition belongs to the
+    /// owner and is managed only through `/connectors`.
+    Connector {
+        /// Owning connector id.
+        connector_id: String,
+    },
 }
 
 /// An MCP server executable discovered on the local system.
@@ -42,6 +59,11 @@ pub struct DiscoveredMcpServer {
     pub env: HashMap<String, String>,
     /// Where the executable was found.
     pub source: McpDiscoverySource,
+    /// The file that declares a *bridged* server (plugin `mcpServers` or
+    /// connector `connector.json`); `None` for a `PATH`/npm/registry discovery,
+    /// which has no definition file until it is persisted through
+    /// [`DiscoveredMcpServer::to_config`].
+    pub definition_file: Option<PathBuf>,
 }
 
 impl DiscoveredMcpServer {
@@ -260,6 +282,7 @@ pub async fn discover_locations() -> Vec<McpDiscoveryLocation> {
                         .collect(),
                     env: HashMap::new(),
                     source: McpDiscoverySource::SystemPath,
+                    definition_file: None,
                 });
                 break; // stop at first matching executable for this server
             }
@@ -477,6 +500,7 @@ async fn try_npm_mcp_package(
         source: McpDiscoverySource::NpmGlobal {
             prefix_dir: prefix.clone(),
         },
+        definition_file: None,
     })
 }
 
@@ -601,6 +625,7 @@ async fn try_mcp_registry_entry(
         source: McpDiscoverySource::McpRegistry {
             registry_dir: registry_dir.to_path_buf(),
         },
+        definition_file: None,
     })
 }
 
@@ -649,6 +674,7 @@ async fn try_mcp_json_config(
         source: McpDiscoverySource::McpRegistry {
             registry_dir: registry_dir.to_path_buf(),
         },
+        definition_file: None,
     })
 }
 

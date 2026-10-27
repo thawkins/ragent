@@ -81,6 +81,11 @@ pub struct PluginMcpContribution {
     pub server_id: String,
     /// The transport configuration the session would connect with.
     pub config: McpServerConfig,
+    /// The file that declares the server: the plugin manifest, or the external
+    /// `mcp.json` the manifest's `mcpServers` string names. The TUI's
+    /// `/mcp discover` and `/mcp config` reports name this file so a user can
+    /// see the declaration is the plugin's, not `ragent.json`'s.
+    pub source_file: std::path::PathBuf,
 }
 
 /// Resolve the MCP servers contributed by the enabled plugins in the stores
@@ -94,6 +99,7 @@ pub fn scanned_plugin_mcp_contributions(dirs: &StoreDirs) -> Vec<PluginMcpContri
     let mut out: Vec<PluginMcpContribution> = Vec::new();
     for parsed in enabled_manifests(dirs) {
         let plugin_id = parsed.descriptor.id.clone();
+        let source_file = mcp_declaration_file(&parsed);
         for (server_id, config) in plugin_mcp_servers(
             &plugin_id,
             &parsed.descriptor.root,
@@ -104,11 +110,28 @@ pub fn scanned_plugin_mcp_contributions(dirs: &StoreDirs) -> Vec<PluginMcpContri
                 plugin_id: plugin_id.clone(),
                 server_id,
                 config,
+                source_file: source_file.clone(),
             });
         }
     }
     out.sort_by(|a, b| a.server_id.cmp(&b.server_id));
     out
+}
+
+/// The file that declares a plugin's MCP servers: the plugin manifest itself,
+/// or the external `mcp.json` its `mcpServers` string names (resolved and
+/// confinement-checked against the plugin root; the manifest is named when the
+/// external file cannot be resolved).
+fn mcp_declaration_file(parsed: &ParsedManifest) -> PathBuf {
+    match parsed
+        .raw_mcp
+        .as_ref()
+        .and_then(|raw| raw.as_str())
+        .and_then(|rel| resolve_within(&parsed.descriptor.root, rel))
+    {
+        Some(external) => external,
+        None => parsed.descriptor.manifest_path.clone(),
+    }
 }
 
 /// Resolve the MCP servers contributed by the enabled plugins in the stores

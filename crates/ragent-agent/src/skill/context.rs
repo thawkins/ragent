@@ -276,10 +276,13 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
                 stdout.trim_end().to_string()
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
+                // Command output is arbitrary: redact it like every other
+                // command-output log site, so an echoed credential never lands
+                // in the log (audit finding).
                 tracing::warn!(
                     command = %safe_cmd,
                     status = ?output.status,
-                    stderr = %stderr,
+                    stderr = %ragent_types::sanitize::redact_secrets(&stderr),
                     "Dynamic context command failed"
                 );
                 format!("[command failed: {}]", stderr.trim())

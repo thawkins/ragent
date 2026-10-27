@@ -130,11 +130,16 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 - **MCP client** — Model Context Protocol support with auto-discovery of 18 known
   server types, stdio and Streamable-HTTP clients, and tool bridging; TUI commands
   (`/mcp` / `/mcp status`, `/mcp config`, `/mcp discover`, `/mcp connect <id>`,
-  `/mcp disconnect <id>`) with durable global enable/disable state
+  `/mcp disconnect <id>`, `/mcp remove <id>`) with durable global enable/disable state
   (`mcp_state.json`) and live connect/disconnect. `/mcp config` reports where
   ragent looks for MCP definitions (ragent-native, npm global, `PATH`, and the
   Claude/Cline/XDG registry directories), the count found at each location, and
-  the servers discovered
+  the servers discovered, naming the manifest that declares each one so a
+  plugin- or connector-bridged server is distinguishable from a `ragent.json`
+  entry. `/mcp remove <id>` deletes a configured server's `ragent.json` entry
+  (every other key preserved) and clears its enable-ledger row; a bridged server
+  is refused by name, because its definition belongs to its plugin or connector
+  and is removed with `/plugins remove <id>` or `/connectors remove <id>`
 
 ![MCP Selector](assets/screens/ragentmcpdiscover.png)
 
@@ -414,7 +419,9 @@ cargo build --release
 # Binary is at target/release/ragent
 ```
 
-Requires Rust 1.85+ (edition 2024; the pinned toolchain is `stable`).
+Requires Rust 1.91+ (edition 2024; the pinned toolchain is `stable`). The
+floor is declared once as `rust-version` in the workspace manifest and
+inherited by every crate.
 
 Incremental compilation is disabled workspace-wide (`.cargo/config.toml` sets
 `[build] incremental = false`, and `[profile.dev]` / `[profile.test]` repeat it)

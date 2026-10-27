@@ -114,6 +114,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
         ),
         variant(
             Event::QuestionRequested {
+                secret: false,
                 session_id: s("s"),
                 request_id: s("r"),
                 question: s("q"),
@@ -128,6 +129,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
                 session_id: s("s"),
                 request_id: s("r"),
                 response: s("a"),
+                secret: false,
             },
             "QuestionAnswered",
             Some("s"),

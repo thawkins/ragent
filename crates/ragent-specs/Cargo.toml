@@ -2,6 +2,7 @@
 name = "ragent-specs"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 authors = ["Tim Hawkins"]
 description = "Spec management system for ragent: EARS notation specs, validation, and lifecycle tracking"

@@ -14,6 +14,7 @@
 pub mod discovery;
 pub mod enable_state;
 pub mod http;
+pub mod npx_cache;
 /// Shared isolated probe helper for the `/connectors test` harness (T-309).
 pub mod probe;
 
@@ -688,6 +689,12 @@ impl McpClient {
 
                 let args = config.args.clone();
                 let env = config.env.clone();
+
+                // An interrupted earlier `npx` run leaves a retired directory
+                // that makes every later `reify` of that package fail with
+                // ENOTEMPTY, which surfaces only as "connection closed". Sweep
+                // it once per process before any child is spawned.
+                npx_cache::ensure_npx_cache_repaired();
 
                 // `KillOnDrop` makes the child die with its transport. Without
                 // it, the process is abandoned to the OS when the client goes

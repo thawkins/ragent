@@ -2,6 +2,7 @@
 name = "ragent-codeindex"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Codebase indexing and structured search for ragent"
 

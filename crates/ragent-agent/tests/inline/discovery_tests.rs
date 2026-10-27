@@ -13,6 +13,7 @@ fn test_discovered_server_to_config() {
         args: vec!["--arg1".to_string()],
         env: HashMap::from([("KEY".to_string(), "VALUE".to_string())]),
         source: McpDiscoverySource::SystemPath,
+        definition_file: None,
     };
 
     let config = server.to_config();

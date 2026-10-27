@@ -131,6 +131,7 @@ async fn resolved_index(options: Vec<&str>, default: Option<&str>) -> Option<usi
         tokio::spawn(async move {
             while let Ok(ev) = answer.recv().await {
                 if let Event::QuestionRequested {
+                    secret: false,
                     session_id,
                     request_id,
                     ..
@@ -140,6 +141,7 @@ async fn resolved_index(options: Vec<&str>, default: Option<&str>) -> Option<usi
                         session_id,
                         request_id,
                         response: "ok".to_string(),
+                        secret: false,
                     });
                     break;
                 }

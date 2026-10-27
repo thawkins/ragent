@@ -780,32 +780,31 @@ fn openai_chat_message(
     })]
 }
 
-/// The `content` of an ordinary OpenAI-family message whose text reaches the wire
-/// as a plain string, as the native `/api/chat` shape requires.
+/// The `content` of a message whose text reaches the wire as a plain string, as
+/// the native `/api/chat` shape requires.
 ///
-/// The sibling of [`openai_content`] on the same rule: only a *text* part becomes
-/// a string, because collapsing anything else would write `"content": null` and
-/// lose the part. Text parts join with a newline, which is what the block form
-/// conveys as two blocks; native Ollama has no block form.
+/// Native Ollama declares `content` as a Go `string`, so *any* JSON value that is
+/// not a string makes the endpoint refuse the whole request with
+/// `json: cannot unmarshal array into Go struct field ... of type string`. The
+/// value is therefore always a string: every text part is concatenated, and turns
+/// with no text at all (an image-only user turn, or a part list holding nothing but
+/// constructs) become `""` rather than an array. A message that also carries tool
+/// calls or results travels as separate entries beside this one (see
+/// [`ollama_native_message`](self)), so dropping the non-text parts here loses
+/// nothing - the siblings carry them.
 fn joined_text(parts: &[ContentPart]) -> serde_json::Value {
-    let rendered: Vec<serde_json::Value> = parts
-        .iter()
-        .filter_map(|part| match part {
-            ContentPart::Text { text } => Some(serde_json::json!({
-                "type": "text",
-                "text": text
-            })),
-            ContentPart::ToolUse { .. }
-            | ContentPart::ToolResult { .. }
-            | ContentPart::ImageUrl { .. }
-            | ContentPart::Reasoning { .. } => None,
-        })
-        .collect();
-    match rendered.as_slice() {
-        [] => serde_json::json!([]),
-        [only] if only["type"] == "text" => only["text"].clone(),
-        _ => serde_json::json!(rendered),
+    let mut joined = String::new();
+    for part in parts {
+        if let ContentPart::Text { text } = part {
+            if !joined.is_empty() {
+                // Text parts join with a newline, which is what the block form
+                // conveys as two blocks; native Ollama has no block form.
+                joined.push('\n');
+            }
+            joined.push_str(text);
+        }
     }
+    serde_json::json!(joined)
 }
 
 /// Native Ollama `/api/chat`: the text of a message always reaches the wire as a

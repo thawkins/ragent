@@ -85,3 +85,21 @@ __pycache__/
 # if the broad `.ragent/` rule above is ever narrowed.
 .ragent/research_vault/
 
+
+# Credential-bearing files this codebase writes and reads. Each holds inline
+# secrets: `azureresources.json` an `api_key`, an MCP config a server's `env` /
+# `headers`, and the root `ragent.json` a provider credential. The root file is
+# anchored (`/`) so `.ragent/ragent.json` project configs stay trackable.
+azureresources.json
+.mcp.json
+mcp.json
+/ragent.json
+*.crt
+*.cer
+*.der
+
+# Node trees an installed MCP server may vendor
+node_modules/
+
+# Run logs
+*.log

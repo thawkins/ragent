@@ -536,6 +536,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                     session_id: req.session_id.clone(),
                                     request_id: req.id.clone(),
                                     response,
+                                    secret: req.secret,
                                 });
                             app.question_queue.pop_front();
                             app.question_selected_index = 0;
@@ -550,6 +551,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                 session_id: req.session_id.clone(),
                                 request_id: req.id.clone(),
                                 response: "[User dismissed question]".to_string(),
+                                secret: req.secret,
                             });
                     }
                     app.question_queue.pop_front();
@@ -571,6 +573,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                 session_id: req.session_id.clone(),
                                 request_id: req.id.clone(),
                                 response,
+                                secret: req.secret,
                             });
                         app.question_queue.pop_front();
                         app.pending_question_input.clear();
@@ -585,6 +588,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             response: "[User dismissed question]".to_string(),
+                            secret: req.secret,
                         });
                 }
                 app.question_queue.pop_front();
@@ -2737,7 +2741,12 @@ async fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
             else {
                 return;
             };
-            let (feedback, enabled) = app.toggle_discovered_mcp_server(&srv).await;
+            let row_enabled = app
+                .mcp_discover
+                .as_ref()
+                .and_then(|s| s.enabled.get(s.selected).copied())
+                .unwrap_or(false);
+            let (feedback, enabled) = app.toggle_discovered_mcp_server(&srv, row_enabled).await;
             if let Some(state) = app.mcp_discover.as_mut() {
                 state.feedback = Some(feedback);
                 if let Some(row) = state.enabled.get_mut(state.selected) {

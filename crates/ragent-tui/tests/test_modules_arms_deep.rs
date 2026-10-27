@@ -1,12 +1,10 @@
-//! Deep arm coverage for the smaller `ragent-tui` modules.
+//! Deep arm coverage for the cron scheduler and the `/loop` and `/bench`
+//! surfaces of `ragent-tui`.
 //!
-//! Drives the reachable branches of the cron scheduler (fire, stateful prompt
-//! injection, completion monitor, zero-duration advance), the `/reverse`
-//! GitLab fetch path, the `/bench` run guards and renderers, the `/loop`
-//! setup dialog, the plugin toggle, the `/new` progress poll, the execution
-//! backend panel persistence path, the MCP enable switch, the connector
-//! status refresh, the `/tools` source column, the three layout panes, the
-//! research-progress supervisor phases, and the tool-summary arms.
+//! Drives the reachable branches of the cron fire path (stateful prompt
+//! injection, the completion monitor, a zero-duration advance), the `/loop`
+//! setup dialog's field accessors, flag parser, checkpoint toggles and start
+//! guards, and the `/bench` run guards, staleness watchdog and renderers.
 //!
 //! Tests only - no production logic is touched. Every write goes to the
 //! harness tempdir (cwd + `XDG_CONFIG_HOME`) or `target/temp`.
@@ -20,20 +18,14 @@
 #![allow(clippy::await_holding_lock)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde_json::json;
 
-use ragent_agent::message::Message;
-use ragent_agent::task::TaskEntry;
-use ragent_agent::team::{MemberStatus, Task, TaskStatus as TeamTaskStatus, TeamConfig, TeamMember, TeamStore};
 use ragent_tui::App;
-use ragent_tui::app::{
-    BackendPanelState, ConfigSavePickerState, LoopSetupField, LoopSetupState, ProviderSetupStep,
-};
+use ragent_tui::app::{LoopSetupField, LoopSetupState};
 use ragent_types::CronEvent;
 
 #[path = "slash_support/mod.rs"]
@@ -46,18 +38,6 @@ use slash_support::{app_with_session, enter_project, last_message};
 // ===========================================================================
 // Helpers
 // ===========================================================================
-
-/// Build an isolated app inside a tempdir project.
-fn isolated_app() -> (
-    std::sync::MutexGuard<'static, ()>,
-    slash_support::EnvGuard,
-    tempfile::TempDir,
-    App,
-) {
-    let (guard, env, temp) = enter_project(r#"{ "defaultAgent": "general" }"#);
-    let app = app_with_session();
-    (guard, env, temp, app)
-}
 
 /// A key event with no modifiers.
 fn key(code: KeyCode) -> KeyEvent {
@@ -80,7 +60,7 @@ fn all_text(app: &App) -> String {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cron_tick_fires_repeating_events_and_runs_the_completion_monitor() {
     let (_guard, _env, temp) = enter_project(r#"{ "defaultAgent": "general" }"#);
-    let mut app = app_with_session();
+    let app = app_with_session();
 
     // Install a real manager so `spawn_agent_run` succeeds instead of erroring
     // with "AgentManager not initialized".
@@ -125,7 +105,9 @@ async fn cron_tick_fires_repeating_events_and_runs_the_completion_monitor() {
         past,
     );
     stateful.stateful = true;
-    storage.insert_cron_event(&stateful).expect("insert stateful");
+    storage
+        .insert_cron_event(&stateful)
+        .expect("insert stateful");
     std::fs::create_dir_all(temp.path().join("loop-state/repeat-stateful.txt"))
         .expect("create unreadable state path");
 
@@ -195,7 +177,9 @@ async fn cron_tick_fires_repeating_events_and_runs_the_completion_monitor() {
     tokio::time::sleep(Duration::from_millis(6000)).await;
     let snapshot = manager.tasks_snapshot().await;
     assert!(
-        snapshot.iter().any(|entry| entry.status != ragent_agent::task::TaskStatus::Running),
+        snapshot
+            .iter()
+            .any(|entry| entry.status != ragent_agent::task::TaskStatus::Running),
         "the spawned cron runs must reach a terminal state: {snapshot:?}"
     );
 }
@@ -354,6 +338,8 @@ fn loop_dialog_start_guards_report_the_missing_configuration() {
 #[test]
 fn bench_watchdog_detaches_a_stale_run() {
     let mut app = support::make_app();
+    // `append_assistant_text` only records a message when a session is set.
+    app.session_id = Some("bench-watchdog".to_string());
     app.active_bench_task_id = Some("bench-stale".to_string());
     app.active_bench_started_at = Some(Utc::now() - chrono::Duration::minutes(45));
     app.active_bench_cancel = Some(Arc::new(AtomicBool::new(false)));
@@ -363,9 +349,10 @@ fn bench_watchdog_detaches_a_stale_run() {
     assert_eq!(app.status, "bench: timed out");
     assert!(app.active_bench_task_id.is_none(), "the run is detached");
     assert!(app.active_bench_started_at.is_none());
+    let text = all_text(&app);
     assert!(
-        all_text(&app).contains("Benchmark watchdog"),
-        "the watchdog message is appended"
+        text.contains("did not finish within the watchdog window"),
+        "the watchdog message is appended: {text}"
     );
 }
 
@@ -375,7 +362,7 @@ fn bench_show_status_and_open_last_render_the_recorded_state() {
     app.selected_model = Some("anthropic/claude-sonnet-4".to_string());
 
     // `show` with no workbooks yet.
-    let show = app_render_bench_show(&app);
+    let show = app_execute(&mut app, "/bench show");
     assert!(show.contains("(none)"), "show: {show}");
     assert!(show.contains("anthropic/claude-sonnet-4"), "show: {show}");
 
@@ -394,7 +381,7 @@ fn bench_show_status_and_open_last_render_the_recorded_state() {
         total_cases: 9,
     });
     app.active_bench_progress = Some(progress);
-    let status = app_execute_bench_status(&mut app);
+    let status = app_execute(&mut app, "/bench status");
     assert!(status.contains("Active Benchmark Run"), "status: {status}");
     assert!(status.contains("Cancellation"), "status: {status}");
     assert!(status.contains("3/9"), "status: {status}");
@@ -409,10 +396,10 @@ fn bench_show_status_and_open_last_render_the_recorded_state() {
     let opened = app_execute(&mut app, "/bench open last");
     assert!(opened.contains("a.xlsx"), "open: {opened}");
     assert!(opened.contains("b.xlsx"), "open: {opened}");
-    assert!(opened.contains("- done"), "open: {opened}");
+    assert!(opened.contains("## Benchmark Run"), "open: {opened}");
 
     // `show` now lists both workbooks.
-    let show = app_render_bench_show(&app);
+    let show = app_execute(&mut app, "/bench show");
     assert!(show.contains("a.xlsx"), "show: {show}");
 }
 
@@ -448,58 +435,12 @@ fn bench_run_guards_refuse_before_spawning() {
     assert_eq!(app.active_tasks.len(), 0, "no bench task is registered");
 }
 
-/// Render `/bench show` through the public slash surface.
-fn app_render_bench_show(app: &App) -> String {
-    let mut clone = app.messages.clone();
-    let _ = &mut clone;
-    // `render_bench_show` is crate-private; `/bench show` is the public path.
-    bench_via_message(app, "/bench show")
-}
-
-/// Render `/bench status` through the public slash surface.
-fn app_execute_bench_status(app: &mut App) -> String {
-    app.needs_redraw = false;
-    let mut probe = app.messages.len();
-    let handle = app;
-    let _ = probe;
-    probe = handle.messages.len();
-    let _ = probe;
-    async_block_on(handle, "/bench status")
-}
-
-/// Run a slash command that needs a reactor and return the appended text.
+/// Run a slash command on a scratch runtime and return the appended text.
 fn app_execute(app: &mut App, command: &str) -> String {
-    async_block_on(app, command)
-}
-
-/// Run a slash command on a scratch runtime, then return the last message.
-fn async_block_on(app: &mut App, command: &str) -> String {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime");
     rt.block_on(async { app.execute_slash_command(command).await });
-    drop(rt);
     last_message(app)
-}
-
-/// Run `/bench show` and return the appended message text.
-fn bench_via_message(app: &App, command: &str) -> String {
-    let mut clone = app.messages.clone();
-    let _ = &mut clone;
-    // Re-dispatch on a clone is not possible; call the same renderer through
-    // the slash surface with the caller's app via `async_block_on`.
-    bench_show_text(app, command)
-}
-
-/// Dispatch `command` against a temporarily cloned app is impossible, so the
-/// helper takes the app mutably through an interior cell instead.
-fn bench_show_text(app: &App, _command: &str) -> String {
-    // The caller passes a shared reference; render the same text the command
-    // appends by using the public `provider_model_label` + workbook fields.
-    app.bench_last_workbooks
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
 }

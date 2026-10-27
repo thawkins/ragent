@@ -46,7 +46,11 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Test (nextest)
-        run: cargo nextest run --workspace --profile ci --no-fail-fast
+        # `ragent-tools-extended/test-ssrf-bypass` compiles in the loopback
+        # escape hatch the fetch/crawl integration tests need. It is off by
+        # default and never enabled for a release build, so the shipped SSRF
+        # guard cannot be disabled by an environment variable.
+        run: cargo nextest run --workspace --features ragent-tools-extended/test-ssrf-bypass --profile ci --no-fail-fast
       - name: Test (doc tests - nextest does not run these)
         run: cargo test --workspace --doc
 
@@ -182,8 +186,16 @@ jobs:
         run: 'cargo nextest run -p ragent-plugins -E "test(test_add::)"'
       - name: Spec containment tests (ANTIPAT M0.7)
         run: 'cargo nextest run -p ragent-specs -E "test(test_govcreate_authoring::)"'
-      - name: Channel SSRF tests (ANTIPAT M0.5)
-        run: 'cargo nextest run -p ragent-tools-extended -E "test(test_channels::)"'
+      # ANTIPAT M0.5: the `send_channel_message` tool (and its `test_channels.rs`
+      # suite) was deleted in 1.0.130, so the SSRF cover for this milestone now
+      # lives in the masterfetch validator suite, the two legacy egress tools'
+      # own SSRF tests, and the capped body-reader tests. The
+      # `test-ssrf-bypass` feature is required because `test_mf_supplement::`
+      # drives real local servers; it only compiles the loopback escape hatch
+      # in, which stays off unless a test sets the environment variable in its
+      # own process, so the rejection assertions still run against the default.
+      - name: SSRF + capped body-reader tests (ANTIPAT M0.5)
+        run: 'cargo nextest run -p ragent-tools-extended --features test-ssrf-bypass -E "test(test_mf_security::) + test(test_legacy_web_ssrf::) + test(test_mf_supplement::)"'
       - name: Telemetry toggle tests (ANTIPAT M0.15)
         run: 'cargo nextest run -p ragent-telemetry --features telemetry -E "test(test_metric_toggles::)"'
 

@@ -1750,6 +1750,7 @@ fn poll_question_expiry_falls_back_to_the_first_option() {
         options: vec!["first".to_string(), "second".to_string()],
         default_index: None,
         expire_at_ms: Some(1),
+        secret: false,
     });
     app.pending_question_input = "half typed".to_string();
 

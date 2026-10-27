@@ -3,6 +3,7 @@ autotests = false
 name = "ragent-plugins"
 version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Plugin system for ragent: discovery, descriptor model, sandboxed runtime, and lifecycle (spec `plugins`)"

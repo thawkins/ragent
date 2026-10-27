@@ -98,7 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.149). The core architecture, tool system,
+Ragent is in **beta** (v1.0.151). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -3849,6 +3849,37 @@ connect path, the permission gate, and the `/mcp` and `/plugins` surfaces:
   the tool is still registered from an earlier connection, naming the command
   that re-enables it.
 
+#### 19.4.1a Removing a definition (`/mcp remove`)
+
+`/mcp remove <id>` is the destructive counterpart of connect/disconnect: it
+disconnects the server and deletes its entry from the `mcp` section of the
+**user-global** `ragent.json`, then clears the server's enable-ledger row so a
+re-added server starts enabled again rather than inheriting a stale disable. The
+session-side disconnect runs *before* the file write, so a failed write leaves
+the running state consistent with the file; a server that was not connected
+simply has nothing to disconnect.
+
+The edit goes through `Config::edit_global_config(edit)`, which reads the file as
+raw `serde_json::Value`, hands the top-level object to the caller's closure, and
+writes it back only when the closure reports a change. It exists because
+serialising the *merged* config would drop every key this build does not model,
+so an unrelated key in the operator's file would be lost by an edit that only
+meant to touch `mcp`. Every other key survives, an `mcp` object emptied by the
+removal is deleted rather than left as `{}`, and the load cache is invalidated so
+the next `Config::load` sees the new value.
+
+**A bridged server is refused.** A server whose definition lives in an installed
+plugin's `mcpServers` (or the external `mcp.json` that entry names) or in a
+connector's `connector.json` belongs to that owner: pruning it would leave the
+owner installed declaring a server list it no longer has, which the next bridge
+scan reports as drift. The refusal names the owning command - `/plugins remove
+<id>` or `/connectors remove <id>` - while `/mcp disconnect <id>` still stops the
+server without uninstalling its owner. Both owners resolve through one
+`app::mcp_bridge` module (`merged_mcp_servers`, `bridged_servers`,
+`resolve_config`, `find_bridged`, `is_bridged_source`), which `/mcp`,
+`/mcp config`, `/mcp discover` and `/mcp connect` all share, so a
+connector-bridged id is accepted everywhere a plugin-bridged one is.
+
 #### 19.4.2 Transports, sessions, and startup reporting
 
 A server is reached over the transport its config declares. Only the bundled
@@ -3957,8 +3988,22 @@ npm global `node_modules`, and each registry directory — the ragent-native
 `<config>/mcp/servers/`, and `<config>/claude/mcp-servers/`. The command renders
 a markdown table of every location (label, path with a `(missing)` marker for an
 absent directory, and a count), a total, and a second table of the discovered
-servers (id, the location it came from, and its launch command). `discover` is
+servers (id, the location it came from, its launch command, and the file that
+declares it). `discover` is
 unchanged: it flattens the location results and de-duplicates by id.
+
+The **declaring file** column is what tells a `ragent.json` entry apart from a
+bridged one before `/mcp remove` is run (§19.4.1a): a `PATH`/npm/registry
+discovery reports `-` (it has no definition file until it is adopted), while a
+plugin- or connector-bridged server reports the absolute path of the manifest
+that declares it - the plugin manifest, the external `mcp.json` its `mcpServers`
+entry names (resolved and confinement-checked against the plugin root), or the
+connector's `connector.json`. The discover dialog carries the same information in
+its `Source / Defined in` column, and its width ceiling is 170 columns so an
+absolute path is not clipped away. `/mcp` prints the same mapping as a separate
+`Defined in:` block plus a `Managed by:` block naming each bridged server's owner,
+because a seventh table column wrapped every header cell past the message width.
+
 
 ---
 
@@ -4739,6 +4784,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.151 | 2026-10-27 | **Workspace-wide security hardening from the fresh `docs/reports/code-audit.md` (81 findings, 21 high), plus `quick-xml` 0.42, a `rust-version` floor of 1.91, `/mcp remove`, and a stable `ms0-regression` CI job.** A credential no longer reaches a log line, an SSE stream or a `{:?}` dump: `InputField` and `AzureResourceEntry` lose their derived `Debug` (a hand-written impl reports `<redacted>` plus a length, and the key as set-or-not) because both sat inside `Debug`-derived app state; the sudo askpass password is masked in the TUI question dialog and replaced outright in `event_to_parts` rather than pattern-redacted (a new `secret: bool` on `QuestionRequested`/`QuestionAnswered`, `serde(default)`, with the in-process event keeping the real value the helper reads from the bus); hook `stderr`, dynamic-context `stderr` and TaskCreated-hook feedback route through `redact_secrets`; user memory content is logged as a char count and hash instead of a prefix; the startup secret registry gains `GEMINI_API_KEY`/`GOOGLE_API_KEY`/`XAI_API_KEY`/`OPENROUTER_API_KEY`/`HF_TOKEN`/`AZURE_AI_FOUNDRY_API_KEY`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`/`RAGENT_TOKEN`; a new `CONNSTRING_PATTERN` second pass masks `scheme://user:pass@host` (and `get_env` covers `URL`/`DATABASE`/`DSN`/`CONN` by name); `.gitignore` covers `azureresources.json`, `.mcp.json`/`mcp.json`, root `ragent.json`, `*.crt`/`*.cer`/`*.der`, `node_modules/` and `*.log`. **The masterfetch SSRF test bypass is compile-time**, behind the new `test-ssrf-bypass` feature of `ragent-tools-extended` (absent from `default` and from every release build; `pre-flight.sh` and the CI workspace test pass it explicitly), so a shipped binary cannot be talked out of its guard by `RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF`. **`/mcp remove <id>`** lands on a new `Config::edit_global_config(edit)` (raw-JSON read/mutate/write so unrelated keys survive), refuses a plugin- or connector-bridged id by name (`/plugins remove` / `/connectors remove`), and clears the enable-ledger row; `/mcp`, `/mcp config` and the discover dialog now name the manifest that declares each server (`McpDiscoverySource::Plugin`/`Connector` plus `DiscoveredMcpServer::definition_file`), and one `app::mcp_bridge` module resolves both owners so `/mcp connect` accepts a connector-bridged id. **Fixes:** native Ollama rejected any request with a text-free message (`joined_text` emitted `[]`; Ollama declares `content` as a Go `string`) - the value is always a string now; the `_npx` cache repair runs once per process before the first child spawns and takes a cross-process `flock` (fixing the `connection closed: initialize response` that a poisoned retired directory produced); a dead background reader, a failed Prometheus scrape write, a failed `!cmd` and a failed agent resume log at `warn!` with structured fields instead of `debug!`; `encrypt_key_with_context` carries the AEAD error and AAD length into its log; the `ms0-regression` M0.5 step filtered on the `test_channels::` suite deleted in 1.0.130 (`cargo nextest` exits 4 on an empty filter) and now runs `test_mf_security::` + `test_legacy_web_ssrf::` + `test_mf_supplement::` (139 tests); five test files that no crate `tests/all.rs` included are compiled again. **Dependencies:** `quick-xml` 0.39 -> 0.42 clears RUSTSEC-2026-0194/-0195 with both suppressions removed from `.cargo/audit.toml` and `deny.toml` (the cited `ooxmlsdk` constraint was stale - it was never a dependency), `tokio` 1.54.1, `libc` 0.2.191, `uuid` 1.29.0. The status bar loses its hardcoded `HEALTHY` git dot and `render_status_bar_v2` becomes `render_status_bar`. Verification: `cargo check --workspace` and `--all-targets --features ragent-tools-extended/test-ssrf-bypass` clean, `cargo fmt --check` clean, `cargo audit` clean (867 dependencies), `cargo deny check advisories` ok. |
 | uncommitted | 2026-10-22 | **Tool visibility removed.** The per-family `tool_visibility` config block (`ToolVisibilityConfig`, `ToolVisibilitySpecified`, `iter_switches`, `tool_family_names`, and the sync between `/codeindex on|off` and `tool_visibility.codeindex`) is deleted, together with the `ToolRegistry::set_hidden` / `hidden()` / `hidden_definitions()` surface and the `/tools <switch> on|off` dispatch arm. Every registered tool is now advertised to the model unconditionally: the definitions sent with each request are the registry's definitions and the system prompt lists the same set, so a tool is absent only when the subsystem that registers it is inactive. `/tools` is reduced to a read-only registry report - `/tools` (help), `/tools list` (alias `show`), `/tools help`; `TOOLS_SUBS` is `["list", "show", "help"]`. The orphaned name-level filter goes with it: the `hidden_tools` config field, `Config::effective_hidden_tools()`, its `merge` union and the `/config show` union-field label are deleted, so a config carrying the key now has it ignored as an unknown key. `DryRunInputs` loses its `hidden_tools` field, so `ragent run --dry-run` no longer reports a hidden-tool count. All documentation that described the switches is removed or rewritten (`docs/howtos/tool-visibility.md` is deleted; `README.md`, `SPEC.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `docs/howtos/{config,permissions,reactagent,office,codeindex,plugins,tutorial}.md` and `docs/howtos/slashcommands/{tools,INDEX,config,reload,codeindex,plugins}.md` follow). |
 | v1.0.149 | 2026-10-21 | **The `/provider` and `/model` setup dialogs are rebuilt on the catalogue list chrome, `/connectors claude` adopts the same design language, and the test suite gains a process-global isolation guard (specs `agentui`, `connectors` FR-047, `pluginstores` FR-054).** Every list-bearing `ProviderSetupStep` (provider, model, router-tier model, agent, configured-provider, provider-config and reset steps) now shares one composition: a slate accent frame titled with the step and subject, a heading strip with a live count, a pinned reversed-video column band, a cursor-filled zebra row list, and a muted key-hint footer; `SelectProvider` gains provider-name/provider-id/`Kind`/`Status` columns, `SelectModel`/`SelectRouterModel` right-align `Context` and `Cost` and spell out the `R`/`V`/`T` legend, and every selector windows around its cursor (the thinking-level list two lines at a time) so a list longer than the dialog keeps the highlighted row painted with `Showing a-b of N` in the legend. A mouse notch over an open setup dialog steps the cursor through the same `handle_provider_setup_key` path and is swallowed elsewhere. The `/connectors claude` browser drops its bespoke layout for the shared `STORE_*` chrome (renamed from `PLUGIN_STORE_*` and now used by both panels), gains a `Categories` navigator above a `Marketplace` navigator with `Name (N)` rows and an `Installed` pseudo-category, three focusable panes (`CataloguePane::Results`/`Categories`/`Marketplaces`), a pinned column-heading row, a one-column bold-green installed lane, and a bottom search box with `[x] clear`; the plugin-store navigators gain the same `Installed` pseudo-category (FR-054). `scripts/check-test-env-isolation.sh` (with `--self-test`) enforces test env isolation across the per-crate `tests/all.rs` binaries, wired into `pre-flight.sh` and CI. `rustls-webpki` 0.103.16 and `webpki-root-certs` 1.0.10 clear RUSTSEC-2026-0382/0383 with no suppression added. Tests: `test_setup_dialog_chrome` (14), `test_setup_selector_scroll` (7), `test_plugin_store_installed_category`, the 54-case connector-catalogue set, and the reworked window/footer suites; `cargo test --workspace` 14,418 passed / 0 failed / 22 ignored, `cargo fmt --check`, clippy, `cargo audit` and `cargo deny check` all clean. **Also released in this version:** the `Esc`-only modal dismissal - the Agents, Teams and output-view overlays lose the bordered ` Close ` bar, `window_frame` derives a one-row legend band instead, and every FR-077 legend ends with `Esc close` (FR-007, FR-018, FR-032, FR-074, FR-077); the keyboard-first Agents/Teams block cursor with the `/team forcecleanup` shutdown race fix (`seed_only` seeding, awaited per-member shutdown) and the 5000 s `TOOL_WATCHDOG_TIMEOUT` (FR-033..FR-046, FR-065, FR-069..FR-070); and the Agent and Team Member panel (FR-006..FR-026) with cooperative sub-agent suspension (FR-035), the widened text-format tool-call recovery (three more dialects plus reasoning-channel scanning), `/yolo on|off|status` with the `--config` write target, the discoverable `SPEC.md`-only spec directory, SEC-ragent-team-003, and the `same-file` Windows path-alias containment. |
 | v1.0.141 | 2026-10-18 | Version bump. Session screenshot renamed to `assets/screens/ragentsession.png` and re-embedded in the README. |

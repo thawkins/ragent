@@ -286,6 +286,9 @@ impl Tool for AskUserTool {
             question: question.to_string(),
             options,
             default_index,
+            // A pick-list question is never a credential prompt; the maskable
+            // free-text answer belongs to the sudo askpass path only.
+            secret: false,
         });
 
         // Wait for a matching QuestionAnswered event from the TUI.
@@ -295,6 +298,7 @@ impl Tool for AskUserTool {
                     session_id: ref s,
                     request_id: ref rid,
                     response: ref r,
+                    ..
                 }) if s == &ctx.session_id && rid == &request_id => {
                     break r.clone();
                 }

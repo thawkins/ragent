@@ -236,8 +236,12 @@ mod test_loop_dialog;
 mod test_markdown_table;
 #[path = "test_markdown_table_rows.rs"]
 mod test_markdown_table_rows;
+#[path = "test_mcp_bridged_surfaces.rs"]
+mod test_mcp_bridged_surfaces;
 #[path = "test_mcp_discover_panel.rs"]
 mod test_mcp_discover_panel;
+#[path = "test_mcp_remove.rs"]
+mod test_mcp_remove;
 #[path = "test_memory_clear_confirm.rs"]
 mod test_memory_clear_confirm;
 #[path = "test_memory_panel.rs"]
@@ -262,6 +266,8 @@ mod test_misc_modules_deep;
 mod test_model_picker_widths;
 #[path = "test_models_state_misc.rs"]
 mod test_models_state_misc;
+#[path = "test_modules_arms_deep.rs"]
+mod test_modules_arms_deep;
 #[path = "test_ms03_mask_secret.rs"]
 mod test_ms03_mask_secret;
 #[path = "test_ms04_tui_source_guards.rs"]

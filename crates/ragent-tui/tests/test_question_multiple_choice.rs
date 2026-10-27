@@ -118,6 +118,7 @@ async fn test_multiple_choice_question_renders_options() {
             "ollama".to_string(),
         ],
         default_index: Some(0),
+        secret: false,
     })
     .await;
 
@@ -146,6 +147,7 @@ async fn test_multiple_choice_question_shows_selected_option() {
         question: "Pick one".to_string(),
         options: vec!["A".to_string(), "B".to_string()],
         default_index: Some(0),
+        secret: false,
     })
     .await;
 
@@ -166,6 +168,7 @@ async fn test_multiple_choice_selection_navigates_down() {
         question: "Pick".to_string(),
         options: vec!["first".to_string(), "second".to_string()],
         default_index: Some(0),
+        secret: false,
     })
     .await;
 
@@ -193,6 +196,7 @@ async fn test_free_text_question_does_not_show_options() {
         question: "Type your answer".to_string(),
         options: vec![],
         default_index: None,
+        secret: false,
     })
     .await;
 

@@ -318,6 +318,9 @@ mod test_mcp_http_transport;
 #[path = "test_mcp_notification.rs"]
 mod test_mcp_notification;
 
+#[path = "test_mcp_npx_cache_repair.rs"]
+mod test_mcp_npx_cache_repair;
+
 #[path = "test_mcp_refresh_more.rs"]
 mod test_mcp_refresh_more;
 
@@ -575,6 +578,9 @@ mod test_team_task_store;
 
 #[path = "test_teammate_retry_backoff.rs"]
 mod test_teammate_retry_backoff;
+
+#[path = "test_tool_argument_decode_sites.rs"]
+mod test_tool_argument_decode_sites;
 
 #[path = "test_template_discovery.rs"]
 mod test_template_discovery;

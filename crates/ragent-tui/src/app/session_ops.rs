@@ -874,7 +874,9 @@ impl App {
             );
 
             if let Err(e) = processor.process_message(&sid, &prompt, &agent, flag).await {
-                tracing::debug!(error = %e, "Failed to process bang command output");
+                // A user-visible failure: at `debug` it was invisible at the
+                // default level, so `!cmd` output could be lost silently.
+                tracing::warn!(error = %e, "Failed to process bang command output");
             }
         });
     }
@@ -3036,7 +3038,9 @@ impl App {
                 .process_message(&sid, resume_text, &agent, flag)
                 .await
             {
-                tracing::debug!(error = %e, "Failed to resume agent");
+                // Resume failures surface to the user through the status line,
+                // so they must be visible at the default log level too.
+                tracing::warn!(error = %e, "Failed to resume agent");
             }
         });
         true
@@ -4000,6 +4004,7 @@ impl App {
     pub(crate) async fn toggle_discovered_mcp_server(
         &mut self,
         server: &DiscoveredMcpServer,
+        row_enabled: bool,
     ) -> (String, bool) {
         use ragent_agent::Config;
 
@@ -4010,9 +4015,16 @@ impl App {
             Ok(c) => c.mcp,
             Err(e) => return (format!("[x] failed to load config: {e}"), false),
         };
-        let ledger = ragent_agent::mcp::McpEnableLedger::load();
-        let currently_enabled =
-            crate::app::state::discovered_mcp_enabled(&server.id, &configured, &ledger);
+        // The dialog's own row state is authoritative for a server that is not in
+        // `ragent.json`: it is either a bridged row (enabled unless the ledger says
+        // otherwise) or a proposal the user has not adopted yet, and the config
+        // cannot tell the two apart.
+        let currently_enabled = if configured.contains_key(&server.id) {
+            let ledger = ragent_agent::mcp::McpEnableLedger::load();
+            crate::app::state::discovered_mcp_enabled(&server.id, &configured, &ledger)
+        } else {
+            row_enabled
+        };
 
         if currently_enabled {
             let report = self.set_mcp_server_enabled(&server.id, false).await;
@@ -4025,10 +4037,20 @@ impl App {
         // Enabling: discovery only proposes a server, so a `ragent.json` entry
         // must exist before it can start. Add one when absent; lift a
         // `disabled: true` override when present so the entry is not shadowed.
-        if let Err(e) = self.ensure_discovered_mcp_config(server) {
+        //
+        // A bridged row is exempt: its definition is already an entry inside a
+        // plugin's or connector's manifest, so writing a `ragent.json` copy would
+        // shadow the owner's declaration and drift the moment the owner changes.
+        // Only the enable ledger is touched, which is exactly what the row means.
+        let bridged = crate::app::mcp_bridge::is_bridged_source(&server.source);
+        if !bridged && let Err(e) = self.ensure_discovered_mcp_config(server) {
             return (format!("[x] {e}"), false);
         }
-        let report = self.set_mcp_server_enabled(&server.id, true).await;
+        let report = if bridged {
+            self.set_bridged_mcp_server_enabled(&server.id, true).await
+        } else {
+            self.set_mcp_server_enabled(&server.id, true).await
+        };
         if report.contains("[err]") {
             return (format!("[x] could not enable '{}'", server.id), false);
         }

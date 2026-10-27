@@ -670,6 +670,23 @@ async fn async_main() -> Result<()> {
         "PERPLEXITY_API_KEY",
         "EXA_API_KEY",
         "SERPER_API_KEY",
+        // Audit high/medium findings: these live credentials were absent from
+        // the seed, so a value a child process echoed reached the log or the SSE
+        // stream in cleartext unless it happened to match a generic pattern. A
+        // bare 32-hex Azure key matches no pattern at all.
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "XAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "HF_TOKEN",
+        "AZURE_AI_FOUNDRY_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        // The HTTP server's own bearer token: read at startup below, and until now
+        // registered nowhere, so an echo of it survived redaction (audit medium
+        // finding).
+        "RAGENT_TOKEN",
     ] {
         if let Ok(val) = std::env::var(var) {
             ragent_agent::sanitize::register_secret(&val);

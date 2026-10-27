@@ -3,6 +3,7 @@ autotests = false
 name = "ragent-config"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 authors = ["Tim Hawkins"]
 license = "MIT"
 description = "Configuration system for ragent"

@@ -19,7 +19,24 @@ use super::{Tool, ToolContext, ToolOutput};
 pub struct GetEnvTool;
 
 /// Variable names containing these substrings are redacted.
-const SENSITIVE_PATTERNS: &[&str] = &["KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "CREDENTIAL"];
+///
+/// `URL`, `DATABASE`, `DSN` and `CONN` cover connection strings
+/// (`scheme://user:pass@host`), whose name carries none of the credential words
+/// but whose value embeds a password; the value-shape pass in
+/// [`ragent_types::sanitize`] masks the `user:pass@` portion as a second line of
+/// defence (audit high finding).
+const SENSITIVE_PATTERNS: &[&str] = &[
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "PASS",
+    "CREDENTIAL",
+    "URL",
+    "DATABASE",
+    "DSN",
+    "CONN",
+];
 
 fn is_sensitive(name: &str) -> bool {
     // Case-insensitive substring test that avoids allocating an uppercased

@@ -61,6 +61,7 @@ where
 {
     slash::mcp_display_servers(previous, configured, working_dir, live)
 }
+mod mcp_bridge;
 mod spawn;
 mod subagent_events;
 mod swarm;
@@ -72,6 +73,61 @@ mod windows;
 #[doc(hidden)]
 pub fn poll_spawn_result_for_tests(app: &mut App) {
     app.poll_spawn_result();
+}
+
+/// Test hook: the bridged MCP servers as `(id, origin label, defining file)`
+/// rows, so the integration tests can assert that `/mcp discover` offers a
+/// plugin- or connector-bridged server with its owner and the manifest that
+/// declares it.
+#[doc(hidden)]
+pub fn bridged_discover_rows_for_tests(
+    working_dir: &std::path::Path,
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig>,
+) -> Vec<(String, &'static str, Option<std::path::PathBuf>)> {
+    mcp_bridge::bridged_discover_rows(working_dir, configured)
+        .into_iter()
+        .map(|server| {
+            let label = match &server.source {
+                ragent_agent::mcp::McpDiscoverySource::Plugin { .. } => "plugin",
+                ragent_agent::mcp::McpDiscoverySource::Connector { .. } => "connector",
+                ragent_agent::mcp::McpDiscoverySource::SystemPath
+                | ragent_agent::mcp::McpDiscoverySource::NpmGlobal { .. }
+                | ragent_agent::mcp::McpDiscoverySource::McpRegistry { .. } => "discovered",
+            };
+            (server.id, label, server.definition_file)
+        })
+        .collect()
+}
+
+/// Test hook: the `/mcp remove` refusal text for a bridged id whose owner is
+/// `owner`, as a plugin or a connector.
+#[doc(hidden)]
+pub fn bridged_removal_refusal_for_tests(server_id: &str, owner: &str, is_plugin: bool) -> String {
+    let origin = if is_plugin {
+        mcp_bridge::BridgeOrigin::Plugin {
+            plugin_id: owner.to_string(),
+        }
+    } else {
+        mcp_bridge::BridgeOrigin::Connector {
+            connector_id: owner.to_string(),
+        }
+    };
+    let server = mcp_bridge::BridgedMcpServer {
+        id: server_id.to_string(),
+        config: ragent_agent::McpServerConfig::default(),
+        source_file: None,
+        origin,
+    };
+    mcp_bridge::bridged_removal_refusal(server_id, &server)
+}
+
+/// Test hook: render the `/mcp config` report from discovery results, without
+/// widening the private slash-command module.
+#[doc(hidden)]
+pub fn render_mcp_config_for_tests(
+    locations: &[ragent_agent::mcp::McpDiscoveryLocation],
+) -> String {
+    slash::render_mcp_config(locations)
 }
 
 /// Test hook: re-render a parsed `/spec reverse` invocation into the

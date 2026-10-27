@@ -2511,6 +2511,55 @@ impl Config {
         Ok(path)
     }
 
+    /// Atomically edit the **user-global** config file as raw JSON, preserving
+    /// every key the editor does not touch.
+    ///
+    /// [`Config::set_global_bool_key`] is the single-key case of this; general
+    /// callers (for example `/mcp remove`, which deletes one entry from the
+    /// `mcp` object) need to read, mutate, and write back a nested structure
+    /// without serialising the *merged* config, which would drop keys this
+    /// build does not model.
+    ///
+    /// The editor returns `Ok(true)` when it changed something and `Ok(false)`
+    /// when the file already matched, so an unchanged edit writes nothing.
+    ///
+    /// Returns the path that was written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be resolved, the
+    /// existing file is not a JSON object, the editor fails, or the write fails.
+    pub fn edit_global_config<F>(edit: F) -> anyhow::Result<PathBuf>
+    where
+        F: FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> anyhow::Result<bool>,
+    {
+        let path = match Self::config_write_target() {
+            Some(explicit) => explicit,
+            None => Self::global_config_path()
+                .ok_or_else(|| anyhow::anyhow!("no config directory found"))?,
+        };
+        let mut json: serde_json::Value = match std::fs::read_to_string(&path) {
+            Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).map_err(|e| {
+                anyhow::anyhow!("Failed to parse global config '{}': {}", path.display(), e)
+            })?,
+            _ => serde_json::Value::Object(serde_json::Map::new()),
+        };
+        let object = json.as_object_mut().ok_or_else(|| {
+            anyhow::anyhow!("global config '{}' is not a JSON object", path.display())
+        })?;
+        if !edit(object)? {
+            return Ok(path);
+        }
+
+        let json = serde_json::to_string_pretty(&json)
+            .map_err(|e| anyhow::anyhow!("Failed to serialise global config: {}", e))?;
+        Self::write_config_if_changed(&path, &json)?;
+        // The write changed a file the load cache is keyed on; drop it so the
+        // next `load` re-reads the new value.
+        Self::invalidate_load_cache();
+        Ok(path)
+    }
+
     /// Resolve the message input-queue capacity (spec `inputqueue` FR-015).
     ///
     /// Returns the configured `input_queue_capacity`, clamped to `1..=99` (the

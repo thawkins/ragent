@@ -672,6 +672,7 @@ impl App {
                 ref question,
                 ref options,
                 default_index,
+                secret,
             } => {
                 // Allow questions from any session (including sub-agents) to be displayed
                 // since they require user interaction to proceed.
@@ -699,6 +700,7 @@ impl App {
                         options: options.clone(),
                         default_index,
                         expire_at_ms: Some(expire_at_ms),
+                        secret,
                     });
                     self.pending_question_input.clear();
                     self.question_selected_index = selected;

@@ -114,6 +114,7 @@ async fn duplicate_permission_request_is_deduplicated() {
 async fn question_answered_removes_request() {
     let mut app = app_with_session("s1");
     app.handle_event(Event::QuestionRequested {
+        secret: false,
         session_id: "s1".to_string(),
         request_id: "q-1".to_string(),
         question: "pick one".to_string(),
@@ -131,6 +132,7 @@ async fn question_answered_removes_request() {
         session_id: "s1".to_string(),
         request_id: "q-1".to_string(),
         response: "b".to_string(),
+        secret: false,
     })
     .await;
     assert!(app.question_queue.is_empty());
@@ -141,6 +143,7 @@ async fn question_requested_from_non_current_session_still_queues() {
     // Questions from any session are displayed (a sub-agent may need input).
     let mut app = app_with_session("s1");
     app.handle_event(Event::QuestionRequested {
+        secret: false,
         session_id: "child-9".to_string(),
         request_id: "q-x".to_string(),
         question: "child question".to_string(),

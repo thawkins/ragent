@@ -736,6 +736,7 @@ fn state_resolve_default_index_clamps() {
         options: vec!["a".to_string(), "b".to_string()],
         default_index: Some(1),
         expire_at_ms: None,
+        secret: false,
     };
     assert_eq!(req.resolved_default_index(), 1);
 }
@@ -1382,6 +1383,7 @@ fn state_poll_question_expiry_answers_past_deadline() {
         options: vec!["first".to_string(), "second".to_string()],
         default_index: Some(1),
         expire_at_ms: Some(1), // far in the past
+        secret: false,
     });
     app.poll_question_expiry();
     assert!(app.question_queue.is_empty());
@@ -1395,6 +1397,7 @@ fn state_poll_question_expiry_answers_past_deadline() {
         options: Vec::new(),
         default_index: None,
         expire_at_ms: None,
+        secret: false,
     });
     app.poll_question_expiry();
     assert_eq!(app.question_queue.len(), 1);

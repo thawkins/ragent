@@ -3452,7 +3452,16 @@ impl SessionProcessor {
                                     &watchdog_identity.1,
                                     &watchdog_identity.0,
                                 );
-                                warn!("{}", msg);
+                                // Structured fields so a structured consumer can
+                                // attribute the timeout without parsing the message
+                                // text (audit finding).
+                                warn!(
+                                    tool = %watchdog_identity.1,
+                                    call_id = %watchdog_identity.0,
+                                    timeout_ms = TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
+                                    msg = %msg,
+                                    "tool watchdog timed out; call aborted"
+                                );
                                 // Close out the tool call in the UI: no `ToolCallEnd`
                                 // was published because the spawned task was aborted.
                                 self.event_bus.publish(Event::ToolCallEnd {
@@ -3531,7 +3540,13 @@ impl SessionProcessor {
                         if let Some((call_id, tool_name)) = stalled_tool {
                             watchdog_timed_out = true;
                             let msg = watchdog_timeout_msg(&tool_name, &call_id);
-                            warn!("{}", msg);
+                            warn!(
+                                tool = %tool_name,
+                                call_id = %call_id,
+                                timeout_ms = TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
+                                msg = %msg,
+                                "tool watchdog timed out; call aborted"
+                            );
                             // C2: close out the stalled call with its REAL
                             // call id (a placeholder id left the TUI part
                             // open) and keep draining sibling results so
