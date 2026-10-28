@@ -70,6 +70,9 @@ pub mod colors {
     /// Labels, separators
     pub const LABEL: Color = Color::DarkGray;
 
+    /// Keybinding hint - the dimmed `(Alt+X)` chord shown beside an indicator
+    pub const HINT: Color = Color::Rgb(170, 170, 170);
+
     /// Text
     pub const TEXT: Color = Color::White;
 }
@@ -715,12 +718,15 @@ fn build_line2_right(
 ) -> Vec<Span<'static>> {
     // Push one `<icon>[ok]/[x] ` indicator span: the icon keeps its own accent
     // color, while the trailing marker conveys enabled (green [ok]) vs disabled
-    // (red [x]). Shared by every service indicator on this line.
+    // (red [x]). Shared by every service indicator on this line. `hint` names the
+    // toggling key when one exists, appended after the marker so the chord is
+    // discoverable from the bar itself.
     fn push_indicator(
         spans: &mut Vec<Span<'static>>,
         icon: (&'static str, Color),
         enabled: bool,
         bold: bool,
+        hint: Option<&'static str>,
     ) {
         let (marker, color) = if enabled {
             (indicators::SUCCESS, colors::HEALTHY)
@@ -736,6 +742,14 @@ fn build_line2_right(
             format!("{marker} "),
             Style::default().fg(color),
         ));
+        if let Some(key) = hint {
+            spans.push(Span::styled(
+                format!("({key}) "),
+                Style::default()
+                    .fg(colors::HINT)
+                    .add_modifier(Modifier::DIM),
+            ));
+        }
     }
 
     let mut spans = Vec::new();
@@ -752,6 +766,7 @@ fn build_line2_right(
         service_icons::GCF,
         ragent_config::gcf::is_enabled(),
         false,
+        Some("Alt+G"),
     );
 
     // Code Index status
@@ -760,6 +775,7 @@ fn build_line2_right(
         service_icons::CODE_INDEX,
         app.code_index_enabled,
         false,
+        None,
     );
 
     // Activity-log status
@@ -768,14 +784,17 @@ fn build_line2_right(
         service_icons::ACTIVITY_LOG,
         ragent_config::activity_log::is_enabled(),
         false,
+        None,
     );
 
-    // Autopilot status
+    // Autopilot status (bold - it changes how the agent loop runs, and Alt+O
+    // toggles it)
     push_indicator(
         &mut spans,
         service_icons::AUTOPILOT,
         app.autopilot_enabled,
-        false,
+        true,
+        Some("Alt+O"),
     );
 
     // Edit-log status
@@ -784,6 +803,7 @@ fn build_line2_right(
         service_icons::EDIT_LOG,
         ragent_tools_core::edit_log::is_edit_log_enabled(),
         false,
+        None,
     );
 
     // Telemetry (OpenTelemetry metrics export) status
@@ -792,6 +812,7 @@ fn build_line2_right(
         service_icons::TELEMETRY,
         app.session_processor.telemetry.is_enabled(),
         false,
+        None,
     );
 
     // YOLO mode status (bold - it changes command-validation behaviour)
@@ -800,6 +821,7 @@ fn build_line2_right(
         service_icons::YOLO,
         ragent_config::yolo::is_enabled(),
         true,
+        Some("Alt+Y"),
     );
 
     spans

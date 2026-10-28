@@ -124,6 +124,8 @@ mod test_url_cloak;
 mod test_verify_func065;
 #[path = "test_web_gather_log.rs"]
 mod test_web_gather_log;
+#[path = "test_web_gatherer_age_filter.rs"]
+mod test_web_gatherer_age_filter;
 #[path = "test_web_gatherer_engine_exclusion.rs"]
 mod test_web_gatherer_engine_exclusion;
 #[path = "test_web_gatherer_exclusions.rs"]

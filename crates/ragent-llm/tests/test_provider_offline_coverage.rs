@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use ragent_llm::provider::Provider;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Spawn a one-shot HTTP server that replies with a fixed status/body and
@@ -28,6 +28,11 @@ async fn spawn_one_shot(status: u16, content_type: &str, body: String) -> String
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 {status} X\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
@@ -49,12 +54,22 @@ async fn spawn_ollama_cloud(tags_body: String, show_body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         write_json(&mut socket, 200, &tags_body).await;
         // Remaining requests: /api/show (one per discovered model)
         loop {
             let Ok((mut socket, _)) = listener.accept().await else {
                 return;
             };
+            // Read the request before replying: a client whose request bytes are
+            // still in flight when the socket closes sees a TCP RST, surfacing as
+            // `client error (Canceled)` on the real HTTP client.
+            let mut request_buf = [0u8; 8192];
+            let _ = socket.read(&mut request_buf).await;
             write_json(&mut socket, 200, &show_body).await;
         }
     });

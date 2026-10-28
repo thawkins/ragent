@@ -538,6 +538,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
             trunc120(&expr)
         }
+        "DateTime" => {
+            let offset = input
+                .get("timezone_offset_minutes")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let sign = if offset < 0 { '-' } else { '+' };
+            let magnitude = offset.abs();
+            let zone = format!("UTC{sign}{:02}:{:02}", magnitude / 60, magnitude % 60);
+            get_str(&["format"])
+                .map(|fmt| format!("{zone} {fmt}"))
+                .unwrap_or(zone)
+        }
 
         // ===================================================================
         //  NETWORK
@@ -1737,6 +1749,17 @@ pub fn tool_result_summary(
         "calculator" => {
             let result = out.get("result").and_then(|v| v.as_str());
             result.map(|r| format!("= {}", truncate_str(r, 100)))
+        }
+        "DateTime" => {
+            let text = out
+                .get("formatted")
+                .or_else(|| out.get("local"))
+                .and_then(|v| v.as_str());
+            let zone = out.get("timezone_offset").and_then(|v| v.as_str());
+            text.map(|t| match zone {
+                Some(zone) => format!("{} {}", truncate_str(t, 90), zone),
+                None => truncate_str(t, 100),
+            })
         }
         // ===================================================================
         //  NETWORK

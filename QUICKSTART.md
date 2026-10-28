@@ -828,11 +828,12 @@ The AI agent can use these tools during a session:
 | `os_info`  | Report host OS/hardware (also `/osinfo show`)   | `none`          |
 | `tool_info`| JSON dump of the tool registry                | `none`          |
 | `commands_info`| JSON dump of the slash-command catalog      | `none`          |
+| `DateTime` | Current date/time: RFC 3339 UTC instant, an optional fixed UTC-offset rendering, date/time fields, Unix timestamp | `none`          |
 
-148 tools are registered in the default build across 21 categories — run
+149 tools are registered in the default build across 21 categories — run
 `/tools` in the TUI to list them all. (`mf_screenshot` is registered only when a
 drivable headless browser engine is present — spec `openhands` FR-029 — so the
-default build advertises 148; with a bundled driver it is 149.)
+default build advertises 149; with a bundled driver it is 150.)
 
 **Provider spellings (optional).** A model, an ACP client or an MCP server may
 name a tool with a spelling ragent does not register — Anthropic's `WebFetch`,
@@ -1575,6 +1576,7 @@ Run any of these from the TUI prompt:
 /research create brief "Vector databases" --max-concepts 3 --max-findings 10
 /research create local-only "Project error handling" --use-local --papers
 /research create vendors "Managed vector db vendors" --url-cloak
+/research create llm-pricing "Current frontier model pricing" --age 30d
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec specify async-await Add async/await ergonomics --from-research rust-async
 /spec plan async-await "Rust 2024 edition, tokio runtime"
@@ -1632,6 +1634,7 @@ ragent research create rust-async "async/await idioms" --evaluate
 ragent research create brief "Vector databases" --max-concepts 3 --max-findings 10
 ragent research create local-only "Project error handling" --use-local --papers
 ragent research create vendors "Managed vector db vendors" --url-cloak
+ragent research create llm-pricing "Current frontier model pricing" --age 30d
 ragent research list          # aligned table; add --json for machine-readable output
 ragent research open rust-async
 ragent research search "async"
@@ -1662,6 +1665,19 @@ Pass `--url-cloak` to write web source URLs as defanged plain text
 (`hxxps://host[.]tld/…` in a code span) in the `Sources` bullets and the
 `References Index` table instead of clickable links, so automated URL scanners
 do not flag or reject the document. Non-URL rows are unchanged.
+
+Pass `--age <SPAN>` to reject web sources published longer ago than the span,
+where `SPAN` is `[n]d` days, `[n]m` months (30 days each) or `[n]y` years (365
+days each) — `--age 45d` for the last six weeks, `--age 6m` for the last half
+year. A source that carries no publication date is rejected as well, because
+you asked for recent material and an undated page cannot be shown to satisfy
+that. The window's start date (`today - span`, as ISO `YYYY-MM-DD`) is appended
+to every decomposed search query as `after:YYYY-MM-DD`, so the engines steer
+towards material inside the window rather than the run discarding an all-old
+result set only after fetching it; the progress table shows what it dropped in
+its own `age` column. A malformed span is a usage error (exit 2), and
+`POST /research` rejects one with 422 rather than silently running unfiltered.
+The flag is recorded in frontmatter, so `/research update` replays it.
 
 The `--tier` flag selects the analysis depth: `light` (minimal), `full`
 (default), or `dissertation` (extended with depth investigations and

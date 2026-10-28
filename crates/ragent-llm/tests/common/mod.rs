@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, ToolDefinition};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Build a minimal single-user-message chat request for streaming tests.
@@ -45,6 +45,11 @@ pub async fn spawn_sse_server(response_body: String) -> anyhow::Result<String> {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
 
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{response_body}"

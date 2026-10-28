@@ -301,6 +301,7 @@ impl App {
                 brief,
                 evaluate,
                 url_cloak,
+                max_age,
             } => {
                 // Use the `[wait]` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
@@ -379,6 +380,7 @@ impl App {
                     max_concurrent_research_units,
                     evaluate: Some(evaluate),
                     url_cloak,
+                    max_age,
                     invocation: Some(invocation.clone()),
                 };
                 let config = ragent_research::build_session_config(&req, config_arc.as_deref());
@@ -462,8 +464,14 @@ impl App {
                 } else {
                     format!("Topic: {topic_for_assistant}")
                 };
+                // Echo the full command line first so the message window
+                // records exactly what was run (every argument verbatim)
+                // immediately above the run's output.
                 let rendered = format!(
                     "From: /research create\n\
+                     ```\n\
+                     {invocation}\n\
+                     ```\n\n\
                      [note] **Gathering sources for `{name}`...**\n\n\
                      {subject_line}\n\
                      Mode: `{resolved_mode}`\n\
@@ -729,6 +737,7 @@ impl App {
                     topic: String::new(),
                 });
                 tokio::spawn(async move {
+                    let mut replayed: Option<String> = None;
                     let run_result: Result<_, String> = async {
                         let item = manager_for_spawn
                             .show(&name)
@@ -741,6 +750,7 @@ impl App {
                                  front-end can be replayed"
                             )
                         })?;
+                        replayed = Some(recorded.clone());
                         let mut req =
                             ragent_research::ResearchRunRequest::from_invocation(&recorded)
                                 .map_err(|e| format!("cannot replay research/{name}: {e}"))?;
@@ -783,10 +793,18 @@ impl App {
                     match run_result {
                         Ok(o) => {
                             let provider_calls = format_provider_calls(&o.provider_tool_calls);
+                            // Echo the replayed command line so the message
+                            // window shows what was executed, not just the
+                            // recorded-invocation notice.
+                            let echo = match replayed.as_deref() {
+                                Some(cmd) => format!("```\n{cmd}\n```\n\n"),
+                                None => String::new(),
+                            };
                             event_bus.publish(Event::TextDelta {
                                 session_id: session_id.clone(),
                                 text: format!(
                                     "From: /research update\n\n\
+                                     {echo}\
                                      [ok] **Updated `research/{}`** with {} sources.{}\n\n\
                                      Tip: run `/research open {}` to view the refreshed report.",
                                     o.research_name,

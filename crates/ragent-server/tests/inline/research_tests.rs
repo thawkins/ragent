@@ -84,6 +84,7 @@ fn minimal_request(name: &str, papers: bool) -> CreateResearchRequest {
         max_concurrent_research_units: None,
         evaluate: false,
         url_cloak: false,
+        max_age: None,
     }
 }
 
@@ -167,5 +168,45 @@ fn invocation_summary_omits_limits_when_unset() {
     assert!(
         !summary.contains("--max-concepts") && !summary.contains("--max-findings"),
         "summary must omit the limits when unset: {summary}"
+    );
+}
+
+#[test]
+fn to_run_request_forwards_the_source_age_span() {
+    let req = CreateResearchRequest {
+        max_age: ragent_research::AgeSpan::parse("6m").ok(),
+        ..minimal_request("age", false)
+    };
+    assert_eq!(
+        req.to_run_request().max_age.map(|s| s.to_string()),
+        Some("6m".to_string())
+    );
+}
+
+#[test]
+fn invocation_summary_round_trips_the_source_age_span() {
+    let req = CreateResearchRequest {
+        max_age: ragent_research::AgeSpan::parse("30d").ok(),
+        ..minimal_request("age-rt", false)
+    };
+    let summary = req.invocation_summary();
+    assert!(
+        summary.contains("--age 30d"),
+        "summary missing the age span: {summary}"
+    );
+    let replayed = ragent_research::ResearchRunRequest::from_invocation(&summary)
+        .expect("summary with an age span must replay");
+    assert_eq!(
+        replayed.max_age.map(|s| s.to_string()),
+        Some("30d".to_string())
+    );
+}
+
+#[test]
+fn invocation_summary_omits_the_age_span_when_unset() {
+    let summary = minimal_request("age-off", false).invocation_summary();
+    assert!(
+        !summary.contains("--age"),
+        "summary must omit the age span when unset: {summary}"
     );
 }

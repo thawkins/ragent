@@ -264,6 +264,12 @@ pub enum ResearchCommands {
         /// or reject the document.
         #[arg(long)]
         url_cloak: bool,
+        /// Reject web sources published longer ago than this span (`30d`
+        /// days, `6m` months, `2y` years). When set, a web source that carries
+        /// no publication date is rejected as well. When omitted, publication
+        /// age is not filtered.
+        #[arg(long, value_name = "SPAN")]
+        max_age: Option<String>,
     },
     /// List research items
     List {
@@ -326,6 +332,26 @@ pub enum ResearchCommands {
         #[arg(long)]
         force: bool,
     },
+}
+
+/// Parse the `--age <span>` value from the Clap layer into the research
+/// layer's cut-off type, rejecting a malformed span as a usage error.
+///
+/// # Errors
+///
+/// Returns a [`CliExit::usage`] (exit code 2) when `span` is not a valid
+/// `--age` value such as `30d`, `6m`, or `2y`.
+fn parse_age_span(span: Option<String>) -> Result<Option<ragent_research::AgeSpan>> {
+    let Some(span) = span else {
+        return Ok(None);
+    };
+    match ragent_research::AgeSpan::parse(&span) {
+        Ok(parsed) => Ok(Some(parsed)),
+        Err(e) => {
+            cliprintln_err!("ragent: invalid --age value '{span}': {e}");
+            Err(CliExit::usage().into())
+        }
+    }
 }
 
 /// Dispatch `ragent research ...` sub-commands to the `ragent-research`
@@ -417,6 +443,7 @@ pub async fn handle_research_command(
             no_clarify: _,
             clarify,
             url_cloak,
+            max_age,
         } => {
             let topic = topic.join(" ");
             // Clarification defaults to off; --clarify opts in.
@@ -471,6 +498,7 @@ pub async fn handle_research_command(
                 brief: None,
                 evaluate: false,
                 url_cloak,
+                max_age: parse_age_span(max_age)?,
             }
         }
         ResearchCommands::List { all, json } => ResearchCliCommand::List { all, json },
@@ -624,6 +652,7 @@ pub async fn handle_research_command(
             brief,
             evaluate,
             url_cloak,
+            max_age,
             ..
         } => {
             // Derive a human-readable item title that summarises the topic
@@ -673,6 +702,7 @@ pub async fn handle_research_command(
                 max_concurrent_research_units,
                 evaluate: Some(evaluate),
                 url_cloak,
+                max_age,
                 // Record the verbatim command line for frontmatter replay.
                 invocation: {
                     let argv: Vec<String> = std::env::args().collect();

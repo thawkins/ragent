@@ -380,6 +380,7 @@ async fn run_agent_search(
     query: &str,
     max_results: usize,
     exclude_engines: &[&str],
+    published_after: Option<&str>,
     tool_name: &str,
     supports_exclusions: bool,
 ) -> Result<Vec<WebSearchHit>> {
@@ -389,6 +390,14 @@ async fn run_agent_search(
     });
     if supports_exclusions && !exclude_engines.is_empty() {
         input["exclude_engines"] = serde_json::json!(exclude_engines);
+    }
+    // `--age`: hand the window's start date to `mf_search` as a structured
+    // bound. Each backend turns it into its own parameter (Exa
+    // `startPublishedDate`, Tavily `start_date`, Serper `cdr:1,cd_min:`), which
+    // is the only form a non-Google/Bing engine honours - the `after:` query
+    // hint is read as literal text by every engine registered here.
+    if supports_exclusions && let Some(date) = published_after {
+        input["published_after"] = serde_json::json!(date);
     }
     let output = tool.execute(input, ctx).await?;
 
@@ -447,6 +456,7 @@ impl WebSearchTool for AgentWebSearchTool {
             query,
             max_results,
             &[],
+            None,
             &self.tool_name,
             self.supports_exclusions,
         )
@@ -467,6 +477,29 @@ impl WebSearchTool for AgentWebSearchTool {
             query,
             max_results,
             exclude_engines,
+            None,
+            &self.tool_name,
+            self.supports_exclusions,
+        )
+        .await
+    }
+
+    async fn search_with_date_bound(
+        &self,
+        query: &str,
+        max_results: usize,
+        exclude_engines: &[&str],
+        published_after: Option<&str>,
+    ) -> Result<Vec<WebSearchHit>> {
+        // `--age`: both engine exclusions and the publication window reach the
+        // backend as first-class `mf_search` parameters in one call.
+        run_agent_search(
+            &self.tool,
+            &self.ctx,
+            query,
+            max_results,
+            exclude_engines,
+            published_after,
             &self.tool_name,
             self.supports_exclusions,
         )
@@ -597,9 +630,19 @@ impl WebFetchTool for AgentWebFetchTool {
             None
         };
 
-        let (mut body, mut title, content_type, page_type, language, mut author) = if is_mf_fetch {
+        let ParsedFetch {
+            mut body,
+            mut title,
+            content_type,
+            page_type,
+            detected_language: language,
+            mut author,
+            published_at: envelope_published,
+        } = if is_mf_fetch {
             parse_mf_fetch_output(&url, &output.content, output.metadata.as_ref())
         } else {
+            // Legacy `webfetch`: plain text with no envelope, so only the tool
+            // metadata can carry a title or page type.
             let title = output
                 .metadata
                 .as_ref()
@@ -616,18 +659,17 @@ impl WebFetchTool for AgentWebFetchTool {
                         .unwrap_or(&url)
                         .to_string()
                 });
-            (
-                output.content,
+            let page_type = output.metadata.as_ref().and_then(|m| {
+                m.get("page_type")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            });
+            ParsedFetch {
+                body: output.content,
                 title,
-                None,
-                output.metadata.as_ref().and_then(|m| {
-                    m.get("page_type")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                }),
-                None,
-                None,
-            )
+                page_type,
+                ..ParsedFetch::default()
+            }
         };
 
         // Apply the YouTube-specific transcript/title parse that was computed
@@ -747,7 +789,11 @@ impl WebFetchTool for AgentWebFetchTool {
         let page_meta = extract_head_metadata_for_url(&url, need_author)
             .await
             .unwrap_or_default();
-        let published_at = page_meta.published_at;
+        // The supplementary head fetch is authoritative when it finds a date;
+        // pages that carry one only in the `mf_fetch` envelope (PDFs and
+        // YouTube responses have no `<head>` to read) fall back to the
+        // envelope's freshness signal.
+        let published_at = page_meta.published_at.or(envelope_published);
         if author.is_none() {
             author = page_meta.author;
         }
@@ -919,6 +965,29 @@ pub fn normalize_github_blob_url(url: &str) -> String {
     )
 }
 
+/// The fields recovered from an `mf_fetch` response.
+///
+/// Replaces the seven-element tuple the envelope and plain-text branches used
+/// to return: every field is `Option`-shaped or a `String`, so a positional
+/// tuple invited silent mis-ordering at both the return sites and the caller.
+#[derive(Debug, Default)]
+struct ParsedFetch {
+    /// Page body (Markdown or plain text).
+    body: String,
+    /// Page title, falling back to the first non-empty body line, then the URL.
+    title: String,
+    /// Declared `Content-Type`, when the fetcher reported one.
+    content_type: Option<String>,
+    /// Envelope page classification (e.g. `article`, `youtube`, `scholarly`).
+    page_type: Option<String>,
+    /// Detected human language.
+    detected_language: Option<String>,
+    /// Author name from the page's embedded metadata.
+    author: Option<String>,
+    /// Publication date recovered from the page's metadata.
+    published_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Parse the `mf_fetch` tool's output envelope.
 ///
 /// `mf_fetch` normally returns a JSON object with `content`, `content_type`,
@@ -932,26 +1001,11 @@ pub fn normalize_github_blob_url(url: &str) -> String {
 /// response but redundant in the research output, where the URL already appears
 /// in the References Index and per-finding source lists. The function strips
 /// that header so the research layer only stores the actual content.
-///
-/// Returns the `(body, title, content_type, page_type, detected_language, author)`
-/// tuple. The `detected_language` is read from the top-level
-/// `detected_language` field (present on HTML, PDF, and YouTube responses) with
-/// a fallback to the nested `metadata.detected_language` for older payloads.
-/// The `author` is read from the nested `metadata.author` field populated by
-/// `PageMetadata` extraction.
-#[allow(clippy::type_complexity)]
 fn parse_mf_fetch_output(
     url: &str,
     content: &str,
     metadata: Option<&serde_json::Value>,
-) -> (
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+) -> ParsedFetch {
     // If the content looks like the mf_fetch envelope, parse it.
     if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(content) {
         if let Some(body) = envelope
@@ -1042,14 +1096,15 @@ fn parse_mf_fetch_output(
                         .filter(|s| !s.is_empty())
                         .map(String::from)
                 });
-            return (
+            return ParsedFetch {
                 body,
                 title,
                 content_type,
                 page_type,
                 detected_language,
                 author,
-            );
+                published_at: envelope_published_at(&envelope),
+            };
         }
     }
 
@@ -1116,14 +1171,33 @@ fn parse_mf_fetch_output(
                 .filter(|s| !s.is_empty())
                 .map(String::from)
         });
-    (
-        body.to_string(),
+    ParsedFetch {
+        body: body.to_string(),
         title,
         content_type,
         page_type,
         detected_language,
         author,
-    )
+        published_at: None,
+    }
+}
+
+/// Recover a publication date from an `mf_fetch` envelope.
+///
+/// The envelope nests the page's [`PageMetadata`] under `metadata`, whose
+/// `published_time` (`article:published_time` / JSON-LD `datePublished`) is the
+/// page's actual publication date. Reading it directly keeps the envelope a
+/// second source of publication dates for the `--age` web-source filter, which
+/// the supplementary raw-HTML head fetch may not be able to reach (PDF and
+/// YouTube bodies carry no `<head>`), without depending on the process clock or
+/// on the day-granularity `content_age_days` summary. `modified_time` is the
+/// fallback for a page that declares only a modification date.
+fn envelope_published_at(envelope: &serde_json::Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    let metadata = envelope.get("metadata")?;
+    ["published_time", "modified_time"]
+        .iter()
+        .filter_map(|key| metadata.get(*key).and_then(|v| v.as_str()))
+        .find_map(ragent_tools_extended::masterfetch::envelope::parse_iso_date)
 }
 
 /// Strip the leading `mf_fetch:` header block from a plain-text tool output.

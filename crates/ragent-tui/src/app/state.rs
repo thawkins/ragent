@@ -1012,7 +1012,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "telemetry_panel",
-        description: "Toggle the telemetry side panel (Alt+O alias); use `/telemetry counters` to list values",
+        description: "Toggle the telemetry side panel; use `/telemetry counters` to list values",
     },
     SlashCommandDef {
         trigger: "tools",
@@ -3327,7 +3327,7 @@ pub struct App {
     pub show_tasks_panel: bool,
     /// Whether the Memory panel is visible (toggled via Alt+M).
     pub show_memory: bool,
-    /// Whether the Telemetry panel is visible (toggled via Alt+O).
+    /// Whether the Telemetry panel is visible (toggled via `/telemetry_panel`).
     pub show_telemetry: bool,
     /// Whether the Context panel is visible (toggled via Alt+C).
     pub show_context_panel: bool,

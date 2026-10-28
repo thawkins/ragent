@@ -72,7 +72,7 @@ fn format_width_sweep_detail_renders_reason_columns_and_blank_lines() {
     );
     assert!(
         detail.ends_with(
-            "totals                7        3        4        1        1        1        0        1      1      0      0      0      0      0      0\n\n"
+            "totals                7        3        4        1        1        1        0        0        1      1      0      0      0      0      0      0\n\n"
         ),
         "table must be followed by a blank line and the totals row must \
          carry the reason and fetch-failure columns:\n{detail}"
@@ -81,17 +81,17 @@ fn format_width_sweep_detail_renders_reason_columns_and_blank_lines() {
     // fetch-failure breakdown columns.
     assert!(
         detail.contains(
-            "excluded   papers      pdf    relev    short    fetch    t/o    net    blk   http   wall     js   extr"
+            "excluded   papers      pdf    relev    short      age    fetch    t/o    net    blk   http   wall     js   extr"
         ),
         "header must carry the reason and fetch-failure columns:\n{detail}"
     );
     // Per-engine breakdown row.
     assert!(
-        detail.contains("langsearch            5        2        3        0        1        1        0        1      1      0      0      0      0      0      0"),
+        detail.contains("langsearch            5        2        3        0        1        1        0        0        1      1      0      0      0      0      0      0"),
         "langsearch row must break exclusions out by reason:\n{detail}"
     );
     assert!(
-        detail.contains("openalex              2        1        1        1        0        0        0        0      0      0      0      0      0      0      0"),
+        detail.contains("openalex              2        1        1        1        0        0        0        0        0      0      0      0      0      0      0      0"),
         "openalex row must break exclusions out by reason:\n{detail}"
     );
 }

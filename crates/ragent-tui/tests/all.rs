@@ -144,6 +144,8 @@ mod test_event_swarm_research_deep;
 #[path = "test_force_cleanup_modal.rs"]
 mod test_force_cleanup_modal;
 
+#[path = "test_autopilot_alt_o.rs"]
+mod test_autopilot_alt_o;
 #[path = "test_fr030_surface_agreement.rs"]
 mod test_fr030_surface_agreement;
 #[path = "test_fr033_completion_surfaces.rs"]

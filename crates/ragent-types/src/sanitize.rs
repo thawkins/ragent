@@ -123,7 +123,7 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         // excluded byte. The 16-char value floor keeps innocuous prose out.
         r#"(?i:((?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*["']?)[a-zA-Z0-9_\-\./+=]{16,})"#,
     ))
-    .expect("valid regex pattern")
+    .expect("valid regex pattern") // no-panic-ok: compile-time constant pattern
 });
 
 /// Connection-string userinfo: `scheme://user:secret@host`.
@@ -141,7 +141,7 @@ static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// group 2 is the `@` (re-emitted so the host stays attached).
 static CONNSTRING_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
-    Regex::new(r"([a-z][a-z0-9+.\-]*://[^\s:/@]+:)[^\s@/]{3,}(@)").expect("valid regex pattern")
+    Regex::new(r"([a-z][a-z0-9+.\-]*://[^\s:/@]+:)[^\s@/]{3,}(@)").expect("valid regex pattern") // no-panic-ok: compile-time constant pattern
 });
 
 /// Global in-memory registry of known secret values.

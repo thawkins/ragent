@@ -255,7 +255,12 @@ pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Valu
         "page": opts.page.saturating_add(1),
     });
 
-    if let Some(tbs) = freshness_to_tbs(opts.freshness) {
+    // An exact `--age` window is expressed with Google's custom date range
+    // (`cdr:1` with `cd_min`), which Google honours; the relative `qdr:`
+    // buckets below are only a fallback when no exact bound was supplied.
+    if let Some(date) = opts.published_after.as_deref() {
+        body["tbs"] = serde_json::Value::String(format!("cdr:1,cd_min:{date}"));
+    } else if let Some(tbs) = freshness_to_tbs(opts.freshness) {
         body["tbs"] = serde_json::Value::String(tbs.to_string());
     }
 

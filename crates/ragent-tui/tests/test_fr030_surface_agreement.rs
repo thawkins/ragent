@@ -57,9 +57,10 @@ mod support;
 use slash_support::{app_with_session, enter_project, last_message};
 
 /// The FR-030 surface size `specs/uniformtools/T-041-BASELINE.md` measured
-/// before the rename. Pinned as a number for the same reason the agent-side file
-/// pins it: a derived expectation would agree with whatever the tree did.
-const FR030_TOTAL: usize = 148;
+/// before the rename, plus the `DateTime` tool added afterwards. Pinned as a
+/// number for the same reason the agent-side file pins it: a derived
+/// expectation would agree with whatever the tree did.
+const FR030_TOTAL: usize = 149;
 
 /// An app in an isolated project with a live session.
 ///

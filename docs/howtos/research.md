@@ -726,6 +726,7 @@ These flags control the performance and resilience of the gathering phases.
 | `--oa-enable` | `research.open_access_recovery` (off) | Force open-access recovery on for this run, overriding `ragent.json`. |
 | `--no-oa` | `research.open_access_recovery` (off) | Force open-access recovery off for this run, overriding `ragent.json`. |
 | `--url-cloak` | off | Emit web source URLs as defanged plain text (`hxxps://host[.]tld/...` in a code span) in the `Sources` bullets and the `References Index` table, so automated URL scanners do not flag the document. Non-URL rows are unchanged. |
+| `--age <span>` | off | Reject web sources published longer ago than the span (`30d`, `6m`, `2y`); a source with no publication date is rejected too. The window's start date (`today - span`, rendered as an ISO `YYYY-MM-DD`) is appended to every decomposed search query, so the engines steer towards material inside the window rather than the run discarding an all-old result set after fetching it. |
 
 GitHub `blob/` file-view URLs (`github.com/owner/repo/blob/...`) are
 rewritten to `raw.githubusercontent.com` before fetching and non-HTML

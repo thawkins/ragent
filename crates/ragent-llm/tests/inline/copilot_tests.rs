@@ -359,7 +359,7 @@ fn test_copilot_premium_multiplier_table() {
 
 use crate::llm::{LlmClient, StreamEvent};
 use ragent_types::event::FinishReason;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn sse_request(_body: String) -> ChatRequest {
@@ -389,6 +389,11 @@ async fn spawn_copilot_sse(body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}"
         );
@@ -405,6 +410,11 @@ async fn spawn_copilot_status(status: u16, body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let reason = if status == 429 {
             "Too Many Requests"
         } else {

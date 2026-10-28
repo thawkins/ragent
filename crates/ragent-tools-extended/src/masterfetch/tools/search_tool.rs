@@ -339,6 +339,10 @@ impl Tool for MfSearchTool {
                     "enum": ["day", "week", "month", "year"],
                     "description": "Time filter for results"
                 },
+                "published_after": {
+                    "type": "string",
+                    "description": "Oldest admissible publication date as YYYY-MM-DD. Engines that accept an absolute lower bound (exa, tavily, serper) drop older results server-side; this expresses an exact window that 'freshness' cannot."
+                },
                 "max_results": {
                     "type": "integer",
                     "description": "Maximum results to return after merge/dedup (1-500, default: 10)"
@@ -414,6 +418,22 @@ impl Tool for MfSearchTool {
             && let Ok(f) = freshness.parse::<Freshness>()
         {
             opts = opts.with_freshness(f);
+        }
+
+        // `published_after` carries an exact window (`--age 45d`) that the
+        // coarse `freshness` buckets cannot express. Reject anything that is
+        // not a `YYYY-MM-DD` date so a malformed value cannot silently become
+        // a literal engine query parameter.
+        if let Some(date) = input["published_after"].as_str() {
+            let date = date.trim();
+            if !date.is_empty() && chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok() {
+                opts = opts.with_published_after(Some(date.to_string()));
+            } else if !date.is_empty() {
+                tracing::warn!(
+                    value = date,
+                    "mf_search: ignoring published_after that is not YYYY-MM-DD"
+                );
+            }
         }
 
         if let Some(page) = input["page"].as_u64() {

@@ -34,6 +34,15 @@ Both flags are optional and can be given in any position. Caveat: the flag
 parser silently ignores unknown tokens, so a typo in a flag name is not
 reported - the run simply starts without that budget applied.
 
+## Keybinding: Alt+O
+
+`Alt+O` toggles autopilot from the keyboard, driving the same state machine
+as `/autopilot on|off`. Because a key chord cannot carry flags, enabling via
+`Alt+O` applies a default `--max-time` of 1800 seconds so a stray keystroke
+cannot start an unbounded run; use `/autopilot on` (no flags) when you want a
+run with no time limit. The status bar shows the state as `AUTO: <mark>
+(Alt+O)`, and pressing `Alt+O` again stops the run.
+
 ## Examples
 
 ```

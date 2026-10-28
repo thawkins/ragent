@@ -38,7 +38,7 @@ use crate::llm::{ChatRequest, LlmClient, StreamEvent};
 use ragent_types::event::FinishReason;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 #[test]
@@ -131,6 +131,11 @@ async fn spawn_gemini_body(body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}"
         );
@@ -186,6 +191,11 @@ async fn test_gemini_chat_http_error() {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let body = "{\"error\":{\"message\":\"bad key\"}}";
         let response = format!(
             "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

@@ -137,3 +137,16 @@ fn test_mask_key_long() {
     let masked = mask_key("tvly-abcd1234efgh5678");
     assert_eq!(masked, "tv*****************78");
 }
+
+#[test]
+fn test_build_request_body_published_after_sets_start_date() {
+    // Tavily previously ignored any date constraint. `--age` now reaches it as
+    // `start_date`, so old results are dropped server-side.
+    use ragent_tools_extended::masterfetch::search::engine::SearchOptions;
+    use ragent_tools_extended::masterfetch::search::tavily::build_request_body;
+
+    let opts = SearchOptions::new(10).with_published_after(Some("2026-09-27".to_string()));
+    let body = build_request_body("rust async", &opts);
+    assert_eq!(body["start_date"], "2026-09-27");
+    assert_eq!(body["query"], "rust async");
+}

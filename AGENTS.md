@@ -1,5 +1,8 @@
 ## 1. Think Before Coding
 
+VERY VERY IMPORTANT: All disscusion, thoughts and other output should be in English. 
+
+
 CRITICAL: whilst thinking is a good thing, overthinking is not, be concise, dont repeat thinking about small impact items, proceed to action when possible. Overthinking burns tokens, pushes costs up and significantly impacts performance and ROI.
 
 So less thinking, more doing.
@@ -315,8 +318,7 @@ When reading files with the `read` tool:
   with `cargo nextest`, not `cargo test` — see "Test Commands" in
   `@AGENTS-LANGUAGE.md` and the configuration in `.config/nextest.toml`.
 - Merging binaries merges process state. Under `cargo test` a child module runs
-  in the `all` binary's single process alongside every other child. `cargo
-  nextest` runs every test in its own process and removes most of that, but it is
+  in the `all` binary's single process alongside every other child. `cargo nextest` runs every test in its own process and removes most of that, but it is
   not a licence to share a mutable global: a `static` registry or a shared
   scratch directory is still one object per binary, and tests within one crate
   can still interleave over a filesystem path. Every crate's `tests/all.rs`
@@ -379,6 +381,7 @@ When reading files with the `read` tool:
   tree byte-identical: no generated `INDEX.md`/`.index.json`, no per-run item
   directories, no log spools, no snapshot files under a checked-in path. Point
   every write at the git-ignored `target/temp/` scratch tree instead:
+
   - pass the root explicitly through state (e.g. `AppState::research_root`)
     rather than reading `std::env::current_dir()` inside a handler, and give the
     test a `target/temp/...` value;
@@ -388,8 +391,8 @@ When reading files with the `read` tool:
     `ragent_tui::app::set_log_root_override`) and call it from the test;
   - resolve `target/temp` from `env!("CARGO_MANIFEST_DIR")` so the path is
     correct regardless of the test's working directory.
-  Never "fix" this by restoring files with `git restore` after a run — that hides
-  the leak and can clobber unrelated work.
+    Never "fix" this by restoring files with `git restore` after a run — that hides
+    the leak and can clobber unrelated work.
 
 ## Documentation Standards
 

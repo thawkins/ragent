@@ -95,6 +95,7 @@ topic can be quoted as one argument.
 | `--clarify` / `--no-clarify` | Force on or off the clarification stage. Off by default. |
 | `--evaluate` | Enable evaluation scoring of findings. |
 | `--url-cloak` | Emit web source URLs as defanged plain text (`hxxps://host[.]tld/...` in a code span) in the `Sources` bullets and `References Index` table. Off by default. |
+| `--age <span>` | Reject web sources published longer ago than the span (`30d`, `6m`, `2y`); undated sources are rejected too. The window's start date (`today - span`, as ISO `YYYY-MM-DD`) is appended to every decomposed search query so the engines steer towards material inside the window. |
 
 ## Examples
 

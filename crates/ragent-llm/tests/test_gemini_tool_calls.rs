@@ -14,7 +14,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_llm::{GeminiProvider, Provider};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn make_request(model: &str) -> ChatRequest {
@@ -45,6 +45,11 @@ async fn spawn_gemini_sse_server(response_body: String) -> anyhow::Result<String
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
 
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{response_body}"

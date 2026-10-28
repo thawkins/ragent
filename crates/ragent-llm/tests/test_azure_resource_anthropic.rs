@@ -170,7 +170,7 @@ async fn test_azure_anthropic_stream_uses_the_shared_accumulator_for_parallel_ca
     use ragent_llm::provider::azure_resource::AzureResourceProvider;
     use std::io::Write;
     use std::sync::Arc;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -179,6 +179,11 @@ async fn test_azure_anthropic_stream_uses_the_shared_accumulator_for_parallel_ca
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let body = concat!(
             "event: content_block_start\n",
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_dup\",\"name\":\"Read\"}}\n\n",

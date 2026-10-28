@@ -347,6 +347,13 @@ struct CreateResearchRequest {
     /// clickable links.
     #[serde(default)]
     url_cloak: bool,
+    /// `--age <span>` - reject web sources published longer ago than this span
+    /// (`30d`, `6m`, `2y`). When set, a web source that carries no publication
+    /// date is rejected as well. Deserialised from the command-line spelling, so
+    /// an invalid span is rejected with 422 (an unprocessable JSON body) rather
+    /// than silently disabling the filter.
+    #[serde(default)]
+    max_age: Option<ragent_research::AgeSpan>,
 }
 
 impl CreateResearchRequest {
@@ -468,6 +475,9 @@ impl CreateResearchRequest {
         if self.url_cloak {
             parts.push("--url-cloak".to_string());
         }
+        if let Some(v) = &self.max_age {
+            parts.push(format!("--age {v}"));
+        }
         parts.join(" ")
     }
 
@@ -514,6 +524,7 @@ impl CreateResearchRequest {
             max_concurrent_research_units: self.max_concurrent_research_units,
             evaluate: Some(self.evaluate),
             url_cloak: self.url_cloak,
+            max_age: self.max_age.clone(),
             invocation: Some(self.invocation_summary()),
         }
     }

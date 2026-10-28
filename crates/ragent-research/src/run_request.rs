@@ -19,6 +19,7 @@ use crate::session::{
     AnalysisConfig, InputConfig, LocalConfig, ModelConfig, OutputConfig, ResilienceConfig,
     RunEngineConfig, SessionConfig, WebConfig,
 };
+use crate::source_age::AgeSpan;
 use crate::web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_SEARCH_MAX_RETRIES,
     DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
@@ -142,6 +143,15 @@ pub struct ResearchRunRequest {
     /// `RESEARCH.md` and `CORPA.md` so automated URL scanners do not treat
     /// them as live, clickable links. Defaults to off.
     pub url_cloak: bool,
+    /// `--age <span>` - reject web sources published longer ago than this span
+    /// (`30d`, `6m`, `2y`). When `Some`, a web source that carries no
+    /// publication date is rejected as well. When `None` (the default)
+    /// publication age is not filtered and undated sources are kept.
+    ///
+    /// Already parsed: every entry point (CLI, `/research create`, `POST
+    /// /research`, frontmatter replay) rejects a malformed span before building
+    /// the request, so a request that exists always carries a usable cut-off.
+    pub max_age: Option<AgeSpan>,
     /// Verbatim front-end invocation (e.g. `ragent research create --name x
     /// "topic" --tier full`) recorded in `RESEARCH.md` frontmatter so a future
     /// `/research update` command can replay the run.
@@ -233,6 +243,7 @@ impl ResearchRunRequest {
                 brief,
                 evaluate,
                 url_cloak,
+                max_age,
             } => {
                 if name.is_empty() {
                     return Err(InvocationParseError::MissingName);
@@ -278,10 +289,14 @@ impl ResearchRunRequest {
                     final_report_model,
                     evaluate: Some(evaluate),
                     url_cloak,
+                    max_age,
                     // Keep the recorded command verbatim so the replayed run
                     // re-stamps the original invocation in frontmatter.
                     invocation: Some(trimmed.to_string()),
                 })
+            }
+            crate::cli::ResearchCliCommand::Invalid(diagnostic) => {
+                Err(InvocationParseError::InvalidArgument(diagnostic))
             }
             crate::cli::ResearchCliCommand::Unknown(verb) if verb == "create" => {
                 Err(InvocationParseError::MissingName)
@@ -313,6 +328,10 @@ pub enum InvocationParseError {
     /// The recorded create command carried no research item name.
     #[error("recorded invocation has no research item name")]
     MissingName,
+    /// The recorded create command carried an argument value that does not
+    /// parse (for example a malformed `--age` span or a non-numeric limit).
+    #[error("recorded invocation has an invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 /// Normalize a recorded invocation to the shared `create ...` grammar used by
@@ -436,6 +455,7 @@ pub fn build_session_config(
                 .web_phase_timeout_secs
                 .or(Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)),
             max_search_calls: req.max_search_calls,
+            max_age: req.max_age,
         },
         local: LocalConfig {
             max_local_sources: req.max_local_sources.unwrap_or(DEFAULT_MAX_LOCAL_SOURCES),

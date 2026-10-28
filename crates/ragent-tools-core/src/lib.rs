@@ -56,6 +56,7 @@ pub mod think;
 
 // Utility tools
 pub mod calculator;
+pub mod datetime;
 pub mod get_env;
 
 pub mod file_lock;
@@ -633,6 +634,7 @@ pub fn create_core_registry() -> ToolRegistry {
     // Utility tools
     registry.register(Arc::new(get_env::GetEnvTool));
     registry.register(Arc::new(calculator::CalculatorTool));
+    registry.register(Arc::new(datetime::DateTimeTool));
 
     registry
 }

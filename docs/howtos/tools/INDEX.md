@@ -4,8 +4,8 @@ The tools available to ragent agents, organised by category. Each category has
 its own document with per-tool arguments, required flags, typical values, and
 worked examples.
 
-> **Scope:** Tool names, parameter schemas, and usage patterns (148 registered
-> tools in the default build — 149 when a drivable headless browser engine is
+> **Scope:** Tool names, parameter schemas, and usage patterns (149 registered
+> tools in the default build — 150 when a drivable headless browser engine is
 > present, so `mf_screenshot` registers — plus the dynamic `mcp_tool`). For TUI
 > workflow see `docs/howtos/tutorial.md`. For team coordination see
 > `docs/howtos/teams.md`.
@@ -35,7 +35,7 @@ worked examples.
 | 19 | [mcp.md](mcp.md) | 1 |
 | 20 | [skills.md](skills.md) | 1 |
 | 21 | [interactive.md](interactive.md) | 4 |
-| 22 | [utility.md](utility.md) | 5 |
+| 22 | [utility.md](utility.md) | 6 |
 
 Every listed tool is advertised to the model whenever ragent's tool registry
 registers it; `mf_screenshot` is the one conditional entry (a drivable headless

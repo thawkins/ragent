@@ -47,7 +47,7 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   the action is permitted or refused; it is a tightening-only layer over the static
   rules (a `deny` is hard, an `allow` never overrides an explicit policy `deny`, and
   any analyzer failure degrades to the normal interactive prompt)
-- **Comprehensive tool system** — **148 registered tools across 21 categories** in
+- **Comprehensive tool system** — **149 registered tools across 21 categories** in
   the default build (the engine-gated `mf_screenshot` tool registers only when a
   drivable headless browser is present, taking the count to 149 — spec `openhands`
   FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
@@ -70,8 +70,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
     error resolution
 - **Shell** (1) — open (cross-platform file/URL reveal)
 - **Web** (5) — webfetch, websearch, mf_fetch, mf_search, mf_crawl
-  (`mf_search` runs the keyless DuckDuckGo, Brave, OpenAlex and Wikipedia backends
-  in parallel, plus LangSearch / Tavily / Perplexity / Exa when configured)
+  (`mf_search` runs the keyless OpenAlex and Wikipedia backends in parallel, plus
+  LangSearch / Tavily / Perplexity / Exa / Serper when configured; a
+  `published_after` `YYYY-MM-DD` bound is passed to the engines that accept an
+  absolute date window, and `mf_fetch` recovers a page's publication date from
+  its envelope as well as its `<head>` so the research `--age` filter can see it)
 - **Code intelligence** (10) — codeindex_search, codeindex_symbols,
   codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex,
   codeindex_explain, codeindex_path, codeindex_communities, codeindex_godnodes
@@ -87,7 +90,10 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 - **Task** (4) — TaskCreate, TaskUpdate, TaskGet, TaskList
 - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
 - **Plan** (2) — EnterPlanMode, ExitPlanMode
-- **None** (8) — calculator, think, agent_complete, ragent_info (running version,
+- **None** (9) — calculator, DateTime (current date/time from the system clock:
+  RFC 3339 UTC instant, the same instant rendered at an optional fixed UTC
+  offset, individual date/time fields, and the Unix timestamp; it reads no `TZ`
+  or host timezone database), think, agent_complete, ragent_info (running version,
   build time, git commit, compiler, plus this instance's pid, uptime, memory and
   thread count), os_info (read-only host report: OS identity and Linux
   distribution, CPU, graphics adapters and graphics-API versions, physical
@@ -105,7 +111,7 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   a live permission countdown timer (120-second timeout with EXPIRED state), and a
   message input queue (`Alt+Q` menu / `/queue`) that keeps the input field editable
   while the agent executes; side panels for context (`Alt+C`), memory (`Alt+M`),
-  telemetry (`Alt+O`) and tasks (`Alt+T`). Every list-bearing `/provider` and
+  telemetry (`/telemetry_panel`) and tasks (`Alt+T`). Every list-bearing `/provider` and
   `/model` step shares one list composition with the plugin and connector
   catalogues - accent frame, heading count, pinned column band, zebra rows, muted
   key-hint footer - and windows around its cursor (`Showing a-b of N`) so a long
@@ -232,8 +238,14 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   persists the exclusion), open-access toggles
   (`--oa-enable`/`--no-oa`), URL cloaking (`--url-cloak`) that defangs web
   source URLs in the `Sources` bullets and `References Index` so scanners do
-  not flag them, a per-engine progress table that breaks exclusions
-  and fetch failures out by reason/cause, and `mf_search` `exclude_engines`
+  not flag them, a publication-age cut-off (`--age 30d|6m|2y`) that rejects
+  sources older than the span - and undated sources with it - while appending
+  the window's start date to every decomposed search query so the engines steer
+  towards material inside the window, `mf_search` `exclude_engines` /
+  `published_after` (an exact `YYYY-MM-DD` bound that Exa, Tavily and Serper
+  honour server-side and the coarse `freshness` enum cannot express), and a
+  per-engine progress table that breaks exclusions
+  and fetch failures out by reason/cause (including its own `age` column)
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions; also discovers the AgentSkills
   convention (`.agents/skills/` project and `~/.agents/skills/` user, a directory per
@@ -400,7 +412,10 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
 ![ragent team](assets/screens/ragentteam.png)
 
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
-  permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
+  permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`), or a
+  one-keystroke `Alt+O` toggle that drives the same state machine with a default
+  1800-second limit so a stray chord cannot start an unbounded run; the status bar
+  shows `AUTO: <mark>` in bold with its `(Alt+O)` chord hint
 - **Config error reporting** — actionable JSON parse diagnostics showing file path,
   line, column, problematic source line, and caret marker
 - **UI internationalisation** — opt-in locale message catalog (English fallback
@@ -812,7 +827,7 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.138** — The core architecture, tool system (148 tools across 21 categories in
+**v1.0.152** — The core architecture, tool system (149 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered

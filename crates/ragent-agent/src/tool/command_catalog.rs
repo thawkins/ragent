@@ -592,7 +592,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "telemetry_panel",
-        description: "Toggle the telemetry side panel (Alt+O alias); use `/telemetry counters` to list values",
+        description: "Toggle the telemetry side panel; use `/telemetry counters` to list values",
         subcommands: EMPTY,
         flags: EMPTY,
     },

@@ -1112,6 +1112,7 @@ impl App {
                     "--max-concepts".to_string(),
                     "--max-findings".to_string(),
                     "--url-cloak".to_string(),
+                    "--age".to_string(),
                 ]
             }
             "init" => {
@@ -7707,10 +7708,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.status = "autopilot: invalid argument".to_string();
                             return;
                         }
-                        self.autopilot_enabled = true;
-                        self.autopilot_token_budget = token_budget;
-                        self.autopilot_time_limit_secs = time_secs;
-                        self.autopilot_started_at = Some(std::time::Instant::now());
+                        self.start_autopilot(token_budget, time_secs);
                         let mut msg =
                             " **Autopilot ON** - agent will run autonomously.".to_string();
                         if let Some(t) = token_budget {
@@ -7725,11 +7723,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.push_log_no_agent(LogLevel::Info, "autopilot enabled".to_string());
                     }
                     "off" => {
-                        self.autopilot_enabled = false;
-                        self.autopilot_token_budget = None;
-                        self.autopilot_time_limit_secs = None;
-                        self.autopilot_started_at = None;
-                        self.autopilot_pending_continue = None;
+                        self.stop_autopilot();
                         self.append_assistant_text(
                             "From: /autopilot\n **Autopilot OFF** - returning to interactive mode.",
                         );

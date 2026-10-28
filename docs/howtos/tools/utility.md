@@ -10,6 +10,7 @@ host environment.
 | `os_info` | Report read-only host OS and hardware introspection (also `/osinfo show`). |
 | `tool_info` | Dump the whole tool registry as JSON (name, description, schema, permission category, source). |
 | `commands_info` | Dump the slash-command catalog as JSON (built-in TUI commands plus plugin-contributed ones). |
+| `DateTime` | Current date and time from the system clock: RFC 3339 UTC instant, an optional fixed-offset rendering, the individual fields, and the Unix timestamp. |
 
 ---
 
@@ -126,4 +127,33 @@ None.
 **Example:**
 ```text
 commands_info
+```
+
+---
+
+## DateTime
+
+Return the current date and time read from the system clock. Reports the UTC
+instant in RFC 3339, the same instant rendered at an optional fixed UTC offset,
+the individual date and time fields, the day of week, and the Unix timestamp in
+both seconds and milliseconds. Read-only, permission category `none`.
+
+The tool reads neither the `TZ` environment variable nor the host timezone
+database, so a result never depends on ambient process state and the same call
+answers the same way on every machine; the offset it used is echoed in the
+metadata. The TUI renders the call as a `UTC+HH:MM` zone summary with the
+formatted instant as the result.
+
+**Arguments**
+
+| Argument | Type | Required | Description | Typical value |
+|----------|------|----------|-------------|---------------|
+| `timezone_offset_minutes` | integer | no | Fixed UTC offset for the rendered local form, between -1080 and 1080 (0 is UTC, 60 is UTC+01:00, -300 is UTC-05:00, 330 is UTC+05:30). Defaults to 0. | `60` |
+| `format` | string | no | chrono date-time format string applied to the local rendering | `"%d/%m/%Y %H:%M"` |
+
+**Example:**
+```text
+DateTime
+DateTime timezone_offset_minutes=60
+DateTime timezone_offset_minutes=-300 format="%d/%m/%Y %H:%M"
 ```

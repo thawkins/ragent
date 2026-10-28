@@ -166,6 +166,11 @@ pub enum ResearchCliCommand {
         /// plain text rather than clickable links. Used when the report is
         /// consumed by tooling that rejects or flags live URLs.
         url_cloak: bool,
+        /// `--age <span>` - reject web sources published longer ago than this
+        /// span (`30d`, `6m`, `2y`). When set, a web source with no
+        /// publication date is rejected too. When absent, publication age is
+        /// not filtered.
+        max_age: Option<crate::source_age::AgeSpan>,
     },
     /// `ragent research open <name>`
     Open {
@@ -329,6 +334,7 @@ impl ResearchCliCommand {
         let mut brief: Option<String> = None;
         let mut evaluate = false;
         let mut url_cloak = false;
+        let mut max_age: Option<crate::source_age::AgeSpan> = None;
         // Set when `--max-concepts` / `--max-findings` receives a value that is
         // not a non-negative integer, so the run is rejected instead of the
         // invalid argument being silently ignored (FR-019).
@@ -367,6 +373,7 @@ impl ResearchCliCommand {
                 | "--max-synthesis-sources"
                 | "--max-concepts"
                 | "--max-findings"
+                | "--age"
                 | "--brief" => {
                     i += 1;
                     if let Some(v) = rest.get(i) {
@@ -390,70 +397,124 @@ impl ResearchCliCommand {
                             "--template" => template = Some((*v).to_string()),
                             "--fetch-concurrently" => match v.parse() {
                                 Ok(n) => fetch_concurrency = Some(n),
-                                Err(_) => invalid = Some(format!("--fetch-concurrently {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--fetch-concurrently {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--local-concurrently" => match v.parse() {
                                 Ok(n) => local_concurrency = Some(n),
-                                Err(_) => invalid = Some(format!("--local-concurrently {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--local-concurrently {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--fetch-timeout-secs" => match v.parse() {
                                 Ok(n) => fetch_timeout_secs = Some(n),
-                                Err(_) => invalid = Some(format!("--fetch-timeout-secs {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--fetch-timeout-secs {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--web-phase-timeout-secs" | "--web-time" => match v.parse() {
                                 Ok(n) => web_phase_timeout_secs = Some(n),
-                                Err(_) => invalid = Some(format!("{arg} {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--web-phase-timeout-secs {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--local-phase-timeout-secs" => match v.parse() {
                                 Ok(n) => local_phase_timeout_secs = Some(n),
-                                Err(_) => invalid = Some(format!("--local-phase-timeout-secs {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--local-phase-timeout-secs {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--search-max-retries" => match v.parse() {
                                 Ok(n) => search_max_retries = Some(n),
-                                Err(_) => invalid = Some(format!("--search-max-retries {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--search-max-retries {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--search-retry-base-delay-ms" => match v.parse() {
                                 Ok(n) => search_retry_base_delay_ms = Some(n),
                                 Err(_) => {
-                                    invalid = Some(format!("--search-retry-base-delay-ms {v}"))
+                                    invalid = Some(format!(
+                                        "--search-retry-base-delay-ms {v}: expected an integer"
+                                    ))
                                 }
                             },
                             "--max-web-results" => match v.parse() {
                                 Ok(n) => max_web_results = Some(n),
-                                Err(_) => invalid = Some(format!("--max-web-results {v}")),
+                                Err(_) => {
+                                    invalid =
+                                        Some(format!("--max-web-results {v}: expected an integer"))
+                                }
                             },
                             "--max-search-calls" => match v.parse() {
                                 Ok(n) => max_search_calls = Some(n),
-                                Err(_) => invalid = Some(format!("--max-search-calls {v}")),
+                                Err(_) => {
+                                    invalid =
+                                        Some(format!("--max-search-calls {v}: expected an integer"))
+                                }
                             },
                             "--max-local-sources" => match v.parse() {
                                 Ok(n) => max_local_sources = Some(n),
-                                Err(_) => invalid = Some(format!("--max-local-sources {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--max-local-sources {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--max-synthesis-sources" => match v.parse() {
                                 Ok(n) => max_synthesis_sources = Some(n),
-                                Err(_) => invalid = Some(format!("--max-synthesis-sources {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!(
+                                        "--max-synthesis-sources {v}: expected an integer"
+                                    ))
+                                }
                             },
                             "--iterations" => match v.parse() {
                                 Ok(n) => iterations = Some(n),
-                                Err(_) => invalid = Some(format!("--iterations {v}")),
+                                Err(_) => {
+                                    invalid = Some(format!("--iterations {v}: expected an integer"))
+                                }
                             },
                             "--max-concurrent-research-units" => match v.parse() {
                                 Ok(n) => max_concurrent_research_units = Some(n),
                                 Err(_) => {
-                                    invalid = Some(format!("--max-concurrent-research-units {v}"))
+                                    invalid = Some(format!(
+                                        "--max-concurrent-research-units {v}: expected an integer"
+                                    ))
                                 }
                             },
                             "--format" => format = Some((*v).to_string()),
                             "--max-concepts" => match v.parse() {
                                 Ok(n) => max_concepts = Some(n),
-                                Err(_) => invalid = Some(format!("--max-concepts {v}")),
+                                Err(_) => {
+                                    invalid =
+                                        Some(format!("--max-concepts {v}: expected an integer"))
+                                }
                             },
                             "--max-findings" => match v.parse() {
                                 Ok(n) => max_findings = Some(n),
-                                Err(_) => invalid = Some(format!("--max-findings {v}")),
+                                Err(_) => {
+                                    invalid =
+                                        Some(format!("--max-findings {v}: expected an integer"))
+                                }
                             },
                             "--brief" => brief = Some((*v).to_string()),
+                            "--age" => match crate::source_age::AgeSpan::parse(v) {
+                                Ok(span) => max_age = Some(span),
+                                Err(e) => invalid = Some(format!("--age {v}: {e}")),
+                            },
                             _ => {
                                 // Unreachable: the outer guard covers every flag
                                 // reaching here. Treated as a consumed value
@@ -486,8 +547,12 @@ impl ResearchCliCommand {
         let Some(name) = name else {
             return Self::Unknown("create".to_string());
         };
+        // `invalid` carries the fully formatted diagnostic for the offending
+        // flag, including the closing backtick, so the rejection below does not
+        // have to re-inspect the flag name to decide which message shape
+        // applies and a presentation surface can interpolate it verbatim.
         if let Some(arg) = invalid {
-            return Self::Invalid(format!("invalid value for `{arg}`: expected an integer"));
+            return Self::Invalid(format!("invalid value for `{arg}"));
         }
         let topic = topic_words.join(" ");
         Self::Create {
@@ -530,6 +595,7 @@ impl ResearchCliCommand {
             brief,
             evaluate,
             url_cloak,
+            max_age,
         }
     }
 
@@ -742,6 +808,9 @@ Common create flags:
   --oa-enable                                        Force open-access recovery on
   --no-oa                                            Force open-access recovery off
   --url-cloak                                        Emit source URLs as defanged plain text
+  --age <SPAN>                                       Reject web sources older than SPAN (30d, 6m, 2y);
+                                                     implies rejecting undated web sources; the window
+                                                     start date is appended to every search query
   --evaluate                                         Append the self-evaluation scorecard
 "
         .to_string()
@@ -1318,6 +1387,51 @@ fn parse_create_evaluate_flag() {
         }
         other => panic!("unexpected variant: {other:?}"),
     }
+}
+
+#[test]
+fn parse_create_age_flag() {
+    let cmd = ResearchCliCommand::parse("create fresh-topic topic --age 6m");
+    match cmd {
+        ResearchCliCommand::Create {
+            name,
+            topic,
+            max_age,
+            ..
+        } => {
+            assert_eq!(name, "fresh-topic");
+            assert_eq!(topic, "topic");
+            assert_eq!(max_age.map(|s| s.to_string()), Some("6m".to_string()));
+        }
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_create_without_age_leaves_the_filter_off() {
+    let cmd = ResearchCliCommand::parse("create default-age topic");
+    match cmd {
+        ResearchCliCommand::Create { max_age, .. } => assert!(max_age.is_none()),
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_create_rejects_an_invalid_age_span() {
+    let cmd = ResearchCliCommand::parse("create bad-age topic --age 30w");
+    match cmd {
+        ResearchCliCommand::Invalid(msg) => {
+            assert!(msg.contains("--age 30w"), "got: {msg}");
+            assert!(msg.contains("unknown unit `w`"), "got: {msg}");
+        }
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+#[test]
+fn help_message_lists_the_age_flag() {
+    let help = ResearchCliCommand::build_help_message();
+    assert!(help.contains("--age <SPAN>"), "got: {help}");
 }
 
 #[test]

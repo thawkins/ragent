@@ -268,8 +268,15 @@ impl LlmQueryDecomposer {
                 )
             })?;
 
+        // The model has no clock: left to itself it writes the year it last saw
+        // in training data into every query ("... 2025"), which then steers the
+        // search engines - and relevance scoring, which treats the year as a
+        // topic term - towards stale material. State today's date and forbid
+        // years other than the current one.
+        let today = chrono::Utc::now().format("%Y-%m-%d");
+        let current_year = chrono::Utc::now().format("%Y");
         let prompt = format!(
-            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {MAX_DECOMPOSED_QUERIES} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
+            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nToday's date is {today}.\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {MAX_DECOMPOSED_QUERIES} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nDo not put a year in a query. The single exception is when the topic names a specific year; then use only {current_year}, never an earlier year. Do not write date ranges or relative phrases such as \"recent\" or \"latest\" - the caller applies its own publication-date filter.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
         );
 
         let request = ChatRequest {

@@ -791,3 +791,28 @@ async fn test_live_exa_api_returns_results() {
     );
     assert_eq!(report.engine, "exa");
 }
+
+#[test]
+fn test_build_request_body_published_after_sets_start_published_date() {
+    // Exa accepts an absolute lower bound, so the `--age` window reaches it as
+    // `startPublishedDate` rather than a query-string operator.
+    use ragent_tools_extended::masterfetch::search::engine::SearchOptions;
+    use ragent_tools_extended::masterfetch::search::exa::build_request_body;
+
+    let opts = SearchOptions::new(10).with_published_after(Some("2026-09-27".to_string()));
+    let body = build_request_body("rust async", &opts);
+    assert_eq!(body["startPublishedDate"], "2026-09-27");
+    assert_eq!(body["query"], "rust async");
+}
+
+#[test]
+fn test_build_request_body_without_bound_omits_start_published_date() {
+    use ragent_tools_extended::masterfetch::search::engine::SearchOptions;
+    use ragent_tools_extended::masterfetch::search::exa::build_request_body;
+
+    let body = build_request_body("rust async", &SearchOptions::new(10));
+    assert!(
+        body.get("startPublishedDate").is_none(),
+        "no date filter without --age: {body}"
+    );
+}

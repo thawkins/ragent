@@ -23,7 +23,7 @@ use ragent_llm::provider::openai_responses::ResponsesApiClient;
 use ragent_llm::{
     AnthropicProvider, GeminiProvider, OllamaCloudProvider, OllamaProvider, Provider,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn make_request(model: &str) -> ChatRequest {
@@ -56,6 +56,11 @@ async fn spawn_sse_server(content_type: &str, body: String) -> anyhow::Result<St
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nConnection: close\r\n\r\n{body}"
         );
@@ -76,6 +81,11 @@ async fn spawn_error_server(status: u16, body: String) -> anyhow::Result<String>
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Read the request before replying: a client whose request bytes are
+        // still in flight when the socket closes sees a TCP RST, surfacing as
+        // `client error (Canceled)` on the real HTTP client.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()

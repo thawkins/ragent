@@ -177,7 +177,11 @@ fn test_statusbar_tag_group_follows_branch_after_cwd() {
     let line1 = frame.lines().next().unwrap_or("");
     let cwd_col = char_col_of(line1, TEST_CWD);
     let branch_col = char_col_of(line1, "Branch: main");
-    let icon_end = char_col_of(line1, "Branch: main ●") + "Branch: main ●".chars().count();
+    // The branch section carries no status glyph: the old hardcoded "HEALTHY"
+    // dot claimed the tree was clean whether or not it was, so it was removed.
+    // The section ends with the branch name's own trailing space, and the
+    // group adds one separator space before the tag.
+    let branch_end = branch_col + "Branch: main  ".chars().count();
     let tag_col = char_col_of(line1, "[hello world]");
     assert!(
         cwd_col < branch_col,
@@ -195,10 +199,9 @@ fn test_statusbar_tag_group_follows_branch_after_cwd() {
         "branch label (col {branch_col}) must render before the prompt tag \
          (col {tag_col}); line was: {line1}"
     );
-    // Tag sits immediately after the branch status icon: one separator space.
+    // Tag sits immediately after the branch section: one separator space.
     assert_eq!(
-        tag_col,
-        icon_end + 1,
+        tag_col, branch_end,
         "tag must render immediately after the branch section; line was: {line1}"
     );
 }
@@ -264,11 +267,12 @@ fn test_statusbar_branch_before_tag_and_cwd_before_branch() {
          (col {tag_col}); line was: {line1}"
     );
     // Branch label sits immediately after the cwd path; the tag follows the
-    // branch section with a single separator space (no centring gap).
-    let icon_end = char_col_of(line1, "Branch: main ●") + "Branch: main ●".chars().count();
+    // branch section with a single separator space (no centring gap). The
+    // section carries no status glyph: it ends with the branch name's own
+    // trailing space, plus the one separating it from the tag.
+    let branch_end = branch_col + "Branch: main  ".chars().count();
     assert_eq!(
-        tag_col,
-        icon_end + 1,
+        tag_col, branch_end,
         "tag must sit immediately after the branch section; line was: {line1}"
     );
 }

@@ -923,7 +923,7 @@ async fn alt_toggle_keys_map_to_actions() {
         ('p', "ToggleProfile"),
         ('i', "ToggleTasksPanel"),
         ('m', "ToggleMemory"),
-        ('o', "ToggleTelemetry"),
+        ('o', "ToggleAutopilot"),
         ('c', "ToggleContextPanel"),
         ('y', "ToggleYolo"),
         ('e', "ToggleEditLog"),

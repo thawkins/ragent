@@ -48,6 +48,14 @@ rustc-hash = { workspace = true }
 tempfile = "3.14"
 axum = { workspace = true }
 wiremock = "0.6"
+# Self-reference with the test-only SSRF bypass enabled: the integration tests
+# drive `mf_fetch`/`mf_crawl` against a loopback axum server, which the SSRF
+# guard rejects unless the bypass is compiled in. Enabling it here (and nowhere
+# else) keeps it out of `default` and out of every release build, so a shipped
+# binary still cannot be talked out of its SSRF guard by an environment
+# variable. Without this the loopback fetch tests fail with
+# "URL rejected by SSRF security check".
+ragent-tools-extended = { path = ".", features = ["test-ssrf-bypass"] }
 
 [dependencies.ort]
 workspace = true

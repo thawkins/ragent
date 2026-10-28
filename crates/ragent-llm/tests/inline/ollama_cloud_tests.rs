@@ -317,6 +317,11 @@ async fn spawn_cloud_body(body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        // Drain the request first: replying and closing with the client's
+        // request bytes still unread makes the kernel answer with a TCP RST,
+        // which the client reports as `client error (Canceled)`.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n\r\n{body}"
         );
@@ -333,6 +338,8 @@ async fn spawn_cloud_status(status: u16, body: String) -> String {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
         };
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
         let response = format!(
             "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()

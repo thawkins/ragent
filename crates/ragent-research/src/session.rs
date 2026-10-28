@@ -511,6 +511,11 @@ pub struct WebConfig {
     /// is shared via `Arc` across every gatherer in the run, and exhausted
     /// budgets degrade the run to its partial results instead of failing.
     pub max_search_calls: Option<usize>,
+    /// `--age <span>`: reject web sources published longer ago than this span
+    /// (`30d`, `6m`, `2y`). When `Some`, a web source with no publication date
+    /// is rejected as well. When `None` (the default) publication age is not
+    /// filtered and undated sources are kept.
+    pub max_age: Option<crate::source_age::AgeSpan>,
 }
 
 /// Default wall-clock budget for the entire web-gathering phase
@@ -752,6 +757,7 @@ impl Default for WebConfig {
             use_pdf_web_sources: false,
             web_phase_timeout_secs: Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
             max_search_calls: None,
+            max_age: None,
         }
     }
 }
@@ -3403,6 +3409,7 @@ impl ResearchSession {
                     ))
                     .with_keep_low_relevance(config.web.use_low_relevance)
                     .with_disable_scholarly(config.web.disable_scholarly)
+                    .with_max_age(config.web.max_age)
                     .with_allow_pdf_web_sources(allow_pdf_web_sources)
                     .with_search_max_retries(config.resilience.search_max_retries)
                     .with_search_retry_base_delay_ms(config.resilience.search_retry_base_delay_ms)

@@ -67,12 +67,19 @@ impl WebSearchTool for RecordingSearch {
         ])
     }
 
+    /// The gatherer dispatches every sweep through this method, so the double
+    /// has to implement it for the base (unfiltered) case too: with an empty
+    /// exclusion set it records the call as a base call and returns the full
+    /// hit list, exactly as an exclusion-capable backend would.
     async fn search_with_exclusions(
         &self,
         query: &str,
-        _max: usize,
+        max_results: usize,
         exclude_engines: &[&str],
     ) -> anyhow::Result<Vec<WebSearchHit>> {
+        if exclude_engines.is_empty() {
+            return self.search(query, max_results).await;
+        }
         self.exclusion_calls.lock().unwrap().push((
             query.to_string(),
             exclude_engines.iter().map(|s| s.to_string()).collect(),

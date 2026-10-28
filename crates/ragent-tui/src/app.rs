@@ -80,9 +80,9 @@ pub fn poll_spawn_result_for_tests(app: &mut App) {
 /// plugin- or connector-bridged server with its owner and the manifest that
 /// declares it.
 #[doc(hidden)]
-pub fn bridged_discover_rows_for_tests(
+pub fn bridged_discover_rows_for_tests<S: std::hash::BuildHasher>(
     working_dir: &std::path::Path,
-    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig>,
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
 ) -> Vec<(String, &'static str, Option<std::path::PathBuf>)> {
     mcp_bridge::bridged_discover_rows(working_dir, configured)
         .into_iter()

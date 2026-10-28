@@ -81,7 +81,7 @@ use serde_json::Value;
 /// expectation would agree with whatever the tree happened to do. `mf_screenshot`
 /// is absent from the default build by design (it registers only when a drivable
 /// headless browser resolves on `PATH`), so the default build advertises 148.
-const FR030_TOTAL: usize = 148;
+const FR030_TOTAL: usize = 149;
 
 /// One canary family per T-041 §2.1: the pair whose split tells a family count
 /// taken from `permission_category()` from one taken off the name prefix.
@@ -241,13 +241,19 @@ fn test_the_registry_names_match_the_recorded_after_rename_digest() {
     // that is the sharpest cheap check. Before the rename no registered name
     // carried an uppercase letter; after it exactly the 13 adopted Claude
     // spellings do. Missing one leaves 12, renaming an extra takes it to 14.
+    //
+    // `DateTime` is a post-rename addition that adopts the same capitalisation
+    // convention without appearing in the FR-023 table, so it is listed here
+    // beside the table's `after` column rather than by widening the assertion.
+    const POST_RENAME_UPPERCASE_ADDITIONS: [&str; 1] = ["DateTime"];
+
     let upper: Vec<&String> = names
         .iter()
         .filter(|name| name.chars().any(|c| c.is_ascii_uppercase()))
         .collect();
     assert_eq!(
         upper.len(),
-        TOOL_RENAMES.len(),
+        TOOL_RENAMES.len() + POST_RENAME_UPPERCASE_ADDITIONS.len(),
         "FR-030: {} registered names carry an uppercase letter, not the {} names \
          the FR-023 table renames: {upper:?}",
         upper.len(),
@@ -258,7 +264,11 @@ fn test_the_registry_names_match_the_recorded_after_rename_digest() {
     // same number of them. A rename that adopted a spelling the table does not
     // list, or skipped one and picked up an unrelated capitalised name, is a
     // different rename than the one the spec records.
-    let adopted: BTreeSet<&str> = TOOL_RENAMES.iter().map(|pair| pair.after).collect();
+    let adopted: BTreeSet<&str> = TOOL_RENAMES
+        .iter()
+        .map(|pair| pair.after)
+        .chain(POST_RENAME_UPPERCASE_ADDITIONS)
+        .collect();
     let upper_set: BTreeSet<&str> = upper.iter().map(|name| name.as_str()).collect();
     assert_eq!(
         upper_set, adopted,
@@ -269,8 +279,12 @@ fn test_the_registry_names_match_the_recorded_after_rename_digest() {
     // Point 6: the digest of the list T-041 §3.1 predicts for the post-rename
     // tree. This is the one assertion that fails when *any* single name is
     // wrong, and its failure message says which digest form it used.
+    //
+    // Recomputed once when `DateTime` was added to the surface (149 names); the
+    // FR-023 rename itself is unchanged, which the `after`-column assertion
+    // above still pins.
     const AFTER_RENAME_DIGEST: &str =
-        "308d92d9d975666cf1f815369e18cc7b457c1c0dcbab004c45f2835100368321";
+        "f08eb2d47e4b81636145ee75b87f54f57ecf9fc50e1e7047ebfc5c7e9102a732";
     assert_eq!(
         names_digest(&names),
         AFTER_RENAME_DIGEST,

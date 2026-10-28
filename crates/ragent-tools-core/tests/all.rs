@@ -91,6 +91,9 @@ mod test_bg;
 #[path = "test_calculator.rs"]
 mod test_calculator;
 
+#[path = "test_datetime.rs"]
+mod test_datetime;
+
 #[path = "test_edit.rs"]
 mod test_edit;
 

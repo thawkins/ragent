@@ -584,7 +584,7 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Alt+P` | Toggle Profile panel |
 | `Alt+I` | Toggle TASKS panel |
 | `Alt+M` | Toggle Memory panel |
-| `Alt+O` | Toggle Telemetry panel |
+| `Alt+O` | Toggle autopilot mode |
 | `Alt+C` | Toggle Context side panel |
 | `Alt+Q` | Open the queue-control menu (`Next` / `Stop` / `Clear` / `Show`) |
 | `Alt+V` | Paste image from clipboard |

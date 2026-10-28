@@ -224,6 +224,8 @@ impl SearchEngine for TavilyEngine {
 /// - `max_results` - clamped to 1-20.
 /// - `include_answer` - `false`.
 /// - `search_depth` - `"basic"`.
+/// - `start_date` - the absolute `published_after` bound (`YYYY-MM-DD`) when
+///   one was supplied, so Tavily drops older results server-side.
 ///
 /// # Examples
 ///
@@ -241,12 +243,16 @@ impl SearchEngine for TavilyEngine {
 #[must_use]
 pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Value {
     let max_results = opts.max_results.clamp(MIN_COUNT, MAX_COUNT);
-    json!({
+    let mut body = json!({
         "query": truncate_query(&strip_disallowed_quotes(query)),
         "max_results": max_results,
         "include_answer": false,
         "search_depth": "basic",
-    })
+    });
+    if let Some(date) = opts.published_after.as_deref() {
+        body["start_date"] = serde_json::Value::String(date.to_string());
+    }
+    body
 }
 
 /// Truncate a search query to [`MAX_QUERY_CHARS`], respecting UTF-8

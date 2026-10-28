@@ -2228,6 +2228,28 @@ impl App {
         }
     }
 
+    /// Enable autopilot mode with the given optional limits.
+    ///
+    /// Shared by `/autopilot on` and the `Alt+O` toggle so both paths start the
+    /// same state machine. Passing `None` for a limit leaves that limit disabled.
+    pub(crate) fn start_autopilot(&mut self, token_budget: Option<u64>, time_secs: Option<u64>) {
+        self.autopilot_enabled = true;
+        self.autopilot_token_budget = token_budget;
+        self.autopilot_time_limit_secs = time_secs;
+        self.autopilot_started_at = Some(std::time::Instant::now());
+    }
+
+    /// Disable autopilot mode and clear every limit and any pending continuation.
+    ///
+    /// Shared by `/autopilot off` and the `Alt+O` toggle.
+    pub(crate) fn stop_autopilot(&mut self) {
+        self.autopilot_enabled = false;
+        self.autopilot_token_budget = None;
+        self.autopilot_time_limit_secs = None;
+        self.autopilot_started_at = None;
+        self.autopilot_pending_continue = None;
+    }
+
     pub(crate) fn set_profile_panel_enabled(&mut self, enabled: bool) {
         let profiler = ragent_agent::session::profiler::agent_loop_profiler();
         profiler.set_enabled(enabled);

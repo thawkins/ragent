@@ -279,7 +279,14 @@ pub fn build_request_body(query: &str, opts: &SearchOptions) -> serde_json::Valu
         );
     }
 
-    if let Some(start_date) = freshness_to_start_date(opts.freshness) {
+    // An exact `--age` window (`published_after`) wins over the coarse
+    // freshness bucket, because Exa accepts an absolute lower bound.
+    if let Some(start_date) = opts
+        .published_after
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| freshness_to_start_date(opts.freshness))
+    {
         body["startPublishedDate"] = serde_json::Value::String(start_date);
     }
 

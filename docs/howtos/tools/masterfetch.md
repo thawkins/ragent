@@ -72,6 +72,7 @@ and `engines_consensus`.
 | `site` | string | no | Restrict results to a domain | `"rust-lang.org"` |
 | `exclude_sites` | array | no | Domains to exclude | `["pinterest.com"]` |
 | `freshness` | enum | no | `day`, `week`, `month`, `year` | `"week"` |
+| `published_after` | string | no | Oldest admissible publication date as `YYYY-MM-DD`. An exact window the coarse `freshness` buckets cannot express; engines that accept an absolute lower bound apply it server-side (Exa `startPublishedDate`, Tavily `start_date`, Serper `cdr:1,cd_min:`), and it takes precedence over `freshness` for them. A value that is not `YYYY-MM-DD` is dropped with a warning rather than sent as a literal query parameter | `"2026-09-13"` |
 | `max_results` | integer | no | Cap after merge/dedup (1–500) | `6` |
 | `per_engine_results` | integer | no | Cap per engine before merge (1–200) | `75` |
 | `page` | integer | no | Result page (0–10) | `0` |
@@ -81,6 +82,7 @@ and `engines_consensus`.
 mf_search query="rust async patterns" max_results=10
 mf_search query="rust async patterns" exclude_engines=["openalex"]
 mf_search query="site:doc.rust-lang.org ownership rules" site="doc.rust-lang.org"
+mf_search query="frontier model pricing" published_after="2026-09-13"
 ```
 
 ---

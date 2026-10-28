@@ -1175,11 +1175,24 @@ async fn research_create_with_a_bad_integer_flag_is_rejected() {
     app.execute_slash_command("/research create bad topic --max-concepts xyz")
         .await;
     let text = last_message(&app);
+    // The diagnostic is rendered inside the message window, where the markdown
+    // pass may close the inline code span, so assert the flag/value and the
+    // reason separately rather than as one contiguous span.
     assert!(
-        text.contains("invalid value for `--max-concepts xyz`"),
+        text.contains("invalid value for `--max-concepts xyz"),
         "got: {text}"
     );
     assert!(text.contains("expected an integer"), "got: {text}");
+}
+
+#[tokio::test]
+async fn research_create_with_a_bad_age_span_is_rejected() {
+    let (_g, _e, _t, mut app) = isolated_app();
+    app.execute_slash_command("/research create fresh topic --age 30w")
+        .await;
+    let text = last_message(&app);
+    assert!(text.contains("invalid value for `--age 30w"), "got: {text}");
+    assert!(text.contains("unknown unit `w`"), "got: {text}");
 }
 
 #[tokio::test]

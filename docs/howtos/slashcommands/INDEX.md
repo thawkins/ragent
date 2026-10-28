@@ -75,7 +75,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/status` | [status](status.md) | Show status message history: /status [clear] |
 | `/mouse` | [mouse](mouse.md) | Toggle mouse support: /mouse on \| off \| help |
 | `/telemetry` | [telemetry](telemetry.md) | Telemetry management: /telemetry help\|on\|off\|setup\|counters |
-| `/telemetry_panel` | [telemetry_panel](telemetry_panel.md) | Toggle the telemetry side panel (Alt+O alias); use `/telemetry counters` to list values |
+| `/telemetry_panel` | [telemetry_panel](telemetry_panel.md) | Toggle the telemetry side panel; use `/telemetry counters` to list values |
 | `/router` | [router](router.md) | Model router management: /router on\|off\|status\|tiers\|weights\|boundaries\|test\|stats\|reload\|help |
 | `/startup` | [startup](startup.md) | Show startup timing breakdown for the current session |
 | `/editlog` | [editlog](editlog.md) | Edit-operation logging: /editlog on\|off\|status\|show\|analyse\|clear |

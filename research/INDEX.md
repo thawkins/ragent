@@ -6,6 +6,7 @@ Derived cache of every research item on disk. This file is regenerated on every 
 |------|-------|--------|---------------|----------------|
 | agenticloops | The sources collectively support the topic's core claim: the agentic loop — a… | complete | 2026-09-06T15:45:46.150463931+00:00 | 2026-09-06T15:45:46.150528202+00:00 |
 | agentidentity | The sources collectively indicate that agent identity is becoming a… | complete | 2026-09-16T21:50:07.028631755+00:00 | 2026-09-16T21:50:07.028725972+00:00 |
+| aisurvey | Across the 42 sources, the AI space in late 2026 is characterized less by any... | complete | 2026-10-27T13:14:30.418279153+00:00 | 2026-10-27T13:14:30.418380614+00:00 |
 | codemigrate | The sources collectively describe code migration with coding agents as a... | complete | 2026-10-02T22:05:37.832810586+00:00 | 2026-10-02T22:05:37.833278842+00:00 |
 | connectors | Across 279 captured sources, Codex and Claude both implement "connectors" as... | complete | 2026-10-02T13:50:56.976304286+00:00 | 2026-10-02T13:50:56.976687912+00:00 |
 | dotnetmig | The captured sources describe a migration tooling landscape in transition: the… | complete | 2026-09-24T11:38:45.248881962+00:00 | 2026-09-24T11:38:45.248995897+00:00 |
@@ -20,4 +21,4 @@ Derived cache of every research item on disk. This file is regenerated on every 
 | windowsrunners | Across the captured sources, support for Windows on GitLab's latest shared… | complete | 2026-09-24T14:16:13.765051764+00:00 | 2026-09-24T14:16:13.765137418+00:00 |
 | zz-engine-diag | Rust stabilized async/.await in version 1.39 but ships no async runtime in its… | complete | 2026-09-07T01:11:11.193006498+00:00 | 2026-09-07T01:11:11.193045022+00:00 |
 
-_Generated 2026-10-02T22:05:53.536035660+00:00 * 15 items._
+_Generated 2026-10-27T13:14:34.477218358+00:00 * 16 items._

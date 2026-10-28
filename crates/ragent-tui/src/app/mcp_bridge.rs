@@ -40,7 +40,7 @@ use ragent_agent::mcp::discovery::DiscoveredMcpServer;
 /// The bridged id alone cannot say this: a plugin id and a connector id are both
 /// ordinary identifiers, and both may contain dots.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BridgeOrigin {
+pub(super) enum BridgeOrigin {
     /// Contributed by an enabled plugin's `mcpServers` section (FR-030).
     Plugin {
         /// The plugin that declared the server.
@@ -55,7 +55,7 @@ pub enum BridgeOrigin {
 
 impl BridgeOrigin {
     /// The short subsystem label a row prints in its source column.
-    pub fn label(&self) -> &'static str {
+    pub(super) fn label(&self) -> &'static str {
         match self {
             Self::Plugin { .. } => "plugin",
             Self::Connector { .. } => "connector",
@@ -63,7 +63,7 @@ impl BridgeOrigin {
     }
 
     /// The owning plugin or connector id.
-    pub fn owner(&self) -> &str {
+    pub(super) fn owner(&self) -> &str {
         match self {
             Self::Plugin { plugin_id } => plugin_id,
             Self::Connector { connector_id } => connector_id,
@@ -75,7 +75,7 @@ impl BridgeOrigin {
     /// `/mcp remove` refuses a bridged id and names this instead: the definition
     /// belongs to the owner, so uninstalling the owner is the only removal that
     /// leaves its manifest consistent.
-    pub fn removal_hint(&self) -> String {
+    pub(super) fn removal_hint(&self) -> String {
         match self {
             Self::Plugin { plugin_id } => format!("`/plugins remove {plugin_id}`"),
             Self::Connector { connector_id } => format!("`/connectors remove {connector_id}`"),
@@ -85,7 +85,7 @@ impl BridgeOrigin {
 
 /// One MCP server the session has because a plugin or a connector declares it.
 #[derive(Debug, Clone)]
-pub struct BridgedMcpServer {
+pub(super) struct BridgedMcpServer {
     /// The bridged registry id (`<owner-id>.<server-id>`), which is what the
     /// session registers the server under and what the tools are prefixed with.
     pub id: String,
@@ -103,7 +103,7 @@ pub struct BridgedMcpServer {
 /// `configured` is the `ragent.json` `mcp` section: its ids are already taken, so
 /// a bridged id that would collide with one is never listed (a connector bridge
 /// refuses it, and the plugin leg skips it). The result is sorted by bridged id.
-pub fn bridged_servers<S: BuildHasher>(
+pub(super) fn bridged_servers<S: BuildHasher>(
     working_dir: &Path,
     configured: &HashMap<String, McpServerConfig, S>,
 ) -> Vec<BridgedMcpServer> {
@@ -187,7 +187,7 @@ fn connector_servers(
 /// with the connector leg added. A configured server carries `None` (the caller
 /// knows the `ragent.json` it loaded); a bridged server carries the file that
 /// declares it, which is what `/mcp` prints in its `Defined in` column.
-pub fn merged_mcp_servers<S: BuildHasher>(
+pub(super) fn merged_mcp_servers<S: BuildHasher>(
     working_dir: &Path,
     configured: &HashMap<String, McpServerConfig, S>,
 ) -> Vec<(String, McpServerConfig, Option<PathBuf>)> {
@@ -209,7 +209,7 @@ pub fn merged_mcp_servers<S: BuildHasher>(
 /// A configured `ragent.json` entry wins; otherwise an enabled plugin's or
 /// connector's bridged server supplies it. `None` means no definition exists, so
 /// enabling the id must be refused rather than written into the enable ledger.
-pub fn resolve_config<S: BuildHasher>(
+pub(super) fn resolve_config<S: BuildHasher>(
     working_dir: &Path,
     configured: &HashMap<String, McpServerConfig, S>,
     server_id: &str,
@@ -229,7 +229,7 @@ pub fn resolve_config<S: BuildHasher>(
 /// A bridged row is already declared by its owner's manifest, so enabling it
 /// must not write a `ragent.json` entry, and removing it is refused outright
 /// (see [`BridgeOrigin::removal_hint`]).
-pub fn is_bridged_source(source: &ragent_agent::mcp::McpDiscoverySource) -> bool {
+pub(super) fn is_bridged_source(source: &ragent_agent::mcp::McpDiscoverySource) -> bool {
     matches!(
         source,
         ragent_agent::mcp::McpDiscoverySource::Plugin { .. }
@@ -242,7 +242,7 @@ pub fn is_bridged_source(source: &ragent_agent::mcp::McpDiscoverySource) -> bool
 /// Used by `/mcp remove` (which refuses a bridged id and names the owner) and by
 /// the `/mcp discover` toggle (which must not write a `ragent.json` entry for a
 /// server whose definition already exists).
-pub fn find_bridged<S: BuildHasher>(
+pub(super) fn find_bridged<S: BuildHasher>(
     working_dir: &Path,
     configured: &HashMap<String, McpServerConfig, S>,
     server_id: &str,
@@ -266,7 +266,7 @@ pub fn find_bridged<S: BuildHasher>(
 /// id is refused and the owner's uninstall command is named. Enabling and
 /// disabling, which are what a bridged server actually needs, work through
 /// `/mcp connect|disconnect` and the `/mcp discover` dialog.
-pub fn bridged_removal_refusal(server_id: &str, server: &BridgedMcpServer) -> String {
+pub(super) fn bridged_removal_refusal(server_id: &str, server: &BridgedMcpServer) -> String {
     let label = server.origin.label();
     format!(
         "From: /mcp remove\n\n[err] `{server_id}` is bridged from {label} `{}` and cannot be \
@@ -291,7 +291,7 @@ pub fn bridged_removal_refusal(server_id: &str, server: &BridgedMcpServer) -> St
 /// `executable` is the `stdio` command for a stdio server and empty for an
 /// `http`/`sse` one; the dialog does not paint it, and a bridged row is never
 /// persisted through `to_config`, so it is only informational.
-pub fn discover_row_for(server: BridgedMcpServer) -> DiscoveredMcpServer {
+pub(super) fn discover_row_for(server: BridgedMcpServer) -> DiscoveredMcpServer {
     // The owning name is read before the origin is consumed: `name` labels the
     // row and `source` carries the origin variant.
     let name = server.origin.owner().to_string();
@@ -320,7 +320,7 @@ pub fn discover_row_for(server: BridgedMcpServer) -> DiscoveredMcpServer {
 }
 
 /// The bridged servers as `/mcp discover` dialog rows (see [`discover_row_for`]).
-pub fn bridged_discover_rows<S: BuildHasher>(
+pub(super) fn bridged_discover_rows<S: BuildHasher>(
     working_dir: &Path,
     configured: &HashMap<String, McpServerConfig, S>,
 ) -> Vec<DiscoveredMcpServer> {

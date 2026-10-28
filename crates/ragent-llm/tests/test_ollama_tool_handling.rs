@@ -40,6 +40,12 @@ async fn spawn_ollama_sse_server(response_body: String) -> anyhow::Result<String
             return;
         };
 
+        // Drain the request first: replying and closing with the client's
+        // request bytes still unread makes the kernel answer with a TCP RST,
+        // which the client reports as `client error (Canceled)`.
+        let mut request_buf = [0u8; 8192];
+        let _ = socket.read(&mut request_buf).await;
+
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{response_body}"
         );

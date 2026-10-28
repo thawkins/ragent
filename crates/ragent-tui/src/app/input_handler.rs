@@ -26,6 +26,17 @@ use crate::app::helpers::short_session_id;
 
 // Re-export status types from theme
 
+/// Default autopilot wall-clock limit applied by the `Alt+O` toggle.
+///
+/// The key toggle is a one-keystroke action with no way to pass flags, so it
+/// applies a bounded limit: an unbounded autopilot started by a stray `Alt+O`
+/// would keep sending continuation turns until the agent called
+/// `task_complete`. `/autopilot on` without flags still starts an unbounded
+/// run for users who deliberately want one.
+fn alt_o_default_autopilot_time_limit() -> u64 {
+    30 * 60
+}
+
 impl App {
     pub(crate) fn handle_history_picker_key(&mut self, key: KeyEvent) {
         use crossterm::event::KeyCode;
@@ -1711,39 +1722,27 @@ impl App {
                 InputAction::MemoryViewLineDown => {
                     self.scroll_memory_view_by(-1);
                 }
-                InputAction::ToggleTelemetry => {
-                    // Toggle the Telemetry side panel visibility (Alt+O). Mirrors
-                    // the TODO panel toggle: mutually exclusive with the other side
-                    // panels so only one occupies the side column. On hide, clear any
-                    // active telemetry-pane text selection or context menu.
-                    self.show_telemetry = !self.show_telemetry;
-                    if self.show_telemetry {
-                        self.show_log = false;
-                        self.show_profile = false;
-                        self.show_tasks_panel = false;
-                        self.show_memory = false;
-                        self.show_context_panel = false;
+                InputAction::ToggleAutopilot => {
+                    // Toggle autopilot mode (Alt+O) - the same state machine as
+                    // `/autopilot on|off`. Enabling applies a default time limit so
+                    // the run cannot spin forever; `/autopilot on` (no flags) leaves
+                    // the limit disabled for a fully unbounded run.
+                    if self.autopilot_enabled {
+                        self.stop_autopilot();
+                        self.append_assistant_text(
+                            "From: Alt+O\n **Autopilot OFF** - returning to interactive mode.",
+                        );
+                        self.push_log_no_agent(LogLevel::Info, "autopilot disabled".to_string());
                     } else {
-                        if self
-                            .text_selection
-                            .as_ref()
-                            .is_some_and(|s| s.pane == SelectionPane::Telemetry)
-                        {
-                            self.text_selection = None;
-                        }
-                        if self
-                            .context_menu
-                            .as_ref()
-                            .is_some_and(|m| m.pane == SelectionPane::Telemetry)
-                        {
-                            self.context_menu = None;
-                        }
+                        self.start_autopilot(None, Some(alt_o_default_autopilot_time_limit()));
+                        self.append_assistant_text(&format!(
+                            "From: Alt+O\n **Autopilot ON** - agent will run autonomously. \
+                             Time limit: {}s.\nCall `task_complete` to signal completion, or \
+                             press Alt+O again to stop.",
+                            alt_o_default_autopilot_time_limit()
+                        ));
+                        self.push_log_no_agent(LogLevel::Info, "autopilot enabled".to_string());
                     }
-                    self.status = if self.show_telemetry {
-                        "telemetry panel visible".to_string()
-                    } else {
-                        "telemetry panel hidden".to_string()
-                    };
                     self.needs_redraw = true;
                 }
                 InputAction::ToggleContextPanel => {

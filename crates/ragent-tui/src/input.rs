@@ -177,8 +177,8 @@ pub enum InputAction {
     MemoryViewLineUp,
     /// Scroll the memory view overlay down by one line.
     MemoryViewLineDown,
-    /// Toggle the Telemetry side panel visibility (Alt+O).
-    ToggleTelemetry,
+    /// Toggle autopilot mode (Alt+O).
+    ToggleAutopilot,
     /// Toggle the Context side panel visibility (Alt+C).
     ToggleContextPanel,
     /// Toggle YOLO mode (Alt+Y).
@@ -1109,10 +1109,11 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Up if app.show_memory => Some(InputAction::MemoryCursorUp),
         KeyCode::Down if app.show_memory => Some(InputAction::MemoryCursorDown),
         // Open / delete the selected memory when the Memory panel is focused.
-        // Alt+O toggles the Telemetry side panel (placed before generic char-insert
-        // handling so the `o` is never inserted into the input buffer - NFR-002).
+        // Alt+O toggles autopilot mode (placed before generic char-insert handling
+        // so the `o` is never inserted into the input buffer - NFR-002). The
+        // Telemetry side panel is still reachable via `/telemetry_panel`.
         KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
-            Some(InputAction::ToggleTelemetry)
+            Some(InputAction::ToggleAutopilot)
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleContextPanel)

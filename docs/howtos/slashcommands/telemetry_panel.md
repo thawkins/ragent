@@ -1,6 +1,6 @@
 # /telemetry_panel
 
-> Toggle the telemetry metrics side panel (alias keybinding: Alt+O)
+> Toggle the telemetry metrics side panel
 
 ## Overview
 
@@ -8,8 +8,10 @@
 display-only: metric values are recorded by the instrumentation and printed to
 the chat transcript by `/telemetry counters`; the panel renders the current
 values without any new collection. Showing the panel hides the log, profile,
-tasks, and memory panels so only one side panel is visible at a time. Alt+O is
-a keybinding alias for the same toggle.
+tasks, and memory panels so only one side panel is visible at a time.
+
+There is no keybinding alias: `Alt+O` toggles autopilot mode, not this panel.
+Use the slash command.
 
 ## Syntax
 
@@ -33,11 +35,6 @@ telemetry panel visible
 ```
 From: /telemetry_panel
 telemetry panel hidden
-```
-
-```
-(Alt+O)
-Same toggle as the slash command, from the keyboard.
 ```
 
 ## Output

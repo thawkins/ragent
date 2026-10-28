@@ -749,7 +749,7 @@ The full-text search index has no documents. Run:
 
 | Document | Covers |
 |----------|--------|
-| `docs/howtos/tools/INDEX.md` | Full tool catalog (148 registered static tools in the default build, 149 with a drivable headless browser engine present, + 1 dynamic tool, split by category) |
+| `docs/howtos/tools/INDEX.md` | Full tool catalog (149 registered static tools in the default build, 150 with a drivable headless browser engine present, + 1 dynamic tool, split by category) |
 | `docs/howtos/tutorial.md` | End-to-end TUI workflow tutorial |
 | `docs/howtos/custom-agents.md` | Custom agent profiles |
 | `TUI-QUICKSTART.md` | TUI layout, panels, startup options |

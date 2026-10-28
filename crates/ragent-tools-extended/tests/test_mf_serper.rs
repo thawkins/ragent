@@ -153,3 +153,39 @@ fn test_build_request_body_strips_quotes_from_query() {
     );
     assert_eq!(q, "agentic loop architecture");
 }
+
+#[test]
+fn test_build_request_body_published_after_uses_exact_google_date_range() {
+    // `--age` supplies an absolute lower bound. Serper forwards it to Google
+    // as `cdr:1,cd_min:<date>`, which constrains results server-side; this is
+    // the whole point of carrying the bound instead of appending `after:` to
+    // the query text.
+    let opts = SearchOptions::new(10).with_published_after(Some("2026-09-27".to_string()));
+    let body = build_request_body("rust async", &opts);
+    assert_eq!(body["tbs"], "cdr:1,cd_min:2026-09-27");
+    assert_eq!(
+        body["q"], "rust async",
+        "the query text itself carries no date operator"
+    );
+}
+
+#[test]
+fn test_build_request_body_relative_bucket_used_without_absolute_bound() {
+    // Without an absolute bound the coarse relative bucket still applies, so
+    // the pre-existing `freshness` contract is unchanged.
+    let opts = SearchOptions::new(10).with_freshness(Freshness::Week);
+    let body = build_request_body("rust async", &opts);
+    assert_eq!(body["tbs"], "qdr:w");
+}
+
+#[test]
+fn test_build_request_body_absolute_bound_wins_over_freshness() {
+    let opts = SearchOptions::new(10)
+        .with_freshness(Freshness::Year)
+        .with_published_after(Some("2026-09-27".to_string()));
+    let body = build_request_body("rust async", &opts);
+    assert_eq!(
+        body["tbs"], "cdr:1,cd_min:2026-09-27",
+        "the exact window must override the coarse bucket"
+    );
+}

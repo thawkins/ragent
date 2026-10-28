@@ -4,6 +4,33 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.152)
+
+- **`Alt+O` toggles autopilot, not the Telemetry panel** — the one-keystroke
+  autonomous-operation switch now sits where the status bar already showed
+  autopilot state. It drives the same state machine as `/autopilot on|off`
+  through shared `App::start_autopilot` / `App::stop_autopilot` helpers, and
+  applies a default 1800-second limit because a key chord cannot carry flags.
+  The Telemetry panel is unchanged and still reachable via `/telemetry_panel`.
+- **Status-bar chord hints** — the `AUTO:` indicator is now bold (it changes how
+  the agent loop runs) and carries a dimmed `(Alt+O)` hint, matching `YOLO:
+  (Alt+Y)` and `GCF: (Alt+G)`, so every chord-toggled state names its key.
+- **`DateTime` tool** — the current date and time from the system clock. A call
+  renders in the message log as a `UTC+HH:MM` zone summary with the formatted
+  instant as the result; it reads no `TZ` or host timezone database, so the same
+  call gives the same answer regardless of ambient process state.
+- **`/research create --age <SPAN>`** — reject web sources published more than
+  the span ago (`30d`, `6m`, `2y`), including undated sources, and append the
+  window's start date to every decomposed search query so the engines steer
+  towards recent material. The progress table reports what it dropped in its own
+  `age` column.
+- **Research commands echo the invocation** — `/research create` and
+  `/research update` now print the full command line in a fenced block above
+  their output, so the message window records exactly what ran.
+- **Dated `mf_search` results** — `mf_search` accepts a `published_after`
+  `YYYY-MM-DD` bound that Exa, Tavily and Serper apply server-side, alongside
+  the existing `freshness` buckets.
+
 ## Highlights (v1.0.149)
 
 - **One store chrome for every catalogue and setup-panel list** — the
@@ -1031,8 +1058,14 @@ it calls `task_complete`, hits a user-defined limit, or you run `/autopilot off`
 /autopilot off
 ```
 
-The status bar shows `AutoPilot:✓` when enabled and `AutoPilot:✗` when
-disabled.
+`Alt+O` toggles autopilot without leaving the keyboard: it drives the same
+state machine as `/autopilot on|off`, but because a key chord cannot carry flags
+it applies a default 1800-second (`--max-time`) limit — a stray keystroke cannot
+start an unbounded run. Use `/autopilot on` with no flags when you want a run
+with no time limit. Pressing `Alt+O` again stops the run.
+
+The status bar shows `AUTO:✓ (Alt+O)` when enabled and `AUTO:✗ (Alt+O)` when
+disabled; the indicator is bold because it changes how the agent loop runs.
 
 ---
 
@@ -1763,7 +1796,7 @@ The Context panel is display-only: its contents are never sent to the model.
 | `Alt+P` | Profile   | Live agent-loop profiler output                   |
 | `Alt+I` | TASKS    | Session tasks and status                         |
 | `Alt+M` | Memory    | Project/user memory and structured-memory summary |
-| `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
+| `Alt+O` | Autopilot | Toggle autonomous operation                       |
 | `Alt+C` | Context   | Token breakdown of the context window             |
 
 Log and Profile can be shown together (Log above, Profile below). The other
@@ -1787,7 +1820,7 @@ shortcut again to close the panel.
 | `Alt+P`                       | Toggle Profile panel                        |
 | `Alt+I`                       | Toggle TASKS panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
-| `Alt+O`                       | Toggle Telemetry panel                      |
+| `Alt+O`                       | Toggle autopilot mode                       |
 | `Alt+C`                       | Toggle Context panel                        |
 | `Alt+Q`                       | Open the queue-control menu (Next/Stop/Clear/Show) |
 | `Alt+V`                       | Paste image from clipboard                  |

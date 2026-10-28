@@ -110,10 +110,9 @@ fn provider_argument_helper_serialises_the_object_form_without_parsing() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn dispatch_pipeline_holds_the_only_agent_decode_of_arguments() {
-    // T-014 moved the decode into the one ordered dispatch pipeline, so the
-    // single decode site now lives in `session::dispatch` and the loop that
-    // calls it must carry none of its own.
+fn dispatch_pipeline_holds_the_single_shared_decode_of_arguments() {
+    // T-014 moved the *dispatch* decode into the one ordered pipeline, so the
+    // pipeline decodes a call's arguments exactly once.
     let pipeline = read_workspace_file("crates/ragent-agent/src/session/dispatch.rs");
     // Count call sites only: the module documentation names the helper too.
     let pipeline_sites = pipeline
@@ -126,13 +125,29 @@ fn dispatch_pipeline_holds_the_only_agent_decode_of_arguments() {
         "the dispatch pipeline must decode a call's arguments exactly once \
          (FR-007); found {pipeline_sites} call sites in session/dispatch.rs"
     );
+
+    // The agent loop may inspect a pending call's arguments for decisions it
+    // makes *before* dispatch - `writes_in_spec_dir` gates the spec
+    // task-completion heuristic on whether a write tool actually touched the
+    // spec's own directory - but it must do so through the one shared helper,
+    // never with a second JSON rule of its own.
     let loop_source = read_workspace_file("crates/ragent-agent/src/session/processor.rs");
-    let loop_sites = loop_source.matches("decode_tool_arguments").count();
+    let loop_sites = loop_source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("decode_tool_arguments"))
+        .count();
+    let shared_sites = loop_source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("ragent_types::tool_args::decode_tool_arguments"))
+        .count();
     assert_eq!(
-        loop_sites, 0,
-        "the agent loop must not decode arguments itself - it calls the one \
-         dispatch pipeline (FR-007, FR-012); found {loop_sites} call sites in \
-         processor.rs"
+        loop_sites, shared_sites,
+        "every argument decode in the agent loop must go through \
+         ragent_types::tool_args::decode_tool_arguments (FR-007, FR-012); \
+         found {loop_sites} decode sites but only {shared_sites} through the \
+         shared helper in processor.rs"
     );
 }
 

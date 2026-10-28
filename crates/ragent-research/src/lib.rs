@@ -82,6 +82,7 @@ pub mod scoreboard;
 pub mod search_budget;
 pub mod session;
 pub mod source;
+pub mod source_age;
 pub mod source_registry;
 pub mod source_vault;
 pub mod state;
@@ -194,6 +195,7 @@ pub use session::{
     SynthesizeOutcome, WebConfig,
 };
 pub use source::{LocalSourceKind, Source};
+pub use source_age::{AgeSpan, AgeSpanError, AgeUnit};
 pub use source_registry::{BuiltinSourceRegistry, ResearchSourceKind, SourceRegistry};
 pub use source_vault::{NewVaultSource, SourceVault, SourceVaultError, VaultSource};
 pub use state::{
@@ -213,5 +215,5 @@ pub use web_gatherer::{
     DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, FetchFailure, FetchFailureKind,
     GatherEvent, GatherResult, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
     WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer, WebSearchHit, WebSearchTool,
-    WebSourceKind, classify_web_source,
+    WebSourceKind, classify_web_source, search_query_age_hint,
 };

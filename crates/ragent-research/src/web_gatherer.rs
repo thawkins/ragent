@@ -159,6 +159,44 @@ fn volume_policy(volume_cap: Option<usize>, sub_query_count: usize) -> (usize, u
     }
 }
 
+/// The `after:` operator prefix the [`search_query_age_hint`] appends.
+///
+/// A bare date token is not read as a publication window by any backend: Google
+/// and Bing recognise the `after:` operator, and the remaining backends at least
+/// see an explicit word ("after") next to the date rather than a stray number
+/// that a relevance scorer can mistake for part of the topic.
+pub const SEARCH_QUERY_AGE_OPERATOR: &str = "after:";
+
+/// Append the `--age` window's start date, as a search-engine date operator, to
+/// a decomposed web-search query.
+///
+/// When a run activates `--age <span>`, every query the decomposer produced is
+/// sent to the search engines with the oldest admissible publication date
+/// (`now - span`, rendered as `after:YYYY-MM-DD`) appended as its last token.
+/// That lets a backend steer towards material inside the window - Google and
+/// Bing read the operator natively - instead of the run discovering after every
+/// fetch that the whole result set is too old and discarding it.
+///
+/// The query text is otherwise unchanged, an already-appended identical hint is
+/// not duplicated, and surrounding whitespace is preserved as far as practical:
+/// the hint is appended after the trimmed query.
+#[must_use]
+pub fn search_query_age_hint(
+    query: &str,
+    span: crate::source_age::AgeSpan,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let hint = format!(
+        "{SEARCH_QUERY_AGE_OPERATOR}{}",
+        span.oldest_allowed_date(now)
+    );
+    let trimmed = query.trim_end();
+    if trimmed.ends_with(hint.as_str()) {
+        return trimmed.to_string();
+    }
+    format!("{trimmed} {hint}")
+}
+
 /// Minimum extracted content length (in characters) for a fetched page to be
 /// accepted as a web source. Pages whose cleaned body is shorter than this are
 /// rejected so near-empty extractions (paywalls, JS-only renders, soft 404s)
@@ -275,6 +313,37 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 /// evidence.
 fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
     is_sole_engine_class(hit, EngineClass::Encyclopedia)
+}
+
+/// Field separator used to fold the search modifiers into one cache key.
+///
+/// A unit separator cannot appear in a sub-query, an engine name, or an ISO
+/// date, so the composed key is unambiguous.
+const CACHE_KEY_SEP: char = '\u{1f}';
+
+/// Build the per-run query-cache key for one sub-query.
+///
+/// The exclusion set and the `--age` date bound are part of the key so a
+/// bounded result can never satisfy an unbounded query (or a differently
+/// bounded one) in the same run. An empty exclusion set and an absent bound
+/// produce the bare query, which is the common case.
+fn search_cache_key(
+    query: &str,
+    exclude_engines: &[&str],
+    published_after: Option<&str>,
+) -> String {
+    let mut key = query.to_string();
+    if !exclude_engines.is_empty() {
+        key.push(CACHE_KEY_SEP);
+        key.push_str("exclude=");
+        key.push_str(&exclude_engines.join(","));
+    }
+    if let Some(date) = published_after {
+        key.push(CACHE_KEY_SEP);
+        key.push_str("after=");
+        key.push_str(date);
+    }
+    key
 }
 
 /// Collect the sorted, de-duplicated set of contributing search engines from
@@ -459,17 +528,20 @@ pub enum ExclusionReason {
     LowRelevance,
     /// Extracted content shorter than the minimum usable length.
     ContentTooShort,
+    /// Publication date older than `--age`, or absent while `--age` is set.
+    TooOld,
     /// Page fetch failed or timed out.
     FetchFailed,
 }
 
 impl ExclusionReason {
     /// Every reason, in the column order used by the progress table.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ScholarlyEngine,
         Self::PdfDisabled,
         Self::LowRelevance,
         Self::ContentTooShort,
+        Self::TooOld,
         Self::FetchFailed,
     ];
 
@@ -481,6 +553,7 @@ impl ExclusionReason {
             Self::PdfDisabled => "pdf",
             Self::LowRelevance => "relev",
             Self::ContentTooShort => "short",
+            Self::TooOld => "age",
             Self::FetchFailed => "fetch",
         }
     }
@@ -805,6 +878,11 @@ pub trait WebSearchTool: Send + Sync {
     /// steer engine selection (and in-memory test doubles) keep working
     /// unchanged.
     ///
+    /// An implementation that steers engine selection **must** override this
+    /// method: the gatherer always dispatches through it, so a tool that
+    /// overrides only [`WebSearchTool::search`] will never be asked for an
+    /// exclusion-aware sweep.
+    ///
     /// Production implementations translate the names into `mf_search`'s
     /// `exclude_engines` parameter, so an excluded engine is never queried and
     /// consumes no search budget (FR-004, FR-006). Unknown names are ignored.
@@ -820,6 +898,39 @@ pub trait WebSearchTool: Send + Sync {
             );
         }
         self.search(query, max_results).await
+    }
+
+    /// Run a web search for `query` constrained to material published on or
+    /// after `published_after` (an ISO 8601 `YYYY-MM-DD` date), optionally
+    /// excluding the named engines.
+    ///
+    /// This is how the `--age` window reaches the backend as a *structured*
+    /// date bound rather than a query-string operator. The append-only
+    /// `after:` hint ([`search_query_age_hint`]) is honoured by Google and Bing
+    /// alone; the engines this workspace actually registers (OpenAlex,
+    /// Wikipedia, LangSearch, Tavily, Perplexity, Exa, Serper) either ignore it
+    /// or read it as literal query text. Passing the bound separately lets each
+    /// engine use its native parameter (Exa `startPublishedDate`, Tavily
+    /// `start_date`, Serper `cdr`/`cd_min`).
+    ///
+    /// The default implementation ignores the bound and delegates to
+    /// [`WebSearchTool::search_with_exclusions`], so in-memory test doubles and
+    /// tools with no date control keep working unchanged.
+    async fn search_with_date_bound(
+        &self,
+        query: &str,
+        max_results: usize,
+        exclude_engines: &[&str],
+        published_after: Option<&str>,
+    ) -> anyhow::Result<Vec<WebSearchHit>> {
+        // The bound is dropped because this backend has no date control. The
+        // caller has already folded it into the age hint in the query string,
+        // so the search still runs bounded where an engine honours `after:`.
+        //
+        // INTENTIONAL: no date parameter exists on the exclusion-only method.
+        let _ = published_after;
+        self.search_with_exclusions(query, max_results, exclude_engines)
+            .await
     }
 }
 
@@ -1145,6 +1256,15 @@ pub struct WebGatherer {
     /// retained candidate is fetched - the per-fetch timeout and fetch
     /// concurrency remain the real volume bounds.
     volume_cap: Option<usize>,
+    /// `--age <span>`: when `Some`, a fetched web page is rejected unless its
+    /// publication date is within the span. An undated page is rejected too,
+    /// because the caller asked for recent material only. `None` (the
+    /// default) does not filter on publication age.
+    max_age: Option<crate::source_age::AgeSpan>,
+    /// The instant `max_age` is measured from. Fixed once per gather pass (see
+    /// [`WebGatherer::with_max_age`]) so the date hint appended to every
+    /// decomposed query and the post-fetch rejection test share one cut-off.
+    age_reference: DateTime<Utc>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -1155,6 +1275,7 @@ impl std::fmt::Debug for WebGatherer {
             .field("fetch_timeout_ms", &self.fetch_timeout.as_millis())
             .field("keep_low_relevance", &self.keep_low_relevance)
             .field("disable_scholarly", &self.disable_scholarly)
+            .field("max_age", &self.max_age)
             .field("allow_pdf_web_sources", &self.allow_pdf_web_sources)
             .field("search_max_retries", &self.search_max_retries)
             .field("has_gather_log", &self.gather_log.is_some())
@@ -1198,6 +1319,8 @@ impl WebGatherer {
             query_cache: None,
             provider_stats: None,
             volume_cap: None,
+            max_age: None,
+            age_reference: Utc::now(),
         }
     }
 
@@ -1406,6 +1529,25 @@ impl WebGatherer {
     #[must_use]
     pub fn with_disable_scholarly(mut self, disable: bool) -> Self {
         self.disable_scholarly = disable;
+        self
+    }
+
+    /// Reject web sources published longer ago than `span` (`--age`).
+    ///
+    /// When set, a page whose publication date is older than the span is
+    /// rejected after fetching (the date is only known once the page and its
+    /// metadata have been read), and a page that exposes no publication date
+    /// at all is rejected too. `None` (the default) does not filter on
+    /// publication age.
+    ///
+    /// The window is measured from the instant this method is called, and that
+    /// instant is kept for the whole gather pass: the same cut-off also dates
+    /// the hint appended to every decomposed search query (see
+    /// [`crate::search_query_age_hint`]).
+    #[must_use]
+    pub fn with_max_age(mut self, span: Option<crate::source_age::AgeSpan>) -> Self {
+        self.max_age = span;
+        self.age_reference = Utc::now();
         self
     }
 
@@ -2011,6 +2153,20 @@ impl WebGatherer {
             }
         };
 
+        // `--age`: append the window's start date to every decomposed query so
+        // the search engine steers towards material inside the window. The
+        // post-fetch filter below is only a backstop - without this hint the
+        // engine is free to return an all-old result set that is then discarded
+        // wholesale, yielding an empty report. The rewrite happens *before* the
+        // `QueriesDecomposed` event so the progress panel and `RESEARCH.md`
+        // report the queries that are actually sent to the search backend.
+        let queries: Vec<String> = match self.max_age {
+            Some(span) => queries
+                .iter()
+                .map(|q| crate::search_query_age_hint(q, span, self.age_reference))
+                .collect(),
+            None => queries,
+        };
         if let Some(obs) = observer {
             obs.on_event(GatherEvent::QueriesDecomposed {
                 queries: queries.clone(),
@@ -2078,6 +2234,11 @@ impl WebGatherer {
                 let cache = query_cache.clone();
                 let stats = provider_stats.clone();
                 let exclude = Arc::clone(&exclude_engines);
+                // `--age`: the exact window start, as an ISO date, handed to
+                // the search tool as a structured bound. `None` without a span.
+                let published_after: Option<String> = self
+                    .max_age
+                    .map(|span| span.oldest_allowed_date(self.age_reference));
                 async move {
                     // Run-scoped search budget: reserve one call before any
                     // provider request. Exhaustion skips the search entirely.
@@ -2088,14 +2249,10 @@ impl WebGatherer {
                     }
                     // Shared query cache: an identical query already answered
                     // this run is served without a provider call. The exclusion
-                    // set is folded into the cache key so an exclusion-aware result
-                    // can never satisfy a later unfiltered query (or vice versa)
-                    // within the same run.
-                    let cache_key = if exclude.is_empty() {
-                        q.clone()
-                    } else {
-                        format!("{q}\u{1f}exclude={}", exclude.join(","))
-                    };
+                    // set and the `--age` date bound are folded into the cache
+                    // key so a bounded result can never satisfy an unbounded
+                    // query (or a differently bounded one) in the same run.
+                    let cache_key = search_cache_key(&q, &exclude, published_after.as_deref());
                     if let Some(cache) = &cache
                         && let Some(hits) = cache.get(&cache_key)
                     {
@@ -2105,12 +2262,14 @@ impl WebGatherer {
                     let mut attempt: u32 = 0;
                     let mut last_error;
                     loop {
-                        let search_result = if exclude.is_empty() {
-                            tool.search(&q, per_query_allowance).await
-                        } else {
-                            tool.search_with_exclusions(&q, per_query_allowance, &exclude)
-                                .await
-                        };
+                        let search_result = tool
+                            .search_with_date_bound(
+                                &q,
+                                per_query_allowance,
+                                &exclude,
+                                published_after.as_deref(),
+                            )
+                            .await;
                         match search_result {
                             Ok(hits) => {
                                 // Record one logical search call (retries
@@ -2786,6 +2945,52 @@ impl WebGatherer {
                                 }
                             }
                         }
+                    }
+
+                    // `--age`: drop pages published outside the requested span.
+                    // The publication date is only known once the page has
+                    // been fetched, so this runs post-fetch. An undated page is
+                    // rejected as well: the caller asked for recent sources, and
+                    // an undated page cannot be shown to satisfy that.
+                    if let Some(span) = self.max_age
+                        && let Some(reason) =
+                            span.rejection_reason(page.published_at, self.age_reference)
+                    {
+                        excluded_count += 1;
+                        bump_engine_exclusions(
+                            &mut per_engine,
+                            &mut excluded_by_reason,
+                            &hit.search_engine,
+                            ExclusionReason::TooOld,
+                        );
+                        tracing::info!(
+                            query = %query,
+                            url = %page.url,
+                            reason = %reason,
+                            "research: skipping web source outside --age window"
+                        );
+                        if let Some(obs) = observer {
+                            obs.on_event(GatherEvent::SourceExcluded {
+                                url: page.url.clone(),
+                                reason: reason.clone(),
+                            });
+                        }
+                        collected.push((index, None));
+                        log_rejected(
+                            &page.url,
+                            &query,
+                            &title,
+                            &hit.search_tool,
+                            &hit.search_engine,
+                            &reason,
+                            Some(&serde_json::json!({
+                                "max_age": span.to_string(),
+                                "published_at": page
+                                    .published_at
+                                    .map(|dt| dt.to_rfc3339()),
+                            })),
+                        );
+                        continue;
                     }
 
                     let content_chars = page.body.chars().count();

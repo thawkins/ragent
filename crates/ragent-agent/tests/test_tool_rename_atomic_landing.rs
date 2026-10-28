@@ -62,7 +62,7 @@ use ragent_agent::tool::rename::TOOL_RENAMES;
 /// baseline record together. **If you did not**, a failure here means the rename
 /// landed half-way - a tool was renamed out of the registry without being
 /// renamed back in, or an adapter registered a second copy.
-const FR030_TOTAL: usize = 148;
+const FR030_TOTAL: usize = 149;
 
 /// The two family counts T-041 records as the canary against a name-prefix count.
 ///

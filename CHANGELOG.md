@@ -1,6 +1,173 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.152] - 2026-10-28
+
+Release 1.0.152: the research publication-age window becomes a parsed type
+instead of a string, so an invalid span fails loudly at every boundary (CLI exit
+2, HTTP 422) rather than silently serving an unfiltered run, and the window now
+dates every decomposed search query with an `after:YYYY-MM-DD` operator the
+engines understand instead of discarding an all-old result set after fetching
+it. Alongside it: a `DateTime` tool that reads only the system clock, `Alt+O`
+rebinding to the autopilot toggle, `mf_search`'s exact `published_after` bound,
+publication dates recovered from the `mf_fetch` envelope, and a batch of
+test-fixture repairs (one-shot HTTP servers that closed before reading the
+request, stale status-bar glyph assertions, a cron monitor race).
+
+### Added
+- **`DateTime` tool** (utility family, `none` permission): returns the current
+  date and time read from the system clock. It reports the UTC instant in
+  RFC 3339 alongside the same instant rendered at an optional fixed UTC offset
+  (`timezone_offset_minutes`, default 0), plus the individual date and time
+  fields, the day of week, and the Unix timestamp in seconds and milliseconds.
+  `format` accepts a chrono date-time format string for the local rendering.
+  The tool deliberately reads neither `TZ` nor the host timezone database, so a
+  result never depends on ambient process state; the offset it used is echoed in
+  the metadata. The default registry now advertises 149 tools across 21
+  families (`--dry-run` reports `none: 9`), and the TUI renders the call as a
+  `UTC+HH:MM` zone summary with the formatted instant as the result.
+
+### Changed
+- **`/research create --age` now dates every decomposed search query.** When a
+  run activates a publication-age window, the window's start date
+  (`now - span`, rendered as an ISO `YYYY-MM-DD`) is appended as the last token
+  of every query the decomposer produced, so the search engines can steer
+  towards material inside the window instead of the run discarding an
+  all-old result set only after fetching it. The same cut-off instant now
+  serves both the query hint and the post-fetch rejection test
+  (`WebGatherer` keeps it for the whole pass rather than re-reading the clock),
+  and `search_query_age_hint` / `AgeSpan::oldest_allowed_date` are public.
+  The hint is spelled with the `after:` operator (`SEARCH_QUERY_AGE_OPERATOR`),
+  which Google and Bing read as a publication window; a bare date token was not
+  recognised by any backend and could be scored as a topic term.
+- **`--age` is a parsed type, not a string.** `AgeSpan` (new
+  `ragent-research/src/source_age.rs`) now derives `Deserialize` through
+  `#[serde(try_from = "String")]`, so a span crosses every boundary as
+  `Option<AgeSpan>` and an invalid span fails rather than silently disabling the
+  filter: `POST /research` rejects a malformed `max_age` with 422 (an
+  unprocessable JSON body) instead of serving an unfiltered run, and the CLI
+  rejects one with `CliExit::usage()` (exit 2) through the new `parse_age_span`
+  helper in the root `src/cli.rs`. `InvocationParseError::InvalidAgeSpan` is
+  replaced by `InvalidArgument(String)`, and a recorded bad flag now replays as
+  a named diagnostic instead of the misleading `MissingName`.
+- **`mf_search` accepts `published_after`.** `SearchOptions` gains a
+  `published_after: Option<String>` field (`with_published_after` builder) that
+  carries an exact `YYYY-MM-DD` lower bound - a window the coarse
+  `freshness` enum cannot express. Engines that accept an absolute bound use it
+  in preference to `freshness`: Exa's `startPublishedDate`, Tavily's
+  `start_date`, and Serper's Google custom range `cdr:1,cd_min:<date>`.
+  `AgentWebSearchTool` gains `search_with_date_bound` so the research gatherer
+  reaches that parameter in one call together with `exclude_engines`. A value
+  that is not `YYYY-MM-DD` is dropped with a warning rather than becoming a
+  literal engine query parameter.
+- **Research CLI diagnostics are uniform.** Every integer-valued research flag
+  now reports `"{flag} {value}: expected an integer"` (14 sites, including the
+  `--web-time` alias, which now names the canonical
+  `--web-phase-timeout-secs`). `ResearchCliCommand::Invalid` carries the fully
+  formatted diagnostic including its closing backtick, so a presentation
+  surface interpolates it verbatim instead of re-deriving the message shape.
+- **`Alt+O` now toggles autopilot mode** instead of the Telemetry side panel,
+  so the one-keystroke autonomous-operation switch sits where the status bar
+  already showed autopilot state. It drives the same state machine as
+  `/autopilot on|off` through new shared `App::start_autopilot` /
+  `App::stop_autopilot` helpers (the slash command was refactored onto them, so
+  the two paths cannot drift apart), and since a key chord cannot carry flags
+  the toggle applies a default 1800-second time limit - a stray keystroke
+  cannot start an unbounded run, while `/autopilot on` still can. The Telemetry
+  panel is unchanged and still reachable via `/telemetry_panel`.
+- **Status bar**: the `AUTO:` indicator is now bold (it changes how the agent
+  loop runs) and carries a dimmed `(Alt+O)` chord hint, matching `YOLO:
+  (Alt+Y)` and `GCF: (Alt+G)`; `push_indicator` gained an optional `hint`
+  parameter and a `colors::HINT` entry to render it.
+- **`mf_fetch`'s parsed result is a struct, not a seven-element tuple.**
+  `parse_mf_fetch_output` returned a positional tuple behind
+  `#[allow(clippy::type_complexity)]`, which invited silent mis-ordering at both
+  return sites and the caller. It now returns `ParsedFetch`, a `Default`-derived
+  struct with named fields (`body`, `title`, `content_type`, `page_type`,
+  `detected_language`, `author`, `published_at`), so the `#[allow]` is gone and
+  the legacy `webfetch` branch spells out only the two fields it actually
+  recovers.
+- **Publication dates are recovered from the `mf_fetch` envelope.** A new
+  `envelope_published_at` reads `metadata.published_time` (falling back to
+  `modified_time`) so pages with no readable `<head>` - PDFs and YouTube
+  responses - still contribute a date to the `--age` filter. The raw-HTML head
+  fetch remains authoritative when it finds one
+  (`page_meta.published_at.or(envelope_published)`).
+- **The search cache key folds in every result-shaping modifier.** The
+  duplicated four-arm `match (exclude_engines, published_after)` that composed
+  the per-run query-cache key collapsed into `search_cache_key(query,
+  exclude_engines, published_after)`, joined with `CACHE_KEY_SEP: char =
+  '\u{1f}'` (a unit separator cannot occur in a sub-query, engine name, or ISO
+  date). An empty exclusion set and an absent bound still produce the bare
+  query.
+- **The LLM query decomposer is told today's date.** The model has no clock and
+  was writing the year it last saw in training data into every query, which
+  steers the engines - and relevance scoring, which reads the year as a topic
+  term - towards stale material. The prompt now states today's date and permits
+  only the current year, and forbids relative phrases such as "recent" or
+  "latest" because the caller applies its own publication-date filter.
+- **Research replayed/report commands echo the command line.** `/research
+  create` and `/research update` now emit the full invocation in a fenced block
+  above their output, so the message window records exactly what ran rather than
+  only the run's result.
+
+### Fixed
+- **`format_width_sweep_detail` totals-row test**: the assertion still encoded
+  the column layout from before the `age` (`TooOld`) exclusion column was added
+  in 1.0.135, so it expected `totals` to run `short fetch` with no `age` column
+  between them. It now expects the current nine reason columns
+  (`papers pdf relev short age fetch` then the fetch-failure kinds).
+- **Stale status-bar tests**: `test_statusbar_tag_group_follows_branch_after_cwd`
+  and `test_statusbar_branch_before_tag_and_cwd_before_branch` still expected a
+  `●` status glyph after `Branch: <name>`, which the 1.0.151 hardening removed
+  because the hardcoded `HEALTHY` dot claimed a clean tree whether or not it
+  was. Both now measure the branch section ending at the branch name's own
+  trailing space plus the group's single separator.
+- **One-shot HTTP test servers read the request before replying.** The
+  `ragent-llm` SSE/JSON fixtures closed the socket while the client's request
+  bytes were still in flight, so the kernel answered with a TCP RST that
+  surfaced as `client error (Canceled)` and made the provider tests flaky. Every
+  fixture now reads the request first (11 sites across `tests/common/mod.rs` and
+  the inline/`test_*` provider suites).
+- **Exa's date bound is borrowed, not cloned.** `build_request_body` was
+  cloning `opts.published_after` to build `startPublishedDate`; it now uses
+  `as_deref().map(str::to_owned)` and keeps the `freshness` bucket as the
+  fallback.
+- **The `test-tool-argument-decode-sites` guard matches the current design.**
+  The processor is allowed to inspect a pending call's arguments for decisions
+  it makes *before* dispatch (the spec task-completion heuristic), so the
+  assertion no longer demands zero decode sites in `processor.rs`; it requires
+  that every one of them goes through
+  `ragent_types::tool_args::decode_tool_arguments`, never a second JSON rule.
+- **`FR030_TOTAL` and the post-rename digest follow the surface.**
+  `test_fr030_surface_agreement` now pins 149 names, lists `DateTime` beside the
+  FR-023 table's `after` column as a post-rename uppercase addition, and carries
+  the recomputed digest for the 149-name tree while the rename assertion itself
+  stays unchanged.
+- **`/telemetry_panel` no longer advertises `Alt+O`.** The command catalog,
+  the how-to, and the TUI key tables said `Alt+O` toggles the telemetry panel;
+  it toggles autopilot now, so the alias was removed from the description and
+  the docs say the slash command is the only route.
+- **Research `--age` diagnostics no longer fight the markdown renderer.** The
+  TUI test asserted one contiguous span, but the render pass can close and
+  relocate inline-code backticks; it now asserts the flag/value and the
+  `expected an integer` reason separately.
+- **The cron completion-monitor test no longer races the monitor's poll.** The
+  case slept a fixed 6 seconds and then asserted the monitor had recorded the
+  run, but the monitor polls every 5 seconds and the two schedules drifted, so
+  the assertion failed intermittently. It now polls its own bounded wait
+  (`MONITOR_WAIT_MS`, 30 s) and asserts as soon as the record appears.
+- **Two `-D unreachable_pub` and `-D warnings` findings in the TUI bridge and
+  the secret sanitizer.** `app::mcp_bridge` is a private module inside
+  `pub mod app`, so its 13 items were `pub` inside a private module and tripped
+  the dead-code lint's `unreachable_pub`; they are `pub(super)` now, and
+  `app::bridged_discover_rows_for_tests` - the one crate-external surface -
+  became generic over `S: std::hash::BuildHasher` to clear clippy's
+  `implicit_hasher`. The two `LazyLock<Regex>` initialisers in
+  `ragent-types/src/sanitize.rs` build their pattern from a source string that
+  is a compile-time constant, which the `check-security-unwraps.sh` guard
+  reports as a panicking `expect`; both now carry the documented same-line
+  `// no-panic-ok:` marker so the guard sees the invariant instead of a
+  baseline entry.
 
 ## [1.0.151] - 2026-10-27
 

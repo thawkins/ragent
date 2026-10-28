@@ -9,7 +9,7 @@
 
 use ragent_config::Config;
 use ragent_research::{
-    ResearchRunRequest, build_session_config,
+    AgeSpan, ResearchRunRequest, build_session_config,
     run_config::{Depth, OutputFormat, ResearchMode, Tier},
     session::DEFAULT_WEB_PHASE_TIMEOUT_SECS,
 };
@@ -42,6 +42,10 @@ fn build_session_config_applies_defaults_with_no_overrides() {
     assert!(cfg.web.disable_scholarly);
     assert!(!cfg.web.use_pdf_web_sources);
     assert!(cfg.web.max_search_calls.is_none());
+    assert!(
+        cfg.web.max_age.is_none(),
+        "publication age is not filtered unless --age is given"
+    );
     assert_eq!(
         cfg.web.web_phase_timeout_secs,
         Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
@@ -125,6 +129,7 @@ fn build_session_config_maps_all_explicit_fields() {
         max_concurrent_research_units: Some(7),
         evaluate: Some(true),
         url_cloak: true,
+        max_age: AgeSpan::parse("6m").ok(),
         invocation: Some("ragent research create --name full-test \"deep topic\"".to_string()),
     };
     let cfg = build_session_config(&req, None);
@@ -155,6 +160,7 @@ fn build_session_config_maps_all_explicit_fields() {
     assert!(cfg.web.use_pdf_web_sources);
     assert_eq!(cfg.web.web_phase_timeout_secs, Some(120));
     assert_eq!(cfg.web.max_search_calls, Some(40));
+    assert_eq!(cfg.web.max_age, AgeSpan::parse("6m").ok());
 
     // Local
     assert_eq!(cfg.local.max_local_sources, 30);

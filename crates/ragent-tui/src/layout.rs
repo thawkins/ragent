@@ -5465,7 +5465,7 @@ fn render_router_save_dialog(frame: &mut Frame, app: &App) {
     frame.render_widget(paragraph, area);
 }
 
-/// Render the Telemetry side panel (toggled via `Alt+O`).
+/// Render the Telemetry side panel (toggled via `/telemetry_panel`).
 ///
 /// Displays the same live counter/gauge values as `/telemetry counters`, grouped
 /// by category in a compact, scrollable side panel. The panel reads from the
@@ -8741,7 +8741,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+L", "Toggle log panel visibility"),
     ("Alt+P", "Toggle profiler panel visibility"),
     ("Alt+I", "Toggle Tasks panel visibility"),
-    ("Alt+O", "Toggle telemetry panel visibility"),
+    ("Alt+O", "Toggle autopilot mode (autonomous operation)"),
     ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     ("Alt+G", "Toggle GCF tool-result encoding"),

@@ -49,6 +49,16 @@ fn all_text(app: &App) -> String {
     slash_support::all_messages(app)
 }
 
+/// How long the cron completion-monitor test waits for a spawned run to reach a
+/// terminal state.
+///
+/// The monitor observes tasks on a 5 s poll (`spawn_completion_monitor`), so the
+/// wait has to clear at least one full cycle plus the agent's own first turn.
+/// It is a ceiling, not a fixed sleep: the test polls and exits as soon as the
+/// state is reached, so a healthy run finishes in well under a second while a
+/// genuinely stuck run still fails in bounded time.
+const MONITOR_WAIT_MS: u64 = 30_000;
+
 // ===========================================================================
 // app::cron - fire path, stateful prompt, completion monitor, advance
 // ===========================================================================
@@ -172,15 +182,27 @@ async fn cron_tick_fires_repeating_events_and_runs_the_completion_monitor() {
     assert!(log_body.contains("repeat-plain"), "log: {log_body}");
     assert!(log_body.contains("repeat-stateful"), "log: {log_body}");
 
-    // The monitor polls every 5 s; give it one full cycle so its
-    // completion/removal path runs inside this test.
-    tokio::time::sleep(Duration::from_millis(6000)).await;
-    let snapshot = manager.tasks_snapshot().await;
-    assert!(
-        snapshot
+    // The runs the tick spawned finish asynchronously, and the completion
+    // monitor only observes them on its 5 s poll. A fixed sleep long enough for
+    // that poll can still lose the race against a slow first LLM turn under
+    // load, so poll for the terminal state instead - the same bounded-wait
+    // shape the settle loop above uses.
+    let mut reached_terminal = false;
+    let mut snapshot = Vec::new();
+    for _ in 0..(MONITOR_WAIT_MS / 100) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        snapshot = manager.tasks_snapshot().await;
+        if snapshot
             .iter()
-            .any(|entry| entry.status != ragent_agent::task::TaskStatus::Running),
-        "the spawned cron runs must reach a terminal state: {snapshot:?}"
+            .any(|entry| entry.status != ragent_agent::task::TaskStatus::Running)
+        {
+            reached_terminal = true;
+            break;
+        }
+    }
+    assert!(
+        reached_terminal,
+        "the spawned cron runs must reach a terminal state within {MONITOR_WAIT_MS} ms: {snapshot:?}"
     );
 }
 

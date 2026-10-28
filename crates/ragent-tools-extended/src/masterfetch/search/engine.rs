@@ -177,6 +177,15 @@ pub struct SearchOptions {
     pub exclude_sites: Vec<String>,
     /// Time filter for results.
     pub freshness: Freshness,
+    /// Oldest admissible publication date, as an ISO 8601 `YYYY-MM-DD` string.
+    ///
+    /// This carries an exact window (`--age 45d`), which the coarse
+    /// [`Freshness`] enum (day/week/month/year) cannot express. An engine that
+    /// can send an absolute lower bound (Exa's `startPublishedDate`, Serper's
+    /// `cd_min`) uses this in preference to `freshness`; an engine that can
+    /// only take a relative recency is fed the nearest `freshness` bucket by
+    /// the caller instead.
+    pub published_after: Option<String>,
     /// Result page (0-based, 0 = first page).
     pub page: usize,
 }
@@ -215,6 +224,15 @@ impl SearchOptions {
         self
     }
 
+    /// Builder: set the absolute oldest admissible publication date
+    /// (`YYYY-MM-DD`). Takes precedence over [`Self::freshness`] in engines
+    /// that accept an absolute lower bound.
+    #[must_use]
+    pub fn with_published_after(mut self, date: Option<String>) -> Self {
+        self.published_after = date;
+        self
+    }
+
     /// Builder: set the result `page`.
     #[must_use]
     pub const fn with_page(mut self, page: usize) -> Self {
@@ -238,6 +256,7 @@ impl Default for SearchOptions {
             site: String::new(),
             exclude_sites: Vec::new(),
             freshness: Freshness::Any,
+            published_after: None,
             page: DEFAULT_PAGE,
         }
     }
