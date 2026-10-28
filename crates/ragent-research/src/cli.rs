@@ -422,9 +422,7 @@ impl ResearchCliCommand {
                             "--web-phase-timeout-secs" | "--web-time" => match v.parse() {
                                 Ok(n) => web_phase_timeout_secs = Some(n),
                                 Err(_) => {
-                                    invalid = Some(format!(
-                                        "--web-phase-timeout-secs {v}: expected an integer"
-                                    ))
+                                    invalid = Some(format!("{arg} {v}: expected an integer"));
                                 }
                             },
                             "--local-phase-timeout-secs" => match v.parse() {
