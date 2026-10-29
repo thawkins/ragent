@@ -149,6 +149,7 @@ fn build_task_entry(
     task_prompt: &str,
     background: bool,
     detached: bool,
+    time_bound_secs: Option<u64>,
 ) -> TaskEntry {
     TaskEntry {
         id: task_id.to_string(),
@@ -167,6 +168,26 @@ fn build_task_entry(
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::Complete,
+        time_bound_secs,
+    }
+}
+
+/// Resolve the wall-clock bound actually applied to a spawn (FR-017, FR-034).
+///
+/// The per-call bound may only ever **tighten** the configured one - it must
+/// never extend it (FR-017). That is a `min`, so a caller asking for two hours
+/// against a 30-minute configured budget gets 30 minutes, and a caller asking
+/// for 60 seconds gets 60 seconds.
+///
+/// `configured` is `None` for the foreground path, which has no configured
+/// wall-clock bound at all (the stall timeout guards per-chunk silence, not
+/// total run length). In that case a per-call bound applies as requested and
+/// its absence leaves the path unbounded exactly as before.
+fn effective_time_bound(requested: Option<u64>, configured: Option<u64>) -> Option<u64> {
+    match (requested, configured) {
+        (Some(req), Some(conf)) => Some(req.min(conf)),
+        (Some(req), None) => Some(req),
+        (None, conf) => conf,
     }
 }
 
@@ -189,6 +210,15 @@ pub enum TaskStatus {
     Terminating,
     /// Task was cancelled before completion.
     Cancelled,
+    /// Task was terminated because a per-call time bound was exceeded
+    /// (FR-017, FR-034).
+    ///
+    /// Distinct from [`TaskStatus::Failed`] on purpose: a caller that set a
+    /// bound needs to tell "the agent errored" from "the agent ran too long",
+    /// and collapsing the two would hide which bound to raise. Only ever
+    /// reached when `new_agent` was given `timeout_secs`; the configured stall
+    /// timeout reports [`TaskStatus::Failed`] exactly as it did before.
+    TimedOut,
 }
 
 impl TaskStatus {
@@ -203,6 +233,7 @@ impl TaskStatus {
             Self::Suspended => "suspended",
             Self::Terminating => "terminating",
             Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
         }
     }
 }
@@ -261,6 +292,62 @@ impl ReportStatus {
 impl std::fmt::Display for ReportStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// Returns `true` when `entry` occupies one slot of the background
+/// concurrency limit (FR-011, FR-030).
+///
+/// This is the ONE definition of occupancy: the spawn-time refusal, the
+/// `running_background_count` accessor and the `list_agents` limit report all
+/// count through it, so the number a caller reads and the number the spawn path
+/// enforces cannot drift apart. A task occupies a slot when it is
+/// `background`, is not `detached` (a fire-and-forget task is never awaited and
+/// never listed), and is still live - `running` or `suspended`, because a
+/// suspended task keeps its wall-clock budget and can resume at any time, so
+/// letting it free a slot would let a later resume push occupancy silently over
+/// the limit.
+fn occupies_limit(entry: &TaskEntry) -> bool {
+    entry.background
+        && !entry.detached
+        && matches!(entry.status, TaskStatus::Running | TaskStatus::Suspended)
+}
+
+/// A snapshot of the background concurrency limit and its occupancy (FR-011).
+///
+/// Produced by [`AgentManager::limit_report`] and rendered by `list_agents`;
+/// the spawn refusal reads the same numbers so a listing and a refusal always
+/// agree (FR-029).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundLimitReport {
+    /// The configured limit (`experimental.max_background_agents`).
+    pub limit: usize,
+    /// How many tasks occupy the limit right now.
+    pub occupancy: usize,
+    /// Free slots: `limit - occupancy`, saturated at zero.
+    pub headroom: usize,
+    /// Ids of the tasks occupying the limit, in registry iteration order.
+    pub occupying_ids: Vec<String>,
+}
+
+impl BackgroundLimitReport {
+    /// Renders the report as one line, naming the limit, the occupancy, the
+    /// headroom and (when the limit is in use) the occupying task ids.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        if self.occupying_ids.is_empty() {
+            return format!(
+                "Background limit: {}/{} slots in use, headroom {}.",
+                self.occupancy, self.limit, self.headroom
+            );
+        }
+        format!(
+            "Background limit: {}/{} slots in use, headroom {}. Occupying tasks: {}.",
+            self.occupancy,
+            self.limit,
+            self.headroom,
+            self.occupying_ids.join(", ")
+        )
     }
 }
 
@@ -326,6 +413,16 @@ pub struct TaskEntry {
     /// (`Truncated`).
     #[serde(default)]
     pub report_status: ReportStatus,
+    /// Per-call wall-clock bound in seconds, when the caller supplied one
+    /// (`new_agent`'s `timeout_secs`, FR-017, FR-034).
+    ///
+    /// `None` means no per-call bound was requested and the configured stall
+    /// timeout applies unchanged. `Some(n)` means the task is bounded by `n`
+    /// seconds **or less** - a bound tighter than the configured stall timeout
+    /// is used as-is, and a bound looser than it is clamped down to it, so the
+    /// per-call value can only ever tighten the configured one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_bound_secs: Option<u64>,
 }
 
 /// Result of a completed sub-agent task.
@@ -354,7 +451,13 @@ pub struct AgentManager {
     ///
     /// PERF (FR-016): `DashMap` replaces `RwLock<HashMap>` for the same
     /// lock-contention reason as `tasks`.
-    cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
+    ///
+    /// `pub(crate)` (spec `agentssetup` T-018): the `/cancel` integration test
+    /// in `ragent-tui` lives in a different crate, so it seeds a task through
+    /// the `#[doc(hidden)]` [`AgentManager::insert_task_for_test`] hook rather
+    /// than reaching in here. A production caller has no reason to touch the
+    /// flag map directly - `cancel_agent` is the only entry point.
+    pub(crate) cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
     /// Cooperative-suspension flags, keyed by the sub-agent's CHILD session
     /// id (the session processor's loop consults this map by session id; the
     /// public `suspend_task`/`resume_task` API translates a task id into the
@@ -416,6 +519,11 @@ impl AgentManager {
     ///
     /// Creates an isolated session, resolves the agent, runs the agent loop,
     /// and returns the result. The parent session is blocked during execution.
+    ///
+    /// `time_bound_secs` is the optional per-call wall-clock bound (FR-017,
+    /// FR-034). This path has no configured total-run bound, so a supplied
+    /// value applies as given; an exceeded bound fails the task with
+    /// [`TaskStatus::TimedOut`] rather than leaving the caller blocked forever.
     pub async fn spawn_sync(
         &self,
         parent_session_id: &str,
@@ -423,6 +531,7 @@ impl AgentManager {
         task_prompt: &str,
         model_override: Option<&str>,
         working_dir: &std::path::Path,
+        time_bound_secs: Option<u64>,
     ) -> anyhow::Result<TaskResult> {
         // D4 fix: Generate human-readable task ID based on agent name
         // e.g., "explore-a1b2c3d4" instead of full UUID
@@ -444,6 +553,7 @@ impl AgentManager {
             task_prompt,
             false,
             false,
+            time_bound_secs,
         );
         self.tasks.insert(task_id.clone(), entry);
         // P-11: spawn_sync tasks are not background (they block the caller),
@@ -464,19 +574,41 @@ impl AgentManager {
             agent: agent_name.to_string(),
             task: truncate_str(task_prompt, 200).into_owned(),
             background: false,
+            // `spawn_sync` blocks its caller and is never detached.
+            detached: false,
         });
 
-        // Resolve agent
-        let result = self
-            .run_subagent(
-                &child_sid,
-                agent_name,
-                task_prompt,
-                model_override,
-                cancel_flag,
-                working_dir,
-            )
-            .await;
+        // Resolve agent and run it, bounded when the caller asked for a bound
+        // (FR-017, FR-034). The foreground path has no configured total-run
+        // bound, so an absent per-call bound leaves it unbounded as before.
+        let run = self.run_subagent(
+            &child_sid,
+            agent_name,
+            task_prompt,
+            model_override,
+            cancel_flag.clone(),
+            working_dir,
+        );
+        let (result, hit_bound) = match time_bound_secs {
+            Some(secs) => {
+                match tokio::time::timeout(std::time::Duration::from_secs(secs), run).await {
+                    Ok(res) => (res, false),
+                    Err(_) => {
+                        // Stop the loop cooperatively before returning, so the
+                        // aborted task cannot keep calling tools behind a
+                        // caller that has already been told it timed out.
+                        cancel_flag.store(true, Ordering::Relaxed);
+                        (
+                            Err(anyhow::anyhow!(
+                                "sub-agent timed out after {secs}s (per-call bound)"
+                            )),
+                            true,
+                        )
+                    }
+                }
+            }
+            None => (run.await, false),
+        };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -514,7 +646,14 @@ impl AgentManager {
                 let error_msg = e.to_string();
                 {
                     if let Some(mut entry) = self.tasks.get_mut(&task_id) {
-                        entry.status = TaskStatus::Failed;
+                        // A bound expiry is its own terminal state, not a
+                        // generic failure (FR-017): the caller needs to tell
+                        // "the agent errored" from "the agent ran too long".
+                        entry.status = if hit_bound {
+                            TaskStatus::TimedOut
+                        } else {
+                            TaskStatus::Failed
+                        };
                         entry.error = Some(Arc::from(error_msg.as_str()));
                         entry.completed_at = Some(Utc::now());
                     }
@@ -541,6 +680,10 @@ impl AgentManager {
     /// The task runs as an independent tokio task. Results are published
     /// via [`Event::SubagentComplete`] when finished.
     ///
+    /// `time_bound_secs` is the optional per-call wall-clock bound (FR-017,
+    /// FR-034). It only ever tightens the configured `background_timeout_secs`;
+    /// an absent bound leaves the configured value in force unchanged.
+    ///
     /// Returns the task ID and entry for the newly spawned task.
     pub async fn spawn_background(
         &self,
@@ -549,6 +692,7 @@ impl AgentManager {
         task_prompt: &str,
         model_override: Option<&str>,
         working_dir: &std::path::Path,
+        time_bound_secs: Option<u64>,
     ) -> anyhow::Result<TaskEntry> {
         self.spawn_background_mode(
             parent_session_id,
@@ -557,6 +701,7 @@ impl AgentManager {
             model_override,
             working_dir,
             false,
+            time_bound_secs,
         )
         .await
     }
@@ -574,6 +719,7 @@ impl AgentManager {
         task_prompt: &str,
         model_override: Option<&str>,
         working_dir: &std::path::Path,
+        time_bound_secs: Option<u64>,
     ) -> anyhow::Result<TaskEntry> {
         self.spawn_background_mode(
             parent_session_id,
@@ -582,6 +728,7 @@ impl AgentManager {
             model_override,
             working_dir,
             true,
+            time_bound_secs,
         )
         .await
     }
@@ -597,19 +744,38 @@ impl AgentManager {
         model_override: Option<&str>,
         working_dir: &std::path::Path,
         detached: bool,
+        time_bound_secs: Option<u64>,
     ) -> anyhow::Result<TaskEntry> {
-        // Check concurrency limit
-        let running_count = self
-            .tasks
-            .iter()
-            .filter(|r| r.status == TaskStatus::Running && r.background)
-            .count();
+        // Check concurrency limit. The occupancy comes from the same
+        // `limit_report` that `list_agents` reports, so a refusal and a listing
+        // can never disagree (FR-011, FR-029).
+        let report = self.limit_report().await;
 
-        if running_count >= self.max_background {
+        if report.headroom == 0 {
+            // FR-010: the refusal is branchable, so it carries a stable
+            // machine-readable reason (`limit_reached`) that `new_agent` lifts
+            // into the tool error a caller actually sees.
+            // FR-029: the message names the limit, the occupancy and the tasks
+            // occupying it, so the caller can cancel a specific one (FR-030: a
+            // suspended task is still in that list, so cancelling - not
+            // suspending - is what frees a slot).
             anyhow::bail!(
-                "Maximum concurrent background tasks ({}) reached. \
-                 Wait for a running task to complete or cancel one.",
-                self.max_background
+                "{}",
+                crate::tool::param_schema::prefixed(
+                    crate::tool::new_agent::REASON_LIMIT_REACHED,
+                    &format!(
+                        "Maximum concurrent background tasks ({}) reached, {} in use \
+                         ({}) with no headroom. Wait for a running task to complete \
+                         or cancel one (suspending does not free a slot).",
+                        report.limit,
+                        report.occupancy,
+                        if report.occupying_ids.is_empty() {
+                            "no occupying task ids".to_string()
+                        } else {
+                            format!("occupying: {}", report.occupying_ids.join(", "))
+                        }
+                    )
+                )
             );
         }
 
@@ -644,6 +810,7 @@ impl AgentManager {
             task_prompt,
             true,
             detached,
+            time_bound_secs,
         );
         self.tasks.insert(task_id.clone(), entry.clone());
         // P-11: mark that there is at least one pending background task so
@@ -666,6 +833,9 @@ impl AgentManager {
             agent: agent_name.to_string(),
             task: truncate_str(task_prompt, 200).into_owned(),
             background: true,
+            // FR-020: the consumer projects the execution contract from this
+            // flag, so a detached run must announce itself as detached.
+            detached,
         });
 
         // Clone everything needed for the background task
@@ -726,8 +896,23 @@ impl AgentManager {
             });
 
             let abort_handle = inner.abort_handle();
+            // The per-call bound may only tighten the configured budget
+            // (FR-017): `effective` is the smaller of the two, so the
+            // configured stall timeout still applies when no bound was given
+            // and can never be extended by one. `bound_is_per_call` records
+            // *why* we are bounded, so a bound expiry reports `TimedOut` while
+            // the configured timeout keeps its historical `Failed` (FR-034:
+            // the configured behaviour is unchanged when no bound is given).
+            let effective = effective_time_bound(time_bound_secs, Some(background_timeout_secs))
+                .unwrap_or(background_timeout_secs);
+            let bound_is_per_call =
+                time_bound_secs.is_some_and(|req| req <= background_timeout_secs);
+            // `hit_bound` is set only by the `Err(_)` arm below, so an ordinary
+            // error that happens to occur after the bound elapsed is still
+            // reported as a failure, not as a timeout.
+            let mut hit_bound = false;
             let result = match tokio::time::timeout(
-                tokio::time::Duration::from_secs(background_timeout_secs),
+                tokio::time::Duration::from_secs(effective),
                 inner,
             )
             .await
@@ -746,9 +931,16 @@ impl AgentManager {
                 Err(_) => {
                     abort_handle.abort();
                     cancel_flag_outer.store(true, Ordering::Relaxed);
-                    Err(anyhow::anyhow!(
-                        "background agent timed out after {background_timeout_secs}s"
-                    ))
+                    if bound_is_per_call {
+                        hit_bound = true;
+                        Err(anyhow::anyhow!(
+                            "sub-agent timed out after {effective}s (per-call bound)"
+                        ))
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "background agent timed out after {effective}s"
+                        ))
+                    }
                 }
             };
 
@@ -827,6 +1019,12 @@ impl AgentManager {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             if is_cancelled {
                                 entry.status = TaskStatus::Cancelled;
+                            } else if hit_bound {
+                                // A per-call bound expiry is its own terminal
+                                // state (FR-017, FR-034), so a caller can tell
+                                // "ran too long" from "errored".
+                                entry.status = TaskStatus::TimedOut;
+                                entry.error = Some(Arc::from(error_msg.as_str()));
                             } else {
                                 entry.status = TaskStatus::Failed;
                                 entry.error = Some(Arc::from(error_msg.as_str()));
@@ -1062,10 +1260,49 @@ impl AgentManager {
 
     /// Returns the count of currently running background tasks.
     pub async fn running_background_count(&self) -> usize {
-        self.tasks
-            .iter()
-            .filter(|r| r.status == TaskStatus::Running && r.background && !r.detached)
-            .count()
+        self.tasks.iter().filter(|r| occupies_limit(r)).count()
+    }
+
+    /// Returns the configured background concurrency limit
+    /// (`experimental.max_background_agents`).
+    #[must_use]
+    pub fn max_background(&self) -> usize {
+        self.max_background
+    }
+
+    /// Returns the background limit, the occupancy, the remaining headroom and
+    /// the ids occupying the limit, as one consistent snapshot (FR-011).
+    ///
+    /// The scan is the same `DashMap` iteration the spawn path performs and the
+    /// occupancy is computed by the same [`occupies_limit`] predicate, so the
+    /// number a listing reports can never disagree with the number the spawn
+    /// refusal enforces (NFR-003: no storage read is added).
+    ///
+    /// Occupancy counts every task that [occupies a slot](occupies_limit),
+    /// whatever its parent session - the limit is manager-wide, so a report
+    /// that described only one session would overstate the headroom.
+    ///
+    /// A `suspended` background task counts the same as a `running` one
+    /// (FR-030): it keeps its wall-clock budget and can resume at any time, so
+    /// suspending a task frees no headroom and only cancellation does.
+    pub async fn limit_report(&self) -> BackgroundLimitReport {
+        let mut occupying_ids = Vec::new();
+        for record in self.tasks.iter() {
+            if occupies_limit(&record) {
+                occupying_ids.push(record.id.clone());
+            }
+        }
+        let occupancy = occupying_ids.len();
+        // A limit lowered at runtime (config reload) can leave occupancy above
+        // it; headroom saturates at zero rather than reporting a negative
+        // number of free slots.
+        let headroom = self.max_background.saturating_sub(occupancy);
+        BackgroundLimitReport {
+            limit: self.max_background,
+            occupancy,
+            headroom,
+            occupying_ids,
+        }
     }
 
     /// Returns a snapshot of every task entry in the map, regardless of
@@ -1078,6 +1315,25 @@ impl AgentManager {
     /// the UI's tracked list and the actual running agents.
     pub async fn tasks_snapshot(&self) -> Vec<TaskEntry> {
         self.tasks.iter().map(|r| r.value().clone()).collect()
+    }
+
+    /// Seed the registry with one task entry and its cancel flag, returning
+    /// the flag so a test can observe whether a cancellation reached
+    /// [`AgentManager::cancel_agent`] (spec `agentssetup` T-018).
+    ///
+    /// The real registry is only populated by actually running a sub-agent,
+    /// which needs a live provider - so a control-surface test (`/cancel`
+    /// delegation in `ragent-tui`, FR-023) cannot exercise the registry
+    /// through a public API. This is a test-only hook: `#[doc(hidden)]`, never
+    /// reachable from an agent or a route, and it registers exactly the state
+    /// `spawn_background_mode` would have registered for a running task.
+    #[doc(hidden)]
+    pub fn insert_task_for_test(&self, entry: TaskEntry) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flags
+            .insert(entry.id.clone(), Arc::clone(&flag));
+        self.tasks.insert(entry.id.clone(), entry);
+        flag
     }
 
     /// Cancels all running tasks for a given parent session.
@@ -1190,16 +1446,31 @@ impl AgentManager {
     /// `decrement_waiter` for those same completed tasks caused
     /// `drain_completed` to inject results prematurely when another waiter
     /// was still waiting.
+    /// A task still in flight is incremented and returns `true`; a task in any
+    /// other state returns `false`, and the caller should collect its result
+    /// directly rather than waiting for an event.
+    ///
+    /// A suspended task is still in flight (FR-030) and is therefore counted:
+    /// a wait that is parked on a suspended task is an active waiter, so
+    /// `list_agents`' `waiter_count` (FR-012) must not report the task as
+    /// unawaited while a `wait_agents` call is blocked on it.
+    ///
+    /// This fixes the previous spurious-increment bug where `increment_waiter`
+    /// was called for already-completed tasks, and the subsequent
+    /// `decrement_waiter` for those same completed tasks caused
+    /// `drain_completed` to inject results prematurely when another waiter
+    /// was still waiting.
     #[must_use]
     pub async fn increment_waiter(&self, task_id: &str) -> bool {
         // PERF (FR-016): DashMap - get_mut returns a short-lived shard guard.
         if let Some(mut entry) = self.tasks.get_mut(task_id) {
-            if entry.status == TaskStatus::Running {
+            if matches!(entry.status, TaskStatus::Running | TaskStatus::Suspended) {
                 entry.waiter_count = entry.waiter_count.saturating_add(1);
                 tracing::debug!(
                     task_id,
                     waiter_count = entry.waiter_count,
-                    "Incremented waiter count (task still running)"
+                    status = %entry.status,
+                    "Incremented waiter count (task still in flight)"
                 );
                 return true;
             }

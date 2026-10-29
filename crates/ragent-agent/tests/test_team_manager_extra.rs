@@ -34,7 +34,7 @@ use manager_support::{stub_processor, team_manager};
 // -- helpers -----------------------------------------------------------------
 
 /// Build a `TeamManager` sharing a **strong** `Arc` to its processor (so the
-/// spawn / reconcile paths can upgrade the `Weak`), optionally with a shortened
+/// spawn / reconcile paths can upgrade the `Weak`).await, optionally with a shortened
 /// public `watchdog_timeout`, and return the `Arc<EventBus>` the manager
 /// publishes on so a test can subscribe to its events.
 ///
@@ -268,74 +268,115 @@ async fn reconcile_tolerates_an_unloadable_team_store() {
 
 /// The multi-agent in-progress guard: an agent already holding one task
 /// `InProgress` cannot claim a different task until it completes the first.
-#[test]
-fn claim_specific_rejects_a_second_in_progress_task_for_the_same_agent() {
+#[tokio::test]
+async fn claim_specific_rejects_a_second_in_progress_task_for_the_same_agent() {
     let (_tmp, store) = task_store();
-    store.add_task(Task::new("task-001", "a")).expect("add");
-    store.add_task(Task::new("task-002", "b")).expect("add");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+    store
+        .add_task(Task::new("task-002", "b"))
+        .await
+        .expect("add");
 
-    store.claim_specific("task-001", "tm-001").expect("claim");
+    store
+        .claim_specific("task-001", "tm-001")
+        .await
+        .expect("claim");
 
     let err = store
         .claim_specific("task-002", "tm-001")
+        .await
         .expect_err("must complete the first task");
+    let text = err.to_string();
+    assert!(text.contains("cannot claim 'task-002'"), "err: {text}");
     assert!(
-        err.to_string().contains("must complete it before"),
-        "err: {err}"
+        text.contains("is working on task 'task-001'"),
+        "err: {text}"
     );
+    assert!(text.contains("team_task_complete"), "err: {text}");
 }
 
 /// A pending task with an unsatisfied dependency cannot be claimed.
-#[test]
-fn claim_specific_rejects_unsatisfied_dependencies() {
+#[tokio::test]
+async fn claim_specific_rejects_unsatisfied_dependencies() {
     let (_tmp, store) = task_store();
+    // FR-039 validates `depends_on` at write time, so the dependency names a
+    // real task - created *in progress* so it is present and open, which is the
+    // unsatisfied state this assertion needs.
+    let mut prereq = Task::new("task-000", "prereq held elsewhere");
+    prereq.status = TaskStatus::InProgress;
+    prereq.assigned_to = Some("tm-009".to_string());
+    store.add_task(prereq).await.expect("add prereq");
     let mut task = Task::new("task-002", "dependent");
     task.depends_on = vec!["task-000".to_string()];
-    store.add_task(task).expect("add");
+    store.add_task(task).await.expect("add");
 
     let err = store
         .claim_specific("task-002", "tm-002")
+        .await
         .expect_err("unsatisfied dependency");
-    assert!(
-        err.to_string().contains("unsatisfied dependencies"),
-        "err: {err}"
-    );
+    let text = err.to_string();
+    assert!(text.contains("its dependencies are unmet"), "err: {text}");
+    assert!(text.contains("depends on [task-000]"), "err: {text}");
 }
 
 /// Completing an in-progress task owned by a different agent is rejected by the
-/// wrong-owner guard (distinct from the "already completed by" guard).
-#[test]
-fn complete_rejects_a_task_owned_by_another_agent() {
+/// wrong-owner guard (distinct from the "already completed by" guard), and the
+/// refusal names the current owner (FR-001, FR-002).
+#[tokio::test]
+async fn complete_rejects_a_task_owned_by_another_agent() {
     let (_tmp, store) = task_store();
-    store.add_task(Task::new("task-001", "a")).expect("add");
-    store.claim_specific("task-001", "tm-001").expect("claim");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+    store
+        .claim_specific("task-001", "tm-001")
+        .await
+        .expect("claim");
 
     let err = store
         .complete("task-001", "tm-002")
+        .await
         .expect_err("wrong owner");
+    let msg = err.to_string();
     assert!(
-        err.to_string()
-            .contains("is assigned to agent tm-001, not tm-002"),
-        "err: {err}"
+        msg.contains("cannot be completed by tm-002: it is assigned to tm-001"),
+        "the refusal must name the current owner and the caller: {msg}"
     );
+
+    // FR-002: nothing was mutated - still owned and still in progress.
+    let after = store.read().expect("read back");
+    let task = after
+        .tasks
+        .iter()
+        .find(|t| t.id == "task-001")
+        .expect("task present");
+    assert_eq!(task.status, TaskStatus::InProgress);
+    assert_eq!(task.assigned_to.as_deref(), Some("tm-001"));
+    assert!(task.completed_at.is_none(), "no completed_at stamp");
+    assert!(task.completed_by.is_none(), "no completed_by stamp");
 }
 
 /// A `Pending` task that nonetheless carries an assignment cannot be
 /// pre-assigned again.
-#[test]
-fn pre_assign_rejects_a_pending_task_that_is_already_assigned() {
+#[tokio::test]
+async fn pre_assign_rejects_a_pending_task_that_is_already_assigned() {
     let (_tmp, store) = task_store();
     let mut task = Task::new("task-001", "odd");
     // Pending but assigned - the status guard passes, the assignment guard trips.
     task.status = TaskStatus::Pending;
     task.assigned_to = Some("tm-009".to_string());
-    store.add_task(task).expect("add");
+    store.add_task(task).await.expect("add");
 
     let err = store
         .pre_assign_task("task-001", "tm-010")
         .expect_err("already assigned");
     assert!(
-        err.to_string().contains("already assigned to tm-009"),
+        err.to_string()
+            .contains("is in status pending and pre-assigned to tm-009"),
         "err: {err}"
     );
 }
@@ -494,4 +535,127 @@ fn notifier_registration_round_trip() {
     deregister_notifier(tmp.path(), "tm-001");
     // Deregistering a never-registered key is also harmless.
     deregister_notifier(tmp.path(), "tm-999");
+}
+
+// -- T-008: one completion implementation behind two entry points ---------------
+
+/// FR-025/FR-026: `TeamManager::complete_task` and `TaskStore::complete` are the
+/// same operation behind a cached and an uncached shape. A refusal from either
+/// must be the identical text, because two diverging messages for one operation
+/// is the defect those requirements name.
+#[tokio::test]
+async fn complete_task_and_store_complete_refuse_with_identical_text() {
+    let (manager, _tmp, _proc, _bus) = stub_manager("parity-team", "lead-sess", None);
+    let store = TaskStore::open(&manager.team_dir).expect("open store");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+    store
+        .claim_specific("task-001", "tm-001")
+        .await
+        .expect("claim");
+
+    let cached_err = manager
+        .complete_task("task-001", "tm-002")
+        .await
+        .expect_err("tm-002 owns nothing");
+    let uncached_err = store
+        .complete("task-001", "tm-002")
+        .await
+        .expect_err("tm-002 owns nothing");
+    assert_eq!(
+        cached_err.to_string(),
+        uncached_err.to_string(),
+        "the cached and uncached completion paths must not diverge (FR-026)"
+    );
+}
+
+/// FR-001: the manager path enforces ownership too, and refusing leaves
+/// `tasks.json` byte-identical (FR-002).
+#[tokio::test]
+async fn manager_complete_task_rejects_an_outsider_and_writes_nothing() {
+    let (manager, _tmp, _proc, _bus) = stub_manager("owner-team", "lead-sess", None);
+    let store = TaskStore::open(&manager.team_dir).expect("open store");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+    store
+        .claim_specific("task-001", "tm-001")
+        .await
+        .expect("claim");
+
+    let tasks_json = manager.team_dir.join("tasks.json");
+    let before = std::fs::read(&tasks_json).expect("read tasks.json");
+
+    let err = manager
+        .complete_task("task-001", "tm-002")
+        .await
+        .expect_err("outsider cannot complete");
+    assert!(
+        err.to_string()
+            .contains("cannot be completed by tm-002: it is assigned to tm-001"),
+        "{err}"
+    );
+
+    let after = std::fs::read(&tasks_json).expect("read tasks.json");
+    assert_eq!(
+        before, after,
+        "a refused completion leaves tasks.json untouched"
+    );
+}
+
+/// FR-001: the lead may complete on the owner's behalf through the manager path.
+#[tokio::test]
+async fn manager_complete_task_accepts_the_lead() {
+    let (manager, _tmp, _proc, _bus) = stub_manager("lead-team", "lead-sess", None);
+    let store = TaskStore::open(&manager.team_dir).expect("open store");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+    store
+        .claim_specific("task-001", "tm-001")
+        .await
+        .expect("claim");
+
+    let (done, _hook) = manager
+        .complete_task("task-001", "lead")
+        .await
+        .expect("lead completes on the owner's behalf");
+    assert_eq!(done.status, TaskStatus::Completed);
+    assert_eq!(done.completed_by.as_deref(), Some("lead"));
+    assert!(done.completed_at.is_some(), "completion stamps the time");
+}
+
+/// The manager path must not reintroduce the deleted auto-claim: an unowned
+/// `Pending` task is refused, not silently reassigned.
+#[tokio::test]
+async fn manager_complete_task_does_not_auto_claim() {
+    let (manager, _tmp, _proc, _bus) = stub_manager("noclaim-team", "lead-sess", None);
+    let store = TaskStore::open(&manager.team_dir).expect("open store");
+    store
+        .add_task(Task::new("task-001", "a"))
+        .await
+        .expect("add");
+
+    let err = manager
+        .complete_task("task-001", "tm-001")
+        .await
+        .expect_err("unowned pending task");
+    assert!(
+        err.to_string()
+            .contains("it is unassigned, and completing is not claiming"),
+        "{err}"
+    );
+
+    let after = store.read().expect("read back");
+    let task = after
+        .tasks
+        .iter()
+        .find(|t| t.id == "task-001")
+        .expect("task");
+    assert_eq!(task.status, TaskStatus::Pending, "no implicit claim");
+    assert!(task.assigned_to.is_none(), "no implicit reassignment");
 }

@@ -42,6 +42,7 @@ fn bench_task_entry_clone(c: &mut Criterion) {
             waiter_count: 0,
             output_file: None,
             report_status: ragent_agent::task::ReportStatus::default(),
+            time_bound_secs: None,
         };
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &entry, |b, entry| {

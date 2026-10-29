@@ -2878,19 +2878,48 @@ fn build_system_prompt_with_storage_inner(
              - `build`   - use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
              - `plan`    - use to produce a structured implementation plan without making any changes.\n\
              - `general` - full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
-             **CRITICAL - `background` mode rules:**\n\
-             - **Use `background: true` for ALL tasks whenever you spawn more than one in the same response.**\n\
-               `background: false` blocks the entire agent loop - every subsequent tool call in the same\n\
-               response waits for it to finish. This makes parallel spawning impossible.\n\
-              - Use `background: false` ONLY when you are spawning a single task and need its result\n\
-                before you can continue reasoning (e.g. a quick targeted lookup).\n\
-              - When in doubt, use `background: true`.\n\n\
-              **CRITICAL - Concurrency limit for background tasks:**\n\
+              **THREE EXECUTION CONTRACTS - `new_agent` selects exactly one:**\n\
+              - **foreground** (`background` absent or `false`) - blocks until the sub-agent finishes\n\
+                and returns its response inline. It blocks the WHOLE agent loop: every subsequent tool\n\
+                call in the same response waits for it.\n\
+              - **background** (`background: true, detached: false`) - returns a task id immediately;\n\
+                a background task IS listed by `list_agents`, IS awaitable with `wait_agents`, and its\n\
+                result IS injected into this session on completion.\n\
+              - **detached** (`background: true, detached: true`) - fire-and-forget: NOT listed by\n\
+                `list_agents`, NOT awaitable with `wait_agents`, and its result is NEVER injected into\n\
+                this session.\n\
+              - `detached: true` without `background: true` names no contract and is REFUSED - there\n\
+                is no detached-foreground contract.\n\
+              - **Use `background: true` for ALL tasks whenever you spawn more than one in the same response.**\n\
+                Only the background contract runs concurrently, so a foreground call serialises the batch.\n\
+               - Use the foreground contract ONLY when you are spawning a single task and need its result\n\
+                 before you can continue reasoning (e.g. a quick targeted lookup).\n\
+               - When in doubt, use `background: true, detached: false`, so the result comes back.\n\n\
+              **Per-call `model` override:**\n\
+              - `new_agent` accepts an optional `model` in `provider/model` (preferred) or\n\
+                `provider:model` form, e.g. `anthropic/claude-sonnet-4-20250514` or `openai:gpt-4o`.\n\
+              - Omit it to inherit this session's model. A string with no `/` or `:` is ignored.\n\n\
+              **The background limit, its occupancy, and how to free a slot:**\n\
               - You can run at most **MAX_BG_TASKS** background tasks at once in this session.\n\
-              - Never call `new_agent` with `background: true` if it would exceed this limit.\n\
-              - If the limit is reached, call `wait_agents` (preferred) or `list_agents`, then spawn only\n\
-                after one finishes. Queue additional work in batches.\n\
-              - Do not spam retries when you see \"Maximum concurrent background tasks reached\".\n\n\
+              - The limit counts every background task in `running`, `suspended` or `terminating`\n\
+                status. A `suspended` task STILL occupies its slot (it keeps its wall-clock budget\n\
+                and can resume at any time) and so does a `terminating` one until it actually stops.\n\
+              - A detached task is never counted - it is never listed. A foreground task is never\n\
+                counted either: it is the call you are blocked inside.\n\
+              - **To free a slot, CANCEL - do not suspend.** `cancel_agent` is the supported way to\n\
+                release occupancy; suspending a task frees NO headroom, because the limit still\n\
+                counts it. A cancel is only REQUESTED when `cancel_agent` returns (`cancel_requested`\n\
+                with the task's current status); the slot frees when the registry reaches the\n\
+                terminal `cancelled` status, so await it or check `list_agents` before respawning.\n\
+              - `list_agents` reports the `limit`, the `occupancy` and the `headroom` in its\n\
+                metadata (and a one-line summary in its content), describing the whole session even\n\
+                when a `status` filter is given - read the headroom before spawning instead of\n\
+                discovering the limit from a refusal.\n\
+              - If the limit is reached, cancel a task you no longer need or await one with\n\
+                `wait_agents` (preferred), then spawn only after a slot frees. Queue additional work\n\
+                in batches.\n\
+              - Do not spam retries when you see \"Maximum concurrent background tasks reached\":\n\
+                the refusal names the limit, the occupancy and the tasks occupying it.\n\n\
               **CRITICAL - Parallel explore agents for large codebase reviews:**\n\
               When asked to review, understand, or analyse a codebase with multiple modules or\n\
               directories, DO NOT do the work yourself. Instead:\n\
@@ -2922,18 +2951,36 @@ fn build_system_prompt_with_storage_inner(
              ```json\n\
              {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
              ```\n\n\
-              Use `wait_agents` to block until background tasks finish (preferred - no polling).\n\
-              Use `list_agents` to check status without blocking. Use `cancel_agent` to stop a task early.\n\n\
+              **THE AWAIT CONTRACT - how a background task's result reaches you:**\n\
+              - `wait_agents` blocks until the awaited background tasks settle. Omit `task_ids`\n\
+                and it waits for ALL running background tasks; `timeout_secs` bounds the wait and\n\
+                returns partial results rather than failing. Prefer it over polling.\n\
+              - Every settled task reports its canonical `status` - `completed`, `failed`,\n\
+                `cancelled` or `timed_out` - taken from the registry, so a cancelled task is never\n\
+                reported as a failure and a timed-out one is never reported as completed.\n\
+              - `list_agents` checks status without blocking and is the only view of a task that\n\
+                is still `running`, `suspended` or `terminating`. `cancel_agent` stops a task early.\n\
+              - A detached task can never be awaited; its result is never injected. A foreground\n\
+                task is not awaited at all - it returned inline.\n\
+              - `suspended` is not settled: a suspended task still occupies the limit and can be\n\
+                resumed, so an await on it keeps waiting rather than reporting it as finished.\n\
+              - `timed_out` is settled: the task stopped at its time bound and its report is the\n\
+                last output it produced.\n\n\
+              **THE DURABLE REPORT PATH:**\n\
+              - Every completed agent's FULL untruncated report is written to\n\
+                `log/subagents/<task-id>.md`. The path is reported as `output_file` in the\n\
+                `wait_agents` output, in its metadata `results` entries and in the `list_agents`\n\
+                table.\n\
+              - When a finished task has no durable copy, `list_agents` and `wait_agents` say so\n\
+                explicitly instead of omitting the field: the report is in-memory only. Do not\n\
+                attempt to `read` a path that does not exist.\n\n\
               **CRITICAL - `wait_agents` output may be truncated for long reports:**\n\
               - Generic context truncation may cut the middle out of a multi-agent batch\n\
                 when the combined output exceeds ~12k chars; the truncated text is a\n\
                 SUMMARY ONLY, not the agents' actual findings.\n\
-              - Every completed agent's FULL untruncated report is written to a durable\n\
-                file at `log/subagents/<task-id>.md` - its path is surfaced in the\n\
-                `wait_agents` output, metadata results entries, and the `list_agents`\n\
-                table. If the printed text was cut, recover the report with the `read`\n\
-                tool against that file rather than re-running the agent or re-reading\n\
-                source files yourself.\n\
+              - If the printed text was cut, recover the full report from the task's\n\
+                `output_file` with the `read` tool rather than re-running the agent or\n\
+                re-reading source files yourself.\n\
               - The tool's metadata `\"results\"` array additionally mirrors every agent's\n\
                 complete `\"output\"` plus the `\"output_file\"` path.\n\n",
         );

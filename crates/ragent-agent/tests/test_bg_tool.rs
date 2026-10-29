@@ -95,8 +95,7 @@ async fn bg_tool_without_a_service_errors() {
         .await
         .expect_err("no service must error");
     assert!(
-        err.to_string()
-            .contains("Background task service is not available"),
+        err.to_string().contains("reason_code: service_unavailable"),
         "err: {err}"
     );
 }
@@ -136,7 +135,7 @@ async fn bg_tool_spawn_list_status_tail_output_lifecycle() {
         )
         .await
         .expect("spawn");
-    assert!(spawned.content.contains("Spawned background task"));
+    assert!(spawned.content.contains("Spawned shell task"));
     let task_id = spawned.metadata.as_ref().expect("metadata")["task_id"]
         .as_str()
         .expect("task_id")
@@ -247,6 +246,192 @@ async fn bg_tool_cleanup_runs() {
     assert!(
         cleaned.content.contains("Cleaned up"),
         "cleanup output: {}",
+        cleaned.content
+    );
+}
+
+/// FR-019: every `bg` message says "shell task" and never "background task",
+/// which is the sub-agent execution contract's name.
+#[tokio::test]
+async fn bg_tool_uses_shell_task_vocabulary() {
+    let (ctx, _tmp) = ctx_with_bg("bg-vocabulary").await;
+
+    let tool = BgTool::new();
+    assert!(
+        tool.description().contains("shell task"),
+        "description: {}",
+        tool.description()
+    );
+    assert!(
+        !tool.description().contains("background task"),
+        "the description must not name the sub-agent contract: {}",
+        tool.description()
+    );
+
+    let spawned = BgTool
+        .execute(
+            json!({ "action": "spawn", "command": "echo vocabulary" }),
+            &ctx,
+        )
+        .await
+        .expect("spawn");
+    assert!(
+        spawned.content.contains("Spawned shell task"),
+        "spawn: {}",
+        spawned.content
+    );
+
+    let listed = BgTool
+        .execute(json!({ "action": "list" }), &ctx)
+        .await
+        .expect("list");
+    assert!(
+        listed.content.contains("shell task(s)"),
+        "list: {}",
+        listed.content
+    );
+
+    let cleaned = BgTool
+        .execute(
+            json!({ "action": "cleanup", "older_than_minutes": 0 }),
+            &ctx,
+        )
+        .await
+        .expect("cleanup");
+    assert!(
+        cleaned.content.contains("shell task(s)"),
+        "cleanup: {}",
+        cleaned.content
+    );
+
+    for (label, text) in [
+        ("spawn", &spawned.content),
+        ("list", &listed.content),
+        ("cleanup", &cleaned.content),
+    ] {
+        assert!(
+            !text.contains("background task"),
+            "{label} must not say `background task`: {text}"
+        );
+    }
+}
+
+/// FR-019: a `session_id` naming another session is refused, naming both
+/// sessions, and a refused `cleanup` deletes nothing.
+#[tokio::test]
+async fn bg_tool_refuses_a_foreign_session_id() {
+    let (ctx, _tmp) = ctx_with_bg("bg-foreign").await;
+
+    let spawned = BgTool
+        .execute(
+            json!({ "action": "spawn", "command": "echo foreign-guard" }),
+            &ctx,
+        )
+        .await
+        .expect("spawn");
+    let task_id = spawned.metadata.as_ref().expect("metadata")["task_id"]
+        .as_str()
+        .expect("task_id")
+        .to_string();
+    let _ = BgTool
+        .execute(
+            json!({ "action": "wait", "task_id": task_id, "timeout": 15 }),
+            &ctx,
+        )
+        .await
+        .expect("wait");
+
+    for action in ["list", "cleanup"] {
+        let err = BgTool
+            .execute(
+                json!({ "action": action, "session_id": "some-other-session-id" }),
+                &ctx,
+            )
+            .await
+            .expect_err("a foreign session_id must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains("wrong_session"),
+            "{action} must carry the wrong_session reason: {text}"
+        );
+        assert!(
+            text.contains("some-other-session-id") && text.contains("bg-foreign"),
+            "the refusal must name both sessions: {text}"
+        );
+    }
+
+    // The refused cleanup deleted nothing.
+    let listed = BgTool
+        .execute(json!({ "action": "list" }), &ctx)
+        .await
+        .expect("list");
+    let tasks = listed.metadata.as_ref().expect("metadata")["tasks"]
+        .as_array()
+        .expect("tasks array");
+    assert!(
+        tasks.iter().any(|t| t["id"] == task_id.as_str()),
+        "the refused cleanup must not delete the caller's shell task"
+    );
+}
+
+/// FR-037: the caller's own `session_id` behaves exactly like omitting it.
+#[tokio::test]
+async fn bg_tool_accepts_the_callers_own_session_id() {
+    let (ctx, _tmp) = ctx_with_bg("bg-own-session").await;
+
+    let spawned = BgTool
+        .execute(
+            json!({ "action": "spawn", "command": "echo own-session" }),
+            &ctx,
+        )
+        .await
+        .expect("spawn");
+    let task_id = spawned.metadata.as_ref().expect("metadata")["task_id"]
+        .as_str()
+        .expect("task_id")
+        .to_string();
+    let _ = BgTool
+        .execute(
+            json!({ "action": "wait", "task_id": task_id, "timeout": 15 }),
+            &ctx,
+        )
+        .await
+        .expect("wait");
+
+    let plain = BgTool
+        .execute(json!({ "action": "list" }), &ctx)
+        .await
+        .expect("list without session_id");
+    let explicit = BgTool
+        .execute(
+            json!({ "action": "list", "session_id": "bg-own-session" }),
+            &ctx,
+        )
+        .await
+        .expect("list with the caller's own session_id");
+
+    assert_eq!(
+        plain.metadata.as_ref().expect("metadata")["tasks"],
+        explicit.metadata.as_ref().expect("metadata")["tasks"],
+        "the caller's own session_id must not change the list"
+    );
+    assert_eq!(plain.content, explicit.content);
+
+    // cleanup accepts it too and actually deletes.
+    let cleaned = BgTool
+        .execute(
+            json!({
+                "action": "cleanup",
+                "session_id": "bg-own-session",
+                "older_than_minutes": 0
+            }),
+            &ctx,
+        )
+        .await
+        .expect("cleanup with the caller's own session_id");
+    assert!(
+        cleaned.content.contains("shell task(s)"),
+        "cleanup: {}",
         cleaned.content
     );
 }

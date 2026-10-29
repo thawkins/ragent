@@ -164,6 +164,73 @@ pub fn extract_command_name(command: &str) -> String {
     }
 }
 
+/// Permission categories whose tools cannot mutate the workspace.
+///
+/// A tool that requires one of these - and only these - is read-only: it may
+/// read files, consult the code index, reach the network or run a command from
+/// the safe-command allowlist, but it cannot change what the next run sees.
+/// Used by [`write_capable_tool_names`] to decide whether an unattended run is
+/// a read-only explorer or a worker that will write.
+pub(crate) const READ_ONLY_PERMISSION_CATEGORIES: &[&str] = &[
+    "file:read",
+    "read",
+    "codeindex",
+    "codeindex:read",
+    "web",
+    "web:fetch",
+    "web:search",
+    "network",
+    "model",
+    "shell:open",
+    "memory:read",
+    "spec:read",
+    "skill:read",
+];
+
+/// Return `true` when a tool whose declared permission category is `category`
+/// can mutate the workspace, the configuration or the repository.
+///
+/// This is the "write permission" question the automatic sub-agent YOLO scope
+/// asks (`docs/plans/subagent-yolo-scope.md`). It is answered pessimistically:
+/// a category the read-only set does not name is WRITE-capable, and an empty
+/// category or `none` (a tool the permission layer never consults) is
+/// write-capable too, because an uncategorised tool bypasses the permission
+/// layer entirely (see `test_agent_permission_taxonomy`).
+#[must_use]
+pub fn is_write_capable_permission_category(category: &str) -> bool {
+    !READ_ONLY_PERMISSION_CATEGORIES.contains(&category)
+}
+
+/// The names of the tools in this run that can mutate the workspace.
+///
+/// Resolved once per turn from the run's own resolved tool surface and cached
+/// beside the tool definitions, because the answer is a property of the run,
+/// not of a call: a sub-agent that can write at all gets the automatic YOLO
+/// scope, and every name it may call is in the set it was offered.
+///
+/// `exposed` is the run's model-facing surface; a name that reaches dispatch
+/// without appearing in it (an alias, a tool added to the registry mid-run) is
+/// resolved through `registry_lookup` so the set never claims a run is
+/// read-only when it can in fact write.
+#[must_use]
+pub fn write_capable_tool_names<'a, I, F>(
+    exposed: I,
+    registry_lookup: F,
+) -> std::collections::HashSet<String>
+where
+    I: IntoIterator<Item = &'a str>,
+    F: Fn(&str) -> Option<&'a str>,
+{
+    exposed
+        .into_iter()
+        .filter(|name| {
+            let category = registry_lookup(name).unwrap_or(name);
+            is_write_capable_permission_category(category)
+        })
+        .map(std::string::ToString::to_string)
+        .collect()
+}
+
 /// Return `true` if the tool is hardwired to auto-approve (no interactive
 /// prompt). Covers codeindex tools, team tools, sub-agent tools
 /// (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`,
@@ -222,6 +289,39 @@ pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["AskUserQuestion"];
 /// be denied in sub-agent runs ([`INTERACTIVE_TOOLS`]).
 pub fn is_interactive_tool(tool_name: &str) -> bool {
     INTERACTIVE_TOOLS.contains(&tool_name)
+}
+
+/// Return `true` when a tool call runs under the **automatic sub-agent YOLO
+/// scope** - the scope a write-capable unattended run gets regardless of the
+/// global `/yolo` flag.
+///
+/// A run is a sub-agent (it is `agent.mode == Subagent`: spawned by
+/// `new_agent`, `/spawn`, cron or the server) and the tool it is calling can
+/// write ([`is_write_capable_permission_category`]). Such a run has no attached
+/// user to answer a prompt, so the prompt is the failure mode, not the
+/// safeguard: it would stall until the watchdog, and the run would be lost.
+///
+/// The scope is deliberately narrower than [`ragent_config::yolo::is_enabled`]:
+///
+/// - it never reaches the primary session, because the caller gates it on the
+///   run being a sub-agent;
+/// - it never covers a read-only tool, so `explore` sub-agents - and every read
+///   a write-capable sub-agent makes - stay under the ordinary policy;
+/// - it suppresses only the interactive prompt. The loop tool-set restriction,
+///   the path guards, the 7-layer bash `is_safe_command` stage the permission
+///   layer runs *before* the prompt, the tool-repeat guard and every
+///   pre-tool hook still apply, and a forced destructive-action checkpoint
+///   still prompts (FR-024). That is the same containment the process-wide
+///   `/yolo` flag already has in this position, so a sub-agent can never widen
+///   it.
+#[must_use]
+#[allow(clippy::implicit_hasher)]
+pub fn subagent_yolo_bypasses_prompt(
+    agent_is_subagent: bool,
+    write_capable_tools: &std::collections::HashSet<String>,
+    tool_name: &str,
+) -> bool {
+    agent_is_subagent && write_capable_tools.contains(tool_name)
 }
 
 /// Destructive tool names (FR-015, T-010): tool calls that irreversibly
@@ -562,6 +662,12 @@ pub async fn check_permission_with_prompt(
     // override an explicit policy `Deny`, the directory denylist, or a forced
     // destructive-action checkpoint (all decided earlier in this function).
     security_approved: bool,
+    // `true` when this call runs under the automatic sub-agent YOLO scope: a
+    // write-capable tool in an unattended sub-agent run
+    // ([`subagent_yolo_bypasses_prompt`]). The caller resolves both halves, so
+    // this flag is the whole question and the prompt path below does not have
+    // to know what a sub-agent is.
+    subagent_yolo: bool,
 ) -> Result<PermissionAction> {
     // Short-circuit if --yes / --no-prompt flag is set. A forced
     // destructive-action checkpoint (FR-015) suppresses this: auto-approval
@@ -573,7 +679,13 @@ pub async fn check_permission_with_prompt(
 
     // YOLO mode bypasses interactive permission prompts for all tools. A
     // forced destructive-action checkpoint still applies (FR-024).
-    if ragent_config::yolo::is_enabled() && !checkpoint_forced {
+    //
+    // The automatic sub-agent YOLO scope joins it at exactly this point and
+    // nowhere else: a write-capable sub-agent run has no user to answer a
+    // prompt, so the prompt would only stall the run until the watchdog. The
+    // policy rules, the denylist and the bash `is_safe_command` stage above
+    // still decide before this line is reached.
+    if (ragent_config::yolo::is_enabled() || subagent_yolo) && !checkpoint_forced {
         return Ok(PermissionAction::Allow);
     }
 

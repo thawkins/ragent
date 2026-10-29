@@ -38,40 +38,46 @@ fn task_list_starts_empty_and_mirrors_disk_writes() {
     assert_eq!(after.tasks[0].id, "task-001");
 }
 
-#[test]
-fn claim_and_complete_task_through_manager() {
+#[tokio::test]
+async fn claim_and_complete_task_through_manager() {
     let (manager, _tmp, _bus) = team_manager("claim-team", "lead-1", true);
     manager
         .apply_to_task_list(|list| list.tasks.push(Task::new("task-001", "do work")))
         .expect("seed task");
 
-    let (claimed, already_had) = manager.claim_next_task("tm-001").expect("claim");
+    let (claimed, already_had) = manager.claim_next_task("tm-001").await.expect("claim");
     let claimed = claimed.expect("a task should be claimed");
     assert_eq!(claimed.id, "task-001");
     assert!(!already_had);
 
     // The same agent claiming again gets the in-progress task back.
-    let (again, already_had) = manager.claim_next_task("tm-001").expect("claim again");
+    let (again, already_had) = manager
+        .claim_next_task("tm-001")
+        .await
+        .expect("claim again");
     assert!(already_had);
     assert_eq!(again.expect("in-progress task").id, "task-001");
 
-    let done = manager
+    let (done, _hook) = manager
         .complete_task("task-001", "tm-001")
+        .await
         .expect("complete");
     assert_eq!(done.status, ragent_agent::team::TaskStatus::Completed);
 
     // Idempotent re-completion by the same agent returns the task.
-    let done_again = manager
+    let (done_again, _hook) = manager
         .complete_task("task-001", "tm-001")
+        .await
         .expect("re-complete");
     assert_eq!(done_again.id, "task-001");
 }
 
-#[test]
-fn complete_missing_task_errors() {
+#[tokio::test]
+async fn complete_missing_task_errors() {
     let (manager, _tmp, _bus) = team_manager("missing-team", "lead-1", true);
     let err = manager
         .complete_task("task-999", "tm-001")
+        .await
         .expect_err("must error");
     assert!(err.to_string().contains("task-999"), "err: {err}");
 }
@@ -135,8 +141,8 @@ fn reject_plan_sets_rejected_status() {
 
 // -- leader adoption ---------------------------------------------------------
 
-#[test]
-fn adopting_a_team_from_a_new_lead_reassigns_in_progress_tasks() {
+#[tokio::test]
+async fn adopting_a_team_from_a_new_lead_reassigns_in_progress_tasks() {
     // The support helper creates the team with lead "old-lead" then constructs
     // the manager with "lead-1", which triggers adopt_orphaned_tasks.
     let (manager, _tmp, _bus) = team_manager("adopt-team", "lead-1", true);
@@ -146,7 +152,7 @@ fn adopting_a_team_from_a_new_lead_reassigns_in_progress_tasks() {
     let mut task = Task::new("task-001", "old work");
     task.status = ragent_agent::team::TaskStatus::InProgress;
     task.assigned_to = Some("lead".to_string());
-    task_store.add_task(task).expect("add task");
+    task_store.add_task(task).await.expect("add task");
 
     ragent_agent::team::manager::TeamManager::adopt_orphaned_tasks(&manager.team_dir, "lead")
         .expect("adopt");
@@ -181,14 +187,66 @@ fn team_prompt_addition_lists_roster() {
         ("bob".to_string(), "tm-002".to_string()),
         ("carol".to_string(), "tm-003".to_string()),
     ];
-    let prompt = build_team_prompt_addition("t", "alice", "tm-001", &roster);
+    let prompt = build_team_prompt_addition("t", "alice", "tm-001", &roster, true);
     assert!(prompt.contains("team \"t\""));
     assert!(prompt.contains("\"alice\""));
     assert!(prompt.contains("bob (tm-002)"));
     assert!(prompt.contains("carol (tm-003)"));
 
-    let empty = build_team_prompt_addition("t", "solo", "tm-001", &[]);
+    let empty = build_team_prompt_addition("t", "solo", "tm-001", &[], true);
     assert!(empty.contains("none yet"));
+}
+
+/// FR-027: the claim rule the prompt states is the rule `auto_claim_tasks`
+/// enforces, so the two settings cannot ship the same instruction.
+#[test]
+fn team_prompt_addition_states_the_claim_rule_the_setting_enforces() {
+    let auto_on = build_team_prompt_addition("t", "alice", "tm-001", &[], true);
+    assert!(
+        auto_on.contains("call `team_task_complete`"),
+        "auto-claim on must tell the teammate to complete its task: {auto_on}"
+    );
+    assert!(
+        auto_on.contains("Call `team_task_claim` to pick"),
+        "auto-claim on must tell the teammate it may claim the next task: {auto_on}"
+    );
+    assert!(
+        !auto_on.contains("Do not call `team_task_claim`"),
+        "auto-claim on must not forbid claiming: {auto_on}"
+    );
+
+    let auto_off = build_team_prompt_addition("t", "alice", "tm-001", &[], false);
+    assert!(
+        auto_off.contains("`auto_claim_tasks` turned off"),
+        "auto-claim off must say the setting is off: {auto_off}"
+    );
+    // The prompt is a literal with `\n\` line continuations, so each phrase is
+    // broken across source lines: compare against the collapsed text.
+    let auto_off_flat = auto_off.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        auto_off_flat.contains("Do not call `team_task_claim` without an explicit instruction"),
+        "auto-claim off must forbid unilateral claiming (FR-027): {auto_off}"
+    );
+    assert!(
+        auto_off.contains("call `team_task_complete`: it parks you idle"),
+        "auto-claim off must say completing the task parks the teammate idle (FR-014): {auto_off}"
+    );
+    assert_ne!(
+        auto_on, auto_off,
+        "the two settings must produce different claim instructions"
+    );
+
+    // Everything outside the claim paragraph is shared, so the setting cannot
+    // silently drop the read-messages, shutdown or plan-approval rules.
+    for clause in [
+        "Call `team_read_messages`",
+        "`team_shutdown_ack`",
+        "`team_submit_plan`",
+        "### Peer collaboration",
+    ] {
+        assert!(auto_on.contains(clause), "auto-on lost {clause:?}");
+        assert!(auto_off.contains(clause), "auto-off lost {clause:?}");
+    }
 }
 
 #[test]
@@ -206,16 +264,20 @@ fn validate_hook_command_rejects_dangerous_commands() {
 
 #[tokio::test]
 async fn run_hook_interprets_exit_codes() {
+    let (manager, _tmp, _bus) = team_manager("hook-exit-codes", "lead-1", true);
+    let dir = manager.team_dir.clone();
+    let event = HookEvent::TaskCompleted;
+
     // Exit 0 -> allow.
-    let allow = run_hook("true", &[], None).await;
+    let allow = run_hook(&dir, event, "true", &[], None).await;
     assert_eq!(allow, HookOutcome::Allow);
 
     // A disallowed command is refused before spawn -> allow.
-    let refused = run_hook("echo; rm", &[], None).await;
+    let refused = run_hook(&dir, event, "echo; rm", &[], None).await;
     assert_eq!(refused, HookOutcome::Allow);
 
     // A missing binary -> allow (best-effort).
-    let missing = run_hook("this-is-not-a-binary-anywhere", &[], None).await;
+    let missing = run_hook(&dir, event, "this-is-not-a-binary-anywhere", &[], None).await;
     assert_eq!(missing, HookOutcome::Allow);
 }
 
@@ -224,8 +286,10 @@ async fn run_hook_feedback_path_returns_stdout() {
     // `sh -c` is unavailable (metacharacters banned), so drive exit-code 2
     // through the standard `false` binary's sibling: `sh` with a script file.
     // Instead use a tiny shell script written to a temp dir and executed by path.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("gate.sh");
+    let (manager, _tmp, _bus) = team_manager("hook-feedback", "lead-1", true);
+    let ledger_dir = manager.team_dir.clone();
+    let script_dir = tempfile::tempdir().expect("tempdir");
+    let script = script_dir.path().join("gate.sh");
     std::fs::write(&script, "#!/bin/sh\necho needs work\nexit 2\n").expect("write script");
     #[cfg(unix)]
     {
@@ -235,7 +299,14 @@ async fn run_hook_feedback_path_returns_stdout() {
         std::fs::set_permissions(&script, perms).expect("chmod");
     }
 
-    let outcome = run_hook(script.to_str().expect("utf8"), &[], None).await;
+    let outcome = run_hook(
+        &ledger_dir,
+        HookEvent::TaskCompleted,
+        script.to_str().expect("utf8"),
+        &[],
+        None,
+    )
+    .await;
     match outcome {
         HookOutcome::Feedback(msg) => assert!(msg.contains("needs work"), "feedback: {msg}"),
         HookOutcome::Allow => panic!("expected feedback from an exit-2 hook"),
@@ -322,12 +393,18 @@ async fn suspend_then_resume_round_trips_member_status() {
 #[tokio::test]
 async fn resume_non_suspended_member_errors() {
     let (manager, _tmp, _bus) = team_manager("resume-team", "lead-1", true);
-    // tm-001 was created in Spawning state, not Suspended.
+    // The fixture member is `Working`: neither `Suspended` nor `Blocked`, so
+    // resume has nothing to restore (FR-010 accepts only the two parked states).
     let err = manager
         .resume_teammate("tm-001")
         .await
-        .expect_err("non-suspended member must error");
-    assert!(err.to_string().contains("not suspended"), "err: {err}");
+        .expect_err("a working member must error");
+    let msg = err.to_string();
+    assert!(msg.contains("working"), "err names the status: {msg}");
+    assert!(
+        msg.contains("suspended or blocked"),
+        "err names the statuses resume accepts: {msg}"
+    );
 }
 
 // `TeamManager::shutdown_teammate` builds its `ShutdownRequest` as a
@@ -384,6 +461,7 @@ async fn add_task_and_next_task_id_increment() {
     assert_eq!(store.next_task_id().expect("first id"), "task-001");
     store
         .add_task(Task::new("task-001", "first"))
+        .await
         .expect("add task");
     assert_eq!(store.next_task_id().expect("second id"), "task-002");
 }

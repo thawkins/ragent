@@ -3,10 +3,8 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use super::{Tool, ToolContext, ToolOutput};
-use crate::event::Event;
-use crate::team::manager::HookOutcome;
-use crate::team::{HookEvent, TaskStatus, TaskStore, find_team_dir, run_team_hook};
+use super::{Tool, ToolContext, ToolOutput, complete_task_through_manager};
+use crate::team::find_team_dir;
 
 /// Marks a task as completed by the calling agent.
 pub struct TeamTaskCompleteTool;
@@ -20,8 +18,32 @@ impl Tool for TeamTaskCompleteTool {
     fn description(&self) -> &'static str {
         "Mark a TEAM task as completed (used inside a team session). REQUIRED \
              parameters: 'team_name' (string) and 'task_id' (string, the ID of the task \
-             you claimed via team_task_claim, e.g. 'task-001'). The task must be currently \
-             assigned to the caller; completing it unblocks any dependent tasks. \
+             you claimed via team_task_claim, e.g. 'task-001'). Completing it unblocks any \
+             dependent tasks. \
+             \\\n\\\n\
+             OWNERSHIP RULE (enforced): only the task's assigned agent or the lead may \
+             complete it. A task assigned to another teammate is refused and is NOT \
+             re-assigned to you; the refusal names the current owner and the two ways \
+             forward - the lead assigns it with `team_assign_task`, or you claim it with \
+             `team_task_claim`. A task that is still 'pending' is refused as unclaimed (also \
+             not re-assigned): claim or assign it first. Completing a task that is already \
+             completed is a no-op success for its owner or the lead, and refused for anyone \
+             else. Every refusal leaves the task list untouched and reports \
+             `rejection_reason` ('not_owner', 'not_claimed', 'already_completed') together \
+             with the task's `owner` in the result metadata. \
+             \\\n\\\n\
+             IDLE RULE (FR-014): completing a task parks you as idle, through the same 
+             status writer `team_idle` uses, so you do not have to call `team_idle` \
+             afterwards. With `auto_claim_tasks` on (the default) a member whose loop is 
+             still running is handed the next claimable task instead and goes straight 
+             back to `working`; with it off you stop `idle` and wait for the lead. A lead \
+             completing on a teammate's behalf leaves the lead's own status alone. \
+             \\\n\\\n\
+             HOOK VERDICT (FR-018): when the team configures a `TaskCompleted` hook, its \
+             verdict is returned to you in this call's result. A veto arrives as \
+             `hook_rejected: true` plus the hook's `feedback` text: read it, address it with \
+             the lead, and do not re-complete the task - a completed task is terminal, so \
+             the completion stands. \
              \\\n\\\n\
              WARNING: DO NOT confuse with `agent_complete` (a different tool used OUTSIDE teams to \
              signal the end of the autonomous loop, which takes `summary` as its only parameter). \
@@ -70,7 +92,7 @@ impl Tool for TeamTaskCompleteTool {
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
-        let store = TaskStore::open(&team_dir)?;
+        let store = crate::team::TaskStore::open(&team_dir)?;
 
         // PERF-018: gate the debug read behind `tracing::enabled!(DEBUG)` so
         // the per-completion `store.read()` (a full file read + deserialise)
@@ -103,123 +125,160 @@ impl Tool for TeamTaskCompleteTool {
                 );
             }
         }
-        let task = match store.complete(task_id, &agent_id) {
-            Ok(t) => t,
-            Err(e) => {
-                // Return a tool output explaining why completion failed, rather than an error.
-                // This gives the teammate a clear error in the TUI instead of generic failure.
-                let err_msg = e.to_string();
-                tracing::warn!(
-                    agent_id = %agent_id,
-                    task_id = %task_id,
-                    team_name = %team_name,
-                    error = %err_msg,
-                    "team_task_complete failed"
-                );
-                return Ok(ToolOutput {
-                    content: format!(
-                        "Failed to mark task '{task_id}' as completed: {err_msg}\n\
+        // FR-018 / FR-026: complete through the one runtime completion path, so
+        // a lead-side completion and this tool run the same FR-001 rule, the
+        // same D3 transition, the same `TeamTaskCompleted` event and the same
+        // `TaskCompleted` hook - and the hook's verdict reaches the completing
+        // agent here as a tool result, whichever path produced it.
+        let (task_id_out, title, completed_at, feedback) =
+            match complete_task_through_manager(ctx, &team_dir, task_id, &agent_id).await {
+                Ok(done) => done,
+                Err(e) => {
+                    // Return a tool output explaining why completion failed, rather than an error.
+                    // This gives the teammate a clear error in the TUI instead of generic failure.
+                    let err_msg = e.to_string();
+                    tracing::warn!(
+                        agent_id = %agent_id,
+                        task_id = %task_id,
+                        team_name = %team_name,
+                        error = %err_msg,
+                        "team_task_complete failed"
+                    );
+                    // FR-044: name the rule that refused the completion in the
+                    // tool's JSON metadata, so a caller that reads the structured
+                    // result (rather than the prose) can tell an ownership refusal
+                    // (`not_owner`) from an unclaimed task (`not_claimed`). The
+                    // `TeamTaskCompletionRejected` event carries the same token.
+                    let (reason, owner) = match e.downcast_ref::<crate::team::CompletionRefusal>() {
+                        Some(refusal) => {
+                            (Some(refusal.reason.as_str()), Some(refusal.owner.clone()))
+                        }
+                        None => (None, None),
+                    };
+                    return Ok(ToolOutput {
+                        content: format!(
+                            "Failed to mark task '{task_id}' as completed: {err_msg}\n\
                          This usually means the task doesn't exist, is already completed, \
                          or is assigned to a different agent."
-                    ),
-                    metadata: Some(json!({
-                        "team_name": team_name,
-                        "task_id": task_id,
-                        "completed": false,
-                        "agent_id": agent_id,
-                        "error": err_msg
-                    })),
-                });
-            }
-        };
+                        ),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "task_id": task_id,
+                            "completed": false,
+                            "agent_id": agent_id,
+                            "rejection_reason": reason,
+                            "owner": owner,
+                            "error": err_msg
+                        })),
+                    });
+                }
+            };
 
-        // Run TaskCompleted hook with task metadata on stdin.
-        let hook_stdin = json!({
-            "team_name": team_name,
-            "task_id": task.id,
-            "title": task.title,
-            "description": task.description,
-            "completed_by": agent_id,
-            "completed_at": task.completed_at.map(|t| t.to_rfc3339())
-        })
-        .to_string();
-        let outcome = run_team_hook(&team_dir, HookEvent::TaskCompleted, Some(&hook_stdin)).await;
-
-        if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected completion - revert task to InProgress. A failed
-            // revert leaves the task falsely Completed, so log it.
-            if let Err(e) = store.update_task(task_id, |t| {
-                t.status = TaskStatus::InProgress;
-                t.completed_at = None;
-            }) {
-                tracing::warn!(team = %team_name, task_id = %task_id, error = %e,
-                    "failed to revert hook-rejected task to in-progress");
-            }
+        // FR-017: the `TaskCompleted` hook fires from the completion itself, so
+        // the verdict arrives here rather than being asked for here. That is
+        // what makes a lead-side completion run the same gate as this tool.
+        //
+        // FR-018: the verdict is delivered - a veto is reported to the agent
+        // that completed the task, in the tool result it reads. The completion
+        // is *not* undone:
+        //
+        //   - the `TaskCompleted` hook is the runtime's observer of a commit,
+        //     not the gatekeeper of it (the pre-commit gate is the
+        //     `TaskClaimed` hook, which runs before the transition is written);
+        //   - silently reverting a committed completion is a second writer of
+        //     the task status, which FR-008 and FR-026 forbid, and it would
+        //     leave `TeamTaskCompleted` published for a task that reads
+        //     `in_progress`;
+        //   - `Completed` is a terminal status (D3), so the revert itself would
+        //     be an illegal transition - a hook that vetoed a completion could
+        //     not be satisfied by "completing again".
+        //
+        // What the verdict must do is reach the agent, which the earlier release
+        // did not do on the runtime path: a lead-side completion ran the hook and
+        // threw the answer away.
+        if let Some(feedback) = feedback {
+            tracing::warn!(
+                team = %team_name,
+                task_id = %task_id,
+                agent_id = %agent_id,
+                "TaskCompleted hook vetoed the completion; delivering its feedback"
+            );
             return Ok(ToolOutput {
                 content: format!(
-                    "TaskCompleted hook rejected completion of task '{task_id}'. \
-                     Feedback: {feedback}\n\
-                     Task reverted to in-progress. Please address the feedback and complete again."
+                    "Task '{task_id}' was marked completed by '{agent_id}', but the \
+                     TaskCompleted hook did not accept the work.\n\
+                     Hook feedback:\n{feedback}\n\
+                     The completion stands (Completed is terminal). Address the feedback \
+                     with the lead - for example, the lead can raise a follow-up task with \
+                     `team_task_create`, or cancel this one and re-issue it."
                 ),
                 metadata: Some(json!({
                     "team_name": team_name,
                     "task_id": task_id,
+                    "completed": true,
+                    "completed_by": agent_id,
+                    "completed_at": completed_at,
                     "hook_rejected": true,
-                    "feedback": feedback,
-                    "completed": false
+                    "feedback": feedback
                 })),
             });
         }
 
-        // M5-T7: publish TeamTaskCompleted so the TUI/SSE observe the
-        // completion (the event variant already existed but was never
-        // published).
-        // PERF-018: prefer the in-memory `TeamManager` (when available on
-        // the `ToolContext`) for the lead session id instead of loading
-        // `TeamStore` from disk on every completion.
-        let lead_sid = ctx
-            .team_manager
-            .as_ref()
-            .and_then(|tm| tm.lead_session_id().map(str::to_string))
-            .or_else(|| {
-                crate::team::TeamStore::load(&team_dir)
-                    .ok()
-                    .map(|s| s.config.lead_session_id.clone())
-            })
-            .unwrap_or_else(|| ctx.session_id.clone());
-        ctx.event_bus.publish(Event::TeamTaskCompleted {
-            session_id: lead_sid,
-            team_name: team_name.to_string(),
-            agent_id: agent_id.clone(),
-            task_id: task.id.clone(),
-        });
-
-        // M8-T3: clear the member's current_task_id now that the task is
-        // completed.
-        // PERF-018: a single `TeamStore::load` + `save` cycle clears the
-        // field. (The previous version also did exactly one load here after
-        // PERF-005 removed the duplicate event publish; this comment just
-        // records that the count remains at one disk read+write.)
-        if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
-            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
-                m.current_task_id = None;
-            }
-            if let Err(e) = store.save() {
-                tracing::warn!(team = %team_name, agent = %agent_id, error = %e,
-                    "failed to persist cleared current_task_id");
+        // M8-T3 / FR-014: completing a task parks the completing member as
+        // idle. Without this a teammate that completed its only task stayed
+        // `Working` with `current_task_id = None` for ever - the swarm roster
+        // showed a done task beside a member that never reported idle, and no
+        // route (`team_idle` refuses only while a task is held, the agent loop's
+        // own idle move had already happened) ever moved it back.
+        //
+        // The move goes through the single status writer, exactly as
+        // `team_idle` does, and not by rewriting `config.json` here. That keeps
+        // one transition, one history row and one `TeammateStatusChanged` event
+        // per move, and it applies FR-015's `auto_claim_tasks` rule: a member
+        // with a claimable task left and a live agent loop is moved on to
+        // `Working` with that task instead of parking. `team_task_claim` is then
+        // how a teammate picks up more work; an `Idle` member claims for itself
+        // or waits for the lead to assign.
+        //
+        // A lead completing on a teammate's behalf leaves the *lead* alone: the
+        // lead is not a roster member and its status is not the swarm's
+        // problem. A member whose loop has already returned also stays put -
+        // `auto_claim_on_idle` refuses to hand work to a loop that has ended,
+        // and any status the member already holds here is a legal destination
+        // from `Working` (or an unknown id, reported by the writer as "no
+        // teammate with id", which is logged rather than failing a completion
+        // that has already been committed).
+        if agent_id != "lead" {
+            if let Err(e) = super::set_member_status_through_manager(
+                ctx,
+                &team_dir,
+                &agent_id,
+                "idle",
+                "task_completed",
+            )
+            .await
+            {
+                tracing::warn!(
+                    team = %team_name,
+                    agent = %agent_id,
+                    error = %e,
+                    "completed task but could not park the member as idle"
+                );
             }
         }
         Ok(ToolOutput {
             content: format!(
                 "Task '{}' marked as completed by '{}'.\nTitle: {}",
-                task.id, agent_id, task.title
+                task_id_out,
+                agent_id,
+                title.clone().unwrap_or_default()
             ),
             metadata: Some(json!({
                 "team_name": team_name,
-                "task_id": task.id,
-                "title": task.title,
+                "task_id": task_id_out,
+                "title": title,
                 "completed_by": agent_id,
-                "completed_at": task.completed_at.map(|t| t.to_rfc3339()),
+                "completed_at": completed_at,
                 "completed": true
             })),
         })

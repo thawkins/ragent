@@ -431,6 +431,17 @@ pub const LOOP_WRITE_TOOLS: &[&str] = &[
     "pdf_write",
 ];
 
+/// Bash-class tools: the shell tool and every registered alias of it.
+///
+/// A class predicate, not a command inspection: a policy that gates shell access
+/// (spec `teamssetup` FR-014 gates an unapproved teammate's write- and
+/// bash-class calls) refuses the *tool*, because deciding whether a particular
+/// command string mutates the workspace is a heuristic
+/// ([`bash_sub_command_is_write`]) and a gate built on a heuristic is a gate with
+/// holes. Name matching follows [`LOOP_WRITE_TOOLS`]: canonical name plus the
+/// registered aliases.
+pub const LOOP_BASH_TOOLS: &[&str] = &["Bash", "run_code"];
+
 /// Bash commands treated as filesystem writes for read-only-constraint
 /// checks (best-effort, matching the permission layer's best-effort bash
 /// splitting). `sed` is handled separately (in-place flag); `git` and

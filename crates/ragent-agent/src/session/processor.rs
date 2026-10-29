@@ -253,7 +253,7 @@ async fn dispatch_tool_leaf(
 /// Extracted from the inline task body so the schema-validation gate and the
 /// permission checks live in one readable place. The behaviour is unchanged
 /// from the previous inline implementation.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 pub(crate) async fn dispatch_tool_with_permissions(
     tool: &std::sync::Arc<dyn crate::tool::Tool>,
     tool_input: Value,
@@ -274,6 +274,12 @@ pub(crate) async fn dispatch_tool_with_permissions(
     // satisfy a bare `Ask` but never override an explicit policy `Deny` or a
     // forced destructive-action checkpoint.
     security_approved: bool,
+    // `true` when this call is a write-capable tool in an unattended sub-agent
+    // run: the automatic sub-agent YOLO scope
+    // ([`subagent_yolo_bypasses_prompt`]). Threaded to every
+    // `check_permission_with_prompt` call below, including the per-sub-command
+    // ones a `Bash` call raises.
+    subagent_yolo: bool,
 ) -> anyhow::Result<crate::tool::ToolOutput> {
     let perm_category = tool.permission_category();
     if perm_category.is_empty() || perm_category == "none" {
@@ -306,6 +312,7 @@ pub(crate) async fn dispatch_tool_with_permissions(
                 checkpoint_forced,
                 checkpoint_timeout_secs,
                 security_approved,
+                subagent_yolo,
             )
             .await;
             match permission_action {
@@ -352,6 +359,7 @@ pub(crate) async fn dispatch_tool_with_permissions(
         checkpoint_forced,
         checkpoint_timeout_secs,
         security_approved,
+        subagent_yolo,
     )
     .await;
     // SEC-ragent-agent-001 (SECTASKS T-007): a hook approval may satisfy the
@@ -1553,6 +1561,34 @@ impl SessionProcessor {
         guard.as_ref().cloned()
     }
 
+    /// The names in this turn's model-facing tool surface that can mutate the
+    /// workspace - the membership test of the automatic sub-agent YOLO scope.
+    ///
+    /// The category question is answered from the registry, not from the name:
+    /// every exposed name is resolved back to its [`crate::tool::Tool`] and its
+    /// `permission_category()` is classified by
+    /// [`crate::session::permissions::is_write_capable_permission_category`].
+    /// A name the registry no longer holds (a registry rebuilt since the
+    /// definitions were cached) is treated as write-capable, so a stale cache
+    /// can only widen caution, never widen the bypass.
+    fn write_capable_tools(
+        &self,
+        definitions: &[ToolDefinition],
+    ) -> Arc<std::collections::HashSet<String>> {
+        let set = definitions
+            .iter()
+            .filter(|def| {
+                self.tool_registry.get(&def.name).is_none_or(|tool| {
+                    crate::session::permissions::is_write_capable_permission_category(
+                        tool.permission_category(),
+                    )
+                })
+            })
+            .map(|def| def.name.clone())
+            .collect();
+        Arc::new(set)
+    }
+
     /// Return the per-session system-prompt component cache, creating it
     /// on first use (FR-008, FR-009).
     ///
@@ -2090,6 +2126,12 @@ impl SessionProcessor {
         // P-7: prime the tool-definition byte cache alongside the definitions
         // cache so the per-step request-size estimator can reuse the sum.
         let _ = self.get_cached_tool_definition_bytes();
+        // The write-capable subset of the surface just resolved. A read-only run
+        // (an `explore` sub-agent, a plan reviewer, a loop restricted to reads)
+        // yields an empty set and therefore no automatic YOLO scope; any run
+        // that *can* write carries the whole set, so a tool the model was never
+        // offered cannot be waved through by a name it never had.
+        let write_capable_tools = self.write_capable_tools(&tool_definitions);
         let cached_tool_names: Option<std::sync::Arc<[String]>> = if max_steps > 1 {
             self.get_cached_tool_names()
         } else {
@@ -3347,6 +3389,11 @@ impl SessionProcessor {
                         team_context_cache: self.team_context_cache.clone(),
                         security_analyzer: security_analyzer.clone(),
                         agent_is_subagent: agent.mode == crate::agent::AgentMode::Subagent,
+                        // The automatic sub-agent YOLO scope's membership test,
+                        // resolved once from the surface this turn was offered. A
+                        // read-only run yields an empty set, so an `explore`
+                        // sub-agent keeps the ordinary prompt policy.
+                        write_capable_tools: write_capable_tools.clone(),
                         auto_approve,
                         loop_checkpoint,
                         checkpoint_timeout_secs,
@@ -3806,6 +3853,7 @@ impl SessionProcessor {
                                     crate::task::TaskStatus::Suspended => "suspended",
                                     crate::task::TaskStatus::Terminating => "terminating",
                                     crate::task::TaskStatus::Running => "running",
+                                    crate::task::TaskStatus::TimedOut => "timed_out",
                                 };
                                 let body = task
                                     .result

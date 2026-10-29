@@ -121,6 +121,25 @@ fn row_containing(buffer: &Buffer, needles: &[&str]) -> u16 {
         })
 }
 
+/// Terminal width that leaves the whole pinned table, controls included,
+/// inside the subpanel's border.
+///
+/// The control columns are pinned to absolute offsets (`KILL_X + KILL_W`
+/// display columns), so a terminal narrower than that clips the last controls
+/// against the border and a read at their documented column returns border
+/// glyphs. Derived from [`columns`] and the modal frame's own margin so a
+/// width edit moves this with the renderer.
+fn full_table_width() -> u16 {
+    // 21 columns of modal frame and table border sit outside the table's
+    // inner content at the default layout (measured, not assumed). The extra
+    // pair leaves a blank gutter between the last control and the border, so a
+    // read of `KILL_W` columns never swallows a border glyph.
+    const FRAME_MARGIN: u16 = 21;
+    const BORDER_GUTTER: u16 = 2;
+    let needed = u16::try_from(columns::KILL_X + columns::KILL_W).expect("control columns fit u16");
+    needed + BORDER_GUTTER + FRAME_MARGIN
+}
+
 /// The paint area of the table rows: the content rect minus its own border.
 ///
 /// The subpanel paints a bordered block inside the modal content area, so the
@@ -597,8 +616,8 @@ fn test_teams_message_counters_render_dash_for_zero_and_colour_for_non_zero() {
 
 /// Claimed and done come from the team task store: claimed counts the tasks
 /// assigned to the teammate, done counts those completed (FR-025).
-#[test]
-fn test_teams_task_counters_come_from_the_team_task_store() {
+#[tokio::test]
+async fn test_teams_task_counters_come_from_the_team_task_store() {
     let _guard = crate::global_env_lock();
     let scratch = scratch_dir("task-counters");
     let original = std::env::current_dir().expect("cwd");
@@ -608,17 +627,17 @@ fn test_teams_task_counters_come_from_the_team_task_store() {
 
     let mut pending = Task::new("task-001", "Pending work");
     pending.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(pending).expect("add pending");
+    tasks.add_task(pending).await.expect("add pending");
 
     let mut running = Task::new("task-002", "Running work");
     running.status = TaskStatus::InProgress;
     running.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(running).expect("add running");
+    tasks.add_task(running).await.expect("add running");
 
     let mut done = Task::new("task-003", "Finished work");
     done.status = TaskStatus::Completed;
     done.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(done).expect("add done");
+    tasks.add_task(done).await.expect("add done");
 
     std::env::set_current_dir(&scratch).expect("enter scratch");
 
@@ -730,7 +749,7 @@ fn test_teams_row_controls_paint_at_the_pinned_columns_and_track_the_cursor_list
         member("tester", "tm-002", MemberStatus::Stopped),
         member("archivist", "tm-003", MemberStatus::Idle),
     ]);
-    let buffer = render(&mut app, 170, 44);
+    let buffer = render(&mut app, full_table_width(), 44);
     let content = table_inner(app.teams_area);
     let lead_y = row_containing(&buffer, &["id", "name", "status", "model"]) + 1;
 
@@ -805,7 +824,7 @@ fn test_teams_row_controls_paint_at_the_pinned_columns_and_track_the_cursor_list
 fn test_teams_suspended_row_paints_the_resume_glyph_in_place_of_stop() {
     let suspended = member("reviewer", "tm-001", MemberStatus::Suspended);
     let mut app = open_teams(vec![suspended]);
-    let buffer = render(&mut app, 170, 44);
+    let buffer = render(&mut app, full_table_width(), 44);
     let content = table_inner(app.teams_area);
     let row_y = row_containing(&buffer, &["tm-001"]);
 

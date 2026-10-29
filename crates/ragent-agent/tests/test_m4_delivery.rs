@@ -158,6 +158,7 @@ async fn test_team_assign_task_pushs_notification_to_assignee_mailbox() {
     let task_store = TaskStore::open(&team_dir).expect("open task store");
     task_store
         .add_task(Task::new("task-001", "Write tests"))
+        .await
         .expect("add task");
     drop(task_store);
     drop(store);
@@ -198,6 +199,7 @@ async fn test_team_assign_task_rejects_dead_assignee() {
     let task_store = TaskStore::open(&team_dir).expect("open task store");
     task_store
         .add_task(Task::new("task-001", "Ghost work"))
+        .await
         .expect("add task");
     drop(task_store);
     drop(store);

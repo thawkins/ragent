@@ -656,6 +656,7 @@ async fn test_nested_subagent_events_are_tracked() {
         agent: "explore".to_string(),
         task: "inspect repo".to_string(),
         background: true,
+        detached: false,
     })
     .await;
     assert_eq!(app.active_tasks.len(), 1);
@@ -668,6 +669,7 @@ async fn test_nested_subagent_events_are_tracked() {
         agent: "build".to_string(),
         task: "fix bug".to_string(),
         background: true,
+        detached: false,
     })
     .await;
     assert_eq!(app.active_tasks.len(), 2);
@@ -719,6 +721,7 @@ async fn test_is_current_or_descendant_session_recognises_nested_tasks() {
         agent: "explore".to_string(),
         task: "inspect".to_string(),
         background: true,
+        detached: false,
     })
     .await;
 

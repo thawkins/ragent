@@ -199,8 +199,8 @@ fn test_team_create_failed_spawns_metadata_schema() {
 /// completing it clears the field. The logic lives in the tools, but the
 /// underlying `TeamStore` / `TeamConfig` mutation is what carries the
 /// guarantee; this test exercises the store directly.
-#[test]
-fn test_current_task_id_set_and_cleared_via_store() {
+#[tokio::test]
+async fn test_current_task_id_set_and_cleared_via_store() {
     use ragent_agent::team::{Task, TaskStore, TeamMember, TeamStore};
 
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -221,10 +221,13 @@ fn test_current_task_id_set_and_cleared_via_store() {
     // Add a task.
     let task = Task::new("t-001", "do something");
     let ts = TaskStore::open(&store.dir).expect("open task store");
-    ts.add_task(task).expect("add task");
+    ts.add_task(task).await.expect("add task");
 
     // Simulate team_task_claim: claim the task, then set current_task_id.
-    let claimed = ts.claim_specific("t-001", "tm-001").expect("claim task");
+    let claimed = ts
+        .claim_specific("t-001", "tm-001")
+        .await
+        .expect("claim task");
     assert_eq!(claimed.assigned_to.as_deref(), Some("tm-001"));
 
     let mut store = TeamStore::load(&store.dir).expect("reload store");
@@ -240,7 +243,7 @@ fn test_current_task_id_set_and_cleared_via_store() {
     assert_eq!(m.current_task_id.as_deref(), Some("t-001"));
 
     // Simulate team_task_complete: complete the task, then clear current_task_id.
-    ts.complete("t-001", "tm-001").expect("complete task");
+    ts.complete("t-001", "tm-001").await.expect("complete task");
     let mut store = TeamStore::load(&store.dir).expect("reload store");
     let m = store
         .config

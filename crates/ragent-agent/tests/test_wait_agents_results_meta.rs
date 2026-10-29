@@ -96,6 +96,7 @@ async fn test_wait_agents_returns_when_background_task_panics() {
             "do the thing",
             None,
             &PathBuf::from("target/temp"),
+            None,
         )
         .await
         .expect("spawn should succeed");
@@ -222,6 +223,7 @@ async fn seed_completed_task(
         waiter_count: 0,
         output_file,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     };
     manager.seed_completed_for_test(entry).await;
 }
@@ -338,8 +340,303 @@ async fn seed_running_task(
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     };
     manager.seed_completed_for_test(entry).await;
+}
+
+/// Seed a settled background task with an arbitrary terminal status.
+///
+/// Used by the FR-007/FR-014 tests below: a cancelled task must report
+/// `cancelled`, not the `failed` label the older `success`-only metadata
+/// collapsed it into.
+async fn seed_settled_task(
+    manager: &AgentManager,
+    parent_session_id: &str,
+    task_id: &str,
+    agent_name: &str,
+    status: TaskStatus,
+    result: Option<&str>,
+    error: Option<&str>,
+) {
+    let entry = TaskEntry {
+        id: task_id.to_string(),
+        parent_session_id: parent_session_id.to_string(),
+        child_session_id: format!("child-{task_id}"),
+        agent_name: agent_name.to_string(),
+        task_prompt: "ignored".to_string(),
+        background: true,
+        detached: false,
+        status,
+        result: result.map(Arc::from),
+        error: error.map(Arc::from),
+        created_at: Utc::now(),
+        completed_at: Some(Utc::now()),
+        reported: false,
+        waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
+    };
+    manager.seed_completed_for_test(entry).await;
+}
+
+/// Read `metadata.results[*]` and `metadata.tasks[*]` for `task_id`.
+fn entries_for(output: &ragent_agent::tool::ToolOutput, task_id: &str) -> (String, String) {
+    let meta = output.metadata.as_ref().expect("metadata must be present");
+    let find = |key: &str, id_field: &str| -> String {
+        meta.get(key)
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or_else(|| panic!("metadata.{key} must be an array"))
+            .iter()
+            .find(|e| e.get(id_field).and_then(serde_json::Value::as_str) == Some(task_id))
+            .and_then(|e| e.get("status"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("{key} entry for {task_id} must carry a `status` string"))
+            .to_string()
+    };
+    (find("results", "task_id"), find("tasks", "id"))
+}
+
+#[tokio::test]
+async fn test_wait_agents_reports_cancelled_not_failed() {
+    let event_bus = Arc::new(EventBus::new(16));
+    let processor = test_processor();
+    let manager = Arc::new(AgentManager::new(event_bus.clone(), processor, 4, 300));
+    let parent_sid = "parent-sess";
+
+    seed_settled_task(
+        &manager,
+        parent_sid,
+        "task-cancelled-1",
+        "explore",
+        TaskStatus::Cancelled,
+        None,
+        None,
+    )
+    .await;
+    seed_settled_task(
+        &manager,
+        parent_sid,
+        "task-failed-0001",
+        "explore",
+        TaskStatus::Failed,
+        None,
+        Some("provider exploded"),
+    )
+    .await;
+
+    let ctx = make_ctx(parent_sid, event_bus.clone(), Arc::clone(&manager));
+    let output = WaitAgentsTool
+        .execute(json!({}), &ctx)
+        .await
+        .expect("wait_agents should succeed");
+
+    let (cancelled_results, cancelled_tasks) = entries_for(&output, "task-cancelled-1");
+    let (failed_results, failed_tasks) = entries_for(&output, "task-failed-0001");
+
+    assert_eq!(
+        cancelled_results, "cancelled",
+        "FR-014: a cancelled task must report `cancelled` in metadata.results"
+    );
+    assert_eq!(
+        cancelled_tasks, "cancelled",
+        "FR-014: a cancelled task must report `cancelled` in metadata.tasks"
+    );
+    assert_eq!(
+        failed_results, "failed",
+        "FR-014: a failed task must report `failed` in metadata.results"
+    );
+    assert_eq!(
+        failed_tasks, "failed",
+        "FR-014: a failed task must report `failed` in metadata.tasks"
+    );
+    assert_ne!(
+        cancelled_results, failed_results,
+        "FR-014: the two terminal states must not collapse into one label"
+    );
+    assert!(
+        output.content.contains("task-cancelled-1") || output.content.contains("cancelled"),
+        "the content must render the cancelled status; got: {}",
+        output.content
+    );
+}
+
+#[tokio::test]
+async fn test_wait_agents_status_uses_the_canonical_task_status_vocabulary() {
+    // FR-007: every reported status is TaskStatus::as_str(), never a
+    // re-derived label.
+    let event_bus = Arc::new(EventBus::new(16));
+    let processor = test_processor();
+    let manager = Arc::new(AgentManager::new(event_bus.clone(), processor, 4, 300));
+    let parent_sid = "parent-sess";
+
+    let seeded = [
+        ("task-completed-1", TaskStatus::Completed),
+        ("task-failed-0002", TaskStatus::Failed),
+        ("task-cancelled-2", TaskStatus::Cancelled),
+        // FR-017: a per-call time bound has its own terminal state.
+        ("task-timedout-01", TaskStatus::TimedOut),
+    ];
+    for (task_id, status) in &seeded {
+        seed_settled_task(
+            &manager,
+            parent_sid,
+            task_id,
+            "explore",
+            status.clone(),
+            None,
+            None,
+        )
+        .await;
+    }
+
+    let ctx = make_ctx(parent_sid, event_bus.clone(), Arc::clone(&manager));
+    let output = WaitAgentsTool
+        .execute(json!({}), &ctx)
+        .await
+        .expect("wait_agents should succeed");
+
+    for (task_id, status) in &seeded {
+        let (results_status, tasks_status) = entries_for(&output, task_id);
+        assert_eq!(
+            results_status,
+            status.as_str(),
+            "{task_id} must report the canonical status in metadata.results"
+        );
+        assert_eq!(
+            tasks_status,
+            status.as_str(),
+            "{task_id} must report the canonical status in metadata.tasks"
+        );
+    }
+
+    // The canonical vocabulary is what is rendered, so the reader sees the
+    // same words the registry uses.
+    for (_, status) in &seeded {
+        assert!(
+            output.content.contains(status.as_str()),
+            "content must render the canonical status `{}`; got: {}",
+            status.as_str(),
+            output.content
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_wait_agents_keeps_success_boolean_as_a_refinement() {
+    // The `success` boolean predates `status`; it must stay present and
+    // agree with the status (never contradict it) so older callers keep
+    // working.
+    let event_bus = Arc::new(EventBus::new(16));
+    let processor = test_processor();
+    let manager = Arc::new(AgentManager::new(event_bus.clone(), processor, 4, 300));
+    let parent_sid = "parent-sess";
+
+    seed_settled_task(
+        &manager,
+        parent_sid,
+        "task-ok-0000001",
+        "explore",
+        TaskStatus::Completed,
+        Some("all good"),
+        None,
+    )
+    .await;
+    seed_settled_task(
+        &manager,
+        parent_sid,
+        "task-cancelled-3",
+        "explore",
+        TaskStatus::Cancelled,
+        None,
+        None,
+    )
+    .await;
+
+    let ctx = make_ctx(parent_sid, event_bus.clone(), Arc::clone(&manager));
+    let output = WaitAgentsTool
+        .execute(json!({}), &ctx)
+        .await
+        .expect("wait_agents should succeed");
+
+    let meta = output.metadata.as_ref().expect("metadata must be present");
+    let results = meta
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .expect("results array must exist");
+    for entry in results {
+        let status = entry
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .expect("every results entry must carry `status`");
+        let success = entry
+            .get("success")
+            .and_then(serde_json::Value::as_bool)
+            .expect("every results entry must keep `success`");
+        assert_eq!(
+            success,
+            status == "completed",
+            "`success` must agree with `status` (status={status}, success={success})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_wait_agents_event_path_prefers_registry_status_over_the_event_boolean() {
+    // A task that settles through the event path must also carry the
+    // registry's status. A `SubagentComplete` with `success: false` whose
+    // entry is `Cancelled` must report `cancelled`, not `failed`.
+    let event_bus = Arc::new(EventBus::new(16));
+    let processor = test_processor();
+    let manager = Arc::new(AgentManager::new(event_bus.clone(), processor, 4, 300));
+    let parent_sid = "parent-sess";
+    let task_id = "task-event-cancel";
+
+    seed_running_task(&manager, parent_sid, task_id, "explore", "do the thing").await;
+
+    let manager2 = Arc::clone(&manager);
+    let event_bus2 = Arc::clone(&event_bus);
+    let parent_sid2 = parent_sid.to_string();
+    let task_id2 = task_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        seed_settled_task(
+            &manager2,
+            &parent_sid2,
+            &task_id2,
+            "explore",
+            TaskStatus::Cancelled,
+            None,
+            None,
+        )
+        .await;
+        event_bus2.publish(Event::SubagentComplete {
+            session_id: parent_sid2,
+            task_id: task_id2,
+            child_session_id: "child-task-event-cancel".to_string(),
+            summary: "cancelled".to_string(),
+            success: false,
+            duration_ms: 10,
+            finish_reason: "cancelled".to_string(),
+        });
+    });
+
+    let ctx = make_ctx(parent_sid, event_bus.clone(), Arc::clone(&manager));
+    let output = tokio::time::timeout(
+        Duration::from_secs(2),
+        WaitAgentsTool.execute(json!({"task_ids": [task_id], "timeout_secs": 60}), &ctx),
+    )
+    .await
+    .expect("wait_agents should return when the task settles via event")
+    .expect("wait_agents should succeed");
+
+    let (results_status, _) = entries_for(&output, task_id);
+    assert_eq!(
+        results_status, "cancelled",
+        "the event path must report the registry's `cancelled`, not the event's \
+         `success: false` collapsed to `failed`"
+    );
 }
 
 #[tokio::test]

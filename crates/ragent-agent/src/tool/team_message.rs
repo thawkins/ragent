@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{Mailbox, MailboxMessage, MemberStatus, MessageType, TeamStore, find_team_dir};
+use crate::team::{Mailbox, MailboxMessage, MessageType, TeamStore, find_team_dir};
 
 /// Sends a direct message to one team member by name.
 pub struct TeamMessageTool;
@@ -22,10 +22,13 @@ impl Tool for TeamMessageTool {
     fn description(&self) -> &'static str {
         "Send a direct message to one team member (teammate or lead) by agent ID or name. \
              The recipient must be an active member of the team; messages to Stopped or Failed \
-             teammates are rejected. REQUIRED parameters: 'team_name' (string), 'to' (string, \
-             agent ID e.g. 'tm-001' or 'lead'), and 'content' (string, message text). Common \
-             gotcha: use the exact agent ID or 'lead' for the lead; nicknames that do not match \
-             team membership will fail."
+             teammates are rejected. 'content' is capped at 262144 bytes (256 KiB); a longer \
+             body is refused with an error naming the limit and the actual size, never \
+             silently truncated - send a summary and put bulk detail in a file or team memory. \
+             REQUIRED parameters: 'team_name' (string), 'to' (string, agent ID e.g. 'tm-001' \
+             or 'lead'), and 'content' (string, message text). Common gotcha: use the exact \
+             agent ID or 'lead' for the lead; nicknames that do not match team membership \
+             will fail."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -42,7 +45,9 @@ impl Tool for TeamMessageTool {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Message text to send (required)"
+                    "description": "Message text to send (required). Maximum 262144 bytes \
+                                    (256 KiB); an oversized body is refused with an error \
+                                    naming the limit and the actual size, never truncated."
                 }
             },
             "required": ["team_name", "to", "content"],
@@ -89,13 +94,18 @@ impl Tool for TeamMessageTool {
             match store.config.member_by_id(&recipient_id) {
                 None => {
                     return Err(anyhow::anyhow!(
-                        "Recipient '{to}' (id: {recipient_id}) is not a member of team '{team_name}'"
+                        "recipient '{to}' (id: {recipient_id}) cannot be messaged: it is not a \
+                         member of team '{team_name}'. Check the name with `team_status`, which \
+                         lists every member and its id"
                     ));
                 }
-                Some(m) if matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed) => {
+                Some(m) if m.status.is_terminal() => {
                     return Err(anyhow::anyhow!(
-                        "Recipient '{to}' (id: {recipient_id}) is {} in team '{team_name}' and cannot receive messages",
-                        m.status.as_str()
+                        "{} and cannot receive messages in team '{team_name}': a {} teammate \
+                         has no session left to drain its mailbox. Send the message to another \
+                         member, or respawn this one with `team_spawn`",
+                        crate::team::member_status_clause(&m.name, &m.agent_id, m.status),
+                        m.status.display_label()
                     ));
                 }
                 _ => {}
@@ -151,14 +161,31 @@ pub(crate) fn resolve_agent_id(team_dir: &std::path::Path, name_or_id: &str) -> 
             return Ok(m.agent_id.clone());
         }
         return Err(anyhow::anyhow!(
-            "Agent ID '{name_or_id}' is not a member of this team (no matching member in config.json)"
+            "agent ID '{name_or_id}' is not a member of this team. Read the roster with \
+             `team_status`, or address the member by its name instead of its id"
         ));
     }
     // Try to find a member with this name.
     let store = TeamStore::load(team_dir)?;
+    let names: Vec<&str> = store
+        .config
+        .members
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
     store
         .config
         .member_by_name(name_or_id)
         .map(|m| m.agent_id.clone())
-        .ok_or_else(|| anyhow::anyhow!("No teammate named '{name_or_id}' in this team"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no teammate named '{name_or_id}' in this team; known teammates: [{}]. Use one \
+                 of those names, or `lead` for the lead session",
+                if names.is_empty() {
+                    "none".to_string()
+                } else {
+                    names.join(", ")
+                }
+            )
+        })
 }

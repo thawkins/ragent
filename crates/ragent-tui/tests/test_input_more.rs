@@ -928,6 +928,7 @@ async fn alt_toggle_keys_map_to_actions() {
         ('y', "ToggleYolo"),
         ('e', "ToggleEditLog"),
         ('g', "ToggleGcf"),
+        ('a', "ToggleAgentsWindow"),
         ('q', "OpenQueueMenu"),
     ] {
         let action = handle_key(&mut app, kmod(KeyCode::Char(c), KeyModifiers::ALT)).await;

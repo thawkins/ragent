@@ -243,6 +243,10 @@ struct SubagentStartP<'a> {
     agent: &'a str,
     task: &'a str,
     background: bool,
+    /// FR-020: the row's execution contract is projected from the registry,
+    /// so the flag that distinguishes a detached run from an awaited
+    /// background one must travel with the event.
+    detached: bool,
 }
 
 #[derive(Serialize)]
@@ -298,6 +302,17 @@ struct TeamAgentErrorP<'a> {
     error: &'a str,
 }
 
+/// Payload for `teammate_status_changed` (spec `teamssetup` FR-035).
+#[derive(Serialize)]
+struct TeamStatusChangedP<'a> {
+    session_id: &'a str,
+    team_name: &'a str,
+    agent_id: &'a str,
+    from: &'a str,
+    to: &'a str,
+    cause: &'a str,
+}
+
 #[derive(Serialize)]
 struct TeamTaskP<'a> {
     session_id: &'a str,
@@ -310,6 +325,28 @@ struct TeamTaskP<'a> {
 struct TeamNameP<'a> {
     session_id: &'a str,
     team_name: &'a str,
+}
+
+/// Payload of the `team_task_completion_rejected` SSE event (spec `teamssetup`
+/// FR-044).
+#[derive(Serialize)]
+struct TeamTaskCompletionRejectedP<'a> {
+    session_id: &'a str,
+    team_name: &'a str,
+    agent_id: &'a str,
+    task_id: &'a str,
+    owner: &'a str,
+    reason: &'a str,
+    message: &'a str,
+}
+
+/// Payload of the `team_adopted` SSE event (spec `teamssetup` FR-024).
+#[derive(Serialize)]
+struct TeamAdoptedP<'a> {
+    session_id: &'a str,
+    team_name: &'a str,
+    previous_lead_session_id: &'a str,
+    reset_task_ids: &'a [String],
 }
 
 // -- Helpers --------------------------------------------------------------
@@ -367,13 +404,17 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::SubagentKilled { .. } => "subagent_killed",
         Event::SubagentCancelled { .. } => "subagent_cancelled",
         Event::TeammateSpawned { .. } => "teammate_spawned",
+        Event::TeammateStopped { .. } => "teammate_stopped",
         Event::TeammateMessage { .. } => "teammate_message",
         Event::TeammateIdle { .. } => "teammate_idle",
         Event::TeammateFailed { .. } => "teammate_failed",
         Event::TeammateSuspended { .. } => "teammate_suspended",
         Event::TeammateResumed { .. } => "teammate_resumed",
+        Event::TeammateStatusChanged { .. } => "teammate_status_changed",
         Event::TeamTaskClaimed { .. } => "team_task_claimed",
         Event::TeamTaskCompleted { .. } => "team_task_completed",
+        Event::TeamTaskCompletionRejected { .. } => "team_task_completion_rejected",
+        Event::TeamAdopted { .. } => "team_adopted",
         Event::TeamCleanedUp { .. } => "team_cleaned_up",
         Event::TeammateP2PMessage { .. } => "teammate_p2p_message",
         Event::TaskCompleted { .. } => "task_completed",
@@ -740,6 +781,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             agent,
             task,
             background,
+            detached,
         } => to_data(&SubagentStartP {
             session_id,
             task_id,
@@ -747,6 +789,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             agent,
             task,
             background: *background,
+            detached: *detached,
         }),
 
         Event::SubagentComplete {
@@ -803,6 +846,19 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             message_type,
             preview,
         }),
+        Event::TeammateStopped {
+            session_id,
+            team_name,
+            agent_id,
+            cause,
+        } => to_data(&TeamStatusChangedP {
+            session_id,
+            team_name,
+            agent_id,
+            to: "stopped",
+            cause,
+            from: "shutting_down",
+        }),
         Event::TeammateIdle {
             session_id,
             team_name,
@@ -844,6 +900,21 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             team_name,
             agent_id,
         }),
+        Event::TeammateStatusChanged {
+            session_id,
+            team_name,
+            agent_id,
+            from,
+            to,
+            cause,
+        } => to_data(&TeamStatusChangedP {
+            session_id,
+            team_name,
+            agent_id,
+            from,
+            to,
+            cause,
+        }),
         Event::TeamTaskClaimed {
             session_id,
             team_name,
@@ -860,6 +931,36 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             team_name,
             agent_id,
             task_id,
+        }),
+
+        Event::TeamTaskCompletionRejected {
+            session_id,
+            team_name,
+            agent_id,
+            task_id,
+            owner,
+            reason,
+            message,
+        } => to_data(&TeamTaskCompletionRejectedP {
+            session_id,
+            team_name,
+            agent_id,
+            task_id,
+            owner,
+            reason,
+            message,
+        }),
+
+        Event::TeamAdopted {
+            session_id,
+            team_name,
+            previous_lead_session_id,
+            reset_task_ids,
+        } => to_data(&TeamAdoptedP {
+            session_id,
+            team_name,
+            previous_lead_session_id,
+            reset_task_ids,
         }),
 
         Event::TeamCleanedUp {

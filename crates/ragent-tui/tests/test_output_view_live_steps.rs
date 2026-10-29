@@ -106,6 +106,7 @@ async fn test_output_view_cache_invalidates_on_agent_progress() {
         agent: "explore".to_string(),
         task: "find callers".to_string(),
         background: true,
+        detached: false,
     })
     .await;
 

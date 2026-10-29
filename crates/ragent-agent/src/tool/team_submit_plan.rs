@@ -67,12 +67,30 @@ impl Tool for TeamSubmitPlanTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         // Update member's plan_status to Pending and status to PlanPending.
+        // FR-032: a member that is not in the roster has no plan to record, and
+        // naming that - rather than writing a silent no-op - is what tells the
+        // caller it is addressing the wrong session.
         {
             let mut store = TeamStore::load(&team_dir)?;
-            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
-                member.plan_status = PlanStatus::Pending;
-                member.status = MemberStatus::PlanPending;
+            let Some(member) = store.config.member_by_id_mut(&agent_id) else {
+                return Err(anyhow::anyhow!(
+                    "cannot submit a plan as '{agent_id}': that agent is not a member of team \
+                     '{team_name}'. A plan is submitted by a teammate session - read the roster \
+                     with `team_status` to find the agent id"
+                ));
+            };
+            if member.status.is_terminal() {
+                let name = member.name.clone();
+                let status = member.status;
+                return Err(anyhow::anyhow!(
+                    "{} and cannot submit a plan: a {} teammate has no live session. Respawn it \
+                     with `team_spawn` first",
+                    crate::team::member_status_clause(&name, &agent_id, status),
+                    status.display_label()
+                ));
             }
+            member.plan_status = PlanStatus::Pending;
+            member.status = MemberStatus::PlanPending;
             store.save()?;
         }
 

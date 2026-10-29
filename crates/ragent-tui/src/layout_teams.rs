@@ -23,7 +23,9 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use ragent_agent::team::{MemberStatus, TaskStatus, TaskStore, TeamMember, TeamStore};
+use ragent_agent::team::{
+    MemberStatus, PendingPlan, TaskStatus, TaskStore, TeamMember, TeamStore, pending_plans,
+};
 
 use crate::app::App;
 use crate::theme::colors;
@@ -64,6 +66,24 @@ pub mod glyphs {
     /// Hint painted beneath the lead row while the team has no members
     /// (FR-026).
     pub const EMPTY_HINT: &str = "(no teammates yet - use team_spawn tool or blueprint)";
+    /// Approve control painted in place of [`STOP`] on a `plan_pending` row
+    /// (spec `teamssetup` FR-034).
+    pub const APPROVE: &str = "[approve]";
+    /// Reject control painted in place of [`KILL`] on a `plan_pending` row
+    /// (spec `teamssetup` FR-034).
+    pub const REJECT: &str = "[reject]";
+    /// Literal opening the plan line painted beneath a `plan_pending` row
+    /// (spec `teamssetup` FR-034).
+    pub const PLAN_AWAITING: &str = "plan awaiting approval:";
+    /// Literal painted when a `plan_pending` member's plan cannot be found in
+    /// the lead's mailbox (spec `teamssetup` FR-034). The row still reports
+    /// that a verdict is awaited rather than showing nothing.
+    pub const PLAN_MISSING: &str = "(plan request not found)";
+    /// Literal opening the hint row shown while the team has a parked member
+    /// (spec `teamssetup` FR-028). The row names the resume key so the operator
+    /// can see that a parked state has a way out.
+    pub const PARKED_HINT: &str =
+        "parked - Del resumes a blocked member, Space resumes a suspended one";
 }
 
 /// Column layout of the Teams table, counted in display columns from the left
@@ -104,14 +124,16 @@ pub mod columns {
     /// Columns separating the counters from the controls, and the two controls
     /// from each other.
     pub const CONTROL_GAP_W: usize = 2;
-    /// First column of the `[stop]` control.
+    /// First column of the `[stop]` / `[approve]` control.
     pub const STOP_X: usize = 132;
-    /// Width of the `[stop]` control column.
-    pub const STOP_W: usize = 6;
-    /// First column of the `[x]` control.
-    pub const KILL_X: usize = 140;
-    /// Width of the `[x]` control column.
-    pub const KILL_W: usize = 4;
+    /// Width of the `[stop]` control column, wide enough for the
+    /// `plan_pending` row's `[approve]` literal (spec `teamssetup` FR-034).
+    pub const STOP_W: usize = 9;
+    /// First column of the `[x]` / `[reject]` control.
+    pub const KILL_X: usize = 143;
+    /// Width of the `[x]` control column, wide enough for the `plan_pending`
+    /// row's `[reject]` literal (spec `teamssetup` FR-034).
+    pub const KILL_W: usize = 8;
 }
 
 /// The fixed columns must add up to the pinned `[stop]` column.
@@ -368,29 +390,99 @@ fn header_line() -> Line<'static> {
 ///
 /// A live row paints the suspend control padded to [`columns::STOP_W`] - `>`
 /// instead of `[stop]` while suspended, padded so `[x]` never moves - then a
-/// gap and the kill control.
-fn control_spans(suspended: bool) -> Vec<Span<'static>> {
-    let (glyph, fg) = if suspended {
-        (glyphs::RESUME, Color::Green)
-    } else {
-        (glyphs::STOP, Color::Yellow)
+/// gap and the kill control. A `plan_pending` row paints the two controls that
+/// resolve its parked state instead, `[approve]` and `[reject]` (spec
+/// `teamssetup` FR-034): the verdict is the only action a parked-for-plan
+/// teammate can act on, so offering suspend/kill in those columns would name a
+/// verb that does not unblock it.
+fn control_spans(status: &MemberStatus) -> Vec<Span<'static>> {
+    let (left, left_fg) = match status {
+        MemberStatus::PlanPending => (glyphs::APPROVE, Color::Green),
+        MemberStatus::Suspended => (glyphs::RESUME, Color::Green),
+        _ => (glyphs::STOP, Color::Yellow),
+    };
+    let (right, right_fg) = match status {
+        MemberStatus::PlanPending => (glyphs::REJECT, Color::LightRed),
+        _ => (glyphs::KILL, Color::Red),
     };
     vec![
         Span::styled(" ".repeat(columns::CONTROL_GAP_W), Style::default()),
         Span::styled(
-            format!("{glyph:<width$}", width = columns::STOP_W),
-            Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            format!("{left:<width$}", width = columns::STOP_W),
+            Style::default().fg(left_fg).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" ".repeat(columns::CONTROL_GAP_W), Style::default()),
         Span::styled(
-            glyphs::KILL,
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            right,
+            Style::default().fg(right_fg).add_modifier(Modifier::BOLD),
         ),
     ]
 }
 
 /// The task counts painted in one teammate row: `(claimed, done)` (FR-025).
 type TaskCounts = HashMap<String, (usize, usize)>;
+
+/// The plan each `plan_pending` teammate is waiting on, keyed by agent id
+/// (spec `teamssetup` FR-034).
+///
+/// Read once per frame from the same store `task_counts` reads (NFR-002), never
+/// once per row, and `team::pending_plans` is the single implementation of the
+/// roster-plus-mailbox join so the popup cannot disagree with `team_status`.
+fn pending_plans_by_agent(app: &App) -> HashMap<String, PendingPlan> {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    app.active_team
+        .as_ref()
+        .and_then(|team| TeamStore::load_by_name(&team.name, &working_dir).ok())
+        .map(|store| {
+            pending_plans(&store)
+                .into_iter()
+                .map(|plan| (plan.agent_id.clone(), plan))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The single-line excerpt of a submitted plan painted beneath the row.
+///
+/// A plan is free-form multi-line text; the popup row is one line, so the first
+/// non-blank line stands in for the whole plan and the budget clips it on a
+/// character boundary (NFR-004).
+fn plan_excerpt(plan: Option<&str>) -> String {
+    plan.and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()))
+        .unwrap_or(glyphs::PLAN_MISSING)
+        .to_string()
+}
+
+/// The resume hint painted while the team has a parked member (spec
+/// `teamssetup` FR-028), `None` when no member is parked.
+///
+/// The hint names the members it is about - by name, not by status word - so
+/// the operator can match the row to the key without re-reading the table. A
+/// `Blocked` member is resumed with `Del`, a `Suspended` one with `Space`; the
+/// wording follows the key that actually carries the verb on that status.
+fn parked_resume_hint(members: &[TeamMember]) -> Option<String> {
+    let blocked: Vec<&str> = members
+        .iter()
+        .filter(|m| m.status == MemberStatus::Blocked)
+        .map(|m| m.name.as_str())
+        .collect();
+    let suspended: Vec<&str> = members
+        .iter()
+        .filter(|m| m.status == MemberStatus::Suspended)
+        .map(|m| m.name.as_str())
+        .collect();
+    if blocked.is_empty() && suspended.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if !blocked.is_empty() {
+        parts.push(format!("Del resumes blocked {}", blocked.join(", ")));
+    }
+    if !suspended.is_empty() {
+        parts.push(format!("Space resumes suspended {}", suspended.join(", ")));
+    }
+    Some(format!("({})", parts.join("; ")))
+}
 
 /// Read the per-agent task counts from the team task store.
 ///
@@ -531,6 +623,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .unwrap_or((0, 0));
 
     let counts = task_counts(app);
+    // FR-034: one store read for every parked plan this frame, so a
+    // `plan_pending` row can name the plan it waits on.
+    let parked_plans = pending_plans_by_agent(app);
     let global_model = app.active_model_ref_string();
     let member_count = app.team_members.len();
 
@@ -697,17 +792,74 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
         // The `[stop]`/`[x]` columns stay painted as status indicators: the
         // keyboard Space/Del now act on the row, and the glyph shows what
-        // each currently means (suspended rows paint `>` = resume).
+        // each currently means (suspended rows paint `>` = resume, a
+        // `plan_pending` row paints its verdict controls).
         if !is_terminal(&member.status) {
-            spans.extend(control_spans(member.status == MemberStatus::Suspended));
+            spans.extend(control_spans(&member.status));
         }
         lines.push(Line::from(spans));
         row_keys.push(member.agent_id.clone());
+
+        // FR-034: a teammate parked in `plan_pending` shows the plan it is
+        // waiting on, so the row says what is blocked instead of only how long
+        // the member has existed. The continuation row carries no click key:
+        // the cursor is an ordinal over teammate rows only, and a plan line is
+        // part of the row above it, not a row of its own.
+        if member.status == MemberStatus::PlanPending {
+            let excerpt = plan_excerpt(
+                parked_plans
+                    .get(&member.agent_id)
+                    .and_then(|plan| plan.plan.as_deref()),
+            );
+            // The excerpt runs to the table's inner right edge, so it can
+            // never paint outside the block (NFR-010).
+            let budget = (area.width as usize)
+                .saturating_sub(2)
+                .saturating_sub(columns::MARKER_W + glyphs::PLAN_AWAITING.chars().count() + 1);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<width$}", "", width = columns::MARKER_W),
+                    Style::default(),
+                ),
+                Span::styled(
+                    format!("{} ", glyphs::PLAN_AWAITING),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    clip(&excerpt, budget.max(1)),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+            row_keys.push(String::new());
+        }
     }
     // The keyboard cursor is an ordinal over the painted teammate rows only:
     // publish the agent ids in paint order for the cursor's Space/Del/Enter
     // resolution and the scroll sync (FR-038).
     app.teams_teammate_agent_ids = row_keys[teammate_row_start..].to_vec();
+
+    // -- parked-member hint row (spec `teamssetup` FR-028) ------------------
+    // While any member is `Blocked` or `Suspended`, the popup says which key
+    // gets it out, so a parked team is visibly escapable rather than looking
+    // wedged. The row carries no click key: it names keys, it is not a row.
+    if let Some(hint) = parked_resume_hint(&app.team_members) {
+        let budget = (area.width as usize).saturating_sub(4);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {}", glyphs::PARKED_HINT),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                clip(&hint, budget.max(1)),
+                Style::default().fg(colors::HINT),
+            ),
+        ]));
+        row_keys.push(String::new());
+    }
 
     // -- empty state (FR-026) ---------------------------------------------
     if member_count == 0 {

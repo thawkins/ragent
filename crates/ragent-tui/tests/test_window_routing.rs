@@ -63,6 +63,7 @@ fn running_task(id: &str) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -141,24 +142,29 @@ fn agents_button_toggles_the_window_and_requests_a_redraw() {
 }
 
 #[test]
-fn agents_button_click_is_a_no_op_without_a_subject() {
+fn agents_button_click_opens_the_window_with_no_subject_and_says_nothing() {
+    // The panel is never invisible: with nothing to show it opens on its
+    // empty-state hint (FR-026) instead of refusing, and the status line is
+    // left alone because nothing went wrong.
     let mut app = app();
+    app.status = "ready".to_string();
     render(&mut app);
     let (col, row) = centre(app.agents_button_area);
 
     app.handle_mouse_event(click(col, row));
     assert!(
-        !app.show_agents_window,
-        "a click with nothing to show is inert"
+        app.show_agents_window,
+        "a click with nothing to show still opens the panel"
     );
-    assert!(
-        !app.needs_redraw,
-        "a refused click must not request a redraw (NFR-005)"
+    assert!(app.needs_redraw, "opening the window requests a redraw");
+    assert_eq!(
+        app.status, "ready",
+        "an empty open is not an error, so it reports nothing"
     );
 }
 
 #[test]
-fn agents_button_click_keeps_an_open_window_open_when_the_subject_vanishes() {
+fn agents_button_click_closes_an_open_window_even_when_the_subject_vanished() {
     let mut app = app();
     render(&mut app);
     app.show_agents_window = true;
@@ -167,10 +173,10 @@ fn agents_button_click_keeps_an_open_window_open_when_the_subject_vanishes() {
 
     app.handle_mouse_event(click(col, row));
     assert!(
-        app.show_agents_window,
-        "with no subject the window keeps its current open state"
+        !app.show_agents_window,
+        "an open window always closes, whatever its subject is now"
     );
-    assert!(!app.needs_redraw, "a no-op click paints nothing");
+    assert!(app.needs_redraw, "closing the window requests a redraw");
 }
 
 // ---------------------------------------------------------------------------
@@ -224,21 +230,28 @@ fn teams_button_toggles_the_window_and_requests_a_redraw() {
 }
 
 #[test]
-fn teams_button_click_is_a_no_op_without_an_active_team() {
+fn teams_button_click_opens_the_window_with_no_team_and_says_nothing() {
+    // The panel is never invisible: with no team it opens on its lead row plus
+    // the empty-state hint (FR-026) instead of refusing.
     let mut app = app();
+    app.status = "ready".to_string();
     render(&mut app);
     let (col, row) = centre(app.teams_button_area);
 
     app.handle_mouse_event(click(col, row));
-    assert!(!app.show_teams_window, "a click with no team is inert");
     assert!(
-        !app.needs_redraw,
-        "a refused click must not request a redraw (NFR-005)"
+        app.show_teams_window,
+        "a click with no team still opens the panel"
+    );
+    assert!(app.needs_redraw, "opening the window requests a redraw");
+    assert_eq!(
+        app.status, "ready",
+        "an empty open is not an error, so it reports nothing"
     );
 }
 
 #[test]
-fn teams_button_click_keeps_an_open_window_open_when_the_team_is_gone() {
+fn teams_button_click_closes_an_open_window_even_when_the_team_is_gone() {
     let mut app = app();
     render(&mut app);
     app.show_teams_window = true;
@@ -247,10 +260,10 @@ fn teams_button_click_keeps_an_open_window_open_when_the_team_is_gone() {
 
     app.handle_mouse_event(click(col, row));
     assert!(
-        app.show_teams_window,
-        "with no team the window keeps its current open state"
+        !app.show_teams_window,
+        "an open window always closes, whatever its subject is now"
     );
-    assert!(!app.needs_redraw, "a no-op click paints nothing");
+    assert!(app.needs_redraw, "closing the window requests a redraw");
 }
 
 // ---------------------------------------------------------------------------
@@ -347,13 +360,23 @@ fn routing_helpers_agree_with_the_buttons_enabled_state() {
 }
 
 #[test]
-fn toggling_through_the_helpers_is_idempotent_when_the_subject_is_absent() {
+fn toggling_through_the_helpers_opens_and_closes_without_a_subject() {
+    // Availability only styles the button; it never gates the toggle. Each
+    // press toggles, and each open closes the other window.
     let mut app = app();
     app.toggle_agents_window();
-    assert!(!app.show_agents_window);
+    assert!(app.show_agents_window, "an empty Agents panel still opens");
+    assert!(!app.teams_window_available(), "still no team to show");
+
     app.toggle_teams_window();
+    assert!(app.show_teams_window, "an empty Teams panel still opens");
+    assert!(!app.show_agents_window, "and the Agents window closes");
+
+    app.toggle_agents_window();
+    assert!(app.show_agents_window, "back to the Agents window");
     assert!(!app.show_teams_window);
+
     app.close_agents_window();
     app.close_teams_window();
-    assert!(!app.needs_redraw, "no refused or redundant path paints");
+    assert!(!app.show_agents_window && !app.show_teams_window);
 }

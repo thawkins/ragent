@@ -1356,35 +1356,11 @@ impl App {
                     self.dispatch_bang_command(text);
                 }
                 InputAction::SendMessage(text) => {
-                    // When a teammate is focused, route the message to their
-                    // mailbox instead of the lead session.
-                    if let Some(ref focused_id) = self.focused_teammate.clone() {
-                        if let Some(member) = self
-                            .team_members
-                            .iter()
-                            .find(|m| m.agent_id == *focused_id)
-                            .cloned()
-                        {
-                            let team_name = self
-                                .active_team
-                                .as_ref()
-                                .map(|t| t.name.clone())
-                                .unwrap_or_default();
-                            self.send_teammate_message(&team_name, &member.name, &text);
-                            self.input.clear();
-                            self.input_cursor = 0;
-                            self.history_index = None;
-                            self.push_log_no_agent(
-                                LogLevel::Info,
-                                format!(
-                                    "-> {} (focused): {}",
-                                    member.name,
-                                    &text[..text.len().min(60)]
-                                ),
-                            );
-                            return;
-                        }
-                    }
+                    // FR-058 (amended): teammate focus no longer redirects the
+                    // input box. Enter always addresses the lead session, so a
+                    // focused teammate's output view can be read while the user
+                    // keeps talking to the primary agent; a teammate is reached
+                    // only through `/team message <name> <text>`.
                     // Block sending if no provider/model is configured
                     if self.configured_provider.is_none() {
                         self.status =
@@ -1838,6 +1814,29 @@ impl App {
                         }
                     }
                     self.needs_redraw = true;
+                }
+                InputAction::ToggleAgentsWindow => {
+                    // Alt+A: toggle the Agents window (spec `agentssetup`
+                    // FR-022). This calls the very same
+                    // `App::toggle_agents_window` the Agents button's left
+                    // click calls, so the keyboard and the mouse share one
+                    // visibility path - including the named refusal when the
+                    // window has no subject to open on, the Teams-window
+                    // exclusion, and the redraw flag. Nothing else is touched:
+                    // the input buffer, staged attachments and a running turn
+                    // are left as they were.
+                    self.toggle_agents_window();
+                }
+                InputAction::ToggleTeamsWindow => {
+                    // Alt+T: toggle the Teams window (spec `agentssetup`
+                    // FR-045). The exact mirror of the Alt+A arm above - it
+                    // calls the same `App::toggle_teams_window` the Teams
+                    // button's click calls, so the keyboard and the mouse share
+                    // one visibility path: an open window always closes, an
+                    // open with no team is refused and named, and a successful
+                    // open closes the Agents window. The input buffer, staged
+                    // attachments and a running turn are left untouched.
+                    self.toggle_teams_window();
                 }
                 // Alt+Q opens the queue-control menu overlay (spec `inputqueue`
                 // FR-021). Opening it only flips the menu flag and resets the

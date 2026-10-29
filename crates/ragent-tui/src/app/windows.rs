@@ -1,10 +1,10 @@
 //! Open/close routing for the Agents and Teams modal windows.
 //!
 //! The two windows are mutually exclusive popups over the chat surface: at most
-//! one is visible at a time, and each is reachable only while its subject
-//! exists (sub-agent or background shell tasks for Agents, an active team for
-//! Teams). This module owns that decision so the input handler and the button
-//! renderer cannot drift apart:
+//! one is visible at a time, and each opens whether or not its subject exists -
+//! an empty panel paints its own empty state instead of refusing. This module
+//! owns that decision so the input handler and the button renderer cannot drift
+//! apart:
 //!
 //! - the renderer calls [`App::agents_window_available`] /
 //!   [`App::teams_window_available`] to pick the enabled versus dimmed button
@@ -20,22 +20,69 @@
 //!
 //! Every path that actually repaints a window sets [`App::needs_redraw`] so the
 //! next frame reflects the change without waiting for an unrelated event
-//! (NFR-005). A refused click (no subject) changes nothing at all, including
-//! the redraw flag (FR-029, FR-031).
+//! (NFR-005). An empty window is not a refusal: the operator asked to see the
+//! panel, so it opens and paints its empty-state hint (FR-026), and the status
+//! line is left to report real outcomes.
+//!
+//! Both windows also toggle from the keyboard whichever way their subject
+//! stands: `Alt+A` ([`App::toggle_agents_window`]) and `Alt+T`
+//! ([`App::toggle_teams_window`]) always *close* a window that is already open,
+//! so a chord can never leave the operator stuck inside a popup (spec
+//! `agentssetup` FR-042, FR-045).
 
 use super::state::{
     App, PendingRowAction, ROW_ACTION_CONFIRM_NO, ROW_ACTION_CONFIRM_YES, RowAction,
 };
 use ragent_agent::team::MemberStatus;
 
+/// Why an empty Agents window *used* to refuse to open (spec `agentssetup`
+/// FR-042).
+///
+/// Kept for the refusal-text contract only: the window now always opens and
+/// paints its own empty state ([`crate::layout_active_agents::glyphs::EMPTY_HINT`]),
+/// so nothing assigns this to the status line. The text still names the
+/// condition, both kinds of subject and the action that produces one, and it is
+/// one constant so no future entry point can describe the same state
+/// differently.
+pub const AGENTS_WINDOW_EMPTY_REFUSAL: &str = "agents: nothing to show - no sub-agent or shell task is tracked; \
+      start one with /spawn or a background command";
+
+/// Why an empty Teams window *used* to refuse to open (spec `agentssetup`
+/// FR-042).
+///
+/// Kept for the same reason as [`AGENTS_WINDOW_EMPTY_REFUSAL`]: the window now
+/// always opens and paints the lead row plus its empty-state hint
+/// (spec `agentui` FR-026).
+pub const TEAMS_WINDOW_EMPTY_REFUSAL: &str =
+    "teams: nothing to show - no team is active; start one with /team create or /swarm";
+
 impl App {
     /// Whether the Agents window has anything to show.
     ///
     /// True while at least one sub-agent task or one background shell task is
     /// tracked, which is exactly the condition the input-side button uses to
-    /// decide between its enabled and dimmed styles (FR-004).
+    /// decide between its normal and dimmed styles (FR-004).
+    ///
+    /// The completed-history section counts as a subject too (spec
+    /// `agentssetup` FR-036): once a finished run is snapshotted into
+    /// [`App::agents_history`] its live row is gone, so without this a session
+    /// whose only task has just finished would look subject-less to the empty
+    /// state. That is not an empty panel - it has a row to paint.
+    ///
+    /// This no longer gates the toggle: the window opens either way and paints
+    /// its empty-state hint when this is false (FR-026).
     #[must_use]
     pub fn agents_window_available(&self) -> bool {
+        self.agents_window_has_live_subject() || !self.agents_history.is_empty()
+    }
+
+    /// Whether a *live* sub-agent or background-shell task is tracked.
+    ///
+    /// This is the FR-063 subject condition: the window follows its live rows,
+    /// so it closes the moment the last one goes, even when the panel still has
+    /// history it could paint.
+    #[must_use]
+    fn agents_window_has_live_subject(&self) -> bool {
         !self.active_tasks.is_empty() || !self.bg_tasks.is_empty()
     }
 
@@ -49,33 +96,45 @@ impl App {
 
     /// Toggle the Agents window (spec `agentui` FR-028, FR-029).
     ///
-    /// With no sub-agent and no background shell task the click is a no-op that
-    /// leaves both the window state and the redraw flag untouched (FR-029).
-    /// Otherwise the window toggles and, when it is being opened, the Teams
-    /// window is closed so the two can never be painted together.
+    /// An open window always closes, whatever its subject currently is: the
+    /// window follows its live rows (FR-063) and can empty out from under the
+    /// operator, so `Alt+A` must never be the one chord that cannot dismiss the
+    /// popup it opened. Closing is silent and repaints (NFR-005).
+    ///
+    /// A closed window always opens, whether or not the session has a subject
+    /// to paint: the operator asked to see the panel, and an empty Agents table
+    /// explains itself in place (its empty-state hint, FR-026) with the
+    /// configuration columns - agent type, model, teammates - still readable.
+    /// The open therefore cannot be refused, and it never reports one.
+    ///
+    /// A successful open closes the Teams window so the two can never be
+    /// painted together.
     pub fn toggle_agents_window(&mut self) {
-        if !self.agents_window_available() {
+        if self.show_agents_window {
+            self.close_agents_window();
             return;
         }
-        self.show_agents_window = !self.show_agents_window;
-        if self.show_agents_window {
-            self.show_teams_window = false;
-        }
+        self.show_agents_window = true;
+        self.show_teams_window = false;
         self.needs_redraw = true;
     }
 
     /// Toggle the Teams window (spec `agentui` FR-030, FR-031).
     ///
-    /// With no active team the click is a no-op (FR-031). Otherwise the window
-    /// toggles and, when it is being opened, the Agents window is closed.
+    /// The mirror of [`App::toggle_agents_window`], and bound to `Alt+T`
+    /// (spec `agentssetup` FR-045): an open window always closes, and a closed
+    /// window always opens. With no active team the panel paints its lead row
+    /// and the empty-state hint (FR-026) rather than refusing, so the roster's
+    /// location is never hidden behind a chord that appears inert.
+    ///
+    /// A successful open closes the Agents window.
     pub fn toggle_teams_window(&mut self) {
-        if !self.teams_window_available() {
+        if self.show_teams_window {
+            self.close_teams_window();
             return;
         }
-        self.show_teams_window = !self.show_teams_window;
-        if self.show_teams_window {
-            self.show_agents_window = false;
-        }
+        self.show_teams_window = true;
+        self.show_agents_window = false;
         self.needs_redraw = true;
     }
 
@@ -103,9 +162,15 @@ impl App {
     /// any time; a no-op when the window is already closed or still has a
     /// subject. The close itself is silent - FR-064's reportable-outcome list
     /// does not include it.
+    ///
+    /// "Empty" means no *live* row (see
+    /// [`App::agents_window_has_live_subject`]): FR-063 makes the window
+    /// follow its live tasks, so a completed-history row left behind by the
+    /// very removal that empties the list does not keep it open. The panel can
+    /// be reopened afterwards on that history (spec `agentssetup` FR-036).
     #[doc(hidden)]
     pub fn close_agents_window_when_empty(&mut self) {
-        if self.show_agents_window && self.agents_window_available() {
+        if self.show_agents_window && self.agents_window_has_live_subject() {
             return;
         }
         self.close_agents_window();
@@ -232,6 +297,15 @@ impl App {
                     && !is_terminal_member_status(status)
                 {
                     self.dispatch_shutdown_teammate(&agent_id);
+                }
+            }
+            RowAction::ResumeTeammate { agent_id, .. } => {
+                // Resume only a member that is still parked: if the row moved
+                // on (the dependency cleared itself, or the member stopped)
+                // between open and answer, the answer mutates nothing - the
+                // same stale-row rule the other arms follow (FR-069).
+                if member_status_of(self, &agent_id) == Some(MemberStatus::Blocked) {
+                    self.dispatch_resume_teammate(&agent_id);
                 }
             }
         }
@@ -623,7 +697,13 @@ impl App {
             self.needs_redraw = true;
             return;
         };
-        if member.status == ragent_agent::team::MemberStatus::Suspended {
+        // Both parked statuses are resumable (FR-010): `Suspended` because the
+        // lead paused it, `Blocked` because a dependency parked it and resume is
+        // its only operator escape (F-06). Every other status stays a suspend.
+        if matches!(
+            member.status,
+            ragent_agent::team::MemberStatus::Suspended | ragent_agent::team::MemberStatus::Blocked
+        ) {
             self.dispatch_resume_teammate(&member.agent_id);
         } else {
             self.open_row_action(crate::app::RowAction::SuspendTeammate {
@@ -633,8 +713,14 @@ impl App {
         }
     }
 
-    /// `Del` (or legacy `K`) on the Teams window: arm the destructive yes/no
-    /// dialog for the cursor row's teammate shutdown (FR-040's confirm flow).
+    /// `Del` (or legacy `K`) on the Teams window: arm the yes/no dialog for the
+    /// cursor row's teammate (FR-040's confirm flow, spec `teamssetup` FR-029).
+    ///
+    /// `Del` is the shutdown verb for a live member. A `Blocked` member is not
+    /// live and has no live turn to destroy, so the destructive reading of the
+    /// key does not apply: `Del` offers the same confirm-then-resume path
+    /// `Suspended` already has on `Space`, and the dialog title names the
+    /// member and the action so the operator is not asked a generic question.
     pub fn teams_cursor_shutdown(&mut self) {
         let agent_id = self
             .teams_cursor_teammate
@@ -647,6 +733,13 @@ impl App {
             self.needs_redraw = true;
             return;
         };
+        if member.status == ragent_agent::team::MemberStatus::Blocked {
+            self.open_row_action(crate::app::RowAction::ResumeTeammate {
+                agent_id: member.agent_id,
+                name: member.name,
+            });
+            return;
+        }
         self.open_row_action(crate::app::RowAction::ShutdownTeammate {
             agent_id: member.agent_id,
             name: member.name,

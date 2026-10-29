@@ -305,3 +305,126 @@ async fn test_agent_complete_accepts_summary_input() {
         Some("Implemented feature X, wrote 3 tests, updated docs"),
     );
 }
+
+// -- FR-042: tool descriptions state the rule the runtime enforces ----------
+
+/// The `team_task_complete` description must state the FR-001 ownership rule the
+/// runtime actually enforces (spec `teamssetup` FR-042).
+///
+/// The defect FR-042 answers is a *mismatch*: the previous description said only
+/// that a task "must be currently assigned to the caller", so a model could
+/// reasonably conclude that completing an unowned task would take ownership -
+/// which is exactly what the pre-fix runtime did, silently. The description now
+/// has to say that a refusal does not re-assign, name the two ways forward, and
+/// name every refusal token the metadata carries.
+#[test]
+fn test_team_task_complete_description_states_the_ownership_rule() {
+    let desc = description_for("team_task_complete");
+    let lower = desc.to_lowercase();
+    for (needle, why) in [
+        ("ownership rule", "must state that an ownership rule exists"),
+        (
+            "assigned agent",
+            "must name the two actors allowed to complete",
+        ),
+        ("lead", "must name the lead as the second allowed actor"),
+        (
+            "not re-assigned",
+            "must say a refusal does not hand the task over",
+        ),
+        (
+            "team_task_claim",
+            "must name the claim verb as a way forward",
+        ),
+        (
+            "team_assign_task",
+            "must name the assign verb as a way forward",
+        ),
+        ("pending", "must cover the unclaimed-task refusal"),
+        (
+            "no-op success",
+            "must state that re-completion is idempotent",
+        ),
+        ("not_owner", "must name the not_owner refusal token"),
+        ("not_claimed", "must name the not_claimed refusal token"),
+        (
+            "already_completed",
+            "must name the already_completed refusal token",
+        ),
+        (
+            "rejection_reason",
+            "must name the metadata field the token lands in",
+        ),
+    ] {
+        assert!(
+            lower.contains(needle),
+            "team_task_complete description must contain {needle:?} ({why}), got: {desc}"
+        );
+    }
+}
+
+/// The `team_cleanup` description must state the FR-022 liveness guard the tool
+/// enforces (spec `teamssetup` FR-042).
+///
+/// The guard is `blocks_teardown`, and the risk FR-042 answers is a model that
+/// believes it must shut every member down before cleanup can succeed. The
+/// parked statuses - `blocked` in particular, which the fix makes escapable -
+/// must be spelled out as non-blocking.
+#[test]
+fn test_team_cleanup_description_states_the_liveness_guard() {
+    let desc = description_for("team_cleanup");
+    let lower = desc.to_lowercase();
+    for (needle, why) in [
+        ("live or shutting down", "must define the blocking set"),
+        ("spawning", "must name every live status"),
+        ("working", "must name every live status"),
+        ("shutting_down", "must name every live status"),
+        ("idle", "must name the parked statuses that do not block"),
+        (
+            "plan_pending",
+            "must name the parked statuses that do not block",
+        ),
+        ("blocked", "must name the parked statuses that do not block"),
+        (
+            "suspended",
+            "must name the parked statuses that do not block",
+        ),
+        (
+            "stopped",
+            "must name the terminal statuses that do not block",
+        ),
+        (
+            "failed",
+            "must name the terminal statuses that do not block",
+        ),
+        ("force", "must name the only override"),
+        (
+            "/team cleanup",
+            "must say the guard is shared with the slash surface",
+        ),
+        (
+            "/team delete",
+            "must say the guard is shared with the delete surface",
+        ),
+    ] {
+        assert!(
+            lower.contains(needle),
+            "team_cleanup description must contain {needle:?} ({why}), got: {desc}"
+        );
+    }
+    // `force` must be optional, not a required parameter: the guard is the
+    // default behaviour, and a required override would offer no guard at all.
+    let schema = schema_for("team_cleanup");
+    let required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .expect("team_cleanup schema must declare a 'required' array")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        required,
+        vec!["team_name"],
+        "team_cleanup must require only `team_name`; `force` is the explicit override"
+    );
+}

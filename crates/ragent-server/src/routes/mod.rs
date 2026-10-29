@@ -989,6 +989,7 @@ async fn spawn_task(
                 &body.task,
                 body.model.as_deref(),
                 working_dir,
+                None,
             )
             .await
     } else {
@@ -999,6 +1000,7 @@ async fn spawn_task(
                 &body.task,
                 body.model.as_deref(),
                 working_dir,
+                None,
             )
             .await
             .map(|result| result.entry)

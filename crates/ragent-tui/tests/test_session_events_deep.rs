@@ -1184,6 +1184,7 @@ async fn subagent_start_registers_a_task() {
         agent: "explore".to_string(),
         task: "look around".to_string(),
         background: true,
+        detached: false,
     })
     .await;
     assert!(
@@ -1202,6 +1203,7 @@ async fn subagent_complete_marks_the_task_completed() {
         agent: "explore".to_string(),
         task: "look around".to_string(),
         background: true,
+        detached: false,
     })
     .await;
     app.handle_event(Event::SubagentComplete {

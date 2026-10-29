@@ -396,7 +396,12 @@ async fn test_the_dry_run_tool_section_is_built_from_the_registry_it_was_handed(
         .filter_map(|name| registry.get(name))
         .map(|tool| {
             let category = tool.permission_category();
-            category.split(':').next().unwrap_or(category).to_string()
+            // The section's family is the whole namespace (`agent:read` ->
+            // `agent`), or the category itself when it carries none.
+            match category.split_once(':') {
+                Some((namespace, _)) => namespace.to_string(),
+                None => category.to_string(),
+            }
         })
         .collect();
     for name in &row_names {

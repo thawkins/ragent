@@ -314,7 +314,7 @@ fn spawn_turn(
     let mgr = Arc::clone(mgr);
     let dir = dir.to_path_buf();
     tokio::spawn(async move {
-        mgr.spawn_sync("parent-session", "general", "task", None, &dir)
+        mgr.spawn_sync("parent-session", "general", "task", None, &dir, None)
             .await
     })
 }
@@ -576,4 +576,73 @@ async fn suspend_resume_transition_rules() {
     mgr.resume_task("live")
         .await
         .expect("resume of a running task is a no-op");
+}
+
+/// FR-030: suspending a background task does not free its limit slot.
+///
+/// Drives the real transition (`suspend_task`, not a seeded `Suspended` entry)
+/// and then reads all three surfaces that must agree: `running_background_count`,
+/// `limit_report` and the spawn refusal a caller actually sees. A suspended task
+/// keeps its wall-clock budget and can resume at any time, so the refusal must
+/// still name it among the occupying tasks and point at cancellation - not
+/// suspension - as the way to free a slot.
+#[tokio::test]
+async fn suspended_task_still_occupies_the_limit() {
+    use ragent_agent::tool::param_schema::reason_in;
+
+    let mgr = manager(1);
+    mgr.seed_completed_for_test(entry_full(
+        "bg-parked",
+        TaskStatus::Running,
+        "p",
+        true,
+        false,
+    ))
+    .await;
+    assert_eq!(mgr.running_background_count().await, 1);
+
+    // The real transition, so the flag and the entry status move together.
+    mgr.suspend_task("bg-parked")
+        .await
+        .expect("suspend a running background task");
+    assert_eq!(
+        mgr.get_task("bg-parked").await.map(|e| e.status),
+        Some(TaskStatus::Suspended),
+        "the entry must actually be suspended"
+    );
+
+    // Occupancy is unchanged by the suspension.
+    assert_eq!(
+        mgr.running_background_count().await,
+        1,
+        "a suspended task must keep occupying a slot (FR-030)"
+    );
+    let report = mgr.limit_report().await;
+    assert_eq!((report.limit, report.occupancy, report.headroom), (1, 1, 0));
+    assert_eq!(report.occupying_ids, vec!["bg-parked".to_string()]);
+
+    // The spawn refusal reads the same numbers and names the suspended task,
+    // with cancellation as the supported way to free the slot.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let err = mgr
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
+        .await
+        .expect_err("the limit must reject the spawn while a slot is suspended");
+    let message = err.to_string();
+    assert_eq!(reason_in(&message), Some("limit_reached"), "{message}");
+    assert!(
+        message.contains("bg-parked"),
+        "the suspended task must be named as occupying the slot: {message}"
+    );
+    assert!(
+        message.contains("suspending does not free a slot"),
+        "the refusal must point at cancellation, not suspension: {message}"
+    );
+
+    // Resuming returns the task to Running without changing occupancy.
+    mgr.resume_task("bg-parked")
+        .await
+        .expect("resume a suspended task");
+    let resumed = mgr.limit_report().await;
+    assert_eq!((resumed.occupancy, resumed.headroom), (1, 0));
 }

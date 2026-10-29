@@ -47,7 +47,7 @@ impl App {
 
     /// Poll the pending swarm decomposition result and, if ready, render the
     /// team summary (or surface an error) into the chat log.
-    pub(crate) fn poll_pending_swarm(&mut self) {
+    pub(crate) async fn poll_pending_swarm(&mut self) {
         let outcome = {
             let mut guard = recover_poisoned(self.swarm_result.lock(), "swarm_result");
             guard.take()
@@ -61,7 +61,7 @@ impl App {
                     .and_then(|s| s.default_agent_type.as_deref());
                 match team::parse_decomposition_with_default(&raw_json, default_agent_type) {
                     Ok(decomposition) => {
-                        self.execute_swarm_decomposition(decomposition);
+                        self.execute_swarm_decomposition(decomposition).await;
                     }
                     Err(msg) => {
                         self.report_swarm_failure("Decomposition Failed", &msg);
@@ -1340,6 +1340,7 @@ impl App {
                 ref agent,
                 ref task,
                 background,
+                detached,
                 ..
             } if self.is_current_or_descendant_session(session_id) => {
                 // Map the child session's short_sid to the task id for display.
@@ -1359,11 +1360,16 @@ impl App {
                     agent,
                     task,
                     background,
+                    detached,
                 );
                 if appended {
                     telemetry_counters::increment_subagent_spawns(1);
                     telemetry_counters::add_agents_active(1);
-                    let (icon, kind) = if background {
+                    // FR-020: the log line names the same three contracts the
+                    // painted type column derives from the registry entry.
+                    let (icon, kind) = if detached {
+                        ("[dt]", "Detached")
+                    } else if background {
                         ("[bg]", "Background")
                     } else {
                         ("[fg]", "Foreground")
@@ -1748,6 +1754,35 @@ impl App {
                     self.team_member_session_id_by_agent_id(agent_id),
                 );
             }
+            Event::TeammateStopped {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+                ref cause,
+            } if self.is_current_session(session_id) => {
+                // FR-017: the stop is published by the runtime's status writer,
+                // so the row follows a shutdown acked by the teammate, one
+                // forced by the lead, and a team cleanup.
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Stopped;
+                    m.current_task_id = None;
+                }
+                // M6-T1: record progress so the watchdog stops tracking this
+                // agent (a stopped member has no session left to fail).
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
+                }
+                self.push_log_for(
+                    LogLevel::Info,
+                    format!("[stop] [{team_name}] Teammate {agent_id} stopped ({cause})"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
+                );
+            }
             Event::TeammateSuspended {
                 ref session_id,
                 ref team_name,
@@ -1847,6 +1882,29 @@ impl App {
                 self.push_log_for(
                     LogLevel::Info,
                     format!("[ok] [{team_name}] {agent_id} completed task {task_id}"),
+                    None,
+                    self.team_member_session_id_by_agent_id(agent_id),
+                );
+            }
+            // FR-044: a completion the FR-001 ownership rule refused. The
+            // previous release silently re-assigned the task to whoever
+            // completed it, so this refusal is a deliberate tightening - show
+            // it in the log rather than letting it look like a lost turn.
+            Event::TeamTaskCompletionRejected {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+                ref task_id,
+                ref owner,
+                ref reason,
+                ref message,
+            } if self.is_current_session(session_id) => {
+                self.push_log_for(
+                    LogLevel::Warn,
+                    format!(
+                        "[rej] [{team_name}] {agent_id} could not complete task {task_id} \
+                         (owner: {owner}, {reason}): {message}"
+                    ),
                     None,
                     self.team_member_session_id_by_agent_id(agent_id),
                 );
@@ -2270,6 +2328,70 @@ impl App {
                         // (NFR-008).
                         tracing::warn!("failed to cancel background task {id}: {e}");
                     }
+                }
+            });
+        }
+    }
+
+    /// Request cancellation of sub-agent `task_id` through the task registry
+    /// (`AgentManager::cancel_agent`), the `/cancel` command's only path
+    /// (FR-023, FR-041).
+    ///
+    /// The row is deliberately **not** removed here: `cancel_agent` only sets
+    /// the task's cooperative cancel flag (`AgentManager::cancel_agent`), the
+    /// entry stays `running` until the agent loop observes the flag at its
+    /// next step boundary, and the Agents window repaints from the
+    /// `SubagentCancelled` event (or the registry reconciliation) when the
+    /// transition actually happens. Removing the row up front would be a
+    /// UI-local lie that the next reconcile pass undoes.
+    ///
+    /// The status line reports the *request*, not the outcome, for the same
+    /// reason. A delivery failure - the cancel flag no longer exists because
+    /// the task finished between the panel snapshot and this dispatch - is
+    /// reported in the log against the child session (NFR-008) and leaves the
+    /// row untouched for the reconcile pass to retire. Because the request is
+    /// fired on the async runtime the failure cannot rewrite the status line;
+    /// the message window and log carry it instead.
+    pub(crate) fn request_agent_cancel(
+        &mut self,
+        task_id: &str,
+        agent: &str,
+        child_session: String,
+    ) {
+        let short = short_id(task_id);
+        self.status = format!("Cancellation requested for {short} ({agent})");
+        self.push_log_for(
+            LogLevel::Info,
+            format!("[stop] Cancel requested for task {short} ({agent})"),
+            None,
+            Some(child_session),
+        );
+        self.append_assistant_text(&format!(
+            "From: /cancel {short}\n[wait] **Cancellation requested for `{short}` ({agent}).**\n\n\
+             The task keeps running until its agent loop reaches the next step boundary; the \
+             Agents window updates when it settles."
+        ));
+        self.needs_redraw = true;
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let tm = self.session_processor.agent_manager.get().cloned();
+            let id = task_id.to_string();
+            handle.spawn(async move {
+                match tm {
+                    Some(tm) => {
+                        if let Err(e) = tm.cancel_agent(&id).await {
+                            // The identifiers are embedded in the message (not
+                            // tracing fields) so the TUI tracing layer - which
+                            // forwards only the message field - shows them
+                            // (NFR-008).
+                            tracing::warn!(
+                                "failed to cancel agent task {id} ({}): {e}",
+                                short_id(&id)
+                            );
+                        }
+                    }
+                    None => tracing::warn!(
+                        "cancel requested for agent task {id} but no task registry is live"
+                    ),
                 }
             });
         }

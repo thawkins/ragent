@@ -2378,7 +2378,16 @@ fn render_yes_no_confirm(frame: &mut Frame, title: &str, selected: usize) -> Rec
     // Option order matches the index constants: `Yes` at 0, `No` at 1.
     let options = ["Yes", "No"];
 
-    let width = (title.chars().count() as u16 + 2).max(30);
+    // The footer states which option performs the action, which leaves it
+    // alone, and how to leave without answering, so `Enter` on the
+    // pre-selected `No` is never read as a silent no-op (spec `teamssetup`
+    // FR-028, FR-032).
+    const FOOTER: &str =
+        "Left/Right move * Enter on Yes performs * Enter on No cancels * Esc cancels";
+
+    let width = (title.chars().count() as u16 + 2)
+        .max(30)
+        .max(FOOTER.chars().count() as u16 + 2);
     let height = (options.len() as u16).saturating_add(5);
     let screen = frame.area();
     let area = centered_rect_fixed(width, height, screen);
@@ -2418,10 +2427,7 @@ fn render_yes_no_confirm(frame: &mut Frame, title: &str, selected: usize) -> Rec
         .collect();
 
     let footer = if inner.height > options.len() as u16 {
-        Line::from(Span::styled(
-            "<-/-> move * Enter select * Esc close",
-            Style::default().fg(Color::DarkGray),
-        ))
+        Line::from(Span::styled(FOOTER, Style::default().fg(Color::DarkGray)))
     } else {
         Line::default()
     };
@@ -2494,8 +2500,11 @@ fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
 /// click on `No`) dismiss it and leave the row untouched (FR-069).
 ///
 /// Layout (spec `agentui` PLAN "Confirmation modal shape"): the body line, a
-/// blank row, then the centred `[ Yes ]` / `[ No ]` button spans, a blank row
-/// and the key hint. The two painted button rectangles are cached on
+/// blank row, the centred `[ Yes ]` / `[ No ]` button spans, a blank row, then
+/// two footer lines from [`crate::app::ROW_ACTION_TOGGLE_HINT`] and
+/// [`crate::app::ROW_ACTION_OUTCOME_HINT`] naming the toggle keys and stating
+/// which option performs and which cancels (spec `teamssetup` FR-028, FR-032).
+/// The two painted button rectangles are cached on
 /// [`App::row_action_confirm_yes_area`] / [`App::row_action_confirm_no_area`]
 /// and the dialog itself on [`App::row_action_confirm_area`], so the mouse
 /// router can answer the dialog by clicking exactly the button it painted
@@ -2515,7 +2524,13 @@ fn render_row_action_confirm(frame: &mut Frame, app: &mut App) {
     const YES_LABEL: &str = "[ Yes ]";
     const NO_LABEL: &str = "[ No ]";
     const BUTTON_GAP: u16 = 8;
-    const INNER_ROWS: u16 = 5;
+    // Two footer lines (spec `teamssetup` FR-028, FR-032): the first names the
+    // toggle keys, the second which option performs and which cancels. They
+    // live in `state.rs` beside the dialog's own option indices so the wording
+    // and the key handling cannot drift apart.
+    let toggle_hint = crate::app::ROW_ACTION_TOGGLE_HINT;
+    let outcome_hint = crate::app::ROW_ACTION_OUTCOME_HINT;
+    const INNER_ROWS: u16 = 6;
     let yes_label_w = YES_LABEL.chars().count() as u16;
     let no_label_w = NO_LABEL.chars().count() as u16;
     let buttons_w = yes_label_w + BUTTON_GAP + no_label_w;
@@ -2523,6 +2538,8 @@ fn render_row_action_confirm(frame: &mut Frame, app: &mut App) {
     let width = (title.chars().count() as u16)
         .max(body_w.saturating_add(4))
         .max(buttons_w.saturating_add(4))
+        .max(toggle_hint.chars().count() as u16 + 2)
+        .max(outcome_hint.chars().count() as u16 + 2)
         .max(34);
     let height = INNER_ROWS + 2; // plus the top and bottom border rows
 
@@ -2591,19 +2608,29 @@ fn render_row_action_confirm(frame: &mut Frame, app: &mut App) {
     app.row_action_confirm_no_area =
         Rect::new(pair_x + yes_label_w + BUTTON_GAP, buttons_y, no_label_w, 1);
 
-    // The key hint sits on the inner row under the buttons; omitted when the
-    // dialog is too small to carry it.
-    let hint = if inner.height > 4 {
-        Line::from(Span::styled(
-            "<-/-> move * Enter select * Esc close",
-            Style::default().fg(Color::DarkGray),
-        ))
+    // The two hint lines sit on the inner rows under the buttons; omitted when
+    // the dialog is too small to carry them. They state that the selection must
+    // be toggled before `Enter` accepts and which option performs and which
+    // cancels, so `Enter` on the pre-selected `No` is never a silent no-op
+    // (spec `teamssetup` FR-028, FR-032).
+    let hint_style = Style::default().fg(Color::DarkGray);
+    let toggle_line = if inner.height > 4 {
+        Line::from(Span::styled(toggle_hint, hint_style))
+    } else {
+        Line::default()
+    };
+    let outcome_line = if inner.height > 5 {
+        Line::from(Span::styled(outcome_hint, hint_style))
     } else {
         Line::default()
     };
     frame.render_widget(
-        Paragraph::new(hint).alignment(Alignment::Center),
+        Paragraph::new(toggle_line).alignment(Alignment::Center),
         Rect::new(inner.x, inner.y.saturating_add(4), inner.width, 1),
+    );
+    frame.render_widget(
+        Paragraph::new(outcome_line).alignment(Alignment::Center),
+        Rect::new(inner.x, inner.y.saturating_add(5), inner.width, 1),
     );
 }
 
@@ -7763,9 +7790,16 @@ const WINDOW_LEGEND_ROWS: u16 = 1;
 const AGENTS_WINDOW_LEGEND: &str =
     "Up/Down select  PgUp/PgDn page  Space stop/resume  Del kill  Enter open  Esc close";
 
-/// The Teams window's FR-077 key legend (same bindings, `Del shut down`).
-const TEAMS_WINDOW_LEGEND: &str =
-    "Up/Down select  PgUp/PgDn page  Space stop/resume  Del shut down  Enter open  Esc close";
+/// The Teams window's FR-077 key legend.
+///
+/// `Del` carries two verbs, so the legend spells out the split the popup
+/// follows (spec `teamssetup` FR-029): a live member is shut down, a `Blocked`
+/// one is resumed. The trailing clause is the FR-028 toggle hint for the dialog
+/// every one of these verbs opens - `No` is pre-selected, so `Enter` alone
+/// cancels and the operator has to toggle the selection before `Enter` accepts.
+const TEAMS_WINDOW_LEGEND: &str = "Up/Down select  PgUp/PgDn page  Space stop/resume  \
+     Del shut down (blocked: resume)  Enter open  Esc close  \
+     | dialogs: toggle Yes/No first - Enter on No cancels";
 
 /// The computed rectangles of a bordered popup-window frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8629,21 +8663,10 @@ pub fn ensure_message_copy_lines(app: &mut App) {
 }
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
-    // Build title: show focused teammate or staged attachments in the block title.
-    let (title, title_style) = if let Some(ref focused_id) = app.focused_teammate {
-        let name = app
-            .team_members
-            .iter()
-            .find(|m| m.agent_id == *focused_id)
-            .map(|m| m.name.as_str())
-            .unwrap_or("?");
-        (
-            format!(" -> {name} (focused) "),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else if app.pending_attachments.is_empty() {
+    // Build title: show staged attachments in the block title. FR-058 (amended):
+    // teammate focus no longer redirects the input box, so the title never names
+    // a recipient - it stays ` Input ` and only attachments lengthen it.
+    let (title, title_style) = if app.pending_attachments.is_empty() {
         (
             " Input ".to_string(),
             Style::default()
@@ -8745,6 +8768,14 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     ("Alt+G", "Toggle GCF tool-result encoding"),
+    (
+        "Alt+A",
+        "Toggle the Agents window (same toggle as the Agents button)",
+    ),
+    (
+        "Alt+T",
+        "Toggle the Teams window (same toggle as the Teams button)",
+    ),
     ("Alt+X", "Stop the running agent (asks Are you sure?)"),
     // -- Sending ---------------------------------------------------------
     ("Enter", "Send message / confirm"),

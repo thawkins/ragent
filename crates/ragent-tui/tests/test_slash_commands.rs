@@ -4720,11 +4720,11 @@ async fn test_slash_spawn_unknown_agent_rejected() {
     app.execute_slash_command("/spawn no-such-agent-xyz do something")
         .await;
     assert_eq!(app.status, "spawn: unknown agent 'no-such-agent-xyz'");
-    // Nothing pending: the result slot must be free for the next /spawn.
-    let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
-    assert!(
-        guard.is_none(),
-        "rejected /spawn must not leave a pending slot"
+    // Nothing pending: the launch set must be free for the next /spawn (D3).
+    assert_eq!(
+        ragent_tui::pending_spawn_launches_for_tests(&app),
+        0,
+        "rejected /spawn must not register a launch"
     );
 }
 
@@ -4752,15 +4752,12 @@ async fn test_slash_spawn_builtin_agent_launches_detached() {
         "expected launch-in-progress or launched status, got {}",
         app.status
     );
-    // Whatever the outcome was, the slot must hold the in-flight marker
-    // (Err("")) or be cleared - never a stale real outcome.
-    let guard = app.spawn_result.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(v) = guard.as_ref() {
-        assert!(
-            v.as_ref().err().is_none_or(|m| m.is_empty()),
-            "slot must hold the in-flight marker or a real outcome"
-        );
-    }
+    // D3: the launch is registered on the shared launch set and released only
+    // when its outcome is drained - never left occupied by a stale marker.
+    assert!(
+        ragent_tui::pending_spawn_launches_for_tests(&app) <= 1,
+        "at most the one launch may be in flight"
+    );
 }
 
 /// The `/mcp` listing must include servers contributed by enabled plugins, not
@@ -4991,17 +4988,31 @@ async fn test_slash_mcp_list_prints_client_derived_status() {
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
-    // Scope both checks to the seeded `configured` row: `/mcp list` merges the
+    // Scope both checks to the seeded `configured` server: `/mcp list` merges the
     // `ragent.json` `mcp` section, so the developer's real global config may
     // contribute further servers (some legitimately disabled), and the assertion
     // is only that *this* entry's seeded `Disabled` state was replaced by the
     // client-derived `Connected` status.
+    //
+    // The status is read from the row's `Status` cell rather than the whole
+    // rendered row: a table whose server id, transport or endpoint fills its
+    // column wraps the row, so one server spans several lines of text.
     let configured_row = joined
         .lines()
         .find(|l| l.trim_start().starts_with("| configured"))
         .unwrap_or_else(|| panic!("the configured server must be listed: {joined}"));
+    // The status is read from the row *plus its continuation line*: `/mcp list`
+    // wraps a row whose cells are wider than their columns, which puts the
+    // status word on the line below the server id.
+    let status_word = joined
+        .split('\n')
+        .skip_while(|l| !l.trim_start().starts_with("| configured"))
+        .take(2)
+        .flat_map(|l| l.split('|'))
+        .map(str::trim)
+        .find(|cell| cell.contains("connected"));
     assert!(
-        configured_row.contains("connected"),
+        status_word.is_some(),
         "the list must show the client-derived connected status: {joined}"
     );
     assert!(
@@ -5403,14 +5414,26 @@ async fn test_slash_mcp_list_shows_tool_counts_not_tool_names() {
         .map(|m| m.text_content())
         .collect::<Vec<_>>()
         .join("\n");
+    // The tool count is read from the server's row *plus its continuation line*:
+    // `/mcp list` wraps a row whose cells are wider than their columns, and the
+    // count then sits on the line below the server id.
+    // The `Tools` heading wraps to `Too` / `ls` in a narrow table, so the header
+    // is recognised by its first column alone: only one table head starts with
+    // the `Server` column, and it is the one these assertions are about.
+    let header_has_tools = joined
+        .split('\n')
+        .any(|l| l.trim_start().starts_with("| Server"));
+    let configured_counts_two_tools = joined
+        .split('\n')
+        .skip_while(|l| !l.trim_start().starts_with("| configured"))
+        .take(2)
+        .any(|l| {
+            l.split('|')
+                .map(str::trim)
+                .any(|cell| cell.split_whitespace().collect::<String>() == "2")
+        });
     assert!(
-        joined
-            .lines()
-            .any(|l| l.trim_start().starts_with("| Server") && l.contains("Tools"))
-            && joined.lines().any(|l| {
-                let cells: Vec<&str> = l.split('|').map(str::trim).collect();
-                cells.len() == 8 && cells[6] == "2"
-            }),
+        header_has_tools && configured_counts_two_tools,
         "the list must report the tool count in a Tools column: {joined}"
     );
     assert!(

@@ -66,6 +66,11 @@ pub fn test_processor() -> Arc<SessionProcessor> {
 }
 
 /// Build a task entry with an arbitrary status, parent, and background flags.
+///
+/// `#[allow(dead_code)]`: this helper is `#[path]`-included by every test file
+/// that needs a task entry, so each inclusion is its own module and the files
+/// that only want [`manager`] would otherwise report it unused.
+#[allow(dead_code)]
 pub fn entry_full(
     id: &str,
     status: TaskStatus,
@@ -90,6 +95,7 @@ pub fn entry_full(
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

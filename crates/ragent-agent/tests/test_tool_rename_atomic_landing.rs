@@ -62,19 +62,26 @@ use ragent_agent::tool::rename::TOOL_RENAMES;
 /// baseline record together. **If you did not**, a failure here means the rename
 /// landed half-way - a tool was renamed out of the registry without being
 /// renamed back in, or an adapter registered a second copy.
-const FR030_TOTAL: usize = 149;
+///
+/// Recomputed for `team_task_cancel` (spec `teamssetup` T-012, FR-005): a
+/// legitimate addition, 149 -> 150 names, `team` 19 -> 20.
+const FR030_TOTAL: usize = 150;
 
 /// The two family counts T-041 records as the canary against a name-prefix count.
 ///
-/// `agent` holds 4 tools and `team` 19, not the 3 / 20 a count of the `team_*`
+/// `agent` holds 5 tools and `team` 20, not the 3 / 21 a count of the `team_*`
 /// *names* produces: `team_wait`'s `permission_category()` is `agent:spawn`, so
 /// it counts in the `agent` family despite its name. A landing check that read
-/// the family off the name prefix would report 3 / 20 and still pass a
+/// the family off the name prefix would report 3 / 21 and still pass a
 /// total-only comparison, which is why both numbers are pinned here (T-041
 /// §2.1, T-046 §4).
-const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 4), ("team", 19)];
+///
+/// Recomputed once for `specs/agentssetup` T-004 (FR-005): `list_agents` moved
+/// from `none` to `agent:read`, so `agent` grows 4 -> 5.
+const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 5), ("team", 20)];
 
-/// The family count T-041 records beside the total (21 families summing to 148).
+/// The number of `permission_category()` families beside the total (unchanged at
+/// 21 by `team_task_cancel`: it joins the existing `team` family).
 const FR030_FAMILY_COUNT: usize = 21;
 
 /// The three enumerations of one registry, as sorted name lists.
@@ -255,7 +262,14 @@ fn test_the_renamed_tools_keep_the_permission_family_they_had_before_the_rename(
     let mut family_counts: BTreeMap<String, usize> = BTreeMap::new();
     for tool in registry.all_tools() {
         let category = tool.permission_category();
-        let family = category.split(':').next().unwrap_or(category).to_string();
+        // The whole namespace is the family (`agent:read` -> `agent`); an
+        // unprefixed category is its own family (`plan` -> `plan`). Splitting
+        // unconditionally on the first `:` groups the unprefixed ones as the
+        // empty string, which no report calls a family.
+        let family = match category.split_once(':') {
+            Some((namespace, _)) => namespace.to_string(),
+            None => category.to_string(),
+        };
         *family_counts.entry(family).or_insert(0) += 1;
     }
 

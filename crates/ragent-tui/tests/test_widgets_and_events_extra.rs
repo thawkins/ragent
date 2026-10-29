@@ -1455,6 +1455,7 @@ async fn event_subagent_lifecycle_tracks_active_tasks() {
         agent: "explore".to_string(),
         task: "find things".to_string(),
         background: true,
+        detached: false,
     })
     .await;
     assert_eq!(app.active_tasks.len(), 1);

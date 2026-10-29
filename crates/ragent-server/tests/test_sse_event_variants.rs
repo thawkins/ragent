@@ -365,6 +365,42 @@ fn test_teammate_failed_suspended_resumed() {
 }
 
 #[test]
+fn test_teammate_status_changed() {
+    // Spec `teamssetup` FR-035: the complete status-transition record. The SSE
+    // payload must carry all four facts so a frontend can rebuild the history.
+    let (name, v) = parts(&Event::TeammateStatusChanged {
+        session_id: "s".into(),
+        team_name: "team".into(),
+        agent_id: "tm-1".into(),
+        from: "working".into(),
+        to: "idle".into(),
+        cause: "task_completed".into(),
+    });
+    assert_eq!(name, "teammate_status_changed");
+    assert_eq!(v["agent_id"], "tm-1");
+    assert_eq!(v["from"], "working");
+    assert_eq!(v["to"], "idle");
+    assert_eq!(v["cause"], "task_completed");
+}
+
+#[test]
+fn test_teammate_stopped() {
+    // Spec `teamssetup` FR-017: the stop is published by the runtime's status
+    // writer, so a remote consumer must see the terminal status and the reason
+    // it holds rather than discovering the stop from a vanished member.
+    let (name, v) = parts(&Event::TeammateStopped {
+        session_id: "s".into(),
+        team_name: "team".into(),
+        agent_id: "tm-1".into(),
+        cause: "shutdown_acked".into(),
+    });
+    assert_eq!(name, "teammate_stopped");
+    assert_eq!(v["agent_id"], "tm-1");
+    assert_eq!(v["cause"], "shutdown_acked");
+    assert_eq!(v["to"], "stopped");
+}
+
+#[test]
 fn test_teammate_p2p_message() {
     let (name, v) = parts(&Event::TeammateP2PMessage {
         session_id: "s".into(),

@@ -105,7 +105,7 @@ async fn test_bang_command_is_refused_while_processing() {
 }
 
 #[tokio::test]
-async fn test_teammate_targeted_message_is_refused_while_processing() {
+async fn test_focused_teammate_does_not_gate_a_send_while_processing() {
     let mut app = support::make_app();
     app.is_processing = true;
     app.focused_teammate = Some("teammate-1".to_string());
@@ -113,11 +113,14 @@ async fn test_teammate_targeted_message_is_refused_while_processing() {
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
 
+    // FR-058 (amended): focus no longer redirects the input box, so a focused
+    // teammate is not a reason to refuse a send - the message is queued for the
+    // lead session like any other.
     assert!(
-        action.is_none(),
-        "teammate-targeted messages keep their busy guard"
+        matches!(action, Some(InputAction::SendMessage(ref text)) if text == "hello teammate"),
+        "a focused teammate must not gate the send, got {action:?}"
     );
-    assert_eq!(app.status, "busy - wait for the current turn to finish");
+    assert_ne!(app.status, "busy - wait for the current turn to finish");
 }
 
 #[tokio::test]

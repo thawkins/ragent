@@ -33,6 +33,10 @@ pub use ragent_types::stderr_spool::Spool as StderrSpool;
 pub use app::App;
 #[doc(hidden)]
 pub use app::poll_spawn_result_for_tests;
+#[doc(hidden)]
+pub use app::{LaunchOrigin, register_spawn_launch_for_tests};
+#[doc(hidden)]
+pub use app::{pending_spawn_launches_for_tests, seed_spawn_outcome_for_tests};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -918,13 +922,13 @@ pub async fn run_tui(
             app.poll_context_snapshot_refresh();
 
             // Check for completed /swarm LLM decomposition results.
-            app.poll_pending_swarm();
+            app.poll_pending_swarm().await;
 
             // Check for completed /bench background runs.
             app.poll_pending_bench();
 
-            // Check for completed /spawn detached-launch registrations.
-            app.poll_spawn_result();
+            // Drain any completed shared sub-agent launch (D3).
+            app.poll_subagent_launch_results();
 
             // Reap spinner latches that outlived their staleness caps (dropped
             // `*Finished` events after a broadcast Lagged burst).
@@ -948,7 +952,7 @@ pub async fn run_tui(
             app.poll_swarm_unblock();
 
             // Check if active swarm has completed all tasks.
-            app.poll_swarm_completion();
+            app.poll_swarm_completion().await;
 
             // Fire any pending autopilot continuation.
             app.poll_autopilot_continue();

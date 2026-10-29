@@ -187,6 +187,16 @@ pub enum InputAction {
     ToggleEditLog,
     /// Toggle GCF tool-result encoding (Alt+G).
     ToggleGcf,
+    /// Toggle the Agents window (Alt+A) - spec `agentssetup` FR-022.
+    ///
+    /// Routed to the same [`App::toggle_agents_window`] the Agents button's
+    /// click calls, so the keyboard and the mouse share one visibility path.
+    ToggleAgentsWindow,
+    /// Toggle the Teams window (Alt+T) - spec `agentssetup` FR-045.
+    ///
+    /// Routed to the same [`App::toggle_teams_window`] the Teams button's
+    /// click calls, mirroring [`InputAction::ToggleAgentsWindow`].
+    ToggleTeamsWindow,
     /// Open the queue-control menu overlay (Alt+Q) - spec `inputqueue` FR-021.
     OpenQueueMenu,
     /// Scroll the research markdown viewer up.
@@ -1026,11 +1036,12 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // FR-002/FR-012: a plain message is accepted while the primary
             // agent is executing; the submit path queues it instead of
             // rejecting it. FR-017 (amended): slash commands are queued the
-            // same way; only bang commands and teammate-targeted messages keep
-            // their existing busy behaviour while a turn is running.
+            // same way; only bang commands keep their existing busy behaviour
+            // while a turn is running. FR-058 (amended): teammate focus no
+            // longer redirects the input box, so a focused teammate is not a
+            // reason to refuse a send.
             let is_bang = text.starts_with('!');
-            let teammate_targeted = app.focused_teammate.is_some();
-            if (is_bang || teammate_targeted) && app.is_input_blocked() {
+            if is_bang && app.is_input_blocked() {
                 app.status = "busy - wait for the current turn to finish".to_string();
                 return None;
             }
@@ -1130,6 +1141,27 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // buffer - NFR-002).
         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleGcf)
+        }
+        // Alt+A toggles the Agents window (spec `agentssetup` FR-022: the panel
+        // is openable from the keyboard alone). It resolves to an
+        // `InputAction`, not an inline mutation, so the dispatch arm can call
+        // the same `App::toggle_agents_window` the Agents button's click uses -
+        // one visibility path, not a keyboard-only lookalike. Placed before the
+        // generic char-insert arm so the `a` is never typed into the input
+        // buffer (NFR-002). ALT was otherwise unbound for `a`, so no other key
+        // behaviour changes (NFR-009).
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleAgentsWindow)
+        }
+        // Alt+T toggles the Teams window (spec `agentssetup` FR-045), the twin
+        // of the Alt+A arm above and resolved to an `InputAction` for the same
+        // reason: the dispatch arm calls the very `App::toggle_teams_window`
+        // the Teams button's click calls, so the keyboard and the mouse cannot
+        // drift apart. Placed before the generic char-insert arm so the `t` is
+        // never typed into the input buffer (NFR-002). ALT was otherwise
+        // unbound for `t`, so no other key behaviour changes (NFR-009).
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleTeamsWindow)
         }
         // Alt+X opens the stop-agent confirmation dialog (only while a turn
         // is running - placed before generic char-insert handling so the `x`

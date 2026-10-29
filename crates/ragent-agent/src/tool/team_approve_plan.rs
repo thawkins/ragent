@@ -86,6 +86,34 @@ impl Tool for TeamApprovePlanTool {
 
         let agent_id = super::team_message::resolve_agent_id(&team_dir, teammate)?;
 
+        // FR-032: a plan verdict is only meaningful for a member parked in
+        // `plan_pending`. Refusing here - with the member's real state and the
+        // action that produces a plan - keeps the tool from silently writing
+        // `plan_status` on a member that never submitted one, which is what the
+        // TUI surface already refuses before making the round trip.
+        {
+            let store = TeamStore::load(&team_dir)?;
+            let Some(member) = store.config.member_by_id(&agent_id) else {
+                return Err(anyhow::anyhow!(
+                    "cannot record a plan verdict for '{teammate}' (id: {agent_id}): it is not \
+                     a member of team '{team_name}'. Read the roster with `team_status`"
+                ));
+            };
+            if member.status != MemberStatus::PlanPending {
+                return Err(anyhow::anyhow!(
+                    "{} and has no plan awaiting a verdict in team '{team_name}'. A plan verdict \
+                     needs a {} teammate - the plan is submitted by the teammate itself with \
+                     `team_submit_plan`",
+                    crate::team::member_status_clause(
+                        &member.name,
+                        &member.agent_id,
+                        member.status
+                    ),
+                    MemberStatus::PlanPending.display_label()
+                ));
+            }
+        }
+
         // Update member plan_status and status.
         {
             let mut store = TeamStore::load(&team_dir)?;

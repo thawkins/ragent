@@ -37,8 +37,9 @@ pub use automation::{
 };
 pub use compaction::{CompactionConfig, CompactionModelRef, KeepConfig};
 pub use config::{
-    AcpAgentConfig, AcpConfig, AgentConfig, AgentPerfConfig, AutoExtractConfig, BackendConfig,
-    Capabilities, Config, Cost, CrossProjectConfig, DEFAULT_ERROR_RETRY_ALLOWANCE,
+    AcpAgentConfig, AcpConfig, AgentConfig, AgentPerfConfig, AgentsConfig, AutoExtractConfig,
+    BackendConfig, Capabilities, Config, Cost, CrossProjectConfig,
+    DEFAULT_AGENTS_COMPLETED_HISTORY, DEFAULT_AGENTS_MAX_LAUNCHING, DEFAULT_ERROR_RETRY_ALLOWANCE,
     DEFAULT_INPUT_QUEUE_CAPACITY, DEFAULT_LOOP_MAX_STEPS, ExecutionBackend, ExecutionBackendKind,
     GitLabIntegrationConfig, LoopConfig, McpServerConfig, McpTransport, MemoryConfig, ModelConfig,
     PieGapConfig, PriceEntry, ProviderConfig, ResearchConfig, ResearchEvaluateConfig,

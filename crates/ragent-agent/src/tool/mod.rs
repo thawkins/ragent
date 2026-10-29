@@ -52,6 +52,7 @@ pub mod team_shutdown_teammate;
 pub mod team_spawn;
 pub mod team_status;
 pub mod team_submit_plan;
+pub mod team_task_cancel;
 pub mod team_task_claim;
 pub mod team_task_complete;
 pub mod team_task_create;
@@ -102,6 +103,11 @@ pub mod cron;
 
 /// Metadata builder for consistent tool output metadata.
 pub mod metadata;
+
+/// Shared schema-property validation for tool inputs (spec `agentssetup`
+/// FR-004 / FR-038): a tool that declares a closed parameter set refuses a
+/// call carrying an undeclared key instead of ignoring it.
+pub mod param_schema;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -198,7 +204,181 @@ pub trait TeamManagerInterface: Send + Sync {
     /// pipeline; without it in the interface the gate cannot ask a
     /// type-erased manager, and a `downcast` to the concrete manager would make
     /// every test double have to be the real one.
+    ///
+    /// This is the narrow `PlanPending` question. FR-014's gate - which also
+    /// covers a teammate that never submitted a plan - asks
+    /// [`Self::is_plan_gate_active`].
     fn is_plan_pending(&self, agent_id: &str) -> bool;
+
+    /// Returns `true` when this teammate's write- and bash-class tool calls must
+    /// be refused for want of an approved plan (spec `teamssetup` FR-014).
+    ///
+    /// True when `TeamSettings.require_plan_approval` is set and the member's
+    /// `plan_status` is anything other than `Approved`. A manager that does not
+    /// model plan approval returns `false`: the gate is opt-in, so an
+    /// unimplemented setting must not stop every teammate from working.
+    fn is_plan_gate_active(&self, _agent_id: &str) -> bool {
+        false
+    }
+
+    /// Move one team member's status through the manager's single status
+    /// writer (spec `teamssetup` FR-008, FR-026).
+    ///
+    /// This is the only way a team tool may move a member: a tool holds an
+    /// `Arc<dyn TeamManagerInterface>`, so it can neither call
+    /// `TeamManager::set_member_status` directly nor write
+    /// `TeamMember::status` on disk without becoming the second status writer
+    /// FR-008 forbids.
+    ///
+    /// `team_dir` is the directory the caller resolved for its `team_name`; a
+    /// manager whose roster is a different team refuses rather than move the
+    /// wrong member.
+    ///
+    /// Returns the applied transition, or `Ok(None)` when the member already
+    /// holds `to` (re-asserting a status is not a transition).
+    ///
+    /// A move **to** `idle` also asks the manager's `auto_claim_tasks` setting
+    /// what "idle" means (FR-015): when the setting is on and a task is
+    /// claimable, the manager claims it and moves the member on to `working`
+    /// before this returns, so the caller observes `Some("working")` and knows
+    /// the member is not parked.
+    async fn set_member_status_in(
+        &self,
+        _team_dir: &std::path::Path,
+        _agent_id: &str,
+        _to: &str,
+        _cause: &str,
+    ) -> anyhow::Result<Option<String>> {
+        anyhow::bail!(
+            "this team manager cannot move member status; the runtime has no status writer"
+        )
+    }
+
+    /// Cancel one task through the manager's single cancellation implementation
+    /// (spec `teamssetup` FR-005, FR-025, FR-026).
+    ///
+    /// `team_task_cancel` is the lead's cancellation verb, and
+    /// `TeamManager::cancel_task` is the implementation behind it: the legal
+    /// transition, the lead-only actor check, and the mailbox notice to an
+    /// `InProgress` task's owner all live there, so the tool must reach that
+    /// function rather than cancel through a `TaskStore` of its own (which would
+    /// skip the notice and could diverge from the manager path - exactly the
+    /// FR-026 duplication `teamssetup` removes).
+    ///
+    /// The result is `(from_status, owner, notified)`: the status the task held
+    /// before the cancellation, the owner the task records (retained through the
+    /// cancel), and the teammate that was actually told, when one was. They
+    /// cross the trait as plain values because the trait is defined in a module
+    /// that must not depend on the team config types; the status is the
+    /// canonical snake_case token.
+    ///
+    /// `agent_id` is the caller: the manager refuses anyone but `"lead"`.
+    ///
+    /// # Errors
+    ///
+    /// The manager's refusal (a non-lead caller, an unknown task, or a task in a
+    /// terminal status), or the error of a cancellation that committed but could
+    /// not deliver its notice.
+    async fn cancel_task(
+        &self,
+        _task_id: &str,
+        _agent_id: &str,
+        _reason: Option<&str>,
+    ) -> anyhow::Result<(String, Option<String>, Option<String>)> {
+        anyhow::bail!("this team manager cannot cancel a task; the runtime has no cancellation")
+    }
+
+    /// Mark one task completed through the manager's single completion
+    /// implementation, returning the `TaskCompleted` hook's verdict (spec
+    /// `teamssetup` FR-018, FR-025, FR-026).
+    ///
+    /// FR-018 requires the hook's `Feedback` verdict to reach the agent that
+    /// completed the task as a tool result *regardless of which path completed
+    /// it*. The completion therefore has one runtime path -
+    /// `TeamManager::complete_task`, which runs the FR-001 ownership rule, the
+    /// D3 transition, the `TeamTaskCompleted` event and the `TaskCompleted` hook
+    /// - and this arm is how a tool reaches it. A tool that completed through a
+    /// `TaskStore` of its own would run a second, hook-firing implementation:
+    /// exactly the FR-025 duplication this spec removes.
+    ///
+    /// # Returns
+    ///
+    /// `(task_id, title, completed_at, feedback)` where `completed_at` is the
+    /// RFC 3339 timestamp of the completion (absent only for a list written
+    /// without one), and `feedback` is the hook's stdout when it vetoed the
+    /// completion, `None` when it allowed it or no `TaskCompleted` hook is
+    /// configured. The values cross the trait as plain data because the trait is
+    /// defined in a module that must not depend on the team config types.
+    ///
+    /// The verdict is returned even though the completion has already been
+    /// committed: FR-018 makes the task done and the verdict the caller's to
+    /// deliver, so a tool reports it rather than pretending the completion
+    /// failed.
+    ///
+    /// # Errors
+    ///
+    /// The completion's refusal (FR-001 ownership, an unknown task, or a task in
+    /// a terminal status), or a hook-lookup failure - which is reported after
+    /// the completion is persisted, so the task is never left half-done.
+    async fn complete_task_in(
+        &self,
+        _team_dir: &std::path::Path,
+        _task_id: &str,
+        _agent_id: &str,
+    ) -> anyhow::Result<(String, Option<String>, Option<String>, Option<String>)> {
+        anyhow::bail!(
+            "this team manager cannot complete a task; the runtime has no completion path"
+        )
+    }
+}
+
+/// Complete one task through the manager's single completion implementation and
+/// deliver the `TaskCompleted` hook's verdict to the caller (spec `teamssetup`
+/// FR-018).
+///
+/// `team_task_complete` is the completing agent's verb, and
+/// `TeamManager::complete_task` is the implementation behind it: the FR-001
+/// ownership rule, the legal transition, the `TeamTaskCompleted` event and the
+/// hook fire all live there, so the tool must reach that function rather than
+/// complete through a `TaskStore` of its own (FR-026).
+///
+/// A session with no manager falls back to [`TaskStore::complete`], the same
+/// in-list implementation the manager caches around, and reports the same tuple,
+/// so the verdict reaches the agent either way (FR-018).
+///
+/// # Returns
+///
+/// `(task_id, title, completed_at, feedback)` - see
+/// [`TeamManagerInterface::complete_task_in`]. `feedback` is the hook's veto
+/// text, which the caller must show; the task is still completed.
+///
+/// [`TaskStore::complete`]: crate::team::task::TaskStore::complete
+pub(crate) async fn complete_task_through_manager(
+    ctx: &ToolContext,
+    team_dir: &std::path::Path,
+    task_id: &str,
+    agent_id: &str,
+) -> anyhow::Result<(String, Option<String>, Option<String>, Option<String>)> {
+    if let Some(manager) = ctx.team_manager.as_ref() {
+        return manager.complete_task_in(team_dir, task_id, agent_id).await;
+    }
+    tracing::debug!(
+        task_id = %task_id,
+        "no TeamManager in context; completing through the task store"
+    );
+    let (task, outcome) = crate::team::TaskStore::open(team_dir)?
+        .complete(task_id, agent_id)
+        .await?;
+    let feedback = match outcome {
+        crate::team::HookOutcome::Feedback(feedback) => Some(feedback),
+        crate::team::HookOutcome::Allow => None,
+    };
+    Ok((
+        task.id,
+        Some(task.title),
+        task.completed_at.map(|t| t.to_rfc3339()),
+        feedback,
+    ))
 }
 
 /// Execution context passed to each tool invocation.
@@ -209,6 +389,44 @@ impl Default for ToolOutput {
             metadata: None,
         }
     }
+}
+
+/// Move one team member's status through the manager's single status writer
+/// (spec `teamssetup` FR-008, FR-026).
+///
+/// Every team tool that needs to move a member calls this instead of assigning
+/// `TeamMember::status` and saving `config.json` itself, so the transition table
+/// validates the move, the reason is recorded, and exactly one
+/// `TeammateStatusChanged` is published (FR-035). The status and cause cross the
+/// [`TeamManagerInterface`] boundary as the canonical snake_case tokens (see
+/// `MemberStatus::from_wire` / `TransitionCause::from_wire`), because the trait
+/// must not depend on `crate::team::config`.
+///
+/// `team_dir` is the directory the caller resolved for its `team_name`; the
+/// manager refuses when it is a different team, so a tool can never move a
+/// member of one team while believing it acts on another.
+///
+/// Returns the applied destination status token, or `Ok(None)` when the member
+/// already holds `to` (re-asserting a status is not a transition). A move to
+/// `idle` also applies the manager's `auto_claim_tasks` decision (FR-015), so the
+/// result is `Some("working")` when the runtime immediately claimed a task for
+/// the member.
+pub(crate) async fn set_member_status_through_manager(
+    ctx: &ToolContext,
+    team_dir: &std::path::Path,
+    agent_id: &str,
+    to: &str,
+    cause: &str,
+) -> anyhow::Result<Option<String>> {
+    let Some(manager) = ctx.team_manager.as_ref() else {
+        anyhow::bail!(
+            "no team manager is attached to this session, so {agent_id} cannot be moved to \
+             '{to}'; the runtime has no status writer to route the move through (FR-008)"
+        );
+    };
+    manager
+        .set_member_status_in(team_dir, agent_id, to, cause)
+        .await
 }
 
 /// Execution context passed to each tool invocation.
@@ -1529,8 +1747,18 @@ impl Default for ToolRegistry {
 /// Creates a [`ToolRegistry`] pre-populated with all built-in tools.
 ///
 /// Included tools: `read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob`, `list`,
-/// `AskUserQuestion`, `pdf_read`, `pdf_write`, `new_agent`, `cancel_agent`,
-/// `list_agents`.
+/// `AskUserQuestion`, `pdf_read`, `pdf_write`, and the sub-agent family -
+/// `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`.
+///
+/// The sub-agent family is named as a family rather than tool by tool because
+/// the four tools are one contract (spec `agentssetup` FR-001): `new_agent`
+/// selects the foreground, background or detached execution contract,
+/// `list_agents` observes the listed ones, `wait_agents` awaits the awaitable
+/// ones (a detached task is refused by name, FR-044), and `cancel_agent`
+/// requests cancellation while reporting the status the registry is actually
+/// in (FR-013). Listing three of the four was the drift recorded as SPEC.md
+/// G1; `tests/test_default_registry_doc_lists_the_family.rs` now asserts that
+/// every tool `create_default_registry` registers is named here.
 ///
 /// # Examples
 ///
@@ -1575,6 +1803,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_spawn::TeamSpawnTool));
     registry.register(Arc::new(team_status::TeamStatusTool));
     registry.register(Arc::new(team_submit_plan::TeamSubmitPlanTool));
+    registry.register(Arc::new(team_task_cancel::TeamTaskCancelTool));
     registry.register(Arc::new(team_task_claim::TeamTaskClaimTool));
     registry.register(Arc::new(team_task_complete::TeamTaskCompleteTool));
     registry.register(Arc::new(team_task_create::TeamTaskCreateTool));

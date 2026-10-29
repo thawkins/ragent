@@ -11,11 +11,12 @@ active team, and `team_name` is required by nearly every tool.
 | `team_message` | Direct message a teammate or lead. |
 | `team_broadcast` | Message all active teammates. |
 | `team_read_messages` | Check mailbox for unread messages. |
-| `team_status` | Team and task status summary. |
+| `team_status` | Team and task status summary: roster with each member's last five status transitions, undelivered mailbox messages, plans awaiting a verdict, and hook failures. |
 | `team_task_list` | List all team tasks. |
 | `team_task_create` | Lead adds a shared task. |
 | `team_task_claim` | Teammate claims the next available task. |
-| `team_task_complete` | Mark a claimed task done. |
+| `team_task_complete` | Mark a claimed task done (owner or lead only). |
+| `team_task_cancel` | Lead withdraws a `pending`/`in_progress` task. |
 | `team_assign_task` | Lead assigns a task to a teammate. |
 | `team_submit_plan` | Teammate submits a plan to the lead. |
 | `team_approve_plan` | Lead approves/rejects a plan. |
@@ -23,7 +24,7 @@ active team, and `team_name` is required by nearly every tool.
 | `team_idle` | Teammate signals no more work. |
 | `team_shutdown_teammate` | Lead requests teammate shutdown. |
 | `team_shutdown_ack` | Teammate acks shutdown and exits. |
-| `team_cleanup` | Lead tears down the team. |
+| `team_cleanup` | Lead tears down the team (refused while a member is live or shutting down, unless `force`). |
 | `team_memory_read` | Read team memory bucket. |
 | `team_memory_write` | Write team memory bucket. |
 
@@ -97,6 +98,28 @@ Team and task status summary.
 |----------|------|----------|-------------|
 | `team_name` | string | yes | Team name |
 
+The report carries more than a roster, because a lead's question is usually
+"why did this teammate stop?" rather than "which members exist":
+
+- **Per-member status history.** Each member row is followed by a
+  `Status history` block holding that member's last five transitions with
+  timestamps and causes, read from the team's append-only
+  `status-history.jsonl`. The event stream carries the same information while
+  someone is listening; the file is what makes the answer survive until the
+  question is asked.
+- **`Undelivered messages`.** A message still unread in a *terminated*
+  teammate's mailbox is stranded - no teammate will ever drain it - so it is
+  reported rather than left invisible.
+- **`Plans awaiting a verdict`.** A plan parked in `plan_pending`, with the
+  `team_approve_plan` call that resolves it.
+- **`Hook failures`.** Configured quality-gate hooks that could not run (a
+  refused command, a spawn failure, or the 30-second timeout), counted from
+  `hook-failures.jsonl`. A non-zero count means a gate is not working; an inert
+  hook never approved anything.
+
+The same facts appear in the result metadata (`pending_plans`,
+`hook_failure_count`), so a programmatic reader need not parse prose.
+
 ---
 
 ## team_task_list / team_task_create / team_task_claim / team_task_complete / team_assign_task
@@ -111,6 +134,31 @@ Team and task status summary.
 `team_task_claim` takes no extra arguments: the teammate claims the next
 available task from the shared list. `team_task_complete` takes
 `team_name` + `task_id` (not `summary`).
+
+**`team_task_complete` requires ownership.** A completion is accepted only from
+the task's assigned agent or the lead. A task assigned to another teammate is
+refused and is **not** re-assigned; the refusal names the current owner and the
+two ways forward (the lead assigns it with `team_assign_task`, or you claim it
+with `team_task_claim`). An unclaimed (`pending`) task is refused the same way,
+and re-completing an already-completed task is a no-op success for its owner or
+the lead, refused for anyone else. Every refusal reports
+`rejection_reason` (`not_owner`, `not_claimed`, `already_completed`) with the
+task's `owner`, and leaves the task list untouched.
+
+**`team_task_cancel` is lead-only.** It takes `team_name`, `task_id` and an
+optional `reason`, and is `team:manage` (the same family as assignment and
+cleanup). Only `pending` and `in_progress` tasks are cancellable - `completed`
+and `cancelled` are terminal, and the refusal names the status the task
+actually holds. The owner of an `in_progress` task is notified through its
+mailbox, and the task stays in the list with status `cancelled` rather than
+being deleted, so the team records that the work was dropped rather than done.
+
+**Dependencies are validated at write time.** Every write to `tasks.json`
+validates the whole list first: a `depends_on` id naming no task in the list, or
+an edge that would close a dependency cycle, is refused with the offending task
+and chain named (`refusing to write invalid <path>: ...`) and the file left
+byte-identical. A dangling dependency is not repaired and not silently
+rewritten - fix the edge and the write proceeds.
 
 ---
 

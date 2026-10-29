@@ -80,7 +80,7 @@ async fn cancel_agent_sets_the_flag_for_a_live_background_task() {
     let mgr = manager(4);
     let dir = tempfile::tempdir().expect("tempdir");
     let entry = mgr
-        .spawn_background("p", "explore", "do it", None, dir.path())
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
         .await
         .expect("spawn accepted");
 
@@ -94,7 +94,7 @@ async fn cancel_all_sets_flags_for_running_background_tasks() {
     let mgr = manager(4);
     let dir = tempfile::tempdir().expect("tempdir");
     let _entry = mgr
-        .spawn_background("p", "explore", "do it", None, dir.path())
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
         .await
         .expect("spawn accepted");
 
@@ -108,7 +108,7 @@ async fn spawn_detached_marks_the_entry_and_arms_the_pending_flag() {
     let mgr = manager(4);
     let dir = tempfile::tempdir().expect("tempdir");
     let entry = mgr
-        .spawn_detached("p", "explore", "fire and forget", None, dir.path())
+        .spawn_detached("p", "explore", "fire and forget", None, dir.path(), None)
         .await
         .expect("detached spawn accepted");
     assert!(entry.background, "detached tasks run in the background");
@@ -660,8 +660,8 @@ fn spec_section_cache_store_get_invalidate_and_mismatch() {
 // team/manager.rs: task-list cache + task mutation branches
 // ===========================================================================
 
-#[test]
-fn manager_task_list_cache_hit_and_external_invalidation() {
+#[tokio::test]
+async fn manager_task_list_cache_hit_and_external_invalidation() {
     use ragent_agent::team::{Task, TaskStore};
     let (manager, _tmp, _bus) = team_manager("tlc-team", "lead-1", true);
 
@@ -674,39 +674,61 @@ fn manager_task_list_cache_hit_and_external_invalidation() {
 
     // An external writer bypasses the cache; the mtime advance forces a reload.
     let ts = TaskStore::open(&manager.team_dir).expect("task store");
-    ts.add_task(Task::new("task-001", "external")).expect("add");
+    ts.add_task(Task::new("task-001", "external"))
+        .await
+        .expect("add");
     let reloaded = manager.task_list().expect("reloaded list");
     assert_eq!(reloaded.tasks.len(), 1);
 }
 
-#[test]
-fn manager_claim_next_with_no_claimable_task_returns_none() {
+#[tokio::test]
+async fn manager_claim_next_with_no_claimable_task_returns_none() {
     let (manager, _tmp, _bus) = team_manager("empty-claim", "lead-1", true);
-    let (claimed, already_had) = manager.claim_next_task("tm-001").expect("claim");
+    let (claimed, already_had) = manager.claim_next_task("tm-001").await.expect("claim");
     assert!(claimed.is_none());
     assert!(!already_had);
 }
 
-#[test]
-fn manager_complete_task_auto_assigns_an_unowned_pending_task() {
+/// T-008 / FR-001: the deleted auto-claim branch. The previous release let
+/// `complete_task` claim an unowned `Pending` task for whoever completed it;
+/// that is now refused, because completing is not claiming.
+#[tokio::test]
+async fn manager_complete_task_refuses_an_unowned_pending_task() {
     use ragent_agent::team::Task;
     let (manager, _tmp, _bus) = team_manager("auto-complete", "lead-1", true);
     manager
         .apply_to_task_list(|list| list.tasks.push(Task::new("task-001", "unowned")))
         .expect("seed");
 
-    // The task is Pending with no assignee; `complete_task` claims it for the
-    // agent and marks it completed.
-    let done = manager
+    let err = manager
         .complete_task("task-001", "tm-001")
-        .expect("complete");
-    assert_eq!(done.status, ragent_agent::team::TaskStatus::Completed);
-    assert_eq!(done.assigned_to.as_deref(), Some("tm-001"));
-    assert_eq!(done.completed_by.as_deref(), Some("tm-001"));
+        .await
+        .expect_err("an unowned task cannot be completed");
+    assert!(
+        err.to_string()
+            .contains("it is unassigned, and completing is not claiming"),
+        "err: {err}"
+    );
+
+    // Nothing was claimed, completed, or re-stamped.
+    let store = ragent_agent::team::TaskStore::open(&manager.team_dir).expect("open");
+    let list = store.read().expect("read");
+    let task = list
+        .tasks
+        .iter()
+        .find(|t| t.id == "task-001")
+        .expect("task present");
+    assert_eq!(task.status, ragent_agent::team::TaskStatus::Pending);
+    assert!(task.assigned_to.is_none(), "no implicit claim");
+    assert!(task.completed_by.is_none(), "no completion stamp");
 }
 
-#[test]
-fn manager_complete_task_owned_by_another_agent_completes_without_reassigning() {
+/// T-008 / FR-001: `TeamManager::complete_task` enforces the same ownership rule
+/// as `TaskStore::complete`. The previous release let the manager path complete
+/// another teammate's task while the store path refused it - the divergence
+/// FR-025 forbids and F-02 records.
+#[tokio::test]
+async fn manager_complete_task_rejects_another_agents_task() {
     use ragent_agent::team::{Task, TaskStatus};
     let (manager, _tmp, _bus) = team_manager("owned-complete", "lead-1", true);
     manager
@@ -718,20 +740,35 @@ fn manager_complete_task_owned_by_another_agent_completes_without_reassigning() 
         })
         .expect("seed");
 
-    // `TeamManager::complete_task` (unlike the stricter `TaskStore::complete`)
-    // marks the task completed even though it is owned by tm-002, but the inner
-    // guard skips the re-assignment because the status is not Pending and an
-    // assignee is already present.
-    let done = manager
+    let err = manager
         .complete_task("task-001", "tm-001")
-        .expect("complete");
-    assert_eq!(done.status, TaskStatus::Completed);
-    assert_eq!(
-        done.assigned_to.as_deref(),
-        Some("tm-002"),
-        "the original owner is left in place"
+        .await
+        .expect_err("tm-001 does not own the task");
+    assert!(
+        err.to_string()
+            .contains("cannot be completed by tm-001: it is assigned to tm-002"),
+        "the refusal must name the current owner: {err}"
     );
-    assert_eq!(done.completed_by.as_deref(), Some("tm-001"));
+
+    // The owner is untouched, and the task is still in progress.
+    let store = ragent_agent::team::TaskStore::open(&manager.team_dir).expect("open");
+    let list = store.read().expect("read");
+    let task = list
+        .tasks
+        .iter()
+        .find(|t| t.id == "task-001")
+        .expect("task present");
+    assert_eq!(task.status, TaskStatus::InProgress);
+    assert_eq!(task.assigned_to.as_deref(), Some("tm-002"));
+    assert!(task.completed_by.is_none(), "no completion stamp");
+
+    // The lead may complete on the owner's behalf (FR-001 exemption).
+    let (done, _hook) = manager
+        .complete_task("task-001", "lead")
+        .await
+        .expect("lead completes on the owner's behalf");
+    assert_eq!(done.status, TaskStatus::Completed);
+    assert_eq!(done.completed_by.as_deref(), Some("lead"));
 }
 
 #[test]
@@ -743,50 +780,65 @@ fn adopt_orphaned_tasks_errors_on_a_missing_team_dir() {
     assert_ne!(err.to_string(), "");
 }
 
-#[test]
-fn adopt_orphaned_tasks_leaves_tasks_owned_by_others_untouched() {
-    use ragent_agent::team::{Task, TaskStatus, TaskStore};
+#[tokio::test]
+async fn adopt_orphaned_tasks_resets_every_in_progress_task_regardless_of_owner() {
+    use ragent_agent::team::{Task, TaskStatus};
+    // FR-024: adoption is symmetric. A task left `InProgress` by a departed
+    // teammate is as orphaned as one left by the previous lead, so ownership is
+    // deliberately *not* consulted - only the status is. This pins that rule
+    // (the source docblock on `adopt_orphaned_tasks` states it, and F-21 in the
+    // spec records the asymmetric behaviour it replaced).
     let dir = tempfile::tempdir().expect("tempdir");
-    let ts = TaskStore::open(dir.path()).expect("task store");
-    // One task owned by another agent, one already completed.
-    let mut other = Task::new("task-other", "someone else");
-    other.status = TaskStatus::InProgress;
-    other.assigned_to = Some("tm-009".to_string());
-    ts.add_task(other).expect("add");
+    std::fs::create_dir_all(dir.path().join(".ragent")).expect("create .ragent");
+    let store = ragent_agent::team::TeamStore::create("adopt-guard", "lead", dir.path(), true)
+        .expect("create team");
+    let ts = store.task_store().expect("task store");
+
+    // One task held by a teammate, one by the old lead, one already completed.
+    let mut teammate = Task::new("task-teammate", "teammate's work");
+    teammate.status = TaskStatus::InProgress;
+    teammate.assigned_to = Some("tm-009".to_string());
+    ts.add_task(teammate).await.expect("add");
+    let mut lead_task = Task::new("task-lead", "lead's work");
+    lead_task.status = TaskStatus::InProgress;
+    lead_task.assigned_to = Some("lead".to_string());
+    ts.add_task(lead_task).await.expect("add");
     let mut done = Task::new("task-done", "finished");
     done.status = TaskStatus::Completed;
-    ts.add_task(done).expect("add");
+    ts.add_task(done).await.expect("add");
 
-    ragent_agent::team::manager::TeamManager::adopt_orphaned_tasks(dir.path(), "lead")
-        .expect("adopt is a no-op for foreign tasks");
-
-    let list = ts.read().expect("read");
-    let keep = list
-        .tasks
-        .iter()
-        .find(|t| t.id == "task-other")
-        .expect("present");
+    let reset = ragent_agent::team::manager::TeamManager::adopt_orphaned_tasks(&store.dir, "lead")
+        .expect("adopt");
+    let mut reset_sorted = reset.clone();
+    reset_sorted.sort();
     assert_eq!(
-        keep.status,
-        TaskStatus::InProgress,
-        "a task owned by a teammate must not be reassigned"
+        reset_sorted,
+        vec!["task-lead".to_string(), "task-teammate".to_string()],
+        "both InProgress tasks are orphaned, whatever their owner"
     );
 
-    // Sanity: the same call DOES reassign a task owned by the departing lead.
-    let mut orphan = Task::new("task-orphan", "lead's work");
-    orphan.status = TaskStatus::InProgress;
-    orphan.assigned_to = Some("lead".to_string());
-    ts.add_task(orphan).expect("add");
-    ragent_agent::team::manager::TeamManager::adopt_orphaned_tasks(dir.path(), "lead")
-        .expect("adopt");
     let list = ts.read().expect("read");
-    let adopted = list
+    for id in ["task-teammate", "task-lead"] {
+        let task = list.tasks.iter().find(|t| t.id == id).expect("present");
+        assert_eq!(
+            task.status,
+            TaskStatus::Pending,
+            "{id} must be reset to Pending"
+        );
+        assert!(
+            task.assigned_to.is_none(),
+            "{id} must be released so any agent can claim it"
+        );
+        assert!(task.claimed_at.is_none(), "{id} must drop its claim stamp");
+    }
+
+    // A terminal task is not InProgress, so adoption leaves it alone.
+    let still_done = list
         .tasks
         .iter()
-        .find(|t| t.id == "task-orphan")
+        .find(|t| t.id == "task-done")
         .expect("present");
-    assert_eq!(adopted.status, TaskStatus::Pending);
-    assert!(adopted.assigned_to.is_none());
+    assert_eq!(still_done.status, TaskStatus::Completed);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::sync::{Arc, LockResult, MutexGuard};
 
 use ratatui::layout::Rect;
 
-use ragent_agent::team::TeamStore;
+use ragent_agent::team::{Mailbox, MessageType, TeamStore};
 use ragent_agent::{
     event::Event,
     mcp::discovery::DiscoveredMcpServer,
@@ -4158,7 +4158,12 @@ impl App {
     /// Called from the Teams subpanel render (`layout_teams::render_teams_subpanel`)
     /// so a freshly-opened team reflects on-disk state before the event
     /// handlers have had a chance to fire.
-    pub(crate) fn refresh_team_member_session_ids(&mut self) {
+    ///
+    /// Also recounts the message counters from the mailbox files - see
+    /// [`App::recount_team_messages`]. Exposed `pub` for the consolidated test
+    /// target; not part of the crate's public API surface.
+    #[doc(hidden)]
+    pub fn refresh_team_member_session_ids(&mut self) {
         let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
         };
@@ -4196,6 +4201,75 @@ impl App {
                     .entry(short_sid)
                     .or_insert_with(|| member.name.clone());
             }
+        }
+
+        // FR-052: the mailbox files are the source of truth for the
+        // sent/received counters. They are drained by whichever process reads
+        // them (the teammate's own `team_read_messages`, the manager's poll
+        // loop, a server-side reader), so an event-driven counter misses
+        // nearly every message in a running team and the Teams panel paints
+        // `-` for all of them. Read every mailbox once per frame and recount.
+        self.recount_team_messages(&store);
+    }
+
+    /// Recount `team_message_counts` from the team's mailbox files.
+    ///
+    /// `sent` is the number of messages a member wrote and `recv` the number it
+    /// was sent, both taken over the whole on-disk mailbox set rather than from
+    /// live events: a mailbox is drained by every reader (the teammate's own
+    /// `team_read_messages`, the manager poll loop), so counting deliveries
+    /// from events leaves the counters at zero. The pair is a superset of what
+    /// the event handlers accumulate - an event never precedes the file write
+    /// that carries it - so the maximum of the two is kept and a counter can
+    /// only ever climb, never blink back to zero between a write and the next
+    /// event.
+    ///
+    /// The lead is a mailbox holder like any other, so its own sent/received
+    /// totals are counted from the same files. Mailbox messages that are not
+    /// agent-to-agent traffic - `IdleNotify` and `ShutdownAck` control
+    /// messages - are excluded, matching the event rule that only reports real
+    /// messages in the panel.
+    fn recount_team_messages(&mut self, store: &TeamStore) {
+        let mut totals: std::collections::HashMap<String, (u32, u32)> =
+            std::collections::HashMap::new();
+        let Ok(entries) = std::fs::read_dir(store.dir.join("mailbox")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(agent_id) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(mailbox) = Mailbox::open(&store.dir, agent_id) else {
+                continue;
+            };
+            let Ok(messages) = mailbox.read_all() else {
+                continue;
+            };
+            for msg in messages {
+                if matches!(
+                    msg.message_type,
+                    MessageType::IdleNotify | MessageType::ShutdownAck
+                ) {
+                    continue;
+                }
+                if !msg.from.is_empty() {
+                    let counts = totals.entry(msg.from.clone()).or_insert((0, 0));
+                    counts.0 = counts.0.saturating_add(1);
+                }
+                if !msg.to.is_empty() {
+                    let counts = totals.entry(msg.to.clone()).or_insert((0, 0));
+                    counts.1 = counts.1.saturating_add(1);
+                }
+            }
+        }
+        for (agent_id, (sent, recv)) in totals {
+            let slot = self.team_message_counts.entry(agent_id).or_insert((0, 0));
+            slot.0 = slot.0.max(sent);
+            slot.1 = slot.1.max(recv);
         }
     }
 

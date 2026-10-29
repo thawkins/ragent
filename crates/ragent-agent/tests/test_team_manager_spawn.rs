@@ -68,7 +68,9 @@ fn live_team_manager(
     drop(store);
 
     let processor = manager_support::stub_processor(bus.clone());
-    let manager = Arc::new(TeamManager::new(
+    // FR-008: the spawn loop records member status through the manager, so the
+    // manager must carry the self handle `into_arc` installs.
+    let manager = TeamManager::into_arc(TeamManager::new(
         team_name,
         lead_session,
         team_dir,

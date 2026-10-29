@@ -159,9 +159,10 @@ carry into the plan stage.
   A4's structural exclusion, a suspend/resume/kill request that would name the
   primary agent or the lead is refused (FR-067), and an action key pressed with no
   valid cursor row is a consumed no-op.
-- **A6 - Focus is a route, not a highlight.** `focused_teammate` changes two behaviours
-  beyond the highlight: `Enter` on a non-empty input sends to that teammate's mailbox,
-  and the input border title changes to `-> <name> (focused)`.
+- **A6 - Focus is a view, not a route.** `focused_teammate` selects which teammate's
+  output view is open and which strip pill and Teams row are highlighted; it does not
+  change the input box's destination. `Enter` always addresses the lead session
+  (FR-058), and a teammate is reached only through `/team message <name> <text>`.
 - **A7 - Keyboard-first, mouse second.** Every row action has a keyboard binding
   (`Space`, `Del`, `Enter`, arrows, PgUp/PgDn), and `Esc` dismisses an open window; the
   mouse retains only the surfaces
@@ -189,7 +190,7 @@ carry into the plan stage.
 | **Row action controls**  | The `[stop]` / `>` suspend-resume glyph and the `[x]` kill glyph painted at the right edge of a live row. They are status indicators; the actions are driven by the keyboard cursor (FR-035, FR-036, FR-040, FR-076). |
 | **Block cursor**         | The full-width reversed-colour band over the keyboard-selected row; an ordinal into the window's ordered row-identifier vector (A3).                                                                       |
 | **Cursor row map**       | The ordered identifier vector (`agents_subagent_task_ids`, `teams_teammate_agent_ids`) the renderer publishes each frame; keyboard actions resolve the cursor ordinal against it (A3, NFR-011).             |
-| **Focused teammate**       | The teammate named by `App::focused_teammate`; receives routed input (A6).                                                                                                                             |
+| **Focused teammate**       | The teammate named by `App::focused_teammate`; opens its output view and highlights its strip pill and Teams row. It does not receive input (A6, FR-058).                                           |
 | **Terminal status**        | For a task: `Completed`, `Failed`, or `Cancelled`. For a member: `ShuttingDown`, `Stopped`, or `Failed`.                                                                                     |
 | **Strip**                  | The single-row teammate pill bar rendered directly below the status bar.                                                                                                                                 |
 | **Glyph set**              | The fixed structural and status characters the panel paints (tree connectors, the `*` primary/lead marker, the `>` focus marker, and the status icons), declared once per renderer module (NFR-003). |
@@ -508,9 +509,9 @@ The retired per-button hit-rect shift no longer exists: only the window buttons 
 
 `While a side panel other than the log panel occupies the side column, and while no chat side column exists, the ragent TUI shall reset the active-agents area and the teams area to an empty rectangle so no hidden surface can receive input.`
 
-### FR-058 - Focused teammate routes input
+### FR-058 - A focused teammate does not redirect the input
 
-`While a teammate is focused, the ragent TUI shall title the input border " -> <name> (focused) " in bold yellow and shall deliver a submitted message to that teammate's mailbox instead of the lead session.`
+`While a teammate is focused, the ragent TUI shall keep the input border title " Input " and shall deliver a submitted message to the lead session, exactly as with no teammate focused; a message reaches a teammate only through "/team message <name> <text>".`
 
 ### FR-059 - Scrollbar for a long list
 

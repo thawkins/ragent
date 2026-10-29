@@ -425,7 +425,9 @@ async fn cancel_help_and_missing_prefix() {
     assert!(app.status.contains("Please provide a task ID prefix"));
 
     app.execute_slash_command("/cancel nosuchtask").await;
-    assert!(app.status.contains("No task found with ID starting with"));
+    // FR-041: the unmatched-prefix report names the prefix it matched nothing
+    // for (`test_cancel_slash.rs` pins the wording).
+    assert!(app.status.contains("No task matching 'nosuchtask'"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

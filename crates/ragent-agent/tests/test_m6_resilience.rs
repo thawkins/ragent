@@ -74,16 +74,19 @@ async fn test_adopt_orphaned_tasks_reassigns_in_progress_for_old_lead() {
     let task_store = TaskStore::open(&team_dir).expect("open task store");
     let mut t1 = Task::new("task-001", "Lead work");
     t1.status = TaskStatus::InProgress;
-    t1.assigned_to = Some("old-lead".to_string());
-    task_store.add_task(t1).expect("add t1");
+    // FR-038 validates every write, so the owner has to be a plausible agent ID
+    // (`lead` or `tm-NNN`). The lead's *tasks* are owned by `lead`; the lead's
+    // session id only identifies the session being adopted from.
+    t1.assigned_to = Some("lead".to_string());
+    task_store.add_task(t1).await.expect("add t1");
 
     let mut t2 = Task::new("task-002", "Teammate work");
     t2.status = TaskStatus::InProgress;
     t2.assigned_to = Some("tm-001".to_string());
-    task_store.add_task(t2).expect("add t2");
+    task_store.add_task(t2).await.expect("add t2");
 
     let t3 = Task::new("task-003", "Pending work");
-    task_store.add_task(t3).expect("add t3");
+    task_store.add_task(t3).await.expect("add t3");
     drop(task_store);
 
     // Adopt orphaned tasks for the old lead.
@@ -97,10 +100,12 @@ async fn test_adopt_orphaned_tasks_reassigns_in_progress_for_old_lead() {
     assert_eq!(t1.status, TaskStatus::Pending);
     assert!(t1.assigned_to.is_none());
 
-    // Teammate's task should be untouched.
+    // FR-024 makes adoption symmetric: a task left `InProgress` by a departed
+    // teammate is as orphaned as one left by the previous lead, so it is reset
+    // too. Before T-029 only the old lead's task moved.
     let t2 = list.tasks.iter().find(|t| t.id == "task-002").unwrap();
-    assert_eq!(t2.status, TaskStatus::InProgress);
-    assert_eq!(t2.assigned_to.as_deref(), Some("tm-001"));
+    assert_eq!(t2.status, TaskStatus::Pending);
+    assert!(t2.assigned_to.is_none());
 
     // Pending task should be untouched.
     let t3 = list.tasks.iter().find(|t| t.id == "task-003").unwrap();
@@ -117,19 +122,28 @@ async fn test_complete_idempotent_same_agent() {
 
     let task_store = TaskStore::open(&team_dir).expect("open");
     let task = Task::new("task-001", "Test task");
-    task_store.add_task(task).expect("add");
+    task_store.add_task(task).await.expect("add");
     // Claim and complete by tm-001.
     task_store
         .claim_specific("task-001", "tm-001")
+        .await
         .expect("claim");
-    task_store.complete("task-001", "tm-001").expect("complete");
+    task_store
+        .complete("task-001", "tm-001")
+        .await
+        .expect("complete");
 
     // Same agent completes again - should be a no-op success.
-    let result = task_store.complete("task-001", "tm-001");
+    let result = task_store.complete("task-001", "tm-001").await;
     assert!(result.is_ok(), "same agent re-completion should succeed");
-    let task = result.unwrap();
+    let (task, hook) = result.unwrap();
     assert_eq!(task.status, TaskStatus::Completed);
     assert_eq!(task.completed_by.as_deref(), Some("tm-001"));
+    assert_eq!(
+        hook,
+        ragent_agent::team::HookOutcome::Allow,
+        "no hook configured"
+    );
 }
 
 #[tokio::test]
@@ -141,19 +155,27 @@ async fn test_complete_rejects_different_agent() {
     let task_store = TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "Test task"))
+        .await
         .expect("add");
     task_store
         .claim_specific("task-001", "tm-001")
+        .await
         .expect("claim");
-    task_store.complete("task-001", "tm-001").expect("complete");
+    task_store
+        .complete("task-001", "tm-001")
+        .await
+        .expect("complete");
 
-    // Different agent tries to complete - should be rejected.
+    // Different agent tries to complete - the FR-001 ownership rule refuses it,
+    // naming the owner, rather than the "already completed by" wording (the
+    // ownership check runs first because it is the stronger claim).
     let err = task_store
         .complete("task-001", "tm-002")
+        .await
         .expect_err("different agent should be rejected");
     assert!(
-        format!("{err}").contains("already completed by"),
-        "expected already-completed error, got: {err}"
+        format!("{err}").contains("cannot be completed by tm-002: it is assigned to tm-001"),
+        "expected ownership refusal naming the owner, got: {err}"
     );
 }
 
@@ -166,17 +188,20 @@ async fn test_claim_idempotent_same_agent() {
     let task_store = TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "Test task"))
+        .await
         .expect("add");
 
     // First claim succeeds.
     let t1 = task_store
         .claim_specific("task-001", "tm-001")
+        .await
         .expect("claim 1");
     assert_eq!(t1.status, TaskStatus::InProgress);
 
     // Same agent claims again - should be a no-op success.
     let t2 = task_store
         .claim_specific("task-001", "tm-001")
+        .await
         .expect("claim 2");
     assert_eq!(t2.status, TaskStatus::InProgress);
     assert_eq!(t2.assigned_to.as_deref(), Some("tm-001"));

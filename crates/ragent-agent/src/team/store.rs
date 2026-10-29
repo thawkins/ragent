@@ -17,6 +17,7 @@ use fs2::FileExt as _;
 
 use crate::team::config::{TeamConfig, TeamMember};
 use crate::team::mailbox::Mailbox;
+use crate::team::manager::HookOutcome;
 use crate::team::task::{Task, TaskList, TaskStore};
 
 // -- Directory discovery -------------------------------------------------------
@@ -432,14 +433,19 @@ impl TeamStore {
     }
 
     /// Add a task to the task store and create an empty `TaskList` file if needed.
-    pub fn add_task(&self, task: Task) -> Result<()> {
+    ///
+    /// Returns the `TaskCreated` hook's outcome: the hook fires from
+    /// [`TaskStore::add_task`], so every route that adds a task - the
+    /// `team_task_create` tool and the `team_create` seed path alike - runs the
+    /// same gate (spec `teamssetup` FR-017).
+    pub async fn add_task(&self, task: Task) -> Result<HookOutcome> {
         let task_path = self.dir.join("tasks.json");
         if !task_path.exists() {
             let initial = TaskList::new(&self.config.name);
             fs::write(&task_path, serde_json::to_string_pretty(&initial)?)
                 .with_context(|| format!("initialise {}", task_path.display()))?;
         }
-        self.task_store()?.add_task(task)
+        self.task_store()?.add_task(task).await
     }
 
     /// Generate the next available task ID in the form `task-NNN`.

@@ -5,9 +5,9 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::team::TaskStore;
 use crate::team::TeamStore;
 use crate::team::manager::HookOutcome;
-use crate::team::{HookEvent, TaskStore, run_team_hook};
 use crate::tool::metadata::MetadataBuilder;
 
 /// Dispatch a tool invoked from a blueprint seed file through the session's
@@ -345,24 +345,12 @@ impl Tool for TeamCreateTool {
                                     {
                                         task.description = desc.to_string();
                                     }
-                                    // INTENTIONAL: best-effort store mutation; the in-memory task list is authoritative
-                                    let _ = store.add_task(task.clone());
-
-                                    // Run TaskCreated hook; remove task if rejected.
-                                    let hook_stdin = serde_json::json!({
-                                        "team_name": name,
-                                        "task_id": id,
-                                        "title": title,
-                                        "description": task.description,
-                                    })
-                                    .to_string();
-                                    let outcome = run_team_hook(
-                                        &store.dir,
-                                        HookEvent::TaskCreated,
-                                        Some(&hook_stdin),
-                                    )
-                                    .await;
-                                    if let HookOutcome::Feedback(feedback) = outcome {
+                                    // FR-017: `add_task` fires the `TaskCreated`
+                                    // hook from the mutation, so a seeded task
+                                    // runs the same gate a `team_task_create`
+                                    // call does. A rejection removes the seed.
+                                    let task_outcome = store.add_task(task.clone()).await;
+                                    if let Ok(HookOutcome::Feedback(feedback)) = task_outcome {
                                         if let Ok(ts) = TaskStore::open(&store.dir) {
                                             // INTENTIONAL: best-effort store cleanup
                                             let _ = ts.remove_task(&id);
@@ -608,7 +596,16 @@ impl Tool for TeamCreateTool {
             .config
             .members
             .iter()
-            .map(|m| format!("  - {} ({}, {})", m.name, m.agent_id, m.status.as_str()))
+            // FR-033: the roster this report hands back spells each state the
+            // way the Teams panel does, not with the wire token.
+            .map(|m| {
+                format!(
+                    "  - {} ({}, {})",
+                    m.name,
+                    m.agent_id,
+                    crate::team::status_word(m.status)
+                )
+            })
             .collect();
         let member_summary = if member_list.is_empty() {
             "No teammates spawned yet. Use team_spawn to add teammates.".to_string()

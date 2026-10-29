@@ -100,6 +100,7 @@ fn task_entry(id: &str, agent: &str) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -178,9 +179,16 @@ async fn team_show_unknown_name_reports_load_failure() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn team_delete_unknown_name_reports_load_failure() {
+    // T-043: the explicit `--force` is the confirmation, so the confirmed
+    // delete reaches the store and reports that the team does not exist.
     let (_g, _e, _t, mut app) = team_app();
-    app.execute_slash_command("/team delete ghost-team").await;
-    assert!(app.status.starts_with("Failed to load team:"));
+    app.execute_slash_command("/team delete ghost-team --force")
+        .await;
+    assert!(
+        app.status.starts_with("Failed to load team:"),
+        "status: {}",
+        app.status
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -200,7 +208,8 @@ async fn team_delete_reports_remove_failure() {
             .permissions();
         std::fs::set_permissions(&teams_dir, std::fs::Permissions::from_mode(0o500))
             .expect("chmod teams dir");
-        app.execute_slash_command("/team delete undeletable").await;
+        app.execute_slash_command("/team delete undeletable --force")
+            .await;
         std::fs::set_permissions(&teams_dir, original).expect("restore teams dir mode");
         assert!(
             app.status.starts_with("Failed to delete team:"),
@@ -286,10 +295,13 @@ async fn team_tasks_renders_completed_and_cancelled_rows() {
     let mut done = TeamTask::new("task-001", "Ship it");
     done.status = TeamTaskStatus::Completed;
     done.assigned_to = Some("lead".to_string());
-    task_store.add_task(done).expect("add completed task");
+    task_store.add_task(done).await.expect("add completed task");
     let mut dropped = TeamTask::new("task-002", "Dropped work");
     dropped.status = TeamTaskStatus::Cancelled;
-    task_store.add_task(dropped).expect("add cancelled task");
+    task_store
+        .add_task(dropped)
+        .await
+        .expect("add cancelled task");
 
     app.execute_slash_command("/team tasks").await;
     assert_eq!(app.status, "2 task(s)");
@@ -337,6 +349,7 @@ async fn team_clear_removes_task_file_and_reports_missing_team() {
         .task_store()
         .expect("task store")
         .add_task(TeamTask::new("task-001", "Clear me"))
+        .await
         .expect("add task");
 
     app.execute_slash_command("/team clear").await;
@@ -729,12 +742,16 @@ async fn cancel_targets_benchmark_flag_and_active_task() {
     app.active_tasks.push(task_entry("task-abc", "explore"));
 
     app.execute_slash_command("/cancel task").await;
+    // FR-023: the row is not removed optimistically - `/cancel` delegates to
+    // `AgentManager::cancel_agent` and the Agents window retires the row when
+    // the registry reports the transition (`test_cancel_slash` owns the full
+    // delegation contract).
     assert!(
-        app.status.starts_with("Cancelled task"),
+        app.status.starts_with("Cancellation requested for"),
         "status: {}",
         app.status
     );
-    assert_eq!(app.active_tasks.len(), 0);
+    assert_eq!(app.active_tasks.len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1569,7 +1586,10 @@ async fn codeindex_graph_lang_without_language_shows_usage() {
 fn github_login_without_runtime_reports_missing_runtime() {
     let (_g, _e, _t, mut app) = isolated_app();
     // `futures::executor::block_on` runs outside any tokio runtime, so
-    // `Handle::try_current()` fails and the guard arm reports it.
+    // `Handle::try_current()` fails and the guard arm reports it. The test is
+    // deliberately a plain `#[test]`: a `#[tokio::test]` would install a
+    // runtime, and `block_in_place` (the login arm's nested-runtime bridge)
+    // refuses to run on a current-thread one.
     futures::executor::block_on(app.execute_slash_command("/github login"));
     assert!(
         last_message(&app).contains("Async runtime not available"),

@@ -4,8 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::event::Event;
-use crate::team::{TaskStore, find_team_dir};
+use crate::team::{TaskStatus, TaskStore, find_team_dir};
 
 /// Atomically claims the next pending task with no unresolved dependencies.
 pub struct TeamTaskClaimTool;
@@ -20,9 +19,12 @@ impl Tool for TeamTaskClaimTool {
         "Claim a task to work on. REQUIRED parameter: 'team_name' (string). Optional: \
              'task_id' (string) to claim a specific task; if omitted, the next available \
              pending task is claimed atomically using file locking. Returns the task details \
-             or a message if the task is unavailable. Common gotcha: if no task_id is provided \
-             and no pending tasks remain, the result indicates no work is available - call \
-             team_idle when appropriate."
+             or a message if the task is unavailable. Only a PENDING task whose dependencies are \
+             all completed can be claimed: a task that is in progress, completed or cancelled is \
+             refused with a message naming the status it actually holds (a cancelled task reports \
+             'cancelled' and is terminal - it can never be claimed again). Common gotcha: if no \
+             task_id is provided and no pending tasks remain, the result indicates no work is \
+             available - call team_idle when appropriate."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -96,31 +98,11 @@ impl Tool for TeamTaskClaimTool {
         let specific_task_id = input.get("task_id").and_then(|v| v.as_str());
 
         if let Some(task_id) = specific_task_id {
-            // Claim a specific task by ID
-            match store.claim_specific(task_id, &agent_id) {
+            // Claim a specific task by ID. The claim hook and the
+            // `TeamTaskClaimed` event fire from the claim itself (FR-017), so
+            // nothing here has to publish or run a hook.
+            match store.claim_specific(task_id, &agent_id).await {
                 Ok(task) => {
-                    // M5-T7: publish TeamTaskClaimed.
-                    // PERF-017: prefer the in-memory `TeamManager` (when
-                    // available on the `ToolContext`) for the lead session
-                    // id instead of loading `TeamStore` from disk on every
-                    // claim. Falls back to the disk read only when no
-                    // manager is wired in (e.g. in tests).
-                    let lead_sid = ctx
-                        .team_manager
-                        .as_ref()
-                        .and_then(|tm| tm.lead_session_id().map(str::to_string))
-                        .or_else(|| {
-                            crate::team::TeamStore::load(&team_dir)
-                                .ok()
-                                .map(|s| s.config.lead_session_id.clone())
-                        })
-                        .unwrap_or_else(|| ctx.session_id.clone());
-                    ctx.event_bus.publish(Event::TeamTaskClaimed {
-                        session_id: lead_sid,
-                        team_name: team_name.to_string(),
-                        agent_id: agent_id.clone(),
-                        task_id: task.id.clone(),
-                    });
                     // M8-T3: update the claiming member's current_task_id
                     // so team_status and the TUI can show what they're working on.
                     // PERF-017: combine this config write with the claim
@@ -183,22 +165,44 @@ impl Tool for TeamTaskClaimTool {
             }
         } else {
             // Claim the next available task
-            let (claimed, already_had) = store.claim_next(&agent_id)?;
+            let (claimed, already_had) = store.claim_next(&agent_id).await?;
 
             match claimed {
                 None => {
-                    // No unclaimed, unblocked tasks available
+                    // No unclaimed, unblocked tasks available. A cancelled task
+                    // is reported as `cancelled`, never as pending (FR-006): the
+                    // count reads the same status the claim predicate refuses,
+                    // so this summary cannot describe a cancelled task as
+                    // waiting work.
+                    let cancelled = store
+                        .read()
+                        .map(|list| {
+                            list.tasks
+                                .iter()
+                                .filter(|t| t.status == TaskStatus::Cancelled)
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    let cancelled_note = if cancelled == 0 {
+                        String::new()
+                    } else {
+                        format!(
+                            "\n{cancelled} cancelled task(s) are terminal and cannot be claimed."
+                        )
+                    };
                     Ok(ToolOutput {
-                                      content: "No more tasks available. All tasks are either in progress, \
-                                                completed, or blocked by dependencies.\n\n\
+                        content: format!(
+                            "No more tasks available. All tasks are either in progress, \
+                                                completed, cancelled, or blocked by dependencies.{cancelled_note}\n\n\
                                                 Call `team_idle` to signal you are done and ready for reassignment."
-                                          .to_string(),
-                                      metadata: Some(json!({
-                                          "team_name": team_name,
-                                          "claimed": false,
-                                          "ready_for_idle": true
-                                      })),
-                                  })
+                        ),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "claimed": false,
+                            "ready_for_idle": true,
+                            "cancelled_tasks": cancelled
+                        })),
+                    })
                 }
                 Some(task) if already_had => {
                     // Agent already has a task in progress
@@ -220,28 +224,9 @@ impl Tool for TeamTaskClaimTool {
                     })
                 }
                 Some(task) => {
-                    // M5-T7: publish TeamTaskClaimed so the TUI/SSE observe
-                    // the claim (the event variant already existed but was
-                    // never published).
-                    // PERF-017: prefer the in-memory `TeamManager` for the
-                    // lead session id to avoid a per-claim `TeamStore::load`.
-                    let lead_sid = ctx
-                        .team_manager
-                        .as_ref()
-                        .and_then(|tm| tm.lead_session_id().map(str::to_string))
-                        .or_else(|| {
-                            crate::team::TeamStore::load(&team_dir)
-                                .ok()
-                                .map(|s| s.config.lead_session_id.clone())
-                        })
-                        .unwrap_or_else(|| ctx.session_id.clone());
-                    ctx.event_bus.publish(Event::TeamTaskClaimed {
-                        session_id: lead_sid,
-                        team_name: team_name.to_string(),
-                        agent_id: agent_id.clone(),
-                        task_id: task.id.clone(),
-                    });
                     // M8-T3: update the claiming member's current_task_id.
+                    // The `TeamTaskClaimed` event and the `TaskClaimed` hook
+                    // fire from the claim itself (FR-017).
                     if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
                         if let Some(m) = store.config.member_by_id_mut(&agent_id) {
                             m.current_task_id = Some(task.id.clone());

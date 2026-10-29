@@ -1049,18 +1049,18 @@ async fn swarm_status_reads_task_store_rows() {
 
     let mut t1 = Task::new("s1", "Task s1");
     t1.status = TaskStatus::Pending;
-    ts.add_task(t1).expect("add s1");
+    ts.add_task(t1).await.expect("add s1");
     let mut t2 = Task::new("s2", "Task s2");
     t2.status = TaskStatus::InProgress;
     t2.assigned_to = Some("tm-001".to_string());
-    ts.add_task(t2).expect("add s2");
+    ts.add_task(t2).await.expect("add s2");
     let mut t3 = Task::new("s3", "Task s3");
     t3.status = TaskStatus::Completed;
-    ts.add_task(t3).expect("add s3");
+    ts.add_task(t3).await.expect("add s3");
     let mut t4 = Task::new("s4", "Task s4");
     t4.status = TaskStatus::Cancelled;
     t4.depends_on = vec!["s1".to_string()];
-    ts.add_task(t4).expect("add s4");
+    ts.add_task(t4).await.expect("add s4");
 
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;
@@ -1100,7 +1100,7 @@ async fn swarm_status_all_completed_prints_cleanup_hint() {
     let ts = TaskStore::open(&store.dir).expect("task store");
     let mut t1 = Task::new("s1", "Task s1");
     t1.status = TaskStatus::Completed;
-    ts.add_task(t1).expect("add task");
+    ts.add_task(t1).await.expect("add task");
 
     let mut app = app_with_session("s-lead");
     app.cwd_path = dir;

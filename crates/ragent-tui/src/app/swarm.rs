@@ -28,7 +28,10 @@ impl App {
         ts.read().ok()
     }
 
-    pub(crate) fn execute_swarm_decomposition(&mut self, decomposition: team::SwarmDecomposition) {
+    pub(crate) async fn execute_swarm_decomposition(
+        &mut self,
+        decomposition: team::SwarmDecomposition,
+    ) {
         use ragent_agent::team::{SwarmState, TaskStore, TeamStore, task::Task};
 
         let task_count = decomposition.tasks.len();
@@ -58,7 +61,7 @@ impl App {
                         let mut task = Task::new(&st.id, &st.title);
                         task.description = st.description.clone();
                         task.depends_on = st.depends_on.clone();
-                        if let Err(e) = task_store.add_task(task) {
+                        if let Err(e) = task_store.add_task(task).await {
                             self.push_log_no_agent(
                                 LogLevel::Warn,
                                 format!("Swarm: failed to add task {}: {e}", st.id),
@@ -523,7 +526,7 @@ impl App {
 
     /// Periodically (every 2s) check the active swarm's overall completion
     /// status and update the status line / log panel accordingly.
-    pub(crate) fn poll_swarm_completion(&mut self) {
+    pub(crate) async fn poll_swarm_completion(&mut self) {
         if self.swarm_completion_last_poll.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }
@@ -564,7 +567,7 @@ impl App {
                                 && task.status != team::TaskStatus::Cancelled
                             {
                                 let agent_id = task.assigned_to.as_deref().unwrap_or("swarm");
-                                if let Err(e) = ts.complete(&task.id, agent_id) {
+                                if let Err(e) = ts.complete(&task.id, agent_id).await {
                                     tracing::warn!(task = %task.id, error = %e, "failed to auto-complete swarm task");
                                 }
                             }

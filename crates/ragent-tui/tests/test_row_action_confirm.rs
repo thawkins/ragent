@@ -78,6 +78,7 @@ fn task(id: &str, agent: &str, status: TaskStatus) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -682,4 +683,136 @@ async fn the_kill_answer_follows_a_row_that_became_a_background_task() {
         .await;
 
     assert!(!app.row_action_confirm_open(), "the answer still resolves");
+}
+
+// ---------------------------------------------------------------------------
+// FR-028 / FR-032 - the dialog states which option performs and which cancels
+// ---------------------------------------------------------------------------
+
+/// The row-action dialog's footer carries both hint lines: the toggle keys and
+/// which option performs versus cancels (spec `teamssetup` FR-028, FR-032), so
+/// `Space` `Enter` on the pre-selected `No` can never silently cancel an action
+/// the operator believed they had confirmed.
+#[tokio::test]
+async fn row_action_dialog_footer_states_the_toggle_and_the_outcomes() {
+    let mut app = app_with_task();
+    app.open_row_action(RowAction::KillSubagent {
+        task_id: "a1b2c3d4".to_string(),
+        agent_name: "explore".to_string(),
+    });
+
+    let text = render_dialog_text(&mut app);
+    assert!(
+        text.contains("toggle the selection"),
+        "the footer names the toggle, so an un-toggled Enter is not a silent no-op: {text}"
+    );
+    assert!(
+        text.contains("Enter on Yes performs"),
+        "the footer says the Yes option performs the action: {text}"
+    );
+    assert!(
+        text.contains("Enter on No cancels"),
+        "the footer says the default No option cancels the action: {text}"
+    );
+    assert!(
+        text.contains("Esc cancels"),
+        "the footer names the escape route: {text}"
+    );
+    // The full hints fit inside the painted dialog, so nothing is clipped.
+    let inner_w = app.row_action_confirm_area.width.saturating_sub(2);
+    for hint in [
+        ragent_tui::app::ROW_ACTION_TOGGLE_HINT,
+        ragent_tui::app::ROW_ACTION_OUTCOME_HINT,
+    ] {
+        assert!(
+            hint.chars().count() as u16 <= inner_w,
+            "hint {hint:?} must fit the {inner_w}-column inner width"
+        );
+    }
+}
+
+/// Every row verb's dialog carries the same footer: the hints belong to the
+/// modal shape, not to one action (spec `teamssetup` FR-028, FR-032).
+#[tokio::test]
+async fn every_row_action_dialog_carries_the_footer_hints() {
+    let actions = [
+        RowAction::KillSubagent {
+            task_id: "a1b2c3d4".to_string(),
+            agent_name: "explore".to_string(),
+        },
+        RowAction::CancelBackground {
+            task_id: "bg-1".to_string(),
+            command: "sleep 30".to_string(),
+        },
+        RowAction::SuspendTeammate {
+            agent_id: "tm-001".to_string(),
+            name: "reviewer".to_string(),
+        },
+        RowAction::ShutdownTeammate {
+            agent_id: "tm-001".to_string(),
+            name: "reviewer".to_string(),
+        },
+        RowAction::ResumeTeammate {
+            agent_id: "tm-001".to_string(),
+            name: "reviewer".to_string(),
+        },
+    ];
+
+    for action in actions {
+        let mut app = app_with_task();
+        app.open_row_action(action.clone());
+        let text = render_dialog_text(&mut app);
+        assert!(
+            text.contains(ragent_tui::app::ROW_ACTION_TOGGLE_HINT),
+            "{action:?} dialog must state the toggle hint: {text}"
+        );
+        assert!(
+            text.contains(ragent_tui::app::ROW_ACTION_OUTCOME_HINT),
+            "{action:?} dialog must state which option performs and which cancels: {text}"
+        );
+    }
+}
+
+/// The shared `Yes`/`No` dialogs (queue clear, memory clear) state the same
+/// contract: `Enter` on `Yes` performs, `Enter` on `No` cancels, `Esc` cancels.
+/// `No` is pre-selected, so an un-toggled `Enter` must read as a cancel.
+#[tokio::test]
+async fn shared_yes_no_dialog_footer_states_the_outcomes() {
+    let mut app = make_app();
+    app.session_id = Some(LEAD_SESSION.to_string());
+    app.input_queue.push_back(ragent_tui::app::QueuedInput {
+        text: "queued".to_string(),
+        image_paths: Vec::new(),
+    });
+    app.queue_menu_open = true;
+    app.queue_menu_select_clear();
+    assert!(
+        app.queue_clear_confirm_open,
+        "precondition: selecting Clear on a non-empty queue arms the dialog"
+    );
+
+    // Paint the dialog first: its cached area is only known after a render.
+    render(&mut app);
+    let area = app.queue_clear_confirm_area;
+    assert!(
+        area.width > 0 && area.height > 0,
+        "the shared dialog must be painted (area {area:?})"
+    );
+    let text = text_of(&mut app, area);
+    assert!(
+        text.contains("Enter on Yes performs"),
+        "the shared dialog's footer says Yes performs the action: {text}"
+    );
+    assert!(
+        text.contains("Enter on No cancels"),
+        "the shared dialog's footer says the default No cancels: {text}"
+    );
+    assert!(
+        text.contains("Esc cancels"),
+        "the shared dialog's footer names the escape route: {text}"
+    );
+    assert!(
+        !text.contains("Enter select"),
+        "the old footer left the outcome unstated: {text}"
+    );
 }

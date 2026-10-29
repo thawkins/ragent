@@ -4,10 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{
-    Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TaskStore, TeamStore,
-    find_team_dir,
-};
+use crate::team::{Mailbox, MailboxMessage, MessageType, TaskStore, TeamStore, find_team_dir};
 
 /// Assigns a pending task directly to a specific teammate (lead-only).
 ///
@@ -78,30 +75,45 @@ impl Tool for TeamAssignTaskTool {
         // Resolve name -> agent ID.
         let agent_id = super::team_message::resolve_agent_id(&team_dir, to)?;
 
-        // Verify the agent exists in the team config and is not dead.
+        // Verify the agent exists in the team config and is not dead. Both
+        // refusals name the entity, its state, and one next action (FR-032): a
+        // caller that mis-typed a name is told which names exist, and one that
+        // picked a finished teammate is told how to revive it.
         let config_store = TeamStore::load(&team_dir)?;
         if agent_id != "lead" && config_store.config.member_by_id(&agent_id).is_none() {
+            let known: Vec<&str> = config_store
+                .config
+                .members
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect();
             return Err(anyhow::anyhow!(
-                "Agent '{to}' (id: {agent_id}) is not a member of team '{team_name}'"
+                "cannot assign task '{task_id}': teammate '{to}' (id: {agent_id}) is not a \
+                 member of team '{team_name}'. Known teammates: [{}] - check the name with \
+                 `team_status`",
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
             ));
         }
-        if let Some(member) = config_store.config.member_by_id(&agent_id) {
-            if matches!(member.status, MemberStatus::Stopped | MemberStatus::Failed) {
-                return Err(anyhow::anyhow!(
-                    "Agent '{to}' (id: {agent_id}) is {} and cannot be assigned tasks in team '{team_name}'",
-                    member.status.as_str()
-                ));
-            }
+        if let Some(member) = config_store.config.member_by_id(&agent_id)
+            && member.status.is_terminal()
+        {
+            return Err(anyhow::anyhow!(
+                "{} and cannot take an assignment: a {} teammate has no live session. \
+                 Respawn it with `team_spawn` first, or assign task '{task_id}' to another \
+                 member",
+                crate::team::member_status_clause(&member.name, &member.agent_id, member.status),
+                member.status.display_label()
+            ));
         }
 
         let task_store = TaskStore::open(&team_dir)?;
-        let task = task_store.update_task(task_id, |t| {
-            if t.status == TaskStatus::Pending {
-                t.status = TaskStatus::InProgress;
-                t.assigned_to = Some(agent_id.clone());
-                t.claimed_at = Some(chrono::Utc::now());
-            }
-        })?;
+        // FR-003/FR-017: the assignment is a claim, so it moves the status
+        // through the shared transition and fires the claim hook from there.
+        let task = task_store.assign(task_id, &agent_id).await?;
 
         // M4-T2: notify the assigned teammate via their mailbox so they pick
         // up the task without having to poll. This is a best-effort delivery:

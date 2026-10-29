@@ -683,6 +683,7 @@ async fn test_permission_hardwired_info_tools_auto_approved() {
             false,
             120,
             false,
+            false,
         )
         .await
         .expect("permission check should succeed");
@@ -709,6 +710,7 @@ async fn test_permission_security_approved_satisfies_bare_ask() {
         false,
         120,
         true,
+        false,
     )
     .await
     .expect("permission check should succeed");
@@ -731,6 +733,7 @@ async fn test_permission_auto_approve_short_circuits() {
         None,
         false,
         120,
+        false,
         false,
     )
     .await
@@ -758,6 +761,7 @@ async fn test_permission_checkpoint_overrides_allow_then_denies_on_timeout() {
         None,
         true,
         0,
+        false,
         false,
     )
     .await

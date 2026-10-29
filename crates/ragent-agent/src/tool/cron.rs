@@ -118,11 +118,10 @@ impl Tool for CronAddTool {
         let agent_clone = event.agent_type.clone();
         let schedule_raw = event.schedule_raw.clone();
         let next_due = event.next_due.to_rfc3339();
-        let prompt_preview = if event.prompt.len() > 80 {
-            format!("{}...", &event.prompt[..80])
-        } else {
-            event.prompt.clone()
-        };
+        // FR-008: no byte-offset slicing; `truncate_bytes` steps back to a char
+        // boundary so a multi-byte codepoint in the prompt cannot panic, and
+        // leaves the prompt unchanged when it already fits (no stray ellipsis).
+        let prompt_preview = ragent_types::strutil::truncate_bytes(&event.prompt, 80);
 
         tokio::task::spawn_blocking(move || storage.insert_cron_event(&event))
             .await
@@ -279,11 +278,8 @@ impl Tool for CronListTool {
         ];
 
         for row in &rows {
-            let prompt_preview = if row.prompt.len() > 40 {
-                format!("{}...", &row.prompt[..40])
-            } else {
-                row.prompt.clone()
-            };
+            // FR-008: char-boundary-safe truncation, no byte-offset slicing.
+            let prompt_preview = ragent_types::strutil::truncate_bytes(&row.prompt, 40);
             let enabled_str = if row.enabled { "[ok]" } else { "[x]" };
             lines.push(format!(
                 "| `{}` | `{}` | `{}` | {} | {} | \"{}\" |",

@@ -396,6 +396,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
                 agent: s("explore"),
                 task: s("find"),
                 background: true,
+                detached: false,
             },
             "SubagentStart",
             Some("s"),
@@ -489,6 +490,16 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
             Some("s"),
         ),
         variant(
+            Event::TeammateStopped {
+                session_id: s("s"),
+                team_name: s("team"),
+                agent_id: s("tm-001"),
+                cause: s("shutdown_acked"),
+            },
+            "TeammateStopped",
+            Some("s"),
+        ),
+        variant(
             Event::TeammateMessage {
                 session_id: s("s"),
                 team_name: s("team"),
@@ -555,6 +566,19 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
                 task_id: s("task-001"),
             },
             "TeamTaskCompleted",
+            Some("s"),
+        ),
+        variant(
+            Event::TeamTaskCompletionRejected {
+                session_id: s("s"),
+                team_name: s("team"),
+                agent_id: s("tm-001"),
+                task_id: s("task-001"),
+                owner: s("tm-002"),
+                reason: s("not_owner"),
+                message: s("task 'task-001' is assigned to tm-002, not tm-001"),
+            },
+            "TeamTaskCompletionRejected",
             Some("s"),
         ),
         variant(
@@ -788,7 +812,7 @@ fn all_variants() -> Vec<(Event, &'static str, Option<&'static str>)> {
 #[test]
 fn type_name_matches_every_variant() {
     let all = all_variants();
-    assert_eq!(all.len(), 78, "variant table drifted from the enum");
+    assert_eq!(all.len(), 80, "variant table drifted from the enum");
     // The enum declares the same number of labels in `type_name`.
     for (event, expected, _) in &all {
         assert_eq!(

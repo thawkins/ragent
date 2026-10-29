@@ -16,6 +16,9 @@ use ragent_agent::team::{
     Mailbox, MailboxMessage, MessageType, Task, TaskList, TaskStatus, TaskStore,
 };
 
+#[path = "team_support/mod.rs"]
+mod team_support;
+
 const MAILBOX_WORKERS: usize = 4;
 const MAILBOX_MESSAGES_PER_WORKER: usize = 25;
 const TASK_WORKERS: usize = 4;
@@ -131,8 +134,9 @@ fn worker_mailbox_push() {
 /// drop or double-claim tasks.
 #[test]
 fn parent_task_store_concurrent_claims() {
-    let dir = tempfile::tempdir().expect("create temp dir");
-    let team_dir = dir.path().to_path_buf();
+    // A real team directory: the task store's mutators fire the team's task
+    // hooks (FR-017), so they need a `config.json` beside `tasks.json`.
+    let (_tmp, team_dir, _store) = team_support::setup_team_with_task_store();
 
     // Seed tasks.json with a batch of independent pending tasks.
     let mut list = TaskList::new("concurrent-test");
@@ -198,8 +202,8 @@ fn parent_task_store_concurrent_claims() {
 
 /// Worker test invoked by the parent above.  Claims available tasks one at a
 /// time and completes them until the store is exhausted.
-#[test]
-fn worker_task_claimer() {
+#[tokio::test]
+async fn worker_task_claimer() {
     let dir = env::var("RAGENT_TEST_TASK_DIR").ok();
     let worker_id = env::var("RAGENT_TEST_TASK_WORKER_ID").ok();
     if dir.is_none() || worker_id.is_none() {
@@ -208,14 +212,18 @@ fn worker_task_claimer() {
 
     let dir = PathBuf::from(dir.unwrap());
     let worker_id = worker_id.unwrap();
-    let agent_id = format!("worker-{worker_id}");
+    // FR-038 validates every write, and `Task::validate` requires an owner to be
+    // `lead` or `tm-NNN`, so the worker uses a plausible agent id: worker 0 is
+    // `tm-001`, worker 1 `tm-002`, and so on.
+    let agent_id = format!("tm-{:03}", worker_id.parse::<u32>().unwrap_or(0) + 1);
     let store = TaskStore::open(&dir).expect("open task store");
 
     loop {
-        match store.claim_next(&agent_id) {
+        match store.claim_next(&agent_id).await {
             Ok((Some(task), false)) => {
                 store
                     .complete(&task.id, &agent_id)
+                    .await
                     .expect("complete claimed task");
             }
             Ok((None, _)) => break,
@@ -274,8 +282,8 @@ fn test_mailbox_threaded_push_does_not_corrupt() {
 
 /// A simple in-process test that `TaskStore::add_task` serialises correctly
 /// under thread contention and never duplicates task IDs.
-#[test]
-fn test_task_store_threaded_add_does_not_duplicate() {
+#[tokio::test]
+async fn test_task_store_threaded_add_does_not_duplicate() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let store = TaskStore::open(dir.path()).expect("open store");
     let store = std::sync::Arc::new(store);
@@ -286,7 +294,11 @@ fn test_task_store_threaded_add_does_not_duplicate() {
         handles.push(std::thread::spawn(move || {
             for i in 0..25 {
                 let id = format!("thread-{t}-{i}");
-                let _ = s.add_task(Task::new(&id, "concurrent add"));
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build a per-thread runtime");
+                let _ = rt.block_on(s.add_task(Task::new(&id, "concurrent add")));
             }
         }));
     }

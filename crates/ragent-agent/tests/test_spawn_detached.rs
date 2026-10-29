@@ -125,6 +125,7 @@ fn completed_entry(parent_sid: &str, task_id: &str, detached: bool, result: &str
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

@@ -4,7 +4,12 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{MemberStatus, TaskStatus, TaskStore, TeamStore, find_team_dir};
+use crate::team::{
+    MemberStatus, STATUS_HISTORY_LIMIT, StatusHistoryEntry, TaskStatus, TaskStore, TeamStore,
+    find_team_dir, pending_plans, recent_status_history, render_hook_failures,
+    render_pending_plans, render_status_history, render_undelivered, status_word,
+    undelivered_messages,
+};
 
 /// Returns human-readable team status.
 pub struct TeamStatusTool;
@@ -19,9 +24,22 @@ impl Tool for TeamStatusTool {
         "Get the current status of a team: member list, their states, and task \
          progress summary. REQUIRED parameter: 'team_name' (string). Use this \
          whenever you need to know which teammates are active, idle, stopped, or \
-         failed, or how many tasks are pending/in-progress/completed. Common gotcha: \
-         the tool only returns state - it does not read mailbox messages (use \
-         team_read_messages for that)."
+         failed, or how many tasks are pending/in-progress/completed. Each member \
+         row is followed by a `Status history` block listing that member's last \
+         five transitions with timestamps and causes (oldest first, from \
+         `status-history.jsonl`), so \"why did this teammate stop?\" is answerable \
+         from this report alone rather than by inference from the coarse events. Also reports \
+         any message still unread in a terminated teammate's mailbox under \
+         `Undelivered messages`, because no teammate will ever drain it, and \
+         any plan parked in plan_pending under `Plans awaiting a verdict` with \
+         the team_approve_plan call that resolves it. Also reports under \
+         `Hook failures` any configured quality-gate hook that could not run \
+         (refused command, spawn failure, or timeout): an inert hook never \
+         approved anything, so a non-zero count here means a gate is not \
+         working. Common \
+         gotcha: this tool does not read YOUR mailbox - use team_read_messages for \
+         that, and use this report to spot messages stranded for a teammate that \
+         has already stopped."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -107,12 +125,68 @@ impl Tool for TeamStatusTool {
                 .as_deref()
                 .map(|id| format!(" (task: {id})"))
                 .unwrap_or_default();
+            // FR-032/FR-033: every row names the member, its id and its state,
+            // with the status word taken from `display_label()` so this report
+            // and the Teams panel spell a state the same way.
             lines.push(format!(
                 "  {status_icon} {} [{}] {}{task_info}",
                 m.name,
                 m.agent_id,
-                m.status.as_str()
+                status_word(m.status)
             ));
+        }
+
+        // FR-036: per-member status history. A roster row says what a member is
+        // now; this block says how it got there, which is the question a lead
+        // actually asks ("why did this teammate stop?").
+        let histories: Vec<Vec<StatusHistoryEntry>> = store
+            .config
+            .members
+            .iter()
+            .map(|m| recent_status_history(&team_dir, &m.agent_id, STATUS_HISTORY_LIMIT))
+            .filter(|entries| !entries.is_empty())
+            .collect();
+        if !histories.is_empty() {
+            lines.push(String::new());
+            let mut block = format!(
+                "# Status history\n\nLast {STATUS_HISTORY_LIMIT} transition(s) per member, \
+                 oldest first.\n"
+            );
+            for entries in &histories {
+                block.push('\n');
+                block.push_str(render_status_history(entries, 2).trim_end());
+                block.push('\n');
+            }
+            lines.push(block.trim_end().to_string());
+        }
+
+        // FR-020: a message whose recipient terminated before reading it is
+        // reported here rather than dropped - nothing else will ever read it.
+        let undelivered = undelivered_messages(&store);
+        let undelivered_block = render_undelivered(&store.config.name, &undelivered, 1);
+        if !undelivered_block.is_empty() {
+            lines.push(String::new());
+            lines.push(undelivered_block.trim_end().to_string());
+        }
+
+        // FR-034: a member parked in `plan_pending` is reported with the plan it
+        // is waiting on and the action that resolves it, never as a bare status
+        // word the lead has to decode.
+        let pending = pending_plans(&store);
+        let pending_block = render_pending_plans(&store.config.name, &pending, 1);
+        if !pending_block.is_empty() {
+            lines.push(String::new());
+            lines.push(pending_block.trim_end().to_string());
+        }
+
+        // FR-019: a hook that could not be executed never produced a verdict,
+        // so it must not read as a passing gate. The ledger is the record and
+        // this count is the surface.
+        let hook_failures = crate::team::read_hook_failures(&team_dir);
+        let hook_block = render_hook_failures(&store.config.name, &hook_failures, 1);
+        if !hook_block.is_empty() {
+            lines.push(String::new());
+            lines.push(hook_block.trim_end().to_string());
         }
 
         let members_json: Vec<Value> = store
@@ -120,11 +194,75 @@ impl Tool for TeamStatusTool {
             .members
             .iter()
             .map(|m| {
+                // FR-036: each member row carries its own last five transitions,
+                // oldest first, so a programmatic consumer gets the same answer
+                // the prose block gives.
+                let history: Vec<Value> =
+                    recent_status_history(&team_dir, &m.agent_id, STATUS_HISTORY_LIMIT)
+                        .iter()
+                        .map(|entry| {
+                            json!({
+                                "timestamp": entry.timestamp.to_rfc3339(),
+                                "from": entry.from,
+                                "to": entry.to,
+                                "cause": entry.cause,
+                            })
+                        })
+                        .collect();
                 json!({
                     "name": m.name,
                     "agent_id": m.agent_id,
                     "status": m.status.as_str(),
-                    "current_task_id": m.current_task_id
+                    "current_task_id": m.current_task_id,
+                    // FR-034: a `plan_pending` row states its plan state so a
+                    // reader never has to infer it from the status word alone.
+                    "plan_status": m.plan_status.as_str(),
+                    "plan_request_id": m.plan_request_id,
+                    "status_history": history
+                })
+            })
+            .collect();
+
+        let undelivered_json: Vec<Value> = undelivered
+            .iter()
+            .map(|u| {
+                json!({
+                    "agent_id": u.agent_id,
+                    "recipient": u.recipient,
+                    "recipient_status": u.recipient_status.as_str(),
+                    "message_id": u.message_id,
+                    "from": u.from,
+                    "type": u.message_type,
+                    "sent_at": u.sent_at.to_rfc3339(),
+                    "content": u.content,
+                })
+            })
+            .collect();
+
+        let pending_json: Vec<Value> = pending
+            .iter()
+            .map(|p| {
+                json!({
+                    "agent_id": p.agent_id,
+                    "name": p.name,
+                    "plan": p.plan,
+                    "submitted_at": p.submitted_at.map(|at| at.to_rfc3339()),
+                    "request_id": p.request_id,
+                    "approve": p.approve_action(team_name),
+                    "reject": p.reject_action(team_name),
+                })
+            })
+            .collect();
+
+        let hook_failures_json: Vec<Value> = hook_failures
+            .iter()
+            .map(|f| {
+                json!({
+                    "timestamp": f.timestamp.to_rfc3339(),
+                    "event": f.event.as_str(),
+                    "hook": f.hook,
+                    "reason": f.reason.as_str(),
+                    "detail": f.detail,
                 })
             })
             .collect();
@@ -133,8 +271,15 @@ impl Tool for TeamStatusTool {
             content: lines.join("\n"),
             metadata: Some(json!({
                 "team_name": team_name,
-                                  "team_status": store.config.status.as_str(),                "member_count": store.config.members.len(),
+                "team_status": store.config.status.as_str(),
+                "member_count": store.config.members.len(),
                 "members": members_json,
+                "undelivered_count": undelivered.len(),
+                "undelivered": undelivered_json,
+                "pending_plan_count": pending.len(),
+                "pending_plans": pending_json,
+                "hook_failure_count": hook_failures.len(),
+                "hook_failures": hook_failures_json,
                 "tasks": {
                     "total": total_tasks,
                     "done": done_tasks,

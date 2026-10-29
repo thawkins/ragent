@@ -1651,6 +1651,7 @@ fn needs_periodic_redraw_tracks_every_live_elapsed_source() {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     });
     assert!(app.needs_periodic_redraw());
     app.active_tasks.clear();

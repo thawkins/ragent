@@ -1,5 +1,728 @@
 # Changelog
 
+## [1.0.153] - 2026-10-29
+
+Release 1.0.153: the team runtime's status and task state machines are tightened
+to rules the previous release only documented - completion requires ownership,
+adoption requires explicit consent, and every status write is validated and
+published through one function. Both changes are tightening-only: no capability
+is removed, and each break is visible in the event stream rather than silent.
+One operator migration attaches to each of those two changes, and the
+`team_task_complete` / `team_cleanup` tool descriptions now state the rule the
+runtime enforces.
+
+### Changed
+- **Write-capable sub-agent runs get an automatic YOLO prompt scope** (SPEC
+  4.7.1). A tool call by an unattended run (`agent.mode == Subagent` - spawned by
+  `new_agent`, `/spawn`, cron or the server) whose tool can write is now
+  auto-approved at the interactive prompt regardless of the global `/yolo` flag,
+  because there is no user attached to answer and an unanswered prompt only
+  stalls the run until the watchdog. The scope is deliberately narrow: the
+  primary session never gets it, read-only runs (`explore`, plan reviewers,
+  read-restricted loops) yield an empty write-capable set and keep the ordinary
+  policy, and it is resolved once per turn from the run's own offered tool
+  surface. Containment is unchanged - the loop restriction, the path guards, the
+  7-layer bash `is_safe_command` stage that runs *before* the prompt, the
+  tool-repeat guard, every pre-tool hook, an explicit policy `Deny` and a forced
+  destructive-action checkpoint (FR-024) all still apply. The process-wide parts
+  of YOLO (bash denied patterns, dynamic-context allowlist, MCP config validation)
+  stay under the single global flag and are never entered by a sub-agent alone.
+  New helper surface: `permissions::is_write_capable_permission_category`,
+  `permissions::write_capable_tool_names`, and
+  `permissions::subagent_yolo_bypasses_prompt`.
+- **Teammate focus no longer redirects the input box** (spec `agentui` FR-058
+  amended, axiom A6 rewritten as "focus is a view, not a route"). With a teammate
+  focused - via `Alt+Up`/`Alt+Down`, `Enter` on a Teams-window row, or `/team focus`
+  - the input box used to retitle its border ` -> <name> (focused) ` and send the
+  next `Enter` into that teammate's mailbox. That made reading a teammate's output
+  view a one-keystroke way to accidentally address the wrong agent, and it also
+  changed the busy rule: a focused-teammate send was refused with
+  `busy - wait for the current turn to finish` while every other message was
+  queued. `Enter` now always addresses the lead session, the border keeps its
+  plain ` Input ` title (attachments still lengthen it), and only bang commands
+  keep the busy refusal. A teammate is reached through
+  `/team message <name> <text>`, which is unchanged and remains the single
+  documented way to write another agent's mailbox. Focus keeps its other two
+  effects: it opens that teammate's output view and highlights its strip pill and
+  Teams row.
+- **Awaiting a detached task is refused by contract, not reported as unknown**
+  (spec `agentssetup` T-016, FR-044). A detached task (`new_agent` with
+  `background: true, detached: true`) is fire-and-forget: `list_agents` excludes it,
+  `wait_agents` seeds its wait set from that listing, and nothing ever injects its
+  completion into the session - so a wait on its id can never settle. Such an id
+  fell through the settled-set scan, the wait set came out empty, and the caller was
+  told `No running background tasks to wait for`: the tool described the one thing
+  that was *not* wrong (the id exists) and named no way forward. `wait_agents` now
+  checks every requested id against the whole registry - `list_agents` cannot be
+  consulted precisely because it hides detached entries - before it subscribes to
+  the event bus or counts a waiter, so a refused call leaves the registry exactly as
+  it found it. A detached id returns an error carrying the reason code
+  `task_detached`, and the message names in one pass the task (short id, full id,
+  agent), the contract as the spawn shape that produced it
+  (`background: true, detached: true`), why a wait cannot settle, and the durable
+  report file `log/subagents/<task-id>.md` - the recorded `output_file` once the run
+  has finished, the expected path while it has not - with the `read` call that
+  recovers it, then the two ways forward (`list_agents` for the tasks this session
+  can await, `new_agent(background: true, detached: false)` for one whose result
+  should come back). The word "unknown" appears nowhere in it. The refusal is scoped
+  to `detached: true` - an ordinary background task is awaitable exactly as before -
+  and a detached id listed beside an awaitable one refuses the whole call rather
+  than awaiting the half it can see. `test_wait_agents_detached_refusal` pins the
+  message substance, the reason code, the no-side-effects rule (no waiter counted,
+  the neighbouring task undisturbed), and both directions of the scope.
+- **The system prompt teaches the whole sub-agent contract** (spec `agentssetup`
+  T-026, FR-025). The `## Sub-Agent Spawning` block a primary agent receives told a
+  model to prefer sub-agents and to use `background: true`, but never named the
+  three execution contracts, never said what occupies the background limit, and
+  never said how to free a slot - so the detached contract, the suspend-frees-
+  nothing rule and the await contract were learnable only from a refusal. The block
+  now carries four named teaching obligations, written in the tool descriptions'
+  vocabulary rather than a paraphrase of it: the three contracts with the
+  `background` / `detached` shape that selects each (including that
+  detached-without-background is **refused**, not degraded) and the
+  listed/awaitable/injected-versus-fire-and-forget consequences that distinguish
+  them; the limit and its occupancy (the configured number substituted for the
+  `MAX_BG_TASKS` placeholder, counting `running`, `suspended` and `terminating`
+  background tasks, never a detached or foreground one) together with the
+  cancel-to-free rule stated in those words and the fact that a cancel is only
+  *requested* until the registry reaches `cancelled`; the await contract (`task_ids`
+  and `timeout_secs`, the canonical `completed`/`failed`/`cancelled`/`timed_out`
+  statuses with cancelled-never-reports-as-failed, `suspended` not settled and
+  `timed_out` settled, and a detached task never awaitable); and the durable report
+  path at `log/subagents/<task-id>.md` with the in-memory-only absence case, so a
+  caller never reads a path that does not exist. The block stays scoped to
+  `AgentMode::Primary`, and a new `test_subagent_prompt_contract` suite checks the
+  four obligations and asserts agreement with the *live* `description()` strings in
+  both directions - a term the descriptions teach that the prompt drops is a build
+  failure, which is the drift FR-016's schema-scan cannot catch in rendered prose.
+- **`create_default_registry`'s rustdoc names the whole sub-agent family, and a
+  guard test keeps it there** (spec `agentssetup` T-027, G1). The doc block listed
+  `new_agent`, `cancel_agent` and `list_agents` but omitting `wait_agents`, while the
+  function registers all four - so the registry's own documentation left out the one
+  tool a caller needs to await a background task, and a reader had no way to tell
+  which of the four to reach for. The block now names the family as one contract:
+  the three execution contracts `new_agent` selects, `list_agents` observing the
+  listed ones, `wait_agents` awaiting the awaitable ones (and refusing a detached
+  task by name, FR-044), and `cancel_agent` reporting the status the registry is
+  actually in (FR-013). The new
+  `crates/ragent-agent/tests/test_default_registry_doc_lists_the_family.rs` reads the
+  doc block out of `src/tool/mod.rs` with `include_str!` and fails if any registered
+  family tool is unnamed (with `wait_agents` asserted separately so a regression
+  names the drift) or if the contract prose disappears - converting G1 from a review
+  finding into a build failure. The other four G1/H1-H4 coverage gaps were closed by
+  tests that already exist and are now recorded against their test cases in
+  `TESTPLAN.md`: `test_new_agent_refuses_detached_without_background` (FR-003),
+  `test_tool_param_schema` (FR-002/FR-004), `test_cancel_agent_status` (FR-013),
+  `test_wait_agents_results_meta::test_wait_agents_reports_cancelled_not_failed`
+  (FR-014) and `test_cancel_slash` (FR-023).
+- **`/spawn` uses the shared sub-agent launch helper instead of its own slot and
+  runtime** (spec `agentssetup` T-024, D3). The command guarded a
+  `Mutex<Option<Result<String, String>>>` so only one launch could ever be in flight,
+  silently dropped the outcome when that mutex was poisoned, and built its own
+  `current_thread` runtime on a helper thread when the caller had no reactor - giving
+  `/spawn` a state machine (`[wait] launching` plus a private `poll_spawn_result`)
+  that no other launch path had. Launch plumbing now lives once in
+  `crates/ragent-tui/src/app/launch.rs`: `App::begin_subagent_launch` registers a
+  bounded, id-correlated entry on the new shared launch set (cap
+  `agents.max_launching`, default 4, clamped `1..=64`), `dispatch_launch` applies one
+  uniform runtime rule, `run_subagent_launch` deposits the outcome under its id, and
+  `App::poll_subagent_launch_results` releases the slot and reports it. A second
+  launch now queues behind the busy ones and the refusal names them, rather than
+  refusing outright; a poisoned lock can no longer lose an outcome. The `agents`
+  config section gains `max_launching` (`DEFAULT_AGENTS_MAX_LAUNCHING`) beside
+  `completed_history`.
+- **A missing durable report copy is now reported instead of omitted** (spec
+  `agentssetup` T-015, FR-018, FR-032, FR-043). `persist_task_output` returns `None`
+  when a sub-agent's full report cannot be written to `log/subagents/` - a
+  read-only or otherwise unwritable directory, a full disk, a failed rename - and the
+  task still completes with its result in memory. Both `list_agents` and
+  `wait_agents` reported only the *absence* of `output_file`, which is
+  indistinguishable from "this task has no report": a caller that read the missing
+  field as the second shape went on to `read` a path that was never created, and lost
+  the findings the moment the in-memory text was truncated. The condition now has one
+  shared wording (`IN_MEMORY_REPORT_NOTE`) behind one shared derivation
+  (`durable_copy_absence_note`), so the two tools cannot describe it differently -
+  `list_agents` prints `-> [memory] <status> - report is <note>` where a persisted
+  task prints `-> [file] Full report: <path>`, and its detail view prints
+  `Output File: none - <note>` rather than the `Output File (full untruncated
+  report)` heading; `wait_agents` prints `[memory] No durable copy: <note>` in the
+  content and its `results` entries carry `report_persisted: false` with
+  `report_location: "in_memory_only"` (`output_file` stays present and `null`, so a
+  presence check cannot mistake the absence for a shape change), the per-task
+  `tasks` roll-up repeating the flag. Only a *settled* task reports a verdict - a
+  running or suspended task has not had a write attempted, so neither surface claims
+  one failed - and both tools' descriptions state the rule. `test_durable_copy_absence`
+  pins the reported shape for a completed, cancelled and timed-out task, the
+  absent-path guarantee, the negative case (a persisted report keeps its path and
+  gets no note) and the in-flight scope.
+- **`/cancel` now delegates to the task registry instead of removing the row
+  itself** (spec `agentssetup`
+  T-018, FR-023, FR-024, FR-041). The command resolved its prefix against the
+  Agents window's local `active_tasks` mirror, removed the matching row and
+  reported `Cancelled task ...` - without ever telling the task registry. The row
+  then reappeared on the next reconciliation sweep, because the registry still held
+  the task as `running`: a UI-local lie that made a real cancellation and a
+  cosmetic one look identical. `/cancel <prefix>` now delegates to
+  `AgentManager::cancel_agent` (the method behind the `cancel_agent` tool) and
+  reports the *request*; the row survives until the agent loop observes the
+  cooperative cancel flag at its next step boundary and the `SubagentCancelled`
+  event (or the reconciliation) retires it, so the window can no longer show a
+  cancellation that did not happen. A prefix matching more than one live task is
+  refused with every match listed as `<short id> (<agent>, <status>)`, and a prefix
+  matching none reports `No task matching '<prefix>'` and lists the live ids (or
+  says plainly that there are none) instead of only echoing the prefix. A prefix
+  matching one *finished* task reports `Task <short id> is already <status>` rather
+  than a cancellation. Live means `running`, `suspended` or `terminating`.
+  Benchmark-first dispatch is unchanged. Covered by the new
+  `test_cancel_slash` suite (nine cases) and a shared `is_cancellable` predicate.
+- **The sub-agent tool descriptions are generated from the contract, and a guard
+  test keeps them there** (spec `agentssetup` T-025, FR-016). The description is
+  the primary artefact a model reads, and `new_agent`'s had already drifted from
+  its own schema: it never named `detached` and never named the `provider:model`
+  spelling of `model`, both of which the schema accepts. All four sub-agent
+  descriptions are now regenerated from the schema they are attached to -
+  `new_agent` states its three execution contracts and every property (`agent`,
+  `task`, `background`, `detached`, `model`, `timeout_secs`) with which `model`
+  spelling is preferred; `cancel_agent` states that a cancel is *requested* and
+  names `task_id`; `list_agents` names `status` and `task_id` and says a detached
+  task is not listed; `wait_agents` names `task_ids` and `timeout_secs` and says a
+  detached task can never be awaited. A new `test_tool_descriptions` suite reads
+  each tool's own `parameters_schema()` and fails the build when a declared
+  property is missing from its description, when a description advertises a
+  property the schema would refuse (which `additionalProperties: false` turns
+  into a call that always fails), when a description stops naming a contract or
+  the terminal `cancelled` status, or when `bg`'s shell-task vocabulary slips -
+  the drift recorded as SPEC.md D1 is now a build failure rather than a review
+  finding.
+- **Waiter counts are visible** (spec `agentssetup` T-014, FR-012). `waiter_count`
+  was tracked by the registry - `wait_agents` incremented it for every in-flight
+  caller - but no surface reported it, so two agents waiting on the same task were
+  indistinguishable from none. `list_agents` now reports it per task: in a listing
+  row (`-> N active waiter(s)`), in the `task_id` detail view (`Active Waiters: N`)
+  and in the detail metadata (`waiter_count`), and the Agents panel paints it as a
+  `[wN]` suffix on the matching row. The count is reported **only when greater than
+  zero** and only for a task that has not finished, so an unawaited task never
+  shows a `0` that reads as a defect and a completed task's leftover tally is not
+  mistaken for a live queue. The panel takes the tally from the registry snapshot
+  it already merges, so a suspended task keeps showing its queued waiters, and the
+  marker is fitted into the label column so the pinned `[stop]` / `[x]` controls
+  never move. Covered by five `test_list_agents_tool` cases, four
+  `test_agents_window_table` cases and the `docs/howtos/tools/sub-agents.md`
+  `list_agents` section.
+- **A suspended background task still counts against the limit** (spec
+  `agentssetup` T-013, FR-030). Suspending a task is a pause, not an exit: it keeps
+  its `background_timeout_secs` wall-clock budget and can resume at any time, so
+  letting it free a slot would let the later resume push occupancy silently over the
+  limit. Occupancy therefore counts `suspended` background tasks exactly like
+  `running` ones on every surface that reports it - `running_background_count`,
+  `limit_report` (`limit` / `occupancy` / `headroom` / `occupying_ids`) and the
+  `list_agents` metadata - so suspending a task frees **no** headroom and only
+  cancellation does. The `limit_reached` spawn refusal now says so in the text a
+  caller actually reads (`... or cancel one (suspending does not free a slot).`) and
+  names the suspended task among the occupying ids, so an agent reaches for
+  `cancel_agent` instead of suspending again. `wait_agents` documents the matching
+  rule: a suspended task is still awaited, because only a terminal status settles a
+  wait. `list_agents` also accepts the status values its own rows carry - its `status`
+  filter took `running` / `completed` / `failed` / `cancelled` while the registry
+  emits `suspended`, `terminating` and `timed_out` too, so a caller could not filter
+  for the suspended task whose slot it needed to free; the filter now declares
+  `suspended` and `timed_out` (FR-007) and the description, schema, validator and
+  user docs share one list. Documented in `docs/howtos/tools/sub-agents.md` under
+  *Occupancy: a suspended task still holds its slot*. Covered by
+  `test_task_suspend_resume::suspended_task_still_occupies_the_limit`, which drives
+  the real `suspend_task` transition and asserts the count, the report and the
+  refusal all agree before and after a resume.
+- **`cancel_agent` reports the status a task is actually in** (spec `agentssetup`
+  T-009, FR-007, FR-013, FR-040). A cancel request is not a cancellation: the
+  registry keeps the task running until its loop reaches a safe point, yet the tool
+  used to answer `status: "cancelled"` the moment the flag was set. It now reports
+  `cancel_requested: true` plus the entry's **current** status, read back from the
+  registry after the request rather than assumed, so a caller can no longer mistake
+  a request for a finished task - the terminal `cancelled` status still arrives
+  through `SubagentCancelled` and is reported by `list_agents` / `wait_agents`. The
+  refusal path carries the same treatment (FR-040): a request the registry rejects
+  because the cancel flag is already gone now names the status the task holds
+  (`already completed`, `already failed`, ...) instead of only an error string, so
+  "this task already finished" is distinguishable from "the request could not be
+  delivered". Every status the tool emits comes from `TaskStatus::as_str()`, with
+  `unknown` reserved for an entry that could not be read back at all (FR-007); the
+  `cancelled` metadata field is replaced by `cancel_requested` on every branch,
+  including `task_not_found`. The description states the request-versus-terminal
+  distinction so the model is not led to await a cancellation that has not happened.
+- **`bg` speaks shell-task vocabulary and refuses a foreign `session_id`** (spec
+  `agentssetup` T-017, FR-019, FR-037). The `bg` tool manages shell tasks - shell
+  commands run in the background - and its rows live in the background-task store,
+  a different id space from the sub-agent task registry. Its description and every
+  message it returns now say "shell task"; the description also names `new_agent`
+  as the sub-agent verb, because "background task" is the sub-agent execution
+  contract's name and the old wording invited `cancel_agent`/`wait_agents` calls
+  against ids the registry has never seen. Every declared property is listed in
+  the description, including `working_dir`, `completed_only` and `session_id`.
+  `session_id` on `list` and `cleanup` is no longer an override: it must name the
+  calling session, where it behaves exactly as omitting it, and any other value is
+  refused with `reason_code: wrong_session` naming both sessions and deletes
+  nothing - previously a foreign id silently listed another session's commands or
+  cleaned them up. A missing background service is reported with
+  `reason_code: service_unavailable`.
+
+- **Team task completion now requires ownership** (spec `teamssetup` FR-001,
+  FR-002, FR-044). A completion is accepted only from the task's `assigned_to`
+  agent or from the lead. The previous release silently re-assigned an unowned or
+  `pending` task to whoever completed it, so "complete it and it becomes mine"
+  worked as a way to claim work by finishing it; that branch is gone rather than
+  guarded. The refusal names the task, its actual owner, and the two verbs that
+  do work - the lead can assign it with `team_assign_task`, or the caller can
+  claim it with `team_task_claim` - and mutates nothing: `assigned_to`,
+  `claimed_at`, `status`, `completed_at` and `completed_by` are untouched, so
+  `tasks.json` stays byte-identical. Re-completing a task that is already
+  completed is still an idempotent no-op success for its owner or the lead, and
+  is refused for anyone else.
+
+  The change is observable rather than a silent regression: every refusal
+  publishes `TeamTaskCompletionRejected { session_id, team_name, agent_id,
+  task_id, owner, reason, message }` on the event bus (SSE
+  `team_task_completion_rejected`), carries the same facts in the
+  `team_task_complete` result metadata as `rejection_reason` / `owner`, and is
+  written at `warn` under the `ragent_agent::task` target with
+  `event = "TaskCompletionRejected"`, so `rg 'TaskCompletionRejected' log/`
+  finds it whether or not a subscriber was attached.
+
+  *Operator migration:* any workflow that relied on "anyone can close any task"
+  must switch to the lead completing on the owner's behalf, or have the caller
+  claim the task first. A teammate that used to close another's task now gets a
+  `not_owner` refusal naming the owner and both alternatives.
+- **Team adoption now requires explicit consent** (spec `teamssetup` FR-023,
+  FR-024). `TeamManager::new` refuses a `lead_session_id` that differs from the
+  one recorded in the team's `config.json`; the previous release silently
+  adopted the team and started mutating it. Adoption is still available through
+  `TeamManager::try_new` with an explicit `AdoptTeam::Adopt`, and on adoption
+  every orphaned `InProgress` task is reset to `pending` regardless of its prior
+  owner - a single `TeamAdopted { previous_lead_session_id, reset_task_ids }`
+  event names what moved.
+
+  *Operator migration:* two sessions driving one team directory must take the
+  team over explicitly (`AdoptTeam::Adopt`, i.e. `adopt: true`) from the session
+  that should own it. Without it the second session gets an error naming the
+  owning session instead of quietly competing for the same task list.
+- **Every team member status write goes through one validating writer** (spec
+  `teamssetup` FR-003, FR-008, FR-009, FR-035). `TeamManager::set_member_status`
+  validates the move against the member status transition table, applies the
+  destination status's side effects, persists the roster once, and publishes
+  exactly one `TeammateStatusChanged { from, to, cause }`. All nine previous
+  direct `member.status = ...` sites now call it. `MemberStatus` gained the
+  `is_terminal` / `is_parked` / `is_live` predicates, and every "is this
+  teammate still active?" guard uses one of them instead of spelling a status
+  list again. The change is hardening, not capability: an illegal move is
+  refused by name rather than written.
+- **Task status writes share one legal-transition table** (spec `teamssetup`
+  FR-003, FR-004). `TaskStatus::can_transition_to` and `transition_task` are now
+  the single writer of `Task::status`, so the four claim paths and both
+  completion paths cannot disagree about which moves are possible, and an
+  illegal move is refused with a message naming the task, its actual status, and
+  the table row that forbids it.
+- **`team_task_complete` and `team_cleanup` descriptions state the enforced
+  rule** (spec `teamssetup` FR-042). `team_task_complete` now spells out the
+  ownership rule, that a refusal does not hand the task over, the two ways
+  forward, the unclaimed and already-completed cases, and the
+  `rejection_reason` / `owner` metadata fields. `team_cleanup` now spells out
+  the exact blocking set (live or shutting down), that parked and terminal
+  members never block, that `force: true` is the only override, and that
+  `/team cleanup` and `/team delete` share the guard.
+- **Parked members are no longer watchdog failures** (spec `teamssetup` FR-012).
+  The watchdog's eligibility test was a hand-spelled list that omitted
+  `Blocked` and `ShuttingDown`, so a parked member could be failed for taking no
+  progress. It is now `MemberStatus::is_live()`, and a team whose config cannot
+  be read yields "not live" rather than being failed on a guess.
+- **`Blocked` has exits** (spec `teamssetup` FR-010, FR-011). `resume` accepts a
+  `Blocked` member, not only a `Suspended` one, so the status is no longer a
+  terminal sink that wedged a team against the teardown guard. Separately, when
+  a task completes, every `Blocked` member whose last unmet dependency is now
+  satisfied is moved to `idle` automatically and published as `TeammateResumed`,
+  so the common case needs no operator verb at all.
+- **`Alt+A` and `Alt+T` toggle their panels unconditionally** (spec `agentssetup`
+  FR-045). The Teams window had no keyboard chord at all - it was mouse-only - and
+  the Agents chord could not close a window whose subject had gone away. Both
+  chords are now bound and both toggles follow one rule: a window that is **open
+  always closes**, whatever its subject currently is; a window that is **closed
+  opens only when it has a subject**, and a refused open names the reason on the
+  status line instead of doing nothing. That second half is the case worth
+  naming: `Alt+A` with no sub-agent and no background shell task tracked used to
+  be indistinguishable from a broken binding, and `Alt+T` with no active team
+  painted a modal whose only row would have been the lead's. They now report
+  `AGENTS_WINDOW_EMPTY_REFUSAL` and the new `TEAMS_WINDOW_EMPTY_REFUSAL` - one
+  sentence each naming the condition, the subject kind the panel would show, and
+  the command that produces one (`/spawn` or a background command for Agents,
+  `/team create` or `/swarm` for Teams) - from single constants every entry point
+  shares, so the chord and the button cannot describe the same refusal
+  differently. `Alt+T` was free: the Tasks side panel moved to `Alt+I` long ago.
+  The close-always half matters because the Agents window follows its live rows
+  (FR-063) and can empty out from under the operator mid-turn; a chord that
+  could not then dismiss the popup it opened would trap a keyboard-only user
+  inside it. Neither chord touches the input buffer, staged attachments or a
+  running turn, and a refusal still paints nothing (NFR-005). Covered by
+  `test_alt_t_teams_window` (7 cases) plus the updated
+  `test_alt_a_agents_window` / `test_window_routing` / `test_agents_window_refusals`.
+- **`Alt+A` opens the Agents window from the keyboard** (spec `agentssetup`
+  T-019, FR-022). The window was mouse-only: `toggle_agents_window` was called
+  only from the mouse router, so a keyboard-only terminal user could not reach
+  the panel at all. `Alt+A` is now bound and resolves to an `InputAction`, not an
+  inline mutation, so the dispatch arm calls the very same
+  `App::toggle_agents_window` the Agents button's click calls - one visibility
+  path, including the Teams-window exclusion and the redraw flag - rather than a
+  keyboard-only lookalike. The `a` is consumed before generic char-insert
+  handling so it is never typed into the input buffer, and bare `a` still types
+  as before. Covered by `test_alt_a_agents_window`.
+- **The Agents panel names both of its silent conditions** (spec `agentssetup`
+  T-023, FR-032, FR-042). Two panel states used to say nothing at all. First,
+  pressing `Alt+A` (or clicking the Agents button) with no sub-agent and no
+  background shell task tracked did nothing whatsoever, so an operator could not
+  tell a broken binding from an empty panel; the open is still refused - FR-042
+  forbids the empty modal - but the status line now says why in one named
+  sentence (condition, both kinds of subject, and the `/spawn` action that
+  produces one), from the single constant `AGENTS_WINDOW_EMPTY_REFUSAL` that
+  every entry point shares. Second, a finished task whose report was never
+  persisted (`output_file: None`, the state a failed `persist_task_output`
+  leaves behind) had nothing to say either: the completed-history row now
+  carries the `[memory]` flag and the shared `IN_MEMORY_REPORT_NOTE` wording
+  `list_agents` and `wait_agents` already print, so the panel and the tools
+  describe the condition identically and no path is ever claimed for a file that
+  was not written (FR-043). Supporting that, the history snapshot now carries
+  the run's `report_status` and `output_file` and is taken *before* the live row
+  is removed (FR-028), on the cancel path as well as the completion path; the
+  panel's completed section paints newest-first under its own heading, bounded
+  by `agents.completed_history` (FR-036, NFR-004). `agents_window_available` now
+  counts a history row as a subject, so the panel stays openable after the last
+  live task finishes and the new note is reachable; FR-063 is unchanged - the
+  window still closes with its last *live* row.
+- **`team_wait` reports parked members instead of waiting out the clock** (spec
+  `teamssetup` FR-031). A teammate resting in `Idle`, `PlanPending`, `Blocked`
+  or `Suspended` is a settled outcome, so a wait over such a member returns
+  immediately (measured: 30.001 s before, 0.013 s after) and each awaited member
+  is reported as idle, parked, failed, or still-running at the timeout.
+- **`/team delete` confirms every named team** (spec `teamssetup` FR-045). The
+  confirmation used to be conditional on a live member; it now applies to every
+  roster - including an empty one - because the team directory is removed for
+  good whatever the statuses say. A second `--force` action is required, naming
+  the team and stating that nothing has been deleted yet.
+
+### Added
+- **A `tasks.json` write now validates the whole list before persisting it**
+  (spec `teamssetup` T-033, FR-038, FR-039). `TaskList::validate()` was per-task
+  only, so a list could be internally inconsistent while every row was
+  individually well-formed, and FR-039's dangling dependency was not caught
+  anywhere: a task that `depends_on` an id that does not exist is unclaimable
+  *forever* (`is_claimable` asks whether every dependency is `completed`, and a
+  missing id can never complete), and a dependency cycle deadlocks every member
+  of the cycle with nothing visible in the task rows. `validate()` now also
+  refuses duplicate task ids, checks every `depends_on` edge against the list,
+  and detects cycles with a three-colour iterative DFS; `TaskStore::write_locked`
+  - the one function every persisted list passes through, cached or not - runs it
+  before creating the temp file, so a refusal leaves `tasks.json` byte-identical.
+  The refusal names the offending task, the missing id (plus the ids that do
+  exist) or the closing chain (`task-001 -> task-002 -> task-001`), prefixed
+  `refusing to write invalid <path>: ...` so it is clear the write boundary
+  refused rather than the tool. `team_task_create`'s description now states the
+  enforced rule and the recovery instead of saying a dangling dependency "will
+  block the task from being claimed".
+
+  *Operator migration:* a hand-edited `tasks.json` that already holds a dangling
+  `depends_on` or a cycle is **not** repaired and not silently rewritten - the
+  next write refuses and names the edge to fix. Edit the file to point the edge
+  at an existing task (or delete it), create a missing dependency before the task
+  that needs it, and the write proceeds.
+
+- **Team hook-failure ledger `hook-failures.jsonl`** (spec `teamssetup` T-026,
+  FR-019, NFR-004). A configured team quality-gate hook could not run for three
+  reasons - its command failed `validate_hook_command`, it failed to spawn, or it
+  exceeded the 30-second `HOOK_TIMEOUT` - and all three returned
+  `HookOutcome::Allow` with only a `tracing::warn!`, so an inert hook was
+  indistinguishable from a hook that had run and approved. Each such failure now
+  appends one JSON object per line to the team's `hook-failures.jsonl`:
+  `{timestamp, event, hook, reason, detail}`, where `reason` is `invalid`,
+  `spawn_failed` or `timeout`. The file is append-only and bounded: once it
+  reaches 1 MiB it is rotated whole to `hook-failures.jsonl.1` (replacing the
+  previous generation) and the new record starts a fresh live file, so the
+  ledger never grows without limit and never rewrites an existing record
+  outside rotation. Recording is best-effort - a filesystem error is logged and
+  swallowed - so the ledger can never change a hook's verdict. The count is
+  surfaced in `/team show <name>` and `team_status` (prose section plus
+  `hook_failure_count` / `hook_failures` metadata); a team with no failures
+  reports nothing.
+- **`team_task_cancel`** (spec `teamssetup` T-012, FR-005). The team runtime had
+  no way to cancel a task at all: `TaskStatus::Cancelled` existed in the enum,
+  `as_str` and the serde table, but nothing ever wrote it, so a lead could only
+  abandon work by editing `tasks.json` by hand. The tool takes `team_name`,
+  `task_id` and an optional `reason`, and is `team:manage` (the same family as
+  assignment and cleanup). It is a surface, not an implementation: it delegates
+  to `TeamManager::cancel_task` (or `TaskStore::cancel` when the session has no
+  manager), both of which are façades over the single `cancel_task_in_list`, so
+  the legal-transition check, the lead-only rule, the mailbox notice and the
+  refusal wording cannot diverge. The description states the rule the runtime
+  enforces (lead-only; only `pending`/`in_progress` are cancellable; `completed`
+  and `cancelled` are terminal; the owner is notified; the task is kept, not
+  deleted). The default registry now advertises 150 tools across 21 families.
+
+- **Tool parameters are validated against the declared schema, not merely
+  documented as if they were** (spec `agentssetup` FR-002, FR-004, FR-038).
+  Every sub-agent tool declares a closed parameter set
+  (`additionalProperties: false`) and every one of them promised the model that
+  an undeclared property is refused - but nothing in the dispatch pipeline
+  enforced the promise, so a tool that reads its parameters by key silently
+  ignored a misspelled one: `new_agent agent="explore" task="..." backgound=true`
+  ran a *foreground* task and looked like a success. The new
+  `crates/ragent-agent/src/tool/param_schema.rs` is the one place that turns a
+  declared schema into an actual check (`validate_tool_input`), and
+  `new_agent`, `cancel_agent`, `list_agents`, `wait_agents` and `bg` call it at
+  the top of `execute`; a call carrying a property the schema does not declare
+  fails with ``Unknown parameter(s): `backgound` `` instead of proceeding. Only
+  property *names* are checked - value types, `enum` membership and conditional
+  requirements stay with each tool, because those need the tool's own vocabulary
+  to produce a useful message. `bg` goes one step further and refuses a declared
+  parameter the chosen action does not read (`{"action": "status", "lines": 10}`
+  names `lines` as not accepted by `status`). The check runs before the
+  environment check, so a bad call shape is reported as a bad call shape even
+  when no agent manager is wired in. Covered by
+  `test_tool_param_schema`, `inline/param_schema_tests.rs` and the refusal cases
+  in `test_bg_tool`.
+
+- **Team member status history is on disk, so `team_status` can answer "why did
+  this teammate stop?"** (spec `teamssetup` FR-036, NFR-004). FR-035 publishes a
+  `TeammateStatusChanged` event for every status write, which is enough to
+  reconstruct a member's history *while someone is listening* - and a tool call
+  is not a listener: by the time a lead runs `team_status`, the answering events
+  have gone past. The new `crates/ragent-agent/src/team/status_history.rs`
+  appends one JSON object per line to the team's `status-history.jsonl`
+  (`{timestamp, agent_id, name, from, to, cause}`), written exclusively by
+  `TeamManager::set_member_status` - the single status writer FR-008 establishes
+  - so a transition cannot be persisted without being logged and cannot be
+  logged without being persisted. Bound: before an append that would take the
+  file past `MAX_HISTORY_BYTES` it is rotated whole to `status-history.jsonl.1`,
+  so it never grows without limit and never rewrites an existing record outside
+  rotation. `team_status` renders the last `STATUS_HISTORY_LIMIT` (5)
+  transitions per member, oldest first, under a `Status history` block beneath
+  each roster row.
+
+- **`team_status` names the three states that used to be silent** (spec
+  `teamssetup` FR-031, FR-036, FR-019). Alongside the status history, the report
+  now surfaces three conditions a lead could previously only discover by
+  inference: messages still unread in a *terminated* member's mailbox under
+  `Undelivered messages` (no teammate will ever drain that mailbox, so the
+  message is stranded rather than pending); a plan parked in `plan_pending`
+  under `Plans awaiting a verdict`, naming the `team_approve_plan` call that
+  resolves it; and configured quality-gate hooks that *could not run* under
+  `Hook failures`, because an inert hook never approved anything and a non-zero
+  count there means a gate is not working. All three are also carried in the
+  result metadata (`pending_plans`, `hook_failure_count`), so a programmatic
+  reader need not parse prose.
+
+- **Four team lifecycle events reach the event bus and the SSE stream** (spec
+  `teamssetup` FR-017, FR-024, FR-035, FR-044). `Event::TeammateStopped`,
+  `Event::TeammateStatusChanged`, `Event::TeamTaskCompletionRejected` and
+  `Event::TeamAdopted` are new, so a remote consumer can see a teammate reach the
+  terminal `Stopped` status and why (`cause` is the snake_case `TransitionCause`
+  token), follow every member status write with its `from`/`to`/`cause`, learn
+  that a completion was refused and by which rule (`not_owner`, `not_claimed`,
+  `already_completed`, with the owner and the message), and observe a team taken
+  over by a second session (previous lead plus the task ids the adoption reset).
+  The status and cause fields are canonical snake_case tokens rather than the
+  typed enums, which live in `ragent-agent` and would invert the dependency on
+  `ragent-types`; a consumer that needs the typed value parses the token. The SSE
+  projections are named `teammate_stopped`, `teammate_status_changed`,
+  `team_task_completion_rejected` and `team_adopted`. Covered by
+  `test_sse_event_variants` and `test_event_to_sse`.
+
+- **The `agents` config section bounds what the Agents panel keeps** (spec
+  `agentssetup` FR-021, FR-036, NFR-004). Two knobs, both omitted from a
+  serialised config while at their defaults so a config that never set them
+  round-trips unchanged: `agents.completed_history` (default
+  `DEFAULT_AGENTS_COMPLETED_HISTORY = 20`, clamped `1..=200`) caps the panel's
+  completed-history section so a long session's panel memory stays constant in
+  the number of tasks ever spawned, and `agents.max_launching` (default
+  `DEFAULT_AGENTS_MAX_LAUNCHING = 4`, clamped `1..=64`) bounds the shared
+  sub-agent launch set every TUI launch path now uses. Both clamp an explicit
+  `0` *up* rather than honouring it: zero would silently switch the feature off
+  while still claiming to be configured.
+
+### Changed
+- **A `TaskCompleted` hook's veto now reaches the completing agent on every path**
+  (spec `teamssetup` T-025, FR-018). Team hooks moved onto the runtime as of
+  `teamssetup` T-023, which meant the verdict was produced by the completion
+  itself - and a lead-side completion ran the hook and then discarded the
+  answer. `team_task_complete` now completes through
+  `TeamManagerInterface::complete_task_in`, a façade over the one
+  `TeamManager::complete_task` (or `TaskStore::complete` when the session has no
+  manager), so the ownership rule, the transition, the `TeamTaskCompleted` event
+  and the hook are one path and the verdict is returned to the agent that asked:
+  `hook_rejected: true` plus the hook's stdout in `feedback`, in both the prose
+  and the result metadata.
+
+  *Behaviour change:* a veto no longer rewrites the task to `in_progress`. The
+  previous tool did so behind the runtime's back - a second writer of the task
+  status, and an invitation to "complete again" that could never succeed because
+  `completed` is terminal. The completion now stands, the result says so, and it
+  points at the lead for a follow-up task or a cancel-and-reissue. Use a
+  `TaskClaimed` hook when the gate must run *before* the status is written.
+
+  *Operator migration:* a hook that relied on the tool's silent revert to make an
+  agent retry now sees a completed task. Express a hard gate as a `TaskClaimed`
+  hook (pre-commit), or have the lead cancel and re-issue the task.
+
+### Fixed
+- The `--web-time` invalid-integer diagnostic named a flag the caller had not
+  typed, and the test suite caught the mismatch rather than the behaviour
+  (commit `15075956`, merged as `79af8667`). The
+  `"--web-phase-timeout-secs" | "--web-time"` arm formatted its message from the
+  hardcoded canonical spelling, so `ragent research create t topic --web-time x`
+  answered `` --web-phase-timeout-secs x: expected an integer ``. The arm now
+  interpolates the matched `arg`, so the diagnostic echoes the spelling that was
+  actually rejected, and `parse_create_invalid_numeric_is_rejected` passes for
+  the alias as well as the canonical form. This **amends** the `[1.0.152]`
+  entry's claim that the alias "now names the canonical
+  `--web-phase-timeout-secs`": naming the canonical flag was the mistake.
+- `pulldown-cmark` 0.13.4 carried RUSTSEC-2026-0414 (high, 7.5): exponential
+  event growth when `ENABLE_WIKILINKS` is set. The TUI's markdown renderer does
+  not enable the option, but the dependency is reachable from a rendered string,
+  so the lock is moved to 0.13.5 (the advisory's fixed version) rather than
+  suppressed. `Cargo.toml` keeps `pulldown-cmark = "0.13"`, so no manifest
+  change was needed; `cargo audit` is clean again across 867 dependencies.
+- A refused sub-agent tool call could only be understood by reading English
+  prose (spec `agentssetup` FR-010, NFR-005). Every failure a caller could
+  branch on - the background limit, an illegal `detached`/`background`
+  combination, an active team context, a bad `timeout_secs`, a missing
+  `AgentManager`, an unknown task or one owned by another session, a rejected
+  cancel, an unsupported `list_agents` status filter, a malformed
+  `wait_agents` `task_ids`, and `bg`'s unknown-action / unread-parameter /
+  missing-service cases - now carries a stable code. An **error** carries it at
+  the head of its message (`reason_code: <code>: <explanation>`, read back with
+  the new `tool::param_schema::reason_in`); a failure reported as a **result**
+  (the `cancel_agent` unknown-task case, an empty listing, the wait outcome)
+  carries it as `metadata.reason`. The task registry prefixes its own
+  `limit_reached` with `param_schema::prefixed` and `new_agent` lifts it into
+  the tool-error envelope, so one code is visible whichever layer refused. Every
+  refusal also names at least one supported next action, and `bg`'s
+  unknown-action refusal now lists the supported action set. Covered by
+  `test_new_agent_refusals_carry_reason_codes`,
+  `test_registry_refusal_keeps_its_reason_code`,
+  `test_reason_code_round_trip`, `test_with_reason_attaches_to_metadata`,
+  `refusals_carry_reason_codes` (`list_agents`),
+  `test_cancel_agent_names_a_missing_manager`,
+  `test_cancel_agent_reports_an_unknown_task`,
+  `test_wait_agents_reason_codes` and `test_bg_refusals_carry_reason_codes`.
+- The background concurrency limit could only be discovered by hitting it (spec
+  `agentssetup` FR-011, FR-029, FR-035, NFR-003). `list_agents` reported the
+  tasks it found but never the limit state, so an agent had to spawn and be
+  refused to learn there was no headroom, and the refusal named only the limit -
+  not who was occupying it. The task registry now exposes `limit_report()` as one
+  `BackgroundLimitReport { limit, occupancy, headroom, occupying_ids }` computed
+  from the same `DashMap` scan the spawn path already performs and through the
+  same single `occupies_limit` predicate `running_background_count` uses, so a
+  listing and a refusal cannot disagree and no storage read is added.
+  `list_agents` reports `limit`, `occupancy`, `headroom` and
+  `occupying_task_ids` in the metadata of every exit path (populated listing,
+  empty listing, detail hit, detail miss) plus a one-line content summary
+  (`Background limit: 1/2 slots in use, headroom 1. Occupying tasks: <id>`); the
+  figures are computed before the `status` filter is applied, so a filtered
+  listing still describes the whole session. Occupancy counts `suspended`
+  background tasks as well as `running` ones (a suspended task keeps its budget
+  and can resume, FR-030) and still excludes `detached` tasks, so suspending a
+  task no longer frees a slot - cancellation is the supported way to free one. A
+  `new_agent` refusal for the limit now names the limit, the occupancy, the
+  headroom and the occupying task ids alongside its `limit_reached` code, and the
+  system prompt's concurrency block points at the reported headroom rather than
+  at the refusal. Covered by
+  `test_ta[REDACTED]::limit_report_counts_running_and_suspended_background_tasks`,
+  `::spawn_refusal_names_limit_occupancy_and_occupying_tasks`,
+  `test_list_agents_tool::limit_occupancy_and_headroom_are_reported`,
+  `::limit_report_composes_with_a_status_filter` and
+  `::detail_mode_reports_the_limit_on_hit_and_miss`.
+- The Agents panel could not tell a detached sub-agent from an awaited
+  background one (spec `agentssetup` FR-020). `Event::SubagentStart` carried
+  only `background`, `App::note_subagent_started` hard-coded `detached: false`
+  on every row it appended, and the table's type column painted `bg`/`fg` from
+  `background` - so a `/spawn` fire-and-forget task, or a `new_agent` call with
+  `detached: true`, was shown as an ordinary background task and the panel
+  reported a contract the runtime never used. The event now carries `detached`
+  beside `background`, the task registry fills both from the entry it actually
+  spawned, and the type column reads `fg`, `bg` or `detached` from that entry,
+  with `detached` tested first because a detached run sets `background` too.
+  The spawn log line names the same three contracts (`[fg]` / `[bg]` / `[dt]`),
+  the flag travels in the SSE `subagent_start` payload so a remote consumer can
+  make the same distinction, and the type column widens from 8 to 9 columns
+  (taken from the label column's one spare column, so the pinned `[stop]`/`[x]`
+  positions are unchanged) to hold `detached` plus its separating column.
+  Covered by `test_type_column_paints_the_execution_contract`,
+  `test_detached_badge_fits_the_type_column`,
+  `test_spawn_paints_the_contract_carried_by_the_event`,
+  `test_replayed_spawn_refreshes_the_contract` and
+  `test_subagent_start_carries_the_detached_flag`.
+- The `new_agent` `model` parameter was documented four different ways (spec
+  `agentssetup` FR-006). The schema showed `anthropic/...` and `openai:...` but
+  named no preference, the tool description named only the `provider/model`
+  spelling, and the system prompt and `README.md` did not mention the
+  parameter at all - so a model could not tell that `provider:model` was
+  accepted, nor which form to prefer. All four surfaces now document the same
+  set (`provider/model` **preferred**, `provider:model` accepted), matching
+  what the resolver actually does: it tries `/` before `:`, and a string with
+  neither separator is ignored rather than guessed. `test_model_override_spellings.rs`
+  pins the schema, description and system prompt, and asserts the documented
+  shapes are the ones the resolver accepts.
+- Calling `new_agent` inside an active team returned a **successful** tool
+  result whose content was guidance prose (spec `agentssetup` FR-009, FR-045):
+  the model saw a normal answer where the runtime meant "you may not do this",
+  and nothing distinguished the refusal from a sub-agent's reply. It is now a
+  tool error carrying the machine-readable reason `team_context_active`,
+  naming the team and this session's role, with the previous guidance text kept
+  verbatim - a lead is pointed at `team_spawn` / `team_task_create` /
+  `team_assign_task` / `team_message`, a teammate at `team_read_messages` /
+  `team_task_claim` / `team_task_complete` / `team_idle`. No sub-agent task
+  starts, and the change is visible rather than silent: an `Err` where there
+  used to be prose.
+- A task completion refused for ownership, an unclaimed task, or an
+  already-completed task left the caller with a bare error and no way to tell
+  which rule fired; the reason is now a canonical token in the event, the log,
+  and the tool metadata.
+- The sub-agent tools reported three categories over one task registry, and the
+  read-only one reported none (spec `agentssetup` FR-005). `new_agent` and
+  `cancel_agent` both said `agent:spawn`, so a `permission` rule could not grant
+  spawning while denying cancellation; `list_agents` said `none`, which
+  short-circuits the permission layer before any rule lookup, so a policy
+  written against it never ran. The taxonomy is now `agent:spawn` (`new_agent`),
+  `agent:control` (`cancel_agent`, `wait_agents`) and `agent:read`
+  (`list_agents`). Classification only: all four stay in
+  `AUTO_APPROVED_AGENT_TOOLS`, so no interactive prompt was added, and the
+  `--dry-run` family table keeps its 21 families (the `agent` family grows
+  4 -> 5).
+- A `Blocked` teammate could be parked forever: nothing in the agent crate
+  unblocked it, the watchdog skipped it by status, and the teardown guard counts
+  it as idle-but-present, so the team could not be cleaned up either.
+- **RUSTSEC-2026-0414** (`pulldown-cmark` 0.13.4, high / 7.5): exponential
+  event growth when `ENABLE_WIKILINKS` is set, reachable through the markdown
+  rendering path. The lock moved to `pulldown-cmark` 0.13.5, which carries the
+  fix; no manifest change and no API difference. `cargo audit` is clean across
+  all 867 dependencies.
+
+### Compatibility
+- Every `config.json` and `tasks.json` written by the previous release loads
+  without migration (spec `teamssetup` FR-043). The on-disk spellings of every
+  `TaskStatus`, `MemberStatus` and `TeamStatus` are unchanged: all three still
+  serialise through `#[serde(rename_all = "lowercase")]`, so `"in_progress"`,
+  `"shutting_down"` and the rest keep their existing snake_case tokens. No field
+  was added to either root object that is required rather than `#[serde(default)]`
+  or `skip_serializing_if`-optional, so an existing file parses as it did.
+- Two **new** append-only files appear beside a team's `config.json` and
+  `tasks.json`: `status-history.jsonl` (one status transition per line) and
+  `hook-failures.jsonl` (one failed hook execution per line), each rotated whole
+  to a `.1` sibling when it would pass its size bound. Both are derived data - a
+  reader that ignores them loses nothing and a missing file means "no records",
+  so no team directory needs a migration. The `agents` config section is new and
+  its two keys are omitted from a serialised config while at their defaults, so
+  a `ragent.json` that has never set them round-trips byte-identically.
+- The default registry advertises **150 tools across 21 families**; the `agent`
+  family counts 5 because `team_wait` is classified `agent:spawn` (it always
+  was - the count was a documentation error, not a new tool). `list_agents` moved
+  from family `none` to `agent:read`, which is why `none` is now 8 and the family
+  count stayed 21: the category was re-spelled inside an existing family.
+
 ## [1.0.152] - 2026-10-28
 
 Release 1.0.152: the research publication-age window becomes a parsed type

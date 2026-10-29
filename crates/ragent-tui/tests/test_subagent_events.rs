@@ -43,6 +43,7 @@ async fn start(app: &mut App, session: &str, task: &str, child: &str, agent: &st
         agent: agent.to_string(),
         task: "do work".to_string(),
         background: true,
+        detached: false,
     })
     .await;
 }
@@ -452,6 +453,7 @@ async fn test_replayed_spawn_refreshes_the_carried_fields() {
         agent: "rust-coder".to_string(),
         task: "reworked prompt".to_string(),
         background: false,
+        detached: false,
     })
     .await;
 
@@ -475,5 +477,76 @@ async fn test_distinct_spawns_append_distinct_rows() {
             "explore-11223344".to_string()
         ],
         "two genuine spawns paint two rows"
+    );
+}
+
+// -- FR-020: the event carries the execution contract -----------------------
+
+/// The painted row takes `background` and `detached` from the event, so the
+/// panel reports what the task registry actually spawned instead of a
+/// hard-coded default (FR-020).
+///
+/// All three contracts are driven through the same entry point because the
+/// defect this closes was a row that painted `detached: false` unconditionally:
+/// a detached spawn then looked like an ordinary awaited background task.
+#[tokio::test]
+async fn test_spawn_paints_the_contract_carried_by_the_event() {
+    let mut app = app_with_session("s1");
+
+    for (task, child, background, detached) in [
+        ("fg-task", "child-fg", false, false),
+        ("bg-task", "child-bg", true, false),
+        ("dt-task", "child-dt", true, true),
+    ] {
+        app.handle_event(Event::SubagentStart {
+            session_id: "s1".to_string(),
+            task_id: task.to_string(),
+            child_session_id: child.to_string(),
+            agent: "explore".to_string(),
+            task: "do work".to_string(),
+            background,
+            detached,
+        })
+        .await;
+
+        let row = app
+            .active_tasks
+            .iter()
+            .find(|t| t.id == task)
+            .unwrap_or_else(|| panic!("{task} is painted"));
+        assert_eq!(
+            row.background, background,
+            "{task}: the row keeps the event's background flag"
+        );
+        assert_eq!(
+            row.detached, detached,
+            "{task}: the row keeps the event's detached flag"
+        );
+    }
+}
+
+/// A replayed spawn for a detached task corrects the existing row's contract
+/// rather than leaving the first event's values in place (FR-020, FR-072).
+#[tokio::test]
+async fn test_replayed_spawn_refreshes_the_contract() {
+    let mut app = app_with_session("s1");
+    start(&mut app, "s1", "explore-abc", "child-1", "explore").await;
+    assert!(!app.active_tasks[0].detached, "the first spawn is awaited");
+
+    app.handle_event(Event::SubagentStart {
+        session_id: "s1".to_string(),
+        task_id: "explore-abc".to_string(),
+        child_session_id: "child-1".to_string(),
+        agent: "explore".to_string(),
+        task: "do work".to_string(),
+        background: true,
+        detached: true,
+    })
+    .await;
+
+    assert_eq!(app.active_tasks.len(), 1, "the replay updates, not appends");
+    assert!(
+        app.active_tasks[0].detached,
+        "the replayed spawn's contract wins"
     );
 }

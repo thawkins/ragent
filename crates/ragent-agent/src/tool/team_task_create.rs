@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::team::manager::HookOutcome;
-use crate::team::{HookEvent, Task, TaskStore, TeamStore, find_team_dir, run_team_hook};
+use crate::team::{Task, TaskStore, TeamStore, find_team_dir};
 
 /// Adds a new task to the team's shared task list (lead-only).
 pub struct TeamTaskCreateTool;
@@ -21,9 +21,13 @@ impl Tool for TeamTaskCreateTool {
              'team_name' (string) and 'title' (string, short task title). Optional: \
              'description' (string, full work description) and 'depends_on' (array of \
              task IDs that must be completed before this task can be claimed). Teammates \
-             will be able to claim it via team_task_claim. Common gotcha: dependency \
-             task IDs refer to other tasks in the same team; dangling dependencies will \
-             block the task from being claimed."
+             will be able to claim it via team_task_claim. DEPENDENCY RULE (enforced): \
+             every id in 'depends_on' must already name a task in the same team's list, and \
+             the dependency graph must stay acyclic. A dangling id (the task does not \
+             exist) or an edge that closes a cycle is refused at write time and the task is \
+             NOT created, because such a task could never be claimed or completed - check \
+             team_task_list for the ids that exist, create a dependency before the task \
+             that needs it, and drop any id that would close a loop."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -93,18 +97,9 @@ impl Tool for TeamTaskCreateTool {
         task.description = description.clone();
         task.depends_on = depends_on.clone();
 
-        store.add_task(task)?;
-
-        // Run TaskCreated hook with task metadata on stdin.
-        let hook_stdin = json!({
-            "team_name": team_name,
-            "task_id": task_id,
-            "title": title,
-            "description": description,
-            "depends_on": depends_on
-        })
-        .to_string();
-        let outcome = run_team_hook(&team_dir, HookEvent::TaskCreated, Some(&hook_stdin)).await;
+        // FR-017: the `TaskCreated` hook fires from the task store's mutation
+        // path, not from here, so a task seeded by `team_create` fires it too.
+        let outcome = store.add_task(task).await?;
 
         if let HookOutcome::Feedback(feedback) = outcome {
             // Hook rejected creation - remove the task.

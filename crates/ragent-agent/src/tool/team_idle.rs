@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
+use crate::team::config::MemberStatus;
 use crate::team::manager::HookOutcome;
-use crate::team::{HookEvent, MemberStatus, TaskStore, TeamStore, find_team_dir, run_team_hook};
+use crate::team::{HookEvent, TaskStore, TeamStore, find_team_dir, run_team_hook};
 
 /// Teammate notifies lead it has no more work (idle state).
 pub struct TeamIdleTool;
@@ -100,14 +101,15 @@ impl Tool for TeamIdleTool {
         let outcome = run_team_hook(&team_dir, HookEvent::TeammateIdle, Some(&hook_stdin)).await;
 
         if let HookOutcome::Feedback(feedback) = outcome {
-            // Hook rejected idle - keep teammate working.
-            {
-                let mut store = TeamStore::load(&team_dir)?;
-                if let Some(member) = store.config.member_by_id_mut(&agent_id) {
-                    member.status = MemberStatus::Working;
-                }
-                store.save()?;
-            }
+            // Hook rejected idle - keep teammate working. FR-008: the move goes
+            // through the manager's single status writer, so it is validated
+            // against the transition table and published as one
+            // `TeammateStatusChanged` instead of silently rewriting
+            // `config.json`.
+            super::set_member_status_through_manager(
+                ctx, &team_dir, &agent_id, "working", "resumed",
+            )
+            .await?;
             return Ok(ToolOutput {
                 content: format!(
                     "TeammateIdle hook rejected idle for '{agent_id}'. \
@@ -123,15 +125,16 @@ impl Tool for TeamIdleTool {
             });
         }
 
-        // Mark the member as idle.
-        {
-            let mut store = TeamStore::load(&team_dir)?;
-            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
-                member.status = MemberStatus::Idle;
-                member.current_task_id = None;
-            }
-            store.save()?;
-        }
+        // Mark the member as idle (FR-008: through the single status writer,
+        // which also clears `current_task_id`).
+        super::set_member_status_through_manager(
+            ctx,
+            &team_dir,
+            &agent_id,
+            "idle",
+            "reported_idle",
+        )
+        .await?;
 
         // M3-T4: publish TeammateIdle so `team_wait` and the TUI/SSE observe
         // the idle transition even when the mailbox poll loop does not deliver
@@ -146,6 +149,46 @@ impl Tool for TeamIdleTool {
             team_name: team_name.to_string(),
             agent_id: agent_id.clone(),
         });
+
+        // FR-015: the status writer already asked `auto_claim_tasks` what this
+        // idle means - either "hold me idle" or "give me the next task", and in
+        // the second case it claimed a task and moved the member to `Working`.
+        // Reading the roster back is how the reply tells the teammate which
+        // happened: telling it to wait for work when it has just been given some
+        // would leave it parked on a task it never started.
+        let claimed = TeamStore::load(&team_dir)
+            .ok()
+            .and_then(|store| {
+                store
+                    .config
+                    .member_by_id(&agent_id)
+                    .map(|m| (m.status, m.current_task_id.clone()))
+            })
+            .and_then(|(status, task_id)| {
+                // `Working` plus a held task is the auto-claim's footprint.
+                (status == MemberStatus::Working)
+                    .then_some(task_id)
+                    .flatten()
+            });
+
+        if let Some(task_id) = claimed {
+            return Ok(ToolOutput {
+                content: format!(
+                    "Teammate '{agent_id}' reported idle in team '{team_name}', and \
+                     `auto_claim_tasks` immediately claimed task '{task_id}' for it.\n\
+                     Summary: {summary}\n\
+                     Start that task now: read it with `team_task_list`, then work it and \
+                     call `team_task_complete` when it is done."
+                ),
+                metadata: Some(json!({
+                    "team_name": team_name,
+                    "agent_id": agent_id,
+                    "status": "working",
+                    "auto_claimed_task_id": task_id,
+                    "summary": summary
+                })),
+            });
+        }
 
         Ok(ToolOutput {
             content: format!(

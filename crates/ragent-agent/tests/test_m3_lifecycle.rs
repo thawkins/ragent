@@ -22,9 +22,13 @@
 use std::sync::Arc;
 
 use ragent_agent::event::EventBus;
+use ragent_agent::team::manager::TeamManager;
 use ragent_agent::team::{MemberStatus, TeamMember, TeamStore};
 use ragent_agent::tool::{Tool, ToolContext};
 use serde_json::json;
+
+#[path = "manager_support/mod.rs"]
+mod manager_support;
 
 #[path = "team_support/mod.rs"]
 mod team_support;
@@ -99,6 +103,18 @@ async fn test_team_wait_handles_teammate_failed_event() {
             error: "simulated crash".to_string(),
         });
     });
+
+    // The manager marks the member `Failed` on disk before it publishes
+    // `TeammateFailed`, so the event and the reported status agree. Reproduce
+    // that ordering here: the event settles the wait, and the on-disk status is
+    // what the outcome report describes.
+    {
+        let mut s = TeamStore::load_by_name("fail-team", &dir).expect("load");
+        if let Some(m) = s.config.member_by_id_mut("tm-001") {
+            m.status = MemberStatus::Failed;
+        }
+        s.save().expect("save failed status");
+    }
 
     let tool = ragent_agent::tool::team_wait::TeamWaitTool;
     let input = json!({ "team_name": "fail-team", "timeout_secs": 5 });
@@ -212,8 +228,21 @@ async fn test_team_idle_publishes_teammate_idle_event() {
     let bus = Arc::new(EventBus::new(128));
     let mut rx = bus.subscribe();
 
+    // FR-008: `team_idle` moves the member through the manager's single status
+    // writer, so the manager must be attached. Build one over the team on disk,
+    // exactly as the runtime does, and let the tool route its Idle move through
+    // it rather than asserting against a context that has no writer at all.
+    let processor = manager_support::stub_processor(bus.clone());
+    let manager = TeamManager::into_arc(TeamManager::new(
+        "idle-event-team",
+        "lead-sess",
+        ragent_agent::team::find_team_dir(&dir, "idle-event-team").expect("team dir exists"),
+        processor,
+        bus.clone(),
+    ));
+
     // Build a tool context that looks like the teammate's session.
-    let ctx = ToolContext {
+    let mut ctx = ToolContext {
         session_id: "tm-001".to_string(),
         working_dir: dir.clone(),
         event_bus: bus.clone(),
@@ -241,18 +270,40 @@ async fn test_team_idle_publishes_teammate_idle_event() {
         allowed_roots: Vec::new(),
         tool_registry: ragent_agent::tool::ToolContext::default_tool_registry(),
     };
+    ctx.team_manager = Some(manager);
 
     let tool = ragent_agent::tool::team_idle::TeamIdleTool;
     let input = json!({ "team_name": "idle-event-team", "summary": "done" });
     let out = tool.execute(input, &ctx).await.expect("team_idle execute");
     assert!(out.content.contains("idle"));
 
-    // The tool must have published Event::TeammateIdle.
-    let received = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-        .await
-        .expect("timed out waiting for TeammateIdle event")
-        .expect("channel closed");
-    match received {
+    // The tool must have published Event::TeammateIdle. The manager's single
+    // status writer publishes `TeammateStatusChanged` for the Working -> Idle
+    // move first (FR-035), so read past it rather than assuming an order.
+    let mut saw_status_changed = false;
+    let idle = loop {
+        let received = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for TeammateIdle event")
+            .expect("channel closed");
+        match received {
+            ragent_agent::event::Event::TeammateStatusChanged { from, to, .. } => {
+                saw_status_changed = true;
+                assert_eq!(
+                    (from.as_str(), to.as_str()),
+                    ("working", "idle"),
+                    "the move is Working -> Idle"
+                );
+            }
+            ev @ ragent_agent::event::Event::TeammateIdle { .. } => break ev,
+            other => panic!("unexpected event before TeammateIdle: {other:?}"),
+        }
+    };
+    assert!(
+        saw_status_changed,
+        "the status writer must announce the Working -> Idle move (FR-035)"
+    );
+    match idle {
         ragent_agent::event::Event::TeammateIdle { agent_id, .. } => {
             assert_eq!(agent_id, "tm-001");
         }

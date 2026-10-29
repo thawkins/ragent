@@ -103,6 +103,7 @@ fn build_active_tasks(count: usize, parent_session: &str) -> Vec<TaskEntry> {
             waiter_count: 0,
             output_file: None,
             report_status: ragent_agent::task::ReportStatus::Complete,
+            time_bound_secs: None,
         })
         .collect()
 }

@@ -102,12 +102,31 @@ pub(crate) fn short_session_id(session_id: &str) -> String {
 /// Truncate any identifier to a stable short prefix for compact display.
 ///
 /// Returns the leading 8 characters of `id`, or the whole value unchanged
-/// when it is shorter. The cut is snapped to a char boundary via
-/// [`ragent_types::strutil::floor_char_boundary`] so a multi-byte UTF-8
-/// sequence straddling the cut point cannot panic.
+/// when it is shorter. Delegates to [`ragent_types::strutil::short_prefix`] so
+/// every id abbreviation in the workspace comes from one helper (FR-008), and
+/// takes its cut on a char boundary so a multi-byte UTF-8 sequence straddling
+/// the cut point cannot panic.
 pub(crate) fn short_id(id: &str) -> String {
-    let end = ragent_types::strutil::floor_char_boundary(id, 8);
-    id[..end].to_string()
+    ragent_types::strutil::short_prefix(id, 8)
+}
+
+/// Whether a sub-agent task in `status` can still accept a cancellation
+/// request (FR-023).
+///
+/// The cancellable states are the ones that represent work still in flight:
+/// `Running`, `Suspended` (parked but resumable - the cancel flag is what
+/// wakes the parked loop), and `Terminating` (a kill is already escalating and
+/// a cancel request is harmless). The finished states - `Completed`, `Failed`,
+/// `Cancelled` and `TimedOut` - cannot be cancelled, so `/cancel` reports the
+/// state instead of claiming a transition that will never happen. The same
+/// predicate drives the live-id listing an unmatched prefix prints (FR-041),
+/// so "live" means exactly "would accept a cancel".
+pub(crate) fn is_cancellable(status: &ragent_agent::task::TaskStatus) -> bool {
+    use ragent_agent::task::TaskStatus;
+    matches!(
+        status,
+        TaskStatus::Running | TaskStatus::Suspended | TaskStatus::Terminating
+    )
 }
 
 /// Truncate a [`RunId`] to a stable short prefix for compact display.
@@ -120,11 +139,12 @@ pub(crate) fn short_run_id(run_id: &ragent_types::id::RunId) -> String {
 }
 
 /// Return the last 8 characters of a string, or the whole string if shorter.
-/// Slices on a char boundary so a multi-byte sequence straddling the cut
-/// point cannot panic.
+///
+/// Delegates to [`ragent_types::strutil::short_suffix`], which takes the cut on
+/// a char boundary so a multi-byte sequence straddling the cut point cannot
+/// panic (FR-008: one shared helper, no hand-rolled byte slicing).
 fn tail8(s: &str) -> String {
-    let start = s.char_indices().rev().nth(7).map(|(i, _)| i).unwrap_or(0);
-    s[start..].to_string()
+    ragent_types::strutil::short_suffix(s, 8)
 }
 
 /// Resolve the activity-log database path from the main storage database path.

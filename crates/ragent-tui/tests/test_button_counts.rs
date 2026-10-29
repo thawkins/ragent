@@ -32,6 +32,7 @@ fn running_task(id: &str, parent: &str, child: &str) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

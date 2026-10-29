@@ -447,6 +447,7 @@ fn render_active_tasks_present() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
     let _ = render(&mut app, 120, 40);
 }

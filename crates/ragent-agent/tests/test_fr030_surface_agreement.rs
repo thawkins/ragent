@@ -80,28 +80,58 @@ use serde_json::Value;
 /// of the assertion is that the rename changed names and nothing else: a derived
 /// expectation would agree with whatever the tree happened to do. `mf_screenshot`
 /// is absent from the default build by design (it registers only when a drivable
-/// headless browser resolves on `PATH`), so the default build advertises 148.
-const FR030_TOTAL: usize = 149;
+/// headless browser resolves on `PATH`), so the default build advertises one
+/// fewer than the number below.
+///
+/// **Recomputed once for `team_task_cancel`** (spec `teamssetup` T-012, FR-005):
+/// the new tool is the one legitimate addition since the rename, taking the
+/// surface from 149 to 150 and the `team` family from 19 to 20. The rename's own
+/// `before`/`after` pairs are untouched, which the pair-by-pair assertions below
+/// still pin.
+const FR030_TOTAL: usize = 150;
 
 /// One canary family per T-041 §2.1: the pair whose split tells a family count
 /// taken from `permission_category()` from one taken off the name prefix.
 ///
 /// Measured on this tree (`--dry-run`, and the registry grouped by category),
-/// not copied from the baseline's "expected" column: the pair is `agent` 4 /
-/// `team` 19, because `team_wait` reports `agent:spawn`. The name-prefix
-/// reading of the same registry gives the wrong `agent` 3 / `team` 20 - and the
-/// same 148 total.
-const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 4), ("team", 19)];
+/// not copied from the baseline's "expected" column: the pair is `agent` 5 /
+/// `team` 20, because `team_wait` reports `agent:spawn` while `team_task_cancel`
+/// reports `team:manage`. A name-prefix count of the same registry gives the
+/// wrong `agent` 3 / `team` 21 - and the same 150 total.
+///
+/// **Recomputed once for `specs/agentssetup` T-004 (FR-005)**: `list_agents`
+/// moved from `none` to `agent:read`, so the `agent` family grows 4 -> 5. The
+/// total and the family count are unchanged - the category was re-spelled
+/// inside an existing family, and the tool that left `none` was one of several
+/// still holding it.
+const FR030_CANARY_FAMILIES: [(&str, usize); 2] = [("agent", 5), ("team", 20)];
 
-/// The family count T-041 records beside the total (21 families summing to 148).
+/// The number of `permission_category()` families beside the total (unchanged at
+/// 21 by `team_task_cancel`: it joins the existing `team` family, and unchanged
+/// again by `specs/agentssetup` T-004: `agent:read` joins the existing `agent`
+/// family).
 const FR030_FAMILY_COUNT: usize = 21;
 
-/// The `permission_category()` family of one registered tool: everything before
-/// the first `:` (`file:read` -> `file`), which is how `--dry-run` groups.
+/// The `permission_category()` family of one registered tool, which is how
+/// `--dry-run` groups.
+///
+/// A category with a namespace keeps the *whole* namespace as its family
+/// (`file:read` -> `file`, `agent:read` -> `agent`), so the split is on the
+/// **first** `:`. A category with none keeps its own name (`plan` -> `plan`).
+/// Taking the segment before the `:` unconditionally made an unprefixed
+/// category group as the empty string - a family `--dry-run` does not report -
+/// which is why `plan`, `task`, `web`, `mcp`, `system` and `none` each counted
+/// as their own family rather than vanishing into one unnamed bucket. That
+/// matters here: `specs/agentssetup` FR-005 adds `agent:read` and the total
+/// stays 150, so the family table is the only place the two readings of one
+/// registry can still be told apart.
 fn family_of(registry: &ToolRegistry, name: &str) -> Option<String> {
     let tool = registry.get(name)?;
     let category = tool.permission_category();
-    Some(category.split(':').next().unwrap_or(category).to_string())
+    Some(match category.split_once(':') {
+        Some((namespace, _)) => namespace.to_string(),
+        None => category.to_string(),
+    })
 }
 
 /// The registry's own family table: family -> tool count.
@@ -280,11 +310,12 @@ fn test_the_registry_names_match_the_recorded_after_rename_digest() {
     // tree. This is the one assertion that fails when *any* single name is
     // wrong, and its failure message says which digest form it used.
     //
-    // Recomputed once when `DateTime` was added to the surface (149 names); the
-    // FR-023 rename itself is unchanged, which the `after`-column assertion
-    // above still pins.
+    // Recomputed for the 150-name surface `team_task_cancel` completes (spec
+    // `teamssetup` T-012); the FR-023 rename itself is unchanged, which the
+    // `after`-column assertion above still pins. The previous value
+    // `f08eb2d4...` was the 149-name digest before the new tool.
     const AFTER_RENAME_DIGEST: &str =
-        "f08eb2d47e4b81636145ee75b87f54f57ecf9fc50e1e7047ebfc5c7e9102a732";
+        "282b7298caba8abf68f96770657ab82a4e8d4b5a2d95ccfa6db4f2ed9c285766";
     assert_eq!(
         names_digest(&names),
         AFTER_RENAME_DIGEST,

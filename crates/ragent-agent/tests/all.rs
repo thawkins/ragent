@@ -63,6 +63,9 @@ mod test_acp_update_parsing;
 #[path = "test_activity_writer.rs"]
 mod test_activity_writer;
 
+#[path = "test_auto_claim_tasks.rs"]
+mod test_auto_claim_tasks;
+
 #[path = "test_agent_memory_deep.rs"]
 mod test_agent_memory_deep;
 
@@ -117,6 +120,9 @@ mod test_blueprint_seed_permissions;
 #[path = "test_builtin_agents.rs"]
 mod test_builtin_agents;
 
+#[path = "test_cancel_agent_status.rs"]
+mod test_cancel_agent_status;
+
 #[path = "test_compaction_flow.rs"]
 mod test_compaction_flow;
 
@@ -165,8 +171,14 @@ mod test_dry_run;
 #[path = "test_dry_run_extra.rs"]
 mod test_dry_run_extra;
 
+#[path = "test_default_registry_doc_lists_the_family.rs"]
+mod test_default_registry_doc_lists_the_family;
+
 #[path = "test_dump_registries.rs"]
 mod test_dump_registries;
+
+#[path = "test_durable_copy_absence.rs"]
+mod test_durable_copy_absence;
 
 #[path = "test_dynamic_trigger.rs"]
 mod test_dynamic_trigger;
@@ -239,6 +251,9 @@ mod test_instruction_includes;
 
 #[path = "test_interim_tool_call_persist.rs"]
 mod test_interim_tool_call_persist;
+
+#[path = "test_agent_permission_taxonomy.rs"]
+mod test_agent_permission_taxonomy;
 
 #[path = "test_knowledge_graph.rs"]
 mod test_knowledge_graph;
@@ -525,8 +540,14 @@ mod test_subagent_interactive_block;
 #[path = "test_subagent_summary_nudge.rs"]
 mod test_subagent_summary_nudge;
 
+#[path = "test_subagent_tool_reasons.rs"]
+mod test_subagent_tool_reasons;
+
 #[path = "test_subagent_truncation.rs"]
 mod test_subagent_truncation;
+
+#[path = "test_subagent_yolo_scope.rs"]
+mod test_subagent_yolo_scope;
 
 #[path = "test_swarm_agent_assignment.rs"]
 mod test_swarm_agent_assignment;
@@ -540,6 +561,11 @@ mod test_task_registry_bookkeeping;
 #[path = "test_task_registry_snapshot.rs"]
 mod test_task_registry_snapshot;
 
+#[path = "test_task_status_transitions.rs"]
+mod test_task_status_transitions;
+
+#[path = "test_task_complete_parks_idle.rs"]
+mod test_task_complete_parks_idle;
 #[path = "test_task_tool_family_prompts.rs"]
 mod test_task_tool_family_prompts;
 
@@ -570,11 +596,43 @@ mod test_team_store_extra;
 #[path = "test_team_swarm.rs"]
 mod test_team_swarm;
 
+#[path = "test_team_member_status.rs"]
+mod test_team_member_status;
+
+#[path = "test_team_cleanup_guard.rs"]
+mod test_team_cleanup_guard;
+
+#[path = "test_team_message_size_limit.rs"]
+mod test_team_message_size_limit;
+
+#[path = "test_plan_approval_gate.rs"]
+mod test_plan_approval_gate;
+
+#[path = "test_team_status_changed_event.rs"]
+mod test_team_status_changed_event;
+
+#[path = "test_set_member_status.rs"]
+mod test_set_member_status;
+
+#[path = "test_resume_teammate_blocked.rs"]
+mod test_resume_teammate_blocked;
+
 #[path = "test_team_task_complete_event.rs"]
 mod test_team_task_complete_event;
 
+#[path = "test_team_claim_single.rs"]
+mod test_team_claim_single;
+
+#[path = "test_team_cancel.rs"]
+mod test_team_cancel;
+
+#[path = "test_team_task_cancel_tool.rs"]
+mod test_team_task_cancel_tool;
 #[path = "test_team_task_store.rs"]
 mod test_team_task_store;
+
+#[path = "test_team_wait_outcomes.rs"]
+mod test_team_wait_outcomes;
 
 #[path = "test_teammate_retry_backoff.rs"]
 mod test_teammate_retry_backoff;
@@ -618,8 +676,17 @@ mod test_tool_info;
 #[path = "test_tool_input_error.rs"]
 mod test_tool_input_error;
 
+#[path = "test_tool_descriptions.rs"]
+mod test_tool_descriptions;
+
+#[path = "test_subagent_prompt_contract.rs"]
+mod test_subagent_prompt_contract;
+
 #[path = "test_tool_registry_extra.rs"]
 mod test_tool_registry_extra;
+
+#[path = "test_tool_param_schema.rs"]
+mod test_tool_param_schema;
 
 #[path = "test_tool_rename_atomic_landing.rs"]
 mod test_tool_rename_atomic_landing;
@@ -642,6 +709,9 @@ mod test_task_suspend_resume;
 #[path = "test_tool_task_adapters.rs"]
 mod test_tool_task_adapters;
 
+#[path = "test_transition_task.rs"]
+mod test_transition_task;
+
 #[path = "test_trigger_runtime.rs"]
 mod test_trigger_runtime;
 
@@ -662,3 +732,43 @@ mod test_verification_gate;
 
 #[path = "test_wait_agents_results_meta.rs"]
 mod test_wait_agents_results_meta;
+
+#[path = "test_wait_agents_detached_refusal.rs"]
+mod test_wait_agents_detached_refusal;
+#[path = "test_wait_agents_suspended.rs"]
+mod test_wait_agents_suspended;
+
+#[path = "test_watchdog_status_branches.rs"]
+mod test_watchdog_status_branches;
+
+#[path = "test_team_watchdog_timeout.rs"]
+mod test_team_watchdog_timeout;
+
+#[path = "test_member_status_write_sites.rs"]
+mod test_member_status_write_sites;
+
+#[path = "test_teammate_lifecycle_hooks.rs"]
+mod test_teammate_lifecycle_hooks;
+
+#[path = "test_teammate_progress_feed.rs"]
+mod test_teammate_progress_feed;
+
+#[path = "test_undelivered_messages.rs"]
+mod test_undelivered_messages;
+
+#[path = "test_task_hook_runtime.rs"]
+mod test_task_hook_runtime;
+
+#[path = "test_hook_failure_ledger.rs"]
+mod test_hook_failure_ledger;
+#[path = "test_hook_feedback_delivery.rs"]
+mod test_hook_feedback_delivery;
+
+#[path = "test_task_parse_diagnostics.rs"]
+mod test_task_parse_diagnostics;
+
+#[path = "test_task_list_write_validation.rs"]
+mod test_task_list_write_validation;
+
+#[path = "test_model_override_spellings.rs"]
+mod test_model_override_spellings;

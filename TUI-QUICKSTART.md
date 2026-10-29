@@ -4,6 +4,48 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.153)
+
+- **`Alt+A` / `Alt+T` always toggle their window** — the Teams window had no
+  keyboard chord at all (mouse-only) and the Agents chord could not close a
+  window whose subject had gone away. Both are now bound and follow one rule: a
+  window that is **open always closes**, whatever its subject currently is; a
+  window that is **closed opens only when it has a subject**, and a refused open
+  names the reason on the status line (`AGENTS_WINDOW_EMPTY_REFUSAL`) instead of
+  silently doing nothing.
+- **The Agents panel keeps a bounded completed-history section** — finished
+  tasks stay listed newest-first under their own heading, capped by the new
+  `agents.completed_history` config key (default 20), so a long session's panel
+  memory stays constant in the number of tasks ever spawned. A row whose report
+  was never written to `log/subagents/` shows the `[memory]` flag with the same
+  wording `list_agents` and `wait_agents` print. The panel stays openable after
+  the last live task finishes, because a history row now counts as a subject.
+- **`/spawn` shares one bounded launch set** — `/spawn` no longer keeps its own
+  single-slot mutex. Every TUI launch path registers on one launch set capped by
+  `agents.max_launching` (default 4), so a second launch queues behind the busy
+  ones and names them instead of being refused outright, and a poisoned lock can
+  no longer lose a launch outcome.
+- **`/cancel <prefix>` requests cancellation through the task registry** — it
+  does not remove the row. The task keeps running until its agent loop reaches
+  the next step boundary, and the Agents window updates when it settles. A
+  prefix matching more than one live task is refused with every match listed; a
+  prefix matching nothing lists the live task ids.
+- **`/team status` (and `team_status`) answer "why did this teammate stop?"** —
+  each member row is followed by its last five status transitions with
+  timestamps (persisted in the team's `status-history.jsonl`), and the report
+  separately names messages stranded in a terminated teammate's mailbox
+  (`Undelivered messages`), plans parked in `plan_pending` (`Plans awaiting a
+  verdict`), and quality-gate hooks that could not run (`Hook failures`).
+- **Only bang commands keep the busy refusal** — teammate focus no longer
+  retargets the input box. `Enter` always addresses the lead session; a
+  teammate is reached through `/team message <name> <text>`. Focus still opens
+  that teammate's output view and highlights its strip pill and Teams row.
+- **Teammates park instead of hanging** — a teammate in `Idle`, `PlanPending`,
+  `Blocked` or `Suspended` is reported as parked by `team_wait` rather than
+  waited out, is skipped by the watchdog rather than failed for taking no
+  progress, and a `Blocked` member auto-resumes to `idle` when the task behind
+  its last unmet dependency completes.
+
 ## Highlights (v1.0.152)
 
 - **`Alt+O` toggles autopilot, not the Telemetry panel** — the one-keystroke
@@ -468,8 +510,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   entries and lets you reorder (`Enter`) or remove (`Del`) them, and
   `/queue [list|clear|next|help]` exposes the same queue. A slash command
   (`/…`) is queued the same way while a turn runs (FR-017 amendment) and runs at
-  the next turn boundary; only bang commands (`!…`) and teammate-targeted sends
-  keep the busy refusal. See §4 and
+  the next turn boundary; only bang commands (`!…`) keep the busy refusal. See §4 and
   [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
 - **`/plugins` slash family (v1.0.112)** — the plugin system is now
   implemented, not just specified. `/plugins list|add|remove|enable|disable|test|stores|help`
@@ -1171,8 +1212,8 @@ boundary (or immediately via `Alt+Q` → `Next` / `/queue next`). A synchronous
 command leaves the boundary free, so a run of consecutive queued commands
 executes back-to-back rather than stalling behind the first. At queue capacity
 the command is rejected and restored to the input field, so nothing is lost.
-Only **bang commands** (`!…`) and **teammate-targeted messages** keep the
-`busy - wait for the current turn to finish` refusal.
+Only **bang commands** (`!…`) keep the `busy - wait for the current turn to
+finish` refusal.
 
 Press **`Alt+Q`** during a run to open the **queue-control menu** — a centred
 overlay with exactly four options. Use **`Up`**/**`Down`** to move the highlight

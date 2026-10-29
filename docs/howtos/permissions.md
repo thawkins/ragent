@@ -208,11 +208,13 @@ variant, so rules keyed on `"read"` match tools that report `"file:read"`.
 | `gitlab:write`       | `Permission::Custom`   | `gitlab_create_mr`, `gitlab_merge`      |
 | `codeindex:read`     | `Permission::Custom`   | `codeindex_search`, `codeindex_symbols`, `codeindex_references` |
 | `codeindex:write`    | `Permission::Custom`   | `codeindex_reindex`                     |
-| `team:manage`        | `Permission::Custom`   | `team_create`, `team_spawn`, `team_cleanup` |
+| `team:manage`        | `Permission::Custom`   | `team_create`, `team_spawn`, `team_cleanup`, `team_task_cancel`, `team_assign_task` |
 | `team:communicate`  | `Permission::Custom`   | `team_message`, `team_broadcast`, `team_read_messages` |
-| `agent:spawn`        | `Permission::Custom`   | `new_agent`, `cancel_agent`             |
+| `agent:spawn`        | `Permission::Custom`   | `new_agent`                              |
+| `agent:control`      | `Permission::Custom`   | `cancel_agent`, `wait_agents`            |
+| `agent:read`         | `Permission::Custom`   | `list_agents`                            |
 | `mcp`                | `Permission::Custom`   | `mcp_tool`                               |
-| `none`               | (no permission needed) | `think`, `agent_complete`, `list_agents`, `wait_agents` |
+| `none`               | (no permission needed) | `think`, `agent_complete`                |
 
 The `Permission` enum is defined in `crates/ragent-config/src/permission.rs`
 (re-exported through `crates/ragent-agent/src/permission/mod.rs`):
@@ -264,7 +266,10 @@ took the tool names to Claude Code's spellings; the families `bash` and
 `ask_user` are ragent's own permission vocabulary and are unchanged, which is
 why `permission_category()` still reports `bash:execute` for `Bash` and
 `ask_user` for `AskUserQuestion`. `specs/uniformtools/T-041-BASELINE.md` records
-32 distinct categories across the registry, before and after the rename.
+32 distinct categories across the registry, before and after the rename; spec
+`agentssetup` FR-005 later grew that to 33 by giving `list_agents` the
+`agent:read` category it previously lacked (it reported `none`, which is what a
+tool with no category reports - see the table above).
 
 ### Default Permission Ruleset
 
@@ -842,7 +847,39 @@ The `/yolo` slash command and `Alt+Y` shortcut toggle the persistent YOLO
 flag, which is saved to the **user-global** `ragent.json`
 (`~/.config/ragent/ragent.json`) and restored on the next startup.
 
-### 7.3 Persistence
+### 7.3 Automatic sub-agent scope
+
+There is a **second, narrower** way to get the prompt bypass, and it needs no
+flag: an unattended sub-agent run (`agent.mode == Subagent` - `new_agent`
+foreground, background or detached, `/spawn`, cron, server) whose tool can
+*write* skips the interactive prompt, whatever the global `/yolo` flag says.
+
+A sub-agent has no attached user, so a prompt is not a safeguard there - the
+call would wait out the watchdog and the run would be lost. The scope is a
+per-turn function of the run's own offered tool surface:
+
+- `subagent_yolo_bypasses_prompt(agent_is_subagent, write_capable_tools, tool)`
+  decides the call; `write_capable_tools` is built once per turn by
+  `SessionProcessor::write_capable_tools` from the run's model-facing
+  definitions.
+- A tool is write-capable unless its `permission_category()` is in
+  `READ_ONLY_PERMISSION_CATEGORIES` (`file:read`, `codeindex`, `web`,
+  `network`, `model`, ...). An uncategorised (`none`) tool is write-capable,
+  because it bypasses the permission layer entirely.
+- **Read-only runs get nothing**: an `explore` sub-agent, a plan reviewer, or a
+  loop restricted to reads resolves to an empty set and keeps the ordinary
+  prompt policy.
+- **Only the prompt is skipped.** The loop tool-set restriction, the path
+  guards, the 7-layer bash `is_safe_command` stage (which runs *before* the
+  prompt), the tool-repeat guard, every pre-tool hook and an explicit policy
+  `Deny` still apply, and a forced destructive-action checkpoint still prompts
+  (FR-024).
+- The **process-wide** parts of YOLO in the table above (banned commands,
+  denied patterns, obfuscation detection, the dynamic-context allowlist and MCP
+  config validation) are still governed by the single global flag: a sub-agent
+  run does not enable them on its own.
+
+### 7.4 Persistence
 
 YOLO is a user-only toggle, so it is always written to the user-global config
 - never the project-local `.ragent/ragent.json`. Project config is untrusted
@@ -886,7 +923,7 @@ pub fn sync_from_config() {
 }
 ```
 
-### 7.4 Status Bar Indicator
+### 7.5 Status Bar Indicator
 
 The status bar shows the YOLO state as `YOLO` with a green (enabled) or
 red (disabled) indicator:
@@ -896,7 +933,7 @@ YOLO:●  (enabled — safety checks bypassed)
 YOLO:○  (disabled — normal safety checks)
 ```
 
-### 7.5 YOLO vs. Autopilot
+### 7.6 YOLO vs. Autopilot
 
 | Feature             | YOLO Mode          | Autopilot           |
 |---------------------|--------------------|--------------------|

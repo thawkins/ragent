@@ -224,12 +224,123 @@ async fn spawn_background_rejects_when_the_concurrency_limit_is_reached() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let err = mgr
-        .spawn_background("p", "explore", "do it", None, dir.path())
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
         .await
         .expect_err("the concurrency limit must reject the spawn");
     assert!(
         err.to_string()
             .contains("Maximum concurrent background tasks"),
         "err: {err}"
+    );
+}
+
+/// FR-011: the registry reports the limit, its occupancy, the resulting
+/// headroom and the ids occupying the limit as one consistent snapshot.
+#[tokio::test]
+async fn limit_report_counts_running_and_suspended_background_tasks() {
+    let mgr = manager(2);
+    assert_eq!(mgr.max_background(), 2);
+
+    let empty = mgr.limit_report().await;
+    assert_eq!((empty.limit, empty.occupancy, empty.headroom), (2, 0, 2));
+    assert!(empty.occupying_ids.is_empty());
+
+    mgr.seed_completed_for_test(entry_full("bg-run", TaskStatus::Running, "p", true, false))
+        .await;
+    let one = mgr.limit_report().await;
+    assert_eq!((one.limit, one.occupancy, one.headroom), (2, 1, 1));
+    assert_eq!(one.occupying_ids, vec!["bg-run".to_string()]);
+
+    // FR-030: a suspended task still holds its slot; a detached one never does,
+    // and neither does a foreground or a finished task.
+    mgr.seed_completed_for_test(entry_full(
+        "bg-suspended",
+        TaskStatus::Suspended,
+        "p",
+        true,
+        false,
+    ))
+    .await;
+    mgr.seed_completed_for_test(entry_full(
+        "bg-detached",
+        TaskStatus::Running,
+        "p",
+        true,
+        true,
+    ))
+    .await;
+    mgr.seed_completed_for_test(entry_full("fg-run", TaskStatus::Running, "p", false, false))
+        .await;
+    mgr.seed_completed_for_test(entry_full(
+        "bg-done",
+        TaskStatus::Completed,
+        "p",
+        true,
+        false,
+    ))
+    .await;
+
+    let full = mgr.limit_report().await;
+    assert_eq!((full.limit, full.occupancy, full.headroom), (2, 2, 0));
+    let mut ids = full.occupying_ids.clone();
+    ids.sort();
+    assert_eq!(ids, vec!["bg-run".to_string(), "bg-suspended".to_string()]);
+    assert_eq!(mgr.running_background_count().await, full.occupancy);
+
+    // Headroom saturates at zero: a limit lowered below the occupancy must not
+    // report a negative number of free slots.
+    mgr.seed_completed_for_test(entry_full(
+        "bg-run-2",
+        TaskStatus::Running,
+        "p",
+        true,
+        false,
+    ))
+    .await;
+    let over = mgr.limit_report().await;
+    assert_eq!((over.occupancy, over.headroom), (3, 0));
+}
+
+/// FR-029: the spawn refusal names the limit, the occupancy and the tasks
+/// occupying it, and still carries the `limit_reached` code (FR-010).
+#[tokio::test]
+async fn spawn_refusal_names_limit_occupancy_and_occupying_tasks() {
+    use ragent_agent::tool::param_schema::reason_in;
+
+    let mgr = manager(2);
+    mgr.seed_completed_for_test(entry_full("busy-a", TaskStatus::Running, "p", true, false))
+        .await;
+    mgr.seed_completed_for_test(entry_full(
+        "busy-b",
+        TaskStatus::Suspended,
+        "p",
+        true,
+        false,
+    ))
+    .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let err = mgr
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
+        .await
+        .expect_err("the concurrency limit must reject the spawn");
+
+    let message = err.to_string();
+    assert_eq!(reason_in(&message), Some("limit_reached"), "{message}");
+    assert!(
+        message.contains("(2)"),
+        "the limit must be named: {message}"
+    );
+    assert!(
+        message.contains("2 in use"),
+        "the occupancy must be named: {message}"
+    );
+    assert!(
+        message.contains("busy-a") && message.contains("busy-b"),
+        "the occupying task ids must be named: {message}"
+    );
+    assert!(
+        message.contains("headroom"),
+        "the headroom must be named: {message}"
     );
 }

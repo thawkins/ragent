@@ -11,6 +11,14 @@
 //! - [`App::note_subagent_completed`] records the report status derived from
 //!   the finish reason and removes the row (FR-048);
 //! - [`App::note_subagent_cancelled`] removes the row (FR-049);
+//!
+//! Both removals snapshot the finished task into [`App::agents_history`] first
+//! (spec `agentssetup` FR-021, FR-028), so a terminal row survives in the
+//! panel's bounded history section - carrying the report status and the
+//! `output_file` the row had at the moment it left - instead of vanishing from
+//! both sections. The history row is where FR-032's "no durable copy" note is
+//! read from, so the snapshot has to happen while the entry is still in hand.
+//!
 //! - [`App::note_subagent_suspended`] / [`App::note_subagent_resumed`]
 //!   re-status the row so the painted status matches the runtime status
 //!   (FR-049).
@@ -21,7 +29,7 @@
 
 use ragent_agent::task::{ReportStatus, TaskEntry, TaskStatus};
 
-use super::state::App;
+use super::state::{App, CompletedTaskRow};
 
 impl App {
     /// Index of the painted row for `task_id`, matching either the task
@@ -40,6 +48,12 @@ impl App {
     /// Append a running row for a sub-agent spawn, or update the row already
     /// painted for it (FR-047, FR-072).
     ///
+    /// `background` and `detached` are the row's execution contract as the task
+    /// registry recorded it: the event carries both, so the painted row reports
+    /// what was spawned rather than an assumed default (FR-020). A detached run
+    /// is also a background run, so the two flags are assigned independently
+    /// and neither is derived from the other here.
+    ///
     /// Returns `true` when a new row was appended and `false` when an existing
     /// row was refreshed, so the caller can keep the telemetry counters honest
     /// across a duplicated event.
@@ -51,6 +65,7 @@ impl App {
         agent: &str,
         task: &str,
         background: bool,
+        detached: bool,
     ) -> bool {
         if let Some(idx) = self.painted_task_index(task_id, child_session_id) {
             if let Some(entry) = self.active_tasks.get_mut(idx) {
@@ -60,6 +75,7 @@ impl App {
                 entry.agent_name = agent.to_string();
                 entry.task_prompt = task.to_string();
                 entry.background = background;
+                entry.detached = detached;
                 // A replayed spawn restarts the run: the row is live again and
                 // a stale suspension or finished marker must not survive it.
                 entry.status = TaskStatus::Running;
@@ -76,7 +92,7 @@ impl App {
             agent_name: agent.to_string(),
             task_prompt: task.to_string(),
             background,
-            detached: false,
+            detached,
             status: TaskStatus::Running,
             result: None,
             error: None,
@@ -86,6 +102,7 @@ impl App {
             waiter_count: 0,
             output_file: None,
             report_status: ReportStatus::default(),
+            time_bound_secs: None,
         });
         true
     }
@@ -114,7 +131,11 @@ impl App {
             entry.status = TaskStatus::Completed;
             entry.completed_at = Some(chrono::Utc::now());
         }
-        self.active_tasks.remove(idx);
+        let entry = self.active_tasks.remove(idx);
+        // Record into history *before* the row stops being reachable
+        // (FR-028): the live row is gone from here on, so a completed run
+        // that is not snapshotted now is lost from both sections.
+        self.record_completed_task(&entry);
         Some(report_status)
     }
 
@@ -128,8 +149,41 @@ impl App {
             .active_tasks
             .get(idx)
             .map(|t| t.child_session_id.clone());
-        self.active_tasks.remove(idx);
+        let entry = self.active_tasks.remove(idx);
+        // A cancelled run is finished too, and it is exactly the status most
+        // likely to have lost its durable copy (FR-032), so it is snapshotted
+        // on the same record-before-removal rule as a completion (FR-028).
+        self.record_completed_task(&entry);
         child_session_id
+    }
+
+    /// Snapshot a finished task into the completed history (FR-021, FR-028).
+    ///
+    /// History is newest-first and capped at [`App::agents_history_cap`], so
+    /// the oldest row is evicted once the cap is exceeded and the panel's
+    /// memory cost stays constant in the number of tasks ever spawned
+    /// (FR-036, NFR-004). A cap of `0` cannot happen through configuration
+    /// (`agents.completed_history` is clamped to `1..=200`) but is treated as
+    /// "keep nothing" rather than indexing an empty deque.
+    fn record_completed_task(&mut self, entry: &TaskEntry) {
+        if self.agents_history_cap == 0 {
+            return;
+        }
+        self.agents_history.push_front(CompletedTaskRow {
+            id: entry.id.clone(),
+            child_session_id: entry.child_session_id.clone(),
+            agent_name: entry.agent_name.clone(),
+            status: entry.status.clone(),
+            background: entry.background,
+            detached: entry.detached,
+            created_at: entry.created_at,
+            completed_at: entry.completed_at.unwrap_or_else(chrono::Utc::now),
+            report_status: entry.report_status,
+            output_file: entry.output_file.clone(),
+        });
+        while self.agents_history.len() > self.agents_history_cap {
+            self.agents_history.pop_back();
+        }
     }
 
     /// Mark the tracked row suspended (FR-049).

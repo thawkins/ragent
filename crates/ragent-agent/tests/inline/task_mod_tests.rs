@@ -64,6 +64,7 @@ fn test_task_entry_serialization() {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::Complete,
+        time_bound_secs: None,
     };
     let json = serde_json::to_string(&entry).unwrap();
     assert!(json.contains("\"explore\""));

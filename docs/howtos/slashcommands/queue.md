@@ -16,8 +16,8 @@ Since the FR-017 amendment, **slash commands are queued the same way**: typing
 the queue instead of being refused, and the queued command runs at the next turn
 boundary — or immediately via `/queue next`. Because a synchronous command leaves
 the turn boundary free, a run of consecutive queued commands executes
-back-to-back rather than stalling behind the first. Bang commands (`!…`) and
-teammate-targeted messages keep their existing busy refusal.
+back-to-back rather than stalling behind the first. Bang commands (`!…`) keep
+their existing busy refusal.
 
 `/queue` is the prompt-side view of the same queue the `Alt+Q` queue-control
 menu manipulates. It is an optional command: it never mutates the running turn,

@@ -154,6 +154,7 @@ fn sample_entry(session: &str, task_id: &str) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::Complete,
+        time_bound_secs: None,
     }
 }
 

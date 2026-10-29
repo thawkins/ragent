@@ -116,6 +116,7 @@ fn task_entry(id: &str, status: TaskStatus) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -896,7 +897,7 @@ async fn team_focus_by_name_resolves_ambiguity_and_misses() {
 }
 
 #[tokio::test]
-async fn enter_with_a_focused_teammate_routes_the_message_to_its_mailbox() {
+async fn enter_with_a_focused_teammate_still_addresses_the_lead_session() {
     let (_g, _e, temp, mut app) = isolated_app();
     TeamStore::create("team-a", "s1", temp.path(), true).expect("create team");
 
@@ -908,28 +909,30 @@ async fn enter_with_a_focused_teammate_routes_the_message_to_its_mailbox() {
 
     app.handle_key_event(key(KeyCode::Enter)).await;
 
-    // FR-058: the focused-input path routes the message to the teammate's
-    // mailbox as the authenticated lead session
-    // (SEC-ragent-team-003), reports success, and clears the input.
-    assert_eq!(app.status, "message sent to swarm-s1");
-    assert_eq!(app.input, "", "the input buffer is cleared");
+    // FR-058 (amended): teammate focus no longer redirects the input box, so
+    // Enter takes the ordinary send path - which refuses here because this
+    // fixture configures no provider. Nothing reaches the teammate's mailbox.
+    assert!(
+        app.status.contains("No provider configured"),
+        "Enter must address the lead session, got: {}",
+        app.status
+    );
+    assert_ne!(app.status, "message sent to swarm-s1");
     let store = TeamStore::load_by_name("team-a", temp.path()).expect("load team");
     let mail = Mailbox::open(&store.dir, "tm-001")
         .and_then(|mb| mb.read_all())
         .expect("read mailbox");
-    assert_eq!(mail.len(), 1, "exactly one routed message");
-    assert_eq!(mail[0].from, "lead");
-    assert_eq!(mail[0].to, "tm-001");
-    assert_eq!(mail[0].content, "please review the diff");
-    assert_eq!(
-        mail[0].sender_session_id.as_deref(),
-        Some("slash-support"),
-        "the lead-origin message must carry the authenticated sender session id"
+    assert!(
+        mail.is_empty(),
+        "the input box must not write to a teammate's mailbox, got {} message(s)",
+        mail.len()
     );
 }
 
 #[tokio::test]
 async fn focused_message_without_a_team_or_member_reports_the_reason() {
+    // Neither an absent team nor a stale focus id changes the destination: both
+    // take the lead-session path and refuse for the ordinary reason.
     let mut app = new_app("s1");
     app.active_team = None;
     app.team_members = vec![member("swarm-s1", "tm-001")];
@@ -937,10 +940,12 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
     app.input = "hello".to_string();
     app.input_cursor = 5;
     app.handle_key_event(key(KeyCode::Enter)).await;
-    assert_eq!(app.status, "No active team");
+    assert!(
+        app.status.contains("No provider configured"),
+        "got: {}",
+        app.status
+    );
 
-    // A focus id with no matching member falls through to the ordinary send
-    // path, which refuses without a configured provider/model.
     let mut app = new_app("s1");
     app.active_team = Some(TeamConfig::new("team-a", "s1"));
     app.team_members = vec![member("swarm-s1", "tm-001")];
@@ -957,6 +962,8 @@ async fn focused_message_without_a_team_or_member_reports_the_reason() {
 
 #[tokio::test]
 async fn focused_message_for_a_missing_team_store_reports_the_load_failure() {
+    // A focused teammate whose team directory is gone no longer produces a
+    // mailbox-load failure from Enter: the input box never opens a mailbox.
     let (_g, _e, _temp, mut app) = isolated_app();
     app.active_team = Some(TeamConfig::new("ghost-team", "s1"));
     app.team_members = vec![member("swarm-s1", "tm-001")];
@@ -967,7 +974,12 @@ async fn focused_message_for_a_missing_team_store_reports_the_load_failure() {
     app.handle_key_event(key(KeyCode::Enter)).await;
 
     assert!(
-        app.status.starts_with("Failed to load team"),
+        !app.status.starts_with("Failed to load team"),
+        "Enter must not touch a team store, got: {}",
+        app.status
+    );
+    assert!(
+        app.status.contains("No provider configured"),
         "got: {}",
         app.status
     );
@@ -1073,7 +1085,7 @@ async fn swarm_status_with_a_store_reports_cancelled_tasks() {
     let ts = TaskStore::open(&store.dir).expect("task store");
     let mut cancelled = Task::new("s1", "Cancelled task");
     cancelled.status = ragent_agent::team::TaskStatus::Cancelled;
-    ts.add_task(cancelled).expect("add task");
+    ts.add_task(cancelled).await.expect("add task");
 
     app.swarm_state = Some(SwarmState {
         team_name: "swarm-store".to_string(),

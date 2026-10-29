@@ -6,7 +6,9 @@ use futures::FutureExt;
 use ragent_agent::agent::AgentMode;
 use ragent_agent::session::loop_state::LoopSpec;
 use ragent_agent::team::{
-    self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
+    self, Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TaskStatus, TeamStore,
+    TransitionCause, pending_plans, read_hook_failures, render_hook_failures, render_pending_plans,
+    render_undelivered, status_label, undelivered_messages,
 };
 use ragent_agent::{event::Event, mcp::McpClient, message::Message};
 use ragent_types::ThinkingLevel;
@@ -29,8 +31,8 @@ use crate::app::state::{
 
 // Helpers
 use crate::app::helpers::{
-    activity_log_db_path, open_verified_alog, parse_alog_run_id_yes, parse_swarm_args, short_id,
-    short_run_id, short_session_id,
+    activity_log_db_path, is_cancellable, open_verified_alog, parse_alog_run_id_yes,
+    parse_swarm_args, short_id, short_run_id, short_session_id,
 };
 use crate::app::toolchain;
 use crate::widgets::message_widget::pluralize;
@@ -4428,7 +4430,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             "cancel" => {
                 if args.trim() == "help" {
                     self.append_assistant_text(
-                        "From: /cancel help\n\n## /cancel \u{2014} Cancel a running task\n\n| Subcommand | Description |\n|---|---|\n| `/cancel <task_id_prefix>` | Cancel a running background task or benchmark by ID prefix |\n| `/cancel help` | Show this help |",
+                        "From: /cancel help\n\n## /cancel \u{2014} Request cancellation of a task\n\n| Subcommand | Description |\n|---|---|\n| `/cancel <task_id_prefix>` | Ask the task registry to cancel a sub-agent task, or stop an active benchmark, by ID prefix. The task keeps running until its next step boundary; an ambiguous prefix is refused and every match listed, and an unmatched prefix lists the live task ids |\n| `/cancel help` | Show this help |",
                     );
                     self.status = "cancel: help".to_string();
                     return;
@@ -4455,20 +4457,103 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     return;
                 }
 
-                if let Some(task) = self.active_tasks.iter().find(|t| t.id.starts_with(args)) {
-                    let task_id = task.id.clone();
-                    let agent = task.agent_name.clone();
-                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) {
-                        self.active_tasks.remove(idx);
+                // FR-023 / FR-024 / FR-041: the request goes to the task
+                // registry, never to the local `active_tasks` mirror. The
+                // mirror is a projection of `AgentManager::tasks` that the
+                // periodic reconciliation rebuilds, so removing a row here
+                // would be a UI-local lie - the registry would still be
+                // `Running` and the row would come back on the next sweep.
+                let matches: Vec<ragent_agent::task::TaskEntry> = self
+                    .active_tasks
+                    .iter()
+                    .filter(|t| t.id.starts_with(args))
+                    .cloned()
+                    .collect();
+                match matches.len() {
+                    0 => {
+                        // FR-041: name the live ids instead of only echoing
+                        // the prefix, so the user can pick one immediately.
+                        let live: Vec<String> = self
+                            .active_tasks
+                            .iter()
+                            .filter(|t| is_cancellable(&t.status))
+                            .map(|t| format!("{} ({})", short_id(&t.id), t.agent_name))
+                            .collect();
+                        let listing = if live.is_empty() {
+                            "no live sub-agent tasks".to_string()
+                        } else {
+                            live.join(", ")
+                        };
+                        self.status = format!("No task matching '{}'", args);
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!("Task not found: {} - live tasks: {}", args, listing),
+                        );
+                        self.append_assistant_text(&format!(
+                            "From: /cancel {args}\n[err] **No live task matches `{args}`.**\n\n\
+                             Live tasks: {listing}\n\n\
+                             Use `/agents` to see the full panel, or `/cancel <id>` with one of \
+                             the ids above."
+                        ));
                     }
-                    self.status = format!("Cancelled task {} ({})", short_id(&task_id), agent);
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("Task cancelled: {}... ({})", short_id(&task_id), agent),
-                    );
-                } else {
-                    self.status = format!("No task found with ID starting with '{}'", args);
-                    self.push_log_no_agent(LogLevel::Warn, format!("Task not found: {}", args));
+                    1 => {
+                        let task = &matches[0];
+                        let task_id = task.id.clone();
+                        let agent = task.agent_name.clone();
+                        let child_session = task.child_session_id.clone();
+                        let status = task.status.clone();
+                        if !is_cancellable(&status) {
+                            // FR-023: report the registry's state rather than
+                            // pretending a finished task was cancelled.
+                            self.status =
+                                format!("Task {} is already {}", short_id(&task_id), status);
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                format!(
+                                    "Cancel ignored: {} ({}) is already {}",
+                                    short_id(&task_id),
+                                    agent,
+                                    status
+                                ),
+                            );
+                            self.append_assistant_text(&format!(
+                                "From: /cancel {args}\n[warn] **Task `{}` ({}) is already \
+                                 `{status}`** - there is nothing to cancel.",
+                                short_id(&task_id),
+                                agent
+                            ));
+                        } else {
+                            self.request_agent_cancel(&task_id, &agent, child_session);
+                        }
+                    }
+                    _ => {
+                        // FR-024: refuse an ambiguous prefix and list the
+                        // candidates so the user can disambiguate.
+                        let candidates = matches
+                            .iter()
+                            .map(|t| {
+                                format!("{} ({}, {})", short_id(&t.id), t.agent_name, t.status)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.status = format!("Ambiguous task prefix '{}'", args);
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!(
+                                "Ambiguous prefix '{}': {} tasks match - {}",
+                                args,
+                                matches.len(),
+                                candidates
+                            ),
+                        );
+                        self.append_assistant_text(&format!(
+                            "From: /cancel {args}\n[err] **Ambiguous task prefix `{args}` - {} \
+                             tasks match.**\n\n{}\n\n\
+                             Re-run `/cancel` with a longer prefix.",
+                            matches.len(),
+                            candidates
+                        ));
+                    }
                 }
             }
             "bench" => match ragent_bench::parse_bench_command(args) {
@@ -5820,9 +5905,58 @@ Tools: `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`.\n";
 | `/team tasks` | none | Show the task table for the active team. |
 | `/team clear` | none | Clear/remove the active team task list file. |
 | `/team cleanup` | none | Clean up the active team (requires no working teammates). |
+| `/team forcecleanup [confirm]` | optional `confirm` | Force cleanup: deactivate every teammate, then remove the team directory. Asks for confirmation unless `confirm` is given. |
 | `/team focus [name]` | optional `name` | Focus on a teammate (shows output, routes input). No arg clears focus. |
+| `/team approve <teammate-name>` | required `teammate-name` | Approve the pending plan of a `plan_pending` teammate, releasing it to work. |
+| `/team reject <teammate-name> <feedback>` | required `teammate-name`, required `feedback` | Reject the pending plan with feedback; the teammate stays `plan_pending` and must resubmit. |
 
-Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams show`).";
+Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams show`).
+
+## Requirements and guards
+
+Every subcommand is listed below with three facts that decide whether it will
+run. **Active team** is `yes` when the subcommand reads the team this session has
+open and refuses with `No active team` when there is none. **Writes disk** is
+`yes` when the subcommand writes or removes files under the team directory
+(`config.json`, `tasks.json`, the mailboxes, or the directory itself).
+**Guard that can refuse it** names the check that stops the command, quoted as
+the refusal names it.
+
+| Command | Active team | Writes disk | Guard that can refuse it |
+|---|---|---|---|
+| `/team help` | no | no | none - always succeeds |
+| `/team status` | no (reports the absence) | no | none - reports `No active team` |
+| `/team show [name]` | no | no | unknown `name` (`Failed to load team`) |
+| `/team create` | no (sets it) | yes | invalid `name`; missing blueprint; no `.ragent/` directory to hold it |
+| `/team close` | yes | no | none - reports `No active team to close` |
+| `/team delete <name>` | no | yes (removes the directory) | invalid `name`; live members when deleting the active team (`still live`), cleared with `team_shutdown_teammate` or `/team forcecleanup` |
+| `/team blueprint` | no | no | unknown blueprint (`not found`) |
+| `/team message` | yes | yes (recipient mailbox) | `No active team`; unknown teammate (`not found`) |
+| `/team tasks` | yes | no | `no active team`; unreadable `tasks.json` |
+| `/team clear` | yes | yes (removes `tasks.json`) | `no active team` |
+| `/team cleanup` | yes | yes (removes the directory) | `No active team to clean up`; live members (`still active`), cleared with `team_shutdown_teammate` or `/team forcecleanup` |
+| `/team forcecleanup` | yes | yes (removes the directory) | `No active team to clean up`; the confirmation step (`forcecleanup confirmation required`) |
+| `/team focus` | yes | no | `No active team`; unknown teammate (lists the available ones) |
+| `/team approve` | yes | yes (`config.json`) | `No active team`; the teammate is not `planning` |
+| `/team reject` | yes | yes (`config.json`) | `No active team`; missing feedback; the teammate is not `planning` |
+
+A subcommand marked **no** under *active team* still works without one, so it can
+be used to find out why a command you expected to work did not.
+
+## Team settings
+
+These live in the team's `config.json` under `settings`. A setting that is
+absent keeps its default. `/team show <name>` prints the **effective** value of
+every setting below, so a setting that is not being honoured is visible rather
+than assumed.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `max_teammates` | `8` | Maximum concurrent teammates; a spawn over the limit is refused and names the limit and the live count. |
+| `require_plan_approval` | `false` | Teammates must submit a plan before writing. |
+| `auto_claim_tasks` | `true` | Idle teammates claim the next available task. |
+| `watchdog_timeout_secs` | `300` | Seconds a live teammate may go without progress before the watchdog fails it. Widen it for a long build; `0` means the default. |
+| `hooks` | none | Quality-gate hooks; a hook that cannot run is recorded in `hook-failures.jsonl` and reported by `/team show` and `team_status`. |";
                         self.append_assistant_text(output);
                         self.status = "team: help".to_string();
                     }
@@ -5845,7 +5979,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 );
                             } else {
                                 for m in &self.team_members {
-                                    let status = format!("{:?}", m.status).to_lowercase();
+                                    // FR-033: the status word comes from the
+                                    // canonical mapping, never from a Debug
+                                    // spelling of the variant name.
+                                    let status = status_label(m.status);
                                     let task =
                                         m.current_task_id.as_deref().unwrap_or("-").to_string();
                                     let model_str = m
@@ -5861,6 +5998,39 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                             output
                                 .push_str(&format!("\n{} teammate(s)\n", self.team_members.len()));
+                            // FR-020: report messages stranded with a terminated
+                            // teammate rather than leaving them silently unread.
+                            let working_dir = crate::app::helpers::current_working_dir();
+                            if let Some(store) = TeamStore::load_by_name(&team.name, &working_dir)
+                                .ok()
+                                .or_else(|| {
+                                    ragent_agent::team::find_team_dir(&working_dir, &team.name)
+                                        .and_then(|dir| TeamStore::load(&dir).ok())
+                                })
+                            {
+                                let undelivered = undelivered_messages(&store);
+                                let block = render_undelivered(&team.name, &undelivered, 2);
+                                if !block.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&block);
+                                }
+                                // FR-034: name the plan a parked teammate is
+                                // waiting on, and the action that unblocks it.
+                                let parked = pending_plans(&store);
+                                let plans = render_pending_plans(&team.name, &parked, 2);
+                                if !plans.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&plans);
+                                }
+                                // FR-019: a hook that could not be executed is
+                                // an inert gate, not a passing one.
+                                let hook_failures = read_hook_failures(&store.dir);
+                                let hooks = render_hook_failures(&team.name, &hook_failures, 2);
+                                if !hooks.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&hooks);
+                                }
+                            }
                         } else {
                             output.push_str("No active team.\n\nUse `/team create <blueprint> [name]` to start a team (blueprint required).");
                         }
@@ -6098,7 +6268,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     output.push_str("  (no teammates yet)\n");
                                 } else {
                                     for m in &team.members {
-                                        let status = format!("{:?}", m.status).to_lowercase();
+                                        // FR-033: one status-word mapping.
+                                        let status = status_label(m.status);
                                         let task =
                                             m.current_task_id.as_deref().unwrap_or("-").to_string();
                                         let sid = m.session_id.as_deref().unwrap_or("-");
@@ -6109,6 +6280,32 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     }
                                 }
                                 output.push_str(&format!("\n{} teammate(s)\n", team.members.len()));
+                                // FR-020: a message whose recipient terminated before
+                                // reading it is reported here rather than dropped -
+                                // nothing else will ever drain that mailbox.
+                                let undelivered = undelivered_messages(&store);
+                                let block = render_undelivered(&team.name, &undelivered, 2);
+                                if !block.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&block);
+                                }
+                                // FR-034: a `plan_pending` row is reported with
+                                // its plan and the verdict that resolves it.
+                                let parked = pending_plans(&store);
+                                let plans = render_pending_plans(&team.name, &parked, 2);
+                                if !plans.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&plans);
+                                }
+                                // FR-019: an inert hook is reported, with the
+                                // ledger it was recorded in, so it is never
+                                // mistaken for a gate that passed.
+                                let hook_failures = read_hook_failures(&store.dir);
+                                let hooks = render_hook_failures(&team.name, &hook_failures, 2);
+                                if !hooks.is_empty() {
+                                    output.push('\n');
+                                    output.push_str(&hooks);
+                                }
                                 self.append_assistant_text(&output);
                                 self.status = format!("team: show {}", team.name);
                             }
@@ -6152,35 +6349,69 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         }
                     }
                     "delete" => {
-                        if rest.is_empty() {
-                            self.status = "Usage: /team delete <name>".to_string();
+                        // T-043/FR-045: the explicit `--force` is the
+                        // confirmation for EVERY named team, not only the
+                        // session's active one. The flag is split off the name
+                        // first, so a confirmed delete never reaches the store
+                        // with `--force` glued onto it.
+                        let (team_name, force) = split_delete_args(rest);
+                        if team_name.is_empty() {
+                            self.status = "Usage: /team delete <name> [--force]".to_string();
                             return;
                         }
-                        // SEC-ragent-tui-004: the name reaches `remove_dir_all` via
-                        // the resolved store directory, so it is validated first.
-                        if let Err(e) = ragent_agent::team::validate_team_name(rest) {
+                        // SEC-ragent-tui-004: the name reaches `remove_dir_all`
+                        // via the resolved store directory, so it is validated
+                        // first.
+                        if let Err(e) = ragent_agent::team::validate_team_name(team_name) {
                             self.status = format!("{e}");
                             return;
                         }
+                        let name_owned = team_name.to_string();
                         let deleting_active = self
                             .active_team
                             .as_ref()
-                            .is_some_and(|team| team.name == rest);
-                        if deleting_active {
-                            let active_count = self
-                                .team_members
-                                .iter()
-                                .filter(|m| matches!(m.status, MemberStatus::Working))
-                                .count();
-                            if active_count > 0 {
-                                self.status = format!(
-                                    "{} teammate(s) still active - shut them down first",
-                                    active_count
-                                );
-                                return;
-                            }
-                        }
+                            .is_some_and(|team| team.name == name_owned);
                         let working_dir = crate::app::helpers::current_working_dir();
+                        // FR-022/FR-045: the live-roster guard is the shared
+                        // `cleanup_refusal` the `team_cleanup` tool uses, so the
+                        // two surfaces cannot disagree. An unforced delete of a
+                        // team whose roster has a live member is refused with the
+                        // next actions named; `--force` is the deliberate override
+                        // and removes it in this one step.
+                        let roster: Vec<(String, ragent_agent::team::MemberStatus)> =
+                            if deleting_active {
+                                self.team_members
+                                    .iter()
+                                    .map(|m| (m.name.clone(), m.status))
+                                    .collect()
+                            } else {
+                                TeamStore::load_by_name(team_name, &working_dir)
+                                    .map(|store| {
+                                        store
+                                            .config
+                                            .members
+                                            .iter()
+                                            .map(|m| (m.name.clone(), m.status))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default()
+                            };
+                        let forced_live_count =
+                            roster.iter().filter(|(_, status)| status.is_live()).count();
+                        if let Some(refusal) = ragent_agent::team::cleanup_refusal(
+                            team_name,
+                            roster.iter().map(|(name, status)| (name.as_str(), *status)),
+                        )
+                        .filter(|_| !force)
+                        {
+                            // FR-032: the refusal names the team, the live
+                            // members with their status words, and the commands
+                            // that clear them.
+                            self.status = format!("team delete {team_name}: {refusal}");
+                            self.push_log_no_agent(LogLevel::Warn, refusal);
+                            return;
+                        }
+                        let rest = team_name;
                         match TeamStore::load_by_name(rest, &working_dir) {
                             Ok(store) => match std::fs::remove_dir_all(&store.dir) {
                                 Ok(_) => {
@@ -6204,8 +6435,18 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         LogLevel::Info,
                                         format!("[clr]  Team '{}' deleted", rest),
                                     );
+                                    // FR-032: say what the confirmed delete
+                                    // removed, and whether it overrode a live
+                                    // roster, so "nothing was forced" is never
+                                    // guessed from silence.
+                                    let forced = if force { forced_live_count } else { 0 };
+                                    let detail = if forced == 0 {
+                                        "Nothing was forced.".to_string()
+                                    } else {
+                                        format!("{forced} live teammate(s) forced.")
+                                    };
                                     self.append_assistant_text(&format!(
-                                        "From: /team delete\nTeam '{}' deleted.",
+                                        "From: /team delete\nTeam '{}' deleted.\n{detail}",
                                         rest
                                     ));
                                     self.status = "team deleted".to_string();
@@ -6683,6 +6924,82 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.status = "No active team to clean up".to_string();
                         }
                     }
+                    // FR-034: the approve/reject action a `plan_pending` row
+                    // names must be runnable from the same surface that names
+                    // it. `approve` takes the teammate; `reject` takes the
+                    // teammate and the feedback the tool requires.
+                    "approve" | "reject" => {
+                        let approve = sub == "approve";
+                        let (who, feedback) = rest
+                            .split_once(char::is_whitespace)
+                            .map_or((rest.trim(), ""), |(n, f)| (n.trim(), f.trim()));
+                        if who.is_empty() {
+                            self.status = format!(
+                                "Usage: /team {sub} <teammate-name>{}{}",
+                                if approve { "" } else { " <feedback>" },
+                                ""
+                            );
+                            return;
+                        }
+                        if !approve && feedback.is_empty() {
+                            // The tool refuses a rejection without feedback, so
+                            // the surface refuses it before the round trip.
+                            self.status =
+                                "Usage: /team reject <teammate-name> <feedback>".to_string();
+                            return;
+                        }
+                        let Some(_team) = self.active_team.clone() else {
+                            self.status = "No active team".to_string();
+                            return;
+                        };
+                        let member = self
+                            .team_members
+                            .iter()
+                            .find(|m| m.name == who || m.agent_id == who)
+                            .cloned();
+                        let Some(member) = member else {
+                            self.status = format!("team {sub}: no teammate named '{who}'");
+                            return;
+                        };
+                        if member.status != MemberStatus::PlanPending {
+                            self.status = format!(
+                                "team {sub}: {} ({}) is {} - a plan verdict needs a teammate in plan_pending",
+                                member.name,
+                                member.agent_id,
+                                member.status.display_label()
+                            );
+                            return;
+                        }
+                        let verdict = if approve { "approved" } else { "rejected" };
+                        let summary = if feedback.is_empty() {
+                            format!("Plan {verdict}.")
+                        } else {
+                            feedback.to_string()
+                        };
+                        match self.submit_plan_verdict(&member.agent_id, approve, &summary) {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /team {sub}\nPlan for **{}** ({}) {verdict}.\n\n{}",
+                                    member.name,
+                                    member.agent_id,
+                                    if approve {
+                                        "The teammate exits plan_pending and begins implementation."
+                                            .to_string()
+                                    } else {
+                                        format!("Feedback sent: {summary}\n\nThe teammate stays in plan_pending and must resubmit with `team_submit_plan`.")
+                                    }
+                                ));
+                                self.status = format!("team: {sub} {}", member.name);
+                            }
+                            Err(e) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /team {sub}\nFailed to record the verdict for **{}**: {e}",
+                                    member.name
+                                ));
+                                self.status = format!("team {sub} failed: {e}");
+                            }
+                        }
+                    }
                     "focus" => {
                         if self.active_team.is_none() {
                             self.status = "No active team".to_string();
@@ -6726,7 +7043,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                     _ => {
                         self.status = format!(
-                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show|create|close|delete|message|tasks|clear|cleanup|focus]",
+                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show|create|close|delete|message|tasks|clear|cleanup|focus|approve|reject]",
                             sub
                         );
                         self.push_log_no_agent(
@@ -11801,6 +12118,113 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.assert_ui_invariants();
     }
 
+    /// Record the lead's verdict on a teammate's submitted plan (FR-034).
+    ///
+    /// The `/team approve <name>` and `/team reject <name> <feedback>` arms run
+    /// the same verdict the `team_approve_plan` tool records, so a `plan_pending`
+    /// row the Teams panel names has a runnable action on the surface that names
+    /// it. The verdict goes through the manager's single status writer, so an
+    /// approval moves the member out of `PlanPending` with the legal-transition
+    /// check and the cache invalidation, and the gate the dispatch pipeline asks
+    /// observes the new value immediately.
+    ///
+    /// `feedback` is delivered to the teammate's mailbox as the
+    /// `PlanApproved` / `PlanRejected` reply the `team_approve_plan` tool sends
+    /// (the tool makes it mandatory on rejection and the slash arm refuses a
+    /// rejection without it before calling here).
+    ///
+    /// The in-memory roster is updated from the persisted verdict afterwards so
+    /// the row stops showing `plan_pending` without waiting for a
+    /// `TeammateStatusChanged` event.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent_id` - the teammate whose plan is being judged.
+    /// * `approve` - `true` approves the plan, `false` rejects it.
+    /// * `feedback` - the lead's note to attach to the verdict.
+    ///
+    /// # Errors
+    ///
+    /// Fails when no team is active, when the session has no `TeamManager` or
+    /// not the team the TUI shows, or when the verdict cannot be persisted or
+    /// delivered.
+    fn submit_plan_verdict(
+        &mut self,
+        agent_id: &str,
+        approve: bool,
+        feedback: &str,
+    ) -> anyhow::Result<()> {
+        let team_name = self
+            .active_team
+            .as_ref()
+            .map(|t| t.name.clone())
+            .ok_or_else(|| anyhow::anyhow!("no active team"))?;
+        let manager = self
+            .session_processor
+            .team_manager
+            .get()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("team manager for '{team_name}' is not initialised"))?;
+
+        // FR-008: the status move goes through the manager's single status
+        // writer, so an approval leaves `PlanPending` for `Working` with the
+        // legal-transition check and the `TeammateStatusChanged` event, and a
+        // rejection keeps the member in `PlanPending` to resubmit.
+        if approve {
+            manager.set_member_status(
+                agent_id,
+                MemberStatus::Working,
+                TransitionCause::PlanApproved,
+            )?;
+        }
+        let plan_status = if approve {
+            PlanStatus::Approved
+        } else {
+            PlanStatus::Rejected
+        };
+        manager.update_member(agent_id, |m| m.plan_status = plan_status)?;
+        manager.invalidate_plan_pending_cache(agent_id);
+
+        // The teammate learns the verdict from its mailbox. A rejection without
+        // this reply leaves it waiting on a plan nobody will answer.
+        let mailbox = Mailbox::open(&manager.team_dir, agent_id)?;
+        let mut msg = MailboxMessage::new(
+            "lead".to_string(),
+            agent_id.to_string(),
+            if approve {
+                MessageType::PlanApproved
+            } else {
+                MessageType::PlanRejected
+            },
+            feedback,
+        );
+        // M5-T4: carry the correlation id so the teammate can tell which plan
+        // the verdict answers, then clear it now the reply is sent.
+        let plan_request_id = TeamStore::load(&manager.team_dir).ok().and_then(|store| {
+            store
+                .config
+                .member_by_id(agent_id)
+                .and_then(|m| m.plan_request_id.clone())
+        });
+        msg.correlation_id = plan_request_id;
+        mailbox.push(msg)?;
+        manager.update_member(agent_id, |m| m.plan_request_id = None)?;
+
+        // Mirror the persisted verdict into the roster the Teams panel draws.
+        if let Some(member) = self
+            .team_members
+            .iter_mut()
+            .find(|m| m.agent_id == agent_id)
+        {
+            member.plan_status = plan_status;
+            if approve {
+                member.status = MemberStatus::Working;
+            }
+        }
+        self.team_task_counts_dirty = true;
+        Ok(())
+    }
+
     /// Invoke a plugin-contributed slash command (spec `plugins` FR-031).
     ///
     /// Returns `true` when `cmd` matched a registered plugin command (and the
@@ -13336,6 +13760,36 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 }
 
 /// Truncate a field for display, appending an ellipsis if truncated.
+/// Split `/team delete`'s argument into the team name and the `--force`
+/// confirmation flag (spec `teamssetup` FR-045).
+///
+/// The flag may appear before or after the name, and may be repeated - only its
+/// presence matters. Everything that is not `--force` (or the `-f` short form)
+/// is part of the name, which the caller then validates, so a stray token can
+/// never be mistaken for a confirmation.
+///
+/// # Examples
+///
+/// ```
+/// # use ragent_tui::app::slash_helpers::split_delete_args;
+/// assert_eq!(split_delete_args("alpha --force"), ("alpha", true));
+/// assert_eq!(split_delete_args("--force alpha"), ("alpha", true));
+/// assert_eq!(split_delete_args("alpha"), ("alpha", false));
+/// assert_eq!(split_delete_args(""), ("", false));
+/// ```
+fn split_delete_args(rest: &str) -> (&str, bool) {
+    let mut name: Option<&str> = None;
+    let mut force = false;
+    for token in rest.split_whitespace() {
+        if token == "--force" || token == "-f" {
+            force = true;
+        } else if name.is_none() {
+            name = Some(token);
+        }
+    }
+    (name.unwrap_or(""), force)
+}
+
 fn truncate_field(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()

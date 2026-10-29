@@ -1831,6 +1831,45 @@ See [section 3](#3-merge-semantics) for the merge-strategy table, and
 
 ---
 
+### 7.41 `agents`
+
+Sub-agent panel and launch configuration (spec `agentssetup` FR-021, FR-036,
+NFR-004). Both keys are omitted from a serialised config while they are at their
+defaults, so a `ragent.json` that has never set them round-trips byte-identically.
+
+```json
+{
+  "agents": {
+    "completed_history": 20,
+    "max_launching": 4
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `completed_history` | `usize` | `20` | Cap on the Agents panel's completed-history section (`DEFAULT_AGENTS_COMPLETED_HISTORY`). Clamped `1..=200`. |
+| `max_launching` | `usize` | `4` | Cap on concurrently launching sub-agent tasks across every TUI launch path (`DEFAULT_AGENTS_MAX_LAUNCHING`). Clamped `1..=64`. |
+
+**Why `completed_history` exists.** The panel's completed section keeps finished
+tasks visible newest-first after their live row is gone, which is how a `[memory]`
+report and a settled verdict stay readable. Unbounded, that section would grow
+with the number of tasks the session ever spawned, so it is capped: the panel's
+memory cost stays constant in session length.
+
+**Why `max_launching` exists.** `/spawn` used to hold its own single-slot
+`Mutex`, so only one launch could be in flight from that command while every
+other path behaved differently. Every TUI launch now registers on one shared,
+bounded launch set: a second launch queues behind the busy ones and names them
+rather than being refused outright.
+
+**Zero is clamped up, not honoured.** An explicit `0` for either key is raised
+to `1` rather than accepted: zero would silently switch the feature off while
+still claiming to be configured, which is worse than a bound the operator can
+see. An out-of-range value is clamped to the nearest bound.
+
+---
+
 ## 8. Full Example File
 
 The following is a comprehensive example showing every section. You do not

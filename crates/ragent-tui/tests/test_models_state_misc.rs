@@ -70,6 +70,7 @@ fn running_task(id: &str, status: TaskStatus) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

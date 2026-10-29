@@ -254,6 +254,7 @@ fn test_opening_active_agents_row_output_view_from_the_keyboard() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
     render(&mut app);
     app.move_agents_cursor(1);
@@ -331,6 +332,7 @@ fn test_clicking_agents_button_toggles_agents_window() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
     app.agents_button_area = Rect::new(2, 30, 9, 3);
 
@@ -355,16 +357,21 @@ fn test_clicking_teams_button_toggles_teams_window() {
 }
 
 #[test]
-fn test_clicking_disabled_buttons_does_not_open_windows() {
+fn test_clicking_dimmed_buttons_still_opens_windows() {
+    // The dimmed style marks an empty panel, it does not disable the button:
+    // the window opens and paints its empty state (FR-026), so the operator can
+    // always reach the roster.
     let mut app = make_app();
     app.agents_button_area = Rect::new(2, 30, 9, 3);
     app.teams_button_area = Rect::new(12, 30, 9, 3);
 
     app.handle_mouse_event(mouse_down(3, 31));
-    app.handle_mouse_event(mouse_down(13, 31));
-
-    assert!(!app.show_agents_window);
+    assert!(app.show_agents_window, "a dimmed Agents button still opens");
     assert!(!app.show_teams_window);
+
+    app.handle_mouse_event(mouse_down(13, 31));
+    assert!(app.show_teams_window, "a dimmed Teams button still opens");
+    assert!(!app.show_agents_window);
 }
 
 #[test]

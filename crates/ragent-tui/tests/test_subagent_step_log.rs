@@ -36,6 +36,7 @@ async fn test_tool_call_start_tracked_subagent_is_logged_with_step_tag() {
         agent: "explore".to_string(),
         task: "find callers".to_string(),
         background: false,
+        detached: false,
     })
     .await;
 
@@ -82,6 +83,7 @@ async fn test_tool_call_count_for_tracked_subagent_matches_panel_counter() {
         agent: "build".to_string(),
         task: "build the crate".to_string(),
         background: true,
+        detached: false,
     })
     .await;
 
@@ -138,6 +140,7 @@ async fn test_tool_call_end_tracked_subagent_is_logged_with_step_tag() {
         agent: "plan".to_string(),
         task: "make a plan".to_string(),
         background: false,
+        detached: false,
     })
     .await;
 
@@ -206,6 +209,7 @@ async fn test_tool_call_batch_tracked_subagent_logs_untagged_calls() {
         agent: "debug".to_string(),
         task: "debug it".to_string(),
         background: false,
+        detached: false,
     })
     .await;
 

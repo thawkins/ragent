@@ -75,6 +75,11 @@ pub fn stub_processor(event_bus: Arc<EventBus>) -> Arc<SessionProcessor> {
 ///
 /// The manager holds the (strong) `Arc<EventBus>` and a `Weak` processor; the
 /// returned `TempDir` must be kept alive for the test body.
+///
+/// `#[allow(dead_code)]`: this helper is `#[path]`-included by every test file
+/// that needs a manager, so each inclusion is its own module and the files that
+/// only want [`stub_processor`] would otherwise report it unused.
+#[allow(dead_code)]
 pub fn team_manager(
     team_name: &str,
     lead_session: &str,
@@ -89,19 +94,51 @@ pub fn team_manager(
         ragent_agent::team::TeamStore::create(team_name, "old-lead", &workspace, project_local)
             .expect("create team");
     // Give the team one member so adoption / plan logic has something to act on.
-    store
-        .add_member(ragent_agent::team::TeamMember::new(
-            "alice", "tm-001", "general",
-        ))
-        .expect("add member");
+    //
+    // The member starts `Working`: nothing is spawning a freshly created team,
+    // and `Spawning` has no edge to the parked or shutdown statuses (FR-003), so
+    // a `Spawning` fixture would make `suspend_teammate` / `shutdown_teammate`
+    // tests assert against fixture state instead of the behaviour under test.
+    let mut member = ragent_agent::team::TeamMember::new("alice", "tm-001", "general");
+    member.status = ragent_agent::team::config::MemberStatus::Working;
+    store.add_member(member).expect("add member");
     let team_dir = store.dir.clone();
     drop(store);
 
     let processor = stub_processor(bus.clone());
-    let manager = Arc::new(TeamManager::new(
+    let manager = TeamManager::into_arc(TeamManager::new(
         team_name,
         lead_session,
         team_dir,
+        processor,
+        bus.clone(),
+    ));
+    // Nothing spawned this member, so it has no handle; register one so a test
+    // that needs a live (or a returned) agent loop has somewhere to record it.
+    manager.register_handle_for_test("tm-001");
+    (manager, tmp, bus)
+}
+
+/// A `TeamManager` over an **existing** team directory.
+///
+/// [`team_manager`] always creates its own team, which is the wrong fixture when
+/// a test needs the cached (`TeamManager`) and uncached (`TaskStore`) claim paths
+/// to read one `tasks.json`: both halves must resolve the same directory. This
+/// builds the manager over `team_dir` and adds nothing to it, so the caller's
+/// fixture is the only state the manager sees. The returned `TempDir` is only a
+/// placeholder workspace root and must be kept alive beside the manager's own.
+#[allow(dead_code)]
+pub fn team_manager_for(team_dir: &std::path::Path) -> (Arc<TeamManager>, TempDir, Arc<EventBus>) {
+    let bus = Arc::new(EventBus::new(256));
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let processor = stub_processor(bus.clone());
+    let name = ragent_agent::team::TeamStore::load(team_dir)
+        .map(|store| store.config.name.clone())
+        .unwrap_or_else(|_| "team".to_string());
+    let manager = TeamManager::into_arc(TeamManager::new(
+        name,
+        "lead-session",
+        team_dir.to_path_buf(),
         processor,
         bus.clone(),
     ));

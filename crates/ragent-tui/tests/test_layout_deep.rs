@@ -152,6 +152,7 @@ fn task_entry(
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -1576,7 +1577,19 @@ fn teammate_strip_renders_every_status_icon() {
     let terminal = render(&mut app, 120, 40);
     let text = painted(&terminal);
     assert!(text.contains("[team]"));
-    assert!(text.contains("teammate-with-a-lo"));
+    // The strip clips every name to `NAME_COLUMNS` display columns (FR-027), so
+    // the assertion is anchored on the clipped label the strip itself paints
+    // rather than on the raw member name. (It previously matched an 18-column
+    // substring that only ever appeared in the input-border focus title, which
+    // FR-058 no longer paints - the strip never emitted it.)
+    let clipped: String = "teammate-with-a-long-name-0"
+        .chars()
+        .take(ragent_tui::teammate_strip::NAME_COLUMNS)
+        .collect();
+    assert!(
+        text.contains(&clipped),
+        "the strip must paint the clipped name {clipped:?}"
+    );
 }
 
 // ===========================================================================

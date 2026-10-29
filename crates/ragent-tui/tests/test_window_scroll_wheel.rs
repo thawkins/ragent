@@ -69,6 +69,7 @@ fn task(id: &str, parent_session: &str, agent: &str) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

@@ -150,6 +150,14 @@ pub(crate) struct ToolDispatchContext {
     pub security_analyzer: Option<(Arc<dyn crate::llm::LlmClient>, String, u64)>,
     /// Whether this run is a sub-agent (no attached user).
     pub agent_is_subagent: bool,
+    /// The names of the tools this run can call that mutate the workspace -
+    /// the automatic sub-agent YOLO scope's membership test.
+    ///
+    /// Resolved once per turn from the run's own exposed surface
+    /// ([`crate::session::permissions::write_capable_tool_names`]) so every
+    /// call in the turn asks the same question. Empty for a read-only run,
+    /// which is how an `explore` sub-agent stays under the ordinary policy.
+    pub write_capable_tools: Arc<std::collections::HashSet<String>>,
     /// `None` forces a destructive-action checkpoint; `Some(bool)` is the normal
     /// auto-approve setting.
     pub auto_approve: Option<bool>,
@@ -236,22 +244,27 @@ impl ToolDispatchPipeline {
             }
         }
 
-        // Stage 6: plan-approval gate. A teammate whose plan awaits the lead's
-        // verdict must not start mutating work; read-only tools and the team
-        // coordination tools stay available (that is how it learns the verdict).
+        // Stage 6: plan-approval gate. A teammate without an approved plan must
+        // not start mutating work; read-only tools and the team coordination
+        // tools stay available (that is how it learns the verdict).
+        //
+        // `is_plan_pending` is the narrow "a plan awaits the verdict" question
+        // that T-307 asked; `is_plan_gate_active` is the wider FR-014 question
+        // ("`require_plan_approval` is set and this member's plan is not
+        // `Approved`"), so a teammate that never submitted a plan is stopped too
+        // (F-10). The two are ORed rather than replaced: the narrow query keeps
+        // its meaning for a setting disabled mid-run.
         if let Some(tc_team) = ctx.tool_ctx.team_context.as_ref() {
-            let plan_pending = ctx
-                .tool_ctx
-                .team_manager
-                .as_ref()
-                .is_some_and(|tm| tm.is_plan_pending(&tc_team.agent_id));
+            let plan_gate = ctx.tool_ctx.team_manager.as_ref().is_some_and(|tm| {
+                tm.is_plan_pending(&tc_team.agent_id) || tm.is_plan_gate_active(&tc_team.agent_id)
+            });
             if let Some(reason) =
-                crate::team::plan_gate_denial(&tc.name, tc_team.is_lead, plan_pending)
+                crate::team::plan_gate_denial(&tc.name, tc_team.is_lead, plan_gate)
             {
                 tracing::info!(
                     tool = %tc.name,
                     agent_id = %tc_team.agent_id,
-                    "plan-pending gate denied tool execution (T-307)"
+                    "plan-pending gate denied tool execution (T-307, FR-014)"
                 );
                 return Self::denial(tc, &reason, input, event_bus, session_id);
             }
@@ -433,6 +446,15 @@ impl ToolDispatchPipeline {
             ctx.checkpoint_timeout_secs,
             hook_approved,
             security_approved,
+            // The automatic sub-agent YOLO scope: a write-capable tool in an
+            // unattended run. Resolved here so the permission layer receives
+            // one boolean rather than a sub-agent question it would have to
+            // answer twice.
+            crate::session::permissions::subagent_yolo_bypasses_prompt(
+                ctx.agent_is_subagent,
+                &ctx.write_capable_tools,
+                &tc.name,
+            ),
         )
         .await;
         // Every exit from the permission stage is a resolved verdict: an allow,

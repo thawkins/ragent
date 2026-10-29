@@ -61,6 +61,7 @@ where
 {
     slash::mcp_display_servers(previous, configured, working_dir, live)
 }
+mod launch;
 mod mcp_bridge;
 mod spawn;
 mod subagent_events;
@@ -68,11 +69,70 @@ mod swarm;
 pub mod toolchain;
 mod windows;
 
-/// Test hook: expose the private `/spawn` poll to the integration test suite
-/// (`tests/test_slash_commands.rs`) without widening the production surface.
+/// Why the Agents window refuses to open with nothing to show (spec
+/// `agentssetup` FR-042). Re-exported so the panel's refusal text has one
+/// definition, reachable from the TUI tests.
+pub use self::windows::AGENTS_WINDOW_EMPTY_REFUSAL;
+
+/// Why the Teams window refuses to open with no active team (spec `agentssetup`
+/// FR-042), re-exported alongside its Agents counterpart.
+pub use self::windows::TEAMS_WINDOW_EMPTY_REFUSAL;
+
+/// Test hook: drive one pass of the shared sub-agent launch poll
+/// (`tests/test_slash_commands.rs`, `tests/test_misc_modules_deep.rs`) without
+/// widening the production surface.
 #[doc(hidden)]
 pub fn poll_spawn_result_for_tests(app: &mut App) {
-    app.poll_spawn_result();
+    app.poll_subagent_launch_results();
+}
+
+/// Test hook: seed one completed launch outcome on the shared queue, as the
+/// launch worker would, so a test can drive the poll's reporting arms without
+/// running a real sub-agent (spec `agentssetup` D3).
+#[doc(hidden)]
+pub fn seed_spawn_outcome_for_tests(app: &mut App, outcome: Result<String, String>) {
+    let launch = app
+        .begin_subagent_launch(LaunchOrigin::SpawnCommand, "explore")
+        .unwrap_or_else(|_| panic!("test hook: launch set must have room"));
+    let mut queue = crate::app::session_ops::recover_poisoned(
+        app.subagent_launch_results.lock(),
+        "subagent_launch_results",
+    );
+    queue.push(SubagentLaunchOutcome { launch, outcome });
+}
+
+/// Test hook: how many launches are currently registered as in flight (D3).
+#[doc(hidden)]
+pub fn pending_spawn_launches_for_tests(app: &App) -> usize {
+    app.subagent_launches.len()
+}
+
+/// Test hook: register one launch without running it, so a test can occupy the
+/// bounded launch set and assert the refusal (spec `agentssetup` D3).
+#[doc(hidden)]
+pub fn register_spawn_launch_for_tests(app: &mut App, agent: &str) {
+    // INTENTIONAL: a refusal here is the very thing the test asserts on.
+    let _ = app.begin_subagent_launch(LaunchOrigin::SpawnCommand, agent);
+}
+
+/// Test hook: drive the `SubagentComplete` transition (including the snapshot
+/// into the completed history) without a live sub-agent run
+/// (`tests/test_agents_window_refusals.rs`, spec `agentssetup` FR-028).
+#[doc(hidden)]
+pub fn note_subagent_completed_for_tests(
+    app: &mut App,
+    task_id: &str,
+    finish_reason: &str,
+) -> Option<ragent_agent::task::ReportStatus> {
+    app.note_subagent_completed(task_id, finish_reason)
+}
+
+/// Test hook: drive the `SubagentCancelled` transition (including the snapshot
+/// into the completed history) without a live sub-agent run
+/// (`tests/test_agents_window_refusals.rs`, spec `agentssetup` FR-032).
+#[doc(hidden)]
+pub fn note_subagent_cancelled_for_tests(app: &mut App, task_id: &str) -> Option<String> {
+    app.note_subagent_cancelled(task_id)
 }
 
 /// Test hook: the bridged MCP servers as `(id, origin label, defining file)`

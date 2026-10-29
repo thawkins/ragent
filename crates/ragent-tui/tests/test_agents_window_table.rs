@@ -67,6 +67,19 @@ fn task(
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
+    }
+}
+
+/// Build a [`TaskEntry`] for a detached (fire-and-forget) task (FR-020).
+///
+/// A detached run is also a background run, so the helper sets both flags the
+/// way the task registry does: the row must distinguish them from the flags,
+/// not from an assumption about which one implies which.
+fn detached_task(id: &str, parent: &str, child: &str, agent: &str) -> TaskEntry {
+    TaskEntry {
+        detached: true,
+        ..task(id, parent, child, agent, TaskStatus::Running, true)
     }
 }
 
@@ -1107,5 +1120,274 @@ fn test_multibyte_identifiers_truncate_on_a_character_boundary() {
     assert!(
         label.chars().count() <= columns::LABEL_W,
         "the label column stays within its budget: {label:?}"
+    );
+}
+
+// -- FR-020: the row paints the real execution contract --------------------
+
+/// The type column paints the row's execution contract from the registry entry
+/// its own row holds, never from a hard-coded default (FR-020).
+///
+/// Detached runs also set `background`, so a renderer that inferred the badge
+/// from `background` would paint `bg` for both and the panel would misreport
+/// the one contract that has no other visible trace.
+#[test]
+fn test_type_column_paints_the_execution_contract() {
+    let mut app = app_with_primary();
+    app.active_tasks.push(task(
+        "fg111111",
+        "s1",
+        "child-fg",
+        "explore",
+        TaskStatus::Running,
+        false,
+    ));
+    app.active_tasks.push(task(
+        "bg222222",
+        "s1",
+        "child-bg",
+        "explore",
+        TaskStatus::Running,
+        true,
+    ));
+    app.active_tasks
+        .push(detached_task("dt333333", "s1", "child-dt", "explore"));
+
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let label_x = columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W;
+    let type_x = label_x + columns::LABEL_W;
+
+    for (short, expected) in [
+        ("fg111111", glyphs::CONTRACT_FOREGROUND),
+        ("bg222222", glyphs::CONTRACT_BACKGROUND),
+        ("dt333333", glyphs::CONTRACT_DETACHED),
+    ] {
+        let row = find_row(&buffer, area, short).unwrap_or_else(|| panic!("{short} row paints"));
+        let text = row_text(&buffer, area, row);
+        let painted: String = text.chars().skip(type_x).take(columns::TYPE_W).collect();
+        assert_eq!(
+            painted.trim(),
+            expected,
+            "the type column derives the contract from the registry entry: {text:?}"
+        );
+    }
+}
+
+/// The detached badge fits the type column, so it can never push the elapsed
+/// time and step columns out of their pinned positions (FR-020, FR-012).
+#[test]
+fn test_detached_badge_fits_the_type_column() {
+    assert!(
+        glyphs::CONTRACT_DETACHED.chars().count() < columns::TYPE_W,
+        "the `detached` contract is narrower than its column so it leaves a \
+         separating column: {:?} vs {}",
+        glyphs::CONTRACT_DETACHED,
+        columns::TYPE_W
+    );
+
+    let mut app = app_with_primary();
+    app.active_tasks
+        .push(detached_task("dt999999", "s1", "child-dt9", "explore"));
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let label_x = columns::CONTENT_X + columns::MARKER_W + columns::ID_W + columns::GAP_W;
+    let type_x = label_x + columns::LABEL_W;
+    let elapsed_x = type_x + columns::TYPE_W;
+
+    let row = find_row(&buffer, area, "dt999999").expect("the detached row paints");
+    let text = row_text(&buffer, area, row);
+    let elapsed: String = text
+        .chars()
+        .skip(elapsed_x)
+        .take(columns::ELAPSED_W)
+        .collect();
+    assert!(
+        elapsed.trim().ends_with('s'),
+        "the elapsed column keeps its pinned position after a detached badge: {text:?}"
+    );
+}
+
+// -- FR-012: waiter visibility in the Agents panel (T-014) --------------------
+
+/// FR-012: a live row held by in-flight `wait_agents` callers paints how many.
+#[test]
+fn an_awaited_live_row_paints_its_waiter_count() {
+    let mut app = app_with_primary();
+    let mut entry = task(
+        "w0000001",
+        "s1",
+        "child-w1",
+        "explore",
+        TaskStatus::Running,
+        true,
+    );
+    entry.waiter_count = 2;
+    app.active_tasks.push(entry);
+
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let row = find_row(&buffer, area, "w0000001").expect("the awaited row paints");
+    let text = row_text(&buffer, area, row);
+
+    assert!(
+        text.contains("[w2]"),
+        "the row must name both waiters: {text:?}"
+    );
+}
+
+/// FR-012: the waiter marker is painted only when the count is greater than
+/// zero - a row nobody awaits carries no `[w0]`.
+#[test]
+fn an_unawaited_row_paints_no_waiter_marker() {
+    let mut app = app_with_primary();
+    app.active_tasks.push(task(
+        "w0000002",
+        "s1",
+        "child-w2",
+        "explore",
+        TaskStatus::Running,
+        true,
+    ));
+
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let row = find_row(&buffer, area, "w0000002").expect("the row paints");
+    let text = row_text(&buffer, area, row);
+
+    assert!(
+        !text.contains("[w"),
+        "an unawaited row must paint no waiter marker: {text:?}"
+    );
+}
+
+/// FR-012: a suspended row is still live, so a wait queued on it stays visible.
+#[test]
+fn a_suspended_awaited_row_still_paints_its_waiters() {
+    let mut app = app_with_primary();
+    let mut entry = task(
+        "w0000003",
+        "s1",
+        "child-w3",
+        "explore",
+        TaskStatus::Suspended,
+        true,
+    );
+    entry.waiter_count = 1;
+    app.active_tasks.push(entry);
+
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let row = find_row(&buffer, area, "w0000003").expect("the suspended row paints");
+    let text = row_text(&buffer, area, row);
+
+    assert!(
+        text.contains("[w1]"),
+        "a parked task's queued waiter must stay visible: {text:?}"
+    );
+    assert!(
+        text.contains(glyphs::STATUS_SUSPENDED.trim()),
+        "the suspension suffix must survive alongside the waiter marker: {text:?}"
+    );
+}
+
+/// FR-012: the waiter marker must not push the pinned `[stop]` / `[x]` columns.
+#[test]
+fn the_waiter_marker_does_not_move_the_pinned_controls() {
+    let mut app = app_with_primary();
+    let mut entry = task(
+        "w0000004",
+        "s1",
+        "child-w4",
+        "explore",
+        TaskStatus::Running,
+        true,
+    );
+    entry.waiter_count = 12;
+    app.active_tasks.push(entry);
+
+    let buffer = render(&mut app, 200, 50);
+    let area = app.active_agents_area;
+    let row = find_row(&buffer, area, "w0000004").expect("the row paints");
+
+    let stop_x = u16::try_from(columns::CONTENT_X + columns::STOP_X).expect("stop column");
+    let kill_x = u16::try_from(columns::CONTENT_X + columns::KILL_X).expect("kill column");
+    let stop: String = (0..u16::try_from(columns::STOP_W).expect("stop width"))
+        .map(|i| {
+            buffer
+                .cell((area.x + stop_x + i, area.y + row))
+                .map(|c| c.symbol().to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(
+        stop,
+        glyphs::STOP,
+        "the [stop] control must stay pinned after a waiter marker"
+    );
+    let kill: String = (0..u16::try_from(columns::KILL_W).expect("kill width"))
+        .map(|i| {
+            buffer
+                .cell((area.x + kill_x + i, area.y + row))
+                .map(|c| c.symbol().to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(
+        kill.trim_end(),
+        glyphs::KILL,
+        "the [x] control must stay pinned after a waiter marker"
+    );
+}
+
+// -- FR-026: empty state -----------------------------------------------------
+
+/// With no sub-agent, background-shell task or history row the hint paints
+/// directly beneath the primary row (FR-026).
+///
+/// The panel always opens, so this is the state an operator sees on a fresh
+/// session: a lone primary row would read as a rendering fault.
+#[test]
+fn test_agents_empty_state_paints_the_hint_beneath_the_primary_row() {
+    let mut app = app_with_primary();
+    let buffer = render(&mut app, 170, 44);
+    let area = app.active_agents_area;
+
+    let header_y = find_row(&buffer, area, "id").expect("header row");
+    let hint_y = find_row(&buffer, area, glyphs::EMPTY_HINT).expect("empty-state hint row");
+    assert_eq!(
+        hint_y,
+        header_y + 2,
+        "the empty-state hint must sit directly beneath the primary row (FR-026)"
+    );
+    let hint_x =
+        u16::try_from(find_in_row(&buffer, area, hint_y, glyphs::EMPTY_HINT).expect("hint column"))
+            .expect("hint column fits");
+    let hint_cell = cell_at(&buffer, area, hint_y, hint_x);
+    assert_eq!(
+        hint_cell.fg,
+        ragent_tui::theme::colors::HINT,
+        "the hint must use the hint colour (FR-026)"
+    );
+    assert!(
+        hint_cell.modifier.contains(Modifier::DIM),
+        "the hint must be dimmed like the Teams empty state (FR-026)"
+    );
+}
+
+/// The hint disappears as soon as a sub-agent, background task or history row
+/// exists (FR-026).
+#[test]
+fn test_agents_empty_state_hint_is_absent_with_rows() {
+    let mut app = app_with_primary();
+    app.active_tasks
+        .push(task("t1", "s1", "c1", "explore", TaskStatus::Running, true));
+    let buffer = render(&mut app, 170, 44);
+    let area = app.active_agents_area;
+
+    assert_eq!(
+        find_row(&buffer, area, glyphs::EMPTY_HINT),
+        None,
+        "the empty-state hint must not paint while rows exist (FR-026)"
     );
 }

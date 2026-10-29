@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.152</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.153</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-10-28
+          <strong>Date:</strong> 2026-10-29
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -98,7 +98,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.152). The core architecture, tool system,
+Ragent is in **beta** (v1.0.153). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 plugin system, connector system (§19C), execution backends (§19D), the Agent
@@ -1023,13 +1023,13 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Task management | `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList` | 4 |
 | Utility | `get_env`, `calculator`, `ragent_info`, `os_info`, `tool_info`, `commands_info` | 6 |
 
-#### Team Tools (19)
+#### Team Tools (20)
 
 | Tool | Purpose |
 |------|---------|
 | `team_create` | Create a named team |
 | `team_spawn` | Spawn a teammate for a single task |
-| `team_status` | List team members and progress |
+| `team_status` | Team status: members with their last five status transitions, undelivered mailbox messages, plans awaiting a verdict, and hook failures |
 | `team_message` | Send a direct message |
 | `team_broadcast` | Message all active teammates |
 | `team_read_messages` | Read unread mailbox messages |
@@ -1038,7 +1038,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `team_approve_plan` | Lead approve/reject a plan |
 | `team_task_create` | Add a team task |
 | `team_task_claim` | Claim a task |
-| `team_task_complete` | Mark a team task done |
+| `team_task_complete` | Mark a team task done (owner or lead only) |
+| `team_task_cancel` | Lead withdraws a pending/in-progress task |
 | `team_assign_task` | Lead assigns a task directly |
 | `team_idle` | Signal no more work |
 | `team_shutdown_teammate` | Request teammate shutdown |
@@ -1050,7 +1051,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-| `bg` | Spawn, monitor, tail, and cancel long-running shell commands in the background. Actions: `spawn`, `list`, `status`, `output`, `tail`, `cancel`, `wait`, `cleanup`. |
+| `bg` | Spawn, monitor, tail, and cancel long-running shell commands as **shell tasks** (never sub-agents, whose vocabulary is the execution contract). Actions: `spawn`, `list`, `status`, `output`, `tail`, `cancel`, `wait`, `cleanup`. `session_id` on `list`/`cleanup` must name the calling session - a foreign id is refused (`reason_code: wrong_session`) and deletes nothing. |
 
 #### Agent Search Tool (1)
 
@@ -1159,8 +1160,11 @@ against a remembered number:
 `/tools list` reports every tool the registry holds - the same set `definitions()`
 returns and the same set sent to the provider - so its row count is the tool count.
 The family is the leading segment of `permission_category()`, never the tool name:
-`team_wait` reports `agent:spawn`, so the split is `agent` 4 / `team` 19 and a
-name-prefix reading gives the wrong 3 / 20 for the same 148 total.
+`team_wait` reports `agent:spawn`, so the split is `agent` 5 / `team` 20 and a
+name-prefix reading gives the wrong 3 / 21 for the same 150 total. (`agent` grew
+4 -> 5 when `list_agents` moved from `none` to `agent:read`, spec `agentssetup`
+FR-005; the family count stayed 21 because the category was re-spelled inside an
+existing family.)
 
 ### 3.3 Agent System
 
@@ -1375,12 +1379,34 @@ Between steps the loop also runs two gates:
 | Tool | Use |
 |------|-----|
 | `new_agent` | Spawn a background sub-agent (optional `detached: true` for a fire-and-forget task excluded from `list_agents`/`wait_agents` whose result is not injected back) |
-| `cancel_agent` | Cancel a running sub-agent |
-| `list_agents` | Inspect active sub-agents |
+| `cancel_agent` | Request cancellation of a running sub-agent; reports `cancel_requested` plus the task's current status, never a terminal state it has not reached |
+| `list_agents` | Inspect active sub-agents (reports `limit`/`occupancy`/`headroom`, the `waiter_count` of a task in-flight `wait_agents` callers hold - shown only when greater than zero - and its `status` filter accepts every declared status: `running`, `suspended`, `completed`, `failed`, `cancelled`, `timed_out`) |
 | `wait_agents` | Block until sub-agents finish |
 | `agent_complete` | **Terminal signal** that ends the autonomous loop |
 
 `agent_complete` takes **only** `summary`. `team_task_complete` takes `team_name` + `task_id`.
+
+**`/cancel <prefix>` delegates to the same registry.** The slash command is not a
+separate cancellation path: it resolves the prefix against the Agents window's
+`active_tasks` projection, then routes a single match to
+`AgentManager::cancel_agent` - the method behind `cancel_agent` - and reports the
+*request*, never an outcome it has not seen (FR-023). It does not remove the row:
+the entry stays `running` until the agent loop observes the cooperative cancel flag
+at its next step boundary, and the row is retired by the `SubagentCancelled` event
+or the registry reconciliation, so the window cannot show a cancellation that did
+not happen. A prefix matching more than one live task is refused with every match
+listed as `<short id> (<agent>, <status>)` (FR-024); a prefix matching none reports
+`No task matching '<prefix>'` and lists the live ids, or says plainly that there are
+none (FR-041). A prefix matching one *finished* task reports
+`Task <short id> is already <status>` rather than a cancellation. Only `running`,
+`suspended` and `terminating` count as live; `completed`, `failed`, `cancelled` and
+`timed_out` are never offered as cancel targets. The benchmark-first dispatch
+(`/cancel <prefix>` against an active `/bench` run) is unchanged and still takes
+precedence over sub-agent tasks. Covered by
+`test_cancel_slash::cancel_requests_through_the_registry_and_keeps_the_row`,
+`::cancel_refuses_an_ambiguous_prefix_and_lists_the_matches`,
+`::cancel_names_the_live_ids_when_no_task_matches` and
+`::cancel_reports_the_registry_status_of_a_finished_task`.
 
 ### 3.9 Failure Capture: Panic Reports, Crash Dumps, and the stderr Spool
 
@@ -1839,6 +1865,48 @@ to `ragent.json`.
 --yes        # CLI flag
 ```
 
+#### 4.7.1 Automatic sub-agent YOLO scope
+
+An **unattended sub-agent run** - any run with `agent.mode == Subagent`,
+whether spawned by `new_agent` (foreground, background or detached), `/spawn`,
+cron or the server - gets a YOLO-equivalent prompt scope **for its write-capable
+tools only**, regardless of the global `/yolo` flag. A sub-agent has no attached
+user, so an interactive prompt is not a safeguard but a stall: the call would
+wait out the watchdog and the run would be lost.
+
+The scope is a property of the run, resolved once per turn from the tool
+surface that run was offered:
+
+| Question | Answer | Where |
+|---|---|---|
+| Is the run unattended? | `agent.mode == AgentMode::Subagent` | `session/processor.rs`, threaded as `ToolDispatchContext::agent_is_subagent` |
+| Can the called tool write? | its `permission_category()` is not in `READ_ONLY_PERMISSION_CATEGORIES` | `session/permissions.rs::is_write_capable_permission_category` |
+| What does that buy? | the interactive **prompt** is skipped, exactly where the global flag skips it | `session/permissions.rs::check_permission_with_prompt` |
+
+The membership set is built per turn from the run's model-facing tool surface
+(`SessionProcessor::write_capable_tools`), so a read-only run (`explore`, a plan
+reviewer, a loop restricted to reads) yields an empty set and keeps the ordinary
+policy, and a name the run was never offered cannot be waved through.
+
+**Containment.** The scope is narrower than the global flag and widens nothing:
+
+- the primary session never gets it - the predicate is gated on the run being a
+  sub-agent;
+- only write-capable tools are covered; every read a sub-agent makes stays under
+  the ordinary policy;
+- the loop tool-set restriction, the path guards, the 7-layer bash
+  `is_safe_command` stage (which runs *before* the prompt), the tool-repeat guard
+  and every pre-tool hook still apply;
+- an explicit policy `Deny` still denies, and a forced destructive-action
+  checkpoint still prompts (FR-024) - the automatic scope suppresses a prompt,
+  never a refusal.
+
+Because isolation between a sub-agent and its parent is by process, the
+process-wide parts of YOLO (bash denied patterns, dynamic-context allowlist, MCP
+config validation) are still governed by the single global flag and are never
+entered by a sub-agent alone. The automatic scope adds no process-wide state: it
+is a per-turn function of the run's own tool surface.
+
 ---
 
 ## 5. Configuration
@@ -2135,7 +2203,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | Log | Step-numbered tool calls with pretty-printed JSON |
 | Status bar | Provider/model, context usage, compression indicator, YOLO state |
 | Teammate strip | One row of pills under the status bar, one per active teammate (status glyph, clipped name, focused highlight, `Alt+^v:cycle` hint); omitted when no team is active (spec `agentui` FR-027) |
-| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
+| Agents window | `Agents`-button popup listing the primary agent and an ancestor-indented sub-agent tree with status, elapsed time, step count, `[stop]`/`[x]` status glyphs, and a background-shell section; openable from the keyboard with `Alt+A` (the chord resolves to `InputAction::ToggleAgentsWindow` and calls the same `App::toggle_agents_window` the button click does, so both share one visibility path, one no-subject no-op and one redraw flag - spec `agentssetup` FR-022); keyboard-first: a block cursor (`Up`/`Down`/`PgUp`/`PgDn`) selects a row, `Space` toggles suspend/resume, `Del` arms the kill confirmation, `Enter` opens the row's output view, and clicking a row selects it; the FR-077 key legend sits in the footer (spec `agentui` FR-006..FR-016) |
 | Teams window | `Teams`-button popup listing the lead plus every teammate with focus markers, status words from `MemberStatus::display_label()`, model column (inherited global model suppressed), and claimed/done/sent/recv counters; the block cursor plus `Enter`/`Space`/`Del` drive focus, suspend and shutdown; clicking a teammate selects it (spec `agentui` FR-017..FR-026) |
 | Input | Command-line with slash-command autocomplete |
 | Permission dialog | Modal approval dialog with live countdown (120 s) |
@@ -3321,7 +3389,7 @@ at the write boundary rather than silently forwarded.
 |------|---------|
 | `team_create` | Create team |
 | `team_spawn` | Spawn teammate |
-| `team_status` | Team status |
+| `team_status` | Team status (status history, undelivered messages, pending plans, hook failures) |
 | `team_message` | Direct message |
 | `team_broadcast` | Broadcast to active teammates |
 | `team_read_messages` | Read mailbox |
@@ -3330,11 +3398,13 @@ at the write boundary rather than silently forwarded.
 | `team_approve_plan` | Lead approve/reject plan |
 | `team_task_create` | Add task |
 | `team_task_claim` | Claim task |
-| `team_task_complete` | Complete task |
+| `team_task_complete` | Complete task (owner or lead only) |
+| `team_task_cancel` | Cancel a pending/in-progress task (lead only) |
 | `team_assign_task` | Lead assigns task |
 | `team_idle` | Signal idle |
 | `team_shutdown_teammate` | Shutdown teammate (graceful/immediate) |
 | `team_shutdown_ack` | Acknowledge shutdown |
+| `team_wait` | Block until teammates settle |
 | `team_cleanup` | Remove team state |
 
 ### 14.4 Team Slash Commands
@@ -3419,6 +3489,96 @@ outputs, and any constraints.
 - Reference files by path rather than pasting content.
 - Spawn one teammate per independent work item.
 - Use `/team_wait` after spawning to avoid racing ahead.
+
+### 14.8 Team state machines and their on-disk record
+
+Four rules the team runtime now enforces rather than merely documents (spec
+`teamssetup`). Each is tightening-only: no capability is removed, and every
+refusal is visible in the event stream and the tool result rather than silent.
+
+#### 14.8.1 One member-status writer
+
+`TeamManager::set_member_status` is the single writer of a member's status. It
+validates the move against the member status transition table, applies the
+destination status's side effects, persists the roster once, appends one record
+to the team's `status-history.jsonl`, and publishes exactly one
+`Event::TeammateStatusChanged { from, to, cause }`. Nine direct
+`member.status = ...` sites were consolidated onto it, so a transition cannot be
+persisted without being logged and cannot be logged without being published.
+
+`MemberStatus` exposes the predicates every guard now uses instead of
+re-spelling a status list: `is_terminal` (`Stopped`, `Failed` - no session
+behind it, only a respawn revives it; `ShuttingDown` is deliberately **not**
+terminal because its session still exists and is awaiting a shutdown ack),
+`is_parked` (`Idle`, `PlanPending`, `Blocked`, `Suspended` - alive but not
+attached to work, so time spent there is not evidence of a wedge and the
+watchdog must skip it) and `is_live` (`Spawning`, `Working`, `ShuttingDown`).
+
+`status-history.jsonl` carries one JSON object per line
+(`{timestamp, agent_id, name, from, to, cause}`), so `team_status` can answer
+"why did this teammate stop?" *after* the events that answer it have gone past -
+a tool call is not a listener. The file is append-only and bounded: before an
+append that would pass `MAX_HISTORY_BYTES` it is renamed whole to
+`status-history.jsonl.1` and the new record starts a fresh live file.
+`team_status` renders the last `STATUS_HISTORY_LIMIT` (5) transitions per member,
+oldest first, under a `Status history` block beneath each roster row.
+
+#### 14.8.2 One task-status transition table
+
+`TaskStatus::can_transition_to` and `transition_task` are the single writer of
+`Task::status`, so the four claim paths and both completion paths cannot
+disagree about which moves are possible, and an illegal move is refused with a
+message naming the task, its actual status, and the table row that forbids it.
+
+`TaskList::validate()` runs before every persisted write (`TaskStore::write_locked`,
+the one function every list passes through, cached or not) and refuses duplicate
+task ids, a `depends_on` edge naming no task in the list, and a dependency cycle
+(detected by a three-colour iterative DFS), naming the offending task, the
+missing id plus the ids that exist, or the closing chain
+(`task-001 -> task-002 -> task-001`). The refusal is prefixed
+`refusing to write invalid <path>: ...` and leaves `tasks.json`
+byte-identical, so a task that could never be claimed is never persisted.
+
+#### 14.8.3 Completion requires ownership, adoption requires consent
+
+`team_task_complete` accepts a completion only from the task's `assigned_to`
+agent or the lead; a task assigned elsewhere is refused and **not**
+re-assigned, with `rejection_reason` set to `not_owner`, `not_claimed` (still
+`pending`) or `already_completed`, and the current `owner` reported alongside.
+Every refusal leaves the task list untouched. A `TeamTaskCompletionRejected`
+event carries the same facts, so a remote consumer sees the refusal and the rule
+that fired.
+
+A second session that opens a team directory must take the team over explicitly
+(`AdoptTeam::Adopt`, i.e. `adopt: true`); without it the session gets an error
+naming the owning session rather than quietly competing for the same task list.
+A successful adoption publishes `TeamAdopted` with the previous lead session id
+and the task ids the adoption reset.
+
+#### 14.8.4 Hook failures are recorded, never mistaken for approval
+
+A configured quality-gate hook that cannot run - its command fails
+`validate_hook_command`, fails to spawn, or exceeds the 30-second
+`HOOK_TIMEOUT` - appends one JSON object per line to the team's
+`hook-failures.jsonl` (`{timestamp, event, hook, reason, detail}`, with `reason`
+one of `invalid`, `spawn_failed`, `timeout`). The file is append-only and
+bounded: at 1 MiB it is rotated whole to `hook-failures.jsonl.1` (replacing the
+previous generation). Recording is best-effort, so the ledger can never change a
+hook's verdict - but the count is surfaced in `/team show <name>` and
+`team_status`, so an inert hook is never mistaken for one that ran and approved.
+
+#### 14.8.5 Parked members and blocked exits
+
+The watchdog's eligibility test is `MemberStatus::is_live()`, so a parked member
+is never failed for taking no progress, and a team whose config cannot be read
+yields "not live" rather than being failed on a guess. `resume` accepts a
+`Blocked` member as well as a `Suspended` one, and when a task completes every
+`Blocked` member whose last unmet dependency is now satisfied is moved to `idle`
+automatically and published as `TeammateResumed`, so the common case needs no
+operator verb. `team_wait` reports parked members distinctly instead of waiting
+out its clock on them, and `team_cleanup`'s guard blocks only on live or
+shutting-down members (parked and terminal members never block; `force: true` is
+the only override, and `/team cleanup` and `/team delete` share the guard).
 
 ---
 
@@ -3523,11 +3683,317 @@ treated the same way (spec `uniformtools` FR-022): the step is reclassified as
 `Truncation` so the text-format tool-call recovery gets its chance, and a
 reply with no recoverable markup ends the run with the "reply may be
 incomplete" notice instead of being presented as a clean answer.
-`new_agent` takes an optional `detached: bool` (only with `background: true`):
-a detached task is excluded from `list_agents` and `running_background_count`,
+`new_agent` selects exactly one of three execution contracts from
+`background` and `detached` (spec `agentssetup` FR-001, FR-003): *foreground*
+(`background` absent or `false`, blocking, response returned inline),
+*background* (`background: true, detached: false`) and *detached*
+(`background: true, detached: true`). The contract is derived once into an
+`Execution` enum so no code path can silently degrade a detached request. A
+call with `detached: true` and `background` absent or `false` is **refused**
+with an error naming both parameters and the two legal combinations: there is
+no detached-foreground contract. A detached task is excluded from
+`list_agents` and `running_background_count`,
 cannot be awaited with `wait_agents`, and its completion is reaped without a
 chat injection while remaining visible in the Agents panel and
 `tasks_snapshot`.
+
+The Agents panel paints that contract per row (spec `agentssetup` FR-020). The
+`Event::SubagentStart` variant carries `detached` alongside `background`, the
+task registry fills both from the entry it actually spawned, and the TUI stores
+them on the painted row, so the panel's type column reads `fg`, `bg` or
+`detached` from the registry instead of inferring it from `background` (which a
+detached run also sets). The flag travels to remote consumers in the SSE
+`subagent_start` payload for the same reason.
+
+**The system prompt teaches the same contract (FR-025).** The `## Sub-Agent
+Spawning` block a *primary* agent receives carries four named teaching
+obligations, in the tool descriptions' vocabulary rather than a paraphrase of
+it, so a model that plans a batch is not left to infer the rules from a refusal:
+
+- **Three execution contracts.** Each is named with the `background` /
+  `detached` shape that selects it (`background` absent or `false`;
+  `background: true, detached: false`; `background: true, detached: true`), the
+  background contract's three consequences are stated (listed by `list_agents`,
+  awaitable with `wait_agents`, injected on completion) against the detached
+  contract's inverse (fire-and-forget), and the illegal combination is named as
+  **refused** rather than degraded.
+- **The limit, its occupancy, and how to free a slot.** The block states the
+  configured limit (substituted for the `MAX_BG_TASKS` placeholder from
+  `experimental.max_background_agents`, so the prose and the enforcement cannot
+  drift), that occupancy counts `running`, `suspended` **and** `terminating`
+  background tasks while never counting a detached or foreground one, and the
+  cancel-to-free rule in those words: *to free a slot, CANCEL - do not suspend*,
+  because suspending frees no headroom (FR-030). It also says a cancel is only
+  *requested* when `cancel_agent` returns, with the slot freeing when the
+  registry reaches the terminal `cancelled` status (FR-013), and points at
+  `list_agents`' `limit` / `occupancy` / `headroom` report, which describes the
+  whole session even under a `status` filter (FR-011, FR-035).
+- **The await contract.** `wait_agents` blocks until the awaited tasks settle;
+  `task_ids` and `timeout_secs` are both named; every settled task reports its
+  canonical registry status (`completed`, `failed`, `cancelled`, `timed_out`)
+  so a cancelled task is never reported as a failure (FR-014); `suspended` is
+  *not* settled and `timed_out` *is* (FR-015, FR-017); and a detached task can
+  never be awaited (FR-044) while a foreground task is not awaited at all
+  because it returned inline.
+- **The durable report path.** `log/subagents/<task-id>.md`, surfaced as
+  `output_file` in the `wait_agents` output, its metadata `results` entries and
+  the `list_agents` table, plus the absence case: a finished task with no durable
+  copy is reported as in-memory only rather than having the field omitted
+  (FR-018, FR-032), so a caller never reads a path that does not exist.
+
+**Durable-copy absence is a reported fact, not a missing field (FR-018, FR-032,
+FR-043).** `persist_task_output` returns `None` when the report cannot be written
+(an unwritable or read-only `log/subagents/`, a full disk, a failed rename). The
+task still completes with its result in memory, so before this change the caller
+saw only the *absence* of `output_file` and could not tell "the write failed and
+the only copy is in memory" from "this task has no report" - a model reading the
+first shape as the second `read`s a path that was never created and loses the
+findings when the text is truncated. Both surfaces now name the condition through
+one shared constant, `ragent_agent::tool::wait_agents::IN_MEMORY_REPORT_NOTE`:
+
+- `list_agents` list rows print `-> [memory] <status> - report is <note>` where a
+  persisted task prints `-> [file] Full report: <path>`, and the detail view
+  prints `Output File: none - <note>` instead of the `Output File (full
+  untruncated report)` heading it prints for a real path (FR-032).
+- `wait_agents` prints `[memory] No durable copy: <note>` in the content where a
+  persisted task prints `[file] Full report: ...`, and its `results` entries
+  carry `report_persisted: false` plus `report_location: "in_memory_only"` (with
+  `output_file` present and `null`, so a presence check cannot mistake the
+  absence for a shape change); the `tasks` roll-up repeats the flag (FR-043).
+- Only a *settled* task reports the verdict: a running or suspended task has not
+  had a write attempted yet, so neither surface claims one failed. The verdict
+  is derived in `durable_copy_absence_note`, which both tools call, so the two
+  cannot drift into describing the same condition differently.
+
+**A detached task is refused by contract, not reported as unknown (FR-044).** A
+detached task (`new_agent` with `background: true, detached: true`) is
+fire-and-forget: `AgentManager::list_agents` excludes it, `wait_agents`' wait set
+is seeded from that listing, and nothing ever injects its completion into the
+session - so a wait on its id can never settle. Before this change such an id
+fell through the settled-set scan, the wait set came out empty, and the caller
+was told "No running background tasks to wait for": the tool described the *one*
+thing that was not wrong (the id is real) and named no way forward.
+
+`wait_agents` now checks every requested id against the whole registry -
+`list_agents` cannot be asked, precisely because it hides detached entries -
+before it subscribes to the event bus or counts a waiter, so a refused call
+leaves the registry exactly as it found it. A detached id returns an error
+carrying the machine-readable reason `task_detached` (`REASON_TASK_DETACHED`)
+whose message names, in one pass: the task (short id, full id, agent name), the
+contract as the spawn shape that produced it (`background: true, detached:
+true`), why a wait cannot settle (excluded from `list_agents`, never awaited,
+never injected), and the durable report file `log/subagents/<task-id>.md` - the
+recorded `output_file` when the run has finished, the expected path when it has
+not - together with the `read` tool call that recovers it. It ends by naming
+both ways forward: `list_agents` for the tasks this session *can* await, and
+`new_agent(background: true, detached: false)` for a sub-agent whose result
+should come back here. The word "unknown" appears nowhere in it, which is the
+distinction the requirement is about.
+
+The refusal is scoped to `detached: true`: an ordinary background task is
+awaitable exactly as before, and a detached id listed alongside an awaitable one
+refuses the whole call rather than awaiting the half it can see.
+
+The block is scoped to `AgentMode::Primary`; a sub-agent receives the completion
+protocol instead and cannot spawn. Because the block is rendered prose it cannot
+be guarded by FR-016's schema-scan, so
+`test_subagent_prompt_contract::the_prompt_uses_the_same_vocabulary_as_the_tool_descriptions`
+asserts agreement in both directions against the *live* `description()` strings
+rather than a hand-copied word list: a term the descriptions teach and the prompt
+does not (or vice versa) is a build failure. The four teaching obligations are
+pinned by `::the_prompt_teaches_the_three_execution_contracts`,
+`::the_prompt_teaches_the_limit_and_how_a_slot_is_freed`,
+`::the_prompt_teaches_the_await_contract` and
+`::the_prompt_teaches_the_durable_report_path`, and the primary-only scoping by
+`::the_contract_block_is_scoped_to_primary_agents`.
+
+Every tool in the family (`new_agent`, `cancel_agent`, `list_agents`,
+`wait_agents`) and `bg` declares a closed parameter set
+(`additionalProperties: false`) and enforces it through one shared validator,
+`ragent_agent::tool::param_schema::validate_tool_input` (spec `agentssetup`
+FR-004, FR-038). A call carrying a property the schema does not declare is
+refused with an error naming every unknown key and listing the declared ones,
+instead of being silently ignored - a misspelled `backgound: true` no longer
+degrades to the foreground contract. The check runs first in each tool's
+`execute`, before any `AgentManager` / service lookup, so a bad call shape is
+reported as a bad call shape rather than as a missing environment. `bg`
+additionally refuses a *declared* property its selected action does not read
+(`lines` on `status`, `timeout` on `spawn`), and `wait_agents` refuses a
+`task_ids` element that is not a string instead of dropping it, so every
+declared parameter is honoured or refused (FR-002).
+
+The optional `model` override accepts one documented spelling set
+(`provider/model` and `provider:model`), and every surface that documents it
+says the same thing (FR-006). `provider/model` is **preferred**: the resolver
+tries `/` before `:`, and a string carrying neither separator is ignored with a
+warning rather than guessed at. The four surfaces are the `model` property's
+schema description, the `new_agent` tool description, the primary-agent system
+prompt, and `README.md`; `test_model_override_spellings.rs` pins the first
+three so drift becomes a build failure, and the same test asserts the two
+documented shapes are the ones the resolver accepts.
+
+Every precondition failure in the family is an **error**, not a successful
+result whose content is prose (FR-009): a caller cannot mistake "you may not do
+this" for an answer. In particular, `new_agent` called from a session with an
+active team context is refused with the machine-readable reason
+`team_context_active` (FR-045, FR-009). The refusal names the team and this
+session's role and keeps the previous guidance text verbatim: a lead is pointed
+at `team_spawn`, `team_task_create`, `team_assign_task` and `team_message`; a
+teammate at `team_read_messages`, `team_task_claim`, `team_task_complete` and
+`team_idle`. No sub-agent task starts.
+
+**Reason codes (FR-010, NFR-005).** Every sub-agent tool failure a caller could
+branch on carries a stable machine-readable code beside its human message, so a
+caller never has to pattern-match English prose:
+
+| Code | Raised by | Condition |
+|------|-----------|-----------|
+| `limit_reached` | `new_agent` (via the registry) | the background limit is full |
+| `contract_refused` | `new_agent` | `detached: true` without `background: true` |
+| `team_context_active` | `new_agent` | a team context owns this session |
+| `invalid_timeout_secs` | `new_agent` | `timeout_secs` is not a positive integer |
+| `manager_unavailable` | all four | the tool ran where no `AgentManager` is wired |
+| `task_not_found` | `list_agents`, `cancel_agent` | the id names no task for this session |
+| `wrong_session` | `cancel_agent` | the task exists but belongs to another session |
+| `cancel_failed` | `cancel_agent` | the registry rejected the cancel request |
+| `invalid_status_filter` | `list_agents` | `status` is outside the declared set |
+| `no_tasks` | `list_agents` | the listing matched nothing |
+| `invalid_task_ids` | `wait_agents` | `task_ids` is not an array of strings |
+| `wait_timed_out` / `wait_settled` | `wait_agents` | the wait outcome |
+| `unknown_action` / `parameter_not_accepted` / `service_unavailable` | `bg` | the shell-task tool's own refusals |
+
+Codes travel in the shape the failure takes. An **error** carries it at the head
+of its message (`reason_code: <code>: <explanation>`), read back with
+`tool::param_schema::reason_in`; a failure reported as a **result** (the
+`cancel_agent` unknown-task case, an empty listing, the wait outcome) carries it
+as `metadata.reason`. The task registry prefixes its own code with
+`param_schema::prefixed` and `new_agent` lifts it into the tool-error envelope,
+so one code is visible whichever layer refused. `bg`'s unknown-action refusal
+also names the supported action set, and every refusal names at least one
+supported next action (NFR-005).
+
+**The limit is reported, not just enforced (FR-011, FR-029, FR-035, NFR-003).**
+`AgentManager::limit_report()` returns one
+`BackgroundLimitReport { limit, occupancy, headroom, occupying_ids }` from the
+same `DashMap` scan the spawn path already performs, counting through the single
+`occupies_limit` predicate that also defines `running_background_count`, so a
+listing and a spawn refusal can never disagree and no storage read is added.
+Occupancy counts `running` **and** `suspended` background tasks (a suspended task
+keeps its wall-clock budget and can resume, FR-030), excludes `detached` ones, and
+is manager-wide because the limit is. `headroom` saturates at zero, so a limit
+lowered below the occupancy never reports a negative number of free slots.
+Suspending a task therefore frees **no** headroom: the spawn refusal for a full
+limit names the suspended task among the occupying ids and says
+`suspending does not free a slot`, so cancellation - not suspension - is the
+supported way to free one early.
+
+`list_agents` carries `limit`, `occupancy`, `headroom` and `occupying_task_ids`
+in the metadata of **every** exit path - populated listing, empty listing, detail
+hit and detail miss - and prints one content line,
+`Background limit: 1/2 slots in use, headroom 1. Occupying tasks: <id>, ...`
+(the `Occupying tasks` clause appears only while a slot is in use), so a model
+reading only prose still sees the headroom. The figures are computed **before** the
+`status` filter is applied, so a filtered listing describes the whole session
+rather than the subset it shows (FR-035). When `new_agent` is refused for the
+limit, the error names the limit, the occupancy, the headroom and the occupying
+task ids as well as its `limit_reached` code (FR-029), so the caller can cancel a
+specific task instead of guessing. The system prompt's concurrency block points at
+the headroom for the same reason. Covered by
+`test_task_registry_bookkeeping::limit_report_counts_running_and_suspended_background_tasks`,
+`::spawn_refusal_names_limit_occupancy_and_occupying_tasks`,
+`test_list_agents_tool::limit_occupancy_and_headroom_are_reported`,
+`::limit_report_composes_with_a_status_filter` and
+`::detail_mode_reports_the_limit_on_hit_and_miss`, and
+`test_task_suspend_resume::suspended_task_still_occupies_the_limit` drives the
+real `suspend_task` transition and asserts occupancy is unchanged by it.
+
+`waiter_count` - the registry's tally of in-flight `wait_agents` callers - is
+reported per task by `list_agents` (FR-012): in a listing row
+(`-> N active waiter(s)`), in the `task_id` detail view (`Active Waiters: N`)
+and in the detail metadata (`waiter_count`), and on the matching Agents-panel row
+as a `[wN]` suffix. It is reported **only when greater than zero** and only for a
+task that has not finished, so a task nobody awaits never paints a `0` that reads
+as a defect and a completed task's leftover tally is not mistaken for a live
+queue. The Agents panel takes the count from the registry snapshot it already
+merges, so a suspended task keeps showing its queued waiters. Covered by
+`test_list_agents_tool::detail_mode_reports_the_waiter_count_of_an_awaited_live_task`,
+`::detail_mode_omits_the_waiter_count_when_nobody_is_waiting`,
+`::detail_mode_drops_the_waiter_count_after_the_wait_returns`,
+`::list_mode_marks_only_the_awaited_live_task`,
+`::a_finished_task_never_reports_waiters`,
+`test_agents_window_table::an_awaited_live_row_paints_its_waiter_count`,
+`::an_unawaited_row_paints_no_waiter_marker` and
+`::a_suspended_awaited_row_still_paints_its_waiters`. The waiter marker is fitted
+into the label column, so
+`::the_waiter_marker_does_not_move_the_pinned_controls` asserts the `[stop]` and
+`[x]` columns stay pinned after it.
+
+Every settled task carries a `status` string that is the canonical
+`TaskStatus::as_str()` label the registry recorded - `completed`, `failed`,
+`cancelled` or `timed_out` - in `wait_agents` content (`[...] **<agent>** (task
+<id>, <status>)`), in its `results[]` entries and in its `tasks[]` entries
+(FR-007, FR-014). The status is taken from the registry entry, **not** re-derived
+from the `success` boolean: a task that was cancelled is reported as `cancelled`
+and one that failed as `failed`, so the two terminal states never collapse into
+one label. The same rule applies on the event path - a `SubagentComplete` carrying
+`success: false` whose entry is `Cancelled` reports `cancelled`, because the
+registry, not the event, is what distinguishes them. A cancelled task publishes
+`SubagentCancelled` rather than `SubagentComplete`, so it reaches the wait only
+through the registry scan; that asymmetry is exactly why the label is sourced
+from the entry. `success` is kept alongside `status` as its boolean refinement
+(and always agrees with it) so callers written against the older metadata shape
+keep working. The implicit wait seeds every settled background task, matching on
+"terminal" (`is_settled`) instead of a hardcoded status list, so a task that hit
+its per-call time bound (FR-017) is reported like one that was cancelled or
+failed rather than silently vanishing from the count. Covered by
+`test_wait_agents_results_meta::test_wait_agents_reports_cancelled_not_failed`,
+`::test_wait_agents_status_uses_the_canonical_task_status_vocabulary`,
+`::test_wait_agents_keeps_success_boolean_as_a_refinement` and
+`::test_wait_agents_event_path_prefers_registry_status_over_the_event_boolean`.
+
+A task that has **not** settled when the wait returns is reported by its real
+state too, so a parked task is never described as running (FR-015). The
+partial-result headline separates the two: `N task(s) still running: <ids>` names
+only tasks that are actually working, and `N task(s) suspended (parked - nothing
+progresses until they are resumed or cancelled): <ids>` names the parked ones; a
+wait holding only running tasks keeps the original wording. The metadata splits
+the same way, with `still_running` / `still_running_count` carrying only live
+work and `suspended` / `suspended_count` carrying the parked ids, while
+`unsettled` lists every unsettled task with its canonical `status` (`suspended`
+for a parked one). This required two corrections inside the wait: the
+pre-subscription collection and the periodic scan both treated "not `Running`"
+as "settled", which collected a parked task as an empty completion, and
+`AgentManager::increment_waiter` refused a non-`Running` task, which is what made
+the parked task look collectable - it now increments for `Running` **and**
+`Suspended`, because a wait parked on a suspended task is an active waiter
+(FR-030, and the `waiter_count` FR-012 reports). Covered by
+`test_wait_agents_suspended::test_wait_agents_reports_suspended_task_as_suspended`,
+`::test_wait_agents_unsettled_entries_carry_the_suspended_status`,
+`::test_wait_agents_keeps_a_running_task_out_of_the_suspended_set` and
+`::test_wait_agents_mixed_running_and_suspended_are_reported_separately`.
+
+The four tools read and write one object (`AgentManager::tasks`), so they carry
+one permission taxonomy (spec `agentssetup` FR-005) - three categories over one
+registry, never `none`:
+
+| Tool | `permission_category()` | Why |
+|------|-------------------------|-----|
+| `new_agent` | `agent:spawn` | the only action that creates a task |
+| `cancel_agent` | `agent:control` | a control action on a task that already exists |
+| `wait_agents` | `agent:control` | the same control action, blocking instead of terminal |
+| `list_agents` | `agent:read` | a read-only observation of the registry |
+
+`cancel_agent` previously reported `agent:spawn`, which conflated "start work"
+with "stop work": a policy could not grant spawning while denying cancellation.
+`list_agents` previously reported `none`, which short-circuits the permission
+layer entirely (`processor.rs` returns before any rule lookup), so a policy
+written against its category never ran - and a read of another agent's work is
+something a policy must be able to deny without denying the spawn. The
+classification tightened and the interactive outcome did not: all four remain in
+`AUTO_APPROVED_AGENT_TOOLS`, so no sub-agent call gains a prompt. The `--dry-run`
+family table keeps its count (the `agent` family grows 4 -> 5, the family total
+stays 21), and `test_agent_permission_taxonomy.rs` pins all four categories as
+literals so a regression cannot agree with itself.
 
 ### 16.4.2 Live sub-agent output overlay
 
@@ -4787,6 +5253,7 @@ The review, the measurement method and the per-crate rollout record live in
 |---------|------|------------|
 | v1.0.150 | 2026-10-26 | **The `uniformtools` spec lands: one canonical tool-call model across every provider, Claude-compatible tool spellings, and per-provider wire profiles.** A single ordered dispatch pipeline (`session::dispatch`) decodes a call's arguments exactly once and owns the tool-call lifecycle end to end, so no provider builds its own message array (FR-014) and a tool result's wire form is produced in one place; the rename table (`tool/alias_table.rs`, `tool/rename.rs`) makes the 13 adopted Claude names canonical while every inbound alias still resolves (`scripts/check_tool_rename.py` guards the set), and `ToolWireProfile` carries the per-provider capabilities (`supports_parallel`, extended-thinking interplay) that were previously declared and ignored. Provider-specific fixes: Anthropic's extended thinking requires a specific message shape (FR-011); the Responses-API input list had no item for two shapes (FR-018); several providers report usage differently and are now normalised (FR-022); no alias survives the rename on any inbound path. Also in this release: `.config/nextest.toml` consolidates the test suite onto `cargo nextest` with per-test timeouts and cross-process test groups, CI moves to the `ms0-regression` job shape, the `_npx` cache repair takes a cross-process `flock`, `cargo deny`/audit config moves to `.cargo/audit.toml`, and `AGENTS-LANGUAGE.md` absorbs the Rust and test-layout rules. |
 | v1.0.151 | 2026-10-27 | **Workspace-wide security hardening from the fresh `docs/reports/code-audit.md` (81 findings, 21 high), plus `quick-xml` 0.42, a `rust-version` floor of 1.91, `/mcp remove`, and a stable `ms0-regression` CI job.** A credential no longer reaches a log line, an SSE stream or a `{:?}` dump: `InputField` and `AzureResourceEntry` lose their derived `Debug` (a hand-written impl reports `<redacted>` plus a length, and the key as set-or-not) because both sat inside `Debug`-derived app state; the sudo askpass password is masked in the TUI question dialog and replaced outright in `event_to_parts` rather than pattern-redacted (a new `secret: bool` on `QuestionRequested`/`QuestionAnswered`, `serde(default)`, with the in-process event keeping the real value the helper reads from the bus); hook `stderr`, dynamic-context `stderr` and TaskCreated-hook feedback route through `redact_secrets`; user memory content is logged as a char count and hash instead of a prefix; the startup secret registry gains `GEMINI_API_KEY`/`GOOGLE_API_KEY`/`XAI_API_KEY`/`OPENROUTER_API_KEY`/`HF_TOKEN`/`AZURE_AI_FOUNDRY_API_KEY`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`/`RAGENT_TOKEN`; a new `CONNSTRING_PATTERN` second pass masks `scheme://user:pass@host` (and `get_env` covers `URL`/`DATABASE`/`DSN`/`CONN` by name); `.gitignore` covers `azureresources.json`, `.mcp.json`/`mcp.json`, root `ragent.json`, `*.crt`/`*.cer`/`*.der`, `node_modules/` and `*.log`. **The masterfetch SSRF test bypass is compile-time**, behind the new `test-ssrf-bypass` feature of `ragent-tools-extended` (absent from `default` and from every release build; `pre-flight.sh` and the CI workspace test pass it explicitly), so a shipped binary cannot be talked out of its guard by `RAGENT_TOOLS_EXTENDED_TEST_NO_SSRF`. **`/mcp remove <id>`** lands on a new `Config::edit_global_config(edit)` (raw-JSON read/mutate/write so unrelated keys survive), refuses a plugin- or connector-bridged id by name (`/plugins remove` / `/connectors remove`), and clears the enable-ledger row; `/mcp`, `/mcp config` and the discover dialog now name the manifest that declares each server (`McpDiscoverySource::Plugin`/`Connector` plus `DiscoveredMcpServer::definition_file`), and one `app::mcp_bridge` module resolves both owners so `/mcp connect` accepts a connector-bridged id. **Fixes:** native Ollama rejected any request with a text-free message (`joined_text` emitted `[]`; Ollama declares `content` as a Go `string`) - the value is always a string now; the `_npx` cache repair runs once per process before the first child spawns and takes a cross-process `flock` (fixing the `connection closed: initialize response` that a poisoned retired directory produced); a dead background reader, a failed Prometheus scrape write, a failed `!cmd` and a failed agent resume log at `warn!` with structured fields instead of `debug!`; `encrypt_key_with_context` carries the AEAD error and AAD length into its log; the `ms0-regression` M0.5 step filtered on the `test_channels::` suite deleted in 1.0.130 (`cargo nextest` exits 4 on an empty filter) and now runs `test_mf_security::` + `test_legacy_web_ssrf::` + `test_mf_supplement::` (139 tests); five test files that no crate `tests/all.rs` included are compiled again. **Dependencies:** `quick-xml` 0.39 -> 0.42 clears RUSTSEC-2026-0194/-0195 with both suppressions removed from `.cargo/audit.toml` and `deny.toml` (the cited `ooxmlsdk` constraint was stale - it was never a dependency), `tokio` 1.54.1, `libc` 0.2.191, `uuid` 1.29.0. The status bar loses its hardcoded `HEALTHY` git dot and `render_status_bar_v2` becomes `render_status_bar`. Verification: `cargo check --workspace` and `--all-targets --features ragent-tools-extended/test-ssrf-bypass` clean, `cargo fmt --check` clean, `cargo audit` clean (867 dependencies), `cargo deny check advisories` ok. |
+| v1.0.153 | 2026-10-29 | **The `teamssetup` / `agentssetup` state machines are tightened to rules the previous release only documented, and the Agents panel gets a config section.** `TeamManager::set_member_status` becomes the single member-status writer: it validates the move against the transition table, applies the destination status's side effects, persists the roster once, appends one record to the team's new `status-history.jsonl`, and publishes exactly one `Event::TeammateStatusChanged { from, to, cause }` (nine direct `member.status = ...` sites consolidated); `MemberStatus` gains `is_terminal` / `is_parked` / `is_live`, and every "is this teammate still active?" guard uses one of them. `TaskStatus::can_transition_to` + `transition_task` become the single task-status writer behind one legal-transition table. `team_task_complete` now requires ownership (the task's `assigned_to` or the lead) and refuses with `rejection_reason` `not_owner` / `not_claimed` / `already_completed` without re-assigning; team adoption requires explicit consent (`adopt: true`), so two sessions driving one team directory no longer quietly compete. `team_task_cancel` lands (lead-only, `pending`/`in_progress` only, owner notified, task kept not deleted), taking the registry to 150 tools in 21 families. `TaskList::validate()` refuses duplicate ids, dangling `depends_on` edges and dependency cycles before any `tasks.json` write, naming the task and chain and leaving the file byte-identical. A hook that cannot run is recorded in `hook-failures.jsonl` rather than silently reported as `Allow`, and its count surfaces in `/team show` and `team_status`. `team_status` also gains per-member status history (last five transitions from `status-history.jsonl`), `Undelivered messages` for a terminated member's stranded mailbox, and `Plans awaiting a verdict`. Four new lifecycle events reach the bus and SSE: `TeammateStopped`, `TeammateStatusChanged`, `TeamTaskCompletionRejected`, `TeamAdopted`. Every sub-agent tool (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `bg`) now enforces its declared closed parameter set through the shared `tool::param_schema::validate_tool_input`, so a misspelled `backgound: true` fails by name instead of silently running the foreground contract. TUI: `Alt+A` / `Alt+T` toggle their windows unconditionally, `/spawn` moves onto a shared bounded launch set (`agents.max_launching`, default 4), and the Agents panel's completed-history section is capped by `agents.completed_history` (default 20). Fixes: the `--web-time` invalid-integer diagnostic now echoes the spelling the caller typed, and `pulldown-cmark` is moved 0.13.4 -> 0.13.5 to clear RUSTSEC-2026-0414. Verification: `cargo check --workspace` clean, `cargo audit` clean across 867 dependencies. |
 | v1.0.152 | 2026-10-28 | **Typed `--age` publication window, a `DateTime` tool, and the `Alt+O` autopilot toggle.** `/research create --age <SPAN>` carries a parsed `AgeSpan` (`ragent-research/src/source_age.rs`, `[n]d`/`[n]m` = 30 days/`[n]y` = 365 days) instead of a raw string: it derives `Deserialize` through `#[serde(try_from = "String")]`, so a JSON request body carries the command-line spelling and an invalid span is rejected - `POST /research` answers 422 rather than serving an unfiltered run, and the root CLI rejects one with `CliExit::usage()` (exit 2) via `parse_age_span`. `InvocationParseError::InvalidAgeSpan` is replaced by `InvalidArgument(String)`, so a recorded bad flag replays as a named diagnostic instead of the misleading `MissingName`. The window's start date is appended to every decomposed query as `after:YYYY-MM-DD` (`SEARCH_QUERY_AGE_OPERATOR`, public, with `search_query_age_hint`); the LLM decomposer is now told today's date and forbidden from writing training-data years or relative phrases, because the model has no clock and was steering every engine towards stale material. `mf_search` gains `published_after` (`SearchOptions::with_published_after`), an exact `YYYY-MM-DD` bound the coarse `freshness` enum cannot express; Exa's `startPublishedDate`, Tavily's `start_date` and Serper's `cdr:1,cd_min:` use it in preference to `freshness`, and `AgentWebSearchTool::search_with_date_bound` reaches it together with `exclude_engines` in one call. A value that is not `YYYY-MM-DD` is dropped with a warning rather than becoming a literal engine parameter. `mf_fetch`'s `parse_mf_fetch_output` returns a named `ParsedFetch` struct instead of a seven-element tuple behind `#[allow(clippy::type_complexity)]`, and a new `envelope_published_at` reads `metadata.published_time` (falling back to `modified_time`) so PDF and YouTube bodies with no readable `<head>` still date themselves for the filter. New `DateTime` tool (family `none`, registry 148 -> 149 in 21 families): the RFC 3339 UTC instant, the same instant at an optional fixed UTC offset, date/time fields, day of week and Unix timestamp, read from the system clock and deliberately independent of `TZ` and the host tz database; the TUI summaries it as a `UTC+HH:MM` zone. `Alt+O` toggles autopilot (was the Telemetry panel) through new shared `App::start_autopilot`/`App::stop_autopilot` helpers that `/autopilot on|off` was also refactored onto, applying a default 1800 s limit so a stray chord cannot start an unbounded run; the `AUTO:` indicator is bold with an `(Alt+O)` hint and `push_indicator` gained a `hint` parameter plus `colors::HINT`. Every research integer flag now reports `"{flag} {value}: expected an integer"`. The duplicated four-arm cache-key `match (exclude_engines, published_after)` collapsed into `search_cache_key` joined with `CACHE_KEY_SEP = '\u{1f}'`. `cargo check` clean; `cargo audit` reports no advisories (867 crates, 1380 advisories loaded). |
 | uncommitted | 2026-10-22 | **Tool visibility removed.** The per-family `tool_visibility` config block (`ToolVisibilityConfig`, `ToolVisibilitySpecified`, `iter_switches`, `tool_family_names`, and the sync between `/codeindex on|off` and `tool_visibility.codeindex`) is deleted, together with the `ToolRegistry::set_hidden` / `hidden()` / `hidden_definitions()` surface and the `/tools <switch> on|off` dispatch arm. Every registered tool is now advertised to the model unconditionally: the definitions sent with each request are the registry's definitions and the system prompt lists the same set, so a tool is absent only when the subsystem that registers it is inactive. `/tools` is reduced to a read-only registry report - `/tools` (help), `/tools list` (alias `show`), `/tools help`; `TOOLS_SUBS` is `["list", "show", "help"]`. The orphaned name-level filter goes with it: the `hidden_tools` config field, `Config::effective_hidden_tools()`, its `merge` union and the `/config show` union-field label are deleted, so a config carrying the key now has it ignored as an unknown key. `DryRunInputs` loses its `hidden_tools` field, so `ragent run --dry-run` no longer reports a hidden-tool count. All documentation that described the switches is removed or rewritten (`docs/howtos/tool-visibility.md` is deleted; `README.md`, `SPEC.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `docs/howtos/{config,permissions,reactagent,office,codeindex,plugins,tutorial}.md` and `docs/howtos/slashcommands/{tools,INDEX,config,reload,codeindex,plugins}.md` follow). |
 | v1.0.149 | 2026-10-21 | **The `/provider` and `/model` setup dialogs are rebuilt on the catalogue list chrome, `/connectors claude` adopts the same design language, and the test suite gains a process-global isolation guard (specs `agentui`, `connectors` FR-047, `pluginstores` FR-054).** Every list-bearing `ProviderSetupStep` (provider, model, router-tier model, agent, configured-provider, provider-config and reset steps) now shares one composition: a slate accent frame titled with the step and subject, a heading strip with a live count, a pinned reversed-video column band, a cursor-filled zebra row list, and a muted key-hint footer; `SelectProvider` gains provider-name/provider-id/`Kind`/`Status` columns, `SelectModel`/`SelectRouterModel` right-align `Context` and `Cost` and spell out the `R`/`V`/`T` legend, and every selector windows around its cursor (the thinking-level list two lines at a time) so a list longer than the dialog keeps the highlighted row painted with `Showing a-b of N` in the legend. A mouse notch over an open setup dialog steps the cursor through the same `handle_provider_setup_key` path and is swallowed elsewhere. The `/connectors claude` browser drops its bespoke layout for the shared `STORE_*` chrome (renamed from `PLUGIN_STORE_*` and now used by both panels), gains a `Categories` navigator above a `Marketplace` navigator with `Name (N)` rows and an `Installed` pseudo-category, three focusable panes (`CataloguePane::Results`/`Categories`/`Marketplaces`), a pinned column-heading row, a one-column bold-green installed lane, and a bottom search box with `[x] clear`; the plugin-store navigators gain the same `Installed` pseudo-category (FR-054). `scripts/check-test-env-isolation.sh` (with `--self-test`) enforces test env isolation across the per-crate `tests/all.rs` binaries, wired into `pre-flight.sh` and CI. `rustls-webpki` 0.103.16 and `webpki-root-certs` 1.0.10 clear RUSTSEC-2026-0382/0383 with no suppression added. Tests: `test_setup_dialog_chrome` (14), `test_setup_selector_scroll` (7), `test_plugin_store_installed_category`, the 54-case connector-catalogue set, and the reworked window/footer suites; `cargo test --workspace` 14,418 passed / 0 failed / 22 ignored, `cargo fmt --check`, clippy, `cargo audit` and `cargo deny check` all clean. **Also released in this version:** the `Esc`-only modal dismissal - the Agents, Teams and output-view overlays lose the bordered ` Close ` bar, `window_frame` derives a one-row legend band instead, and every FR-077 legend ends with `Esc close` (FR-007, FR-018, FR-032, FR-074, FR-077); the keyboard-first Agents/Teams block cursor with the `/team forcecleanup` shutdown race fix (`seed_only` seeding, awaited per-member shutdown) and the 5000 s `TOOL_WATCHDOG_TIMEOUT` (FR-033..FR-046, FR-065, FR-069..FR-070); and the Agent and Team Member panel (FR-006..FR-026) with cooperative sub-agent suspension (FR-035), the widened text-format tool-call recovery (three more dialects plus reasoning-channel scanning), `/yolo on|off|status` with the `--config` write target, the discoverable `SPEC.md`-only spec directory, SEC-ragent-team-003, and the `same-file` Windows path-alias containment. |

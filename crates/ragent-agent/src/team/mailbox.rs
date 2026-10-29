@@ -70,6 +70,8 @@ pub enum MessageType {
     ShutdownRequest,
     /// Teammate acknowledges shutdown.
     ShutdownAck,
+    /// Lead cancelled a task the recipient owned (spec `teamssetup` FR-005).
+    TaskCancelled,
 }
 
 // -- Message -------------------------------------------------------------------

@@ -12,13 +12,15 @@
 //! team manager).
 //!
 //! The launch itself is async (`spawn_detached` creates a child session), so
-//! the command handler deposits the future's outcome in `App::spawn_result`
-//! and the next event-loop pass (`poll_spawn_result`) surfaces it.
+//! the command handler registers the request on the shared bounded launch set
+//! ([`App::begin_subagent_launch`]) and hands the work to
+//! [`run_subagent_launch`]; the next event-loop pass
+//! ([`App::poll_subagent_launch_results`]) releases the slot and surfaces the
+//! outcome. That helper is the only launch plumbing in the TUI, so this command
+//! carries no state machine of its own (spec `agentssetup` D3).
 
-use crate::app::state::{App, LogLevel};
-
-// `short_id` truncates a task id to a stable display prefix on a char boundary.
-use crate::app::helpers::short_id;
+use crate::app::launch::{detached_launch_work, dispatch_launch, run_subagent_launch};
+use crate::app::state::{App, LaunchOrigin, LogLevel};
 
 // Reuse the `/prompt` roster resolver so built-ins (hidden ones included via
 // exact-case) and custom agents resolve identically to `/prompt <agent>`.
@@ -90,141 +92,56 @@ impl App {
             }
         }
 
-        // Only one pending launch at a time - the slot doubles as the
-        // "already waiting" guard (it is cleared by poll_spawn_result).
-        let slot = {
-            let mut guard =
-                crate::app::session_ops::recover_poisoned(self.spawn_result.lock(), "spawn_result");
-            if guard.is_some() {
-                self.status =
-                    "[warn] spawn: another /spawn is still launching - wait for it".to_string();
+        // D3: registration on the shared bounded launch set replaces the
+        // hand-rolled `Mutex<Option<Result<..>>>` slot. Every TUI launch path
+        // registers here, so `/spawn` is no longer a special case and a second
+        // Enter in the same tick cannot race two launches.
+        let launch = match self.begin_subagent_launch(LaunchOrigin::SpawnCommand, agent_name) {
+            Ok(launch) => launch,
+            Err(refusal) => {
+                self.status = format!("[warn] spawn: {refusal}");
+                self.push_log_no_agent(LogLevel::Warn, format!("spawn: {refusal}"));
                 return;
             }
-            // Hold a marker so a second Enter in the same tick does not race
-            // two launches (the real outcome replaces it before the next
-            // paint).
-            *guard = Some(Err(String::new()));
-            std::sync::Arc::clone(&self.spawn_result)
         };
 
         let Some(parent_sid) = self.session_id.clone() else {
             // The gate in `execute_slash_command_inner` already created a
-            // session; reaching here with none is a bug - fail visibly.
+            // session; reaching here with none is a bug - fail visibly rather
+            // than holding the launch slot forever.
+            self.release_subagent_launch(launch.id);
             self.status = "[warn] spawn: no active session".to_string();
             return;
         };
+
         let working_dir = self.cwd_path.clone();
         let agent_label = agent_name.to_string();
 
+        // A session with no manager is reported by the shared work future as a
+        // failure outcome, so the launch slot is released by the normal poll
+        // rather than by a second hand-written guard here.
         let agent_manager = self.session_processor.agent_manager.get().cloned();
-        let Some(agent_manager) = agent_manager else {
-            self.status = "[warn] spawn: sub-agent manager unavailable in this session".to_string();
-            let mut guard =
-                crate::app::session_ops::recover_poisoned(self.spawn_result.lock(), "spawn_result");
-            *guard = None;
-            return;
-        };
-
         let prompt_owned = prompt.to_string();
         let model_override = self.selected_model.clone();
-        let agent_for_spawn = agent_label.clone();
 
-        // The launch work is async (create child session + register the
-        // task); dispatch on the ambient tokio runtime when one is available,
-        // falling back to a tiny dedicated runtime on a helper thread so the
-        // command also works from sync callers that lack a running reactor.
-        let launch = async move {
-            let outcome = agent_manager
-                .spawn_detached(
-                    &parent_sid,
-                    &agent_for_spawn,
-                    &prompt_owned,
-                    model_override.as_deref(),
-                    &working_dir,
-                )
-                .await
-                .map(|entry| entry.id)
-                .map_err(|e| e.to_string());
-            if let Ok(mut guard) = slot.lock() {
-                *guard = Some(outcome);
-            } else {
-                tracing::error!("spawn_result mutex poisoned; spawn outcome dropped");
-            }
-        };
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn(launch);
-            }
-            Err(_) => {
-                std::thread::spawn(move || {
-                    match tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    {
-                        Ok(rt) => rt.block_on(launch),
-                        Err(e) => {
-                            tracing::error!(error = %e, "spawn: helper runtime build failed")
-                        }
-                    }
-                });
-            }
-        }
+        let work = detached_launch_work(
+            agent_manager,
+            parent_sid,
+            agent_label.clone(),
+            prompt_owned,
+            model_override,
+            working_dir,
+        );
+        dispatch_launch(run_subagent_launch(
+            launch,
+            work,
+            std::sync::Arc::clone(&self.subagent_launch_results),
+        ));
 
         self.status = format!("[wait] spawn: launching {agent_label} ...");
         self.push_log_no_agent(
             LogLevel::Info,
             format!("spawn: launching detached {agent_label}"),
         );
-    }
-
-    /// Poll the `/spawn` launch slot and surface the outcome. Runs on every
-    /// event-loop pass alongside the other `poll_*` fns.
-    pub(crate) fn poll_spawn_result(&mut self) {
-        let outcome = {
-            let mut guard =
-                crate::app::session_ops::recover_poisoned(self.spawn_result.lock(), "spawn_result");
-            guard.take()
-        };
-        let Some(outcome) = outcome else { return };
-        match outcome {
-            Ok(task_id) => {
-                self.status = format!("spawn: detached task {} running", short_id(&task_id));
-                self.push_log_no_agent(
-                    LogLevel::Info,
-                    format!("spawn: detached background task launched ({task_id})"),
-                );
-                self.append_assistant_text(&format!(
-                    "From: /spawn\n## Detached sub-agent launched\n\n\
-                     Task **{task_id}** is running in the background.\n\n\
-                     It is detached: nothing will wait for it, it will not appear \
-                     in `list_agents`, and its output will not be injected into \
-                     this chat. Track it in the Agents panel or stop it with \
-                     `/cancel {}`.\n",
-                    short_id(&task_id)
-                ));
-            }
-            Err(msg) if msg.is_empty() => {
-                // Marker entry - the real outcome has not landed yet; leave
-                // the slot occupied so concurrent /spawn invocations stay
-                // serialised. Restore the marker ONLY if the slot is still
-                // empty: if the async launch task landed its outcome between
-                // our `take()` above and this lock acquisition, the real
-                // result must win or the user never sees the success path.
-                let mut guard = crate::app::session_ops::recover_poisoned(
-                    self.spawn_result.lock(),
-                    "spawn_result",
-                );
-                if guard.is_none() {
-                    *guard = Some(Err(String::new()));
-                }
-            }
-            Err(msg) => {
-                self.status = format!("[warn] spawn failed: {msg}");
-                self.push_log_no_agent(LogLevel::Warn, format!("spawn failed: {msg}"));
-                self.append_assistant_text(&format!(
-                    "From: /spawn\n## [err] Could not launch detached sub-agent\n\n{msg}\n"
-                ));
-            }
-        }
     }
 }

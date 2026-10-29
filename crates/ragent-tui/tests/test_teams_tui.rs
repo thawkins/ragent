@@ -392,7 +392,9 @@ async fn test_team_delete_removes_existing_team() {
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
-    app.execute_slash_command(&format!("/team delete {team_name}"))
+    // FR-045: the explicit `--force` is the confirmation for every named team,
+    // so one confirmed delete removes the directory.
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
         .await;
 
     let _ = std::env::set_current_dir(original_dir);
@@ -423,11 +425,10 @@ async fn test_team_delete_active_team_clears_session_state() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
-    app.team_members
-        .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
-    app.execute_slash_command(&format!("/team delete {team_name}"))
+    // FR-045: the active team is confirmed on the same rule as any other.
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
         .await;
 
     let _ = std::env::set_current_dir(original_dir);
@@ -472,7 +473,7 @@ async fn test_team_delete_active_team_blocked_when_teammates_working() {
     let _ = std::env::set_current_dir(original_dir);
 
     assert!(
-        app.status.contains("still active"),
+        app.status.contains("still live"),
         "should refuse delete while active: {}",
         app.status
     );
@@ -556,12 +557,12 @@ async fn test_team_tasks_renders_table_with_status() {
 
     let mut t1 = Task::new("task-001", "Write docs");
     t1.status = TaskStatus::Pending;
-    task_store.add_task(t1).expect("add task 1");
+    task_store.add_task(t1).await.expect("add task 1");
 
     let mut t2 = Task::new("task-002", "Run tests");
     t2.status = TaskStatus::InProgress;
     t2.assigned_to = Some("tm-001".to_string());
-    task_store.add_task(t2).expect("add task 2");
+    task_store.add_task(t2).await.expect("add task 2");
 
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
@@ -624,6 +625,7 @@ async fn test_team_clear_removes_tasks_for_active_team() {
     let task_store = store.task_store().expect("task store");
     task_store
         .add_task(Task::new("task-001", "Task to clear"))
+        .await
         .expect("add task");
     let tasks_path = store.dir.join("tasks.json");
     assert!(tasks_path.exists(), "tasks.json should exist before clear");
@@ -705,8 +707,6 @@ async fn test_team_cleanup_clears_state() {
     let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
-    app.team_members
-        .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
     // Team dir does not exist on disk - cleanup should still clear in-memory state.
@@ -734,9 +734,9 @@ async fn test_team_cleanup_blocked_when_teammates_active() {
 
     app.execute_slash_command("/team cleanup").await;
 
-    // Should refuse because a teammate is still working.
+    // Should refuse because a teammate is still working, naming it (FR-032).
     assert!(
-        app.status.contains("still active"),
+        app.status.contains("worker") || app.status.contains("still active"),
         "should block cleanup when teammates active: {}",
         app.status
     );
@@ -765,8 +765,8 @@ async fn test_team_unknown_subcommand_shows_error() {
 
 // -- [T] badge - team_members drives badge rendering ---------------------------
 
-#[test]
-fn test_team_members_drives_t_badge_set() {
+#[tokio::test]
+async fn test_team_members_drives_t_badge_set() {
     // The [T] badge is rendered in layout_active_agents by checking
     // whether the task's child_session_id is in the teammate_ids set.
     // This test verifies that the set is built from team_members correctly.
@@ -1199,6 +1199,7 @@ fn test_buttons_render_with_active_blue_state() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
     app.show_agents_window = true;
 
@@ -1232,8 +1233,8 @@ fn test_buttons_render_with_active_blue_state() {
     );
 }
 
-#[test]
-fn test_agents_popup_renders_tidy_table_columns() {
+#[tokio::test]
+async fn test_agents_popup_renders_tidy_table_columns() {
     let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
@@ -1256,6 +1257,7 @@ fn test_agents_popup_renders_tidy_table_columns() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
 
     let backend = TestBackend::new(160, 44);
@@ -1496,6 +1498,52 @@ async fn test_event_teammate_suspend_resume_update_member_status() {
     );
 }
 
+/// `TeammateStopped` must move the row to the terminal status and release the
+/// task it was holding (spec `teamssetup` FR-017): the runtime publishes the
+/// stop from its status writer, so the panel must not keep showing a stopped
+/// teammate as working on a task.
+#[tokio::test]
+async fn test_event_teammate_stopped_marks_row_stopped() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    let mgr = std::sync::Arc::new(ragent_agent::team::TeamManager::new(
+        "alpha",
+        "s1",
+        app.cwd_path.join("target/temp/team-manager-stopped"),
+        app.session_processor.clone(),
+        app.event_bus.clone(),
+    ));
+    let _ = app.session_processor.team_manager.set(mgr);
+    let mut m = TeamMember::new("writer", "tm-001", "general");
+    m.status = MemberStatus::Working;
+    m.current_task_id = Some("task-001".to_string());
+    app.team_members.push(m);
+
+    app.handle_event(Event::TeammateStopped {
+        session_id: "s1".to_string(),
+        team_name: "alpha".to_string(),
+        agent_id: "tm-001".to_string(),
+        cause: "shutdown_acked".to_string(),
+    })
+    .await;
+
+    assert_eq!(
+        app.team_members[0].status,
+        MemberStatus::Stopped,
+        "the stop event must move the row to the terminal status"
+    );
+    assert_eq!(
+        app.team_members[0].current_task_id, None,
+        "a stopped teammate holds no task"
+    );
+    assert!(
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("tm-001") && e.message.contains("stopped")),
+        "the stop must be logged with the teammate id"
+    );
+}
+
 /// The idle/failed/claim/complete handlers record watchdog progress against a
 /// real `TeamManager` without erroring, so an active teammate is never flagged
 /// as hung by the events the panel itself observes (FR-051).
@@ -1687,12 +1735,13 @@ async fn test_team_focus_cycle_with_no_members_clears_stale_focus() {
     );
 }
 
-/// While a teammate is focused the input border reads `-> <name> (focused)` in
-/// bold yellow (FR-058), and a submitted message is routed to that teammate's
-/// mailbox instead of the lead session.
+/// Focusing a teammate opens its output view but leaves the input border plain:
+/// FR-058 (amended) removed the focused-input routing, so the input box never
+/// names a recipient and Enter always addresses the lead session. A message
+/// reaches a teammate only through `/team message`, the path exercised below.
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
-async fn test_team_focus_routes_input_and_titles_the_border() {
+async fn test_team_focus_does_not_retitle_or_route_the_input() {
     let _cwd_guard = crate::global_env_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
@@ -1712,7 +1761,7 @@ async fn test_team_focus_routes_input_and_titles_the_border() {
     assert_eq!(
         app.focused_teammate.as_deref(),
         Some("tm-001"),
-        "focusing must register before the border/routing can apply (FR-058)"
+        "focusing must register before the border can be checked (FR-058)"
     );
 
     let backend = TestBackend::new(100, 30);
@@ -1731,25 +1780,14 @@ async fn test_team_focus_routes_input_and_titles_the_border() {
             })
             .collect::<String>()
     };
-    let border_row = (0..30)
-        .rev()
-        .find(|y| row(*y).contains("(focused)"))
-        .expect("input border must carry the focused title (FR-058)");
-    assert!(row(border_row).contains("-> writer (focused)"));
-    let title_row_text = row(border_row);
-    // Byte offset in the row string != cell offset when multi-byte glyphs
-    // (strip icons, box drawing) are painted earlier in the row; map through
-    // the char count so the style is sampled at the title's first cell.
-    let title_byte = title_row_text
-        .find("-> writer (focused)")
-        .expect("title offset");
-    let title_x = title_row_text[..title_byte].chars().count();
-    let style = buffer
-        .cell((title_x as u16, border_row))
-        .map(ratatui::buffer::Cell::style)
-        .expect("title cell");
-    assert_eq!(style.fg, Some(ratatui::style::Color::Yellow));
-    assert!(style.add_modifier.contains(ratatui::style::Modifier::BOLD));
+    assert!(
+        (0..30).all(|y| !row(y).contains("(focused)")),
+        "the input border must not name a recipient (FR-058 amended)"
+    );
+    assert!(
+        (0..30).any(|y| row(y).contains(" Input ")),
+        "the input border keeps its plain title"
+    );
 
     // Alt+Down off the single member goes past the end (the cycle does not
     // wrap; FR-046 clears the focus together with the output view instead).
@@ -1763,12 +1801,12 @@ async fn test_team_focus_routes_input_and_titles_the_border() {
         "Alt+Down with a single member must clear focus past the end (FR-046)"
     );
     assert!(app.output_view.is_none());
-    // Re-land on the only member for the routing half of the test.
+    // Re-land on the only member for the delivery half of the test.
     app.cycle_focused_teammate(true);
     assert_eq!(app.focused_teammate.as_deref(), Some("tm-001"));
 
-    // A submitted message must be routed to the focused teammate's mailbox,
-    // never the lead session (FR-058) - the same path the Enter action drives.
+    // FR-058 (amended): delivery to a teammate is `/team message`'s job, not the
+    // input box's - `send_teammate_message` is the arm behind that command.
     app.send_teammate_message(
         &app.active_team
             .as_ref()
@@ -1779,7 +1817,7 @@ async fn test_team_focus_routes_input_and_titles_the_border() {
     );
     assert!(
         app.status.contains("message sent to writer") || app.status.contains("writer"),
-        "the routed send must report the focused teammate, got: {}",
+        "the routed send must report the teammate, got: {}",
         app.status
     );
 
@@ -1866,4 +1904,366 @@ async fn test_team_delete_slash_rejects_traversal_names() {
         victim.is_dir(),
         "a traversal name must not let /team delete remove an unrelated directory"
     );
+}
+
+// -- /team delete confirmation (teamssetup T-028, FR-023, FR-030, F-28) --------
+
+/// Create a project-local team directory holding one member with `status` and
+/// return the workspace root. The caller owns the temp dir via `_tmp`.
+fn workspace_with_member(
+    tmp: &tempfile::TempDir,
+    team_name: &str,
+    member_name: &str,
+    status: MemberStatus,
+) {
+    let mut store =
+        TeamStore::create(team_name, "lead-session", tmp.path(), true).expect("create team");
+    let mut member = TeamMember::new(member_name, "tm-001", "general");
+    member.status = status;
+    store.add_member(member).expect("add member");
+    store.save().expect("persist roster");
+}
+
+fn team_dir(tmp: &tempfile::TempDir, team_name: &str) -> std::path::PathBuf {
+    tmp.path().join(".ragent/teams").join(team_name)
+}
+
+#[test]
+fn delete_confirmation_fires_for_a_quiet_roster() {
+    // FR-045: nothing is live, but the directory still goes, so the delete is
+    // still a two-step action - and the text says what is removed.
+    let quiet = [
+        ("beta", MemberStatus::Idle),
+        ("gamma", MemberStatus::Blocked),
+        ("delta", MemberStatus::Stopped),
+        ("epsilon", MemberStatus::Failed),
+    ];
+    let text = ragent_agent::team::delete_confirmation("tguard", quiet, [])
+        .expect("a quiet roster still needs the second action");
+    assert!(text.contains("team 'tguard'"), "{text}");
+    assert!(text.contains("permanently"), "{text}");
+    assert!(text.contains("/team delete tguard --force"), "{text}");
+    assert!(text.contains("Nothing has been deleted"), "{text}");
+}
+
+#[test]
+fn delete_confirmation_names_the_live_member_and_both_actions() {
+    let roster = [
+        ("alpha", MemberStatus::Working),
+        ("beta", MemberStatus::Idle),
+        ("gamma", MemberStatus::Spawning),
+    ];
+    let text = ragent_agent::team::delete_confirmation("tguard", roster, [])
+        .expect("two live members must be confirmed");
+    // Entity and state for each blocker, and not for the parked member.
+    assert!(text.contains("alpha [working]"), "{text}");
+    assert!(text.contains("gamma [spawning]"), "{text}");
+    assert!(!text.contains("beta"), "{text}");
+    assert!(text.contains("2 teammate(s)"), "{text}");
+    assert!(text.contains("team 'tguard'"), "{text}");
+    // The next action the surface accepts. A live roster is refused before the
+    // override applies, so the confirmation names the override alone; the
+    // graceful path belongs to the FR-022 refusal.
+    assert!(text.contains("/team delete tguard --force"), "{text}");
+    // Nothing has happened yet - the text must say so.
+    assert!(text.contains("Nothing has been deleted"), "{text}");
+}
+
+#[tokio::test]
+async fn delete_confirmation_yields_to_an_excluded_name() {
+    // An `--exclude`d team is never deleted, whatever its roster says, so no
+    // confirmation is offered for it and the caller cannot fall through to a
+    // delete on the strength of a `Some(_)`.
+    let live = [("alpha", MemberStatus::Working)];
+    assert_eq!(
+        ragent_agent::team::delete_confirmation("tguard", live, ["other", "tguard"]),
+        None
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_refuses_persisted_live_member_without_force() {
+    // F-28: a named team that is not the session's active team used to be
+    // deleted with no check at all. Its persisted roster is now read, so a live
+    // member refuses the delete even when the in-memory roster is empty.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("persisted-live");
+    workspace_with_member(&tmp, &team_name, "worker", MemberStatus::Working);
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    // No active team: the in-memory roster is empty on purpose.
+    app.execute_slash_command(&format!("/team delete {team_name}"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        app.status.contains("still live"),
+        "a persisted live member must refuse the delete: {}",
+        app.status
+    );
+    assert!(
+        path.exists(),
+        "a refused delete must leave the team on disk"
+    );
+    // FR-032: the refusal names the live member with its status word.
+    assert!(app.status.contains("worker [working]"), "{}", app.status);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_force_removes_a_live_roster_and_says_so() {
+    // T-043/FR-045: `--force` is the explicit confirmation, not a first of two
+    // actions. It removes the parked team in one step and the success message
+    // states what was forced, so the operator is not left guessing.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("force-confirm");
+    workspace_with_member(&tmp, &team_name, "worker", MemberStatus::Working);
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        !path.exists(),
+        "the explicit --force must remove the team (status: {})",
+        app.status
+    );
+    assert_eq!(app.status, "team deleted");
+    // FR-032: the confirmation says what it overrode.
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("1 live teammate(s) forced"), "{text}");
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_accepts_the_force_flag_before_the_name() {
+    // T-043: the flag is split off the name wherever it appears, so
+    // `delete --force <name>` confirms the same delete instead of sending
+    // `--force` to the store as part of the name.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("flag-first");
+    TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.execute_slash_command(&format!("/team delete --force {team_name}"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        !path.exists(),
+        "the flag-first form must delete (status: {})",
+        app.status
+    );
+    assert_eq!(app.status, "team deleted");
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_of_a_parked_roster_needs_the_explicit_force() {
+    // FR-045: a named team with nothing live is not refused (FR-022 has nothing
+    // to refuse), but removal is still permanent, so it takes the explicit
+    // `--force` rather than a bare `delete`.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("parked-delete");
+    let mut store =
+        TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
+    for (name, id, status) in [
+        ("idle", "tm-001", MemberStatus::Idle),
+        ("blocked", "tm-002", MemberStatus::Blocked),
+        ("stopped", "tm-003", MemberStatus::Stopped),
+    ] {
+        let mut member = TeamMember::new(name, id, "general");
+        member.status = status;
+        store.add_member(member).expect("add member");
+    }
+    store.save().expect("persist roster");
+    drop(store);
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    // No active team: the in-memory roster is empty and the persisted one is
+    // read instead. A parked roster is not refused, and the explicit `--force`
+    // confirms and removes it in one step (T-043/FR-045).
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        !path.exists(),
+        "the confirmed delete must remove the parked team"
+    );
+    assert_eq!(app.status, "team deleted");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        !text.contains("teammate(s) forced"),
+        "nothing was forced, so the message must not claim otherwise: {text}"
+    );
+    assert!(
+        text.contains("Nothing was forced"),
+        "the message must say the delete forced nothing: {text}"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_removes_a_parked_team_without_a_second_step() {
+    // T-043/FR-045: the delete is confirmed by the explicit `--force` on every
+    // named team, so one `--force` removes a parked team and a second one has
+    // nothing left to delete rather than removing a different team.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("cancel-delete");
+    workspace_with_member(&tmp, &team_name, "worker", MemberStatus::Working);
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
+        .await;
+
+    assert!(
+        !path.exists(),
+        "the explicit --force removes the parked team in one step"
+    );
+    assert_eq!(app.status, "team deleted");
+
+    // Repeating it is an honest failure naming the missing team, not a silent
+    // success over some other directory.
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        app.status.starts_with("Failed to") || app.status.contains("not found"),
+        "a repeat delete must report the missing team: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_confirmation_does_not_carry_to_another_team() {
+    // FR-045: arming one team's delete must never authorise another team's. A
+    // `delete` for a different name disarms the first and confirms the second.
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let first = unique_team_name("carry-first");
+    let second = unique_team_name("carry-second");
+    workspace_with_member(&tmp, &first, "worker", MemberStatus::Working);
+    workspace_with_member(&tmp, &second, "worker", MemberStatus::Working);
+    let first_path = team_dir(&tmp, &first);
+    let second_path = team_dir(&tmp, &second);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.execute_slash_command(&format!("/team delete {first} --force"))
+        .await;
+
+    // A different team is not protected by the first team's delete: each name
+    // is loaded from its own store directory and removed on its own.
+    app.execute_slash_command(&format!("/team delete {second} --force"))
+        .await;
+
+    assert!(
+        !first_path.exists(),
+        "the first team must be removed by its own delete: {}",
+        app.status
+    );
+    assert!(
+        !second_path.exists(),
+        "the second team's delete must target its own directory: {}",
+        app.status
+    );
+
+    let _ = std::env::set_current_dir(original_dir);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_team_delete_active_team_live_member_needs_force_and_confirmation() {
+    // The active-team path keeps the FR-022 refusal; the explicit `--force`
+    // is the confirmation and removes the team in one step (T-043, FR-045).
+    let _cwd_guard = crate::global_env_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
+
+    let team_name = unique_team_name("active-force");
+    let _store =
+        TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
+    let path = team_dir(&tmp, &team_name);
+
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.active_team = Some(TeamConfig::new(&team_name, "s1"));
+    let mut member = TeamMember::new("worker", "tm-001", "general");
+    member.status = MemberStatus::Spawning;
+    app.team_members.push(member);
+    app.show_teams = true;
+
+    // Without --force the FR-022 refusal fires.
+    app.execute_slash_command(&format!("/team delete {team_name}"))
+        .await;
+    assert!(
+        app.status.contains("still live"),
+        "the active team must refuse while a member is live: {}",
+        app.status
+    );
+
+    // With --force the delete runs in one step and clears the session state.
+    app.execute_slash_command(&format!("/team delete {team_name} --force"))
+        .await;
+
+    let _ = std::env::set_current_dir(original_dir);
+
+    assert!(
+        !path.exists(),
+        "the explicit --force must delete the active team"
+    );
+    assert!(app.active_team.is_none(), "active team should be cleared");
+    assert!(app.team_members.is_empty(), "members should be cleared");
+    assert_eq!(app.status, "team deleted");
 }

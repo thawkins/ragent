@@ -789,8 +789,23 @@ Use `team_spawn` with a role-specific prompt:
 
 - Lead adds tasks: `team_task_create`
 - Teammates claim tasks: `team_task_claim`
-- Teammates finish tasks: `team_task_complete`
-- Lead monitors: `team_task_list` or `/team tasks`
+- Teammates finish tasks: `team_task_complete` — accepted only from the task's
+  assigned agent or the lead. A refusal does **not** hand the task over; it
+  reports `rejection_reason` (`not_owner`, `not_claimed`, `already_completed`)
+  plus the current owner, and suggests either `team_task_claim` or
+  `team_assign_task` from the lead.
+- Lead withdraws work: `team_task_cancel` (lead-only; only `pending` and
+  `in_progress` are cancellable, and the owner is notified through its mailbox).
+  The task stays in the list with status `cancelled` — it is not deleted.
+- Lead monitors: `team_task_list`, or `team_status` for the roster. `team_status`
+  reports each member's last five status transitions (from the team's
+  `status-history.jsonl`), any message stranded in a terminated member's mailbox
+  under `Undelivered messages`, any plan parked in `plan_pending` under
+  `Plans awaiting a verdict`, and any quality-gate hook that could not run under
+  `Hook failures`.
+- Dependency hygiene: a `tasks.json` write validates the whole list first, so a
+  `depends_on` id naming no task, or an edge that would close a cycle, is refused
+  (`refusing to write invalid <path>: ...`) and the file is left byte-identical.
 
 ### Communicate and close out
 
@@ -1201,10 +1216,16 @@ Agent uses:
 
 ```
 /agents     # Open the Agents panel to see running background tasks
-/cancel abc # Cancel a background task by ID prefix
+/cancel abc # Request cancellation of a sub-agent by task-id prefix
 /task list  # List session tasks (the task-service equivalent of old todos)
 /spawn explore "Find every call site of resolve_agent"   # detached, fire-and-forget
 ```
+
+`/cancel <prefix>` asks the task registry to cancel the matching task; it does not
+just hide the row. The task keeps running until its agent loop reaches the next step
+boundary, and the Agents window updates when it settles. A prefix that matches more
+than one live task is refused and every match is listed, so re-run it with a longer
+prefix; a prefix that matches nothing lists the live task ids.
 
 `/spawn <agent> <prompt...>` launches a **detached** sub-agent straight from the
 input line. It runs concurrently and appears in the Agents panel, but nothing ever
@@ -1212,8 +1233,10 @@ waits on it: it is absent from `list_agents`, cannot be awaited with `wait_agent
 and its result is never injected back into the chat. Use it for side-effect-only
 work (writing a file, refreshing the index). Because nothing reads the reply body,
 give the prompt a file to write; every completed sub-agent (detached or not) also
-persists its full output to `log/subagents/<task-id>.md`. A second `/spawn` while
-one is still registering is refused.
+persists its full output to `log/subagents/<task-id>.md`. `/spawn` shares one
+bounded launch set with every other TUI launch path (`agents.max_launching`,
+default 4), so a second launch queues behind the busy ones and names them rather
+than being refused outright.
 
 **Via REST API:**
 
@@ -2879,7 +2902,7 @@ on top of `6cf0b60f` (MS-04).
   toward the front and `Del` removes it. `/queue [list|clear|next|help]` exposes
   the same queue. A slash command (`/…`) is queued the same way while a turn
   runs (FR-017 amendment) and runs at the next turn boundary; only bang commands
-  (`!…`) and teammate-targeted sends keep the busy refusal. Spec `inputqueue`
+  (`!…`) keep the busy refusal. Spec `inputqueue`
   complete (T-001..T-027); 234 new test attributes across 19 new test files. See
   [`docs/howtos/slashcommands/queue.md`](docs/howtos/slashcommands/queue.md).
 - **Code-quality pass (`/simplify all`)** — de-duplication and dead-code

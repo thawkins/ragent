@@ -110,6 +110,7 @@ fn task_entry(
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -1325,6 +1326,16 @@ fn utils_format_elapsed_and_short_id() {
     // The last eight characters (the unique suffix) are kept.
     assert_eq!(utils::short_id("session-0123456789abcdef"), "89abcdef");
     assert_eq!(utils::short_id("short"), "short");
+    // FR-008: the abbreviation comes from the shared `short_suffix` helper, so
+    // a multi-byte id is cut on a char boundary instead of panicking.
+    assert_eq!(
+        utils::short_id("\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"),
+        "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"
+    );
+    assert_eq!(
+        utils::short_id("\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"),
+        "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}"
+    );
 }
 
 #[test]
@@ -2029,8 +2040,10 @@ fn layout_teams_window_paints_the_lead_and_teammates() {
     // hit-rect vectors: one key per painted row (header, lead, three
     // teammates) and the teammate slice for the keyboard cursor (hit-rect
     // rework). A stopped member still carries its key - Space/Del on it
-    // resolve (and are refused) through the member status.
-    assert_eq!(app.teams_row_agent_ids.len(), 5);
+    // resolve (and are refused) through the member status. `tester` is
+    // suspended, so the FR-028 parked-member hint row is painted too and
+    // carries its own empty key.
+    assert_eq!(app.teams_row_agent_ids.len(), 6);
     assert_eq!(
         app.teams_teammate_agent_ids,
         vec![
@@ -2348,11 +2361,9 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
     assert_eq!(app.messages.len(), before);
 
     // Success arm: the detached task id is reported and the panel is told the
-    // run will never be waited on.
-    {
-        let mut slot = app.spawn_result.lock().expect("spawn slot");
-        *slot = Some(Ok("s2-explore-abc123456789".to_string()));
-    }
+    // run will never be waited on (D3: the outcome is seeded on the shared
+    // launch queue exactly as the launch worker deposits it).
+    ragent_tui::seed_spawn_outcome_for_tests(&mut app, Ok("s2-explore-abc123456789".to_string()));
     ragent_tui::poll_spawn_result_for_tests(&mut app);
     assert!(
         app.status.starts_with("spawn: detached task"),
@@ -2366,12 +2377,14 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
         .unwrap_or_default();
     assert!(text.contains("Detached sub-agent launched"), "got {text}");
     assert!(text.contains("nothing will wait for it"));
+    // Draining the outcome released the launch slot.
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 0);
 
     // Failure arm.
-    {
-        let mut slot = app.spawn_result.lock().expect("spawn slot");
-        *slot = Some(Err("AgentManager not initialized".to_string()));
-    }
+    ragent_tui::seed_spawn_outcome_for_tests(
+        &mut app,
+        Err("AgentManager not initialized".to_string()),
+    );
     ragent_tui::poll_spawn_result_for_tests(&mut app);
     assert!(
         app.status.starts_with("[warn] spawn failed"),
@@ -2387,22 +2400,36 @@ fn spawn_poll_surfaces_launch_success_and_failure() {
         text.contains("Could not launch detached sub-agent"),
         "got {text}"
     );
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 0);
 }
 
+/// D3: an outcome is drained by id, so a failed launch releases exactly its own
+/// slot and leaves a still-running launch registered.
+///
+/// The pre-D3 slot could not express this: one `Mutex<Option<..>>` held either
+/// the in-flight marker or one outcome, so a second launch was refused outright
+/// and a poisoned mutex dropped the outcome silently.
 #[test]
-fn spawn_poll_restores_the_pending_marker_for_an_empty_error() {
+fn spawn_poll_releases_only_the_finished_launch() {
     let mut app = slash_support::app_with_session();
-    {
-        let mut slot = app.spawn_result.lock().expect("spawn slot");
-        *slot = Some(Err(String::new()));
-    }
-    let before = app.messages.len();
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 0);
+
+    // One launch stays in flight; a second one completes.
+    ragent_tui::register_spawn_launch_for_tests(&mut app, "explore");
+    let launch = app.subagent_launches[0].clone();
+    ragent_tui::seed_spawn_outcome_for_tests(&mut app, Ok("s2-explore-b".to_string()));
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 2);
+
     ragent_tui::poll_spawn_result_for_tests(&mut app);
-    // The marker entry is put back so concurrent /spawn invocations stay
-    // serialised, and no user-visible message is emitted.
-    let pending = app.spawn_result.lock().expect("spawn slot").is_some();
-    assert!(pending, "the marker entry must be restored");
-    assert_eq!(app.messages.len(), before);
+
+    // The completed launch released its slot; the in-flight one is untouched.
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 1);
+    assert_eq!(app.subagent_launches[0].id, launch.id);
+    assert!(
+        app.status.starts_with("spawn: detached task s2-explo"),
+        "{}",
+        app.status
+    );
 }
 
 #[test]
@@ -3270,16 +3297,23 @@ async fn slash_spawn_guards_a_pending_launch() {
     let _lock = crate::global_env_lock();
     let (_env, temp) = enter_project_pair();
     let mut app = slash_support::app_with_session();
-    // A launch already occupies the slot.
-    {
-        let mut slot = app.spawn_result.lock().expect("spawn slot");
-        *slot = Some(Err(String::new()));
+    // The bounded launch set is full (D3: a shared set of
+    // `agents.max_launching`, default 4, not a one-shot mutex slot).
+    let cap = app.subagent_launch_cap;
+    for _ in 0..cap {
+        ragent_tui::register_spawn_launch_for_tests(&mut app, "explore");
     }
     app.execute_slash_command("/spawn general do the thing")
         .await;
-    assert_eq!(
-        app.status,
-        "[warn] spawn: another /spawn is still launching - wait for it"
+    assert!(
+        app.status.starts_with("[warn] spawn: already launching"),
+        "{}",
+        app.status
+    );
+    assert!(
+        app.status.contains("explore (/spawn)"),
+        "the refusal must name the busy launch: {}",
+        app.status
     );
     drop(temp);
 }
@@ -3292,12 +3326,34 @@ async fn slash_spawn_reports_a_missing_sub_agent_manager() {
     // `make_app` never installs an AgentManager, so the launch cannot start.
     app.execute_slash_command("/spawn general summarise the tree")
         .await;
+    // D3: the missing manager is reported by the shared work future as a
+    // failure outcome, so the launch registered first and is released by the
+    // normal poll - the next /spawn is never blocked.
+    assert_eq!(ragent_tui::pending_spawn_launches_for_tests(&app), 1);
+
+    // Let the worker land its outcome, then drain it.
+    for _ in 0..200 {
+        ragent_tui::poll_spawn_result_for_tests(&mut app);
+        if ragent_tui::pending_spawn_launches_for_tests(&app) == 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     assert_eq!(
-        app.status,
-        "[warn] spawn: sub-agent manager unavailable in this session"
+        ragent_tui::pending_spawn_launches_for_tests(&app),
+        0,
+        "the launch slot must be released after the failure is reported"
     );
-    // The pending marker is released so the next /spawn is not blocked.
-    assert!(app.spawn_result.lock().expect("spawn slot").is_none());
+    assert!(
+        app.status.starts_with("[warn] spawn failed:"),
+        "{}",
+        app.status
+    );
+    assert!(
+        app.status.contains("sub-agent manager unavailable"),
+        "{}",
+        app.status
+    );
     drop(temp);
 }
 

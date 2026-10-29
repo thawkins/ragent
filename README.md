@@ -47,11 +47,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   the action is permitted or refused; it is a tightening-only layer over the static
   rules (a `deny` is hard, an `allow` never overrides an explicit policy `deny`, and
   any analyzer failure degrades to the normal interactive prompt)
-- **Comprehensive tool system** — **149 registered tools across 21 categories** in
+- **Comprehensive tool system** — **150 registered tools across 21 categories** in
   the default build (the engine-gated `mf_screenshot` tool registers only when a
-  drivable headless browser is present, taking the count to 149 — spec `openhands`
-  FR-029). `ragent run --dry-run` prints the live per-category counts; the groups
-  are:
+  drivable headless browser is present, one above the count shown — spec
+  `openhands` FR-029). `ragent run --dry-run` prints the live per-category counts;
+  the groups are:
 
 ![ragent tool session](assets/screens/ragentsession.png)
 
@@ -83,14 +83,38 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   git_tag, git_add, git_reset, git_checkout, git_commit, git_stash, git_cherry_pick,
   git_push, git_pull, git_fetch, git_clone, git_merge
 - **GitHub** (11) and **GitLab** (19) — issues, PRs/MRs, pipelines, jobs, and CI/CD
-- **Teams** (19) — the full team lifecycle, shared tasks, mailbox messaging, and
-  coordination surface
-- **Agent** (4) — new_agent, cancel_agent, list_agents, wait_agents
+- **Teams** (20) — the full team lifecycle, shared tasks (create, list, claim,
+  complete, assign and lead-only `team_task_cancel`), mailbox messaging, and
+  coordination surface. Team quality-gate hooks fire from the runtime, so a
+  `TaskCompleted` hook's veto reaches the completing agent as a tool result
+  (`hook_rejected` plus the hook's `feedback`) whichever path completed the
+  task, and the completed task keeps its terminal status. A hook that cannot run
+  at all — its command fails validation, fails to spawn, or exceeds the
+  30-second timeout — is recorded in the team's append-only
+  `hook-failures.jsonl` (hook name, event, reason, timestamp; rotating to
+  `hook-failures.jsonl.1` at 1 MiB) and its count is surfaced in `/team show`
+  and `team_status`, so an inert hook is never mistaken for a passing one.
+  Every write to `tasks.json` validates the whole list first: a `depends_on` id
+  that names no task in the list, or an edge that would close a dependency
+  cycle, is refused at write time with the offending task and chain named
+  (`refusing to write invalid <path>: ...`) and the file left byte-identical,
+  instead of persisting a task that could never be claimed. Completion requires
+  ownership (the task's assignee or the lead), and `team_status` reports each
+  member's last five status transitions from the append-only
+  `status-history.jsonl`, messages stranded in a terminated teammate's mailbox,
+  plans awaiting a verdict, and the hook-failure count
+- **Agent** (5) — new_agent, cancel_agent, list_agents, wait_agents and
+  `team_wait` (a team's wait belongs to the agent family, because `team_wait`
+  and `wait_agents` are the same await surface for two different task
+  populations). Every tool in the family declares a closed parameter set and
+  actually enforces it: a call carrying an undeclared property fails and names
+  the offending key (`Unknown parameter(s): \`backgound\``) instead of silently
+  running with the default
 - **Spec** (5) — spec_list, spec_read, spec_search, spec_task_update, spec_coverage
 - **Task** (4) — TaskCreate, TaskUpdate, TaskGet, TaskList
 - **Cron** (5) — cron_add, cron_remove, cron_list, cron_enable, cron_disable
 - **Plan** (2) — EnterPlanMode, ExitPlanMode
-- **None** (9) — calculator, DateTime (current date/time from the system clock:
+- **None** (8) — calculator, DateTime (current date/time from the system clock:
   RFC 3339 UTC instant, the same instant rendered at an optional fixed UTC
   offset, individual date/time fields, and the Unix timestamp; it reads no `TZ`
   or host timezone database), think, agent_complete, ragent_info (running version,
@@ -165,7 +189,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   also writes its FULL output to `log/subagents/<task-id>.md`, and the
   completion event carries the real loop `finish_reason` (`stop` /
   `truncation` / `length` / `cancelled` / `error`) so a provider-side cut is
-  flagged in the Agents panel instead of looking like a healthy finish
+  flagged in the Agents panel instead of looking like a healthy finish.
+  `new_agent` takes an optional `model` override in `provider/model`
+  (preferred) or `provider:model` form, e.g.
+  `anthropic/claude-sonnet-4-20250514` or `openai:gpt-4o`; omit it and the
+  sub-agent inherits the session's model
 - **Agent and Team Member panel** — the `Agents` and `Teams` buttons beside the
   message input open live control popups: the Agents window lists the primary
   agent and an ancestor-indented sub-agent tree with status, elapsed time,
@@ -827,7 +855,7 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.152** — The core architecture, tool system (149 tools across 21 categories in
+**v1.0.153** — The core architecture, tool system (150 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered

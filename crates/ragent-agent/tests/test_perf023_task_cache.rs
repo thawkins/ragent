@@ -99,8 +99,8 @@ fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberS
 /// First call loads from disk; second call returns the cached value (no
 /// extra disk read). We verify the cache hit by checking that the returned
 /// list is structurally identical across the two calls.
-#[test]
-fn test_task_list_caches_after_first_load() {
+#[tokio::test]
+async fn test_task_list_caches_after_first_load() {
     let (_tmp, dir) = setup_workspace();
     let mut store = TeamStore::create("cache-team", "lead-sess", &dir, true).expect("create");
     add_member(&mut store, "alice", "tm-001", MemberStatus::Idle);
@@ -108,6 +108,7 @@ fn test_task_list_caches_after_first_load() {
     let task_store = ragent_agent::team::task::TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "Do thing"))
+        .await
         .expect("add");
     drop(task_store);
     drop(store);
@@ -123,8 +124,8 @@ fn test_task_list_caches_after_first_load() {
 }
 
 /// `apply_to_task_list` writes through to disk and refreshes the cache.
-#[test]
-fn test_apply_to_task_list_writes_through_and_refreshes_cache() {
+#[tokio::test]
+async fn test_apply_to_task_list_writes_through_and_refreshes_cache() {
     let (_tmp, dir) = setup_workspace();
     let mut store = TeamStore::create("apply-team", "lead-sess", &dir, true).expect("create");
     add_member(&mut store, "alice", "tm-001", MemberStatus::Idle);
@@ -132,6 +133,7 @@ fn test_apply_to_task_list_writes_through_and_refreshes_cache() {
     let task_store = ragent_agent::team::task::TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "Original title"))
+        .await
         .expect("add");
     drop(task_store);
     drop(store);
@@ -163,8 +165,8 @@ fn test_apply_to_task_list_writes_through_and_refreshes_cache() {
 /// An external write to `tasks.json` advances the mtime; the next
 /// `task_list()` call must observe the new mtime and reload from disk
 /// (rather than serving the stale cached value).
-#[test]
-fn test_cache_invalidates_on_external_mtime_change() {
+#[tokio::test]
+async fn test_cache_invalidates_on_external_mtime_change() {
     let (_tmp, dir) = setup_workspace();
     let mut store = TeamStore::create("ext-team", "lead-sess", &dir, true).expect("create");
     add_member(&mut store, "alice", "tm-001", MemberStatus::Idle);
@@ -172,6 +174,7 @@ fn test_cache_invalidates_on_external_mtime_change() {
     let task_store = ragent_agent::team::task::TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "Cached"))
+        .await
         .expect("add");
     drop(task_store);
     drop(store);
@@ -201,8 +204,8 @@ fn test_cache_invalidates_on_external_mtime_change() {
 }
 
 /// `invalidate` forces the next `task_list()` call to re-read from disk.
-#[test]
-fn test_invalidate_forces_reload() {
+#[tokio::test]
+async fn test_invalidate_forces_reload() {
     let (_tmp, dir) = setup_workspace();
     let mut store = TeamStore::create("inv-team", "lead-sess", &dir, true).expect("create");
     add_member(&mut store, "alice", "tm-001", MemberStatus::Idle);
@@ -210,6 +213,7 @@ fn test_invalidate_forces_reload() {
     let task_store = ragent_agent::team::task::TaskStore::open(&team_dir).expect("open");
     task_store
         .add_task(Task::new("task-001", "One"))
+        .await
         .expect("add");
     drop(task_store);
     drop(store);

@@ -586,6 +586,8 @@ See `docs/howtos/custom-agents.md` for the full schema.
 | `Alt+M` | Toggle Memory panel |
 | `Alt+O` | Toggle autopilot mode |
 | `Alt+C` | Toggle Context side panel |
+| `Alt+A` | Toggle the Agents window (same toggle as the `Agents` button) |
+| `Alt+T` | Toggle the Teams window (same toggle as the `Teams` button) |
 | `Alt+Q` | Open the queue-control menu (`Next` / `Stop` / `Clear` / `Show`) |
 | `Alt+V` | Paste image from clipboard |
 | `Alt+Y` | Toggle YOLO mode |
@@ -603,7 +605,7 @@ appends the message to a FIFO **input queue** (counter shown as `NN> ` before
 the prompt) and the oldest entry runs at each turn boundary. Slash commands are
 queued the same way (FR-017 amendment) — a `/status` or `/queue` typed while a
 turn runs is enqueued and dispatched at the next boundary rather than refused;
-only bang commands (`!…`) and teammate-targeted messages keep the busy refusal.
+only bang commands (`!…`) keep the busy refusal.
 A queued entry is
 added to the **input history** as soon as you press `Enter`, not when it runs,
 and it is not echoed into the message window until it is dispatched. Press

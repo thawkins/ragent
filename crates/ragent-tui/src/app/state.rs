@@ -232,6 +232,82 @@ pub struct BgTaskView {
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// One retained entry of the Agents window's completed-history section
+/// (spec `agentssetup` FR-021, FR-028).
+///
+/// The live section is a projection of [`App::active_tasks`], which drops a
+/// row the moment the task finishes. This is the frozen copy taken *before*
+/// that removal, so a finished task's final status, its duration and the path
+/// to its durable report stay inspectable in the panel (FR-021) even though
+/// the registry entry is gone.
+///
+/// The entry is a snapshot rather than a registry lookup: the registry reaps
+/// finished tasks (`drain_completed`), so a history row cannot re-read them
+/// and must carry everything the panel paints.
+#[derive(Debug, Clone)]
+pub struct CompletedTaskRow {
+    /// Task identifier as the registry recorded it.
+    pub id: String,
+    /// Child session id of the run (the agent instance).
+    pub child_session_id: String,
+    /// Agent definition name the run used.
+    pub agent_name: String,
+    /// Terminal status the run finished with: `completed`, `failed`,
+    /// `cancelled` or `timed_out` (FR-021).
+    pub status: ragent_agent::task::TaskStatus,
+    /// The run's execution contract, as the registry recorded it (FR-020).
+    pub background: bool,
+    /// Whether the run was fire-and-forget (FR-020).
+    pub detached: bool,
+    /// When the run started, used to derive its duration.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When the run finished; the duration is derived from this and
+    /// `created_at`.
+    pub completed_at: chrono::DateTime<chrono::Utc>,
+    /// The report state the run finished with, as derived from its finish
+    /// reason (FR-048): a truncated report must stay visible after the row
+    /// moves into history, not only while it is live.
+    pub report_status: ragent_agent::task::ReportStatus,
+    /// Durable copy of the full report (`log/subagents/<task-id>.md`), or
+    /// `None` when the in-memory result is the only copy - the history row
+    /// then says so rather than leaving the column blank (FR-032, FR-043).
+    pub output_file: Option<std::path::PathBuf>,
+}
+
+impl CompletedTaskRow {
+    /// The explicit no-durable-copy note for this history row, or [`None`]
+    /// when a durable copy exists (spec `agentssetup` FR-032, FR-043).
+    ///
+    /// Every history row is finished by construction, so absence is decided by
+    /// `output_file` alone: a row that carries no path had its
+    /// `persist_task_output` fail, and saying nothing would let a reader
+    /// assume a report file exists. The wording is
+    /// [`IN_MEMORY_REPORT_NOTE`](ragent_agent::tool::wait_agents::IN_MEMORY_REPORT_NOTE),
+    /// the same constant `list_agents` and `wait_agents` print, so the panel
+    /// and the tools cannot describe one condition two ways.
+    #[must_use]
+    pub fn durable_copy_absence(&self) -> Option<&'static str> {
+        if self.output_file.is_some() {
+            return None;
+        }
+        Some(ragent_agent::tool::wait_agents::IN_MEMORY_REPORT_NOTE)
+    }
+
+    /// The wall-clock duration of the run, in seconds.
+    ///
+    /// Derived rather than stored so a history row cannot disagree with its
+    /// own timestamps; a clock that moved backwards (or a task that finished
+    /// within the same second) yields `0` instead of a negative or wrapped
+    /// value.
+    #[must_use]
+    pub fn duration_secs(&self) -> u64 {
+        (self.completed_at - self.created_at)
+            .num_seconds()
+            .max(0)
+            .unsigned_abs()
+    }
+}
+
 /// A single completed LLM request used for `/llmstats` aggregation.
 #[derive(Debug, Clone)]
 pub struct LlmRequestStat {
@@ -1154,18 +1230,53 @@ pub enum RowAction {
         /// The member name shown by the row, for the dialog body.
         name: String,
     },
+    /// Resume a `Blocked` teammate (`Del` on a blocked teammate row, spec
+    /// `teamssetup` FR-029).
+    ///
+    /// A `Blocked` member is parked by a dependency it cannot clear itself, so
+    /// resume is its only operator escape (FR-010, F-22). `Del` carries that
+    /// exit behind a confirmation so the key keeps one meaning per status and
+    /// a mistyped `Del` cannot silently restart work.
+    ResumeTeammate {
+        /// The member id the answer dispatches to.
+        agent_id: String,
+        /// The member name shown by the row, for the dialog body.
+        name: String,
+    },
 }
+
+/// The footer hints for the modal row-action dialog (spec `teamssetup` FR-028,
+/// FR-032).
+///
+/// Row verbs are modal: `Space`/`Del` open a `Yes`/`No` dialog whose default is
+/// `No`, so an `Enter` on an un-toggled dialog DISMISSES the action. Both
+/// strings therefore name the toggle key pair first and say which option
+/// performs and which cancels, so "pressed `Enter` and nothing happened" is
+/// never the observed behaviour.
+pub const ROW_ACTION_TOGGLE_HINT: &str = "Left/Right toggle the selection";
+
+/// The second footer line: which option performs, which cancels, and how to
+/// leave without acting (spec `teamssetup` FR-028, FR-032).
+pub const ROW_ACTION_OUTCOME_HINT: &str =
+    "Enter on Yes performs * Enter on No cancels * Esc cancels";
 
 impl RowAction {
     /// The dialog title naming the action (spec `agentui` T-009, FR-036,
     /// FR-037, FR-040).
+    ///
+    /// A title is fixed text for the four destructive verbs. `ResumeTeammate`
+    /// is the one verb the operator reaches for when the popup has told them a
+    /// member is stuck, so its title names the member as well as the action
+    /// (spec `teamssetup` FR-029): the confirmation has to say *whom* it is
+    /// about, not only *what* it does.
     #[must_use]
-    pub fn title(&self) -> &'static str {
+    pub fn title(&self) -> String {
         match self {
-            Self::KillSubagent { .. } => " Kill sub-agent? ",
-            Self::CancelBackground { .. } => " Cancel background task? ",
-            Self::SuspendTeammate { .. } => " Suspend teammate? ",
-            Self::ShutdownTeammate { .. } => " Shut down teammate? ",
+            Self::KillSubagent { .. } => " Kill sub-agent? ".to_string(),
+            Self::CancelBackground { .. } => " Cancel background task? ".to_string(),
+            Self::SuspendTeammate { .. } => " Suspend teammate? ".to_string(),
+            Self::ShutdownTeammate { .. } => " Shut down teammate? ".to_string(),
+            Self::ResumeTeammate { name, .. } => format!(" Resume {name}? "),
         }
     }
 
@@ -1190,6 +1301,12 @@ impl RowAction {
             Self::SuspendTeammate { agent_id, name }
             | Self::ShutdownTeammate { agent_id, name } => {
                 format!("{name} ({agent_id})")
+            }
+            // The body has to say what confirmation buys, not only who it is
+            // about: the parked member's state is the reason the dialog exists
+            // (spec `teamssetup` FR-029, FR-032).
+            Self::ResumeTeammate { agent_id, name } => {
+                format!("{name} ({agent_id}) blocked -> resume")
             }
         }
     }
@@ -1780,6 +1897,54 @@ pub struct ConnectorCatalogueInstallResult {
     /// Whether the install committed, so the poll re-derives the installed set
     /// and the row re-colours.
     pub succeeded: bool,
+}
+
+/// Which TUI surface asked for a sub-agent launch (spec `agentssetup` D3).
+///
+/// Carried on a [`SubagentLaunch`] so one shared launch helper can report an
+/// outcome in the words of the surface that requested it, without each surface
+/// growing its own state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchOrigin {
+    /// The `/spawn` slash command (a detached fire-and-forget launch).
+    SpawnCommand,
+}
+
+impl LaunchOrigin {
+    /// The label this origin's reports are prefixed with.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SpawnCommand => "/spawn",
+        }
+    }
+}
+
+/// One in-flight sub-agent launch queued on the shared launch set
+/// (spec `agentssetup` D3).
+///
+/// The launch is registered by [`App::begin_subagent_launch`], which puts it on
+/// [`App::subagent_launches`] and returns its id; the outcome lands in
+/// [`App::subagent_launch_results`] under the same id and the next
+/// [`App::poll_subagent_launch_results`] drains it. Ids are monotonic per
+/// process, so a result can never be matched to the wrong request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentLaunch {
+    /// Monotonic id correlating this request with its result.
+    pub id: u64,
+    /// The surface that requested the launch.
+    pub origin: LaunchOrigin,
+    /// The agent name requested (reported back in the outcome).
+    pub agent: String,
+}
+
+/// The terminal outcome of one [`SubagentLaunch`] (spec `agentssetup` D3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentLaunchOutcome {
+    /// The request this outcome answers.
+    pub launch: SubagentLaunch,
+    /// The registered task id on success, or the failure message.
+    pub outcome: Result<String, String>,
 }
 
 /// One message from the off-loop manifest-metadata enrichment of a connector
@@ -3647,6 +3812,21 @@ pub struct App {
     pub next_agent_index: u32,
     /// Active background sub-agent tasks (F14).
     pub active_tasks: Vec<ragent_agent::task::TaskEntry>,
+    /// Bounded history of recently finished sub-agent tasks, newest first
+    /// (spec `agentssetup` FR-021, FR-028, FR-036).
+    ///
+    /// A finished task's live row is dropped from [`App::active_tasks`], so
+    /// the panel would otherwise lose every trace of it. Each terminal event
+    /// records the row here *before* the live row is removed (FR-028), which
+    /// is what keeps "an already-painted task is never lost from both
+    /// sections" true. The deque is capped by [`App::agents_history_cap`] so
+    /// the panel's memory cost stays constant in the number of tasks ever
+    /// spawned (NFR-004).
+    pub agents_history: std::collections::VecDeque<CompletedTaskRow>,
+    /// Maximum number of rows [`App::agents_history`] retains, resolved from
+    /// `agents.completed_history` at startup (spec `agentssetup` FR-036,
+    /// NFR-004).
+    pub agents_history_cap: usize,
     /// Shared lag counter incremented by the TUI's event-bus bridge task
     /// whenever the broadcast channel reports `Lagged` (events dropped).
     /// `poll_active_tasks_reconcile` watches this for changes to trigger a
@@ -3746,14 +3926,27 @@ pub struct App {
     pub swarm_state: Option<SwarmState>,
     /// Pending result from an async `/swarm` LLM decomposition call.
     pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-    /// Result slot for the `/spawn` command's detached sub-agent launch.
+    /// In-flight sub-agent launches on the shared launch set
+    /// (spec `agentssetup` D3).
     ///
-    /// The `/spawn` handler performs the (async) `spawn_detached` registration
-    /// on a tokio task and deposits `Ok(task_id)` or `Err(message)` here; the
-    /// next event-loop pass publishes the outcome to the chat/status.
-    /// Only one `/spawn` launch may be pending at a time; a second invocation
-    /// while the slot is occupied is rejected with a usage warning.
-    pub spawn_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Every TUI launch path registers here through
+    /// [`App::begin_subagent_launch`], which refuses (naming the busy ids) once
+    /// [`App::subagent_launch_cap`] launches are in flight. The entry is removed
+    /// when its outcome is drained by [`App::poll_subagent_launch_results`], so
+    /// this is the single "already launching" guard the `/spawn` command used to
+    /// hand-roll with its own result slot.
+    pub subagent_launches: Vec<SubagentLaunch>,
+    /// Completed launch outcomes awaiting the next poll pass (D3).
+    ///
+    /// The worker that runs one launch deposits its outcome here under the
+    /// [`SubagentLaunch`] id, so the shared queue is behind a mutex rather than
+    /// owned by the event loop; [`App::poll_subagent_launch_results`] drains it.
+    pub subagent_launch_results: Arc<std::sync::Mutex<Vec<SubagentLaunchOutcome>>>,
+    /// Cap on concurrently in-flight launches, from
+    /// `Config::effective_agents_max_launching` (D3).
+    pub subagent_launch_cap: usize,
+    /// Monotonic id source for [`App::subagent_launches`] (D3).
+    pub next_subagent_launch_id: u64,
     /// Pending result from a background `/bench run`.
     pub bench_result: Arc<std::sync::Mutex<Option<Result<ragent_bench::BenchRunOutcome, String>>>>,
     /// Active output overlay state.
@@ -5316,6 +5509,11 @@ impl App {
         for (id, entry) in &registry {
             if let Some(existing) = self.active_tasks.iter_mut().find(|t| &t.id == id) {
                 existing.status = entry.status.clone();
+                // FR-012: the registry is authoritative for the waiter tally
+                // too - an in-flight `wait_agents` caller increments it, so a
+                // refresh that only copied the status would leave the Agents
+                // panel showing a stale count.
+                existing.waiter_count = entry.waiter_count;
             } else if entry.status == TaskStatus::Running {
                 self.active_tasks.push(entry.clone());
                 added.push(entry);

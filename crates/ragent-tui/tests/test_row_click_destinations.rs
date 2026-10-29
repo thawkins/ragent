@@ -56,6 +56,7 @@ fn task(id: &str, parent_session: &str, agent: &str, status: TaskStatus) -> Task
         waiter_count: 0,
         output_file: None,
         report_status: ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 
@@ -492,19 +493,8 @@ fn flat_row(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
     out
 }
 
-/// The column of `needle` in `row`, or `None` when the needle is absent.
-///
-/// Buffer rows are flatten per *column*, but `str::find` reports the byte
-/// offset of the first matched character, so the column index is recovered by
-/// counting the characters in front of the match.
-fn row_offset(row: &str, needle: &str) -> Option<usize> {
-    row.find(needle).map(|byte| row[..byte].chars().count())
-}
-
 #[test]
-fn focused_teammate_titles_the_input_border_in_bold_yellow() {
-    use ratatui::style::Color;
-
+fn focused_teammate_does_not_title_the_input_border() {
     let mut app = app_with_team();
     app.focused_teammate = Some("tm-001".to_string());
     let backend = TestBackend::new(120, 40);
@@ -520,29 +510,15 @@ fn focused_teammate_titles_the_input_border_in_bold_yellow() {
         "the input widget paints a bordered block"
     );
     let border = flat_row(&buffer, input.y);
-    let needle = "-> reviewer (focused)";
+    // FR-058 (amended): focus opens the teammate's output view but no longer
+    // redirects the input box, so the border keeps its plain title.
     assert!(
-        border.contains(needle),
-        "the input border must carry the focused title (FR-058), got {border:?}"
-    );
-    let Some(col) = row_offset(&border, needle) else {
-        panic!("{needle} not on the border row");
-    };
-    let cell = buffer
-        .cell((col as u16, input.y))
-        .cloned()
-        .unwrap_or_else(|| panic!("title cell off the buffer"));
-    let style = cell.style();
-    assert_eq!(
-        style.fg,
-        Some(Color::Yellow),
-        "the focused title must be yellow (FR-058)"
+        border.contains(" Input "),
+        "a focused teammate must not retitle the input, got {border:?}"
     );
     assert!(
-        style.add_modifier.is_empty()
-            || (style.add_modifier - ratatui::style::Modifier::empty())
-                .contains(ratatui::style::Modifier::BOLD),
-        "the focused title must be bold (FR-058)"
+        !border.contains("(focused)"),
+        "the input border never names a recipient (FR-058 amended), got {border:?}"
     );
 }
 
@@ -568,29 +544,36 @@ fn unfocused_input_border_shows_the_plain_input_title() {
 }
 
 #[tokio::test]
-async fn focused_input_is_routed_to_the_teammate_mailbox() {
+async fn focused_input_is_not_routed_to_the_teammate_mailbox() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = app_with_team();
     app.focused_teammate = Some("tm-001".to_string());
-    // With the popup open `Enter` is the open-overlay key (FR-038); the
-    // mailbox routing applies once the window is closed again.
+    // With the popup open `Enter` is the open-overlay key (FR-038); the send
+    // behaviour applies once the window is closed again.
     app.show_teams_window = false;
     app.input = "please report your progress".to_string();
-    // The route decision happens before the provider is consulted: the lead
-    // path would stop at the no-provider guard WITHOUT consuming the input.
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
     app.handle_key_event(key).await;
 
-    assert!(
-        app.input.is_empty(),
-        "the focused teammate consumes the submission (FR-058 routing)"
+    // FR-058 (amended): Enter addresses the lead session, which stops at the
+    // no-provider guard of this fixture. The mailbox path is never taken and
+    // the unsubmitted draft stays in the input.
+    assert_eq!(
+        app.input, "please report your progress",
+        "the lead path keeps the draft instead of consuming it"
     );
     assert!(
-        app.status.starts_with("Failed to load team"),
-        "the message went to the teammate mailbox path (FR-058), got {}",
+        !app.status.starts_with("Failed to load team"),
+        "the message must not go to the teammate mailbox path, got {}",
         app.status
     );
+    assert!(
+        app.status.contains("No provider configured"),
+        "got: {}",
+        app.status
+    );
+
     assert_eq!(
         app.focused_teammate.as_deref(),
         Some("tm-001"),

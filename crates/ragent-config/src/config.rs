@@ -151,6 +151,15 @@ pub struct Config {
     /// LLM streaming configuration (timeouts, retries).
     #[serde(default)]
     pub stream: StreamConfig,
+    /// Sub-agent panel configuration (spec `agentssetup` FR-021, FR-036,
+    /// NFR-004).
+    ///
+    /// Carries the cap on the Agents window's completed-history section, so a
+    /// long session's panel memory stays constant in the number of tasks ever
+    /// spawned. The section is omitted from a serialised config while it is at
+    /// its defaults, so a config that has never set it round-trips unchanged.
+    #[serde(default, skip_serializing_if = "AgentsConfig::is_default")]
+    pub agents: AgentsConfig,
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -369,6 +378,7 @@ impl Default for Config {
             serper_api_key: None,
             code_index: CodeIndexConfig::default(),
             stream: StreamConfig::default(),
+            agents: AgentsConfig::default(),
             memory: MemoryConfig::default(),
             compaction: CompactionConfig::default(),
             gcf: GcfConfig::default(),
@@ -799,6 +809,112 @@ impl StreamConfig {
             ));
         }
         problems
+    }
+}
+
+/// Default cap on the Agents window's completed-history section
+/// (spec `agentssetup` FR-036, NFR-004).
+pub const DEFAULT_AGENTS_COMPLETED_HISTORY: usize = 20;
+
+/// Lowest accepted `agents.completed_history` value.
+///
+/// One row is the smallest meaningful history: `0` would silently switch the
+/// section off while still claiming to be configured, so an explicit `0` is
+/// clamped up rather than honoured.
+const MIN_AGENTS_COMPLETED_HISTORY: usize = 1;
+
+/// Highest accepted `agents.completed_history` value.
+///
+/// The cap exists to keep the panel's memory cost constant (NFR-004), so it is
+/// bounded rather than trusted: a four-figure history would defeat the purpose
+/// of the knob while still being technically "bounded".
+const MAX_AGENTS_COMPLETED_HISTORY: usize = 200;
+
+/// Default cap on concurrently launching sub-agent tasks (spec `agentssetup`
+/// D3, FR-021).
+///
+/// Replaces the single `/spawn`-only launch slot: every TUI launch path shares
+/// one bounded launch set, so a second launch is queued behind the busy ones
+/// rather than refused, and no path needs its own state machine.
+pub const DEFAULT_AGENTS_MAX_LAUNCHING: usize = 4;
+
+/// Lowest accepted `agents.max_launching` value.
+///
+/// One in-flight launch is the smallest meaningful set: `0` would make every
+/// TUI launch impossible while still claiming to be configured, so an explicit
+/// `0` is clamped up rather than honoured.
+const MIN_AGENTS_MAX_LAUNCHING: usize = 1;
+
+/// Highest accepted `agents.max_launching` value.
+///
+/// Each in-flight launch holds a registration future, so the set is bounded
+/// rather than trusted.
+const MAX_AGENTS_MAX_LAUNCHING: usize = 64;
+
+/// Sub-agent panel configuration (spec `agentssetup` FR-021, FR-036, NFR-004).
+///
+/// Corresponds to the `agents` key in `ragent.json`:
+///
+/// ```json
+/// { "agents": { "completed_history": 20, "max_launching": 4 } }
+/// ```
+///
+/// The completed-history section of the Agents window retains the most
+/// recently finished sub-agent tasks so a finished task's final status,
+/// duration and report path stay inspectable after its live row is removed
+/// (FR-021). The retained count is capped so the panel's memory cost does not
+/// grow with the number of tasks ever spawned (NFR-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentsConfig {
+    /// Maximum number of completed tasks the Agents window's history section
+    /// retains, newest first (default: 20).
+    ///
+    /// Values below 1 or above 200 are clamped into that range by
+    /// [`Config::effective_agents_completed_history`]; a value that is legal
+    /// but small simply evicts the oldest entry sooner (FR-036).
+    #[serde(default = "default_agents_completed_history")]
+    pub completed_history: usize,
+    /// Maximum number of sub-agent launches allowed in flight at once
+    /// (default: 4).
+    ///
+    /// This is the one launch slot every TUI launch path shares (D3): the
+    /// `/spawn` command, the Agents window and any future launcher queue behind
+    /// the busy ones instead of each hand-rolling its own "already launching"
+    /// guard. Values below 1 or above 64 are clamped into that range by
+    /// [`Config::effective_agents_max_launching`].
+    #[serde(default = "default_agents_max_launching")]
+    pub max_launching: usize,
+}
+
+/// Default for [`AgentsConfig::completed_history`].
+const fn default_agents_completed_history() -> usize {
+    DEFAULT_AGENTS_COMPLETED_HISTORY
+}
+
+/// Default for [`AgentsConfig::max_launching`].
+const fn default_agents_max_launching() -> usize {
+    DEFAULT_AGENTS_MAX_LAUNCHING
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            completed_history: DEFAULT_AGENTS_COMPLETED_HISTORY,
+            max_launching: DEFAULT_AGENTS_MAX_LAUNCHING,
+        }
+    }
+}
+
+impl AgentsConfig {
+    /// `true` when the section is at its default state.
+    ///
+    /// Used by the `Config` serialisation to omit the `agents` key while no
+    /// value has been chosen, so a config that has never set it round-trips
+    /// byte-identically.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.completed_history == DEFAULT_AGENTS_COMPLETED_HISTORY
+            && self.max_launching == DEFAULT_AGENTS_MAX_LAUNCHING
     }
 }
 
@@ -2572,6 +2688,32 @@ impl Config {
             .clamp(MIN_INPUT_QUEUE_CAPACITY, MAX_INPUT_QUEUE_CAPACITY)
     }
 
+    /// The cap on the Agents window's completed-history section
+    /// (spec `agentssetup` FR-036, NFR-004).
+    ///
+    /// Resolves [`AgentsConfig::completed_history`] and clamps it into
+    /// `1..=200`, so an out-of-range value can never switch the section off or
+    /// let it grow without bound.
+    #[must_use]
+    pub fn effective_agents_completed_history(&self) -> usize {
+        self.agents
+            .completed_history
+            .clamp(MIN_AGENTS_COMPLETED_HISTORY, MAX_AGENTS_COMPLETED_HISTORY)
+    }
+
+    /// The cap on concurrently launching sub-agent tasks (spec `agentssetup`
+    /// D3).
+    ///
+    /// Resolves [`AgentsConfig::max_launching`] and clamps it into `1..=64`, so
+    /// an out-of-range value can never make a launch impossible or let the
+    /// in-flight set grow without bound.
+    #[must_use]
+    pub fn effective_agents_max_launching(&self) -> usize {
+        self.agents
+            .max_launching
+            .clamp(MIN_AGENTS_MAX_LAUNCHING, MAX_AGENTS_MAX_LAUNCHING)
+    }
+
     /// The execution backend a tool invocation runs in (spec `openhands`
     /// FR-001, FR-019).
     ///
@@ -3080,6 +3222,12 @@ impl Config {
         // `compaction` above) so `/gcf off` in a higher-precedence config is
         // respected rather than OR-merged back to on.
         base.gcf = overlay.gcf;
+
+        // Agents panel (spec `agentssetup` FR-036): overlay takes precedence,
+        // so a project file can tighten the completed-history cap for its own
+        // panel without OR-merging back to the user-global value (a smaller
+        // cap is a legitimate choice, not a "switch off").
+        base.agents = overlay.agents;
 
         if overlay.yolo {
             base.yolo = overlay.yolo;

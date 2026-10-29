@@ -45,10 +45,16 @@ mod test_agent_switching;
 mod test_agents_teams_cursor;
 #[path = "test_agents_window_frame.rs"]
 mod test_agents_window_frame;
+#[path = "test_agents_window_refusals.rs"]
+mod test_agents_window_refusals;
 #[path = "test_agents_window_table.rs"]
 mod test_agents_window_table;
 #[path = "test_agentui_t019_offline.rs"]
 mod test_agentui_t019_offline;
+#[path = "test_alt_a_agents_window.rs"]
+mod test_alt_a_agents_window;
+#[path = "test_alt_t_teams_window.rs"]
+mod test_alt_t_teams_window;
 #[path = "test_app_send_sync.rs"]
 mod test_app_send_sync;
 #[path = "test_automation_command.rs"]
@@ -69,6 +75,8 @@ mod test_busy_send_guard;
 mod test_button;
 #[path = "test_button_counts.rs"]
 mod test_button_counts;
+#[path = "test_cancel_slash.rs"]
+mod test_cancel_slash;
 #[path = "test_clipboard.rs"]
 mod test_clipboard;
 #[path = "test_clipboard_tempfile.rs"]
@@ -466,6 +474,8 @@ mod test_swarm_more;
 mod test_tasks_panel;
 #[path = "test_teammate_strip.rs"]
 mod test_teammate_strip;
+#[path = "test_teams_message_counts.rs"]
+mod test_teams_message_counts;
 #[path = "test_teams_tui.rs"]
 mod test_teams_tui;
 #[path = "test_teams_window_frame.rs"]
@@ -494,3 +504,6 @@ mod test_window_lifecycle;
 mod test_window_routing;
 #[path = "test_window_scroll_wheel.rs"]
 mod test_window_scroll_wheel;
+
+#[path = "test_probe_t022.rs"]
+mod test_probe_t022;

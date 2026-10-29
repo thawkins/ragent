@@ -377,7 +377,7 @@ async fn spawn_sync_without_a_provider_fails_fast() {
     // The in-memory processor has an empty provider registry, so the sub-agent
     // turn cannot build a client and the synchronous spawn returns an error.
     let err = mgr
-        .spawn_sync("p", "explore", "do it", None, dir.path())
+        .spawn_sync("p", "explore", "do it", None, dir.path(), None)
         .await
         .expect_err("no provider is configured");
     assert!(!err.to_string().is_empty(), "non-empty error");
@@ -388,7 +388,7 @@ async fn spawn_background_without_a_provider_records_a_failure() {
     let mgr = manager(4);
     let dir = tempfile::tempdir().expect("tempdir");
     let entry = mgr
-        .spawn_background("p", "explore", "do it", None, dir.path())
+        .spawn_background("p", "explore", "do it", None, dir.path(), None)
         .await
         .expect("spawn accepted");
     assert!(entry.background);

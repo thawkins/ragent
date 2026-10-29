@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.152"
+version = "1.0.153"
 edition = "2024"
 # The minimum Rust the workspace actually builds on. `edition = "2024"` needs
 # 1.85, but the source uses `slice::as_chunks` (stable in 1.88) and several

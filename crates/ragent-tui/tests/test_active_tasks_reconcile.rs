@@ -43,6 +43,7 @@ fn entry(id: &str, status: ragent_agent::task::TaskStatus) -> TaskEntry {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     }
 }
 

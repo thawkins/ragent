@@ -689,6 +689,14 @@ pub enum Event {
         task: String,
         /// Whether the task runs in the background (`true`) or blocks (`false`).
         background: bool,
+        /// Whether the task is fire-and-forget (`detached`) rather than part of
+        /// the delegation pipeline (FR-020).
+        ///
+        /// Carried on the event so a consumer projects the real execution
+        /// contract from what the registry spawned instead of inferring it
+        /// from `background` (which a detached run also sets).
+        #[serde(default)]
+        detached: bool,
     },
     /// A background sub-agent task has completed.
     SubagentComplete {
@@ -794,6 +802,24 @@ pub enum Event {
         /// Agent ID assigned to this teammate (e.g. `"tm-001"`).
         agent_id: String,
     },
+    /// A teammate reached the terminal `Stopped` status.
+    ///
+    /// Spec `teamssetup` FR-017: published by the team runtime's single status
+    /// writer, so a shutdown acked by the teammate, one forced by the lead, and
+    /// a team cleanup all report the stop the same way. `cause` is the
+    /// `snake_case` `TransitionCause` token (`"shutdown_acked"`,
+    /// `"team_cleaned_up"`, …) - a `String` rather than the typed enum, which
+    /// lives in `ragent-agent` and would invert the dependency.
+    TeammateStopped {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the stopped teammate.
+        agent_id: String,
+        /// Why the teammate stopped (`snake_case`, e.g. `"shutdown_acked"`).
+        cause: String,
+    },
     /// A teammate sent a message that was delivered to the lead session.
     ///
     /// M5-T6: `message_type` carries the `snake_case` `MessageType` so event
@@ -852,6 +878,35 @@ pub enum Event {
         /// Agent ID of the resumed teammate.
         agent_id: String,
     },
+    /// A teammate changed [`MemberStatus`].
+    ///
+    /// Spec `teamssetup` FR-035: this is the *complete* record of member status
+    /// motion. Every status write publishes exactly one of these carrying the
+    /// previous status, the new status, and the reason, so the event stream
+    /// alone can reconstruct a member's status history - the coarser events
+    /// (`TeammateIdle`, `TeammateFailed`, `TeammateResumed`, `TeammateSuspended`)
+    /// are conveniences for existing consumers and are not sufficient to answer
+    /// "why did this teammate stop?".
+    ///
+    /// The status and cause fields are the canonical snake_case tokens
+    /// (`MemberStatus::as_str` / `TransitionCause::as_str`) rather than typed
+    /// enums: those types live in `ragent-agent`, which depends on this crate,
+    /// so carrying them here would invert the dependency. A consumer that needs
+    /// the typed value parses the token.
+    TeammateStatusChanged {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the teammate whose status changed.
+        agent_id: String,
+        /// Previous status (`snake_case`, e.g. `"working"`).
+        from: String,
+        /// New status (`snake_case`, e.g. `"idle"`).
+        to: String,
+        /// Why the status changed (`snake_case`, e.g. `"task_completed"`).
+        cause: String,
+    },
     /// A teammate claimed a task from the shared task list.
     TeamTaskClaimed {
         /// Lead session ID.
@@ -873,6 +928,55 @@ pub enum Event {
         agent_id: String,
         /// ID of the completed task.
         task_id: String,
+    },
+    /// A completion was refused because the caller does not own the task.
+    ///
+    /// Published instead of `TeamTaskCompleted` when the FR-001 ownership rule
+    /// rejects a completion that the previous release accepted by silently
+    /// re-assigning the task to the caller (spec `teamssetup` FR-044). The
+    /// behaviour change is intentional, and this event is what keeps it from
+    /// looking like a silent regression: every refusal names the caller, the
+    /// task, and the agent that does hold it, so an operator can see in the
+    /// event log *who* tried to close work they did not own.
+    ///
+    /// It is also written at `warn` level under the `ragent_agent::task` target
+    /// so a refusal survives in `log/` even when no event consumer is attached.
+    TeamTaskCompletionRejected {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID that asked to complete the task.
+        agent_id: String,
+        /// ID of the task whose completion was refused.
+        task_id: String,
+        /// Agent ID recorded as the task's `assigned_to`, or `"unassigned"`.
+        owner: String,
+        /// Why the completion was refused: `"not_owner"`, `"not_claimed"`, or
+        /// `"already_completed"`.
+        reason: String,
+        /// The refusal text the caller received, so the event carries the same
+        /// words the agent saw.
+        message: String,
+    },
+    /// A team was adopted by a lead session that did not create it.
+    ///
+    /// Published by [`TeamManager::new`] only when the caller passed
+    /// `adopt: true` and the on-disk `lead_session_id` named a different
+    /// session (FR-023, FR-024). One event is published per adoption, listing
+    /// every task the adoption reset to `Pending` so an operator can see what
+    /// the takeover moved rather than discovering it in `tasks.json`.
+    ///
+    /// [`TeamManager::new`]: https://docs.rs/ragent-agent
+    TeamAdopted {
+        /// Session ID of the adopting lead.
+        session_id: String,
+        /// Name of the adopted team.
+        team_name: String,
+        /// Session ID recorded in the team's config before the adoption.
+        previous_lead_session_id: String,
+        /// IDs of the tasks the adoption reset from `InProgress` to `Pending`.
+        reset_task_ids: Vec<String>,
     },
     /// A team was cleaned up (all resources removed).
     TeamCleanedUp {
@@ -1220,13 +1324,17 @@ impl Event {
             Self::BackgroundTaskUpdated { .. } => "BackgroundTaskUpdated",
             Self::BackgroundTaskCompleted { .. } => "BackgroundTaskCompleted",
             Self::TeammateSpawned { .. } => "TeammateSpawned",
+            Self::TeammateStopped { .. } => "TeammateStopped",
             Self::TeammateMessage { .. } => "TeammateMessage",
             Self::TeammateIdle { .. } => "TeammateIdle",
             Self::TeammateFailed { .. } => "TeammateFailed",
             Self::TeammateSuspended { .. } => "TeammateSuspended",
             Self::TeammateResumed { .. } => "TeammateResumed",
+            Self::TeammateStatusChanged { .. } => "TeammateStatusChanged",
             Self::TeamTaskClaimed { .. } => "TeamTaskClaimed",
             Self::TeamTaskCompleted { .. } => "TeamTaskCompleted",
+            Self::TeamTaskCompletionRejected { .. } => "TeamTaskCompletionRejected",
+            Self::TeamAdopted { .. } => "TeamAdopted",
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
@@ -1301,13 +1409,17 @@ impl Event {
             | Self::BackgroundTaskUpdated { session_id, .. }
             | Self::BackgroundTaskCompleted { session_id, .. }
             | Self::TeammateSpawned { session_id, .. }
+            | Self::TeammateStopped { session_id, .. }
             | Self::TeammateMessage { session_id, .. }
             | Self::TeammateIdle { session_id, .. }
             | Self::TeammateFailed { session_id, .. }
             | Self::TeammateSuspended { session_id, .. }
             | Self::TeammateResumed { session_id, .. }
+            | Self::TeammateStatusChanged { session_id, .. }
             | Self::TeamTaskClaimed { session_id, .. }
             | Self::TeamTaskCompleted { session_id, .. }
+            | Self::TeamTaskCompletionRejected { session_id, .. }
+            | Self::TeamAdopted { session_id, .. }
             | Self::TeamCleanedUp { session_id, .. }
             | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }

@@ -470,11 +470,39 @@ fn test_subagent_start() {
         agent: "explore".into(),
         task: "find usages".into(),
         background: true,
+        detached: false,
     });
     assert_eq!(name, "subagent_start");
     assert_eq!(v["task_id"], "t1");
     assert_eq!(v["child_session_id"], "child-s1");
     assert_eq!(v["background"], true);
+    assert_eq!(
+        v["detached"], false,
+        "FR-020: the execution contract travels with the event"
+    );
+}
+
+/// A detached spawn is distinguishable from an awaited background one in the
+/// SSE payload (FR-020).
+///
+/// Both set `background`, so a payload that dropped `detached` would make the
+/// two indistinguishable to a remote consumer.
+#[test]
+fn test_subagent_start_carries_the_detached_flag() {
+    let (_, v) = parse_data(&Event::SubagentStart {
+        session_id: "s1".into(),
+        task_id: "t1".into(),
+        child_session_id: "child-s1".into(),
+        agent: "explore".into(),
+        task: "fire and forget".into(),
+        background: true,
+        detached: true,
+    });
+    assert_eq!(v["background"], true);
+    assert_eq!(
+        v["detached"], true,
+        "FR-020: a detached run announces itself as detached"
+    );
 }
 
 #[test]
@@ -517,6 +545,23 @@ fn test_teammate_spawned() {
     assert_eq!(v["team_name"], "code-review");
     assert_eq!(v["teammate_name"], "reviewer");
     assert_eq!(v["agent_id"], "tm-001");
+}
+
+#[test]
+fn test_teammate_stopped() {
+    // Spec `teamssetup` FR-017: the terminal status, published by the runtime's
+    // status writer, so a remote consumer sees the stop and its reason.
+    let (name, v) = parse_data(&Event::TeammateStopped {
+        session_id: "s1".into(),
+        team_name: "code-review".into(),
+        agent_id: "tm-001".into(),
+        cause: "shutdown_acked".into(),
+    });
+    assert_eq!(name, "teammate_stopped");
+    assert_eq!(v["team_name"], "code-review");
+    assert_eq!(v["agent_id"], "tm-001");
+    assert_eq!(v["cause"], "shutdown_acked");
+    assert_eq!(v["to"], "stopped");
 }
 
 #[test]
@@ -568,6 +613,31 @@ fn test_team_task_completed() {
     });
     assert_eq!(name, "team_task_completed");
     assert_eq!(v["task_id"], "task-001");
+}
+
+/// FR-044: a refused completion reaches the SSE stream with the facts an
+/// operator needs to see *who* tried to close work they did not own.
+#[test]
+fn test_team_task_completion_rejected() {
+    let (name, v) = parse_data(&Event::TeamTaskCompletionRejected {
+        session_id: "s1".into(),
+        team_name: "code-review".into(),
+        agent_id: "tm-001".into(),
+        task_id: "task-001".into(),
+        owner: "tm-002".into(),
+        reason: "not_owner".into(),
+        message: "task 'task-001' is assigned to tm-002, not tm-001".into(),
+    });
+    assert_eq!(name, "team_task_completion_rejected");
+    assert_eq!(v["team_name"], "code-review");
+    assert_eq!(v["agent_id"], "tm-001");
+    assert_eq!(v["task_id"], "task-001");
+    assert_eq!(v["owner"], "tm-002");
+    assert_eq!(v["reason"], "not_owner");
+    assert_eq!(
+        v["message"],
+        "task 'task-001' is assigned to tm-002, not tm-001"
+    );
 }
 
 #[test]

@@ -73,8 +73,17 @@ fn test_validate_hook_command_rejects_shell_metacharacters() {
 
 #[tokio::test]
 async fn test_run_hook_refuses_metacharacter_command() {
-    let outcome = run_hook("true; echo pwned", &[], None).await;
+    let dir = temp_team_dir("metachar");
+    let outcome = run_hook(
+        &dir,
+        ragent_agent::team::HookEvent::TaskCompleted,
+        "true; echo pwned",
+        &[],
+        None,
+    )
+    .await;
     assert_eq!(outcome, HookOutcome::Allow);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -83,8 +92,17 @@ async fn test_run_hook_times_out_and_is_bounded() {
     // spawn; the hard timeout is what terminates it. The assertion is that the
     // timeout is enforced rather than the process being waited on forever.
     let started = std::time::Instant::now();
-    let outcome = run_hook("sleep", &["300".to_string()], None).await;
+    let dir = temp_team_dir("timeout");
+    let outcome = run_hook(
+        &dir,
+        ragent_agent::team::HookEvent::TaskCompleted,
+        "sleep",
+        &["300".to_string()],
+        None,
+    )
+    .await;
     assert_eq!(outcome, HookOutcome::Allow);
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(
         started.elapsed() < HOOK_TIMEOUT + std::time::Duration::from_secs(5),
         "hook did not respect its timeout"

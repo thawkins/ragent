@@ -63,8 +63,51 @@ pub mod glyphs {
     pub const STATUS_SUSPENDED: &str = " [||]";
     /// Suffix painted after a terminating row's label (FR-014).
     pub const STATUS_TERMINATING: &str = " ...";
+    /// Suffix painted after a row whose per-call time bound expired (FR-017).
+    ///
+    /// A bound expiry is a terminal outcome of its own, not a failure, so the
+    /// row must not read as a plain error: the suffix names the cause.
+    pub const STATUS_TIMED_OUT: &str = " [timeout]";
+    /// Suffix painted after a live row held by one or more in-flight
+    /// `wait_agents` callers (FR-012).
+    ///
+    /// The count is appended after this stem and closed with a `]` (rendering
+    /// `[w2]`), because two waiters is a different situation from one and the
+    /// number decides whether another wait adds value. Kept ASCII for the same
+    /// byte-per-cell reason as [`ROW_DOT`].
+    pub const STATUS_WAITERS: &str = " [w";
     /// Heading that opens the background shell section (FR-016).
     pub const BG_HEADING: &str = " Background shell tasks ";
+    /// Heading that opens the completed-history section (FR-021).
+    pub const HISTORY_HEADING: &str = " Completed (newest first) ";
+    /// Marker painted on a history row whose report has no durable copy
+    /// (FR-032).
+    ///
+    /// A one-word flag so the condition is visible in the fixed columns even
+    /// when the explanatory note is scrolled out of the row's visible width;
+    /// ASCII for the same byte-per-cell reason as [`ROW_DOT`].
+    pub const REPORT_IN_MEMORY: &str = "[memory]";
+    /// Type-column label for a row that blocks its caller (FR-020).
+    pub const CONTRACT_FOREGROUND: &str = "fg";
+    /// Type-column label for an awaited background row (FR-020).
+    pub const CONTRACT_BACKGROUND: &str = "bg";
+    /// Type-column label for a fire-and-forget background row (FR-020).
+    ///
+    /// `detached` is deliberately narrower than the column so it can never
+    /// push the elapsed-time column, and it is spelled out rather than
+    /// abbreviated (`dt`) because it is the one contract a reader cannot
+    /// infer from the row's behaviour.
+    pub const CONTRACT_DETACHED: &str = "detached";
+    /// Hint painted beneath the primary row when no sub-agent, background-shell
+    /// task or completed-history row exists (spec `agentui` FR-026).
+    ///
+    /// The panel always opens - the operator asked to see it - so an empty
+    /// table says what would fill it and how to start one rather than leaving a
+    /// lone primary row that reads as a rendering fault. It mirrors the Teams
+    /// window's empty state, and is ASCII for the same byte-per-cell reason as
+    /// [`ROW_DOT`].
+    pub const EMPTY_HINT: &str =
+        "(no sub-agents yet - start one with /spawn or a background command)";
 }
 
 /// Column layout of the Agents table (FR-009 through FR-016).
@@ -84,9 +127,17 @@ pub mod columns {
     pub const GAP_W: usize = 1;
     /// Width of the agent label column, badges and status suffix included
     /// (FR-012, FR-013).
-    pub const LABEL_W: usize = 32;
-    /// Width of the `primary` / `bg` / `fg` type column (FR-012).
-    pub const TYPE_W: usize = 8;
+    ///
+    /// One column narrower than the 32-column budget the label itself is
+    /// allowed, so the type column can hold the widest contract (`detached`)
+    /// plus its separating column without moving the pinned controls.
+    pub const LABEL_W: usize = 31;
+    /// Width of the type column, which paints the row's execution contract
+    /// (`fg` / `bg` / `detached`) (FR-012, FR-020).
+    ///
+    /// Sized for the widest contract (`detached`, eight columns) plus the
+    /// separating column, so no contract can push the elapsed-time column.
+    pub const TYPE_W: usize = 9;
     /// Width of the right-aligned elapsed-time column (FR-012, FR-016).
     pub const ELAPSED_W: usize = 8;
     /// Width of the right-aligned step-count column (FR-012).
@@ -233,6 +284,11 @@ fn status_presentation(status: &TaskStatus) -> (Color, Color, &'static str) {
         TaskStatus::Completed => (Color::Cyan, Color::Cyan, ""),
         TaskStatus::Failed => (Color::Red, Color::Red, ""),
         TaskStatus::Cancelled => (Color::DarkGray, Color::DarkGray, ""),
+        // A per-call bound expiry is not a failure of the agent's work: it is
+        // the caller's budget being reached (FR-017). Painted in the warning
+        // colour with a suffix that names the cause, so it is never mistaken
+        // for a provider error.
+        TaskStatus::TimedOut => (Color::Yellow, Color::Yellow, glyphs::STATUS_TIMED_OUT),
     }
 }
 
@@ -304,6 +360,38 @@ fn agent_label(
     let budget = columns::LABEL_W.saturating_sub(used).saturating_sub(1);
     let name = fit_chars(&task.id, budget);
     format!("{prefix}{name}{suffix}")
+}
+
+/// The execution contract a sub-agent row paints in the type column (FR-020).
+///
+/// Derived from the row's own registry entry - never from a hard-coded
+/// default - because the three contracts are not recoverable from appearance:
+/// a detached run sets `background` too, so reading `background` alone would
+/// paint it as an ordinary awaited background task. Detached is therefore
+/// tested first.
+fn execution_contract_label(task: &TaskEntry) -> &'static str {
+    if task.detached {
+        glyphs::CONTRACT_DETACHED
+    } else if task.background {
+        glyphs::CONTRACT_BACKGROUND
+    } else {
+        glyphs::CONTRACT_FOREGROUND
+    }
+}
+
+/// The waiter marker a live task row appends to its label (FR-012), or `None`
+/// when no caller is waiting on it.
+///
+/// `waiter_count` is the registry's tally of in-flight `wait_agents` callers.
+/// It is painted only when greater than zero - a row nobody awaits must not
+/// carry a `[w0]` that reads as a defect - and only for a row that has not
+/// finished, because a finished task's count is the residue of a wait that
+/// ended with the task rather than a queue of callers.
+fn waiter_suffix(task: &TaskEntry) -> Option<String> {
+    if task.waiter_count == 0 || task.completed_at.is_some() {
+        return None;
+    }
+    Some(format!("{}{}]", glyphs::STATUS_WAITERS, task.waiter_count))
 }
 
 /// Build the trailing `[stop]` / `[x]` control spans for a task row.
@@ -444,15 +532,22 @@ fn build_task_rows<'a>(
     for (idx, task) in children.iter().enumerate() {
         let is_last = idx + 1 == children.len();
         let (dot_color, row_color, status_suffix) = status_presentation(&task.status);
+        // FR-012: a live row held by one or more in-flight `wait_agents`
+        // callers names how many, appended after the status suffix so both
+        // facts stay readable and neither can be dropped by truncation.
+        let suffix = match waiter_suffix(task) {
+            Some(waiters) => format!("{status_suffix}{waiters}"),
+            None => status_suffix.to_string(),
+        };
         let label = agent_label(
             task,
             last_stack,
             is_last,
             custom_names,
             teammate_ids,
-            status_suffix,
+            &suffix,
         );
-        let type_label = if task.background { "bg" } else { "fg" };
+        let type_label = execution_contract_label(task);
         let steps = event_bus
             .current_tool_calls(&task.child_session_id)
             .to_string();
@@ -562,6 +657,19 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     )));
     row_keys.push("primary".to_string());
 
+    // -- empty state (FR-026) ----------------------------------------------
+    // Nothing but the primary row would be painted, so the table says what it
+    // is waiting for: an otherwise bare modal reads as a rendering fault.
+    if !app.agents_window_available() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {}", glyphs::EMPTY_HINT),
+            Style::default()
+                .fg(colors::HINT)
+                .add_modifier(Modifier::DIM),
+        )]));
+        row_keys.push(String::new());
+    }
+
     // -- sub-agents (FR-011 through FR-015) --------------------------------
     let subagent_row_start = row_keys.len();
     build_task_rows(
@@ -618,6 +726,59 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             // background-shell cancel glyph keeps its meaning (FR-016).
             if task.status == "running" {
                 spans.extend(control_spans(true, false));
+            }
+            lines.push(Line::from(spans));
+            row_keys.push(String::new());
+        }
+    }
+
+    // -- completed history (FR-021, FR-036) --------------------------------
+    if !app.agents_history.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            glyphs::HISTORY_HEADING,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::DIM),
+        )]));
+        row_keys.push(String::new());
+        // The deque is already newest-first and capped at
+        // `agents_history_cap` when it is written (FR-036, NFR-004), so the
+        // renderer only has to paint it.
+        for row in &app.agents_history {
+            let (dot_color, row_color, _) = status_presentation(&row.status);
+            let contract = if row.detached {
+                glyphs::CONTRACT_DETACHED
+            } else if row.background {
+                glyphs::CONTRACT_BACKGROUND
+            } else {
+                glyphs::CONTRACT_FOREGROUND
+            };
+            let label = format!("{} [{}]", row.agent_name, row.status.as_str());
+            let mut spans = fixed_spans(
+                glyphs::ROW_DOT,
+                RowStyle {
+                    marker: dot_color,
+                    row: row_color,
+                    bold_label: false,
+                },
+                &short_id(&row.id),
+                &fit_chars(&label, columns::LABEL_W.saturating_sub(1)),
+                contract,
+                &ragent_types::strutil::format_duration_compact(row.duration_secs() as i64),
+                "-",
+            );
+            // FR-032: a finished task whose report was never persisted says so
+            // instead of leaving the report column blank, which a reader would
+            // take to mean "no report file needed".
+            if let Some(note) = row.durable_copy_absence() {
+                spans.push(Span::styled(
+                    format!("{} ", glyphs::REPORT_IN_MEMORY),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(note, Style::default().fg(Color::Yellow)));
             }
             lines.push(Line::from(spans));
             row_keys.push(String::new());

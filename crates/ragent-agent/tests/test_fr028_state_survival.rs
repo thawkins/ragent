@@ -8,7 +8,7 @@
 //! | # | Case | Clause it pins |
 //! |---|---|---|
 //! | 1 | `test_every_renamed_tool_keeps_the_permission_category_it_had_before_the_rename` | each of the 13 renamed tools still reports the category it reported pre-rename |
-//! | 2 | `test_the_permission_category_vocabulary_is_unchanged` | the 32 distinct categories, including the two that collide with a retired tool name |
+//! | 2 | `test_the_permission_category_vocabulary_is_unchanged` | the 33 distinct categories, including the two that collide with a retired tool name |
 //! | 3 | `test_a_hook_matcher_naming_only_a_retired_spelling_is_reported_once` | the load-time report, and its once-per-entry-per-process shape |
 //! | 4 | `test_a_hook_matcher_naming_the_adopted_spelling_or_no_matcher_is_silent` | the report is not noise for a correct matcher |
 //! | 5 | `test_a_guard_matcher_contributes_its_bare_tool_name` | `bash(git commit:*)` reports, `Bash(git commit:*)` does not |
@@ -88,15 +88,22 @@ const CATEGORY_AFTER_RENAME: [(&str, &str); 13] = [
     ("Write", "file:write"),
 ];
 
-/// The 32 distinct `permission_category()` values across the 148 tools.
+/// The distinct `permission_category()` values across the registry.
 ///
 /// Recorded in `specs/uniformtools/T-041-BASELINE.md` section 4 ("32 distinct
 /// `permission_category()` values across the 148, collapsing to the 21
 /// families"). A rename adds, removes and re-spells nothing here - which is why
 /// `ask_user` and `bash:execute` are still present even though the *tools* that
 /// report them are now called `AskUserQuestion` and `Bash`.
-const CATEGORY_VOCABULARY: [&str; 32] = [
+///
+/// **Grown once by `specs/agentssetup` T-004 (FR-005)**: the sub-agent family
+/// gained `agent:read` - `list_agents` moved off `none` - which takes the
+/// vocabulary from 32 to 33 distinct categories while leaving the 21 families
+/// untouched (`agent` already existed). The rename's own entries are unchanged,
+/// which case 1 still pins pair by pair.
+const CATEGORY_VOCABULARY: [&str; 33] = [
     "agent:control",
+    "agent:read",
     "agent:spawn",
     "ask_user",
     "bash:execute",

@@ -533,6 +533,7 @@ impl App {
             waiter_count: 0,
             output_file: None,
             report_status: ragent_agent::task::ReportStatus::default(),
+            time_bound_secs: None,
         };
         self.active_tasks.push(entry);
 

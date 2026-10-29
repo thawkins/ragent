@@ -276,18 +276,55 @@ Note: When using blueprints, teammates are spawned automatically — do NOT re-s
 ### 6.5 Claim and complete tasks (teammate sessions)
 
 - Claim next available task: `team_task_claim`
-- Complete claimed task: `team_task_complete`
+- Complete claimed task: `team_task_complete` — accepted only from the task's
+  assigned agent or the lead. A refusal does not hand the task over; it reports
+  `rejection_reason` (`not_owner`, `not_claimed`, `already_completed`) plus the
+  current owner, and leaves the task list untouched.
+- Lead withdraws work: `team_task_cancel` (lead-only). Only `pending` and
+  `in_progress` tasks are cancellable; the owner is notified through its
+  mailbox; the task stays in the list with status `cancelled` rather than being
+  deleted, so the team records that the work was dropped rather than done.
 
 ### 6.6 Check status and communicate
 
-- `team_status` — Full team report with member states and task summary
+- `team_status` — Full team report: member states, task summary, each member's
+  last five status transitions (from `status-history.jsonl`), `Undelivered
+  messages` stranded in a terminated teammate's mailbox, `Plans awaiting a
+  verdict`, and `Hook failures` for quality gates that could not run
 - `team_task_list` — List all tasks with status
 - `team_message` — Send direct message to a teammate
 - `team_read_messages` — Read inbox messages
 - `team_broadcast` — Send message to all teammates
 - `team_assign_task` — Lead assigns a specific task to a teammate
 - `team_idle` — Teammate signals it has no more work
-- `team_cleanup` — Lead tears the team down after all teammates have stopped
+- `team_cleanup` — Lead tears the team down after all teammates have stopped.
+  Refused while any member is live or shutting down; parked (`idle`,
+  `plan_pending`, `blocked`, `suspended`) and terminal members never block.
+  `force: true` is the only override, and `/team cleanup` and `/team delete`
+  share the same guard.
+
+### 6.6.1 State machines the runtime enforces
+
+Three rules are enforced rather than merely documented, and each refusal is
+visible in the tool result and the event stream:
+
+- **One member-status writer.** `TeamManager::set_member_status` validates the
+  move against the transition table, applies the destination status's side
+  effects, persists the roster once, appends one record to
+  `status-history.jsonl`, and publishes exactly one `TeammateStatusChanged`.
+  `MemberStatus::is_terminal` / `is_parked` / `is_live` are the predicates every
+  guard uses, so time a parked member spends waiting is never evidence of a
+  wedge.
+- **One task-status transition table.** `TaskStatus::can_transition_to` and
+  `transition_task` are the single writer of `Task::status`, so the claim and
+  completion paths cannot disagree about which moves are possible. Every
+  `tasks.json` write runs `TaskList::validate()` first and refuses a duplicate
+  id, a dangling `depends_on` edge, or a dependency cycle, naming the offending
+  task and chain.
+- **Hook failures are recorded.** A quality-gate hook that cannot run (invalid
+  command, spawn failure, 30-second timeout) appends a record to
+  `hook-failures.jsonl` and its count surfaces in `team_status`, so an inert
+  hook is never mistaken for one that ran and approved.
 
 ### 6.7 Plan approval (optional)
 

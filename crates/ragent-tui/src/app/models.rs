@@ -1,5 +1,4 @@
 //! Model selection, thinking-level, and provider management for the TUI.
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use ragent_agent::team::TeamManager;
@@ -1103,7 +1102,9 @@ impl App {
             self.event_bus.clone(),
         );
         manager.active_model = active_model;
-        let manager = Arc::new(manager);
+        // FR-008: the spawn loop records member status through the manager
+        // itself, so it needs the `Arc` this manager lives in.
+        let manager = manager.into_arc();
 
         if self
             .session_processor

@@ -216,6 +216,7 @@ fn test_live_agents_panel_requests_periodic_redraw() {
         waiter_count: 0,
         output_file: None,
         report_status: ragent_agent::task::ReportStatus::default(),
+        time_bound_secs: None,
     });
     assert!(app.needs_periodic_redraw());
     assert!(ragent_tui::should_render(&app, past_idle_interval()));

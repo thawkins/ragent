@@ -436,6 +436,7 @@ async fn spawn_agent_run(
             prompt,
             None, // no model override - use the configured default
             working_dir,
+            None, // no per-call bound - the configured stall timeout applies
         )
         .await
 }

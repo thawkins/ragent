@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
-use crate::team::{MemberStatus, TeamStatus, TeamStore, find_team_dir};
+use crate::team::{TeamStatus, TeamStore, find_team_dir};
 
 /// Tears down a team's on-disk resources.
 pub struct TeamCleanupTool;
@@ -18,9 +18,17 @@ impl Tool for TeamCleanupTool {
 
     fn description(&self) -> &'static str {
         "Tear down a team and remove its on-disk resources. Lead-only. Fails if any \
-             teammates are still active (not Stopped) unless force is true; use \
-             team_shutdown_teammate on each active member first. REQUIRED parameter: \
-             'team_name' (string). Optional: 'force' (boolean, default false). Common \
+             teammates are still live or shutting down (spawning, working, or \
+             shutting_down) unless force is true; idle, plan_pending, blocked, \
+             suspended, stopped and failed members do not block. Use \
+             team_shutdown_teammate on each live member first. REQUIRED parameter: \
+             'team_name' (string). Optional: 'force' (boolean, default false). The \
+             refusal names every blocking member with its status, and `force: true` is \
+             the only way past it. A blocked member is parked, not live, so it never \
+             blocks a teardown - resume it with a `Blocked`-aware resume or shut it down \
+             if you want it to stop. The guard is shared with `/team cleanup` and \
+             `/team delete`, so all three surfaces refuse the same rosters with the same \
+             words. Common \
              gotcha: cleanup is permanent and deletes the team's directory; make sure \
              all results have been extracted before calling it."
     }
@@ -35,7 +43,7 @@ impl Tool for TeamCleanupTool {
                 },
                 "force": {
                     "type": "boolean",
-                    "description": "If true, remove even if teammates are still active. Default: false"
+                    "description": "If true, remove even if teammates are still live or shutting down. Default: false"
                 }
             },
             "required": ["team_name"],
@@ -62,23 +70,24 @@ impl Tool for TeamCleanupTool {
 
         // Load config to check for active teammates.
         let store = TeamStore::load(&team_dir)?;
-        let active: Vec<_> = store
-            .config
-            .members
-            .iter()
-            .filter(|m| m.status != MemberStatus::Stopped)
-            .map(|m| m.name.clone())
-            .collect();
+        // teamssetup FR-022: the teardown guard is shared with `/team cleanup`
+        // and `/team delete` through `cleanup_refusal`, so the three surfaces
+        // cannot disagree. The pre-fix rule here was `status != Stopped`, which
+        // refused a teardown while a member was merely `Idle` or `Suspended` -
+        // parked states with nothing in flight.
+        let refusal = crate::team::cleanup_refusal(
+            team_name,
+            store
+                .config
+                .members
+                .iter()
+                .map(|m| (m.name.as_str(), m.status)),
+        );
 
-        if !active.is_empty() && !force {
-            return Err(anyhow::anyhow!(
-                "Cannot clean up team '{}': {} teammate(s) are still active: {}.\n\
-                 Use team_shutdown_teammate on each, or pass force: true to override.",
-                team_name,
-                active.len(),
-                active.join(", ")
-            ));
+        if let Some(refusal) = refusal.filter(|_| !force) {
+            return Err(anyhow::anyhow!(refusal));
         }
+        let member_count = store.config.members.len();
 
         // Mark team as disbanded in config before deleting (best-effort).
         let lead_sid = {
@@ -104,7 +113,7 @@ impl Tool for TeamCleanupTool {
                 "team_name": team_name,
                 "status": "disbanded",
                 "forced": force,
-                "member_count": active.len()
+                "member_count": member_count
             })),
         })
     }
