@@ -1526,7 +1526,7 @@ fn router_setup_panel_renders_model_metadata_and_cost() {
         "SIMPLE".to_string(),
         ragent_llm::providers::router_config::TierConfig {
             models: vec![ragent_llm::providers::router_config::TierEntry {
-                provider: "gemini".to_string(),
+                provider_id: "gemini".to_string(),
                 model: "gemini-2.5-pro-preview-05-06".to_string(),
             }],
             timeout_ms: None,

@@ -54,14 +54,19 @@ pub fn step(
 
 /// Truncate `text` to at most `max` characters for a report.
 ///
-/// A single char-iteration: `char_indices().nth(max)` is `Some` only when the
-/// text is longer than `max`, so no separate length pass is needed.
+/// Delegates to [`ragent_types::strutil::truncate_chars_no_ellipsis`] and adds
+/// the marker itself: this helper's contract keeps `max` characters and puts
+/// the `...` *after* them, so the budget does not include the marker (unlike
+/// [`ragent_types::strutil::truncate_chars`], which reserves three of it).
 #[must_use]
 pub fn truncate(text: &str, max: usize) -> String {
-    match text.char_indices().nth(max) {
-        Some((idx, _)) => format!("{}...", &text[..idx]),
-        None => text.to_string(),
+    if text.chars().count() <= max {
+        return text.to_string();
     }
+    format!(
+        "{}...",
+        ragent_types::strutil::truncate_chars_no_ellipsis(text, max)
+    )
 }
 
 /// Generate schema-valid sample arguments for a JSON-schema tool declaration.

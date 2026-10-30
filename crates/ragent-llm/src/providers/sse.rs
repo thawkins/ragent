@@ -191,21 +191,17 @@ pub(crate) fn parse_openai_sse_stream(
                 }
             };
 
-            super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
             // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a peer
             // dribbles bytes without ever emitting a newline instead of letting
             // the accumulation buffer grow without bound.
-            if super::http_client::sse_buffer_exceeded(&buffer) {
-                tracing::warn!(
-                    limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                    "SSE accumulation buffer exceeded the cap; aborting the stream"
-                );
+            if let Err(e) = super::http_client::append_chunk_guarded(
+                &mut buffer,
+                &mut pending_utf8,
+                &chunk,
+                spec.provider_label.as_str(),
+            ) {
                 yield StreamEvent::Error {
-                    message: format!(
-                        "SSE buffer exceeded {} bytes without a complete frame",
-                        super::http_client::MAX_SSE_BUFFER_BYTES
-                    ),
+                    message: e.to_string(),
                 };
                 return;
             }

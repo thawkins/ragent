@@ -243,7 +243,7 @@ async fn limit_report_counts_running_and_suspended_background_tasks() {
 
     let empty = mgr.limit_report().await;
     assert_eq!((empty.limit, empty.occupancy, empty.headroom), (2, 0, 2));
-    assert!(empty.occupying_ids.is_empty());
+    assert_eq!(empty.occupying_ids, Vec::<String>::new());
 
     mgr.seed_completed_for_test(entry_full("bg-run", TaskStatus::Running, "p", true, false))
         .await;

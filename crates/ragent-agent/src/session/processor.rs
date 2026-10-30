@@ -1256,8 +1256,10 @@ impl SessionProcessor {
         run_start: Option<Instant>,
         working_dir: Option<&std::path::Path>,
     ) {
+        // The single log site is `terminate_loop_with`: it emits the reason as
+        // part of its own info line, so logging it again here would report one
+        // failure twice at two levels.
         let reason = format!("unrecoverable error: {err:#}");
-        tracing::error!(session_id = %session_id, reason, "fatal loop error detail");
         self.terminate_loop_with(
             session_id,
             crate::session::loop_state::StopCondition::UnrecoverableError,
@@ -2327,15 +2329,18 @@ impl SessionProcessor {
             }
 
             if cancel_flag.load(Ordering::Relaxed) {
-                warn!("Agent loop cancelled by user at step {}", step);
+                // One cancellation is one event: the warn carries the step and
+                // the timing breakdown rather than emitting a second info line
+                // for the same cancellation.
                 let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
                 let other_ms = total_elapsed_ms.saturating_sub(cumulative_model_wait_ms);
-                tracing::info!(
+                warn!(
                     session_id = %session_id,
+                    step,
                     total_ms = total_elapsed_ms,
                     model_wait_ms = cumulative_model_wait_ms,
                     other_ms = other_ms,
-                    "Agent loop cancelled - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
+                    "Agent loop cancelled by user - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
                     total_elapsed_ms,
                     cumulative_model_wait_ms,
                     other_ms
@@ -2419,16 +2424,18 @@ impl SessionProcessor {
                     context_window,
                     0,
                 );
-                tracing::debug!(
-                    session_id,
-                    effective_tokens = decision.effective_tokens,
-                    threshold = decision.threshold,
-                    context_window,
-                    estimated_tokens = decision.estimated_tokens,
-                    last_reported_input_tokens,
-                    should_compact = decision.should_compact,
-                    "pre-send compaction trigger evaluation"
-                );
+                // One condensed line per turn: `should_compact` plus the
+                // numbers that explain it. The full decision struct was
+                // logged here on every step, which is noise at `debug` level.
+                if decision.should_compact {
+                    tracing::debug!(
+                        session_id,
+                        effective_tokens = decision.effective_tokens,
+                        threshold = decision.threshold,
+                        context_window,
+                        "pre-send compaction trigger fired"
+                    );
+                }
                 if decision.should_compact {
                     // Convert the provider-facing chat messages into the
                     // internal `Message` form the compaction runner expects,

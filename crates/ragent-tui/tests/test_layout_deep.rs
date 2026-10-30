@@ -466,7 +466,7 @@ fn setup_router_with_models_both_pane_focus_and_error() {
         "SIMPLE".to_string(),
         ragent_llm::providers::router_config::TierConfig {
             models: vec![ragent_llm::providers::router_config::TierEntry {
-                provider: "anthropic".to_string(),
+                provider_id: "anthropic".to_string(),
                 model: "claude-sonnet-4-20250514".to_string(),
             }],
             timeout_ms: None,

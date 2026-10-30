@@ -548,23 +548,6 @@ fn test_teammate_spawned() {
 }
 
 #[test]
-fn test_teammate_stopped() {
-    // Spec `teamssetup` FR-017: the terminal status, published by the runtime's
-    // status writer, so a remote consumer sees the stop and its reason.
-    let (name, v) = parse_data(&Event::TeammateStopped {
-        session_id: "s1".into(),
-        team_name: "code-review".into(),
-        agent_id: "tm-001".into(),
-        cause: "shutdown_acked".into(),
-    });
-    assert_eq!(name, "teammate_stopped");
-    assert_eq!(v["team_name"], "code-review");
-    assert_eq!(v["agent_id"], "tm-001");
-    assert_eq!(v["cause"], "shutdown_acked");
-    assert_eq!(v["to"], "stopped");
-}
-
-#[test]
 fn test_teammate_message() {
     let (name, v) = parse_data(&Event::TeammateMessage {
         session_id: "s1".into(),

@@ -2357,22 +2357,25 @@ impl Config {
         // does not match the `ragent.json.*` backup pattern) but never a
         // partial backup.
         let tmp_path = saves_dir.join(format!("{backup_name}.tmp"));
-        std::fs::write(&tmp_path, &content).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to write backup temp file '{}': {}",
-                tmp_path.display(),
-                e
-            )
-        })?;
-        std::fs::rename(&tmp_path, &backup_path).map_err(|e| {
-            // Best-effort cleanup of the orphaned temp file on rename failure.
+        // SEC-022: a backup is a byte-for-byte copy of the credential-bearing
+        // config, so it must be created owner-only (`0o600`) rather than at the
+        // process umask; the rename carries the mode to the backup itself.
+        let write_result = (|| -> std::io::Result<()> {
+            use std::io::Write as _;
+            let mut file = ragent_types::guard::open_owner_only(&tmp_path)?;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+            std::fs::rename(&tmp_path, &backup_path)
+        })();
+        if let Err(e) = write_result {
+            // Best-effort cleanup of the orphaned temp file on failure.
             let _ = std::fs::remove_file(&tmp_path); // INTENTIONAL: best-effort temp cleanup
-            anyhow::anyhow!(
-                "Failed to rename temp file to backup '{}': {}",
+            return Err(anyhow::anyhow!(
+                "Failed to write backup '{}': {}",
                 backup_path.display(),
                 e
-            )
-        })?;
+            ));
+        }
 
         Ok(backup_path)
     }
@@ -3237,14 +3240,21 @@ impl Config {
             base.edit_log = overlay.edit_log;
         }
 
-        // Activity-log: overlay takes precedence (last-wins, same semantics
-        // as `compaction` above). This cannot use the OR semantics of
-        // `yolo`/`edit_log` because `/alog off` must be respected - once any
-        // config disables logging, a higher-precedence config that re-enables
-        // it should win, and vice-versa. Without this line the merged value
-        // always stayed at the derived-`Default` of `false`, so the status bar
-        // showed "off" at startup regardless of the configured state.
-        base.activity_log = overlay.activity_log;
+        // Activity-log: the overlay wins only when it actually says so.
+        //
+        // `activity_log` defaults to `true`, so a plain `base.activity_log =
+        // overlay.activity_log` cannot distinguish "the overlay file wrote
+        // true" from "the overlay file omitted the key and serde filled in the
+        // default". The second case silently re-enabled logging for every
+        // project that had a `.ragent/ragent.json` without the key: `/alog off`
+        // was written to the user-global file, then `merge_project` overwrote it
+        // with the project file's *defaulted* `true` at the next load, so the
+        // toggle appeared not to persist. The overlay therefore takes precedence
+        // only when it explicitly set the key (`false` always wins, which is what
+        // makes `/alog off` stick); an omitted key leaves the lower layer alone.
+        if !overlay.activity_log {
+            base.activity_log = false;
+        }
 
         // SDD flags: OR semantics - a flag enabled in either base or overlay
         // stays enabled. All flags default to false (opt-in, FR-019).

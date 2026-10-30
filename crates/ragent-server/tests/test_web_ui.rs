@@ -1,14 +1,22 @@
 //! Tests for the web UI static file serving and integration.
 
-// Note: Full integration tests with AppState require extensive mocking.
-// These tests verify the static file serving routes are properly configured.
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use ragent_server::routes::router;
+use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_health_endpoint_route_exists() {
-    // This test verifies the /health route is registered
-    // Full testing requires a complete AppState which is complex to construct
-    // The route is tested in the main application via the TUI integration
-    let _ = ragent_server::routes::router as fn(ragent_server::routes::AppState) -> _;
+    // `GET /health` is registered on the real router and answers without auth.
+    // Driving it through `oneshot` proves the route exists and is wired to a
+    // handler, rather than merely that the router factory type-checks.
+    let app = router(crate::support::test_state("secret"));
+    let req = Request::builder()
+        .uri("/health")
+        .body(Body::empty())
+        .expect("build request");
+    let resp = app.oneshot(req).await.expect("route /health");
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -54,9 +62,17 @@ async fn test_index_html_content() {
 
 #[tokio::test]
 async fn test_serve_dir_feature_enabled() {
-    // Verify tower-http fs feature is enabled by checking ServeDir can be imported
-    // This is a compile-time check - if the feature wasn't enabled, compilation would fail
+    // `tower_http::services::ServeDir` is reachable, and a root that does not
+    // exist answers 404 rather than panicking, which is the behaviour the
+    // static-file fallback depends on.
     use tower_http::services::ServeDir;
-    let path = std::path::PathBuf::from("target/temp");
-    let _serve = ServeDir::new(path);
+    let missing = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/temp/no-such-static-root");
+    let service = ServeDir::new(missing);
+    let req = Request::builder()
+        .uri("/index.html")
+        .body(Body::empty())
+        .expect("build request");
+    let resp = service.oneshot(req).await.expect("ServeDir responds");
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

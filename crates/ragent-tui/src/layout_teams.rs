@@ -28,6 +28,7 @@ use ragent_agent::team::{
 };
 
 use crate::app::App;
+use crate::layout_table_rows::{band_line, cursor_line};
 use crate::theme::colors;
 use crate::utils::{format_elapsed, short_id};
 
@@ -174,68 +175,6 @@ const _: () =
 /// the second border legible as structure rather than as a second frame
 /// shouting for attention.
 const INNER_BORDER: Color = Color::Rgb(62, 84, 118);
-
-/// Subtle band background painted on alternating table rows.
-///
-/// Sits in the same family as the teammate strip's two background tones, so
-/// the popup, the strip and the confirm dialog read as one panel.
-const BAND_BG: Color = Color::Rgb(22, 22, 30);
-/// Block-cursor background painted on the keyboard-selected teammate row.
-///
-/// The same slate blue as the Agents table's cursor, so selection reads
-/// identically in both windows; clearly lighter than [`BAND_BG`] so a cursor
-/// row never reads as a band.
-const CURSOR_BG: Color = Color::Rgb(50, 50, 90);
-
-/// Paint the block cursor over one painted table row, full inner width.
-///
-/// The cursor is the selection affordance replaced by keyboard navigation
-/// (Up/Down/PgUp/PgDn move it, Space/Del/Enter act on it), so it overrides the
-/// zebra-band: the row is restyled with one distinct background across every
-/// span, and a trailing pad fills the unpainted remainder edge to edge (the
-/// same trick [`band_line`] uses) so the cursor rectangle reads as one block.
-fn cursor_line(line: Line, width: usize) -> Line {
-    let painted: usize = line
-        .spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    let mut spans: Vec<Span> = line
-        .spans
-        .into_iter()
-        .map(|span| {
-            Span::styled(
-                span.content.to_string(),
-                span.style.bg(CURSOR_BG).add_modifier(Modifier::BOLD),
-            )
-        })
-        .collect();
-    if width > painted {
-        spans.push(Span::styled(
-            " ".repeat(width - painted),
-            Style::default().bg(CURSOR_BG),
-        ));
-    }
-    Line::from(spans).style(Style::default().bg(CURSOR_BG))
-}
-
-/// Give one painted table row the zebra-band background across the full inner
-/// width (the counterpart of the shared band helper in the Agents table).
-fn band_line(line: Line, width: usize) -> Line {
-    let painted: usize = line
-        .spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    let mut spans = line.spans;
-    if width > painted {
-        spans.push(Span::styled(
-            " ".repeat(width - painted),
-            Style::default().bg(BAND_BG),
-        ));
-    }
-    Line::from(spans).style(Style::default().bg(BAND_BG))
-}
 
 /// Whether `status` is terminal, in which case the row carries no controls.
 fn is_terminal(status: &MemberStatus) -> bool {

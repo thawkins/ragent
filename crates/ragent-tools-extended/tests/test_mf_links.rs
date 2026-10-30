@@ -396,11 +396,24 @@ fn test_html_with_no_links_returns_empty_lists() {
 }
 
 #[test]
-fn test_malformed_html_does_not_panic() {
+fn test_malformed_html_extracts_what_it_can() {
     let html = r#"<article><a href="/p">Unclosed</body></html>"#;
     let links = classify(html, "https://example.com");
-    // Should not panic; may or may not extract the link.
-    let _ = links;
+    // An unclosed anchor must not abort the scan: the parser recovers and still
+    // surfaces the link it read before the malformed markup (or, when it cannot,
+    // reports the empty classification rather than panicking on a truncated tag).
+    assert!(
+        links.external.len() <= 1,
+        "a single malformed document must not fabricate links: {:?}",
+        links.external
+    );
+    if let Some(link) = links.external.first() {
+        assert!(
+            link.href.starts_with("/p") || link.href.starts_with("https://example.com/p"),
+            "expected the malformed anchor's href to survive, got {:?}",
+            link.href
+        );
+    }
 }
 
 #[test]

@@ -228,15 +228,17 @@ use crate::config::Config as AppConfig;
 
 #[test]
 fn test_test_function() {
+    // Fixture source for the parser. The bodies are deliberately trivial: the
+    // assertions under test are the attribute detection, not the bodies.
     let source = r"
 #[test]
 fn test_something() {
-    assert!(true);
+    let _ = 2 + 2;
 }
 
 #[tokio::test]
 async fn test_async() {
-    assert!(true);
+    let _ = 1 + 1;
 }
 ";
     let parsed = parse_rust(source);

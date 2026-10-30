@@ -1,38 +1,37 @@
 //! `/plugins marketplace <store> add|remove` source resolution and the durable
 //! marketplace ledger (spec `pluginstores` FR-048).
 //!
-//! This module owns the two pieces the `marketplace` command family needs beyond
-//! the pure report rendering in [`crate::commands`]:
+//! This module owns the one piece the `marketplace` command family needs beyond
+//! the pure report rendering in [`crate::commands`]: turning a user-typed
+//! marketplace source into a display `name` and (when fetchable) an `https`
+//! marketplace-index URL. Four source forms are accepted, mirroring the Claude
+//! Code `/plugin marketplace add` prompt:
 //!
-//! - [`resolve_source`] turns a user-typed marketplace source into a display
-//!   `name` and (when fetchable) an `https` marketplace-index URL. Four source
-//!   forms are accepted, mirroring the Claude Code `/plugin marketplace add`
-//!   prompt:
-//!   - `owner/repo` (GitHub shorthand) - resolved to the store's raw marketplace
-//!     document on branch `main`;
-//!   - `git@github.com:owner/repo.git` (SSH) - resolved the same way;
-//!   - `https://.../marketplace.json` (or a GitHub repo URL) - used directly;
-//!   - `./path/to/marketplace` (a local directory) - recorded as a local,
-//!     non-fetchable marketplace (its `name` is read from the manifest when it is
-//!     readable).
-//! - [`add_marketplace`] / [`remove_marketplace`] edit the **user-global**
-//!   `plugins.stores.marketplaces` array in `~/.config/ragent/ragent.json` with a
-//!   minimal, atomic JSON splice, so a user-owned marketplace is never shadowed by
-//!   (or written into) an untrusted project config.
+//! - `owner/repo` (GitHub shorthand) - resolved to the store's raw marketplace
+//!   document on branch `main`;
+//! - `git@github.com:owner/repo.git` (SSH) - resolved the same way;
+//! - `https://.../marketplace.json` (or a GitHub repo URL) - used directly;
+//! - `./path/to/marketplace` (a local directory) - recorded as a local,
+//!   non-fetchable marketplace (its `name` is read from the manifest when it is
+//!   readable).
 //!
-//! No network access happens here: a source is resolved syntactically and the URL
-//! is recorded for the browser to fetch later.
+//! The ledger edits themselves ([`add_marketplace`] / [`remove_marketplace`])
+//! are the shared implementation in [`ragent_surface::marketplace_ledger`],
+//! parameterised by the `plugins` root key; the `/connectors` family calls the
+//! same functions with its own key. No network access happens here: a source is
+//! resolved syntactically and the URL is recorded for the browser to fetch
+//! later.
 
 use std::path::Path;
-
-use serde_json::Value;
 
 use crate::store_index::StoreKind;
 
 // `MarketplaceSource` and `MarketplaceSourceError` are shared with the
-// `/connectors` marketplace family (byte-identical copies before this);
-// re-export the single definition.
+// `/connectors` marketplace family; re-export the single definition.
 pub use ragent_surface::marketplace::{MarketplaceSource, MarketplaceSourceError};
+
+/// The JSON root key this subsystem's ledger lives under.
+const ROOT_KEY: &str = "plugins";
 
 /// The store-specific marketplace document path (relative to a repository root).
 #[must_use]
@@ -61,9 +60,7 @@ pub fn resolve_source(
 /// Add (or replace) a marketplace entry in the user-global
 /// `plugins.stores.marketplaces` array (spec `pluginstores` FR-048).
 ///
-/// `store_token` is `codex` / `claude`; the entry is matched by `name` within that
-/// store. Without `force` a duplicate name is refused (returns `Ok(false)` and
-/// leaves the file untouched); with `force` the existing entry is replaced.
+/// Delegates to [`ragent_surface::marketplace_ledger::add_marketplace`].
 ///
 /// # Errors
 ///
@@ -76,136 +73,25 @@ pub fn add_marketplace(
     source: &str,
     force: bool,
 ) -> Result<bool, String> {
-    let path = global_config_path()?;
-    let mut value = read_or_empty_object(&path)?;
-    let marketplaces = marketplaces_array_mut(&mut value)?;
-
-    let existing = marketplaces
-        .iter()
-        .position(|entry| matches_entry(entry, store_token, name));
-    if let Some(index) = existing {
-        if !force {
-            return Ok(false);
-        }
-        marketplaces.remove(index);
-    }
-    let mut entry = serde_json::Map::new();
-    entry.insert("store".to_string(), Value::String(store_token.to_string()));
-    entry.insert("name".to_string(), Value::String(name.to_string()));
-    if let Some(url) = url {
-        entry.insert("url".to_string(), Value::String(url.to_string()));
-    }
-    entry.insert("source".to_string(), Value::String(source.to_string()));
-    marketplaces.push(Value::Object(entry));
-    write_config(&path, &value)?;
-    Ok(true)
+    ragent_surface::marketplace_ledger::add_marketplace(
+        ROOT_KEY,
+        store_token,
+        name,
+        url,
+        source,
+        force,
+    )
 }
 
 /// Remove the marketplace entry named `name` for `store_token` from the
 /// user-global config (spec `pluginstores` FR-048).
 ///
-/// Returns `Ok(true)` when an entry was removed and `Ok(false)` when no matching
-/// entry existed (the file is left untouched in that case).
+/// Delegates to [`ragent_surface::marketplace_ledger::remove_marketplace`].
 ///
 /// # Errors
 ///
 /// Returns a short message when the global config cannot be read, parsed, or
 /// written.
 pub fn remove_marketplace(store_token: &str, name: &str) -> Result<bool, String> {
-    let path = global_config_path()?;
-    let mut value = read_or_empty_object(&path)?;
-    let marketplaces = marketplaces_array_mut(&mut value)?;
-    let before = marketplaces.len();
-    marketplaces.retain(|entry| !matches_entry(entry, store_token, name));
-    let removed = marketplaces.len() != before;
-    if removed {
-        write_config(&path, &value)?;
-    }
-    Ok(removed)
+    ragent_surface::marketplace_ledger::remove_marketplace(ROOT_KEY, store_token, name)
 }
-
-/// Whether a stored marketplace entry is the `name` entry for `store_token`.
-///
-/// The store token is compared case-insensitively and the name exactly, matching
-/// the `add`/`remove` contract so both mutate the same entry.
-fn matches_entry(entry: &Value, store_token: &str, name: &str) -> bool {
-    entry
-        .get("store")
-        .and_then(Value::as_str)
-        .is_some_and(|s| s.eq_ignore_ascii_case(store_token))
-        && entry
-            .get("name")
-            .and_then(Value::as_str)
-            .is_some_and(|n| n == name)
-}
-
-/// The user-global config path, or a short error when none can be resolved.
-fn global_config_path() -> Result<std::path::PathBuf, String> {
-    ragent_config::Config::global_config_path()
-        .ok_or_else(|| "no user-global config directory could be resolved".to_string())
-}
-
-/// Read the global config as a JSON object, defaulting to an empty object when the
-/// file is absent. A non-object or unparseable file yields an error so a bad file
-/// is never silently overwritten with defaults.
-fn read_or_empty_object(path: &Path) -> Result<Value, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let value: Value = serde_json::from_slice(&bytes)
-                .map_err(|e| format!("global config {} is not valid JSON: {e}", path.display()))?;
-            if value.is_object() {
-                Ok(value)
-            } else {
-                Err(format!(
-                    "global config {} is not a JSON object",
-                    path.display()
-                ))
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Object(Default::default())),
-        Err(e) => Err(format!("cannot read global config {}: {e}", path.display())),
-    }
-}
-
-/// The mutable `plugins.stores.marketplaces` array inside `value`, creating the
-/// `plugins` / `stores` / `marketplaces` path when any level is absent (or a
-/// non-object, which is replaced).
-fn marketplaces_array_mut(value: &mut Value) -> Result<&mut Vec<Value>, String> {
-    let root = value
-        .as_object_mut()
-        .ok_or_else(|| "global config root is not an object".to_string())?;
-    let plugins = root
-        .entry("plugins")
-        .or_insert_with(|| Value::Object(Default::default()));
-    if !plugins.is_object() {
-        *plugins = Value::Object(Default::default());
-    }
-    let plugins = plugins
-        .as_object_mut()
-        .ok_or_else(|| "plugins config value is not an object".to_string())?;
-    let stores = plugins
-        .entry("stores")
-        .or_insert_with(|| Value::Object(Default::default()));
-    if !stores.is_object() {
-        *stores = Value::Object(Default::default());
-    }
-    let stores = stores
-        .as_object_mut()
-        .ok_or_else(|| "plugins.stores config value is not an object".to_string())?;
-    let marketplaces = stores
-        .entry("marketplaces")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !marketplaces.is_array() {
-        *marketplaces = Value::Array(Vec::new());
-    }
-    marketplaces
-        .as_array_mut()
-        .ok_or_else(|| "plugins.stores.marketplaces is not an array".to_string())
-}
-
-/// Write `value` back to `path` atomically and drop the config crate's on-disk
-/// load cache so the next `Config::load` sees the edit.
-///
-/// Aliases [`ragent_surface::config_splice::write_atomic_json`], the single
-/// shared implementation (also used by the `/connectors` marketplace family).
-use ragent_surface::config_splice::write_atomic_json as write_config;

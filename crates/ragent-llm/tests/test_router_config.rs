@@ -138,7 +138,7 @@ fn test_tier_config_default_models_empty() {
                 .tier_config(*t)
                 .models
                 .into_iter()
-                .map(|e| e.provider)
+                .map(|e| e.provider_id)
         })
         .collect();
     assert!(

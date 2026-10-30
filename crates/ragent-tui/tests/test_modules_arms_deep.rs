@@ -260,10 +260,7 @@ fn loop_dialog_field_accessors_and_navigation_cover_every_field() {
 
 #[test]
 fn loop_dialog_parse_loop_flags_reports_u32_overflow_and_equals_forms() {
-    let overflow_steps: Vec<String> = ["--max-steps=4294967296"]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    let overflow_steps: Vec<String> = vec!["--max-steps=4294967296".to_string()];
     let err = ragent_tui::app::parse_loop_flags(&overflow_steps).expect_err("overflow");
     assert!(err.contains("exceeds u32 range"), "got {err}");
 
@@ -275,7 +272,7 @@ fn loop_dialog_parse_loop_flags_reports_u32_overflow_and_equals_forms() {
     assert!(err.contains("exceeds u32 seconds"), "got {err}");
 
     // A missing value for a `=form`-less flag names the flag.
-    let missing_timeout: Vec<String> = ["--timeout"].iter().map(|s| (*s).to_string()).collect();
+    let missing_timeout: Vec<String> = vec!["--timeout".to_string()];
     let err = ragent_tui::app::parse_loop_flags(&missing_timeout).expect_err("missing value");
     assert!(err.contains("missing value for --timeout"), "got {err}");
 }

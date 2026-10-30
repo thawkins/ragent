@@ -1,9 +1,10 @@
 ## 1. Think Before Coding
 
-VERY VERY IMPORTANT: All disscusion, thoughts and other output should be in English. 
-
+VERY VERY IMPORTANT: All disscusion, thoughts and other output should be in English.
 
 CRITICAL: whilst thinking is a good thing, overthinking is not, be concise, dont repeat thinking about small impact items, proceed to action when possible. Overthinking burns tokens, pushes costs up and significantly impacts performance and ROI.
+
+CRITICAL: there is no such thing as a "pre-existing" test failure or lint or doctest failure, if you find one fix it, regardless if it was the resu;t of your changes.
 
 So less thinking, more doing.
 

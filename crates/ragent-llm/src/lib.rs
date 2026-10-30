@@ -6,6 +6,8 @@
 //! - HTTP client utilities
 //! - Model metadata and capabilities
 
+#![deny(unsafe_code)]
+
 pub mod llm;
 pub mod providers;
 pub mod shared_request;

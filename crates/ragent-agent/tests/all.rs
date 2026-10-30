@@ -572,8 +572,14 @@ mod test_task_tool_family_prompts;
 #[path = "test_task_tools_cache_more.rs"]
 mod test_task_tools_cache_more;
 
+#[path = "test_team_approve_plan_tool.rs"]
+mod test_team_approve_plan_tool;
 #[path = "test_team_classify.rs"]
 mod test_team_classify;
+#[path = "test_team_memory_common.rs"]
+mod test_team_memory_common;
+#[path = "test_team_task_list_tool.rs"]
+mod test_team_task_list_tool;
 
 #[path = "test_team_manager.rs"]
 mod test_team_manager;

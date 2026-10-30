@@ -51,7 +51,9 @@ pub fn recover_poisoned<'a, T>(
     match result {
         Ok(guard) => guard,
         Err(poisoned) => {
-            tracing::error!("{name} mutex poisoned, recovering");
+            // Recovered poisoning is a `warn`: the guard is recovered and
+            // execution continues, matching `bash_lists.rs` and `bg.rs`.
+            tracing::warn!("{name} mutex poisoned, recovering");
             poisoned.into_inner()
         }
     }
@@ -684,7 +686,7 @@ impl App {
             if let Ok(mut guard) = result_slot.lock() {
                 *guard = Some(snapshot);
             } else {
-                tracing::error!("context_snapshot_result mutex poisoned, snapshot dropped");
+                tracing::warn!("context_snapshot_result mutex poisoned, snapshot dropped");
             }
         });
     }

@@ -251,9 +251,9 @@ impl LlmClient for RouterClient {
             let mut seen = HashSet::new();
             for tier in super::router_config::Tier::all() {
                 for entry in &self.config.tier_config(*tier).models {
-                    if seen.insert((entry.provider.clone(), entry.model.clone())) {
+                    if seen.insert((entry.provider_id.clone(), entry.model.clone())) {
                         let _ = registry
-                            .resolve_model_async(&entry.provider, &entry.model)
+                            .resolve_model_async(&entry.provider_id, &entry.model)
                             .await;
                     }
                 }
@@ -298,7 +298,7 @@ impl LlmClient for RouterClient {
             }
         };
 
-        let selected_model = format!("{}:{}", entry.provider, entry.model);
+        let selected_model = format!("{}:{}", entry.provider_id, entry.model);
         let classification_summary = format_classification_summary(&result, &selected_model);
         tracing::info!(
             message = %classification_summary,
@@ -360,7 +360,7 @@ impl RouterClient {
         entry: TierEntry,
         mut request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamEvent> + Send>>> {
-        let selected_model = format!("{}:{}", entry.provider, entry.model);
+        let selected_model = format!("{}:{}", entry.provider_id, entry.model);
 
         let registry = match &self.registry {
             Some(r) => r,
@@ -373,19 +373,19 @@ impl RouterClient {
             }
         };
 
-        let provider = match registry.get(&entry.provider) {
+        let provider = match registry.get(&entry.provider_id) {
             Some(p) => p,
             None => {
                 bail!(
                     "Router selected model {} but provider '{}' is not registered.",
                     selected_model,
-                    entry.provider,
+                    entry.provider_id,
                 );
             }
         };
 
-        let api_key = self.resolve_api_key(&entry.provider).await;
-        let base_url = resolve_env_base_url(&entry.provider);
+        let api_key = self.resolve_api_key(&entry.provider_id).await;
+        let base_url = resolve_env_base_url(&entry.provider_id);
         let mut options: HashMap<String, serde_json::Value> = HashMap::new();
         options.insert(
             "model_id".to_string(),
@@ -395,7 +395,7 @@ impl RouterClient {
         // H2: reuse a warm downstream client keyed by (provider, model) so the
         // connection pool (TLS, keep-alive) is amortised across loop steps
         // instead of being torn down and rebuilt on every delegated call.
-        let cache_key = format!("{}:{}", entry.provider, entry.model);
+        let cache_key = format!("{}:{}", entry.provider_id, entry.model);
         let downstream = match self
             .downstream_clients
             .lock()
@@ -627,7 +627,7 @@ fn select_tier_entry<'a>(
         .iter()
         .find(|entry| {
             let capabilities = registry
-                .resolve_model(&entry.provider, &entry.model)
+                .resolve_model(&entry.provider_id, &entry.model)
                 .map(|m| m.capabilities);
             let vision_ok = !requires_vision || capabilities.as_ref().is_some_and(|c| c.vision);
             let tools_ok = !needs_tools || capabilities.as_ref().is_none_or(|c| c.tool_use);

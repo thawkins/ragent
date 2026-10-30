@@ -479,12 +479,7 @@ fn truncate_preview(s: &str, max_len: usize) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t");
-    if escaped.chars().count() <= max_len {
-        escaped
-    } else {
-        let truncated: String = escaped.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{truncated}...")
-    }
+    ragent_types::strutil::truncate_chars(&escaped, max_len)
 }
 
 /// Per-tool edit-log statistics.

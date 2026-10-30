@@ -6,6 +6,8 @@
 //! - Spec discovery (walk `specs/` and parse directories)
 //! - Atomic file read/write for spec files
 
+#![deny(unsafe_code)]
+
 pub mod commands;
 pub mod constitution;
 /// Typed errors for the spec management system.

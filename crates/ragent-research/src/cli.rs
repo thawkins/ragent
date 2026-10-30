@@ -857,11 +857,11 @@ pub fn render_list_output(items: &[(String, String, String, String, String, Stri
     for (name, title, _topic, status, created, modified) in items {
         out.push_str(&format!(
             "{:<22} {:<32} {:<11} {:<24} {:<24}\n",
-            truncate(name, 22),
-            truncate(title, 32),
-            truncate(status, 11),
-            truncate(created, 24),
-            truncate(modified, 24),
+            ragent_types::strutil::truncate_chars(name, 22),
+            ragent_types::strutil::truncate_chars(title, 32),
+            ragent_types::strutil::truncate_chars(status, 11),
+            ragent_types::strutil::truncate_chars(created, 24),
+            ragent_types::strutil::truncate_chars(modified, 24),
         ));
     }
     out
@@ -923,16 +923,6 @@ pub fn render_search_output_json(results: &[(String, String, String, String)]) -
         })
         .collect();
     serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string())
-}
-
-/// Truncate a string to at most `max` characters, appending `...` when cut.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut t: String = s.chars().take(max.saturating_sub(3)).collect();
-    t.push_str("...");
-    t
 }
 
 /// Render a single research item as a JSON object.

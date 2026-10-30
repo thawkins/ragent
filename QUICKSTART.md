@@ -2239,6 +2239,75 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.156
+
+- **Version bump only** - no new capabilities. This release publishes the
+  `docs/reports/code-audit.md` remediation pass that was prepared under the
+  `1.0.155` version string: duplicated guards collapsed onto shared
+  implementations (one SSE accumulation helper, one `ANTHROPIC_VERSION`, one
+  root-key-parameterised marketplace ledger, one `DEFAULT_LISTEN_ADDR`), the two
+  guards that police that duplication strengthened, `#![deny(unsafe_code)]` on
+  all 19 crate and binary roots, the debug-only `/inputdiag` command removed
+  (registry unchanged at 150 tools across 21 families), and the runtime-flag
+  toggles persisting to the user-global config. See the 1.0.155 section below for
+  the detail.
+
+## Version 1.0.155
+
+- **`/editlog off`, `/alog off` and `/yolo off` survive a restart** — the three
+  runtime-flag toggles shared one persistence helper, and it wrote back to
+  whichever config file the session had loaded: the project
+  `.ragent/ragent.json` whenever one existed. `Config::load` merges that file
+  under the user-global config but a session started in a *different* directory
+  never reads it, so the toggle silently reverted. They now persist through
+  `RuntimeFlag::persist_to_global`, which edits the single key in
+  `~/.config/ragent/ragent.json` and leaves every other key byte-identical. `gcf`
+  (nested at `gcf.enabled`, not a top-level key) keeps its previous
+  `save_to_source` path, and the old behaviour is retained as
+  `RuntimeFlag::persist_to_source` for callers that genuinely must edit a
+  project file. Regression tests drive the full `/editlog off` and `/alog off`
+  sequences and then restart in a different directory, asserting the value
+  round-trips.
+- **A project config that omits `activity_log` no longer re-enables it** —
+  `activity_log` defaults to `true`, so `merge_project` could not tell "the
+  project file wrote `true`" from "it omitted the key and serde supplied the
+  default", and the defaulted `true` overwrote a user-global `false` on every
+  load. The overlay now applies the value only when it explicitly disables
+  logging, so an explicit `false` always wins.
+- **`/inputdiag` removed** — the debug-only command dumped internal widget,
+  cursor and selection geometry into the transcript. It is gone from
+  `SLASH_COMMANDS`, the slash dispatch, the agent-side `command_catalog.rs`
+  mirror and the four how-tos that documented it
+  (`docs/howtos/slashcommands/inputdiag.md` is deleted). The tool registry is
+  unchanged at 150 tools across 21 families.
+- **Truncation helpers gain full-budget siblings** — `truncate_chars` reserves
+  three characters of the caller's budget for its `...`, so `truncate_chars(s,
+  250)` kept 247. The new `ragent_types::strutil::truncate_chars_no_ellipsis` and
+  `truncate_bytes_no_ellipsis` keep the whole budget and let the caller draw its
+  own marker. The bash tool-call header now shows a true 250 command characters
+  before clipping.
+- **Duplication collapsed across four shared guards** — one
+  `providers::http_client::append_chunk_guarded` replaces the nine hand-written
+  SSE decode-and-cap sequences (which had already drifted), one
+  `providers::ANTHROPIC_VERSION` replaces the literal three Anthropic-shaped
+  providers each carried, the `/plugins` and `/connectors` marketplace ledgers
+  share one `ragent_surface::marketplace_ledger` parameterised by root key, and
+  `ragent_server::DEFAULT_LISTEN_ADDR` replaces the CLI literal. The guards that
+  police this are strengthened: `check_shared_guards.py` gains four duplicate
+  patterns plus delegation checks, and `check_security_unwraps.py` stops counting
+  doc-comment examples (which had let a real new panic hide under a grandfathered
+  baseline).
+- **`#![deny(unsafe_code)]` on all 19 crate and binary roots** — previously six
+  carried it. A new `unsafe` block now fails to compile until a scoped
+  `#[allow(unsafe_code)]` with a `// SAFETY:` invariant is added; the approved
+  FFI sites are catalogued in `AGENTS-LANGUAGE.md`.
+- **`pre-flight.sh` no longer fails on the bench guard with no baseline** —
+  `check-bench-regression.sh` exits 2 to mean "no saved baseline", which is its
+  documented not-applicable code, not a regression; `target/criterion` is
+  git-ignored and never checked in, so the step failed on every run. The status is
+  now mapped (2 skips, 0 passes, anything else fails), so a real regression still
+  fails. Full pre-flight: 7 passed / 0 failed / 1 skipped.
+
 ## Version 1.0.149
 
 - **Shared store chrome across every catalogue and setup-panel list** — the

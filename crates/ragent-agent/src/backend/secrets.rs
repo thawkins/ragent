@@ -78,9 +78,21 @@ impl SecretResolver for StorageSecretResolver {
 ///
 /// Mirrors the connector crate's `InMemoryCredentialStore`: it makes the
 /// injection path hermetic, so a test never reads or writes the real database.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct MapSecretResolver {
     entries: BTreeMap<String, String>,
+}
+
+// `Debug` is hand-written because the map's *values* are live secrets: a
+// derived impl would print every credential in plaintext the moment the
+// resolver crossed a `{:?}` (a log field, an assertion message, a panic).
+impl std::fmt::Debug for MapSecretResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.entries.keys().map(String::as_str).collect();
+        f.debug_struct("MapSecretResolver")
+            .field("names", &names)
+            .finish()
+    }
 }
 
 impl MapSecretResolver {

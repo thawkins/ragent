@@ -285,11 +285,45 @@ mod mock_session {
 
 #[cfg(not(feature = "telemetry"))]
 mod mock_session {
+    use ragent_telemetry::{SessionRecorder, TelemetryState, TelemetrySubsystem};
+
     #[test]
-    fn test_mock_session_noop_when_feature_off() {
-        // When telemetry feature is disabled, there is nothing to record and
-        // the test crate has no real instruments. This test exists so the file
-        // still compiles and passes in the default feature set.
-        assert!(true);
+    fn test_noop_recorders_are_inert_without_the_feature() {
+        // With `telemetry` off the crate compiles against the no-op stubs.
+        // The contract asserted here is that (a) a disabled subsystem reports
+        // itself as such, and (b) a recorder built from it accepts a session's
+        // events without panicking while still updating the feature-independent
+        // last-value mirror.
+        let subsystem = TelemetrySubsystem::disabled();
+        assert_eq!(
+            subsystem.state(),
+            TelemetryState::Disabled,
+            "a disabled subsystem must not report itself enabled"
+        );
+        assert!(
+            !subsystem.is_enabled(),
+            "is_enabled() must agree with the Disabled state"
+        );
+
+        let recorder = SessionRecorder::from_subsystem(&subsystem);
+        assert!(
+            !recorder.is_enabled(),
+            "a no-op recorder must report itself disabled"
+        );
+        recorder.record_session_start();
+        recorder.record_agent_loop(12.5, 3);
+        recorder.record_tool_calls_per_session(7);
+        recorder.record_session_end();
+
+        assert_eq!(
+            ragent_telemetry::counters::current_values().agent_loop_iterations_last,
+            3,
+            "the feature-independent last-value mirror must still be updated"
+        );
+        assert_eq!(
+            ragent_telemetry::counters::current_values().tool_calls_per_session_last,
+            7,
+            "a no-op recorder must still forward the feature-independent mirror"
+        );
     }
 }

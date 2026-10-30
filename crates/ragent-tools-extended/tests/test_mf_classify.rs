@@ -777,7 +777,7 @@ fn test_empty_html() {
 }
 
 #[test]
-fn test_malformed_html_does_not_panic() {
+fn test_malformed_html_recovers_the_body_text() {
     let html = r"<html><head><title>Broken<body><p>unclosed";
     let result = classify_and_extract(
         html,
@@ -785,8 +785,25 @@ fn test_malformed_html_does_not_panic() {
         "text/html",
         &ClassifyOptions::default(),
     );
-    // Should not panic; content_ok depends on extracted text.
-    let _ = result.content_ok;
+    // Unclosed tags must not defeat extraction: the body text before the
+    // truncated markup is still recovered verbatim into `content`.
+    let content = result.content.to_lowercase();
+    assert!(
+        content.contains("broken") || content.contains("unclosed"),
+        "expected the recovered content to include the document body, got {:?}",
+        result.content
+    );
+    // `content_ok` deliberately stays false here: an unclosed document is an
+    // `Unknown` page type, whose threshold is `MIN_CONTENT_OK_CHARS` (100).
+    // The recovered text is only ~15 chars, so this truncated page is
+    // correctly reported as below the usable-content threshold rather than
+    // being promoted to content on the strength of a fragment.
+    assert!(
+        !result.content_ok,
+        "15 recovered chars are below the 100-char threshold and must not \
+         report content_ok, got {:?}",
+        result.content
+    );
 }
 
 #[test]

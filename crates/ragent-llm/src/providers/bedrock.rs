@@ -519,7 +519,10 @@ impl LlmClient for BedrockAnthropicClient {
         // Sign the request with SigV4
         let mut headers: Vec<(String, String)> = Vec::new();
         headers.push(("content-type".to_string(), "application/json".to_string()));
-        headers.push(("anthropic-version".to_string(), "2023-06-01".to_string()));
+        headers.push((
+            "anthropic-version".to_string(),
+            super::ANTHROPIC_VERSION.to_string(),
+        ));
         headers.push(("accept".to_string(), "text/event-stream".to_string()));
 
         super::bedrock_sigv4::sign_request(
@@ -537,14 +540,14 @@ impl LlmClient for BedrockAnthropicClient {
             request_builder = request_builder.header(key.as_str(), value.as_str());
         }
 
+        // Transport failures are reported once, by whoever logs the error this
+        // `with_context` produces: a `warn!` here would duplicate the message
+        // at a second level for the same failure.
         let response = request_builder
             .body(body_bytes)
             .send()
             .await
-            .inspect_err(|e| {
-                tracing::warn!(url = %url, error = %e, "Bedrock Anthropic chat request failed");
-            })
-            .with_context(|| format!("Failed to send request to Bedrock at {url}"))?;
+            .with_context(|| format!("Bedrock Anthropic chat request failed: {url}"))?;
 
         // FR-027, FR-028, FR-029: Error handling
         if !response.status().is_success() {
@@ -598,21 +601,17 @@ impl LlmClient for BedrockAnthropicClient {
                     }
                 };
 
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
                 // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
                 // peer dribbles bytes without ever emitting a newline instead
                 // of letting the accumulation buffer grow without bound.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "SSE accumulation buffer exceeded the cap; aborting the stream"
-                    );
+                if let Err(e) = super::http_client::append_chunk_guarded(
+                    &mut buffer,
+                    &mut pending_utf8,
+                    &chunk,
+                    "Bedrock",
+                ) {
                     yield StreamEvent::Error {
-                        message: format!(
-                            "SSE buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
+                        message: e.to_string(),
                     };
                     return;
                 }
@@ -962,21 +961,17 @@ impl LlmClient for BedrockConverseClient {
                     }
                 };
 
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
                 // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
                 // peer dribbles bytes without ever emitting a newline instead
                 // of letting the accumulation buffer grow without bound.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "SSE accumulation buffer exceeded the cap; aborting the stream"
-                    );
+                if let Err(e) = super::http_client::append_chunk_guarded(
+                    &mut buffer,
+                    &mut pending_utf8,
+                    &chunk,
+                    "Bedrock",
+                ) {
                     yield StreamEvent::Error {
-                        message: format!(
-                            "SSE buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
+                        message: e.to_string(),
                     };
                     return;
                 }
@@ -1191,7 +1186,8 @@ async fn handle_bedrock_error(
         }
         // FR-029: Access denied -> permissions error
         "AccessDeniedException" => {
-            tracing::error!(status = %status, message = %message, "Bedrock access denied");
+            // The `bail!` text is the single report: the caller propagates it
+            // to the user, so an `error!` here would log the same failure twice.
             bail!(
                 "Bedrock access denied: {message}. \
                  Ensure your AWS principal has 'bedrock:InvokeModel' permission for the requested model."
@@ -1199,11 +1195,11 @@ async fn handle_bedrock_error(
         }
         // FR-028: Validation -> descriptive error
         "ValidationException" => {
-            tracing::warn!(status = %status, message = %message, "Bedrock validation error");
+            // The `bail!` text is the single report (see the AccessDenied arm).
             bail!("Bedrock validation error: {message}");
         }
         _ => {
-            tracing::error!(status = %status, error_type = %error_type, message = %message, "Bedrock API error");
+            // The `bail!` text is the single report (see the AccessDenied arm).
             bail!("Bedrock API error ({status}): [{error_type}] {message}");
         }
     }

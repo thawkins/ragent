@@ -341,7 +341,7 @@ impl BackgroundCommand {
                         warn!(
                             error = %e,
                             task_id = %task_id_stdout,
-                            command = %command_stdout,
+                            command = %crate::sanitize::redact_secrets(&command_stdout),
                             stream = "stdout",
                             "background command reader failed"
                         );
@@ -375,7 +375,7 @@ impl BackgroundCommand {
                         warn!(
                             error = %e,
                             task_id = %task_id_stderr,
-                            command = %command,
+                            command = %crate::sanitize::redact_secrets(&command),
                             stream = "stderr",
                             "background command reader failed"
                         );
@@ -452,7 +452,7 @@ impl BackgroundCommand {
         // RUST_LOG=debug is set on a long-running command.
         trace!(
             %task_id,
-            command = %command,
+            command = %crate::sanitize::redact_secrets(command),
             is_stdout,
             status,
             "Background command line captured"
@@ -583,7 +583,7 @@ impl BackgroundCommand {
 
         debug!(
             %task_id,
-            command = %command,
+            command = %crate::sanitize::redact_secrets(&command),
             status,
             exit_code = ?exit_code,
             "Background command finished"

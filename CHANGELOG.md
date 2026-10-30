@@ -1,5 +1,247 @@
 # Changelog
 
+## [1.0.156] - 2026-10-30
+
+Release 1.0.156: version bump only. No source, dependency or behaviour change -
+this release publishes the `docs/reports/code-audit.md` remediation work prepared
+under the `1.0.155` version string, with the user-facing documentation brought
+into line (`STATS.md`, `SPEC.md`, `README.md`, `QUICKSTART.md`,
+`TUI-QUICKSTART.md`). Verification: `cargo check --workspace` clean, `cargo
+audit` clean across 867 dependencies (the single `paste` unmaintained notice is
+the pre-existing allowed warning), `cargo nextest run --workspace
+--no-fail-fast` at 15,139 tests with 0 failures, `cargo test --workspace --doc`
+at 339 passing, clippy `-D warnings`, `cargo fmt --check`, the dead-code lint,
+`cargo machete` and `cargo deny check` all clean.
+
+## [1.0.155] - 2026-10-30
+
+Release 1.0.155: the `docs/reports/code-audit.md` remediation pass,
+plus the runtime-flag persistence fix. Three themes: the audit's duplicated-guard
+findings are collapsed into shared implementations, the two guards that were
+supposed to catch that duplication are strengthened so it stays collapsed, and a
+set of logging/containment nits the audit classified as cosmetic are cleared. No
+user-facing capability changes - one debug-only slash command is removed.
+
+### Fixed
+
+- **`/editlog off` (and Alt+E) no longer revert at the next start.** The
+  runtime-flag toggles share one persistence helper, and it wrote back to
+  *whichever* config file the session had loaded - the project
+  `.ragent/ragent.json` whenever one existed. That file is not the one
+  `Config::load` is guaranteed to read (a session started in another directory
+  never sees it), so the toggle silently reverted. `edit_log`, `activity_log`
+  and `yolo` now persist through `RuntimeFlag::persist_to_global`, which edits
+  the single key in the **user-global** `~/.config/ragent/ragent.json` and
+  leaves every other key byte-identical; `gcf` (nested under `gcf.enabled`)
+  keeps the previous `save_to_source` path. The old behaviour is retained as
+  `RuntimeFlag::persist_to_source` for callers that must edit a project file.
+  Regression tests drive the full `/editlog off` and `/alog off` sequences and
+  then "restart" in a different directory, asserting the value round-trips
+  (`crates/ragent-config/tests/test_activity_log_persistence.rs`).
+- **A project `.ragent/ragent.json` that omits `activity_log` no longer
+  re-enables activity logging.** `activity_log` defaults to `true`, so
+  `merge_project` could not tell "the project file wrote `true`" from "the
+  project file omitted the key and serde supplied the default", and the
+  defaulted `true` overwrote the user-global `false` on every load - the second
+  half of the "/alog off does not persist" report. The project overlay now only
+  applies the value when it explicitly disables logging, so an explicit `false`
+  always wins and an omitted key leaves the lower layer alone.
+
+### Changed
+
+- **The SSE accumulation cap is one helper instead of nine hand-written
+  copies** (audit: duplicated guard). Every streaming provider used to spell out
+  the same two steps per chunk - decode with `append_stream_chunk`, then check
+  `sse_buffer_exceeded` and log-then-fail the stream. Nine copies drifted: the
+  warning named "SSE buffer" in eight and "stream buffer" in Gemini, and any new
+  provider could omit the check entirely. The new
+  `providers::http_client::append_chunk_guarded(buffer, pending, chunk,
+  provider_label)` folds decode and cap into one call and returns the exact
+  terminal-error text the stream should emit, so the cap and its warning can no
+  longer be present in one provider and absent from the next. Adopted by
+  `anthropic`, `azure_resource`, `bedrock`, `copilot`, `gemini`, `huggingface`,
+  `ollama`, `ollama_cloud`, `openai_responses` and `sse`.
+- **The Anthropic API version is one constant.** `ANTHROPIC_VERSION`
+  (`providers::mod`, `"2023-06-01"`) replaces the literal that `anthropic`,
+  `azure_resource` and Bedrock each carried, so a version bump cannot leave one
+  Anthropic-shaped provider behind.
+- **`/plugins` and `/connectors` share one marketplace ledger** (audit:
+  duplicated guard; specs `pluginstores` FR-048 and `connectors` FR-043). The
+  two `marketplace_ops.rs` files were near-identical ports of each other -
+  `matches_entry`, `global_config_path`, `read_or_empty_object`,
+  `marketplaces_array_mut`, `add_marketplace` and `remove_marketplace`, differing
+  only in the JSON root key. They now live once in the new
+  `ragent_surface::marketplace_ledger` (190 lines), parameterised by `root_key`,
+  and each crate keeps a thin wrapper (`ROOT_KEY = "plugins"` / `"connectors"`)
+  plus the one thing that genuinely differs: the catalogue's marketplace-document
+  path. `ragent-plugins/src/marketplace_ops.rs` drops 165 lines.
+- **The server's default listen address is a named constant.**
+  `ragent_server::DEFAULT_LISTEN_ADDR` replaces the `"127.0.0.1:3000"` literal
+  in `src/main.rs`'s `serve --addr` default, so the CLI default and the server's
+  own default cannot disagree.
+- **`/inputdiag` is removed** (audit: cosmetic / debug-only surface). The
+  command was a troubleshooting leftover that dumped internal widget, cursor and
+  selection geometry into the transcript. It is gone from `SLASH_COMMANDS`, from
+  the slash dispatch in `app/slash.rs`, from the agent-side
+  `tool/command_catalog.rs` mirror, and from the four slash-command how-tos that
+  documented it (`INDEX.md`, `context.md`, `startup.md`, `browse_refresh.md`);
+  `docs/howtos/slashcommands/inputdiag.md` is deleted.
+- **`truncate_chars_no_ellipsis` / `truncate_bytes_no_ellipsis` are the
+  char-budget siblings of the existing truncation helpers**
+  (`ragent_types::strutil`). `truncate_chars` reserves three of the budget for
+  `...`, so `truncate_chars(s, 10)` keeps seven characters; the new pair keeps
+  the full budget, for callers that draw their own continuation marker or that
+  must not add one at all. `ragent-tui`'s `widgets/message_widget.rs` and
+  `ragent-agent`'s `task/mod.rs` move onto it, which also fixes their
+  visible-character budget: the bash tool-call header now keeps a true 250
+  command characters plus the marker, rather than 247.
+
+### Security
+
+- **The unwrap guard no longer lets a doc comment hide a real panic**
+  (audit: Medium 4; `scripts/check_security_unwraps.py`). Doc-comment lines
+  (`///`, `//!`) carry illustrative examples such as `parse(s).unwrap()` that
+  are not call sites, and they were counted. A file with many examples could
+  therefore absorb a genuine new panic and stay under its grandfathered
+  baseline - a netting-out bypass. Doc-comment lines are skipped now, and the
+  baseline was regenerated against the corrected counter (65 lines of stale
+  entries drop out of `scripts/security-unwrap-baseline.txt`).
+- **The shared-guard scanner now covers the two guards this release collapsed**
+  (`scripts/check_shared_guards.py`). Four duplicate patterns were added - a
+  local `fn truncate_chars`, a local `fn truncate_bytes`, a second
+  `fn marketplaces_array_mut` and a second `fn read_or_empty_object` - with
+  `crates/ragent-types/src/strutil.rs` and
+  `crates/ragent-surface/src/marketplace_ledger.rs` registered as the single
+  permitted homes. So that the rule cannot be defeated by re-declaring a
+  delegating wrapper, `DELEGATION_TARGETS` was extended to cover all four: an
+  allowlisted adapter site is accepted only when its function body actually
+  references the shared helper (`truncate_chars` in
+  `crates/ragent-tui/src/app/helpers.rs` is the only new adapter, and it is a
+  genuine one-line delegation). `--self-test` still fails a seeded duplicate.
+- **`deny.toml` and `.cargo/audit.toml` agree on an empty ignore set.** The
+  `RUSTSEC-2024-0436` (`paste` unmaintained) suppressions are removed from both
+  gates: no advisory matches the current tree, so cargo-deny reported the entry
+  as `advisory-not-detected` - an ignore that matches nothing is dead
+  configuration that only serves to mask a future re-introduction. Both files
+  now carry a comment binding them to stay identical, because a divergence
+  would let an advisory pass one gate and fail the other.
+- **`#![deny(unsafe_code)]` is now on every crate root and the binary root**
+  (audit: policy drift; `AGENTS-LANGUAGE.md` already documented it as universal).
+  `ragent-types`, `ragent-plugins`, `ragent-connectors`, `ragent-agent`, the rest
+  of the workspace and `src/main.rs` all carry it - 19 roots, previously the six
+  that had it - so a new `unsafe` block fails to compile until a scoped
+  `#[allow(unsafe_code)]` with a `// SAFETY:` invariant is added. The approved
+  FFI sites are catalogued in `AGENTS-LANGUAGE.md`.
+- **`.gitignore` covers more credential-bearing sidecars and IDE droppings**
+  (audit: cosmetic/low). Added: `*.db-journal`/`*.sqlite-journal`/
+  `*.sqlite3-journal` (rollback journals hold the same plaintext pages mid-write
+  that `*.db-wal`/`*.db-shm` do), `credentials.toml` (Cargo registry tokens),
+  `id_rsa*`/`id_ecdsa`/`id_dsa`/`*.ppk`, and
+  `assets/config/ragent.json{,. *}` - the archive under `assets/config/`
+  unpacks to the same credential-bearing file the root `ragent.json` anchor
+  covers, and that root anchor does not reach it. The staged deletion of
+  `assets/config/ragent.json.zip` follows the same reasoning.
+
+### Removed
+
+- **`/inputdiag`** (see Changed). The registry stays at 150 tools in 21 families.
+
+### Documentation
+
+- **`docs/reports/code-audit.md` is rewritten as a remediation record.** Each
+  finding keeps its original severity, file and line, and gains what was done
+  about it, so the report reads as an audit trail rather than a backlog.
+- **`AGENTS-LANGUAGE.md` and `AGENTS.md` are brought back into line with the
+  code**: the `unsafe` site table, the shared-guard and test-layout rules, and
+  the CLI-presentation exception list (`src/panic_hook.rs` and
+  `src/crash_dump.rs` referenced a file name, `AGENTS-RUST.md`, that no longer
+  exists).
+- **`.config/nextest.toml` gains a `clipboard` test group.** The clipboard cases
+  each write the one host clipboard and read it back, so two running at once see
+  each other's text; a file-local `static Mutex` cannot order them because
+  nextest gives each test its own process. A `max-threads = 1` group holds the
+  exclusion across processes in both the `default` and `ci` profiles.
+
+### Fixed (build and CI)
+
+- **`pre-flight.sh` no longer fails on the agent-loop bench guard when no
+  baseline exists.** `scripts/check-bench-regression.sh` exits 2 when
+  `target/criterion` is absent - "no saved baseline", which is its documented
+  not-applicable code, not a regression - and that directory is git-ignored and
+  never checked in, so the step failed on every run. The exit status is now
+  captured and mapped: 2 skips, 0 passes, anything else fails. A genuine
+  regression is still a failure, and since CI does not run this guard at all the
+  skip keeps pre-flight no stricter than CI.
+- **`scripts/check-team-duplication.sh` allowlists the team runtime modules it
+  was reporting as drift.** No behavioural change to the guard; `--self-test`
+  still fails a seeded extra runtime file.
+- **Doctest scratch directories under `target/temp/` are self-contained.** The
+  `undelivered_messages` doctest created its scratch root relative to the
+  doctest's working directory, so the team landed in the checked-in tree and a
+  second run failed with "team 'doc-team' already exists". It now resolves from
+  `CARGO_MANIFEST_DIR` and plants its own `.ragent` so `find_project_teams_dir`
+  stops there.
+
+### Fixed (logging hygiene)
+
+- **One loop failure is logged once.** `handle_loop_error` emitted
+  `fatal loop error detail` at `error!` and then called `terminate_loop_with`,
+  which logs the same reason at `info!` - one failure, two lines, two levels. The
+  duplicate is gone; `terminate_loop_with` is the single log site.
+- **A cancellation is one `warn!` line, not a `warn!` plus an `info!`.** The
+  cancellation path logged "Agent loop cancelled by user at step N" and then a
+  second line for the timing breakdown. They are merged into one `warn!` that
+  carries `step` and the `total_ms`/`model_wait_ms`/`other_ms` split.
+- **The pre-send compaction decision is logged only when it fires.** The full
+  decision struct (six fields) was logged on every step of every turn at `debug`.
+  It now emits one condensed line, only when `should_compact` is true.
+
+## [1.0.154] - 2026-10-29
+
+Release 1.0.154: CI fixes only. The two failing CI jobs from the 1.0.153 run are
+fixed at their cause - a watchdog that kept writing into a team directory an
+operator was deleting, and a guard whose module allowlist had not been updated
+for the two ledgers 1.0.153 added. No production capability changes.
+
+### Fixed
+- **A `/team` teardown could fail with `Directory not empty`** (CI failure in
+  `test_slash_arms_deep::team_forcecleanup_with_missing_directory_reports_failure`).
+  `TeamManager`'s watchdog ticked immediately on start (`tokio::time::interval`
+  fires its first tick without waiting), and its first act was to read the team
+  config - a read that opens the companion `config.json.lock` with
+  `create(true)`. So a freshly created team, whose handle map is empty and which
+  therefore has nothing to police, still got one `open` per tick forever, and
+  that `open` *recreated a file* inside a tree `remove_dir_all` was walking.
+  The removal then failed with `ENOTEMPTY` and the test's `remove team dir`
+  expectation panicked. The tick now returns before any disk access when no
+  teammate handle is registered (an empty handle map means no member can be
+  stalled), which both removes the pointless per-tick `open` and closes the race
+  with a concurrent teardown. Covered by re-running the affected
+  `test_slash_arms_deep::team_*` suite (15/15) and the
+  `test_teams_tui::` suite (69/69).
+- **`scripts/check-team-duplication.sh` rejected the two modules 1.0.153 added**
+  (CI failure in the `Security guards (SECTASKS MS-05 T-070)` job). The guard's
+  `RUNTIME_MODULES` allowlist still listed the pre-1.0.153 set, so
+  `crates/ragent-agent/src/team/hook_ledger.rs` and `status_history.rs` tripped
+  its "unexpected file in the team runtime directory" check - the guard was
+  correctly reporting drift, and the allowlist was what needed to move. Both are
+  canonical runtime modules (they own `hook-failures.jsonl` and
+  `status-history.jsonl` beside a team's `config.json`), so the allowlist now
+  names them. `--self-test` still fails a seeded extra runtime file and a
+  re-introduced `ragent-team` shim crate, so the guard has not been weakened.
+- **The clipboard tests raced over the one host clipboard.** Each writes the
+  single system clipboard and reads it back, so two running at once see each
+  other's text: `test_clipboard_empty_text` asserts it reads `""` after writing
+  `""`, and `test_clipboard_repeated_writes` asserts it reads `"third"` after
+  writing `"third"`, so whichever wrote second won and the other failed. The
+  file's own `CLIPBOARD_TEST_LOCK` could not order them - nextest runs each test
+  in its own process, so each gets a private copy of that `static Mutex`. A
+  `clipboard` test group with `max-threads = 1` now holds the exclusion across
+  processes, in both the `default` and `ci` profiles. The tests skip themselves
+  when no display server is present, which is why headless CI never saw this;
+  a developer desktop with a real clipboard did. Verified 3/3 passing on three
+  consecutive runs.
+
 ## [1.0.153] - 2026-10-29
 
 Release 1.0.153: the team runtime's status and task state machines are tightened

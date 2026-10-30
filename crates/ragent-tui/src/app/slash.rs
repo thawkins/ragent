@@ -533,7 +533,7 @@ fn spawn_websearch_render<F>(
         if let Ok(mut guard) = slot.lock() {
             *guard = Some(rendered);
         } else {
-            tracing::error!("websearch_test_result mutex poisoned, result dropped");
+            tracing::warn!("websearch_test_result mutex poisoned, result dropped");
         }
     });
 }
@@ -4828,64 +4828,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.append_assistant_text(&help_lines);
 
                 self.status = "help".to_string();
-            }
-            "inputdiag" => {
-                let selection = self
-                    .text_selection
-                    .as_ref()
-                    .map(|s| format!("{:?} {:?}->{:?}", s.pane, s.anchor, s.endpoint))
-                    .unwrap_or_else(|| "none".to_string());
-                let context_menu = self
-                    .context_menu
-                    .as_ref()
-                    .map(|m| format!("{:?} selected={}", m.pane, m.selected))
-                    .unwrap_or_else(|| "none".to_string());
-                let diag = format!(
-                    "From: /inputdiag\n\
-                                       Input diagnostics:\n\
-                                         screen: {:?}\n\
-                                         input chars: {}\n\
-                                         input cursor: {}\n\
-                                         slash menu: {}\n\
-                                         file menu: {}\n\
-                                         history picker: {}\n\
-                                         selection: {}\n\
-                                         context menu: {}\n\
-                                         message area: {:?}\n\
-                                         log area: {:?}\n\
-                                         input area: {:?}\n\
-                                         browse cache cwd: {:?}\n\
-                                         browse cache entries: {}\n\
-                                         browse cache refreshed: {:?}\n\
-                                         browse menu state: {}",
-                    self.current_screen,
-                    self.input_len_chars(),
-                    self.input_cursor,
-                    self.slash_menu.is_some(),
-                    self.file_menu.is_some(),
-                    self.history_picker.is_some(),
-                    selection,
-                    context_menu,
-                    self.message_area,
-                    self.log_area,
-                    self.input_area,
-                    self.project_files_cache_cwd,
-                    self.project_files_cache_count,
-                    self.project_files_cache_refreshed_at,
-                    self.file_menu
-                        .as_ref()
-                        .map(|m| format!(
-                            "query='{}' dir={:?} selected={} offset={} results={}",
-                            m.query,
-                            m.current_dir,
-                            m.selected,
-                            m.scroll_offset,
-                            m.matches.len()
-                        ))
-                        .unwrap_or_else(|| "none".to_string())
-                );
-                self.append_assistant_text(&diag);
-                self.status = "inputdiag".to_string();
             }
             "log" => {
                 let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
@@ -12074,7 +12016,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                     .unwrap_or_else(|| "default".to_string());
                                 output.push_str(&format!(
                                     "{:<10}{}/{}  {}\n",
-                                    prefix, entry.provider, entry.model, timeout
+                                    prefix, entry.provider_id, entry.model, timeout
                                 ));
                             }
                         }
@@ -13771,9 +13713,26 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 /// # Examples
 ///
 /// ```
-/// # use ragent_tui::app::slash_helpers::split_delete_args;
+/// # // `split_delete_args` is private to this module, so the example carries its own
+/// # // copy of the parser rather than widening visibility for a doc test.
+/// # fn split_delete_args(rest: &str) -> (&str, bool) {
+/// #     let mut name: Option<&str> = None;
+/// #     let mut force = false;
+/// #     for token in rest.split_whitespace() {
+/// #         if token == "--force" || token == "-f" {
+/// #             force = true;
+/// #         } else if name.is_none() {
+/// #             name = Some(token);
+/// #         }
+/// #     }
+/// #     (name.unwrap_or(""), force)
+/// # }
+/// // The flag may sit before or after the name.
 /// assert_eq!(split_delete_args("alpha --force"), ("alpha", true));
 /// assert_eq!(split_delete_args("--force alpha"), ("alpha", true));
+/// // `-f` is the short form.
+/// assert_eq!(split_delete_args("alpha -f"), ("alpha", true));
+/// // No flag means no confirmation.
 /// assert_eq!(split_delete_args("alpha"), ("alpha", false));
 /// assert_eq!(split_delete_args(""), ("", false));
 /// ```

@@ -1618,18 +1618,19 @@ fn apply_model_override(
     }
 }
 
-/// Truncate a string to `max_len` characters, appending "..." if truncated.
+/// Truncate a string to `max_len` characters, appending `...` if truncated.
 ///
 /// Returns a borrowed slice when no truncation is needed, avoiding an
-/// allocation on the common no-op path.
+/// allocation on the common no-op path. The budget counts visible characters
+/// only, so `max_len` characters are kept and the `...` follows them
+/// ([`ragent_types::strutil::truncate_chars_no_ellipsis`] plus the marker); the
+/// `Cow` is the only part specific to this call site.
 fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
-    match s.char_indices().nth(max_len) {
-        Some((byte_idx, _)) => {
-            let mut truncated = String::from(&s[..byte_idx]);
-            truncated.push_str("...");
-            std::borrow::Cow::Owned(truncated)
-        }
-        None => std::borrow::Cow::Borrowed(s),
+    if s.chars().count() <= max_len {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        let head = ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len);
+        std::borrow::Cow::Owned(format!("{head}..."))
     }
 }
 

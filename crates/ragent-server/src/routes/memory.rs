@@ -305,12 +305,13 @@ pub async fn store_memory(
             .await;
             let (row, tags) = match fetch {
                 Ok(Ok(pair)) => pair,
+                // `internal_error_response` is the single log site: it emits
+                // the context and the error at `error!`, so a `warn!` here
+                // would report the same failure twice at two levels.
                 Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "fetch-after-store failed");
                     return internal_error_response("store_memory (fetch-after-store)", e);
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "fetch-after-store task panicked");
                     return internal_error_response("store_memory (fetch-after-store task)", e);
                 }
             };

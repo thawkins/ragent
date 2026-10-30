@@ -49,6 +49,12 @@ PANIC_PATTERNS = (
 # An inline escape hatch, e.g. `let x = re.compile(..).expect("valid"); // no-panic-ok: compile-time constant`
 NO_PANIC_MARKER = "no-panic-ok"
 
+# Doc comments carry illustrative examples (``/// let x = parse(s).unwrap();``)
+# that are not production call sites. Counting them let a file with many
+# doc-comment examples absorb a *real* new panic and stay under its grandfathered
+# baseline - a netting-out bypass (code-audit Medium 4). They are skipped now.
+DOC_COMMENT_PREFIXES = ("///", "//!")
+
 # `.expect(` arguments may legitimately mention these words; they are not
 # panicking sites in the sense this guard cares about.
 IGNORED_SUBSTRINGS = (
@@ -91,10 +97,17 @@ def blank_cfg_test_blocks(src: str) -> str:
 
 
 def count_sites(path: pathlib.Path, src: str) -> int:
-    """Count panicking unwrap/expect call sites in one production source file."""
+    """Count panicking unwrap/expect call sites in one production source file.
+
+    Doc-comment lines (``///`` and ``//!``) are skipped: their examples are
+    illustrative, not call sites, and counting them let real panics hide under
+    a grandfathered baseline.
+    """
     clean = blank_cfg_test_blocks(src)
     total = 0
     for line in clean.splitlines():
+        if line.lstrip().startswith(DOC_COMMENT_PREFIXES):
+            continue
         if NO_PANIC_MARKER in line:
             continue
         if any(skip in line for skip in IGNORED_SUBSTRINGS):
@@ -146,6 +159,9 @@ def write_baseline(counts: dict[str, int]) -> None:
         "# The gate fails when a file exceeds its baseline or a file that had none",
         "# gains a panicking call. Mark an intentional call with a same-line",
         "# `// no-panic-ok: <reason>` comment to keep it out of the count.",
+        "# Doc-comment examples (`///`, `//!`) are NOT counted: they are",
+        "# illustrations, not call sites, and counting them would let a real new",
+        "# panic hide under a grandfathered baseline (code-audit Medium 4).",
         "",
     ]
     for path, count in sorted(counts.items()):
@@ -154,8 +170,40 @@ def write_baseline(counts: dict[str, int]) -> None:
 
 
 def self_test() -> int:
-    """Seed a violation in a temp file inside the scan root and confirm the
-    scanner flags it. Proves the guard actually fails on a seeded breach."""
+    """Prove the guard fails on a seeded breach and counts only real call sites.
+
+    Two properties are asserted, because the second was the actual bug
+    (code-audit Medium 4):
+
+    1. A new panicking call in a file with no baseline is flagged.
+    2. Doc-comment examples are not counted, so a file cannot absorb a real new
+       panic under a grandfathered baseline made up of ``///`` examples.
+    """
+    # Property 2 is checked directly against the counting function: the same
+    # real call must count 1 whether or not doc examples surround it.
+    doc_filled = (
+        "//! Crate docs.\n"
+        "/// Example.\n"
+        "///\n"
+        "/// ```\n"
+        "/// let a: Option<u32> = Some(1);\n"
+        "/// a.unwrap();\n"
+        "/// a.expect(\"bad\");\n"
+        "/// ```\n"
+        "pub fn f() -> u32 {\n"
+        "    let v: Option<u32> = Some(1);\n"
+        "    v.unwrap()\n"
+        "}\n"
+    )
+    direct = count_sites(pathlib.Path("selftest"), doc_filled)
+    if direct != 1:
+        print(
+            "ERROR: self-test failed - doc-comment examples are counted as real "
+            f"panicking calls (expected 1, got {direct}).",
+            file=sys.stderr,
+        )
+        return 1
+
     seed = SCAN_ROOT / "ragent-types" / "src" / "__unwrap_guard_selftest.rs"
     seed.write_text(
         "pub fn f() -> u32 {\n"
@@ -177,7 +225,10 @@ def self_test() -> int:
                 file=sys.stderr,
             )
             return 1
-        print("OK: self-test - the guard fails a seeded panicking unwrap.")
+        print(
+            "OK: self-test - the guard fails a seeded panicking unwrap and "
+            "ignores doc-comment examples."
+        )
         return 0
     finally:
         seed.unlink(missing_ok=True)

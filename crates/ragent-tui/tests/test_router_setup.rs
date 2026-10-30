@@ -216,7 +216,7 @@ fn test_router_config_report_includes_entries() {
                 "MEDIUM".to_string(),
                 ragent_llm::providers::router_config::TierConfig {
                     models: vec![TierEntry {
-                        provider: "anthropic".to_string(),
+                        provider_id: "anthropic".to_string(),
                         model: "claude-sonnet-4-20250514".to_string(),
                     }],
                     timeout_ms: None,
@@ -454,7 +454,7 @@ async fn test_router_setup_assigns_model_to_bucket() {
                 .map(|t| t.models.clone())
                 .unwrap_or_default();
             assert!(!models.is_empty(), "model must be assigned to SIMPLE");
-            assert_eq!(models[0].provider, "anthropic");
+            assert_eq!(models[0].provider_id, "anthropic");
         }
         _ => panic!("expected SetupRouter after assignment"),
     }
@@ -1263,7 +1263,7 @@ async fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
                 "SIMPLE bucket should contain the saved model assignment"
             );
             assert!(
-                simple.models.iter().any(|e| e.provider == "anthropic"),
+                simple.models.iter().any(|e| e.provider_id == "anthropic"),
                 "saved SIMPLE assignment should reference anthropic: {:?}",
                 simple.models
             );

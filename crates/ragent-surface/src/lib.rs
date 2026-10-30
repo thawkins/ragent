@@ -21,11 +21,14 @@
 //! | [`scan`]    | shared store-scan failure row                             |
 //! | [`store`]   | [`store::StoreDirs`] resolution and store-entry checks     |
 
+#![deny(unsafe_code)]
+
 pub mod config_splice;
 pub mod harness;
 pub mod help;
 pub mod manifest;
 pub mod marketplace;
+pub mod marketplace_ledger;
 pub mod net;
 pub mod scan;
 pub mod store;

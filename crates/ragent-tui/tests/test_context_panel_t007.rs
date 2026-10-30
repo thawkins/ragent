@@ -32,18 +32,36 @@ fn test_agents_md_token_count_is_non_negative() {
 
 #[test]
 fn test_memory_injection_token_count_is_non_negative() {
-    // FR-009: memory injections may legitimately be empty (no memories for
-    // the working directory), but the call must never underflow or panic.
+    // FR-009: memory injections may legitimately be zero (no memories for the
+    // working directory), but the count must be a bounded slice, never a
+    // wild value from an underflow.
     let app = support::make_app();
-    let _count = app.memory_injection_token_count();
+    let count = app.memory_injection_token_count();
+    assert!(
+        count < 1_000_000,
+        "memory injection partition implausibly large: {count}"
+    );
+    // It is a slice of the whole prompt, so it can never exceed it.
+    assert!(
+        count <= app.system_prompt_token_count(),
+        "memory injection partition larger than the system prompt"
+    );
 }
 
 #[test]
 fn test_skills_token_count_is_non_negative() {
     // FR-009: the skills partition is zero when no agent-invocable skills
-    // resolve, positive otherwise; either way the call must succeed.
+    // resolve, positive otherwise; either way it must be a bounded slice.
     let app = support::make_app();
-    let _count = app.skills_token_count();
+    let count = app.skills_token_count();
+    assert!(
+        count < 1_000_000,
+        "skills partition implausibly large: {count}"
+    );
+    assert!(
+        count <= app.system_prompt_token_count(),
+        "skills partition larger than the system prompt"
+    );
 }
 
 #[test]

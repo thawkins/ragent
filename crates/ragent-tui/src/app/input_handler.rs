@@ -34,7 +34,7 @@ use crate::app::helpers::short_session_id;
 /// `task_complete`. `/autopilot on` without flags still starts an unbounded
 /// run for users who deliberately want one.
 fn alt_o_default_autopilot_time_limit() -> u64 {
-    30 * 60
+    5000
 }
 
 impl App {

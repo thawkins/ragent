@@ -7,6 +7,12 @@
 .vscode/
 *.swp
 *.swo
+*.iml
+*.suo
+*.user
+.history/
+*.orig
+*.rej
 
 # Logs
 /log/
@@ -48,16 +54,26 @@ EOF
 *.db
 *.sqlite
 *.sqlite3
-# SQLite WAL/SHM sidecars can hold plaintext credential-store and session pages
+# SQLite WAL/SHM sidecars and rollback journals can hold plaintext
+# credential-store and session pages mid-write.
 *.db-wal
 *.db-shm
+*.db-journal
+*.sqlite-journal
+*.sqlite3-journal
 
 # Key files
 *.key
 id_rsa
+id_rsa*
+id_ecdsa
+id_dsa
 id_ed25519
+*.ppk
 *.jks
 *.keystore
+# Cargo registry tokens live here; never track it.
+credentials.toml
 
 # Certificates and credential files
 *.pem
@@ -94,6 +110,10 @@ azureresources.json
 .mcp.json
 mcp.json
 /ragent.json
+# The archive under assets/config/ unpacks to the same credential-bearing file;
+# the root anchor above does not reach it.
+assets/config/ragent.json
+assets/config/ragent.json.*
 *.crt
 *.cer
 *.der
@@ -103,3 +123,6 @@ node_modules/
 
 # Run logs
 *.log
+
+# Regenerable function-length analysis scratch (tools/analyze_function_lengths.py)
+.func-count/

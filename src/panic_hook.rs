@@ -18,7 +18,7 @@
 //! hook may fire before the tracing subscriber is installed (or after it has
 //! been torn down), so a `tracing` call could be silently dropped. Writing
 //! directly to stderr guarantees the diagnostic is visible. This is the
-//! documented CLI-presentation exception in `AGENTS-RUST.md`; the hook itself
+//! documented CLI-presentation exception in `AGENTS-LANGUAGE.md`; the hook itself
 //! is best-effort and never panics on its own.
 
 use std::backtrace::Backtrace;

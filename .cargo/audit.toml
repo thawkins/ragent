@@ -3,6 +3,7 @@
 # dependency tree are listed here, so a re-introduced vulnerable crate is never
 # silently masked.
 [advisories]
-ignore = [
-    "RUSTSEC-2024-0436", # paste unmaintained; transitive via tokenizers 0.21 (embeddings feature)
-]
+# No ignores: RUSTSEC-2024-0436 (`paste` unmaintained) no longer matches the
+# current tree, so the entry was dead configuration. cargo-deny reported it as
+# `advisory-not-detected`; the ignore was removed from both gates together.
+ignore = []

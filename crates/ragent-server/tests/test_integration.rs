@@ -3,93 +3,17 @@
 //! Uses an in-process Axum router with [`tower::ServiceExt::oneshot`] to
 //! exercise HTTP endpoints without opening a TCP socket.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use ragent_agent::Config;
-use ragent_agent::event::{Event, EventBus};
-use ragent_agent::permission::PermissionChecker;
-use ragent_agent::provider::ProviderRegistry;
-use ragent_agent::session::SessionManager;
-use ragent_agent::session::processor::SessionProcessor;
-use ragent_agent::storage::Storage;
-use ragent_agent::tool::ToolRegistry;
-use ragent_server::routes::{AppState, router};
+use ragent_agent::event::Event;
+use ragent_server::routes::router;
 use tower::ServiceExt;
-
-/// Build a minimal [`AppState`] suitable for testing auth and rate-limit paths.
-fn test_state(token: &str) -> AppState {
-    let storage = Arc::new(Storage::open_in_memory().unwrap());
-    let event_bus = Arc::new(EventBus::new(16));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: Arc::new(ProviderRegistry::new()),
-        tool_registry: Arc::new(ToolRegistry::new()),
-        permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![]))),
-        event_bus: event_bus.clone(),
-        agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        connector_session: tokio::sync::RwLock::new(None),
-        connector_statuses: tokio::sync::RwLock::new(None),
-        code_index: std::sync::OnceLock::new(),
-        stream_config: Default::default(),
-        extraction_engine: std::sync::OnceLock::new(),
-        auto_approve: false,
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
-        activity_log: std::sync::OnceLock::new(),
-        activity_log_tx: tokio::sync::Mutex::new(None),
-        skill_registry_cache: parking_lot::Mutex::new(None),
-        active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
-        active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
-        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
-        bg_service: std::sync::OnceLock::new(),
-    });
-    AppState {
-        event_bus,
-        config: Arc::new(tokio::sync::RwLock::new(Config::default())),
-        storage,
-        session_processor: processor,
-        auth_token: token.to_string(),
-        rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        coordinator: None,
-        research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: std::sync::Arc::new(crate::research_sandbox::isolated_research_root()),
-    }
-}
 
 // -- Auth middleware tests -------------------------------------------------
 
 #[tokio::test]
 async fn test_health_no_auth_required() {
-    let app = router(test_state("secret"));
+    let app = router(crate::support::test_state("secret"));
     let req = Request::builder()
         .uri("/health")
         .body(Body::empty())
@@ -100,7 +24,7 @@ async fn test_health_no_auth_required() {
 
 #[tokio::test]
 async fn test_protected_route_rejects_missing_auth() {
-    let app = router(test_state("secret"));
+    let app = router(crate::support::test_state("secret"));
     let req = Request::builder()
         .uri("/sessions")
         .body(Body::empty())
@@ -111,7 +35,7 @@ async fn test_protected_route_rejects_missing_auth() {
 
 #[tokio::test]
 async fn test_protected_route_rejects_wrong_token() {
-    let app = router(test_state("correct-token"));
+    let app = router(crate::support::test_state("correct-token"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "Bearer wrong-token")
@@ -123,7 +47,7 @@ async fn test_protected_route_rejects_wrong_token() {
 
 #[tokio::test]
 async fn test_protected_route_rejects_non_bearer_scheme() {
-    let app = router(test_state("secret"));
+    let app = router(crate::support::test_state("secret"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "Basic secret")
@@ -135,7 +59,7 @@ async fn test_protected_route_rejects_non_bearer_scheme() {
 
 #[tokio::test]
 async fn test_protected_route_accepts_valid_token() {
-    let app = router(test_state("my-secret"));
+    let app = router(crate::support::test_state("my-secret"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "Bearer my-secret")
@@ -150,7 +74,7 @@ async fn test_protected_route_accepts_valid_token() {
 
 #[tokio::test]
 async fn test_rate_limiter_allows_under_limit() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     // Pre-seed a session so send_message can find it.
     state.storage.create_session("s1", "/tmp").unwrap();
 
@@ -176,7 +100,7 @@ async fn test_rate_limiter_allows_under_limit() {
 
 #[tokio::test]
 async fn test_rate_limiter_rejects_over_limit() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
 
     let rate_limiter = state.rate_limiter.clone();
@@ -200,7 +124,7 @@ async fn test_rate_limiter_rejects_over_limit() {
 
 #[tokio::test]
 async fn test_rate_limiter_resets_after_window() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
 
     let rate_limiter = state.rate_limiter.clone();
@@ -230,7 +154,7 @@ async fn test_rate_limiter_resets_after_window() {
 
 #[tokio::test]
 async fn test_events_stream_requires_auth() {
-    let app = router(test_state("secret"));
+    let app = router(crate::support::test_state("secret"));
     let req = Request::builder()
         .uri("/events")
         .body(Body::empty())
@@ -241,7 +165,7 @@ async fn test_events_stream_requires_auth() {
 
 #[tokio::test]
 async fn test_events_stream_returns_sse() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     let bus = state.event_bus.clone();
 
     let app = router(state);
@@ -273,7 +197,7 @@ async fn test_events_stream_returns_sse() {
 
 #[tokio::test]
 async fn test_auth_accepts_lowercase_bearer() {
-    let app = router(test_state("my-secret"));
+    let app = router(crate::support::test_state("my-secret"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "bearer my-secret")
@@ -285,7 +209,7 @@ async fn test_auth_accepts_lowercase_bearer() {
 
 #[tokio::test]
 async fn test_auth_accepts_uppercase_bearer() {
-    let app = router(test_state("my-secret"));
+    let app = router(crate::support::test_state("my-secret"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "BEARER my-secret")
@@ -297,7 +221,7 @@ async fn test_auth_accepts_uppercase_bearer() {
 
 #[tokio::test]
 async fn test_auth_accepts_mixed_case_bearer() {
-    let app = router(test_state("my-secret"));
+    let app = router(crate::support::test_state("my-secret"));
     let req = Request::builder()
         .uri("/sessions")
         .header("Authorization", "BeArEr my-secret")
@@ -311,7 +235,7 @@ async fn test_auth_accepts_mixed_case_bearer() {
 
 #[tokio::test]
 async fn test_create_session_invalid_path() {
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     let req = Request::builder()
         .method("POST")
         .uri("/sessions")
@@ -328,7 +252,7 @@ async fn test_create_session_invalid_path() {
 #[tokio::test]
 async fn test_create_session_not_a_directory() {
     // /dev/null exists but is not a directory.
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     let req = Request::builder()
         .method("POST")
         .uri("/sessions")
@@ -342,7 +266,7 @@ async fn test_create_session_not_a_directory() {
 
 #[tokio::test]
 async fn test_create_session_success() {
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     // SEC-062: a directory must be inside the configured project root, so use a
     // subdirectory of the server's working directory rather than `/tmp`.
     let dir = std::env::current_dir()
@@ -368,7 +292,9 @@ async fn test_create_session_success() {
 async fn func066_auth_accepts_token_of_any_length_and_rejects_others() {
     // The constant-time comparison hashes both sides, so tokens of differing
     // lengths are still correctly compared.
-    let app = router(test_state("a-much-longer-correct-token-value"));
+    let app = router(crate::support::test_state(
+        "a-much-longer-correct-token-value",
+    ));
 
     let req_ok = Request::builder()
         .uri("/sessions")
@@ -395,7 +321,7 @@ async fn func066_auth_accepts_token_of_any_length_and_rejects_others() {
 #[tokio::test]
 async fn func066_rate_limiter_enforces_exactly_60() {
     // 59 prior requests -> the 60th is allowed.
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
     {
         let mut lim = state.rate_limiter.lock().await;
@@ -415,7 +341,7 @@ async fn func066_rate_limiter_enforces_exactly_60() {
     );
 
     // 60 prior requests -> the next (61st) is rejected.
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
     {
         let mut lim = state.rate_limiter.lock().await;

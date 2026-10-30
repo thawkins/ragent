@@ -106,7 +106,7 @@ fn config_with_known_models() -> RouterConfig {
             tier.to_string(),
             TierConfig {
                 models: vec![TierEntry {
-                    provider: provider.to_string(),
+                    provider_id: provider.to_string(),
                     model: model.to_string(),
                 }],
                 timeout_ms: None,
@@ -525,11 +525,11 @@ async fn test_router_text_followup_after_image_uses_non_vision_model() {
         TierConfig {
             models: vec![
                 TierEntry {
-                    provider: "fake".to_string(),
+                    provider_id: "fake".to_string(),
                     model: "glm-5.2".to_string(),
                 },
                 TierEntry {
-                    provider: "fake".to_string(),
+                    provider_id: "fake".to_string(),
                     model: "glm-5.2-vision".to_string(),
                 },
             ],
@@ -717,7 +717,7 @@ async fn test_router_vision_fallback_warms_all_tiers_for_dynamic_providers() {
         Tier::Simple.to_string(),
         TierConfig {
             models: vec![TierEntry {
-                provider: "dynamic_fake".to_string(),
+                provider_id: "dynamic_fake".to_string(),
                 model: "kimi-k2.7-code".to_string(),
             }],
             timeout_ms: None,

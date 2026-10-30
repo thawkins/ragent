@@ -7,6 +7,8 @@
 //! - Runtime allowlists and denylists (bash, directories)
 //! - YOLO mode configuration
 
+#![deny(unsafe_code)]
+
 pub mod activity_log;
 pub mod automation;
 pub mod bash_lists;

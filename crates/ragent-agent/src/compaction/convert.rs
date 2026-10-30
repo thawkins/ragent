@@ -35,7 +35,19 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
             // System and tool-role messages have no place in the internal
             // compaction history; skip them rather than silently re-roling.
             "system" | "tool" => continue,
-            _ => Role::User,
+            "user" => Role::User,
+            // An unrecognised spelling cannot be safely mapped onto a known
+            // role (assigning `User` would invent a turn the provider never
+            // sent and corrupt the summary input), so it is skipped and
+            // reported rather than guessed at. The match names every case
+            // explicitly so adding a `Role` variant fails to compile here.
+            other => {
+                tracing::warn!(
+                    role = other,
+                    "compaction: skipping a chat message with an unrecognised role"
+                );
+                continue;
+            }
         };
         let msg_idx = messages.len();
         let mut parts: Vec<MessagePart> = Vec::new();

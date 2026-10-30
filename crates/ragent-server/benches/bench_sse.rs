@@ -66,6 +66,7 @@ fn make_events() -> Vec<(&'static str, Event)> {
                 agent: "explore".into(),
                 task: "Find all usages of the Config struct".into(),
                 background: true,
+                detached: false,
             },
         ),
         (

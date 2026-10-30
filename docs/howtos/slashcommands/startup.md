@@ -72,6 +72,5 @@ launched, or when timing instrumentation did not run.
 
 ## Related
 
-- `/inputdiag` - dump input and pane state for diagnostics
 - `/doctor` - run environment health checks
 - `/bug-report` - collect diagnostics into a report file

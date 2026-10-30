@@ -71,6 +71,33 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> String {
     format!("{truncated}...")
 }
 
+/// Truncate a string to at most `max_chars` Unicode scalar values, with no
+/// ellipsis or other suffix.
+///
+/// The char-budget sibling of [`truncate_bytes_no_ellipsis`]. Use this where a
+/// caller wants a hard column budget and will draw its own continuation marker,
+/// or where the marker would be misleading (a value that is already an
+/// identifier, a cell that the surrounding table border delimits).
+///
+/// Note the difference from [`truncate_chars`]: that helper reserves three of
+/// the budget for `...`, so `truncate_chars(s, 10)` keeps seven characters,
+/// while `truncate_chars_no_ellipsis(s, 10)` keeps ten.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_types::strutil::truncate_chars_no_ellipsis;
+///
+/// assert_eq!(truncate_chars_no_ellipsis("hello world", 20), "hello world");
+/// assert_eq!(truncate_chars_no_ellipsis("hello world", 5), "hello");
+/// // Never splits a multi-byte character:
+/// assert_eq!(truncate_chars_no_ellipsis("caf\u{e9}s", 4), "caf\u{e9}");
+/// ```
+#[must_use]
+pub fn truncate_chars_no_ellipsis(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
 /// Format a byte count as a compact human-readable string.
 ///
 /// Uses binary units (`KB`/`MB`) and one decimal place once the value exceeds

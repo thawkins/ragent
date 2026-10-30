@@ -363,12 +363,6 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         flags: EMPTY,
     },
     CommandCatalogEntry {
-        trigger: "inputdiag",
-        description: "Dump input/cursor/selection diagnostics for troubleshooting",
-        subcommands: EMPTY,
-        flags: EMPTY,
-    },
-    CommandCatalogEntry {
         trigger: "llmstats",
         description: "Show average LLM response time and token throughput",
         subcommands: EMPTY,

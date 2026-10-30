@@ -265,7 +265,23 @@ Use the `Bash` tool to run the following cargo commands:
 
 ### Core Code Rules
 
-* **No `unsafe` Blocks:** Never use `unsafe` unless explicitly approved or required by FFI bounds; document all safety invariants clearly when used. The single approved production site is `kill_process_group` in `crates/ragent-tools-core/src/bash.rs` (the bash-timeout process-group kill), where `libc::killpg` has no safe std alternative; it carries a `// SAFETY:` comment and a scoped `#[allow(unsafe_code)]`.
+* **No `unsafe` Blocks:** Never use `unsafe` unless explicitly approved or required by FFI bounds; document all safety invariants clearly when used.
+  Every crate root (`crates/*/src/lib.rs`) and the `ragent` binary root (`src/main.rs`)
+  carries a crate-level `#![deny(unsafe_code)]`, so a new `unsafe` block fails to
+  compile until it is explicitly re-enabled. The approved production sites are
+  gated with a scoped `#[allow(unsafe_code)]` plus a `// SAFETY:` comment stating
+  the invariant, and each exists only because libc has no safe std equivalent:
+
+  | Site | Why |
+  | --- | --- |
+  | `crates/ragent-tools-core/src/bash.rs` (`kill_process_group`) | `libc::killpg` - bash-timeout process-group kill |
+  | `crates/ragent-agent/src/team/manager.rs` (`kill_hook_process_group`) | `libc::killpg`/`kill` - hook timeout teardown |
+  | `crates/ragent-agent/src/mcp/mod.rs` (`kill_stdio_child`) | `libc::kill`/`killpg` - MCP stdio child teardown (3 blocks) |
+  | `src/stderr_spool.rs` (`install`) | `libc::pipe`/`dup`/`dup2`/`close` and `File::from_raw_fd` - stderr spool capture (7 blocks) |
+  | `src/crash_dump.rs` (`process_alive`) | `libc::kill` signal 0 liveness probe, `OpenProcess`/`GetExitCodeProcess`/`CloseHandle` on Windows (2 blocks) |
+
+  Tests may opt back in with a file-level `#![allow(unsafe_code)]` for the Rust 2024
+  `std::env::set_var`/`remove_var` migration; that is the only sanctioned test use.
 * **Exhaustive Pattern Matching:** Always match enums and results exhaustively; avoid wildcard `_` fallbacks unless handling non-exhaustive external types.
 * **Explicit Cloning:** Call `.clone()` explicitly on non-`Copy` types; forbid hidden or cascading clones inside intensive iterators or closures.
 * **No Silent Error Swallowing:** Never use `.unwrap()` or `.expect()` in production code paths on user-facing paths; always propagate or handle `Result` and `Option`. Test and bench code may use them freely. The workspace clippy config sets `unwrap_used = "allow"` so the compiler does not enforce this; treat it as a review-enforced rule and keep the T-006 sites fixed.

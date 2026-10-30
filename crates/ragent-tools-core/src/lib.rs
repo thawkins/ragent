@@ -3,6 +3,8 @@
 //! This crate provides the extracted Milestone 4 tool set together with the
 //! minimal shared tool abstractions those moved implementations require.
 
+#![deny(unsafe_code)]
+
 // Shared exact-byte replacement matcher (used by edit, multi_edit,
 // apply_patch) plus the match-failure diagnostics formatter.
 // Extracted in WSPLAN Milestone 2.

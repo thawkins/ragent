@@ -4,6 +4,39 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.156)
+
+- **Version bump only** - this release publishes the internal audit-remediation
+  work; the TUI behaves exactly as it did in 1.0.155.
+
+## Highlights (v1.0.155)
+
+- **`/inputdiag` is gone.** The debug-only command dumped internal widget,
+  cursor and selection geometry into the transcript; it had no tool behind it
+  and is no longer part of the slash-command set. The tool registry is unchanged
+  at 150 tools across 21 families. Everything else in this release is internal.
+- **The bash tool-call header keeps a true 250 characters.** The truncation
+  helper it shares with the agent's task panel counted the trailing `...` inside
+  the caller's budget, so a 250-character header budget actually kept 247. The
+  new `truncate_chars_no_ellipsis`/`truncate_bytes_no_ellipsis` helpers keep the
+  full budget and the caller appends the marker, so you now see three more
+  characters of a long command before it is clipped.
+- **`/editlog off` and `Alt+E` now stay off.** Both wrote back to whichever
+  config file the session had loaded - the project `.ragent/ragent.json` when one
+  existed - which a session started in a different directory never reads, so the
+  toggle silently reverted at the next start. `edit_log`, `activity_log` and
+  `yolo` now persist to the **user-global** `~/.config/ragent/ragent.json` and
+  leave every other key untouched. `gcf` keeps its previous path.
+- **A project `.ragent/ragent.json` can no longer re-enable activity logging.**
+  Because `activity_log` defaults to `true`, a project file that simply omitted
+  the key was indistinguishable from one that set it, and the default overwrote
+  your user-global `false` on every load. An explicit `false` now always wins and
+  an omitted key leaves the lower layer alone.
+- **Fewer duplicate log lines.** One loop failure was reported twice at two
+  levels, and a cancellation produced a `warn!` plus a separate timing `info!`;
+  both are single lines now. The pre-send compaction decision is logged only when
+  it actually fires, instead of dumping a six-field struct on every step.
+
 ## Highlights (v1.0.153)
 
 - **`Alt+A` / `Alt+T` always toggle their window** — the Teams window had no

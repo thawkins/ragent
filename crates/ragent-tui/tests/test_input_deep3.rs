@@ -577,11 +577,11 @@ async fn router_setup_space_deselects_a_provider_and_its_tier_entries() {
         TierConfig {
             models: vec![
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m1".to_string(),
                 },
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m2".to_string(),
                 },
             ],
@@ -632,11 +632,11 @@ async fn router_setup_ctrl_up_and_down_reorder_bucket_models() {
         TierConfig {
             models: vec![
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m1".to_string(),
                 },
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m2".to_string(),
                 },
             ],
@@ -699,11 +699,11 @@ async fn router_setup_delete_removes_a_bucket_model() {
         TierConfig {
             models: vec![
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m1".to_string(),
                 },
                 TierEntry {
-                    provider: "anthropic".to_string(),
+                    provider_id: "anthropic".to_string(),
                     model: "m2".to_string(),
                 },
             ],
@@ -739,7 +739,7 @@ async fn router_setup_ctrl_s_stages_the_save_when_a_tier_has_a_model() {
         Tier::Simple.to_string(),
         TierConfig {
             models: vec![TierEntry {
-                provider: "anthropic".to_string(),
+                provider_id: "anthropic".to_string(),
                 model: "m1".to_string(),
             }],
             timeout_ms: None,

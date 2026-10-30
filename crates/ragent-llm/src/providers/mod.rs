@@ -53,6 +53,13 @@ use serde::{Deserialize, Serialize};
 use crate::llm::LlmClient;
 use ragent_config::{Capabilities, Cost};
 
+/// The Anthropic Messages API version header value.
+///
+/// Sent as `anthropic-version` by every Anthropic-shaped provider (direct
+/// Anthropic, Azure resource endpoints, and Bedrock's Anthropic body). Defined
+/// once so a version bump cannot leave one provider behind.
+pub const ANTHROPIC_VERSION: &str = "2023-06-01";
+
 /// Metadata describing an LLM model, including its cost, capabilities, and context limits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {

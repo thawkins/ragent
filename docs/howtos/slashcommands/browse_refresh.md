@@ -46,5 +46,4 @@ cached entry count.
 ## Related
 
 - `@` file picker - the autocomplete surface this command refreshes
-- `/inputdiag` - shows the browse cache state (cwd, entry count, refreshed-at)
 - `/log` - open the log panel to see the refresh log entry

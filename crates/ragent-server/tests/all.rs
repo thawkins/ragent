@@ -8,6 +8,8 @@
 
 #[path = "research_sandbox.rs"]
 pub mod research_sandbox;
+#[path = "support/mod.rs"]
+pub mod support;
 #[path = "test_automation_surface.rs"]
 mod test_automation_surface;
 #[path = "test_config_redaction.rs"]

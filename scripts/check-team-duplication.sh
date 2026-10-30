@@ -31,7 +31,12 @@ AGENT_SRC="crates/ragent-agent/src"
 SHIM_CRATE="crates/ragent-team"
 
 # Required team-runtime modules; each must exist as a file and be declared.
-RUNTIME_MODULES=(classify config mailbox manager store swarm task)
+#
+# `hook_ledger` and `status_history` are the two append-only ledgers v1.0.153
+# added beside a team's `config.json` (`hook-failures.jsonl`,
+# `status-history.jsonl`). They are canonical runtime modules like the rest, so
+# they belong in this list rather than tripping the "unexpected file" check.
+RUNTIME_MODULES=(classify config hook_ledger mailbox manager status_history store swarm task)
 
 fail() {
     echo "ERROR: $*"

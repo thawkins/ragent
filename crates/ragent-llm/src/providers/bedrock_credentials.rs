@@ -238,12 +238,31 @@ fn aws_credentials_path() -> PathBuf {
 }
 
 /// Parsed credential entry from the AWS credentials INI file.
-#[derive(Debug, Clone, Default)]
+///
+/// `Debug` is hand-written (not derived) for the same reason as
+/// [`AwsCredentials`]: the struct holds live secret material, so a stray
+/// `debug!(creds = ?profile)` must never print the secret key or the session
+/// token.
+#[derive(Clone, Default)]
 struct ProfileCredentials {
     access_key: String,
     secret_key: String,
     session_token: Option<String>,
     region: Option<String>,
+}
+
+impl std::fmt::Debug for ProfileCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProfileCredentials")
+            .field("access_key", &self.access_key)
+            .field("secret_key", &"[REDACTED]")
+            .field(
+                "session_token",
+                &self.session_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("region", &self.region)
+            .finish()
+    }
 }
 
 /// Parses an AWS credentials INI file into a map of profile name -> credentials.

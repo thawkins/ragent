@@ -460,10 +460,6 @@ async fn test_slash_help_shows_commands() {
     assert!(text.contains("/compact"), "help should mention /compact");
     assert!(text.contains("/agent"), "help should mention /agent");
     assert!(text.contains("/model"), "help should mention /model");
-    assert!(
-        text.contains("/inputdiag"),
-        "help should mention /inputdiag"
-    );
     assert!(text.contains("/help"), "help should mention /help");
     assert!(text.contains("/spec"), "help should mention /spec");
 }
@@ -2642,25 +2638,6 @@ async fn test_file_menu_down_scrolls_selection_window() {
     let menu = app.file_menu.as_ref().expect("menu");
     assert_eq!(menu.selected, 9);
     assert!(menu.scroll_offset > 0);
-}
-
-#[tokio::test]
-async fn test_slash_inputdiag_reports_input_state() {
-    let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    app.input = "abc".to_string();
-    app.input_cursor = 2;
-
-    app.execute_slash_command("/inputdiag").await;
-
-    assert_eq!(app.status, "inputdiag");
-    assert!(!app.messages.is_empty());
-    let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Input diagnostics:"));
-    assert!(text.contains("input chars: 0"));
-    assert!(text.contains("input cursor: 0"));
-    assert!(text.contains("browse cache entries:"));
-    assert!(text.contains("browse menu state:"));
 }
 
 // -- with leading slash and without ----------------------------------

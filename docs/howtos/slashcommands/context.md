@@ -91,4 +91,3 @@ The cache is also invalidated automatically after agent file edits; manual
 
 - `/undo` - remove the last turn pair from the conversation
 - `/reload` - reload configuration, agents, MCP, and skills
-- `/inputdiag` - dump current input and pane state for diagnostics

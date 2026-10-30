@@ -171,7 +171,7 @@ async fn cost_without_samples_is_unavailable() {
 }
 
 // ---------------------------------------------------------------------------
-// profile / perf / startup / actionloop / history / inputdiag
+// profile / perf / startup / actionloop / history
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -224,14 +224,6 @@ async fn history_help_and_picker() {
     app.input_history = vec!["alpha".to_string(), "beta".to_string()];
     app.execute_slash_command("/history").await;
     assert!(app.history_picker.is_some(), "history picker should open");
-}
-
-#[tokio::test]
-async fn inputdiag_renders_diagnostics() {
-    let mut app = app();
-    app.execute_slash_command("/inputdiag").await;
-    assert_eq!(app.status, "inputdiag");
-    assert!(last_message(&app).contains("Input diagnostics"));
 }
 
 // ---------------------------------------------------------------------------

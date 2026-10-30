@@ -125,7 +125,7 @@ impl App {
             if let Ok(mut guard) = compact_result.lock() {
                 *guard = Some(outcome);
             } else {
-                tracing::error!("compact_result mutex poisoned, result dropped");
+                tracing::warn!("compact_result mutex poisoned, result dropped");
             }
         });
         true

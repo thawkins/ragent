@@ -194,11 +194,18 @@ fn prepare_summary(summary: &str) -> PreparedSummary {
     PreparedSummary { body, lower }
 }
 
-/// Truncate `s` to at most `max` characters at a char boundary, appending an
+/// Truncate `s` to at most `max` bytes at a char boundary, appending an
 /// ellipsis when the text was cut.
+///
+/// The cut is trailing-whitespace-trimmed so a cell never ends with a dangling
+/// space before its `...`. The byte budget and the boundary step come from
+/// [`ragent_types::strutil`]; only the trim is local.
 fn truncate_cell(s: &str, max: usize) -> String {
     if s.len() > max {
-        format!("{}...", s[..s.floor_char_boundary(max)].trim_end())
+        let head = ragent_types::strutil::truncate_bytes_no_ellipsis(s, max)
+            .trim_end()
+            .to_string();
+        format!("{head}...")
     } else {
         s.to_string()
     }

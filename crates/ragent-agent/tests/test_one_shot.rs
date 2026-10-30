@@ -50,7 +50,11 @@ async fn test_send_one_shot_virtual_router_provider_is_not_registered() {
         None,
     )
     .await;
-    assert!(result.is_err());
+    let err = result.expect_err("the virtual router provider must never be dispatched");
+    assert!(
+        err.to_string().contains("not found"),
+        "expected a not-found error for the virtual router, got: {err}"
+    );
 }
 
 #[tokio::test]
@@ -74,7 +78,15 @@ async fn test_send_one_shot_registered_provider_without_key_errors() {
         None,
     )
     .await;
-    // Either a missing-key error (the common case) or a client-level failure;
-    // the function must never panic and must return a `Result`.
-    let _ = result;
+    // The invariant under test is "never proceed unauthenticated": with no key
+    // available the call must fail, and it must fail *before* any provider
+    // request is attempted. A key-resolution failure is therefore the expected
+    // outcome; a client-level failure would mean the request was dispatched
+    // without credentials, which this asserts against.
+    let err = result.expect_err("a provider with no resolvable key must never dispatch");
+    let message = err.to_string();
+    assert!(
+        message.contains("API key") || message.contains("api key") || message.contains("key"),
+        "expected a missing-key failure, got: {message}"
+    );
 }

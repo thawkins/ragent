@@ -39,6 +39,8 @@
 //! - [`watcher`] - Filesystem event watcher
 //! - [`worker`] - Background indexing worker with debounce and batching
 
+#![deny(unsafe_code)]
+
 /// Core data types shared across the indexing pipeline.
 pub mod types;
 

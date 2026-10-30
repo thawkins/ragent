@@ -1567,12 +1567,12 @@ impl App {
                 for entry in &tier_config.models {
                     let provider_name = self
                         .provider_registry
-                        .get(&entry.provider)
+                        .get(&entry.provider_id)
                         .map(|p| p.name().to_string())
-                        .unwrap_or_else(|| entry.provider.clone());
+                        .unwrap_or_else(|| entry.provider_id.clone());
                     report.push_str(&format!(
                         "- `{}` via **{}** (`{}`)\n",
-                        entry.model, provider_name, entry.provider
+                        entry.model, provider_name, entry.provider_id
                     ));
                 }
                 report.push('\n');
@@ -1642,31 +1642,31 @@ impl App {
     ) -> ProviderSetupStep {
         use ragent_llm::providers::router_config::{RouterConfig, Tier};
 
-        let (draft_config, selected_provider_ids) = if let Some(saved) =
-            self.load_raw_router_config()
-        {
-            let provider_ids: std::collections::HashSet<String> =
-                providers.iter().map(|p| p.id.clone()).collect();
-            let mut selected: Vec<String> = Vec::new();
-            for tier in saved.tiers.values() {
-                for entry in &tier.models {
-                    if provider_ids.contains(&entry.provider) && !selected.contains(&entry.provider)
-                    {
-                        selected.push(entry.provider.clone());
+        let (draft_config, selected_provider_ids) =
+            if let Some(saved) = self.load_raw_router_config() {
+                let provider_ids: std::collections::HashSet<String> =
+                    providers.iter().map(|p| p.id.clone()).collect();
+                let mut selected: Vec<String> = Vec::new();
+                for tier in saved.tiers.values() {
+                    for entry in &tier.models {
+                        if provider_ids.contains(&entry.provider_id)
+                            && !selected.contains(&entry.provider_id)
+                        {
+                            selected.push(entry.provider_id.clone());
+                        }
                     }
                 }
-            }
-            (saved, selected)
-        } else {
-            (
-                RouterConfig {
-                    enabled: false,
-                    tiers: std::collections::HashMap::new(),
-                    ..RouterConfig::default()
-                },
-                Vec::new(),
-            )
-        };
+                (saved, selected)
+            } else {
+                (
+                    RouterConfig {
+                        enabled: false,
+                        tiers: std::collections::HashMap::new(),
+                        ..RouterConfig::default()
+                    },
+                    Vec::new(),
+                )
+            };
 
         ProviderSetupStep::SetupRouter {
             providers,

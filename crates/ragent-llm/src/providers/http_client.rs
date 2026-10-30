@@ -155,6 +155,55 @@ pub fn append_stream_chunk_capped(buffer: &mut String, chunk: &str) -> bool {
     !sse_buffer_exceeded(buffer)
 }
 
+/// Append a raw network chunk and enforce the accumulation cap in one step.
+///
+/// This is the shape nine provider stream loops used to spell out by hand:
+/// [`append_stream_chunk`] to decode the bytes, then a
+/// [`sse_buffer_exceeded`] check that logs and fails the stream. Folding the
+/// two together means the cap and its warning can no longer be omitted from
+/// one provider while being present in the other eight - which is exactly how
+/// the copies drifted (some said "SSE buffer", Gemini said "stream buffer").
+///
+/// # Arguments
+///
+/// * `buffer` - the decoded text accumulated so far.
+/// * `pending` - the partial multi-byte UTF-8 bytes carried between chunks.
+/// * `chunk` - the raw bytes just read from the socket.
+/// * `provider_label` - the provider name used in the warning field, e.g.
+///   `"Anthropic"`.
+///
+/// # Returns
+///
+/// `Ok(())` when the buffer is within [`MAX_SSE_BUFFER_BYTES`], or an
+/// [`anyhow::Error`] whose message is the exact text the stream should emit as
+/// its terminal `StreamEvent::Error`, after the capped state has been logged at
+/// `warn!`.
+///
+/// # Errors
+///
+/// Returns an error when the accumulation buffer exceeds the cap without
+/// producing a complete frame.
+pub fn append_chunk_guarded(
+    buffer: &mut String,
+    pending: &mut Vec<u8>,
+    chunk: &[u8],
+    provider_label: &str,
+) -> anyhow::Result<()> {
+    append_stream_chunk(buffer, pending, chunk);
+    if !sse_buffer_exceeded(buffer) {
+        return Ok(());
+    }
+    tracing::warn!(
+        provider = provider_label,
+        limit = MAX_SSE_BUFFER_BYTES,
+        "SSE accumulation buffer exceeded the cap; aborting the stream"
+    );
+    Err(anyhow::anyhow!(
+        "SSE buffer exceeded {} bytes without a complete frame",
+        MAX_SSE_BUFFER_BYTES
+    ))
+}
+
 /// Maximum bytes read from an error/response body before formatting.
 ///
 /// SEC-ragent-llm-005 (SECTASKS T-028): a hostile endpoint can return an

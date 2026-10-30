@@ -63,6 +63,11 @@ async fn alt_o_enables_autopilot() {
         app.autopilot_time_limit_secs.is_some(),
         "the key toggle applies a bounded time limit"
     );
+    assert_eq!(
+        app.autopilot_time_limit_secs,
+        Some(5000),
+        "Alt+O arms the 5000-second default limit"
+    );
 }
 
 #[tokio::test]
@@ -150,12 +155,12 @@ fn status_bar_shows_autopilot_off_before_enabling() {
         "the status bar carries the autopilot indicator:\n{screen}"
     );
     assert!(
-        screen.contains("AUTO: \u{2717} (Alt+O)"),
+        screen.contains("AUTO: \u{2717} "),
         "the autopilot indicator reads disabled while off:\n{screen}"
     );
     assert!(
-        screen.contains("(Alt+O)"),
-        "the status bar names the Alt+O chord beside the indicator:\n{screen}"
+        !screen.contains("(Alt+O)"),
+        "the status bar carries no chord label; `?` documents the keys:\n{screen}"
     );
 }
 
@@ -173,7 +178,43 @@ async fn status_bar_shows_autopilot_on_after_alt_o() {
     // A green check mark appears beside the indicator; several other services
     // may also be green, so assert on the indicator pairing itself.
     assert!(
-        screen.contains("AUTO: \u{2713} (Alt+O)"),
+        screen.contains("AUTO: \u{2713} "),
         "the autopilot indicator reads enabled after Alt+O:\n{screen}"
+    );
+}
+
+#[tokio::test]
+async fn status_bar_counts_down_the_autopilot_time_limit() {
+    let mut app = support::make_app();
+
+    press_alt_o(&mut app).await;
+    let screen = draw(&mut app, 200, 40);
+
+    // The armed limit is 5000 s, rendered as a fixed-width HH:MM:SS countdown
+    // right after the indicator. A frame drawn moments after the start stamp
+    // is still inside the first second, so the full 01:23:20 shows.
+    assert!(
+        screen.contains("AUTO: \u{2713} [01:23:20] "),
+        "the status bar counts down the armed autopilot limit:\n{screen}"
+    );
+}
+
+#[tokio::test]
+async fn status_bar_omits_the_countdown_without_a_time_limit() {
+    let mut app = support::make_app();
+
+    // `/autopilot on` with no flags runs unbounded, so there is nothing to
+    // count down.
+    app.execute_slash_command("/autopilot on").await;
+    assert!(app.autopilot_time_limit_secs.is_none());
+    let screen = draw(&mut app, 200, 40);
+
+    assert!(
+        screen.contains("AUTO: \u{2713} "),
+        "the indicator still reads enabled:\n{screen}"
+    );
+    assert!(
+        !screen.contains("AUTO: \u{2713} ["),
+        "no countdown is drawn for an unbounded run:\n{screen}"
     );
 }

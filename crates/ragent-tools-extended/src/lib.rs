@@ -3,6 +3,8 @@
 //! This crate owns the extended tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
+#![deny(unsafe_code)]
+
 pub mod archdoc;
 pub mod codeindex_communities;
 pub mod codeindex_dependencies;

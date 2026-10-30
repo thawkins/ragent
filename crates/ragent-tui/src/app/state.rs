@@ -891,10 +891,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (^/v to select, Enter to insert, c to copy to clipboard); /history help",
     },
     SlashCommandDef {
-        trigger: "inputdiag",
-        description: "Dump input/cursor/selection diagnostics for troubleshooting",
-    },
-    SlashCommandDef {
         trigger: "log",
         description: "Log panel: /log [clear subagents|panics|research|editlog|help]",
     },
@@ -5446,7 +5442,7 @@ impl App {
                 if let Ok(mut guard) = slot.lock() {
                     *guard = Some(snapshot);
                 } else {
-                    tracing::error!(
+                    tracing::warn!(
                         "active_tasks_reconcile_result mutex poisoned, snapshot dropped"
                     );
                 }

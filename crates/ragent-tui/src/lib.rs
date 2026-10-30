@@ -4,6 +4,8 @@
 //! tool call status, permission dialogs, and a text input prompt. The TUI
 //! reacts to real-time events from the ragent [`EventBus`].
 
+#![deny(unsafe_code)]
+
 pub mod app;
 pub mod clipboard;
 pub mod input;
@@ -11,6 +13,7 @@ pub mod input_field;
 pub mod layout;
 pub mod layout_active_agents;
 pub mod layout_statusbar;
+pub mod layout_table_rows;
 pub mod layout_teams;
 pub mod logo;
 pub mod panels;
@@ -1162,6 +1165,12 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
         .front()
         .is_some_and(|q| q.expire_at_ms.is_some())
     {
+        deadline = deadline.min(now + Duration::from_secs(1));
+    }
+
+    // Autopilot countdown on the status bar ticks every second while a
+    // wall-clock limit is armed.
+    if app.autopilot_enabled && app.autopilot_time_limit_secs.is_some() {
         deadline = deadline.min(now + Duration::from_secs(1));
     }
 

@@ -4419,7 +4419,8 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         // retained and displayed inside the bucket. Falls back to
                         // a minimal label when the model is not advertised by the
                         // provider registry (e.g. a stale assignment).
-                        let metadata = app.router_model_picker_entry(&entry.provider, &entry.model);
+                        let metadata =
+                            app.router_model_picker_entry(&entry.provider_id, &entry.model);
 
                         // Line 1: provider / model name.
                         let model_label = metadata
@@ -4427,7 +4428,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                             .map(|m| m.name.clone())
                             .unwrap_or_else(|| entry.model.clone());
                         bucket_lines.push(Line::from(vec![
-                            Span::styled(format!("{}", entry.provider), style),
+                            Span::styled(format!("{}", entry.provider_id), style),
                             Span::styled(
                                 format!(" / {} ", model_label),
                                 Style::default().fg(Color::DarkGray),
@@ -4476,7 +4477,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         // Line 3: cost estimate from the provider registry, when
                         // available (FR-022).
                         let cost = app
-                            .estimate_entry_cost(&entry.provider, &entry.model)
+                            .estimate_entry_cost(&entry.provider_id, &entry.model)
                             .unwrap_or_default();
                         if !cost.is_empty() {
                             bucket_lines.push(Line::from(Span::styled(
@@ -8767,6 +8768,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+O", "Toggle autopilot mode (autonomous operation)"),
     ("Alt+C", "Toggle context panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
+    ("Alt+E", "Toggle edit-log (per-edit operation logging)"),
     ("Alt+G", "Toggle GCF tool-result encoding"),
     (
         "Alt+A",

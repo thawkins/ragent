@@ -34,7 +34,7 @@ async fn test_router_save_confirm_persists_and_activates() {
                 "SIMPLE".to_string(),
                 ragent_llm::providers::router_config::TierConfig {
                     models: vec![ragent_llm::providers::router_config::TierEntry {
-                        provider: "anthropic".to_string(),
+                        provider_id: "anthropic".to_string(),
                         model: "claude-sonnet-4-20250514".to_string(),
                     }],
                     timeout_ms: None,
@@ -134,7 +134,7 @@ async fn test_router_save_cancel_does_not_persist() {
                 "SIMPLE".to_string(),
                 ragent_llm::providers::router_config::TierConfig {
                     models: vec![ragent_llm::providers::router_config::TierEntry {
-                        provider: "anthropic".to_string(),
+                        provider_id: "anthropic".to_string(),
                         model: "claude-sonnet-4-20250514".to_string(),
                     }],
                     timeout_ms: None,

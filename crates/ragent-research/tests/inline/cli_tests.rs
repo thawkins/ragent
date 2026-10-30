@@ -350,13 +350,15 @@ fn render_search_output_json_is_valid_json() {
 
 #[test]
 fn truncate_short_string_passes_through() {
-    assert_eq!(truncate("abc", 5), "abc");
+    // The renderer's truncation is `strutil::truncate_chars`; this pins the
+    // contract the table renderer relies on at the shared helper.
+    assert_eq!(ragent_types::strutil::truncate_chars("abc", 5), "abc");
 }
 
 #[test]
 fn truncate_long_string_ellipsises() {
     let s = "a".repeat(20);
-    let t = truncate(&s, 5);
+    let t = ragent_types::strutil::truncate_chars(&s, 5);
     assert_eq!(t.chars().count(), 5);
     assert!(t.ends_with("..."));
 }

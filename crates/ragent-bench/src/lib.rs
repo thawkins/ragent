@@ -2,6 +2,8 @@
 //!
 //! This crate owns the `/bench` command backend for the local benchmark MVP.
 
+#![deny(unsafe_code)]
+
 pub mod command;
 pub mod data;
 pub mod exec_guard;

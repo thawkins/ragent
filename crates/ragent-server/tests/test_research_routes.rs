@@ -9,19 +9,8 @@
 //! test, and filesystem-touching tests stay serialized so concurrent
 //! INDEX.md writes cannot race.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use ragent_agent::Config;
-use ragent_agent::event::EventBus;
-use ragent_agent::permission::PermissionChecker;
-use ragent_agent::provider::ProviderRegistry;
-use ragent_agent::session::SessionManager;
-use ragent_agent::session::processor::SessionProcessor;
-use ragent_agent::storage::Storage;
-use ragent_agent::tool::ToolRegistry;
 use ragent_research::ResearchManager;
 use ragent_server::routes::{AppState, router};
 use tower::ServiceExt;
@@ -29,70 +18,15 @@ use tower::ServiceExt;
 /// Global mutex to serialize tests that touch the shared research sandbox.
 static FS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Build a minimal [`AppState`] for testing research routes.
-fn test_state(token: &str, research_root: &std::path::Path) -> AppState {
-    let storage = Arc::new(Storage::open_in_memory().unwrap());
-    let event_bus = Arc::new(EventBus::new(16));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: Arc::new(ProviderRegistry::new()),
-        tool_registry: Arc::new(ToolRegistry::new()),
-        permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![]))),
-        event_bus: event_bus.clone(),
-        agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        connector_session: tokio::sync::RwLock::new(None),
-        connector_statuses: tokio::sync::RwLock::new(None),
-        code_index: std::sync::OnceLock::new(),
-        stream_config: Default::default(),
-        extraction_engine: std::sync::OnceLock::new(),
-        auto_approve: false,
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
-        activity_log: std::sync::OnceLock::new(),
-        activity_log_tx: tokio::sync::Mutex::new(None),
-        skill_registry_cache: parking_lot::Mutex::new(None),
-        active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
-        active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
-        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
-        bg_service: std::sync::OnceLock::new(),
-    });
-    AppState {
-        event_bus,
-        config: Arc::new(tokio::sync::RwLock::new(Config::default())),
-        storage,
-        session_processor: processor,
-        auth_token: token.to_string(),
-        rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        coordinator: None,
-        research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: Arc::new(research_root.to_path_buf()),
-    }
+/// Build a test state whose research vault root is `research_root`.
+///
+/// Built on top of the shared [`crate::support::test_state`] fixture so this
+/// file does not carry its own copy of the `AppState`/`SessionProcessor`
+/// constructor.
+fn research_state(token: &str, research_root: &std::path::Path) -> AppState {
+    let mut state = crate::support::test_state(token);
+    state.research_root = std::sync::Arc::new(research_root.to_path_buf());
+    state
 }
 
 /// Helper to build an authenticated GET request.
@@ -241,7 +175,7 @@ async fn create_test_item_with_invocation(root: &std::path::Path, name: &str, in
 #[tokio::test]
 async fn test_research_list_requires_auth() {
     let root = crate::research_sandbox::isolated_research_root();
-    let app = router(test_state("secret", &root));
+    let app = router(research_state("secret", &root));
     let req = Request::builder()
         .uri("/research")
         .body(Body::empty())
@@ -253,7 +187,7 @@ async fn test_research_list_requires_auth() {
 #[tokio::test]
 async fn test_research_list_returns_empty_or_items() {
     let root = crate::research_sandbox::isolated_research_root();
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app.oneshot(auth_get("tok", "/research")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = body_string(resp).await;
@@ -268,7 +202,7 @@ async fn test_research_list_returns_empty_or_items() {
 async fn test_research_show_not_found() {
     let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", "/research/nonexistent-item-xyz"))
         .await
@@ -285,7 +219,7 @@ async fn test_research_show_returns_item_fields() {
     let name = test_name();
     create_test_item(&root, &name, "test topic for show").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}")))
         .await
@@ -316,7 +250,7 @@ async fn test_research_show_full_includes_extended_fields() {
     let name = test_name();
     create_test_item(&root, &name, "test topic for full show").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}?full=true")))
         .await
@@ -342,7 +276,7 @@ async fn test_research_delete_requires_confirmation() {
     let name = test_name();
     create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     // Without ?confirm=delete-{name}
     let resp = app
         .oneshot(auth_delete("tok", &format!("/research/{name}")))
@@ -362,7 +296,7 @@ async fn test_research_delete_with_confirmation() {
     let name = test_name();
     create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let confirm = format!("delete-{name}");
     let resp = app
         .oneshot(auth_delete(
@@ -386,7 +320,7 @@ async fn test_research_delete_with_confirmation() {
 async fn test_research_delete_not_found() {
     let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_delete(
             "tok",
@@ -403,7 +337,7 @@ async fn test_research_delete_not_found() {
 async fn test_research_post_invalid_name() {
     let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let body = r#"{"name":"INVALID NAME!","topic":"test"}"#;
     let resp = app
         .oneshot(auth_post("tok", "/research", body))
@@ -418,7 +352,7 @@ async fn test_research_post_returns_202_with_location() {
     let root = crate::research_sandbox::isolated_research_root();
     let name = test_name();
     let body = format!(r#"{{"name":"{name}","topic":"test topic for post"}}"#);
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
         .await
@@ -456,7 +390,7 @@ async fn test_research_post_accepts_output_limit_fields() {
     let name = test_name();
     let body =
         format!(r#"{{"name":"{name}","topic":"test topic","max_concepts":2,"max_findings":3}}"#);
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
         .await
@@ -480,7 +414,7 @@ async fn test_research_post_duplicate_returns_conflict() {
     let name = test_name();
     create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let body = format!(r#"{{"name":"{name}","topic":"duplicate"}}"#);
     let resp = app
         .oneshot(auth_post("tok", "/research", &body))
@@ -501,7 +435,7 @@ async fn test_research_post_duplicate_returns_conflict() {
 async fn test_research_update_not_found() {
     let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", "/research/nonexistent-item-xyz"))
         .await
@@ -518,7 +452,7 @@ async fn test_research_update_without_invocation_returns_bad_request() {
     let name = test_name();
     create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -537,7 +471,7 @@ async fn test_research_update_with_unparseable_invocation_returns_bad_request() 
     let name = test_name();
     create_test_item_with_invocation(&root, &name, "ragent research list --all").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -563,7 +497,7 @@ async fn test_research_update_accepts_recorded_invocation() {
     )
     .await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -610,7 +544,7 @@ async fn test_research_update_replays_recorded_output_limits() {
     )
     .await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_put("tok", &format!("/research/{name}")))
         .await
@@ -637,7 +571,7 @@ async fn test_research_update_conflicts_with_in_flight_run() {
     )
     .await;
 
-    let state = test_state("tok", &root);
+    let state = research_state("tok", &root);
     // Simulate an in-flight run by pre-registering the name.
     {
         let mut runs = state.research_runs.lock().await;
@@ -665,7 +599,7 @@ async fn test_research_events_no_active_run_returns_status() {
     let name = test_name();
     create_test_item(&root, &name, "topic").await;
 
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", &format!("/research/{name}/events")))
         .await
@@ -683,7 +617,7 @@ async fn test_research_events_no_active_run_returns_status() {
 async fn test_research_events_not_found() {
     let root = crate::research_sandbox::isolated_research_root();
     let _guard = FS_LOCK.lock().await;
-    let app = router(test_state("tok", &root));
+    let app = router(research_state("tok", &root));
     let resp = app
         .oneshot(auth_get("tok", "/research/nonexistent-xyz/events"))
         .await

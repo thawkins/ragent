@@ -616,29 +616,42 @@ fn test_teams_message_counters_render_dash_for_zero_and_colour_for_non_zero() {
 
 /// Claimed and done come from the team task store: claimed counts the tasks
 /// assigned to the teammate, done counts those completed (FR-025).
-#[tokio::test]
-async fn test_teams_task_counters_come_from_the_team_task_store() {
-    let _guard = crate::global_env_lock();
+/// The task store and the `set_current_dir` below both touch process-global
+/// state, so the guard is taken for the whole test. It is a *blocking*
+/// `Mutex`, which must not be held across an `.await`; every async call is
+/// therefore staged into a scoped `block_on` before the guard is taken, and
+/// the rendering below is synchronous.
+#[test]
+fn test_teams_task_counters_come_from_the_team_task_store() {
     let scratch = scratch_dir("task-counters");
     let original = std::env::current_dir().expect("cwd");
 
+    // Seed the shared task list before the blocking guard is taken, so no
+    // `std::sync::MutexGuard` is alive while this future awaits.
     let store = TeamStore::create("alpha", LEAD_SESSION, &scratch, true).expect("create team");
     let tasks = store.task_store().expect("task store");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    runtime.block_on(async {
+        let mut pending = Task::new("task-001", "Pending work");
+        pending.assigned_to = Some("tm-001".to_string());
+        tasks.add_task(pending).await.expect("add pending");
 
-    let mut pending = Task::new("task-001", "Pending work");
-    pending.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(pending).await.expect("add pending");
+        let mut running = Task::new("task-002", "Running work");
+        running.status = TaskStatus::InProgress;
+        running.assigned_to = Some("tm-001".to_string());
+        tasks.add_task(running).await.expect("add running");
 
-    let mut running = Task::new("task-002", "Running work");
-    running.status = TaskStatus::InProgress;
-    running.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(running).await.expect("add running");
+        let mut done = Task::new("task-003", "Finished work");
+        done.status = TaskStatus::Completed;
+        done.assigned_to = Some("tm-001".to_string());
+        tasks.add_task(done).await.expect("add done");
+    });
+    drop(runtime);
 
-    let mut done = Task::new("task-003", "Finished work");
-    done.status = TaskStatus::Completed;
-    done.assigned_to = Some("tm-001".to_string());
-    tasks.add_task(done).await.expect("add done");
-
+    let _guard = crate::global_env_lock();
     std::env::set_current_dir(&scratch).expect("enter scratch");
 
     let mut app = open_teams(vec![

@@ -22,6 +22,7 @@ use ragent_agent::event::EventBus;
 use ragent_agent::task::{TaskEntry, TaskStatus};
 
 use crate::app::App;
+use crate::layout_table_rows::{band_line, cursor_line};
 use crate::theme::colors;
 use crate::utils::{format_elapsed, short_id};
 
@@ -179,75 +180,6 @@ fn is_terminal(status: &TaskStatus) -> bool {
         status,
         TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
     )
-}
-
-/// Paint the block cursor over one painted table row, full table width.
-///
-/// The cursor is the selection affordance replaced by keyboard navigation
-/// (Up/Down/PgUp/PgDn move it, Space/Del/Enter act on it), so it overrides the
-/// zebra-band: the row is restyled with one distinct background across every
-/// span, and a trailing pad fills the unpainted remainder edge to edge (the
-/// same trick [`band_line`] uses) so the cursor rectangle reads as one block.
-fn cursor_line(line: Line, width: usize) -> Line {
-    let painted: usize = line
-        .spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    let mut spans: Vec<Span> = line
-        .spans
-        .into_iter()
-        .map(|span| {
-            Span::styled(
-                span.content.to_string(),
-                span.style.bg(CURSOR_BG).add_modifier(Modifier::BOLD),
-            )
-        })
-        .collect();
-    if width > painted {
-        spans.push(Span::styled(
-            " ".repeat(width - painted),
-            Style::default().bg(CURSOR_BG),
-        ));
-    }
-    Line::from(spans).style(Style::default().bg(CURSOR_BG))
-}
-
-/// Subtle band background painted on alternating table rows.
-///
-/// The modal clears to black underneath, so a near-black blue-grey stripe on
-/// every other data row separates neighbouring rows without shouting; the
-/// strip's two background tones sit in the same family for a coherent panel.
-const BAND_BG: Color = Color::Rgb(22, 22, 30);
-
-/// Block-cursor background painted on the keyboard-selected row.
-///
-/// A slate blue that is clearly lighter than [`BAND_BG`] (so a cursor row
-/// never reads as a band) but stays dim enough that the row text remains
-/// legible; the same tone family as the teammate-strip focus highlight.
-const CURSOR_BG: Color = Color::Rgb(50, 50, 90);
-
-/// Give one painted table row the zebra-band background across the full
-/// table width.
-///
-/// A trailing background-coloured spacer fills the unpainted remainder so the
-/// band covers the row from edge to edge instead of stopping at the last
-/// control column. The cut never panics on a row wider than `width`: there is
-/// simply nothing left to pad.
-fn band_line(line: Line, width: usize) -> Line {
-    let painted: usize = line
-        .spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    let mut spans = line.spans;
-    if width > painted {
-        spans.push(Span::styled(
-            " ".repeat(width - painted),
-            Style::default().bg(BAND_BG),
-        ));
-    }
-    Line::from(spans).style(Style::default().bg(BAND_BG))
 }
 
 /// An unbanded filler row: a blank line that reserves one row of the table

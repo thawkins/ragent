@@ -146,7 +146,7 @@ fn test_router_bucket_scrolls_to_the_selected_model() {
     let mut app = support::make_app();
     let models: Vec<TierEntry> = (0..20)
         .map(|i| TierEntry {
-            provider: "anthropic".to_string(),
+            provider_id: "anthropic".to_string(),
             model: format!("model-{i:02}"),
         })
         .collect();

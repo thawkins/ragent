@@ -22,6 +22,8 @@
 //!
 //! [`SdkMeterProvider`]: https://docs.rs/opentelemetry/0.27/opentelemetry/sdk/metrics/struct.SdkMeterProvider.html
 
+#![deny(unsafe_code)]
+
 pub mod cardinality;
 pub mod counters;
 pub mod instruments;

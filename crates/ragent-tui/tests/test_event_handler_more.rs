@@ -213,6 +213,165 @@ async fn task_completed_stops_autopilot_and_renders_summary() {
     assert!(text.contains("Task Complete"), "got: {text}");
 }
 
+/// A sub-agent's `agent_complete` must not stop the primary's autopilot run.
+///
+/// `agent_complete` publishes `TaskCompleted` carrying the *calling* session's
+/// id. A sub-agent calls it at the end of every run (it is mandatory there), so
+/// the handler must scope the arm to the primary session: if it matched a child
+/// session the primary's autopilot would be cancelled by whatever sub-agent
+/// happened to finish first.
+#[tokio::test]
+async fn subagent_completion_leaves_primary_autopilot_running() {
+    let mut app = app_with_session("primary");
+    app.autopilot_enabled = true;
+    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.autopilot_time_limit_secs = Some(5000);
+    app.active_tasks.push(task_entry("t1", "child-1"));
+
+    // The child session completes with its own `agent_complete`.
+    app.handle_event(Event::TaskCompleted {
+        session_id: "child-1".to_string(),
+        summary: "sub-agent finished".to_string(),
+    })
+    .await;
+
+    assert!(
+        app.autopilot_enabled,
+        "a sub-agent's agent_complete must not stop the primary's autopilot"
+    );
+    assert!(
+        app.autopilot_started_at.is_some(),
+        "the primary's autopilot start stamp must survive"
+    );
+    assert_eq!(
+        app.autopilot_time_limit_secs,
+        Some(5000),
+        "the primary's autopilot time limit must survive"
+    );
+    assert!(
+        app.autopilot_pending_continue.is_none(),
+        "a sub-agent completion must not schedule a primary continuation"
+    );
+    let text = joined_text(&app);
+    assert!(
+        !text.contains("Task Complete"),
+        "a sub-agent's summary must not be rendered as the primary's task completion:\n{text}"
+    );
+}
+
+/// A descendant's `agent_complete` is routine: it logs against the child's
+/// own output view and leaves every primary-run field untouched.
+///
+/// `agent_complete` is mandatory for every child run, so a teammate or
+/// sub-agent finishing must never read as the primary's task completion.
+#[tokio::test]
+async fn subagent_completion_logs_against_its_own_session_only() {
+    let mut app = app_with_session("primary");
+    app.autopilot_enabled = true;
+    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.autopilot_time_limit_secs = Some(5000);
+    app.active_tasks.push(task_entry("t1", "child-1"));
+
+    app.handle_event(Event::TaskCompleted {
+        session_id: "child-1".to_string(),
+        summary: "wrote the report".to_string(),
+    })
+    .await;
+
+    // The primary's completion clock is untouched, so the running turn's
+    // continuation logic still sees "not completed".
+    assert!(
+        app.last_task_completed_at.is_none(),
+        "a child completion must not mark the PRIMARY task complete"
+    );
+    assert_eq!(
+        app.status, "ready",
+        "a child completion must not overwrite the primary's status"
+    );
+    // The summary is attributed to the child, not to the primary transcript.
+    assert!(
+        !joined_text(&app).contains("Task Complete"),
+        "no primary Task Complete banner is rendered for a child"
+    );
+    assert!(
+        app.log_entries.iter().any(|e| {
+            e.session_id.as_deref() == Some("child-1") && e.message.contains("wrote the report")
+        }),
+        "the completion is logged against the child session for its output view: {:?}",
+        app.log_entries
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The `MessageEnd` that ends an autopilot turn must not schedule a
+/// continuation when the same drain already delivered the primary's
+/// `TaskCompleted`.
+///
+/// The two events are published back-to-back by the agent loop (`agent_complete`
+/// publishes `TaskCompleted` from the tool, then the loop breaks and publishes
+/// `MessageEnd`). Both land in the same `event_rx` drain, so whichever arrives
+/// second must observe the first: the continuation is suppressed by
+/// `last_task_completed_at`, and autopilot stays off. If the drain order is
+/// reversed in a future publish sequence, autopilot must still end.
+#[tokio::test]
+async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
+    // TaskCompleted first, then MessageEnd - the production publish order.
+    let mut app = app_with_session("s1");
+    app.autopilot_enabled = true;
+    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.autopilot_time_limit_secs = Some(5000);
+
+    app.handle_event(Event::TaskCompleted {
+        session_id: "s1".to_string(),
+        summary: "all done".to_string(),
+    })
+    .await;
+    app.handle_event(Event::MessageEnd {
+        session_id: "s1".to_string(),
+        message_id: "m1".to_string(),
+        reason: FinishReason::Stop,
+    })
+    .await;
+
+    assert!(
+        !app.autopilot_enabled,
+        "autopilot stays off after the primary's agent_complete"
+    );
+    assert!(
+        app.autopilot_pending_continue.is_none(),
+        "no continuation is scheduled once the primary completed"
+    );
+
+    // Reversed order must also end the run.
+    let mut app = app_with_session("s1");
+    app.autopilot_enabled = true;
+    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.autopilot_time_limit_secs = Some(5000);
+
+    app.handle_event(Event::MessageEnd {
+        session_id: "s1".to_string(),
+        message_id: "m2".to_string(),
+        reason: FinishReason::Stop,
+    })
+    .await;
+    app.handle_event(Event::TaskCompleted {
+        session_id: "s1".to_string(),
+        summary: "all done".to_string(),
+    })
+    .await;
+
+    assert!(
+        !app.autopilot_enabled,
+        "autopilot ends whichever order the two events arrive in"
+    );
+    assert!(
+        app.autopilot_pending_continue.is_none(),
+        "the completion clears any continuation scheduled by MessageEnd"
+    );
+}
+
 // ===========================================================================
 // Sub-agent lifecycle (suspend / resume / kill / cancel)
 // ===========================================================================

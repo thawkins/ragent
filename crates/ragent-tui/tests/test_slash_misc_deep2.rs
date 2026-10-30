@@ -6,7 +6,7 @@
 //! `/toolchain` unknown, `/skill`, `/skills`, `/blueprints`, `/template`,
 //! `/goal`, `/actionloop`, `/mcp` connect/disconnect usage, `/tools`,
 //! `/system`, `/cost`, `/clip`, `/name`, `/undo`, `/yolo`, `/compact`,
-//! `/compress`, `/startup`, `/llmstats`, `/inputdiag`, `/resume`, `/reload`
+//! `/compress`, `/startup`, `/llmstats`, `/resume`, `/reload`
 //! and `/help`.
 //!
 //! Tests only - no production logic is touched.
@@ -434,7 +434,7 @@ async fn yolo_toggle() {
 }
 
 // ---------------------------------------------------------------------------
-// /compact, /compress, /startup, /llmstats, /inputdiag
+// /compact, /compress, /startup, /llmstats
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -458,7 +458,7 @@ async fn compact_and_compress_without_history() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn startup_and_llmstats_and_inputdiag() {
+async fn startup_and_llmstats() {
     let (_g, _e, _t, mut app) = isolated_app();
 
     app.execute_slash_command("/startup").await;
@@ -466,9 +466,6 @@ async fn startup_and_llmstats_and_inputdiag() {
 
     app.execute_slash_command("/llmstats").await;
     assert!(last_message(&app).contains("From: /llmstats"));
-
-    app.execute_slash_command("/inputdiag").await;
-    assert!(last_message(&app).contains("From: /inputdiag"));
 }
 
 // ---------------------------------------------------------------------------

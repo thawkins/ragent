@@ -535,10 +535,16 @@ impl UndeliveredMessage {
 /// ```
 /// use ragent_agent::team::{MemberStatus, MemberStatus::Stopped, undelivered_messages};
 ///
-/// # let dir = std::path::Path::new("target/temp/doc-undelivered");
-/// # let _ = std::fs::remove_dir_all(dir);
-/// # std::fs::create_dir_all(dir).unwrap(); // no-panic-ok: doc example
-/// # let store = ragent_agent::team::TeamStore::create("doc-team", "lead", dir, true).unwrap(); // no-panic-ok: doc example
+/// # // A self-contained scratch root under the git-ignored `target/temp/`, resolved from
+/// # // the manifest dir because a doctest's working directory is not the workspace root.
+/// # let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/temp/doc-undelivered");
+/// # let _ = std::fs::remove_dir_all(&dir);
+/// # // Give the scratch root its OWN `.ragent` so `find_project_teams_dir` stops here.
+/// # // Without it the upward walk escapes to the enclosing workspace and the team lands
+/// # // in the checked-in tree, where the cleanup below never removes it and the second
+/// # // run fails with "team 'doc-team' already exists".
+/// # std::fs::create_dir_all(dir.join(".ragent")).unwrap(); // no-panic-ok: doc example
+/// # let store = ragent_agent::team::TeamStore::create("doc-team", "lead", &dir, true).unwrap(); // no-panic-ok: doc example
 /// # let mut store = store;
 /// # let mut member = ragent_agent::team::TeamMember::new("alpha", "tm-001", "general");
 /// # member.status = MemberStatus::Stopped;

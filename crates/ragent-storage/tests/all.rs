@@ -96,6 +96,8 @@ mod test_task_crud;
 mod test_task_cycle;
 #[path = "test_task_dag.rs"]
 mod test_task_dag;
+#[path = "test_task_delete_and_snapshot_bounds.rs"]
+mod test_task_delete_and_snapshot_bounds;
 #[path = "test_tasks_list_plan.rs"]
 mod test_tasks_list_plan;
 #[path = "test_todos_migration.rs"]

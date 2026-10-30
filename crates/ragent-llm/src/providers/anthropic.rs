@@ -239,7 +239,7 @@ pub async fn list_anthropic_models(
     let resp = http
         .get(&url)
         .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-version", super::ANTHROPIC_VERSION)
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
@@ -352,7 +352,7 @@ impl LlmClient for AnthropicClient {
             .http
             .post(&url)
             .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
+            .header("anthropic-version", super::ANTHROPIC_VERSION)
             .header("content-type", "application/json")
             .body(body_bytes)
             .send()
@@ -429,23 +429,32 @@ impl LlmClient for AnthropicClient {
                     }
                 };
 
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
                 // SEC-ragent-llm-004 (SECTASKS T-028): fail the stream when a
+
                 // peer dribbles bytes without ever emitting a newline instead
+
                 // of letting the accumulation buffer grow without bound.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "SSE accumulation buffer exceeded the cap; aborting the stream"
-                    );
+
+                if let Err(e) = super::http_client::append_chunk_guarded(
+
+                    &mut buffer,
+
+                    &mut pending_utf8,
+
+                    &chunk,
+
+                    "Anthropic",
+
+                ) {
+
                     yield StreamEvent::Error {
-                        message: format!(
-                            "SSE buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
+
+                        message: e.to_string(),
+
                     };
+
                     return;
+
                 }
 
                 while let Some(line) = super::http_client::take_sse_line(&mut buffer) {

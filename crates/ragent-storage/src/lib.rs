@@ -6,6 +6,8 @@
 //! - Snapshot storage (file snapshots, diffs)
 //! - Team storage (team state, mailboxes, tasks)
 
+#![deny(unsafe_code)]
+
 pub mod activity_log;
 pub mod snapshot;
 pub mod storage;

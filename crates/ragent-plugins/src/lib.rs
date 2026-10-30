@@ -29,6 +29,8 @@
 //! | [`mod@help`]       | T-014 | `/plugins help` usage text + subcommand metadata (FR-006, FR-014) |
 //! | [`error`]          | T-002 | contained error reporting (FR-026)                    |
 
+#![deny(unsafe_code)]
+
 pub mod add;
 pub mod bridge;
 pub mod command_adapter;

@@ -2837,6 +2837,22 @@ impl TeamManager {
                         .collect()
                 };
 
+                // Nothing to police: no teammate handle is registered, so no
+                // member can be stalled. Skip the tick before touching disk.
+                //
+                // The config read below opens the companion `config.json.lock`
+                // with `create(true)`, i.e. it *creates* a file inside the team
+                // directory on every tick. An idle or freshly created team has
+                // an empty handle map, so that read was pure overhead - one
+                // `open` per tick forever - and it also re-created a file in a
+                // tree an operator was deleting, making `remove_dir_all` fail
+                // with ENOTEMPTY (the CI failure in
+                // `test_slash_arms_deep::team_forcecleanup_with_missing_directory_reports_failure`,
+                // where the immediate first tick raced the test's removal).
+                if stale.is_empty() {
+                    continue;
+                }
+
                 // FR-012: read the config once per tick and let every stale
                 // member's status be looked up in that one parse. One read
                 // failing means the watchdog cannot confirm any member is live,

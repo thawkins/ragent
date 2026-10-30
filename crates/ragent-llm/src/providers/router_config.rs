@@ -12,7 +12,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TierEntry {
     /// Provider identifier (e.g. `"anthropic"`, `"openai"`).
-    pub provider: String,
+    ///
+    /// Named `provider_id` to match [`ModelInfo::provider_id`], the identifier
+    /// of the same concept in the same module tree.
+    ///
+    /// [`ModelInfo::provider_id`]: super::ModelInfo::provider_id
+    #[serde(alias = "provider")]
+    pub provider_id: String,
     /// Model identifier (e.g. `"claude-sonnet-4-20250514"`).
     pub model: String,
 }

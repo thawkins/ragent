@@ -32,6 +32,8 @@
 //! | [`store_index`]| T-016| compiled default catalogue endpoint and config-over-default resolver (FR-034, FR-035, FR-037, FR-038) |
 //! | [`store_ops`]  | T-017/T-018 | wire endpoint resolution into the catalogue fetch (FR-035, FR-037, NFR-002) and the `/connectors stores` report: endpoint + provenance tag, `--check` probe (FR-036) |
 
+#![deny(unsafe_code)]
+
 pub mod add;
 pub mod auth;
 pub mod bridge;

@@ -761,19 +761,8 @@ async fn update_research(
     // The item must exist and carry a recorded invocation.
     let item = match manager.show(&name).await {
         Ok(item) => item,
-        Err(ragent_research::ResearchError::NotFound(missing, suggestions)) => {
-            return error_response(
-                StatusCode::NOT_FOUND,
-                format!("research item '{missing}' not found. Closest matches: {suggestions}"),
-            )
-            .into_response();
-        }
-        Err(ragent_research::ResearchError::InvalidName(_)) => {
-            return error_response(StatusCode::BAD_REQUEST, "invalid research name")
-                .into_response();
-        }
         Err(e) => {
-            return internal_error_response("research route", e).into_response();
+            return research_error_response(e).into_response();
         }
     };
     let Some(recorded) = item.invocation.clone() else {
@@ -949,14 +938,7 @@ async fn show_research(
                 })),
             )
         }
-        Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
-            StatusCode::NOT_FOUND,
-            format!("research item '{name}' not found. Closest matches: {suggestions}"),
-        ),
-        Err(ragent_research::ResearchError::InvalidName(_)) => {
-            error_response(StatusCode::BAD_REQUEST, "invalid research name")
-        }
-        Err(e) => internal_error_response("research route", e),
+        Err(e) => research_error_response(e),
     }
 }
 
@@ -985,15 +967,41 @@ async fn delete_research(
         // F-L3: RFC 9110 forbids a body on 204, so a body-carrying success is
         // reported as 200 OK (the client still learns the deleted name).
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "deleted": name }))),
-        Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
-            StatusCode::NOT_FOUND,
-            format!("research item '{name}' not found. Closest matches: {suggestions}"),
-        ),
-        Err(e) => internal_error_response("research route", e),
+        Err(e) => research_error_response(e),
     }
 }
 
 // -- helpers -------------------------------------------------------------
+
+/// Map a [`ragent_research::ResearchError`] to the shared HTTP error shape.
+///
+/// The `NotFound`/`InvalidName` mapping was written verbatim in three handlers
+/// (`GET`, `PATCH` and `DELETE /research/{name}`), so a wording change had to be
+/// made in three places. The status codes and messages are the client contract:
+/// a missing item is `404` with the nearest-name suggestions, a name that fails
+/// validation is `400`, and anything else is an internal error.
+///
+/// # Arguments
+///
+/// * `err` - the error returned by a [`ResearchManager`] operation.
+///
+/// # Returns
+///
+/// The `(status, JSON body)` pair those handlers return.
+pub(crate) fn research_error_response(
+    err: ragent_research::ResearchError,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match err {
+        ragent_research::ResearchError::NotFound(name, suggestions) => error_response(
+            StatusCode::NOT_FOUND,
+            format!("research item '{name}' not found. Closest matches: {suggestions}"),
+        ),
+        ragent_research::ResearchError::InvalidName(_) => {
+            error_response(StatusCode::BAD_REQUEST, "invalid research name")
+        }
+        other => internal_error_response("research route", other),
+    }
+}
 
 // -- GET /research/{name}/events ------------------------------------------
 //

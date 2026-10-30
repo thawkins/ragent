@@ -710,6 +710,33 @@ fn build_line2_center(
     spans
 }
 
+/// Remaining autopilot wall-clock time, in whole seconds, for the status bar.
+///
+/// Returns `None` when autopilot is off, when no time limit is armed (a
+/// `/autopilot on` run with no `--max-time`), or when the start instant is
+/// missing. A limit already passed reports `0` rather than a negative value;
+/// the event loop clears the mode on its next tick.
+fn autopilot_remaining_secs(app: &App) -> Option<u64> {
+    if !app.autopilot_enabled {
+        return None;
+    }
+    let limit = app.autopilot_time_limit_secs?;
+    let started = app.autopilot_started_at?;
+    let elapsed = started.elapsed().as_secs();
+    Some(limit.saturating_sub(elapsed))
+}
+
+/// Render a remaining-seconds value as a fixed-width `HH:MM:SS` countdown.
+///
+/// The fixed width keeps the status-bar columns to the right of the countdown
+/// from shifting as it ticks down.
+fn format_countdown(total_secs: u64) -> String {
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
 /// Build Line 2 right section: Service status indicators
 fn build_line2_right(
     app: &App,
@@ -718,15 +745,14 @@ fn build_line2_right(
 ) -> Vec<Span<'static>> {
     // Push one `<icon>[ok]/[x] ` indicator span: the icon keeps its own accent
     // color, while the trailing marker conveys enabled (green [ok]) vs disabled
-    // (red [x]). Shared by every service indicator on this line. `hint` names the
-    // toggling key when one exists, appended after the marker so the chord is
-    // discoverable from the bar itself.
+    // (red [x]). Shared by every service indicator on this line. The chord that
+    // toggles the service is NOT drawn here: the shortcut panel (`?`) is the one
+    // place that documents key bindings.
     fn push_indicator(
         spans: &mut Vec<Span<'static>>,
         icon: (&'static str, Color),
         enabled: bool,
         bold: bool,
-        hint: Option<&'static str>,
     ) {
         let (marker, color) = if enabled {
             (indicators::SUCCESS, colors::HEALTHY)
@@ -742,14 +768,6 @@ fn build_line2_right(
             format!("{marker} "),
             Style::default().fg(color),
         ));
-        if let Some(key) = hint {
-            spans.push(Span::styled(
-                format!("({key}) "),
-                Style::default()
-                    .fg(colors::HINT)
-                    .add_modifier(Modifier::DIM),
-            ));
-        }
     }
 
     let mut spans = Vec::new();
@@ -766,7 +784,6 @@ fn build_line2_right(
         service_icons::GCF,
         ragent_config::gcf::is_enabled(),
         false,
-        Some("Alt+G"),
     );
 
     // Code Index status
@@ -775,7 +792,6 @@ fn build_line2_right(
         service_icons::CODE_INDEX,
         app.code_index_enabled,
         false,
-        None,
     );
 
     // Activity-log status
@@ -784,18 +800,27 @@ fn build_line2_right(
         service_icons::ACTIVITY_LOG,
         ragent_config::activity_log::is_enabled(),
         false,
-        None,
     );
 
-    // Autopilot status (bold - it changes how the agent loop runs, and Alt+O
-    // toggles it)
+    // Autopilot status (bold - it changes how the agent loop runs; the `?`
+    // shortcut panel documents the Alt+O toggle). While a wall-clock limit is
+    // armed, the remaining time is shown right after the indicator as
+    // `[MM:SS] `, so the running countdown never shifts the columns of the
+    // indicators to its right.
     push_indicator(
         &mut spans,
         service_icons::AUTOPILOT,
         app.autopilot_enabled,
         true,
-        Some("Alt+O"),
     );
+    if let Some(remaining) = autopilot_remaining_secs(app) {
+        spans.push(Span::styled(
+            format!("[{}] ", format_countdown(remaining)),
+            Style::default()
+                .fg(colors::HINT)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     // Edit-log status
     push_indicator(
@@ -803,7 +828,6 @@ fn build_line2_right(
         service_icons::EDIT_LOG,
         ragent_tools_core::edit_log::is_edit_log_enabled(),
         false,
-        None,
     );
 
     // Telemetry (OpenTelemetry metrics export) status
@@ -812,7 +836,6 @@ fn build_line2_right(
         service_icons::TELEMETRY,
         app.session_processor.telemetry.is_enabled(),
         false,
-        None,
     );
 
     // YOLO mode status (bold - it changes command-validation behaviour)
@@ -821,7 +844,6 @@ fn build_line2_right(
         service_icons::YOLO,
         ragent_config::yolo::is_enabled(),
         true,
-        Some("Alt+Y"),
     );
 
     spans

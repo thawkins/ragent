@@ -503,7 +503,7 @@ impl App {
             plan_approval_pending: None,
             role_mode: None,
             webapi_server: None,
-            webapi_addr: "127.0.0.1:3000".to_string(),
+            webapi_addr: ragent_server::DEFAULT_LISTEN_ADDR.to_string(),
             webapi_token: None,
             memory_entry_count: 0,
             memory_entry_count_pending: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),

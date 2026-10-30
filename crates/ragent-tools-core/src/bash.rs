@@ -1090,7 +1090,9 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
         if ragent_config::yolo::is_enabled() {
             tracing::warn!("YOLO mode: allowing banned command tool");
         } else if ragent_config::bash_lists::is_allowlisted(command) {
-            tracing::info!("Banned command allowed by user allowlist");
+            // A bypass of the ban list must never be quieter than the YOLO
+            // notices on the same code path.
+            tracing::warn!("Banned command allowed by user allowlist");
         } else {
             bail!(
                 "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m). \
@@ -1210,7 +1212,7 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
 /// SIGKILL)` signals ragent's *own* process group, which would kill the agent
 /// (FUNC-014). Both are refused without sending a signal.
 #[cfg(unix)]
-#[allow(unsafe_code)] // approved: killpg has no safe std alternative (see AGENTS-RUST.md)
+#[allow(unsafe_code)] // approved: killpg has no safe std alternative (see AGENTS-LANGUAGE.md)
 fn kill_process_group(pgid: i32) -> std::io::Result<()> {
     if pgid <= 0 {
         return Err(std::io::Error::new(

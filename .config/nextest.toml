@@ -79,6 +79,19 @@ test-group-sandbox = { max-threads = 1 }
 # fixture is on disk.
 tool-rename-guard = { max-threads = 1 }
 
+# The clipboard cases each write the ONE host system clipboard and read it back,
+# so two of them running at once see each other's text: `test_clipboard_empty_text`
+# asserts it reads "" after writing "", and `test_clipboard_repeated_writes`
+# asserts it reads "third" after writing "third", so whichever writes second wins
+# and the other fails. The file's own `CLIPBOARD_TEST_LOCK` cannot order them -
+# nextest runs each test in its own process, so each gets a private copy of that
+# `static Mutex` and they all enter together. A group is the only form that
+# holds across processes.
+#
+# The tests skip themselves when no display server is present, which is why CI
+# (headless) never sees this; a developer desktop with a real clipboard does.
+clipboard = { max-threads = 1 }
+
 [[profile.default.overrides]]
 filter = 'test(/^test_tool_rename_guard::/)'
 test-group = 'tool-rename-guard'
@@ -86,6 +99,14 @@ test-group = 'tool-rename-guard'
 [[profile.ci.overrides]]
 filter = 'test(/^test_tool_rename_guard::/)'
 test-group = 'tool-rename-guard'
+
+[[profile.default.overrides]]
+filter = 'test(/^test_clipboard::/)'
+test-group = 'clipboard'
+
+[[profile.ci.overrides]]
+filter = 'test(/^test_clipboard::/)'
+test-group = 'clipboard'
 
 [[profile.default.overrides]]
 filter = '(test(/^test_sandbox_secrets::/) | test(/^test_container_backend::/))'

@@ -4,6 +4,8 @@
 //! compatibility re-exports for the shared config, storage, LLM, and runtime
 //! primitives that the moved modules still reference through `crate::*`.
 
+#![deny(unsafe_code)]
+
 /// Agent Client Protocol (ACP) client: drive an external coding agent as a
 /// subprocess over JSON-RPC on stdio (spec `openhands` FR-015, FR-022, FR-036).
 pub mod acp;

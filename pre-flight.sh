@@ -155,9 +155,21 @@ bash "$(dirname "$0")/scripts/check-tool-rename.sh" --self-test || print_failure
 bash "$(dirname "$0")/scripts/check-tool-rename.sh" || print_failure "Tool-rename guard failed"
 
 # PERFPLAN F-5: agent-loop bench regression guard (skipped in --quick mode).
+# Exit codes: 0 = no regression, 1 = regression past threshold, 2 = no saved
+# baseline. Exit 2 means the guard could not run because nothing has recorded a
+# Criterion baseline yet (target/criterion is git-ignored and never checked in),
+# which is a not-applicable state rather than a failure - skip it, the same way
+# the security audit and cargo deny steps are skipped when unavailable.
+# CI does not run this guard, so skipping keeps pre-flight no stricter than CI.
 if [[ "${QUICK_MODE}" != "true" ]]; then
     print_step "Agent-loop bench regression guard..."
-    bash "$(dirname "$0")/scripts/check-bench-regression.sh" || print_failure "Agent-loop bench regression guard failed"
+    bench_rc=0
+    bash "$(dirname "$0")/scripts/check-bench-regression.sh" || bench_rc=$?
+    if [[ "${bench_rc}" -eq 2 ]]; then
+        print_skip "Agent-loop bench regression guard (no saved baseline)"
+    elif [[ "${bench_rc}" -ne 0 ]]; then
+        print_failure "Agent-loop bench regression guard failed"
+    fi
 fi
 
 # =============================================================================

@@ -321,7 +321,7 @@ impl Tool for TeamCreateTool {
                                     match dispatch_seed_tool(&tool, args_obj, ctx, tool_name).await
                                     {
                                         Ok(_out) => {
-                                            tracing::info!(tool = %tool_name, "Seed tool executed successfully");
+                                            tracing::debug!(tool = %tool_name, "Seed tool executed successfully");
                                         }
                                         Err(e) => {
                                             tracing::error!(tool = %tool_name, error = %e, arg_keys = %arg_keys, "Seed tool execution failed");
@@ -469,7 +469,7 @@ impl Tool for TeamCreateTool {
                                         .await
                                     {
                                         Ok(out) => {
-                                            tracing::info!(tool = %tool_name, "Spawn tool executed");
+                                            tracing::debug!(tool = %tool_name, "Spawn tool executed");
                                             if let Some(meta) = out.metadata
                                                 && let Some(status) =
                                                     meta.get("status").and_then(|v| v.as_str())

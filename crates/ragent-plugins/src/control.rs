@@ -665,10 +665,10 @@ fn table_row(row: &Row) -> String {
     let (mcp_servers, mcp_tools) = row.mcp_cell();
     format!(
         plugin_row_fmt!(),
-        truncate(&row.id, W_ID),
-        truncate(&row.name, W_NAME),
-        truncate(&row.version, W_VERSION),
-        truncate(&row.dialect, W_DIALECT),
+        ragent_types::strutil::truncate_chars_no_ellipsis(&row.id, W_ID),
+        ragent_types::strutil::truncate_chars_no_ellipsis(&row.name, W_NAME),
+        ragent_types::strutil::truncate_chars_no_ellipsis(&row.version, W_VERSION),
+        ragent_types::strutil::truncate_chars_no_ellipsis(&row.dialect, W_DIALECT),
         row.state.to_string(),
         row.tools.len(),
         row.commands.len(),
@@ -690,10 +690,6 @@ fn table_row(row: &Row) -> String {
         wm = W_MCP,
         wmt = W_MCP_TOOLS,
     )
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    value.chars().take(width).collect()
 }
 
 /// The FR-009 summary line: totals by lifecycle state. A plugin is either

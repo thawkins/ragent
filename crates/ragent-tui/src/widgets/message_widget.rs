@@ -98,18 +98,21 @@ pub fn pluralize(count: usize, singular: &str, plural: &str) -> String {
     }
 }
 
-/// Truncate a string to a maximum length, appending ellipsis if truncated.
+/// Truncate a string to a maximum length, appending an ellipsis if truncated.
 ///
-/// Single pass over the input (O(min(n, max_len))): the old shape counted
-/// chars to decide, then walked the string again to truncate.
+/// The budget counts visible characters only: `max_len` characters are kept and
+/// the `...` is appended after them, so a preview never loses content to the
+/// marker. That is [`ragent_types::strutil::truncate_chars_no_ellipsis`] plus the
+/// marker here, not [`ragent_types::strutil::truncate_chars`], which reserves
+/// three of the budget for the ellipsis.
 pub fn truncate_str(s: &str, max_len: usize) -> String {
-    let mut chars = s.chars();
-    let truncated: String = chars.by_ref().take(max_len).collect();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    format!(
+        "{}...",
+        ragent_types::strutil::truncate_chars_no_ellipsis(s, max_len)
+    )
 }
 
 /// Character budget for the command echoed in a bash tool-call header.

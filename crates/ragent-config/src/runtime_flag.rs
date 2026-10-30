@@ -38,17 +38,51 @@ impl RuntimeFlag {
         self.flag.store(enabled, Ordering::Relaxed);
     }
 
-    /// Persist the requested state to the config file and update the runtime
-    /// flag.
+    /// Persist the requested state and update the runtime flag.
     ///
-    /// The current config is reloaded, the named field is updated, and the
-    /// result is written back to the same source file that was loaded (project
-    /// config preferred over global config). Any error during persistence is
-    /// returned so callers can decide how to report it.
+    /// There are two persistence paths:
+    ///
+    /// - A flag with a top-level config key ([`RuntimeFlag::global_config_key`])
+    ///   is written through [`RuntimeFlag::persist_to_global`], which edits that
+    ///   one key in the **user-global** config file and leaves every other key
+    ///   byte-identical. `/alog off` must survive a restart, and the global file
+    ///   is the only file guaranteed to be read back (`Config::load` merges it
+    ///   under every project overlay, and `save_to_source` never targets a
+    ///   project file), so the value round-trips no matter which directory the
+    ///   session was started in.
+    /// - A flag without one (`gcf`, whose value lives under `gcf.enabled`) falls
+    ///   back to the historical path: reload the merged config, update the
+    ///   field, and write it back to the source that was loaded.
+    ///
+    /// Any error during persistence is returned so callers can decide how to
+    /// report it. A config file that cannot be loaded (e.g. it is corrupt) is
+    /// reported rather than silently overwritten with defaults.
+    pub fn persist(&self, enabled: bool) -> anyhow::Result<()> {
+        if self.global_config_key().is_some() {
+            return self.persist_to_global(enabled);
+        }
+        // Legacy path for flags whose value is not a top-level key.
+        let mut config = crate::config::Config::load()
+            .with_context(|| format!("failed to load config before persisting {}", self.name))?;
+        self.apply_to_config(&mut config, enabled);
+        config.save_to_source()?;
+        self.set_enabled(enabled);
+        Ok(())
+    }
+
+    /// Persist the requested state to the config file that was loaded (project
+    /// config preferred over global config) and update the runtime flag.
+    ///
+    /// This is the write path used before [`RuntimeFlag::persist`] was moved to
+    /// the user-global file, and it is retained only for callers that genuinely
+    /// must edit a project-level file, plus the persistence tests. A UI toggle
+    /// must use [`RuntimeFlag::persist`] / [`RuntimeFlag::toggle_persist`]
+    /// instead: a project-file write does not round-trip when the next session
+    /// starts in a directory without that file.
     ///
     /// If the config file cannot be loaded (e.g. it is corrupt), the error is
     /// propagated rather than silently overwriting the file with defaults.
-    pub fn persist(&self, enabled: bool) -> anyhow::Result<()> {
+    pub fn persist_to_source(&self, enabled: bool) -> anyhow::Result<()> {
         let mut config = crate::config::Config::load()
             .with_context(|| format!("failed to load config before persisting {}", self.name))?;
         self.apply_to_config(&mut config, enabled);
@@ -159,8 +193,9 @@ impl RuntimeFlag {
             "activity_log" => Some("activity_log"),
             "edit_log" => Some("edit_log"),
             "yolo" => Some("yolo"),
-            // `gcf` is nested under `gcf.enabled`; it is persisted through the
-            // `Config::save` path in the `/gcf` handler, not this helper.
+            // `gcf` is nested under `gcf.enabled`, which a single top-level key
+            // cannot address; `/gcf on|off` therefore keeps the legacy
+            // `save_to_source` path in `RuntimeFlag::persist`.
             _ => None,
         }
     }

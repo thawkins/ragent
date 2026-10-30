@@ -77,18 +77,36 @@ fn test_runtime_flag_new_defaults_and_setters() {
 #[test]
 #[serial_test::serial]
 fn test_runtime_flag_persist_and_toggle_round_trip() {
-    let _sandbox = Sandbox::new();
+    let sandbox = Sandbox::new();
+
+    // `edit_log` has a top-level config key, so `persist` writes that key to
+    // the **user-global** file: it is the only file `Config::load` always
+    // reads, so the value survives a restart whatever directory the session
+    // starts in.
+    let global = sandbox
+        .temp
+        .path()
+        .join("config")
+        .join("ragent")
+        .join("ragent.json");
 
     let flag = RuntimeFlag::new("edit_log", false);
     flag.persist(true).expect("persist edit_log on");
     assert!(flag.is_enabled());
-    // The project config now carries the flag (save_to_source prefers project).
-    assert_eq!(read_project_config()["edit_log"], serde_json::json!(true));
+    let raw = std::fs::read_to_string(&global).expect("read global config");
+    let root: serde_json::Value = serde_json::from_str(&raw).expect("parse global config");
+    assert_eq!(root["edit_log"], serde_json::json!(true));
+    assert!(
+        !std::path::Path::new(".ragent/ragent.json").exists(),
+        "the toggle must not create a project config"
+    );
 
     // A toggle flips the persisted value and reports the new state.
     let new = flag.toggle_persist().expect("toggle");
     assert!(!new);
-    assert_eq!(read_project_config()["edit_log"], serde_json::json!(false));
+    let raw = std::fs::read_to_string(&global).expect("read global config");
+    let root: serde_json::Value = serde_json::from_str(&raw).expect("parse global config");
+    assert_eq!(root["edit_log"], serde_json::json!(false));
 
     // sync_from_config reads the on-disk value back into the runtime flag.
     flag.persist(true).expect("persist on again");

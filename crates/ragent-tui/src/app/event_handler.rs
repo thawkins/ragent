@@ -789,6 +789,15 @@ impl App {
                 ref session_id,
                 ref summary,
             } if self.is_current_session(session_id) => {
+                // Only the PRIMARY agent's `agent_complete` ends the run: it
+                // clears the autopilot continuation and renders the terminal
+                // summary. The guard above is `is_current_session`, not
+                // `is_current_or_descendant_session`, and that is load-bearing -
+                // `agent_complete` publishes `TaskCompleted` with the CALLING
+                // session's id, and every sub-agent / teammate is instructed to
+                // end each run with `agent_complete`. Matching a descendant here
+                // would let whichever child finished first cancel the primary's
+                // autopilot run. The descendant arm below only logs.
                 self.push_log_no_agent(LogLevel::Info, "agent_complete signalled".to_string());
                 self.last_task_completed_at = Some(std::time::Instant::now());
                 // Exit autopilot mode on task completion
@@ -818,6 +827,25 @@ impl App {
                 ));
                 self.force_new_message = true;
                 self.append_assistant_text(&rendered);
+            }
+            Event::TaskCompleted {
+                ref session_id,
+                ref summary,
+            } if self.is_current_or_descendant_session(session_id) => {
+                // A sub-agent or teammate ended its own run with
+                // `agent_complete`. That is mandatory for every child run, so it
+                // is routine, not a task-level completion: it must NOT stop the
+                // primary's autopilot, clear `last_task_completed_at`, or render
+                // a "Task Complete" banner into the primary's transcript. The
+                // child's own report already reaches the UI through
+                // `SubagentComplete` (which carries the durable output path), so
+                // this arm only records a log line.
+                self.push_log_for(
+                    LogLevel::Info,
+                    format!("{} completed: {}", short_id(session_id), summary),
+                    self.agent_log_tag(session_id),
+                    Some(session_id.clone()),
+                );
             }
             Event::AgentNotice {
                 ref session_id,
@@ -886,7 +914,8 @@ impl App {
                             ),
                         );
                         let Some(last) = self.research_progress.last_mut() else {
-                            tracing::error!("research progress list empty immediately after push");
+                            // Logically unreachable: the entry was just pushed.
+                            tracing::debug!("research progress list empty immediately after push");
                             return;
                         };
                         last

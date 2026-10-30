@@ -3,6 +3,8 @@
 //! This crate owns the Milestone 6 extracted VCS layer while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
+#![deny(unsafe_code)]
+
 pub mod git;
 pub mod github;
 pub mod gitlab;

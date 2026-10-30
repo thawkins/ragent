@@ -580,22 +580,17 @@ impl LlmClient for GeminiClient {
                     }
                 };
 
-                // Gemini streams JSON objects, not SSE
-                super::http_client::append_stream_chunk(&mut buffer, &mut pending_utf8, &chunk);
-
-                // SEC-ragent-llm-004 (SECTASKS T-028): bound the accumulation
-                // buffer for the non-SSE path too; a peer that never emits a
+                // Gemini streams JSON objects, not SSE, but the accumulation
+                // buffer is bounded the same way: a peer that never emits a
                 // line terminator must not grow it without limit.
-                if super::http_client::sse_buffer_exceeded(&buffer) {
-                    tracing::warn!(
-                        limit = super::http_client::MAX_SSE_BUFFER_BYTES,
-                        "Gemini stream buffer exceeded the cap; aborting the stream"
-                    );
+                if let Err(e) = super::http_client::append_chunk_guarded(
+                    &mut buffer,
+                    &mut pending_utf8,
+                    &chunk,
+                    "Gemini",
+                ) {
                     yield StreamEvent::Error {
-                        message: format!(
-                            "stream buffer exceeded {} bytes without a complete frame",
-                            super::http_client::MAX_SSE_BUFFER_BYTES
-                        ),
+                        message: e.to_string(),
                     };
                     return;
                 }

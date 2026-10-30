@@ -17,12 +17,10 @@ fn plan(storage: &Storage, sql: &str) -> Vec<String> {
     let mut stmt = guard
         .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
         .expect("prepare plan");
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(3))
+    stmt.query_map([], |r| r.get::<_, String>(3))
         .expect("plan rows")
         .collect::<rusqlite::Result<Vec<_>>>()
-        .expect("collect plan");
-    rows
+        .expect("collect plan")
 }
 
 /// The list query must use the partial index and must not sort in a temp

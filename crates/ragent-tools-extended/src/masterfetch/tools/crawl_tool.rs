@@ -328,7 +328,9 @@ impl CrawlFetcher for HttpCrawlFetcher {
         let client = match crate::masterfetch::http::shared_client() {
             Ok(c) => c.clone(),
             Err(e) => {
-                tracing::error!(url = url, error = %e, "crawl: failed to get HTTP client");
+                // Non-fatal: the single page is skipped and the crawl
+                // continues, so this is a warning, not an error.
+                tracing::warn!(url = url, error = %e, "crawl: failed to get HTTP client");
                 return None;
             }
         };

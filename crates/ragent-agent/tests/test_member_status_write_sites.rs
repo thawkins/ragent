@@ -203,10 +203,10 @@ async fn immediate_shutdown_of_a_shutting_down_member_stops_it() {
         "a member already shutting down makes only the ack move"
     );
     assert!(
-        changes.iter().all(
-            |(_, from, to, _)| (from == "shutting_down" && to == "shutting_down")
-                || (from == "shutting_down" && to == "stopped")
-        ),
+        changes
+            .iter()
+            .all(|(_, from, to, _)| from == "shutting_down"
+                && (to == "shutting_down" || to == "stopped")),
         "every announcement is either the re-asserted request or the ack: {changes:?}"
     );
 }

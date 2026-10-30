@@ -249,8 +249,9 @@ pub fn previous_unclean_exit(working_dir: &Path) -> std::io::Result<Option<Crash
 ///
 /// # Safety note
 ///
-/// Unix uses the one approved `unsafe` FFI call for signal 0 (a liveness probe
-/// that does not deliver a signal); Windows uses an `OpenProcess` handle and
+/// Unix uses an approved `unsafe` FFI call for signal 0 (a liveness probe that
+/// does not deliver a signal; see the `unsafe` site table in
+/// `AGENTS-LANGUAGE.md`); Windows uses an `OpenProcess` handle and
 /// `GetExitCodeProcess` via windows-sys (kernel32 imports are statically
 /// linked by `windows_link`). The invariant is that `pid` is a value read back
 /// from a record file; an invalid pid simply yields `false`.

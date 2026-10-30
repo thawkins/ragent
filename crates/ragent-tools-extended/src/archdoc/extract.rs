@@ -73,7 +73,8 @@ pub fn build_arch_extraction_prompt(corpus: &GatheredCorpus) -> String {
         ));
     }
 
-    let body = truncate_chars(&corpus.text, MAX_PROMPT_CORPUS_CHARS);
+    let body =
+        ragent_types::strutil::truncate_chars_no_ellipsis(&corpus.text, MAX_PROMPT_CORPUS_CHARS);
 
     format!(
         "You are a software architect. Read the gathered architecture documentation below \
@@ -354,15 +355,4 @@ fn first_headings(content: &str, limit: usize) -> Vec<String> {
         })
         .take(limit)
         .collect()
-}
-
-/// Truncate `text` to at most `max` characters (UTF-8 boundary safe).
-fn truncate_chars(text: &str, max: usize) -> &str {
-    if text.chars().count() <= max {
-        text
-    } else {
-        text.char_indices()
-            .nth(max)
-            .map_or(text, |(i, _)| &text[..i])
-    }
 }

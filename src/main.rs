@@ -5,6 +5,8 @@
 //! to the requested sub-command (TUI, headless run, HTTP server, session
 //! management, auth, or config display).
 
+#![deny(unsafe_code)]
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -122,7 +124,7 @@ enum Commands {
     /// Start HTTP server only
     Serve {
         /// Address to bind to
-        #[arg(long, default_value = "127.0.0.1:3000")]
+        #[arg(long, default_value = ragent_server::DEFAULT_LISTEN_ADDR)]
         addr: String,
     },
     /// Run a small orchestration example (demonstrates multi-agent coordinator)

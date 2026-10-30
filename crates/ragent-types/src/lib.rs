@@ -12,6 +12,8 @@
 //! - Activity-log event schema and types
 //! - Cron scheduling types
 
+#![deny(unsafe_code)]
+
 pub mod activity;
 pub mod automation;
 pub mod cron;

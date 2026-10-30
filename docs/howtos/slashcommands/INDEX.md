@@ -24,7 +24,6 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/cost` | [cost](cost.md) | Show session token usage and estimated cost |
 | `/help` | [help](help.md) | Show available slash commands |
 | `/history` | [history](history.md) | Browse and re-use previous inputs; /history [filter] restricts to matching entries (arrow keys to select, Enter to insert, c to copy to clipboard); /history help |
-| `/inputdiag` | [inputdiag](inputdiag.md) | Dump input/cursor/selection diagnostics for troubleshooting |
 | `/log` | [log](log.md) | Log panel: /log [clear subagents\|panics\|research\|editlog\|help] |
 | `/loop` | [loop](loop.md) | Goal-driven agent loop: /loop opens setup, /loop <agent> <goal> starts, /loop help shows usage |
 | `/profile` | [profile](profile.md) | Toggle the agent-loop profiler panel (/profile on\|off\|help) |

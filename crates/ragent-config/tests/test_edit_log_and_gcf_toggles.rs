@@ -56,16 +56,26 @@ impl Drop for Sandbox {
 #[test]
 #[serial_test::serial]
 fn test_edit_log_toggle_persist_and_sync() {
-    let _sandbox = Sandbox::new();
+    let sandbox = Sandbox::new();
 
     ragent_config::edit_log::set_enabled(false);
     assert!(!ragent_config::edit_log::is_enabled());
 
     // persist_edit_log writes the new value and updates the runtime flag.
+    // `edit_log` has a top-level config key, so the write targets the
+    // user-global file (never a project `.ragent/ragent.json`), which is the
+    // only file guaranteed to be read back on the next start regardless of the
+    // directory the session is launched from.
     ragent_config::edit_log::persist_edit_log(true).expect("persist edit_log on");
     assert!(ragent_config::edit_log::is_enabled());
+    let global = sandbox
+        .temp
+        .path()
+        .join("config")
+        .join("ragent")
+        .join("ragent.json");
     let root: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(".ragent/ragent.json").expect("read"))
+        serde_json::from_str(&std::fs::read_to_string(&global).expect("read global config"))
             .expect("parse");
     assert_eq!(root["edit_log"], serde_json::json!(true));
 
@@ -81,6 +91,9 @@ fn test_edit_log_toggle_persist_and_sync() {
     // sync_from_config reloads from disk (currently `true`).
     ragent_config::edit_log::sync_from_config();
     assert!(ragent_config::edit_log::is_enabled());
+
+    // Keep the sandbox alive for the whole test (its `Drop` restores the cwd).
+    let _ = &sandbox;
 }
 
 #[test]

@@ -855,7 +855,7 @@ Key optimisations include:
 
 ## Project Status
 
-**v1.0.153** — The core architecture, tool system (150 tools across 21 categories in
+**v1.0.156** — The core architecture, tool system (150 tools across 21 categories in
 the default build), TUI, HTTP server, memory system, teams/swarm coordination, spec
 management, skills system, research system, plugin and connector systems, pluggable
 execution backends, ACP integration, the automation service, and multi-layered

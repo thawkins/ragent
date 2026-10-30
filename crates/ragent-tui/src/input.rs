@@ -3039,7 +3039,7 @@ fn handle_router_setup_key(app: &mut App, key: KeyEvent) {
                     // Remove any existing assignments for this provider from
                     // every tier so the cluster stays consistent.
                     for tier_config in draft_config.tiers.values_mut() {
-                        tier_config.models.retain(|entry| entry.provider != id);
+                        tier_config.models.retain(|entry| entry.provider_id != id);
                     }
                 } else {
                     selected_provider_ids.push(id);
@@ -3220,12 +3220,12 @@ fn handle_router_model_picker_key(app: &mut App, key: KeyEvent) {
                 let already_present = tier_config
                     .models
                     .iter()
-                    .any(|entry| entry.provider == provider_id && entry.model == model.id);
+                    .any(|entry| entry.provider_id == provider_id && entry.model == model.id);
                 if !already_present {
                     tier_config
                         .models
                         .push(ragent_llm::providers::router_config::TierEntry {
-                            provider: provider_id.clone(),
+                            provider_id: provider_id.clone(),
                             model: model.id.clone(),
                         });
                 }

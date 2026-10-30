@@ -660,14 +660,9 @@ async fn abort_session(
                     tracing::info!(session_id = %id, "Session aborted");
                     (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
                 }
-                Ok(Err(e)) => {
-                    tracing::error!(
-                        session_id = %id,
-                        error = %e,
-                        "Failed to archive session during abort"
-                    );
-                    internal_error_response("abort_session (archive)", e)
-                }
+                // `internal_error_response` already logs the failure with its
+                // context; a second `error!` here duplicates the same event.
+                Ok(Err(e)) => internal_error_response("abort_session (archive)", e),
                 Err(e) => internal_error_response("abort_session (archive task)", e),
             }
         }

@@ -4,94 +4,18 @@
 //! `?session=` filter, and the request body limit. Uses an in-process Axum
 //! router via [`tower::ServiceExt::oneshot`].
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures::StreamExt;
-use ragent_agent::Config;
-use ragent_agent::event::{Event, EventBus};
-use ragent_agent::permission::PermissionChecker;
-use ragent_agent::provider::ProviderRegistry;
-use ragent_agent::session::SessionManager;
-use ragent_agent::session::processor::SessionProcessor;
-use ragent_agent::storage::Storage;
-use ragent_agent::tool::ToolRegistry;
-use ragent_server::routes::{AppState, router};
+use ragent_agent::event::Event;
+use ragent_server::routes::router;
 use tower::ServiceExt;
-
-/// Build a minimal [`AppState`] suitable for exercising the router layers.
-fn test_state(token: &str) -> AppState {
-    let storage = Arc::new(Storage::open_in_memory().unwrap());
-    let event_bus = Arc::new(EventBus::new(64));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: Arc::new(ProviderRegistry::new()),
-        tool_registry: Arc::new(ToolRegistry::new()),
-        permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![]))),
-        event_bus: event_bus.clone(),
-        agent_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        connector_session: tokio::sync::RwLock::new(None),
-        connector_statuses: tokio::sync::RwLock::new(None),
-        code_index: std::sync::OnceLock::new(),
-        stream_config: Default::default(),
-        extraction_engine: std::sync::OnceLock::new(),
-        auto_approve: false,
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        tool_repeat_guard: std::sync::Arc::new(parking_lot::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
-        activity_log: std::sync::OnceLock::new(),
-        activity_log_tx: tokio::sync::Mutex::new(None),
-        skill_registry_cache: parking_lot::Mutex::new(None),
-        active_loops: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        active_loop_specs: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        loop_telemetry_recorded: std::sync::atomic::AtomicBool::new(false),
-        active_loop_interrupts: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        active_loop_captures: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        last_message_end_reason: std::sync::RwLock::new(std::collections::HashMap::new()),
-        pending_verdicts: ragent_agent::session::pending::PendingVerdicts::new(),
-        bg_service: std::sync::OnceLock::new(),
-    });
-    AppState {
-        event_bus,
-        config: Arc::new(tokio::sync::RwLock::new(Config::default())),
-        storage,
-        session_processor: processor,
-        auth_token: token.to_string(),
-        rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        coordinator: None,
-        research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        research_root: std::sync::Arc::new(crate::research_sandbox::isolated_research_root()),
-    }
-}
 
 /// A dropped `/events` response releases its connection slot, so a fresh
 /// connection on an idle router still succeeds (F-M9).
 #[tokio::test]
 async fn test_events_connection_slot_released_on_drop() {
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     let make_req = || {
         Request::builder()
             .uri("/events")
@@ -111,7 +35,7 @@ async fn test_events_connection_slot_released_on_drop() {
 /// The `?session=` query filters the global stream to one session (F-M9).
 #[tokio::test]
 async fn test_events_stream_filters_by_session() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     let bus = state.event_bus.clone();
     let app = router(state);
 
@@ -153,7 +77,7 @@ async fn test_events_stream_filters_by_session() {
 /// A cross-origin request from a non-allowlisted origin gets no CORS grant (F-M8).
 #[tokio::test]
 async fn test_cors_rejects_unknown_origin() {
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     let req = Request::builder()
         .uri("/health")
         .header("Origin", "https://evil.example.com")
@@ -169,7 +93,7 @@ async fn test_cors_rejects_unknown_origin() {
 /// A cross-origin request from a loopback dev origin is allowed (F-M8).
 #[tokio::test]
 async fn test_cors_allows_localhost_origin() {
-    let app = router(test_state("tok"));
+    let app = router(crate::support::test_state("tok"));
     let req = Request::builder()
         .uri("/health")
         .header("Origin", "http://localhost:3000")
@@ -186,7 +110,7 @@ async fn test_cors_allows_localhost_origin() {
 /// A body well within the cap is accepted (not 413) by the extractor (F-M10).
 #[tokio::test]
 async fn test_body_limit_accepts_normal_body() {
-    let state = test_state("tok");
+    let state = crate::support::test_state("tok");
     state.storage.create_session("s1", "/tmp").unwrap();
     let app = router(state);
     let req = Request::builder()

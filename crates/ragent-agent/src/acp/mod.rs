@@ -1026,18 +1026,14 @@ fn collect_stderr(tail: &std::sync::Mutex<std::collections::VecDeque<String>>) -
 }
 
 /// Truncate a string for a log line, keeping it single-line and bounded.
+///
+/// The byte budget and the char-boundary step come from
+/// [`ragent_types::strutil::truncate_bytes`]; folding newlines is the only
+/// part specific to a log line.
 fn truncate_for_log(text: &str) -> String {
     const MAX: usize = 500;
     let one_line = text.replace(['\n', '\r'], " ");
-    if one_line.len() <= MAX {
-        one_line
-    } else {
-        let mut end = MAX;
-        while end > 0 && !one_line.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &one_line[..end])
-    }
+    ragent_types::strutil::truncate_bytes(&one_line, MAX)
 }
 
 /// Spawn `agent`, run the `initialize` / `session/new` / `session/prompt`
