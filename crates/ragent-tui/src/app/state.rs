@@ -1647,9 +1647,9 @@ pub struct McpDiscoverState {
 /// before it can start. An entry with `disabled: true` is never enabled, however
 /// the ledger reads, matching `ragent_agent::mcp::is_server_enabled`.
 #[must_use]
-pub(crate) fn discovered_mcp_enabled(
+pub fn discovered_mcp_enabled<S: std::hash::BuildHasher>(
     server_id: &str,
-    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig>,
+    configured: &std::collections::HashMap<String, ragent_agent::McpServerConfig, S>,
     ledger: &ragent_agent::mcp::McpEnableLedger,
 ) -> bool {
     // A server absent from the `ragent.json` `mcp` section is either a bridged one

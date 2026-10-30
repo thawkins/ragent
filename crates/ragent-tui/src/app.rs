@@ -127,6 +127,14 @@ pub fn note_subagent_completed_for_tests(
     app.note_subagent_completed(task_id, finish_reason)
 }
 
+/// Test hook: run one autopilot continuation tick (`poll_autopilot_continue`)
+/// from a test, so the settle-or-dispatch decision after `agent_complete` is
+/// observable without a live event loop (`tests/test_event_handler_more.rs`).
+#[doc(hidden)]
+pub fn poll_autopilot_continue_for_tests(app: &mut App) {
+    app.poll_autopilot_continue();
+}
+
 /// Test hook: drive the `SubagentCancelled` transition (including the snapshot
 /// into the completed history) without a live sub-agent run
 /// (`tests/test_agents_window_refusals.rs`, spec `agentssetup` FR-032).

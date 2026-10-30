@@ -13,15 +13,14 @@ use crate::ToolContext;
 ///
 /// Every GitHub tool surfaces this one message when no token is available
 /// (ANTIPAT.md I-4); do not re-word it per module.
-pub(crate) const NOT_AUTHENTICATED: &str =
-    "GitHub not authenticated. Run /github login to authenticate.";
+pub const NOT_AUTHENTICATED: &str = "GitHub not authenticated. Run /github login to authenticate.";
 
 /// Build an authenticated [`GitHubClient`].
 ///
 /// # Errors
 ///
 /// Returns an error when the client cannot be constructed (no stored token).
-pub(crate) fn make_client() -> Result<GitHubClient> {
+pub fn make_client() -> Result<GitHubClient> {
     GitHubClient::new().context(NOT_AUTHENTICATED)
 }
 
@@ -30,7 +29,7 @@ pub(crate) fn make_client() -> Result<GitHubClient> {
 /// # Errors
 ///
 /// Returns an error when no GitHub remote is detected.
-pub(crate) fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
+pub fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
     GitHubClient::detect_repo(&ctx.working_dir).ok_or_else(|| {
         anyhow::anyhow!(
             "Could not detect GitHub repository from git remote. \
@@ -44,7 +43,7 @@ pub(crate) fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
 /// # Errors
 ///
 /// Returns an error when the client cannot be built or the repo is undetected.
-pub(crate) fn detect(ctx: &ToolContext) -> Result<(GitHubClient, String, String)> {
+pub fn detect(ctx: &ToolContext) -> Result<(GitHubClient, String, String)> {
     let client = make_client()?;
     let (owner, repo) = detect_repo(ctx)?;
     Ok((client, owner, repo))

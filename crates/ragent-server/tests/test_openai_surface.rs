@@ -510,21 +510,35 @@ async fn test_tool_call_raises_permission_prompt_and_is_not_auto_approved() {
             "messages": [{ "role": "user", "content": "write a file" }]
         }),
     );
-    let handle = tokio::spawn(async move { app.oneshot(req).await });
+    let mut handle = tokio::spawn(async move { app.oneshot(req).await });
 
-    let mut saw_prompt = false;
-    for _ in 0..200 {
-        match tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await {
-            Ok(Ok(Event::PermissionRequested { .. })) => {
-                saw_prompt = true;
-                break;
+    // Wait on ONE overall deadline, not a short per-event window: a busy CI
+    // runner can spend longer than a few hundred milliseconds before the
+    // freshly spawned request schedules its first event, and breaking on that
+    // first silence would fail the test for want of CPU rather than for a
+    // missing prompt. `Lagged` means this receiver fell behind the broadcast
+    // ring while the bus is still live, so keep draining. The request's own
+    // completion races the wait, so a request that returns without ever
+    // prompting fails immediately instead of waiting out the deadline.
+    let wait_for_prompt = async {
+        loop {
+            tokio::select! {
+                event = rx.recv() => match event {
+                    Ok(Event::PermissionRequested { .. }) => break true,
+                    // Any other event (streaming deltas, tool start, ...) -
+                    // keep draining until the prompt appears.
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break false,
+                },
+                // The request finished without prompting: nothing more can arrive.
+                _ = &mut handle => break false,
             }
-            // Any other event (streaming deltas, tool start, ...) - keep
-            // draining until the prompt appears.
-            Ok(Ok(_)) => {}
-            Ok(Err(_)) | Err(_) => break,
         }
-    }
+    };
+    let saw_prompt = tokio::time::timeout(std::time::Duration::from_secs(30), wait_for_prompt)
+        .await
+        .unwrap_or(false);
     handle.abort();
 
     assert!(

@@ -61,7 +61,7 @@ use crate::session::tool_input_error::ToolInputError;
 /// or a failed run); the wall-clock duration; the content the model sees; the
 /// metadata attached to the LLM-visible result; and the `PostToolUse` hook
 /// `additionalContext` blocks to fold in.
-pub(crate) type ToolOutcome = (
+pub type ToolOutcome = (
     PendingToolCall,
     Value,
     ToolCallStatus,
@@ -84,7 +84,7 @@ pub(crate) type ToolOutcome = (
 /// used to reach the model as a bare statement, so a client keyed on the marker
 /// saw the same status spelled two ways.
 #[allow(dead_code)] // superseded by `ToolDispatchPipeline::refusal`; the pipeline owns ordering
-pub(crate) fn refusal(
+pub fn refusal(
     tc: &PendingToolCall,
     refusal: &ToolInputError,
     input: Value,
@@ -120,7 +120,7 @@ pub(crate) fn refusal(
 /// with [`ToolCallStatus::Error`] - whose
 /// [`is_error`](ToolCallStatus::is_error) is the result flag (FR-014).
 #[allow(dead_code)] // superseded by `ToolDispatchPipeline::denial`; the pipeline owns ordering
-pub(crate) fn denial(
+pub fn denial(
     tc: &PendingToolCall,
     reason: &str,
     input: Value,
@@ -162,7 +162,7 @@ pub(crate) fn denial(
 ///
 /// [`ToolDispatchPipeline::synthesised`]: crate::session::dispatch::ToolDispatchPipeline::synthesised
 #[allow(dead_code)] // superseded by `ToolDispatchPipeline::synthesised`; the pipeline owns ordering
-pub(crate) fn synthesised(
+pub fn synthesised(
     tc: &PendingToolCall,
     message: &str,
     duration_ms: u64,

@@ -1,5 +1,57 @@
 # Changelog
 
+## [1.0.157] - 2026-10-30
+
+CI fixes and code-audit follow-up. Two defects are fixed: autopilot could keep
+running after the primary agent called `agent_complete`, and the
+`test_openai_surface` permission-prompt test failed on a slow CI runner after
+exactly one 200 ms scheduling window. The workspace-wide clippy
+`redundant_pub_crate` findings from the audit are also cleared, with no
+behaviour change outside the autopilot latch guard. Verification: `cargo check
+--workspace` clean, `cargo audit` clean across 867 dependencies (the single
+`paste` unmaintained notice remains the pre-existing allowed warning), `cargo
+nextest run --workspace --no-fail-fast` at 15,140 tests with 0 failures and 16
+skipped, `cargo test --workspace --doc` at 316 passing, clippy `-D warnings`,
+`cargo fmt --check` and the twelve `scripts/check-*.sh` guards all clean.
+
+### Fixed
+
+- **Autopilot now exits when the primary agent calls `agent_complete`.** The
+  completion arm of `Event::TaskCompleted` switched autopilot off and set the
+  `last_task_completed_at` latch, but `Event::MessageStart` cleared that latch
+  unconditionally. The agent loop keeps publishing lifecycle events after the
+  completion (the `MessageEnd` that closes the turn, then `AgentNotice` /
+  `SessionUpdated`), and the same drain can dispatch a continuation, so a
+  `MessageStart` arriving after `agent_complete` wiped the latch; the next
+  `poll_autopilot_continue` wake then saw "no completion" with a continuation
+  pending and started another turn - autopilot never exited.  `MessageStart` now
+  clears the latch only while `autopilot_enabled` is true, i.e. only for a turn
+  autopilot is still driving. Regression test:
+  `test_event_handler_more::message_start_after_agent_complete_keeps_autopilot_off`.
+- **`test_openai_surface::test_tool_call_raises_permission_prompt_and_is_not_auto_approved`
+  no longer fails on a busy CI runner.** The wait loop gave *each* `recv` a 200 ms
+  window and broke out of the loop on the first one that expired, so a runner
+  that took longer than 200 ms to schedule the spawned request failed after
+  exactly one window (CI failed at 0.251 s) even though the prompt was raised
+  correctly. It now waits on a single 30-second deadline and breaks early only
+  when the request itself returns without prompting, so a genuine regression
+  still fails in milliseconds while scheduling delay no longer fails it (FR-038).
+  `Lagged` is drained rather than treated as terminal, matching the other
+  event-bus waits in the workspace.
+
+### Changed
+
+- **Clippy `redundant_pub_crate` cleared workspace-wide.** Every `pub(crate)`
+  item declared inside a module that is not itself crate-visible is narrowed to
+  the visibility the module actually grants (or the module is widened, where the
+  item is re-exported): `ragent-tools-vcs` `github`/`gitlab` `helpers`,
+  `ragent-research` `analysis::{parser,prompt}`, `session::{topic,fallback}`,
+  `web_gatherer::{relevance,title}` and `polarity`, `ragent-agent`
+  `session::refusal_outcome` plus `session::{permissions,prompt_builders}` and
+  `tool::team_memory_common`, and `ragent-tui` `app::{event_handler,plugin,slash,state}`.
+  `App::discovered_mcp_enabled` gains a `BuildHasher` parameter, matching the
+  other generic `HashMap` helpers in the crate. No behaviour change.
+
 ## [1.0.156] - 2026-10-30
 
 Release 1.0.156: version bump only. No source, dependency or behaviour change -

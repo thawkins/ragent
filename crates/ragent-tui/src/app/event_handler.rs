@@ -34,7 +34,7 @@ const ERROR_PREVIEW_CHARS: usize = 200;
 /// Seconds a multiple-choice question dialog waits for a user answer before
 /// auto-answering with its default option. Only applies to timed questions
 /// (those with options); free-text and askpass prompts are never auto-timed.
-pub(crate) const QUESTION_TIMEOUT_SECS: u64 = 120;
+pub const QUESTION_TIMEOUT_SECS: u64 = 120;
 
 impl App {
     /// Render a swarm failure uniformly: status line, chat panel message,
@@ -462,7 +462,17 @@ impl App {
                 ref message_id,
             } if self.is_current_session(session_id) => {
                 self.is_processing = true;
-                self.last_task_completed_at = None;
+                // Only a turn that autopilot is still driving may clear the
+                // completion latch. `agent_complete` switches autopilot off and
+                // sets the latch from inside the tool phase, but the loop keeps
+                // publishing lifecycle events afterwards, so a `MessageStart`
+                // can arrive *after* the completion (a continuation dispatched by
+                // the same drain's `MessageEnd`, or a queued message). Clearing
+                // the latch there would let `poll_autopilot_continue` dispatch
+                // another turn on the next wake and autopilot would never exit.
+                if self.autopilot_enabled {
+                    self.last_task_completed_at = None;
+                }
                 self.agent_halted = false;
                 self.set_status_working("processing");
                 telemetry_counters::increment_messages_user(1);

@@ -13,7 +13,7 @@ use crate::ToolContext;
 ///
 /// Every GitLab tool surfaces this one message when no configuration is
 /// available (ANTIPAT.md I-4); do not re-word it per module.
-pub(crate) const NOT_CONFIGURED: &str = "GitLab not configured. Run /gitlab setup to configure.";
+pub const NOT_CONFIGURED: &str = "GitLab not configured. Run /gitlab setup to configure.";
 
 /// Build a [`GitLabClient`] from the context's storage handle.
 ///

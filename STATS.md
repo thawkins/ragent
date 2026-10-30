@@ -1,12 +1,22 @@
 # Project Statistics
 
-**Version:** 1.0.156
+**Version:** 1.0.157
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.156` state (the `docs/reports/code-audit.md` remediation pass on
-> top of the `1.0.154` state). That pass collapses four duplicated-guard findings
+> `1.0.157` state (the CI-fix and clippy-cleanup pass on top of the
+> `1.0.156` version bump, which publishes the `docs/reports/code-audit.md`
+> remediation pass on top of the `1.0.154` state). The `1.0.157` pass is
+> behaviour-neutral apart from one runtime fix: autopilot no longer keeps
+> running after the primary agent calls `agent_complete`, because the
+> `Event::MessageStart` arm clears the `last_task_completed_at` latch only
+> while `autopilot_enabled` is true. It also de-flakes the
+> `test_openai_surface` permission-prompt wait (a single 30-second deadline
+> instead of a per-event 200 ms window) and clears every clippy
+> `redundant_pub_crate` finding by narrowing the affected items to the
+> visibility their module actually grants. That earlier pass collapses four
+> duplicated-guard findings
 > into shared implementations (one SSE accumulation helper instead of nine
 > hand-written copies, one `ANTHROPIC_VERSION`, one root-key-parameterised
 > marketplace ledger shared by `/plugins` and `/connectors`, one
@@ -34,11 +44,11 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 740,745 (733,659 in `crates/` + 7,086 in root `src/`/`tests/`) |
+| Total Rust lines | 740,835 (733,749 in `crates/` + 7,086 in root `src/`/`tests/`) |
 | Total Rust files | 1,914 (1,893 workspace crates + 21 root `src/`/`tests/`) |
-| Tests defined | 15,159 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
-| Test files | 1,198 under crate `tests/` trees (1,041 consolidated `test_*.rs` + 127 `tests/inline/*` modules, the remainder shared `support` helpers); the 18 `tests/all.rs` roots are the per-crate targets |
-| Test binaries | 37 (18 consolidated `[[test]] name = "all"` integration targets - one per crate, plus the root package's 1; 18 crate lib targets and the 1 root bin) |
+| Tests defined | 15,160 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
+| Test files | 1,198 under crate `tests/` trees (1,038 consolidated `test_*.rs` + 127 `tests/inline/*` modules, the remainder shared `support` helpers); the 19 `tests/all.rs` roots are the per-crate targets |
+| Test binaries | 37 (19 consolidated `[[test]] name = "all"` integration targets - one per crate including the root package, 18 crate lib targets and the 1 root bin) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
 | Tools registered | 150 in 21 families (`mf_screenshot` engine-gated above the shown count) |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
@@ -46,7 +56,7 @@
 | Specs on disk | 61 directories in `specs/` |
 | Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 82 files in `docs/howtos/slashcommands/` (81 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.156 |
+| Version | 1.0.157 |
 
 `/inputdiag` was the only registry-visible change this pass: it was a
 debug-only slash command with no tool behind it, so the tool count is unmoved at

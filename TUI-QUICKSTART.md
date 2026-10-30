@@ -4,10 +4,13 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.156)
+## Highlights (v1.0.157)
 
-- **Version bump only** - this release publishes the internal audit-remediation
-  work; the TUI behaves exactly as it did in 1.0.155.
+- **Autopilot now stops when the agent finishes** - a completion no longer gets
+  overridden by a later `MessageStart`, so `AUTO:` clears from the status bar
+  instead of the loop starting another turn.
+- **Workspace-wide clippy cleanup and a de-flaked server permission-prompt
+  test**; otherwise the TUI behaves as it did in 1.0.155.
 
 ## Highlights (v1.0.155)
 

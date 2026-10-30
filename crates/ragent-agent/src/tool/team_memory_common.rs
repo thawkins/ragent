@@ -9,7 +9,7 @@
 ///
 /// Lowercases the input, maps every non-alphanumeric character to `-`, trims
 /// leading/trailing hyphens, and collapses runs of hyphens to one.
-pub(crate) fn slugify(s: &str) -> String {
+pub fn slugify(s: &str) -> String {
     let slug: String = s
         .to_ascii_lowercase()
         .chars()
@@ -27,7 +27,7 @@ pub(crate) fn slugify(s: &str) -> String {
 ///
 /// The result is `path-<slug>`; a path that slugs to the empty string uses the
 /// `path-memory` default bucket.
-pub(crate) fn path_tag(path: &str) -> String {
+pub fn path_tag(path: &str) -> String {
     let slug = slugify(path);
     if slug.is_empty() {
         "path-memory".to_string()

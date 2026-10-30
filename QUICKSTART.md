@@ -2239,18 +2239,32 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
-## Version 1.0.156
+## Version 1.0.157
 
-- **Version bump only** - no new capabilities. This release publishes the
-  `docs/reports/code-audit.md` remediation pass that was prepared under the
-  `1.0.155` version string: duplicated guards collapsed onto shared
-  implementations (one SSE accumulation helper, one `ANTHROPIC_VERSION`, one
-  root-key-parameterised marketplace ledger, one `DEFAULT_LISTEN_ADDR`), the two
-  guards that police that duplication strengthened, `#![deny(unsafe_code)]` on
-  all 19 crate and binary roots, the debug-only `/inputdiag` command removed
-  (registry unchanged at 150 tools across 21 families), and the runtime-flag
-  toggles persisting to the user-global config. See the 1.0.155 section below for
-  the detail.
+- **Autopilot exits when the primary agent calls `agent_complete`** — the
+  completion arm set the `last_task_completed_at` latch and switched autopilot
+  off, but `Event::MessageStart` cleared that latch unconditionally. The agent
+  loop keeps publishing lifecycle events after the completion, so a
+  `MessageStart` arriving afterwards wiped the latch; the next
+  `poll_autopilot_continue` wake then saw "no completion" with a continuation
+  pending and started another turn. The clear is now guarded on
+  `autopilot_enabled`, i.e. it only applies to a turn autopilot is still
+  driving. Regression test:
+  `test_event_handler_more::message_start_after_agent_complete_keeps_autopilot_off`.
+- **`test_openai_surface` permission-prompt test no longer flakes on a busy
+  runner** — the wait loop bounded *each* `recv` at 200 ms and broke on the
+  first expiry, so a runner that took longer than 200 ms to schedule the
+  spawned request failed after exactly one window. It now waits on a single
+  30-second deadline, drains `Lagged` instead of treating it as terminal, and
+  races the request future so a genuine FR-038 regression still fails in
+  milliseconds.
+- **Workspace-wide clippy `redundant_pub_crate` cleanup** — every `pub(crate)`
+  item declared in a module that is not itself crate-visible is narrowed to the
+  visibility the module actually grants, or the module is widened where the
+  item is re-exported. `App::discovered_mcp_enabled` gains a `BuildHasher`
+  parameter to clear `implicit_hasher`. No behaviour change.
+- **Tool registry unchanged** at 150 tools across 21 families; no slash command
+  or configuration key was added or removed.
 
 ## Version 1.0.155
 

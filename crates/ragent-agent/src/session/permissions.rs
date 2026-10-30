@@ -28,7 +28,7 @@ use crate::permission::{PermissionAction, PermissionChecker};
 ///
 /// Tries common parameter names (`path`, `command`, `url`, `pattern`, `query`)
 /// and falls back to the tool name if none are found.
-pub(crate) fn extract_resource_from_input(input: &Value, tool_name: &str) -> String {
+pub fn extract_resource_from_input(input: &Value, tool_name: &str) -> String {
     input
         .get("path")
         .or_else(|| input.get("command"))
@@ -55,7 +55,7 @@ pub(crate) fn extract_resource_from_input(input: &Value, tool_name: &str) -> Str
 /// assert_eq!(strip_timeout_prefix("timeout 10 ls -la"), "ls -la");
 /// assert_eq!(strip_timeout_prefix("ls -la"), "ls -la");
 /// ```
-pub(crate) fn strip_timeout_prefix(command: &str) -> &str {
+pub fn strip_timeout_prefix(command: &str) -> &str {
     let trimmed = command.trim();
 
     // Check if the command starts with "timeout"
@@ -171,7 +171,7 @@ pub fn extract_command_name(command: &str) -> String {
 /// the safe-command allowlist, but it cannot change what the next run sees.
 /// Used by [`write_capable_tool_names`] to decide whether an unattended run is
 /// a read-only explorer or a worker that will write.
-pub(crate) const READ_ONLY_PERMISSION_CATEGORIES: &[&str] = &[
+pub const READ_ONLY_PERMISSION_CATEGORIES: &[&str] = &[
     "file:read",
     "read",
     "codeindex",
@@ -236,7 +236,7 @@ where
 /// (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`,
 /// `agent_complete`), the four `Task*` tools (T-011, FR-017),
 /// and `AskUserQuestion`.
-pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
+pub fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
     is_hardwired_codeindex_tool(tool_name)
         || tool_name.starts_with("team_")
         || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
@@ -250,7 +250,7 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
 
 /// Return `true` for the read-only codeindex tools that are always allowed
 /// regardless of skill restrictions.
-pub(crate) fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
+pub fn is_hardwired_codeindex_tool(tool_name: &str) -> bool {
     const AUTO_APPROVED_CODEINDEX_TOOLS: &[&str] = &[
         "codeindex_search",
         "codeindex_symbols",
@@ -283,7 +283,7 @@ const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
 /// server, forked skill) have no attached user, so these are filtered from
 /// the tool surface and denied at dispatch - an unanswered interactive
 /// dialog would otherwise block the sub-agent run until the watchdog.
-pub(crate) const INTERACTIVE_TOOLS: &[&str] = &["AskUserQuestion"];
+pub const INTERACTIVE_TOOLS: &[&str] = &["AskUserQuestion"];
 
 /// Return `true` when `tool_name` waits on live user interaction and must
 /// be denied in sub-agent runs ([`INTERACTIVE_TOOLS`]).
@@ -361,7 +361,7 @@ pub const DESTRUCTIVE_GIT_TOOLS: &[&str] = &[
 /// checkpoint layer (T-010): deletion, destructive git sub-commands, config
 /// writes, and dependency installation. Package/build commands (cargo test,
 /// npm run, ...) stay on the normal permission path.
-pub(crate) const BASH_DESTRUCTIVE_COMMANDS: &[&str] = &[
+pub const BASH_DESTRUCTIVE_COMMANDS: &[&str] = &[
     // Deletion (the safe-command allowlist already excludes rm; the
     // checkpoint additionally intercepts it when a loop runs).
     "rm",
@@ -413,7 +413,7 @@ pub(crate) const BASH_DESTRUCTIVE_COMMANDS: &[&str] = &[
 /// outer answer must be `false`, or every unknown stored name becomes
 /// destructive. `crates/ragent-agent/tests/test_fr028_state_survival.rs` case 9
 /// pins the distinction.
-pub(crate) fn is_destructive_tool(tool_name: &str, input: &Value) -> bool {
+pub fn is_destructive_tool(tool_name: &str, input: &Value) -> bool {
     if DESTRUCTIVE_TOOLS.contains(&tool_name) {
         return true;
     }
@@ -473,7 +473,7 @@ fn bash_is_destructive(sub_command: &str) -> bool {
 /// (FR-015, T-010). Best-effort, mirroring the permission layer's bash
 /// splitting: the command is split on `&&`/`||`/`;` and each sub-command is
 /// checked against [`BASH_DESTRUCTIVE_COMMANDS`].
-pub(crate) fn bash_has_destructive_command(command: &str) -> bool {
+pub fn bash_has_destructive_command(command: &str) -> bool {
     split_bash_command(command)
         .iter()
         .any(|sub| bash_is_destructive(sub))
@@ -481,7 +481,7 @@ pub(crate) fn bash_has_destructive_command(command: &str) -> bool {
 
 /// The denial observation text appended to the model's context when a
 /// destructive-action checkpoint is denied (timeout or user refusal).
-pub(crate) fn checkpoint_reason(tool_name: &str, resource: &str) -> String {
+pub fn checkpoint_reason(tool_name: &str, resource: &str) -> String {
     format!(
         "checkpoint denied: destructive action '{tool_name}' on '{resource}' was \
          not approved - a human-approval checkpoint protects destructive \
@@ -613,7 +613,7 @@ async fn prompt_for_permission(
 /// Tools that are always available to an agent even when a skill's
 /// `allowed_tools` list is being enforced. These are essential control and
 /// introspection tools that must not be removed from the LLM's tool list.
-pub(crate) const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
+pub const SKILL_ALWAYS_ALLOWED_TOOLS: &[&str] = &[
     "think",
     "AskUserQuestion",
     "agent_complete",

@@ -372,6 +372,65 @@ async fn primary_completion_and_message_end_in_one_drain_stop_autopilot() {
     );
 }
 
+/// A `MessageStart` arriving after the primary's `agent_complete` must not
+/// resurrect autopilot.
+///
+/// `MessageStart` clears `last_task_completed_at` because it marks the start of
+/// a fresh user turn. The agent loop keeps publishing lifecycle events after
+/// `TaskCompleted` (the `MessageEnd` that closes the turn, then any
+/// `AgentNotice`/`SessionUpdated`), so the completion latch is not necessarily
+/// the last thing the TUI sees. `poll_autopilot_continue` runs on the following
+/// loop wake: with the latch cleared and a continuation still pending, it would
+/// dispatch another turn and autopilot would never exit.
+///
+/// The latch must therefore only be cleared by a turn the user actually
+/// started - the guard is `autopilot_enabled`, which is false after
+/// `agent_complete` because the completion arm already switched it off.
+#[tokio::test]
+async fn message_start_after_agent_complete_keeps_autopilot_off() {
+    let mut app = app_with_session("s1");
+    app.autopilot_enabled = true;
+    app.autopilot_started_at = Some(std::time::Instant::now());
+    app.autopilot_time_limit_secs = Some(5000);
+
+    // Production order: the tool publishes TaskCompleted, the loop then
+    // publishes MessageEnd, and the autopilot continuation for this turn was
+    // already scheduled by the MessageEnd handler...
+    app.handle_event(Event::TaskCompleted {
+        session_id: "s1".to_string(),
+        summary: "all done".to_string(),
+    })
+    .await;
+    assert!(!app.autopilot_enabled, "agent_complete exits autopilot");
+    assert!(app.autopilot_pending_continue.is_none());
+
+    // ...but a stale continuation can still be in flight from an earlier
+    // wake, and a late MessageStart must not clear the latch.
+    app.autopilot_pending_continue = Some("Continue working on the task.".to_string());
+    app.handle_event(Event::MessageStart {
+        session_id: "s1".to_string(),
+        message_id: "m-next".to_string(),
+    })
+    .await;
+
+    assert!(
+        app.last_task_completed_at.is_some(),
+        "a MessageStart that arrives after agent_complete must not clear the \
+         completion latch"
+    );
+
+    // The next loop wake must settle autopilot off rather than dispatch.
+    ragent_tui::app::poll_autopilot_continue_for_tests(&mut app);
+    assert!(
+        !app.autopilot_enabled,
+        "autopilot must stay off after the primary's agent_complete"
+    );
+    assert!(
+        app.autopilot_pending_continue.is_none(),
+        "no continuation may survive the completion"
+    );
+}
+
 // ===========================================================================
 // Sub-agent lifecycle (suspend / resume / kill / cancel)
 // ===========================================================================

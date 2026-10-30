@@ -108,7 +108,7 @@ pub fn build_goal_loop_section(spec: &LoopSpec) -> String {
 ///
 /// Uses strong directive language to steer the LLM away from `Grep`/`search`
 /// for any query that involves code symbols, types, or structure.
-pub(crate) fn build_codeindex_guidance_section_active() -> String {
+pub fn build_codeindex_guidance_section_active() -> String {
     "\n## Code Intelligence - Codebase Index Tools\n\n\
             A **codebase index** is active for this project. It provides fast, structured \
             search across all indexed source files - symbols, references, dependencies, \
@@ -154,7 +154,7 @@ pub(crate) fn build_codeindex_guidance_section_active() -> String {
 ///
 /// Informs the LLM that codeindex tools will return "not available" and
 /// that Grep/search should be used as fallback. Suggests enabling the index.
-pub(crate) fn build_codeindex_guidance_section_disabled() -> String {
+pub fn build_codeindex_guidance_section_disabled() -> String {
     "\n## Code Intelligence - Codebase Index Tools\n\n\
             The codebase index is **not active** for this project. Code index tools \
             (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
@@ -173,7 +173,7 @@ pub(crate) fn build_codeindex_guidance_section_disabled() -> String {
 /// Injected into every session's system prompt so the model always knows the exact tool names
 /// available. This prevents hallucinated tool names (e.g. calling "search" instead of "Grep").
 #[allow(dead_code)]
-pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
+pub fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
     build_tool_reference_from_defs(&registry.definitions())
 }
 

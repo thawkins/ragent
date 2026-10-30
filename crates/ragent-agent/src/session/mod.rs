@@ -30,7 +30,7 @@ pub mod profiler;
 pub mod prompt_builders;
 /// The one shape a tool call's terminal outcome takes (spec `uniformtools`
 /// FR-012, FR-014, FR-021).
-pub(crate) mod refusal_outcome;
+mod refusal_outcome;
 /// Remote-backend turn dispatch: relay a turn to a second ragent server over
 /// REST+SSE and mirror its event stream locally (spec `openhands` FR-021,
 /// FR-031, FR-034).
