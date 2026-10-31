@@ -719,6 +719,18 @@ impl Storage {
         // The database file (created above with the process umask) and its WAL
         // sidecars must be 0600: the row contents are the credentials.
         restrict_file_permissions(path);
+        // R-24: generous busy_timeout FIRST, before any pragma that can contend
+        // with another connection. `PRAGMA journal_mode=WAL` on a database that
+        // is still in rollback-journal mode needs a brief exclusive lock to
+        // rewrite the header, and it honours whatever busy handler is installed
+        // when it runs. Setting the timeout afterwards meant the switch used
+        // rusqlite's 5 s default and, when a second ragent process (two CLI
+        // invocations, a concurrent test run) held a read or write lock on the
+        // shared `~/.config/ragent/ragent.db`, `Storage::open` failed outright
+        // with `Error code 5: database is locked` instead of waiting. Ordering
+        // the timeout first makes every subsequent pragma as patient as the
+        // rest of the connection. See `BUSY_TIMEOUT_MS`.
+        conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)?;
         // PERF: Use WAL so background writers (e.g. the FTS warm-up) do not
         // block concurrent readers on the main thread, and set a busy_timeout
         // so a transient lock never surfaces as an immediate `DatabaseBusy`
@@ -730,10 +742,6 @@ impl Storage {
         // fsync on every WAL commit while remaining crash-safe (the WAL is
         // still durable on checkpoint). This matches the activity-log store.
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        // R-24: generous busy_timeout so a startup write (e.g. the background
-        // FTS warm-up on a second connection) never surfaces as an immediate
-        // `SQLITE_BUSY` / "database is locked" error. See `BUSY_TIMEOUT_MS`.
-        conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)?;
         // R-23: explicit WAL auto-checkpoint so the WAL file does not grow to
         // hundreds of MB. See `WAL_AUTOCHECKPOINT_PAGES`.
         conn.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;

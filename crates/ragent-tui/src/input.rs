@@ -2454,10 +2454,39 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     match app.save_telemetry_otel(&draft) {
                         Ok(()) => {
                             app.session_processor.invalidate_config_cache();
+                            // Bug fix: `/telemetry setup` used to persist the
+                            // new block and stop there, so an operator who had
+                            // already enabled telemetry kept exporting with
+                            // the OLD endpoint/protocol/interval until the
+                            // next restart. Reconfigure the live subsystem
+                            // exactly as `/telemetry on` does, so saving the
+                            // form takes effect immediately.
+                            let reconfigure_error = app
+                                .session_processor
+                                .telemetry
+                                .reconfigure(draft)
+                                .err()
+                                .map(|e| e.to_string());
                             app.provider_setup = None;
-                            app.append_assistant_text(
-                                "From: /telemetry setup\n[ok] **Telemetry configuration saved.**\n\nSettings take effect on the next ragent start, or immediately if the telemetry subsystem is already running.",
+                            let mut message = String::from(
+                                "From: /telemetry setup\n[ok] **Telemetry configuration saved.**",
                             );
+                            match reconfigure_error {
+                                // Reconfiguring a disabled subsystem is a
+                                // no-op, and a save with telemetry off is the
+                                // expected path for an operator preparing a
+                                // config, not a failure to report.
+                                None => message.push_str(
+                                    "\n\nThe change is already live: the telemetry subsystem \
+                                     was reconfigured in place.",
+                                ),
+                                Some(e) => message.push_str(&format!(
+                                    "\n\n[err] The new configuration was saved but could not be \
+                                     applied to the running telemetry subsystem: {e}\n\nThe \
+                                     settings take effect on the next ragent start."
+                                )),
+                            }
+                            app.append_assistant_text(&message);
                             app.status = "telemetry: saved".to_string();
                         }
                         Err(e) => {

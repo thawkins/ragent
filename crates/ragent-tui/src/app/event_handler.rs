@@ -2880,6 +2880,66 @@ impl App {
         self.session_id.as_deref() == Some(session_id)
     }
 
+    /// Surface OTLP metric-export failures as "Agent Notice" bubbles and act on
+    /// the auto-disable threshold.
+    ///
+    /// The periodic OTLP reader runs on the tokio runtime, so an unreachable
+    /// collector or a non-2xx response never becomes an [`Event`]: the SDK
+    /// only logs it. The exporter wrapper in `ragent_telemetry::export_health`
+    /// records every outcome in a process-wide monitor instead, and this poll
+    /// (driven from the TUI event loop) drains it:
+    ///
+    /// - each failed export appends one "Agent Notice" bubble naming the
+    ///   consecutive-failure count, the reason, and the endpoint, and a
+    ///   matching `Warn` log line;
+    /// - the fifth consecutive failure turns telemetry off through the same
+    ///   path as `/telemetry off` (persist `enabled: false` and reconfigure the
+    ///   live subsystem), so a dead collector stops costing a request per
+    ///   export interval.
+    ///
+    /// This is a no-op when no notice is pending, which is the steady state
+    /// for every healthy (or disabled) session.
+    pub fn poll_telemetry_export_health(&mut self) {
+        let health = ragent_telemetry::export_health::export_health();
+        if health.pending_notice_count() == 0 {
+            return;
+        }
+        let notices = health.take_notices();
+        if notices.is_empty() {
+            return;
+        }
+        let mut auto_disabled = false;
+        for notice in &notices {
+            self.push_log_no_agent(LogLevel::Warn, format!("telemetry: {}", notice.detail));
+            // Same presentation contract as `Event::AgentNotice`: one notice
+            // per bubble, with a forced break on both sides so a streamed
+            // message can never merge into the notice.
+            self.force_new_message = true;
+            self.append_assistant_text(&format!("{}\n{}", "Agent Notice", notice.render()));
+            self.force_new_message = true;
+            auto_disabled |= notice.auto_disabled;
+        }
+        if auto_disabled {
+            // The exporter already tripped the latched flag; persist the
+            // disable through the normal `/telemetry off` path so the change
+            // survives a restart, and reset the monitor so a later
+            // `/telemetry on` starts with a clean failure streak.
+            self.set_telemetry_enabled(false);
+            health.clear();
+            self.status = "telemetry: disabled after repeated export failures".to_string();
+            self.arm_status_expiry();
+        } else {
+            self.status = format!(
+                "telemetry: export failing ({} consecutive)",
+                notices
+                    .last()
+                    .map_or(0, |notice| notice.consecutive_failures)
+            );
+            self.arm_status_expiry();
+        }
+        self.needs_redraw = true;
+    }
+
     /// Returns the session id for a team member by agent id, if known.
     /// Used to attribute team-related log entries to the teammate's own
     /// output-view overlay.

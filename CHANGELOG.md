@@ -1,5 +1,155 @@
 # Changelog
 
+## [1.0.159] - 2026-10-31
+
+Release covering the telemetry export-health work plus four defects found while
+validating it. The headline fix is a startup crash: with telemetry enabled the
+TUI tore down its alternate screen within seconds and left the shell receiving
+raw-mode input.
+
+- **Startup crash with telemetry enabled.** The OTLP exporter was built with
+  `opentelemetry-otlp`'s *async* reqwest client, but the SDK's default
+  `PeriodicReader` drives exports from a plain OS thread via
+  `futures_executor::block_on`. The async client calls `tokio::time::sleep`
+  inside its export future, so the first (immediate) export panicked with
+  `there is no reactor running`, and the process-wide panic hook - which cannot
+  tell a worker thread from the UI thread - restored the terminal underneath a
+  still-running TUI. Switching to `reqwest-blocking-client` removes the reactor
+  dependency entirely; the default reader is then correct.
+- **`force_flush` deadlock.** The interim fix (the async-runtime reader) bound
+  the export task to whichever runtime was current at construction, so the
+  synchronous `TelemetrySubsystem::flush` deadlocked on a current-thread runtime
+  and hung forever if that runtime had already stopped. `flush` now runs against
+  a blocking exporter from any thread; it returns in microseconds off-runtime
+  where it previously hung until killed.
+- **`database is locked` on startup (CI failure).** `Storage::open` installed
+  `busy_timeout` *after* `PRAGMA journal_mode=WAL`, so the rollback-journal to WAL
+  switch used rusqlite's 5 s default. Two ragent processes sharing
+  `~/.config/ragent/ragent.db` - which is exactly what a parallel test run does -
+  made one of them fail outright instead of waiting. This is the sole failure in
+  CI run #41164957150 (15139/15140).
+- **`/telemetry setup` did not take effect.** Saving the form persisted the new
+  `telemetry.otel` block but never reconfigured the running subsystem, so an
+  operator who had telemetry on kept exporting to the OLD endpoint until the
+  next restart.
+- **Telemetry dialog cursor appeared to jump.** The `Transport protocol` row is
+  field index 1 in the `Tab` cycle but was painted last, so `>` moved from the
+  endpoint down to the interval row and only then back up to the protocol row.
+
+Verification: `cargo check` clean, `cargo audit` clean (867 dependencies, the
+single pre-existing `paste` unmaintained notice unchanged), `cargo fmt --all
+-- --check` clean, `cargo nextest run -p ragent-telemetry` 306/306,
+`-p ragent-tui` 3916/3916, `-p ragent-storage -E 'test(test_wal_warmup::)'` green
+including the new contended-WAL regression test, and all `scripts/check-*.sh`
+guards passing. Live TUI with telemetry pointed at a dead
+`http://127.0.0.1:4318` ran 70+ s with zero `no reactor running` panics, zero new
+`log/panics/*.log` files, and the `TELE:` indicator rendered.
+
+
+OTLP export failures are now visible to the operator and self-heal: a non-2xx
+collector response or an export timeout produces an "Agent Notice" in the
+message window, and five consecutive failures switch telemetry off instead of
+retrying a dead endpoint forever. Verified against a live mock collector
+answering `503` (24 responses served, exactly 5 notices rendered, `TELE:`
+flipped from `✓` to `✗`, `telemetry.otel.enabled` persisted as `false`).
+`cargo nextest run -p ragent-telemetry -E 'test(test_export_health::)'` 13/13,
+`-p ragent-tui -E 'test(test_telemetry_export_notice::)'` 4/4, clippy and
+`cargo fmt --check` clean for both crates.
+
+### Added
+
+- **`ragent-telemetry::export_health`** - [`ExportHealth`], a process-wide
+  atomic monitor that records every OTLP export outcome (success, non-2xx
+  status, transport error, timeout), keeps the consecutive-failure streak, a
+  total, and a bounded queue of [`ExportNotice`] values. [`ObservedMetricExporter`]
+  decorates the live `opentelemetry_otlp::MetricExporter` in `build_provider`,
+  classifies failures from the SDK error text (`HTTP export failed with status
+  code: NNN`, `network error`, `Timeout`) and forwards the result unchanged so
+  the SDK still logs it. `AUTO_DISABLE_THRESHOLD` is 5; a success resets the
+  streak; the auto-disable latch trips exactly once and is released by
+  `clear()` (which `TelemetrySubsystem::reconfigure` calls, so `/telemetry on`
+  retries with a clean count).
+- **`App::poll_telemetry_export_health`** - drains the monitor from the TUI
+  event loop. Each failure appends one `Agent Notice` bubble (consecutive count,
+  reason, endpoint, and how to recover) plus a `Warn` log line; on the fifth it
+  runs the `/telemetry off` path (`set_telemetry_enabled(false)`), clears the
+  monitor, and sets the status to `telemetry: disabled after repeated export
+  failures`.
+- **`/telemetry counters` / telemetry panel** - an `Export health` line
+  (`N consecutive failure(s), M total`) appears once any failure is recorded.
+  `/telemetry help` documents the notice and auto-disable behaviour.
+- Tests: `crates/ragent-telemetry/tests/test_export_health.rs` (13 cases:
+  streak, reset-by-success, latch-once, `clear`, notice rendering, classification,
+  and the decorator over a fake `PushMetricExporter` on a current-thread runtime)
+  and `crates/ragent-tui/tests/test_telemetry_export_notice.rs` (4 cases:
+  one notice per failure, timeout wording, fifth-failure auto-disable actually
+  disabling the live subsystem, and the no-op steady state).
+- **Durable input-transition spool.** `App::append_input_transition_to_spool`
+  writes one line per input-buffer change (handler source, lengths and cursor
+  before/after, cursor delta, screen, and the escaped text) to
+  `log/logwindow/input-transitions.log`, honouring `helpers::log_root()` so a
+  test run writes under `target/temp/log`. Every failure is logged at `debug`
+  and dropped - a diagnostic must never disturb the session it observes
+  (`crates/ragent-tui/tests/test_input_transition_spool.rs`).
+
+### Fixed
+
+- **Telemetry-enabled startup crash.** `crates/ragent-telemetry/Cargo.toml`
+  selects `reqwest-blocking-client` instead of `reqwest-client`, and
+  `build_provider` is back to the SDK's default `PeriodicReader` (the
+  `experimental_metrics_periodicreader_with_async_runtime` feature is gone).
+  `subsystem.rs` documents at length why an async client cannot be used with a
+  reader that runs on its own OS thread.
+- **`TelemetrySubsystem::flush` off-runtime.** Clones the provider `Arc` out of
+  the runtime lock before calling the blocking `force_flush`, so `reconfigure`
+  can still take the lock, and routes the SDK's opaque error text through
+  `ExportFailureKind::classify` so a shutdown log reads `export timed out`
+  rather than the raw `oneshot canceled`.
+- **Narrowed Prometheus runtime requirement.** `build_enabled_provider` now
+  checks `tokio::runtime::Handle::try_current()` explicitly and returns
+  `TelemetryError::ExporterInit` when `telemetry.internal_port` is set but no
+  runtime is present, instead of panicking after the reader thread already
+  exists.
+- **`ExportFailureKind::Cancelled`.** `export_health.rs` classifies
+  `oneshot canceled`/`oneshot cancelled`/`reader is shut down`/`already shut
+  down` as a shutdown-time cancellation before the timeout and transport arms,
+  rendering `export cancelled while the reader was shutting down`.
+- **Panic hook only tears the terminal down for the UI thread.**
+  `ragent_tui::should_teardown_terminal(contained, panicking, ui_thread)` is now
+  a `#[must_use]` pure function, used by the hook in `run_tui`. A panic on a
+  worker thread (OTEL exporter, MCP stdio reader, provider task) no longer
+  destroys the alternate screen while the UI keeps running. Covered by
+  `crates/ragent-tui/tests/test_panic_hook_thread_scope.rs` (6 cases, including
+  end-to-end runs of the hook for both thread kinds).
+- **`Storage::open` installs `busy_timeout` before `journal_mode=WAL`.**
+  `crates/ragent-storage/src/storage.rs` reorders the pragmas
+  (`busy_timeout` -> `journal_mode` -> `synchronous` -> `wal_autocheckpoint`)
+  with a comment explaining that the WAL switch takes a brief exclusive lock and
+  honours whatever busy handler is already installed. Regression test
+  `open_waits_out_a_contended_wal_switch` in `tests/test_wal_warmup.rs` holds a
+  read transaction on a `journal_mode=delete` database from a second connection
+  for 7 s and requires `Storage::open` to succeed (it fails at 5 s under the old
+  ordering, so the test genuinely discriminates).
+- **`/telemetry setup` applies the saved configuration.** `input.rs` calls
+  `session_processor.telemetry.reconfigure(draft)` after a successful save and
+  reports either that the change is live or that it will apply at the next
+  start, instead of always claiming a restart was needed.
+- **Telemetry dialog row order matches the `Tab` cycle.** `layout.rs` extracts
+  `render_telemetry_protocol_row` and paints the protocol row at its real index
+  between the endpoint and interval fields.
+
+### Changed
+
+- **CLI test isolation.** `tests/test_new_cli_command.rs` and
+  `tests/test_version_flag.rs` route every spawned `ragent` through a
+  `ragent_command(...)` helper that sets `XDG_CONFIG_HOME` and `HOME` inside the
+  test's temporary directory (keeping the existing credential stripping), so
+  these suites no longer open the developer's real
+  `~/.config/ragent/ragent.db`. The two files were the only root-crate CLI tests
+  without this isolation; their peers
+  (`test_connectors_cli_command.rs`, `test_plugins_cli_command.rs`,
+  `test_wire_matrix_flag.rs`, `test_serve_openai_gate.rs`) already had it.
+
 ## [1.0.158] - 2026-10-30
 
 CI fix: the `Dead-code lint` job is green again. The job runs `cargo check

@@ -142,6 +142,18 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   provider, model, thinking-level, Azure-resource or router-bucket list never clips
   away the highlighted row; a mouse notch over an open setup dialog steps the
   cursor exactly like `Up`/`Down` and is swallowed elsewhere
+- **Telemetry export health** — every OTLP metric export outcome is classified
+  (success, non-2xx collector response, transport error, export timeout) and a
+  failure is reported in the message window as an `Agent Notice` naming the
+  consecutive-failure count, the reason (e.g. `HTTP export failed with status
+  code: 503`), and the masked endpoint; a success resets the streak. After
+  **5 consecutive failures** ragent switches telemetry off through the same path
+  as `/telemetry off` (persisting `telemetry.otel.enabled: false`), so a dead
+  collector stops costing a request per export interval, and the notice says so
+  and names `/telemetry on` as the retry. `/telemetry counters` and the telemetry
+  panel open with an `Export health` line once any failure has been recorded.
+  The export result is still forwarded unchanged, so the SDK's own logging is
+  unaffected
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
 - **Session management** — persistent conversation history stored in SQLite;
   list, resume, export-archive, and import sessions

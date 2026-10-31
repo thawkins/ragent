@@ -53,7 +53,17 @@ opentelemetry_sdk = { version = "0.33", optional = true, features = [
 opentelemetry-otlp = { version = "0.33", optional = true, default-features = false, features = [
     "metrics",
     "http-proto",
-    "reqwest-client",
+    # The BLOCKING reqwest client, not `reqwest-client`. The async client calls
+    # `tokio::time::sleep` inside its export future, so the SDK's default
+    # `PeriodicReader` - whose export loop runs on a plain OS thread via
+    # `futures_executor::block_on` - panicked with "there is no reactor
+    # running" on the very first (immediate) export, tearing down the TUI
+    # alternate screen. Swapping to the async-runtime reader only moved the
+    # problem: it binds the export task to the runtime that was current when
+    # the reader was built, so `force_flush` deadlocks whenever that runtime is
+    # a current-thread runtime (or no longer running). The blocking client has
+    # no runtime dependency at all, which is what the default reader expects.
+    "reqwest-blocking-client",
     "grpc-tonic",
     # SEC-ragent-telemetry-001 (SECTASKS T-019): without a TLS feature an
     # `https://host:4317` gRPC endpoint is rejected outright (opentelemetry-otlp

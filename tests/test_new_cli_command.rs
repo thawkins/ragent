@@ -31,6 +31,33 @@ impl Drop for CwdGuard {
     }
 }
 
+/// Build a `ragent` invocation for `args` that cannot touch the developer's
+/// real global state.
+///
+/// `ragent` opens `~/.config/ragent/ragent.db` on every startup that reaches
+/// [`Storage::open`], including the `ragent new` paths exercised here - the
+/// command itself never reads the database, but the binary opens it before
+/// dispatch. Without an isolated root, every child in this file (and every
+/// concurrently running ragent on the machine) contends for the one shared
+/// database file, and `PRAGMA journal_mode=WAL` on a contended rollback-journal
+/// database fails with `Error code 5: database is locked`. That is not this
+/// test's subject; a private `XDG_CONFIG_HOME`/`HOME` per invocation removes the
+/// contention by construction.
+///
+/// Hosting credentials are stripped so no test can reach the network; a hosting
+/// invocation fails contained at the auth step instead (FR-010).
+fn ragent_command(root: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ragent"));
+    command
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("HOME", root.join("home"))
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GITLAB_TOKEN")
+        .env_remove("GITLAB_URL")
+        .env("RAGENT_GITHUB_NO_GH_CLI", "1");
+    command
+}
+
 /// Run `ragent` with `args` inside a fresh empty tempdir.
 fn ragent_in_empty_cwd(args: &[&str]) -> (PathBuf, Output) {
     let _lock = cwd_lock();
@@ -39,14 +66,10 @@ fn ragent_in_empty_cwd(args: &[&str]) -> (PathBuf, Output) {
     std::env::set_current_dir(temp.path()).expect("set cwd");
     let _guard = CwdGuard { prev };
 
-    // Strip hosting credentials so no test can reach the network; a hosting
-    // invocation fails contained at the auth step instead (FR-010).
-    let output = Command::new(env!("CARGO_BIN_EXE_ragent"))
+    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
+    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
+    let output = ragent_command(temp.path())
         .args(args)
-        .env_remove("GITHUB_TOKEN")
-        .env_remove("GITLAB_TOKEN")
-        .env_remove("GITLAB_URL")
-        .env("RAGENT_GITHUB_NO_GH_CLI", "1")
         .output()
         .expect("spawn ragent");
     let dir = temp.path().to_path_buf();
@@ -166,13 +189,11 @@ fn test_new_cli_non_empty_directory_refused() {
     std::env::set_current_dir(temp.path()).expect("set cwd");
     let _guard = CwdGuard { prev };
     std::fs::write(temp.path().join("BLOCKER.txt"), "keep out").expect("write blocker");
+    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
+    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_ragent"))
+    let out = ragent_command(temp.path())
         .args(["new", "--language", "rust", "--type", "cmdline"])
-        .env_remove("GITHUB_TOKEN")
-        .env_remove("GITLAB_TOKEN")
-        .env_remove("GITLAB_URL")
-        .env("RAGENT_GITHUB_NO_GH_CLI", "1")
         .output()
         .expect("spawn ragent");
 

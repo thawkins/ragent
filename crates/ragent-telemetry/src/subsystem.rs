@@ -321,6 +321,12 @@ impl TelemetrySubsystem {
     pub fn reconfigure(&self, config: OtelConfig) -> Result<()> {
         let mut guard = self.runtime.lock();
 
+        // A reconfigure means a brand-new export pipeline (or none at all), so
+        // the previous streak of export failures no longer describes anything.
+        // Clearing also releases a latched auto-disable, which is what lets
+        // `/telemetry on` retry an endpoint that previously failed.
+        crate::export_health::export_health().clear();
+
         // 1. Shut down the existing live provider (stops the periodic reader).
         #[cfg(feature = "telemetry")]
         {
@@ -413,11 +419,25 @@ impl TelemetrySubsystem {
     pub fn flush(&self) -> Result<()> {
         #[cfg(feature = "telemetry")]
         {
-            let guard = self.runtime.lock();
-            if let Some(provider) = &guard.provider
+            // Clone the provider handle so the blocking flush never runs while
+            // `self.runtime` is locked - `reconfigure` needs that lock.
+            let provider = self
+                .runtime
+                .lock()
+                .provider
+                .as_ref()
+                .map(std::sync::Arc::clone);
+            if let Some(provider) = provider
                 && let Err(e) = provider.force_flush()
             {
-                tracing::warn!("OTEL meter provider force_flush error: {e}");
+                // Route the SDK's opaque text through the same classifier the
+                // Agent Notice uses, so a shutdown log says "export timed out"
+                // rather than the raw `oneshot canceled` internal failure.
+                let kind = crate::export_health::ExportFailureKind::classify(&e.to_string());
+                tracing::warn!(
+                    reason = kind.describe(),
+                    "OTEL meter provider force_flush error: {e}"
+                );
                 return Err(crate::TelemetryError::ExporterInit(format!(
                     "flush failed: {e}"
                 )));
@@ -573,6 +593,28 @@ fn validate_endpoint(config: &OtelConfig) -> Result<()> {
 /// export interval, attaches resource attributes, and builds the provider.
 /// When `prometheus_reader` is `Some`, the same provider also serves the
 /// Prometheus scrape path (FR-028).
+///
+/// # Why the default reader (no Tokio runtime required)
+///
+/// The SDK's default
+/// [`PeriodicReader`](opentelemetry_sdk::metrics::PeriodicReader) drives
+/// exports from a plain OS thread via `futures_executor::block_on`, i.e.
+/// outside any Tokio context. That is only safe if the exporter's `export`
+/// call never touches a reactor, so this crate builds the OTLP exporter with
+/// `opentelemetry-otlp`'s **blocking** reqwest client
+/// (`reqwest-blocking-client`) rather than the async one. The async client
+/// calls `tokio::time::sleep` inside its export future, and on the very first
+/// (immediate) export that panicked with "there is no reactor running" on the
+/// reader's OS thread - and because a panic on any thread runs the
+/// process-wide hook that restores the terminal, telemetry-enabled startup
+/// tore down the TUI alternate screen.
+///
+/// The async-runtime reader is deliberately **not** used: it binds the export
+/// task to whichever runtime was current when the reader was built, so
+/// [`TelemetrySubsystem::flush`] (a synchronous `force_flush`) deadlocks on a
+/// current-thread runtime and hangs forever if that runtime has since
+/// stopped. Keeping the exporter blocking removes the coupling entirely, so
+/// the provider can be built and flushed from any thread.
 #[cfg(feature = "telemetry")]
 fn build_provider(
     config: &OtelConfig,
@@ -585,7 +627,23 @@ fn build_provider(
     // Build the OTLP metric exporter (HTTP/protobuf by default, gRPC if configured).
     let exporter = build_metric_exporter(config)?;
 
+    // Wrap the exporter so every export result (success, non-2xx status,
+    // transport error, or export timeout) is recorded in the shared
+    // `ExportHealth` monitor. The TUI drains that monitor and renders an
+    // "Agent Notice" per failure, switching telemetry off after
+    // `AUTO_DISABLE_THRESHOLD` consecutive failures. The wrapper forwards the
+    // result unchanged, so the SDK still logs it exactly as before.
+    let exporter = crate::export_health::ObservedMetricExporter::new(
+        exporter,
+        crate::subsystem::mask_endpoint_userinfo(&config.endpoint),
+    );
+
     // Build a periodic reader with the configured export interval (FR-006).
+    //
+    // The default `PeriodicReader` is correct here because the exporter is
+    // blocking (see the doc comment above): its export loop runs on its own
+    // OS thread and needs no reactor, which is what lets `flush` and
+    // `shutdown` be called from any thread.
     let interval = Duration::from_secs(config.export_interval_seconds.max(1));
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(interval)
@@ -611,8 +669,11 @@ fn build_provider(
 /// (indirectly, inlined) and [`TelemetrySubsystem::reconfigure`]. It returns
 /// the three pieces a caller needs to populate [`RuntimeState`].
 ///
-/// Must be called from within a tokio runtime context because the Prometheus
-/// `serve` future is spawned via [`tokio::spawn`].
+/// Requires a Tokio runtime context only when `config.internal_port` is set,
+/// because the Prometheus `serve` future is spawned via [`tokio::spawn`]; that
+/// case is checked explicitly and returns an error instead of panicking. The
+/// OTLP exporter and its periodic reader are fully blocking and need no
+/// runtime.
 #[cfg(feature = "telemetry")]
 fn build_enabled_provider(
     config: &OtelConfig,
@@ -631,6 +692,16 @@ fn build_enabled_provider(
     let provider = build_provider(config, prometheus_reader.clone())?;
 
     let prometheus_handle = if let Some(port) = config.internal_port {
+        // The scrape server is spawned as a tokio task, so this is the one
+        // requirement for a runtime context. Fail loudly with a typed error
+        // rather than letting `tokio::spawn` panic with "there is no reactor
+        // running" after the provider (and its reader thread) already exist.
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(crate::TelemetryError::ExporterInit(
+                "telemetry.internal_port requires a Tokio runtime context to serve the                  Prometheus scrape endpoint"
+                    .to_string(),
+            ));
+        }
         prometheus_reader
             .as_ref()
             .map(|reader| tokio::spawn(crate::prometheus::serve(reader.handle(), port)))

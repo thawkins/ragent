@@ -4111,6 +4111,12 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 Line::from(""),
             ];
 
+            // FUNC-044: the fields are listed in `Tab` order (0, 1, 2, 3, 4)
+            // so the `>` marker always moves one row per keypress. The
+            // protocol row is field 1 and is rendered between the endpoint
+            // and the interval fields because that is the index `Tab` and
+            // `BackTab` advance through; listing it last made the cursor
+            // appear to jump around the dialog.
             let fields: [(&str, &crate::input_field::InputField, u8, &str); 4] = [
                 ("OTLP endpoint:", endpoint_field, 0, "http://localhost:4318"),
                 ("Export interval (s):", interval_field, 2, "30"),
@@ -4118,7 +4124,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 ("Internal Prometheus port:", port_field, 4, "disabled"),
             ];
 
-            for (label, field, idx, placeholder) in fields {
+            // Render the endpoint row, then the protocol row, then the
+            // remaining fields, so display order matches `active_field`.
+            for (position, (label, field, idx, placeholder)) in fields.into_iter().enumerate() {
+                if position == 1 {
+                    render_telemetry_protocol_row(&mut lines, *active_field, *protocol);
+                }
+
                 let is_active = *active_field == idx;
                 lines.push(Line::from(label.to_string()));
                 let display = if field.text().is_empty() {
@@ -4144,27 +4156,6 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 ]));
                 lines.push(Line::from(""));
             }
-
-            // Protocol row is always visible and togglable.
-            let proto_active = *active_field == 1;
-            lines.push(Line::from("Transport protocol:"));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    if proto_active { "> " } else { "  " },
-                    Style::default().fg(Color::Cyan),
-                ),
-                Span::styled(
-                    format!(
-                        "[{}]",
-                        match protocol {
-                            ragent_config::OtelProtocol::Http => "http",
-                            ragent_config::OtelProtocol::Grpc => "grpc",
-                        }
-                    ),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(""));
 
             if let Some(err) = error {
                 lines.push(Line::from(Span::styled(
@@ -5042,6 +5033,40 @@ fn input_cursor_display_pos(
 #[must_use]
 pub fn mask_secret(text: &str) -> String {
     ragent_types::sanitize::mask_edges(text, 4, 12)
+}
+
+/// Append the telemetry dialog's `Transport protocol` row to `lines`.
+///
+/// The row is field index `1` in the dialog's `Tab` cycle
+/// (see `ProviderSetupStep::TelemetrySetup` in `input.rs`), so it must be
+/// painted at that position in the rendered list. Rendering it after the
+/// text fields made the `>` marker jump from the endpoint straight to the
+/// protocol row and then backwards to the interval field, which looked like
+/// the highlight had moved to the wrong row.
+fn render_telemetry_protocol_row(
+    lines: &mut Vec<Line<'_>>,
+    active_field: u8,
+    protocol: ragent_config::OtelProtocol,
+) {
+    let proto_active = active_field == 1;
+    lines.push(Line::from("Transport protocol:"));
+    lines.push(Line::from(vec![
+        Span::styled(
+            if proto_active { "> " } else { "  " },
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::styled(
+            format!(
+                "[{}]",
+                match protocol {
+                    ragent_config::OtelProtocol::Http => "http",
+                    ragent_config::OtelProtocol::Grpc => "grpc",
+                }
+            ),
+            Style::default().fg(Color::White),
+        ),
+    ]));
+    lines.push(Line::from(""));
 }
 
 fn with_cursor_marker(text: &str, cursor: usize) -> String {

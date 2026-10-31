@@ -174,6 +174,36 @@ const MODEL_DOWNLOAD_STALE_SECS: u64 = 45 * 60;
 /// Self-healing staleness cap for a wedged benchmark run.
 const BENCH_STALE_SECS: u64 = 30 * 60;
 
+/// Decide whether a panic raised on the current thread must restore the
+/// terminal.
+///
+/// A panic only ends the process when it unwinds the thread the runtime owns
+/// (the one that called [`run_tui`]). A background worker - the OTEL exporter
+/// thread, an MCP stdio reader, a provider task - that panics is either
+/// contained by its own supervisor or merely kills that one worker, and the
+/// UI must survive it: tearing the alternate screen down from a helper thread
+/// left ragent running with a destroyed display and a raw-mode input stream
+/// leaking escape sequences to the shell (the telemetry-enabled startup
+/// crash).
+///
+/// Two conditions must both hold for a teardown:
+///
+/// - the panic is not already inside a deliberate contained-panic container
+///   ([`ragent_types::panic_guard::is_active`]) - its caller catches it, so the
+///   application keeps running and the screen must stay intact;
+/// - the panicking thread is the UI thread that called [`run_tui`].
+///
+/// Extracted from the hook closure so the policy is unit-testable without
+/// installing a process-wide panic hook.
+#[must_use]
+pub fn should_teardown_terminal(
+    contained: bool,
+    panicking: std::thread::ThreadId,
+    ui_thread: std::thread::ThreadId,
+) -> bool {
+    !contained && panicking == ui_thread
+}
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -236,20 +266,34 @@ pub async fn run_tui(
     // Set up panic handler to ensure terminal state is restored on crashes
     // This handles panics, OOM, and segfaults by restoring the terminal before
     // the default panic handler prints the backtrace
+    //
+    // A panic only ends the process when it unwinds the thread the runtime owns
+    // (the one that called `run_tui`). A background worker - the OTEL exporter
+    // thread, an MCP stdio reader, a provider task - that panics is either
+    // contained by its own supervisor or merely kills that one worker, and the
+    // UI must survive it: tearing the alternate screen down from a helper
+    // thread left ragent running with a destroyed display and a raw-mode input
+    // stream leaking escape sequences to the shell (the telemetry-enabled
+    // startup crash). This closure runs on the panicking thread, so the thread
+    // id it reads is the one that panicked.
+    let ui_thread_id = std::thread::current().id();
     let default_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         // A panic raised inside a deliberate contained-panic container
         // (ragent_types::panic_guard) is caught by its caller: leave the
         // terminal alone - tearing it down here would destroy the UI even
         // though the application keeps running.
-        if ragent_types::panic_guard::is_active() {
-            return;
+        let contained = ragent_types::panic_guard::is_active();
+        // Only the UI thread's own panic is terminal: restore the screen so the
+        // backtrace is readable on a sane terminal. An off-thread panic is
+        // recorded through the default hook (and the log panel via the stderr
+        // mirror) with the display left intact.
+        if should_teardown_terminal(contained, std::thread::current().id(), ui_thread_id) {
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture); // INTENTIONAL: terminal teardown is best-effort
+            let _ = crossterm::terminal::disable_raw_mode(); // INTENTIONAL: terminal teardown is best-effort
+            let _ =
+                crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen); // INTENTIONAL: terminal teardown is best-effort
         }
-        // Restore terminal state before printing panic message
-        // This is best-effort; ignore errors
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture); // INTENTIONAL: terminal teardown is best-effort
-        let _ = crossterm::terminal::disable_raw_mode(); // INTENTIONAL: terminal teardown is best-effort
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen); // INTENTIONAL: terminal teardown is best-effort
 
         // Call the default panic hook to print the backtrace
         default_panic_hook(info);
@@ -920,6 +964,11 @@ pub async fn run_tui(
 
             // Check for completed compaction runs.
             app.poll_compaction_result();
+
+            // Surface OTLP metric-export failures ("Agent Notice" + auto-disable
+            // after repeated failures). The exporter records outcomes on the
+            // tokio runtime, so this poll is the only path that reaches the UI.
+            app.poll_telemetry_export_health();
 
             // Adopt background Context panel snapshot refreshes (T-013/FR-015).
             app.poll_context_snapshot_refresh();

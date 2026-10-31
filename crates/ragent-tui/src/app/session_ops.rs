@@ -3220,21 +3220,90 @@ impl App {
         before_input: &str,
         before_cursor: usize,
     ) {
-        #[cfg(debug_assertions)]
+        // Nothing moved: the overwhelming majority of keypresses (arrows while
+        // a panel is focused, modifier-only keys, swallowed dialog keys) leave
+        // the buffer untouched, so this is the cheap early out and it is what
+        // keeps the spool small enough to read.
+        if before_input == self.input && before_cursor == self.input_cursor {
+            return;
+        }
+        tracing::debug!(
+            source = source,
+            before_chars = before_input.chars().count(),
+            before_cursor = before_cursor,
+            after_chars = self.input_len_chars(),
+            after_cursor = self.input_cursor,
+            screen = ?self.current_screen,
+            slash_menu = self.slash_menu.is_some(),
+            file_menu = self.file_menu.is_some(),
+            "input transition"
+        );
+        self.append_input_transition_to_spool(
+            source,
+            before_input.chars().count(),
+            before_cursor,
+            before_input,
+        );
+    }
+
+    /// Append one input transition to the durable transition spool.
+    ///
+    /// The TUI's only live trace of input handling is the log panel, which is
+    /// rate-limited and lost when the process exits, so a reported "characters
+    /// land in the wrong place" could not be diagnosed after the fact. This
+    /// spools every transition whose buffer or cursor actually changed to
+    /// `log/logwindow/input-transitions.log`, recording which handler ran,
+    /// the buffer length and cursor before and after, and the text itself.
+    ///
+    /// The spool lives next to the other `logwindow` spools and honours
+    /// [`crate::app::helpers::log_root`], so a test run writes into
+    /// `target/temp/log` instead of the checked-in tree.
+    ///
+    /// Every failure is logged at `debug` and dropped: a diagnostic that cannot
+    /// be written must never disturb the session it is observing.
+    fn append_input_transition_to_spool(
+        &self,
+        source: &str,
+        before_chars: usize,
+        before_cursor: usize,
+        before_input: &str,
+    ) {
+        use std::io::Write;
+        let path = crate::app::helpers::log_root()
+            .join("logwindow")
+            .join("input-transitions.log");
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
         {
-            if before_input != self.input || before_cursor != self.input_cursor {
-                tracing::debug!(
-                    source = source,
-                    before_chars = before_input.chars().count(),
-                    before_cursor = before_cursor,
-                    after_chars = self.input_len_chars(),
-                    after_cursor = self.input_cursor,
-                    screen = ?self.current_screen,
-                    slash_menu = self.slash_menu.is_some(),
-                    file_menu = self.file_menu.is_some(),
-                    "input transition"
-                );
-            }
+            tracing::debug!(error = %e, "input transition spool directory creation failed");
+            return;
+        }
+        let Some(mut file) = crate::app::helpers::open_log_spool(&path) else {
+            tracing::debug!("input transition spool could not be opened");
+            return;
+        };
+        // Control characters in the buffer would break one-transition-per-line
+        // readability, so newlines and tabs are escaped rather than emitted raw.
+        let escape = |s: &str| {
+            s.replace('\\', "\\\\")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t")
+        };
+        let line = format!(
+            "{} source={source} before_chars={before_chars} before_cursor={before_cursor} \
+             after_chars={} after_cursor={} cursor_delta={} screen={:?} \
+             before={:?} after={:?}\n",
+            chrono::Utc::now().to_rfc3339(),
+            self.input_len_chars(),
+            self.input_cursor,
+            self.input_cursor as i64 - before_cursor as i64,
+            self.current_screen,
+            escape(before_input),
+            escape(&self.input),
+        );
+        if let Err(e) = file.write_all(line.as_bytes()) {
+            tracing::debug!(error = %e, "failed to append input transition to spool");
         }
     }
 

@@ -8,13 +8,31 @@
 
 use std::process::{Command, Output};
 
+/// Build a `ragent` invocation for `args` that cannot touch the developer's
+/// real global state.
+///
+/// `ragent --version` returns before `Storage::open`, so it never needs the
+/// database itself - but `--help` and any other argv reaching dispatch does, and
+/// a child pointed at the real `~/.config/ragent/ragent.db` contends with every
+/// concurrently running ragent for the one shared file. A private
+/// `XDG_CONFIG_HOME`/`HOME` per invocation keeps the run hermetic.
+fn ragent_command(dir: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ragent"));
+    command
+        .current_dir(dir)
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .env("HOME", dir.join("home"));
+    command
+}
+
 /// Run `ragent` with `args` inside a fresh empty tempdir and return the tempdir
 /// path plus the captured output.
 fn ragent_in_empty_cwd(args: &[&str]) -> (std::path::PathBuf, Output) {
     let temp = tempfile::tempdir().expect("tempdir");
-    let output = Command::new(env!("CARGO_BIN_EXE_ragent"))
+    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
+    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
+    let output = ragent_command(temp.path())
         .args(args)
-        .current_dir(temp.path())
         .output()
         .expect("spawn ragent");
     let dir = temp.path().to_path_buf();
@@ -76,9 +94,8 @@ fn version_flag_leaves_no_unclean_marker() {
 #[test]
 fn version_flag_does_not_warn_about_previous_crash() {
     let (dir, _first) = ragent_in_empty_cwd(&["-V"]);
-    let second = Command::new(env!("CARGO_BIN_EXE_ragent"))
+    let second = ragent_command(&dir)
         .args(["--version"])
-        .current_dir(&dir)
         .output()
         .expect("spawn ragent");
     assert_eq!(second.status.code(), Some(0));

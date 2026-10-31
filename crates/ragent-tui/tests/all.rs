@@ -230,6 +230,8 @@ mod test_input_queue_menu_stop_resume;
 mod test_input_queue_show_panel;
 #[path = "test_input_queue_slash.rs"]
 mod test_input_queue_slash;
+#[path = "test_input_transition_spool.rs"]
+mod test_input_transition_spool;
 #[path = "test_input_unicode.rs"]
 mod test_input_unicode;
 #[path = "test_keyboard_control.rs"]
@@ -482,6 +484,8 @@ mod test_teams_tui;
 mod test_teams_window_frame;
 #[path = "test_teams_window_table.rs"]
 mod test_teams_window_table;
+#[path = "test_telemetry_export_notice.rs"]
+mod test_telemetry_export_notice;
 #[path = "test_telemetry_slash.rs"]
 mod test_telemetry_slash;
 #[path = "test_text_selection.rs"]
@@ -505,5 +509,7 @@ mod test_window_routing;
 #[path = "test_window_scroll_wheel.rs"]
 mod test_window_scroll_wheel;
 
+#[path = "test_panic_hook_thread_scope.rs"]
+mod test_panic_hook_thread_scope;
 #[path = "test_probe_t022.rs"]
 mod test_probe_t022;

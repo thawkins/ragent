@@ -20,6 +20,8 @@ mod test_counters_helpers;
 mod test_custom_resource_attributes;
 #[path = "test_disabled_zero_traffic.rs"]
 mod test_disabled_zero_traffic;
+#[path = "test_export_health.rs"]
+mod test_export_health;
 #[path = "test_http_exporter.rs"]
 mod test_http_exporter;
 #[path = "test_malformed_endpoint.rs"]

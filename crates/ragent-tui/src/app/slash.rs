@@ -1352,7 +1352,11 @@ impl App {
     ///   the periodic OTLP reader and therefore the "Failed to export
     ///   metrics" log noise that would otherwise continue until restart.
     /// - `/telemetry on` builds a fresh provider from the persisted config.
-    fn set_telemetry_enabled(&mut self, enabled: bool) {
+    ///
+    /// Also called by
+    /// [`poll_telemetry_export_health`](crate::app::App::poll_telemetry_export_health)
+    /// to disable telemetry after repeated OTLP export failures.
+    pub(crate) fn set_telemetry_enabled(&mut self, enabled: bool) {
         let mut cfg = ragent_agent::Config::load().unwrap_or_default();
         cfg.telemetry.otel.enabled = enabled;
         match self.save_telemetry_otel(&cfg.telemetry.otel) {
@@ -1403,6 +1407,19 @@ impl App {
         let fmt_u64 = |v: u64| v.to_string();
         let fmt_i64 = |v: i64| v.to_string();
         let fmt_f64 = |v: f64| format!("{v:.2}");
+
+        // OTLP export health: the streak that drives the auto-disable policy.
+        // Rendered first so an operator running `/telemetry counters` sees why
+        // the numbers below may have stopped reaching the collector.
+        let health = ragent_telemetry::export_health::export_health();
+        let consecutive = health.consecutive_failures();
+        if consecutive > 0 || health.total_failures() > 0 {
+            out.push_str(&format!(
+                "| Export health | {} consecutive failure(s), {} total |\n\n",
+                consecutive,
+                health.total_failures()
+            ));
+        }
 
         let usage: [(&str, &str, &str, String); 9] = [
             (
@@ -1674,7 +1691,12 @@ impl App {
 | `/telemetry on` | Enable OpenTelemetry metrics export |
 | `/telemetry off` | Disable OpenTelemetry metrics export |
 | `/telemetry setup` | Open a TUI dialog to configure endpoint, protocol, interval, timeout, and internal port |
-| `/telemetry counters` | List all available metric counters, grouped by category |",
+| `/telemetry counters` | List all available metric counters, grouped by category |
+
+Each failed OTLP export (a non-2xx collector response or an export timeout) is
+reported in the message window as an `Agent Notice`. After 5 consecutive
+failures telemetry switches itself off; `/telemetry on` retries the endpoint
+with a clean failure count.",
                 );
                 self.status = "telemetry: help".to_string();
             }

@@ -10,13 +10,13 @@ and coverage re-measured at 11:27 UTC against the final working tree.
 
 ## Step timings and disk usage
 
-| Step | Command | Time | Disk consumed | Disk free before | Disk free after |
-|------|---------|------|---------------|------------------|-----------------|
-| clean | `cargo clean` | 9s | freed 326.09 GiB | 809.95 GiB | 1136.05 GiB |
-| release | `cargo build --release --workspace` | 7m 37s | 1.80 GiB | 1136.99 GiB | 1135.20 GiB |
-| debug | `cargo build --workspace` | 2m 41s | 2.40 GiB | 1135.20 GiB | 1132.80 GiB |
-| tests | `cargo test --workspace --all-targets` | 9m 12s | 14.92 GiB | 1132.80 GiB | 1117.88 GiB |
-| coverage | `cargo llvm-cov --workspace --all-targets` | 9m 58s | 15.82 GiB | 1117.88 GiB | 1102.06 GiB |
+| Step     | Command                                      | Time   | Disk consumed    | Disk free before | Disk free after |
+| -------- | -------------------------------------------- | ------ | ---------------- | ---------------- | --------------- |
+| clean    | `cargo clean`                              | 9s     | freed 326.09 GiB | 809.95 GiB       | 1136.05 GiB     |
+| release  | `cargo build --release --workspace`        | 7m 37s | 1.80 GiB         | 1136.99 GiB      | 1135.20 GiB     |
+| debug    | `cargo build --workspace`                  | 2m 41s | 2.40 GiB         | 1135.20 GiB      | 1132.80 GiB     |
+| tests    | `cargo test --workspace --all-targets`     | 9m 12s | 14.92 GiB        | 1132.80 GiB      | 1117.88 GiB     |
+| coverage | `cargo llvm-cov --workspace --all-targets` | 9m 58s | 15.82 GiB        | 1117.88 GiB      | 1102.06 GiB     |
 
 Each step was measured with free-space probes immediately before and after its command.
 `cargo clean` frees space, so its delta is reported as space freed (it also removed the
@@ -149,27 +149,27 @@ measurement, so the rise from 83.41% is entirely newly executed code.
 
 ## Per-crate line coverage
 
-| Crate | Lines covered | Total lines | Coverage |
-|-------|---------------|-------------|----------|
-| ragent(bin) | 762 | 2386 | 31.94% |
-| ragent-agent | 27388 | 31578 | 86.73% |
-| ragent-bench | 3683 | 4282 | 86.01% |
-| ragent-codeindex | 7625 | 8538 | 89.31% |
-| ragent-config | 2769 | 3003 | 92.21% |
-| ragent-connectors | 3774 | 4351 | 86.74% |
-| ragent-llm | 6042 | 7017 | 86.11% |
-| ragent-plugins | 4815 | 5334 | 90.27% |
-| ragent-research | 14602 | 16939 | 86.20% |
-| ragent-server | 2606 | 2959 | 88.07% |
-| ragent-specs | 3810 | 4228 | 90.11% |
-| ragent-storage | 3681 | 4019 | 91.59% |
-| ragent-surface | 409 | 450 | 90.89% |
-| ragent-telemetry | 1342 | 1458 | 92.04% |
-| ragent-tools-core | 4521 | 5197 | 86.99% |
-| ragent-tools-extended | 9149 | 10605 | 86.27% |
-| ragent-tools-vcs | 3005 | 3431 | 87.58% |
-| ragent-tui | 35723 | 41170 | 86.77% |
-| ragent-types | 1765 | 1834 | 96.24% |
+| Crate                 | Lines covered | Total lines | Coverage |
+| --------------------- | ------------- | ----------- | -------- |
+| ragent(bin)           | 762           | 2386        | 31.94%   |
+| ragent-agent          | 27388         | 31578       | 86.73%   |
+| ragent-bench          | 3683          | 4282        | 86.01%   |
+| ragent-codeindex      | 7625          | 8538        | 89.31%   |
+| ragent-config         | 2769          | 3003        | 92.21%   |
+| ragent-connectors     | 3774          | 4351        | 86.74%   |
+| ragent-llm            | 6042          | 7017        | 86.11%   |
+| ragent-plugins        | 4815          | 5334        | 90.27%   |
+| ragent-research       | 14602         | 16939       | 86.20%   |
+| ragent-server         | 2606          | 2959        | 88.07%   |
+| ragent-specs          | 3810          | 4228        | 90.11%   |
+| ragent-storage        | 3681          | 4019        | 91.59%   |
+| ragent-surface        | 409           | 450         | 90.89%   |
+| ragent-telemetry      | 1342          | 1458        | 92.04%   |
+| ragent-tools-core     | 4521          | 5197        | 86.99%   |
+| ragent-tools-extended | 9149          | 10605       | 86.27%   |
+| ragent-tools-vcs      | 3005          | 3431        | 87.58%   |
+| ragent-tui            | 35723         | 41170       | 86.77%   |
+| ragent-types          | 1765          | 1834        | 96.24%   |
 
 All 18 crates are now above 85% line coverage. `ragent-tui` is the largest gain
 (75.14% -> 86.77%, +4,788 lines) from the 17 deep-coverage suites, followed by

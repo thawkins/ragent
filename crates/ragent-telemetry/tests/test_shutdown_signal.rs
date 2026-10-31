@@ -40,8 +40,19 @@ fn test_guard_debug_after_into_inner() {
 /// Install the real SIGINT-driven flush path: spawn the signal handler, deliver
 /// SIGINT to this process, and await the task. The handler must consume the
 /// signal (so the test process survives) and flush the subsystem.
+///
+/// The endpoint points at a port nothing listens on, so the flush is expected
+/// to *fail* (`Transport`). The assertion is on resolution, not success, and
+/// the outer deadline is set above `export_timeout_seconds` (default 10s):
+/// a shorter deadline would report a healthy-but-failing flush as a hang.
+///
+/// A multi-thread runtime is used because `flush` is a synchronous blocking
+/// `force_flush`. The exporter is built with the blocking reqwest client, so
+/// no reactor is needed, but blocking a current-thread runtime while other
+/// tasks (the signal stream itself) still need to be polled would serialise
+/// them behind the flush for the whole export timeout.
 #[cfg(all(feature = "telemetry", unix))]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_flush_on_signal_arc_handles_real_sigint() {
     let config = OtelConfig {
         enabled: true,
@@ -62,8 +73,10 @@ async fn test_flush_on_signal_arc_handles_real_sigint() {
         .status();
     assert!(status.is_ok(), "kill command must run");
 
-    // The task should resolve promptly after the signal.
-    let joined = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+    // The task must resolve after the signal. The ceiling sits above the
+    // export timeout (default 10s) so a flush that legitimately times out
+    // against the dead endpoint still counts as resolved.
+    let joined = tokio::time::timeout(std::time::Duration::from_secs(20), handle).await;
     assert!(
         joined.is_ok(),
         "flush_on_signal_arc task should resolve after SIGINT"
