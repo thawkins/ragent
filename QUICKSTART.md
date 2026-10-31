@@ -2239,6 +2239,17 @@ recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
 
+## Version 1.0.158
+
+- **CI `Dead-code lint` green again** — no user-facing change. The job runs
+  `cargo check --workspace --lib --all-features` with
+  `RUSTFLAGS='-D unreachable_pub -D dead_code -D unused_imports'`, and 57 items
+  declared `pub` inside private modules had no public re-export path. Each is now
+  `pub(crate)`, which is the reachability it actually had: the
+  `ragent-research` `analysis`/`session`/`web_gatherer`/`polarity` helpers, the
+  `ragent-agent` `refusal_outcome` constructors that `ToolDispatchPipeline`
+  supersedes, and the `ragent-tui` MCP render helpers in `app::slash`.
+
 ## Version 1.0.157
 
 - **Autopilot exits when the primary agent calls `agent_complete`** — the

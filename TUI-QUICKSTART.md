@@ -4,6 +4,12 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.158)
+
+- No user-facing change: this release only narrows 57 internal items from `pub`
+  to `pub(crate)` so the CI `Dead-code lint` job (`-D unreachable_pub`) passes
+  again. The TUI behaves exactly as it did in 1.0.157.
+
 ## Highlights (v1.0.157)
 
 - **Autopilot now stops when the agent finishes** - a completion no longer gets

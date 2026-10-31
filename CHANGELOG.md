@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.0.158] - 2026-10-30
+
+CI fix: the `Dead-code lint` job is green again. The job runs `cargo check
+--workspace --lib --all-features` with `RUSTFLAGS='-D unreachable_pub -D
+dead_code -D unused_imports'`, and 57 items were declared `pub` inside private
+modules with no public re-export path, so `unreachable_pub` failed the build.
+No behaviour change. Verification: `cargo check --workspace` clean, `cargo
+audit` clean across 867 dependencies (the single `paste` unmaintained notice
+remains the pre-existing allowed warning), the exact CI lint command at exit 0,
+`cargo nextest run -p ragent-research` 1175/1175, `-p ragent-agent` 2560 passed /
+1 skipped, `-p ragent-tui` 3901/3901, CI's clippy invocation (`-D warnings -A
+clippy::used_underscore_items -A clippy::redundant_pub_crate -A
+clippy::wildcard_imports`) clean, `cargo fmt --check` clean, and all twelve
+`scripts/check-*.sh` guards passing.
+
+### Fixed
+
+- **`Dead-code lint` CI job: 57 `unreachable_pub` errors.** Every flagged item
+  is reachable only inside its own crate, so each was demoted from `pub` to
+  `pub(crate)`; nothing is referenced from another crate, a bench, or a test
+  through a public path. Affected: `ragent-research`
+  `analysis::{parser,prompt}` (17), `session::{fallback,topic}` (16),
+  `web_gatherer::{relevance,title}` (7) and `polarity` (5); `ragent-agent`
+  `session::refusal_outcome` (4 - the `ToolOutcome` alias and the
+  `refusal`/`denial`/`synthesised` constructors that `ToolDispatchPipeline`
+  supersedes); and `ragent-tui` `app::slash` (6 MCP helpers),
+  `app::plugin::toggle_plugin_enabled` and
+  `app::event_handler::QUESTION_TIMEOUT_SECS`.
+
 ## [1.0.157] - 2026-10-30
 
 CI fixes and code-audit follow-up. Two defects are fixed: autopilot could keep

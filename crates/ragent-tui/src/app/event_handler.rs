@@ -34,7 +34,7 @@ const ERROR_PREVIEW_CHARS: usize = 200;
 /// Seconds a multiple-choice question dialog waits for a user answer before
 /// auto-answering with its default option. Only applies to timed questions
 /// (those with options); free-text and askpass prompts are never auto-timed.
-pub const QUESTION_TIMEOUT_SECS: u64 = 120;
+pub(crate) const QUESTION_TIMEOUT_SECS: u64 = 120;
 
 impl App {
     /// Render a swarm failure uniformly: status line, chat panel message,

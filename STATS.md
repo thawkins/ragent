@@ -1,14 +1,18 @@
 # Project Statistics
 
-**Version:** 1.0.157
+**Version:** 1.0.158
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.157` state (the CI-fix and clippy-cleanup pass on top of the
-> `1.0.156` version bump, which publishes the `docs/reports/code-audit.md`
-> remediation pass on top of the `1.0.154` state). The `1.0.157` pass is
-> behaviour-neutral apart from one runtime fix: autopilot no longer keeps
+> `1.0.158` state (the CI dead-code-lint fix pass on top of the `1.0.157`
+> CI-fix and clippy-cleanup pass, which sits on the `1.0.156` version bump
+> that publishes the `docs/reports/code-audit.md` remediation pass on top of
+> the `1.0.154` state). The `1.0.158` pass changes nothing but item
+> visibility: 57 items that were declared `pub` inside private modules are
+> now `pub(crate)`, which is the exact reachability they had, so the
+> `Dead-code lint` job's `-D unreachable_pub` passes again. The `1.0.157`
+> pass is behaviour-neutral apart from one runtime fix: autopilot no longer keeps
 > running after the primary agent calls `agent_complete`, because the
 > `Event::MessageStart` arm clears the `last_task_completed_at` latch only
 > while `autopilot_enabled` is true. It also de-flakes the
@@ -56,7 +60,7 @@
 | Specs on disk | 61 directories in `specs/` |
 | Documentation | 23 per-category tool how-tos in `docs/howtos/tools/` (+ generated PDFs), 23 top-level how-tos, 82 files in `docs/howtos/slashcommands/` (81 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
-| Version | 1.0.157 |
+| Version | 1.0.158 |
 
 `/inputdiag` was the only registry-visible change this pass: it was a
 debug-only slash command with no tool behind it, so the tool count is unmoved at
