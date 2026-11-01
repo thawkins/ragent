@@ -536,7 +536,7 @@ Use ↑/↓ (or `k`/`j`) to choose a backup, **Enter** to restore it over the ac
 session's cached configuration is invalidated so the next agent turn picks up
 the restored values.
 
-### OpenTelemetry Metrics Export
+### OpenTelemetry Metrics and Log Export
 
 Enable background metric export to any OTLP-compatible collector by adding a
 `telemetry.otel` block:
@@ -557,7 +557,8 @@ Enable background metric export to any OTLP-compatible collector by adding a
         "ragent.tool.invocations": true,
         "ragent.snapshot.restores": false
       },
-      "internal_port": 9090
+      "internal_port": 9090,
+      "logs": { "enabled": true, "level": "warn" }
     }
   }
 }
@@ -565,10 +566,14 @@ Enable background metric export to any OTLP-compatible collector by adding a
 
 - `enabled` — master switch. Default `false`; no metrics are recorded or
   exported when disabled.
-- `endpoint` — OTLP collector base URL. Use `http://host:4318` for HTTP and
-  `http://host:4317` for gRPC.
+- `endpoint` — OTLP collector **base** URL. Use `http://host:4318` for HTTP and
+  `http://host:4317` for gRPC. ragent appends the OTLP/HTTP signal path itself
+  (`/v1/metrics`, `/v1/logs`), so `http://localhost:4318` exports metrics to
+  `http://localhost:4318/v1/metrics`; a base path
+  (`https://gw.example.com/otel`) is kept, and a value that already names a
+  signal path (`.../v1/metrics`) is used exactly as written.
 - `protocol` — `http` (default) or `grpc`.
-- `export_interval_seconds` — how often buffered metrics are exported.
+- `export_interval_seconds` — how often buffered metrics and logs are exported.
 - `export_timeout_seconds` — per-export request timeout; a slow endpoint will
   not block the agent loop.
 - `service_name`/`resource_attributes` — attached to every exported metric.
@@ -576,13 +581,32 @@ Enable background metric export to any OTLP-compatible collector by adding a
   are enabled by default.
 - `internal_port` — optional in-process Prometheus text endpoint on
   `127.0.0.1:<port>/metrics` for local scraping.
+- `logs` — opt-in OTLP **logs** signal (`enabled: false` by default). It adds a
+  `tracing` sink beside the local one rather than replacing it, so the TUI log
+  panel (or stderr in a headless run) still shows everything `--log-level`
+  selects; `level` (`trace`/`debug`/`info`/`warn`/`error`, default `info`) is a
+  floor for the *remote* export only. Bodies pass through the shared credential
+  redactor (over 16 KiB truncated) and attributes through the metric
+  sensitive-data guard. Log export rides the same switch as the metrics:
+  `/telemetry on` enables both signals and `/telemetry off` stops both - there
+  is no separate logs on/off, only `/telemetry logs <level>` to set how much is
+  exported. A hand-edited config still needs `telemetry.otel.enabled: true` for
+  the `logs` block to ship anything.
+
+Export failures are surfaced rather than silent: each non-2xx response,
+transport error or timeout produces an `Agent Notice` naming the consecutive
+failure count and the masked endpoint, and five consecutive failures switch
+telemetry off (persisting `telemetry.otel.enabled: false`) instead of retrying a
+dead collector forever.
 
 Inside the TUI you can also run:
 
 ```
-/otel on          # enable telemetry for the current session
-/otel off         # disable telemetry for the current session
-/otel status      # show current telemetry state and endpoint
+/telemetry on                                # export metrics AND logs
+/telemetry off                               # stop both (persists enabled: false)
+/telemetry logs [all|trace|debug|info|warn|error]  # log-export level only
+/telemetry counters                          # counters plus the log-export state
+/telemetry setup                             # dialog, including the Logs level row
 ```
 
 Telemetry is gated behind the `telemetry` Cargo feature. To build with OTEL
@@ -995,7 +1019,7 @@ Result returned to agent
 - **Dynamic context**: Use `` !`command` `` to execute shell commands and inject output
 - **Forked execution**: Set `context: fork` to run in an isolated subagent (separate conversation history)
 - **Model override**: Use `model: "provider/model"` to use a different model for this skill
-- **Tool restrictions**: Use `allowed-tools: [Bash, read]` (or the YAML block form) to limit tools available when running the skill. Entries resolve by exact name: the adopted Claude spellings (`Bash`, `Edit`, `Grep`, ...) and the tools that kept their ragent names (`read`, `list`, ...) work as written; a retired spelling or a typo matches nothing and is reported, naming the entry and the skill
+- **Tool restrictions**: Use `allowed-tools: [Bash, read]` (or the YAML block form) to limit tools available when running the skill. Entries resolve by name, **ignoring case**: the adopted Claude spellings (`Bash`, `Edit`, `Grep`, ...) and the tools that kept their ragent names (`read`, `list`, ...) work as written, and `bash`/`grep` resolve to the same tools. `any` (any case) lifts the restriction entirely. A retired spelling that names a *different* tool, or a typo, matches nothing and is reported, naming the entry and the skill
 
 ### Personal Skills
 
@@ -1305,6 +1329,46 @@ ragent session export <session-id> > session.json
 # Import a session from JSON (creates a new session with re-parented messages)
 ragent session import session.json
 ```
+
+### Pruning an old transcript
+
+A session's messages can be aged out without deleting the session. The
+operation is the same in the TUI and on the CLI; the session row survives, so an
+expired conversation stays listed and resumable with an empty transcript.
+
+```bash
+# Report how many messages are older than 30 days - deletes nothing
+ragent db prune --days 30 --dry-run
+
+# Delete messages older than the configured window
+# (storage.retention.message_days, default 14)
+ragent db prune
+
+# Delete messages older than 30 days
+ragent db prune --days 30
+```
+
+```
+/db prune --dry-run --days 30     # TUI: report the count, delete nothing
+/db prune --days 30               # TUI: asks "Delete messages older than 30 day(s)?" first
+/db help                          # TUI: subcommands, defaults, and caveats
+```
+
+`--days` accepts both `--days N` and `--days=N`; the value must be a positive day
+count (a zero-day window would empty the store, so it is refused). The
+confirmation dialog opens on `No`, so a stray `Enter` deletes nothing.
+
+To run the same prune automatically at every start, enable retention in
+`ragent.json`:
+
+```json
+{ "storage": { "retention": { "enabled": true, "message_days": 14 } } }
+```
+
+Retention is **off by default**; with no `storage` section no message is ever
+expired. Deleting rows returns their pages to SQLite's freelist, so `ragent.db`
+keeps its size until a `VACUUM` - which needs exclusive access, so stop every
+other ragent process first.
 
 ---
 
@@ -2238,6 +2302,21 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.160 (uncommitted)
+
+- **Message retention and the `/db` surface** — `/db prune [--days N] [--dry-run]`
+  in the TUI and `ragent db prune [--days N] [--dry-run]` on the CLI delete
+  messages older than a retention window while keeping the session row, so an
+  expired transcript stays listed and resumable with an empty transcript. A real
+  prune asks for confirmation and the dialog opens on `No`, so a stray `Enter`
+  deletes nothing. `storage.retention.enabled: true` runs the same prune at
+  startup. Deleting rows does not shrink `ragent.db` until a `VACUUM`, which needs
+  exclusive access.
+- **`ragent.db-wal` no longer keeps its peak size** — `Storage::open` sets
+  `journal_size_limit` (32 MiB), so the WAL is truncated back to the bound once a
+  large write burst is over instead of holding the high-water mark forever; a
+  graceful shutdown also checkpoints it outright.
 
 ## Version 1.0.158
 

@@ -25,6 +25,7 @@ pub mod list_config;
 pub mod openai;
 pub mod permission;
 pub mod plugins;
+pub mod retention;
 pub mod runtime_flag;
 pub mod security_analyzer;
 pub mod telemetry;
@@ -61,7 +62,7 @@ pub use permission::{
 };
 pub use plugins::{MarketplaceEntry, PluginStoreEndpoint, PluginStoresConfig, PluginsConfig};
 pub use security_analyzer::{AnalyzerModelRef, SecurityAnalyzerConfig};
-pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};
+pub use telemetry::{OtelConfig, OtelLogsConfig, OtelProtocol, TelemetryConfig};
 pub use tools::{AliasesConfig, RetiredAliasSpelling, TOOLS_ALIASES_KEY, ToolsConfig};
 pub use trigger::{McpNotificationMode, TriggerConfig};
 

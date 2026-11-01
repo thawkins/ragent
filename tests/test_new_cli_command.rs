@@ -59,24 +59,30 @@ fn ragent_command(root: &Path) -> Command {
 }
 
 /// Run `ragent` with `args` inside a fresh empty tempdir.
+///
+/// The private `XDG_CONFIG_HOME`/`HOME` live in a *sibling* of the working
+/// directory, never inside it: `ragent new` refuses to scaffold into a
+/// non-empty directory, so anything the harness creates beside `cwd` would
+/// itself trip the guard this file tests.
 fn ragent_in_empty_cwd(args: &[&str]) -> (PathBuf, Output) {
     let _lock = cwd_lock();
     let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("cwd");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&cwd).expect("cwd dir");
+    std::fs::create_dir_all(&state).expect("state dir");
     let prev = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(temp.path()).expect("set cwd");
+    std::env::set_current_dir(&cwd).expect("set cwd");
     let _guard = CwdGuard { prev };
 
-    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
-    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
-    let output = ragent_command(temp.path())
+    let output = ragent_command(&state)
         .args(args)
         .output()
         .expect("spawn ragent");
-    let dir = temp.path().to_path_buf();
     // Keep the tempdir alive until after assertions by leaking it; the test
     // process is short-lived and the tree is small.
     std::mem::forget(temp);
-    (dir, output)
+    (cwd, output)
 }
 
 fn stdout(out: &Output) -> String {
@@ -185,14 +191,19 @@ fn test_new_cli_hosting_conflict_aborts_without_scaffolding() {
 fn test_new_cli_non_empty_directory_refused() {
     let _lock = cwd_lock();
     let temp = tempfile::tempdir().expect("tempdir");
+    // The scaffold target must contain only the blocker: the private
+    // config/home root is a sibling, so it cannot appear in the refusal's
+    // list of offending entries.
+    let cwd = temp.path().join("cwd");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&cwd).expect("cwd dir");
+    std::fs::create_dir_all(&state).expect("state dir");
     let prev = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(temp.path()).expect("set cwd");
+    std::env::set_current_dir(&cwd).expect("set cwd");
     let _guard = CwdGuard { prev };
-    std::fs::write(temp.path().join("BLOCKER.txt"), "keep out").expect("write blocker");
-    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
-    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
+    std::fs::write(cwd.join("BLOCKER.txt"), "keep out").expect("write blocker");
 
-    let out = ragent_command(temp.path())
+    let out = ragent_command(&state)
         .args(["new", "--language", "rust", "--type", "cmdline"])
         .output()
         .expect("spawn ragent");
@@ -205,7 +216,7 @@ fn test_new_cli_non_empty_directory_refused() {
     assert!(stderr(&out).contains("not empty"));
     assert!(stderr(&out).contains("BLOCKER.txt"));
     assert!(
-        !temp.path().join("Cargo.toml").exists(),
+        !cwd.join("Cargo.toml").exists(),
         "guard refusal must not scaffold"
     );
 }

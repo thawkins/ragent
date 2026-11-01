@@ -2204,6 +2204,30 @@ impl App {
                         self.close_memory_clear_confirm();
                     }
                 }
+                // `Prune messages older than N days?` confirmation dialog
+                // (opened by `/db prune`). Messages are deleted only here, on
+                // an explicit `Yes`. The armed window must be captured BEFORE
+                // `close_db_prune_confirm()` clears it, otherwise
+                // `run_confirmed_db_prune()` has nothing to apply and
+                // silently does nothing.
+                InputAction::ConfirmDbPrune => {
+                    if self.db_prune_confirm_open && self.db_prune_confirm_is_yes() {
+                        self.run_confirmed_db_prune();
+                        self.close_db_prune_confirm();
+                    } else if self.db_prune_confirm_open {
+                        // `No` is the default selection: treat it as a cancel
+                        // rather than deleting on a dialog the user did not
+                        // explicitly accept.
+                        self.close_db_prune_confirm();
+                    }
+                }
+                InputAction::CancelDbPrune => {
+                    if self.db_prune_confirm_open {
+                        // Dismissing with `No`/`Esc` leaves the database
+                        // unchanged; only the dialog state is reset.
+                        self.close_db_prune_confirm();
+                    }
+                }
                 InputAction::ConfirmRouterSave => {
                     if let Some(draft) = self.pending_router_save.take() {
                         match self.save_router_config(&draft) {

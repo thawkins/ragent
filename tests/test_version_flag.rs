@@ -16,30 +16,39 @@ use std::process::{Command, Output};
 /// a child pointed at the real `~/.config/ragent/ragent.db` contends with every
 /// concurrently running ragent for the one shared file. A private
 /// `XDG_CONFIG_HOME`/`HOME` per invocation keeps the run hermetic.
-fn ragent_command(dir: &std::path::Path) -> Command {
+///
+/// `cwd` is the process working directory; `state` holds the private config and
+/// home roots. They are separate so the working directory stays empty.
+fn ragent_command(cwd: &std::path::Path, state: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ragent"));
     command
-        .current_dir(dir)
-        .env("XDG_CONFIG_HOME", dir.join("config"))
-        .env("HOME", dir.join("home"));
+        .current_dir(cwd)
+        .env("XDG_CONFIG_HOME", state.join("config"))
+        .env("HOME", state.join("home"));
     command
 }
 
 /// Run `ragent` with `args` inside a fresh empty tempdir and return the tempdir
 /// path plus the captured output.
+///
+/// The private `XDG_CONFIG_HOME`/`HOME` live in a *sibling* of the working
+/// directory: the working directory must stay genuinely empty so a command
+/// that inspects it (e.g. `ragent new`'s "directory is not empty" guard) sees
+/// the state the test set up, not the harness's own files.
 fn ragent_in_empty_cwd(args: &[&str]) -> (std::path::PathBuf, Output) {
     let temp = tempfile::tempdir().expect("tempdir");
-    std::fs::create_dir_all(temp.path().join("config")).expect("config dir");
-    std::fs::create_dir_all(temp.path().join("home")).expect("home dir");
-    let output = ragent_command(temp.path())
+    let cwd = temp.path().join("cwd");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&cwd).expect("cwd dir");
+    std::fs::create_dir_all(&state).expect("state dir");
+    let output = ragent_command(&cwd, &state)
         .args(args)
         .output()
         .expect("spawn ragent");
-    let dir = temp.path().to_path_buf();
     // Keep the tempdir alive until after assertions by leaking it; the test
     // process is short-lived and the tree is small.
     std::mem::forget(temp);
-    (dir, output)
+    (cwd, output)
 }
 
 fn stdout(out: &Output) -> String {
@@ -94,7 +103,10 @@ fn version_flag_leaves_no_unclean_marker() {
 #[test]
 fn version_flag_does_not_warn_about_previous_crash() {
     let (dir, _first) = ragent_in_empty_cwd(&["-V"]);
-    let second = ragent_command(&dir)
+    // `ragent_in_empty_cwd` returns `<temp>/cwd`; the private config/home root
+    // is its sibling, `<temp>/state`.
+    let state = dir.with_file_name("state");
+    let second = ragent_command(&dir, &state)
         .args(["--version"])
         .output()
         .expect("spawn ragent");

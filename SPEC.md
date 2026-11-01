@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.158</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.160</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-10-30
+          <strong>Date:</strong> 2026-10-31
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -573,7 +573,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
-| **Tool-rich** | 149 registered tools across 21 categories in the default build (`mf_screenshot` is engine-gated, spec `openhands` FR-029) |
+| **Tool-rich** | 150 registered tools across 21 categories in the default build (`mf_screenshot` is engine-gated, spec `openhands` FR-029) |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -594,7 +594,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 | **Swarm** | Parallel task decomposition across spawned agents |
 | **Autopilot** | Autonomous mode with auto-approval and iteration limits |
 | **Initiative** | Durable project-scoped goal with milestones |
-| **Telemetry** | OpenTelemetry metrics export for operator observability |
+| **Telemetry** | OpenTelemetry metrics and log export for operator observability |
 
 ---
 
@@ -1142,7 +1142,7 @@ and nowhere else.
 
 ### 3.2.3 Tool Surface Agreement (FR-030, spec `uniformtools`)
 
-The registered tool surface is **149 tools in 21 permission families** in the default
+The registered tool surface is **150 tools in 21 permission families** in the default
 build, and every enumeration of it is checked against the registry rather than
 against a remembered number:
 
@@ -1996,6 +1996,18 @@ provider entry (`thinking`, `env`, `models`) still merges.
   "gcf": {
     "enabled": false
   },
+  // Session-message retention (opt-in; the section is omitted entirely while
+  // disabled). When enabled, messages older than `message_days` are deleted at
+  // startup and by `/db prune` / `ragent db prune`. Session rows are kept, so
+  // an expired transcript stays listed and resumable but reads back empty.
+  // `message_days` must be >= 1: a zero-day window would empty the store on
+  // every start and is rejected by `validate()`.
+  "storage": {
+    "retention": {
+      "enabled": false,
+      "message_days": 14
+    }
+  },
   // Deprecated legacy Headroom compression block. Still parsed for
   // one-release migration: `compression.enabled` maps to
   // `compaction.auto` when `compaction.auto` is not set explicitly.
@@ -2192,6 +2204,122 @@ Thinking/reasoning is configured per model:
 
 Levels: `auto`, `off`, `low`, `medium`, `high`. `budget_tokens` is optional.
 
+### 5.6 Message Retention (`storage.retention`)
+
+Ragent keeps the whole transcript forever unless the operator opts in to
+age-based expiry. The `storage` section makes that opt-in explicit:
+
+```jsonc
+{ "storage": { "retention": { "enabled": true, "message_days": 14 } } }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `retention.enabled` | `bool` | `false` | Run age-based expiry at startup and permit `/db prune` / `ragent db prune`. |
+| `retention.message_days` | `u32` | `14` | Window, in days, a message survives. Must be `>= 1`. |
+
+Rules:
+
+- **Off by default, and omitted while off.** With no `storage` section no
+  message is ever expired, and a `ragent.json` that never set it round-trips
+  byte-identically (`skip_serializing_if = StorageConfig::is_default`).
+- **A zero-day window is rejected** by `RetentionConfig::validate()`, because it
+  would empty the store on every start - an error the operator can see beats a
+  silent wipe.
+- **Sessions are kept.** `Storage::prune_messages_older_than` deletes rows from
+  `messages_fts`, `message_fts_keys` and `messages` in **one transaction**, but
+  never from `sessions`. An expired transcript stays listed and resumable; it
+  reads back empty.
+- **The cutoff is fallible.** `chrono::Duration::checked_sub_signed` (SEC-049)
+  means an extreme window returns an error instead of panicking inside the
+  startup path.
+- **`--dry-run` cannot disagree with the prune.** `Storage::count_messages_older_than`
+  uses the same cutoff computation and the same predicate and deletes nothing.
+- **The file does not shrink.** `DELETE` returns pages to SQLite's freelist;
+  `ragent.db` keeps its size until a `VACUUM`, which requires exclusive access.
+
+Surfaces: the startup pass (on `spawn_blocking`, so it never stalls startup),
+`ragent db prune [--days N] [--dry-run]`, and `/db prune [--days N] [--dry-run]`
+in the TUI. A real TUI prune asks for confirmation and the dialog opens on `No`,
+so a stray `Enter` deletes nothing.
+
+See `docs/sqlite.md` for the storage-level detail (pragma table and the
+retention section).
+
+### 5.7 Telemetry (`telemetry.otel`)
+
+Observability export is opt-in and disabled by default. The `telemetry.otel`
+block configures an OTLP exporter for **metrics** and **logs** under one master
+switch: turning telemetry on exports both.
+
+```jsonc
+{ "telemetry": { "otel": {
+    "enabled": true,
+    "endpoint": "http://localhost:4318",
+    "protocol": "http",
+    "export_interval_seconds": 30,
+    "export_timeout_seconds": 10,
+    "logs": { "enabled": true, "level": "warn" }
+} } }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `otel.enabled` | `bool` | `false` | Master switch for the whole subsystem. |
+| `otel.endpoint` | `String` | `"http://localhost:4318"` | Collector **base** URL (`http://` or `https://`). |
+| `otel.protocol` | `OtelProtocol` | `http` | `http` or `grpc`. |
+| `otel.export_interval_seconds` | `u64` | `30` | Batch interval shared by both signals. |
+| `otel.export_timeout_seconds` | `u64` | `10` | Per-export request timeout shared by both signals. |
+| `otel.cardinality_limit` | `usize` | `1000` | Distinct attribute combinations per metric before overflow into the `unknown` bucket. |
+| `otel.logs.enabled` | `bool` | `false` | Ship `tracing` events over the OTLP logs signal. Written by `/telemetry on|off` alongside `otel.enabled`. |
+| `otel.logs.level` | `String` | `"info"` | `all`/`trace`/`debug`/`info`/`warn`/`error`; a floor for the **remote** export only (`all` exports every level the layer observes). |
+
+Rules:
+
+- **The endpoint is a base URL, and ragent resolves the signal path itself.**
+  `otlp_http_signal_endpoint` appends `/v1/metrics` or `/v1/logs` (trailing
+  slashes collapsed, query string and fragment preserved), keeps an existing
+  base path (`https://gw.example.com/otel`), and returns a value that already
+  names a signal path (`.../v1/metrics`) unchanged, so both documented forms
+  reach a stock collector. Passing the configured value straight to
+  `opentelemetry-otlp`'s `with_endpoint` posts to it verbatim, which a stock
+  collector answers with `404`.
+- **The logs signal composes, it does not redirect.** A
+  `tracing_subscriber::Layer` (`ragent_telemetry::logs::TracingLogsLayer`) is
+  installed beside the existing sinks, so the TUI log panel (or stderr in a
+  headless run) keeps every event `--log-level` admits and only the remote
+  export is filtered by `logs.level`.
+- **One switch, both signals.** `/telemetry on` enables metrics **and** logs
+  (writing `otel.logs.enabled: true` beside `otel.enabled: true`) and
+  `/telemetry off` stops both; there is no separate logs on/off command. Log
+  export still requires `otel.enabled: true`, so a hand-edited config with
+  `logs.enabled: true` and `otel.enabled: false` records the intent and ships
+  nothing until telemetry is on (FR-040).
+- **A logs failure never takes metrics down.** An exporter that cannot be built
+  is logged at `warn` and the metric signal keeps running (FR-041).
+- **Both signals are flushed and shut down together**, so the last records of a
+  run are not lost in the batch buffer.
+- **Every exported body and attribute is guarded.** Bodies pass through
+  `ragent_types::sanitize::redact_secrets` (over 16 KiB truncated with a
+  `... [truncated]` marker) and attributes through the metric sensitive-data
+  guard.
+- **Export failures are visible.** `ragent_telemetry::export_health` classifies
+  every metric export outcome; the TUI turns each into an `Agent Notice` naming
+  the consecutive-failure count, the reason and the masked endpoint, and five
+  consecutive failures switch telemetry off (persisting `enabled: false`)
+  rather than retrying a dead collector forever.
+- **The gRPC transport needs TLS off-loopback.** A cleartext non-loopback gRPC
+  endpoint is refused when TLS is unavailable.
+
+Surfaces: `/telemetry help|on|off|setup|counters` plus `/telemetry logs [<level>]`
+(the level only - enabling and disabling is `/telemetry on|off`) in the TUI, the
+`Logs level` row in `/telemetry setup` (an empty field keeps the default
+`info`; saving the dialog turns both signals on), `/telemetry counters` and the
+telemetry panel (both report the log-export state), and `docs/howtos/config.md`
+for the per-field reference.
+
+See `specs/otel/` for FR-036..FR-042 and NFR-008.
+
 ---
 
 ## 6. Terminal User Interface (TUI)
@@ -2232,6 +2360,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
+| `/db` | Session database: `/db prune [--days N] [--dry-run]` deletes messages older than the retention window (the session row is kept; a real prune arms a `Yes`/`No` dialog that opens on `No`), `/db help` (also the bare form) |
 | `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
@@ -2265,7 +2394,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/init config` | Create a default `ragent.json` in the global config directory |
 | `/startup` | Show per-stage startup timing instrumentation |
 | `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Read-only agent system-prompt inspector (no LLM call) |
-| `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
+| `/telemetry help\|on\|off\|setup\|counters\|logs` | Manage OpenTelemetry metrics and log export |
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |
@@ -3334,17 +3463,35 @@ frontmatter name; on a name clash the existing higher-scope pack is preferred.
 ### 12.5 Tool restrictions (`allowed-tools`)
 
 A `SKILL.md` frontmatter `allowed-tools` key (a single string or a list) limits
-the tools a skill run may call. Entries resolve by **exact** name comparison
-against the `ToolRegistry`: `tool::build_allowed_tool_set` stores each entry
-verbatim and the per-step filter keeps a definition whose name equals an entry.
+the tools a skill run may call. Entries resolve by **case-insensitive** name
+comparison against the `ToolRegistry`:
+`tool::build_allowed_tool_set` stores each entry under the *registry's* own
+spelling (`allowed_tools::resolve_allowed_tool_entry`), so two spellings of one
+tool cannot become two keys in the allowed set, and the per-step filter compares
+with `allowed_tools::entry_matches_tool` (`eq_ignore_ascii_case`).
+Because names are ASCII identifiers, ASCII folding is sufficient and cannot fold
+two distinct names together.
+
+The pseudo entry **`any`** (any case, `allowed_tools::ANY_TOOL_ENTRY`) names every
+tool: the allowed set is returned empty, which every consumer already reads as
+"no allowlist, hide nothing", so the restriction is exactly as if the key were
+omitted. It is honoured without consulting the registry, so it never appears in
+the unresolved report and does not depend on a registered tool of that name.
 
 There is deliberately **no translation layer**. Because the tool rename adopted
 the Anthropic spellings (`AskUserQuestion`, `Bash`, `Edit`, `Glob`, `Grep`,
 `EnterPlanMode`, `ExitPlanMode`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`,
 `TaskUpdate`, `Write`), a manifest written for Claude Code resolves on the
 registry lookup itself. Nothing consults the `(before, after)` rename table, so a
-retired spelling is unresolved rather than mapped, and `Read` - rated too close to
-`read` and not adopted - is unresolved rather than silently served by `read`.
+retired spelling that names a *different* tool is unresolved rather than mapped,
+and `Read` - rated too close to `read` and not adopted - is unresolved rather than
+silently served by `read`. Case folding resolves *one* tool; it never resolves a
+different one.
+
+Every surface that renders a tool list routes through `tool::is_allowed_tool`, so
+the case-insensitive rule holds in the sub-agent filters
+(`session/processor.rs`, `session/loop_steps.rs`) and the loop `tool_set` path as
+well as the primary prompt.
 
 An entry that matches no registered tool is reported once per `(entry, declarer)`
 by `tool::allowed_tools::report_unresolved_allowed_tools_once`, naming the entry
@@ -5254,7 +5401,10 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| uncommitted | 2026-11-01 | **Only `Bash` tool calls reached the OTLP logs endpoint.** The log-window re-emit sat inside `if self.show_log` in `App::push_log_record_and_maybe_export`, so the export was a consequence of the log *view* being open - and a session normally runs with it closed. A collector therefore received only the events carrying a native `tracing` record of their own: `Bash` logs `Executing bash command` on every call, while `Edit`, `Write`, `Grep`, `read` and the rest log nothing, so they appeared only when the operator happened to open `/log`. The panel-gated code treated every tool identically, so the asymmetry came entirely from which tools log natively; from a collector it read as "only Bash is exported". New spec `otel` FR-036e: the panel-visibility gate now covers only the panel's rendering and its spool file and the re-emit is unconditional (still under the FR-036d duplicate guard and the FR-036c burst bound); FR-036a no longer scopes the re-emit to an open panel. Verified by driving the real `ToolCallStart` handler for `Bash` and `Edit` with `show_log = false` - neither produced a record before, both produce one at `INFO` with `log_window_level = "tool"` after. New regression test `test_tool_call_is_exported_with_the_panel_closed` in `crates/ragent-tui/tests/test_log_window_otel_export.rs`; `cargo nextest run -p ragent-tui` 3939/3939, `cargo fmt --check` clean. |
+| uncommitted | 2026-11-01 | **OTLP log export, plus `/db` message retention and a bounded WAL.** ragent's `tracing` events can now ship to the same collector as its metrics through a composing `tracing_subscriber::Layer` (`ragent_telemetry::logs::TracingLogsLayer`): the TUI log panel and stderr keep every event the local `--log-level` admits, and `telemetry.otel.logs.level` is only a floor for the remote copy. New `telemetry.otel.logs` block (`enabled`, default `false`; `level`, default `info`). **One switch, both signals**: `/telemetry on` enables metrics *and* logs (persisting `logs.enabled: true` beside `otel.enabled`) and `/telemetry off` stops both, so there is no separate logs on/off; `/telemetry logs [<level>]` sets the export level only, and `/telemetry setup` gained a `Logs level` row (index 5 of the `Tab` cycle) whose empty value keeps the default rather than disabling the signal. A level change reconfigures the live subsystem, so the layer changes its filter without a restart; `/telemetry counters` and the telemetry panel report whether records are leaving the machine instead of promising "log signals are planned". The logs pipeline reuses the metrics endpoint, protocol, timeout and gRPC TLS rules, posts to `/v1/logs` via the shared `otlp_http_signal_endpoint` resolver, redacts every body through `ragent_types::sanitize::redact_secrets` (16 KiB cap), guards every attribute through the metric sensitive-data path, and is flushed and shut down with the meter provider; a log exporter that cannot be built leaves the metric signal running. Earlier in the same tree: the opt-in `storage.retention` section, `Storage::prune_messages_older_than` / `count_messages_older_than`, the `spawn_blocking` startup pass, `ragent db prune` and the TUI `/db prune\|help` surface with a confirm dialog that opens on `No`, and a `journal_size_limit` bound (32 MiB) so `ragent.db-wal` stops retaining the high-water mark of a write burst. 17 new tests in `crates/ragent-telemetry/tests/test_logs_export.rs`; `cargo check --workspace` clean and `cargo audit` reports no advisories (867 dependencies, the pre-existing `paste` unmaintained notice unchanged). A follow-up noise-and-correctness pass rides the same tree: the code index counts its skip reasons (`skipped_symlink`/`skipped_excluded`/`skipped_globbed`, plus a `ProcessOutcome` tally for `Empty`/`Oversized`/`GrewPastCap`/`Binary`/`Unreadable`) instead of logging one `trace!` per skipped path - roughly 6,000 events per reindex, which the new logs signal then exported; Ollama Cloud's per-frame line drops to `DEBUG`; the `TuiTracingLayer` drain and the mirrored-child-stderr drain use the deferred push so a record the OTLP layer already shipped is not exported twice; `--log-level` defaults to `info` (a tool call is `INFO`, so a `warn` default silently dropped every tool call from the export) and `all` maps to `trace`; `validate_mcp_config` no longer short-circuits under YOLO, because a well-formed definition is a structural requirement rather than a permission; and `allowed-tools` resolution folds ASCII case (`entry_matches_tool`, `resolve_allowed_tool_entry`, storing each entry under the registry's spelling so one tool cannot become two keys) with a new `any` pseudo entry (`ANY_TOOL_ENTRY`, `is_any_tool_entry`) that lifts the restriction by emptying the allowed set, both sub-agent filters and the loop `tool_set` path now routing through `is_allowed_tool`. |
 | v1.0.158 | 2026-10-30 | **CI `Dead-code lint` fix; no behaviour change.** The job runs `cargo check --workspace --lib --all-features` with `RUSTFLAGS='-D unreachable_pub -D dead_code -D unused_imports'`, and 57 items were declared `pub` inside private modules with no public re-export path, so `unreachable_pub` failed the build (`ragent-research` `analysis::{parser,prompt}` 17, `session::{fallback,topic}` 16, `web_gatherer::{relevance,title}` 7 and `polarity` 5; `ragent-agent` `session::refusal_outcome` 4 — the `ToolOutcome` alias and `refusal`/`denial`/`synthesised`, superseded by `ToolDispatchPipeline`; `ragent-tui` `app::slash` 6 MCP helpers, `app::plugin::toggle_plugin_enabled`, `app::event_handler::QUESTION_TIMEOUT_SECS`). Each was demoted to `pub(crate)`, the exact reachability it had; nothing is referenced from another crate, a bench, or a test through a public path. Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 867 dependencies with the single `paste` unmaintained notice the only allowed warning, the exact CI lint command at exit 0, `cargo nextest run -p ragent-research` 1175/1175, `-p ragent-agent` 2560 passed / 1 skipped, `-p ragent-tui` 3901/3901, CI's clippy invocation (`-D warnings -A clippy::used_underscore_items -A clippy::redundant_pub_crate -A clippy::wildcard_imports`) clean, `cargo fmt --check` clean, and the twelve `scripts/check-*.sh` guards passing. |
+| uncommitted | 2026-10-31 | **OTLP/HTTP exports reached the collector at `/`, not `/v1/metrics`, and 404'd.** `telemetry.otel.endpoint` is documented (and validated) as a base URL - the default is `http://localhost:4318` - but `opentelemetry-otlp` 0.33 treats a programmatic `WithExportConfig::with_endpoint` value as the *complete* signal URL: `resolve_http_endpoint` returns it verbatim (`provider_endpoint.parse()`) and only `build_endpoint_uri`, reached for the SDK's compiled default or `OTEL_EXPORTER_OTLP_ENDPOINT`, appends `/v1/metrics`. `build_metric_exporter` passed `config.endpoint` unchanged, so every export POSTed to `http://localhost:4318/`; a stock collector serves only the signal paths and answers `404`, which the export-health monitor classified as `ExportFailureKind::HttpStatus` and reported once per interval until telemetry switched itself off after five. New `ragent_telemetry::subsystem::otlp_http_metrics_endpoint` resolves the configured value before it reaches `with_endpoint`: a bare base URL (trailing slashes collapsed) gains `/v1/metrics`, a base path such as `https://gw.example.com/otel` keeps it, a query string or fragment is preserved after the appended path, and a value that already names a signal segment (`.../v1/metrics`) is returned unchanged so both documented forms work and an operator's explicit signal URL is never rewritten. Verified live against the running collector on `:4318` (`POST /` -> 404, `POST /v1/metrics` -> 200; `TelemetrySubsystem::flush` now `Ok` where it previously returned `404`), plus 7 new tests in `crates/ragent-telemetry/tests/test_otlp_http_endpoint.rs` - six pinning the resolver table and one exporting a recorded metric through a live `SdkMeterProvider` to a mock collector that asserts the request target is `/v1/metrics` (it fails with `left: "/"` with the fix reverted) - and `cargo nextest run -p ragent-telemetry` 313/313 with `cargo clippy -p ragent-telemetry --all-targets` and `cargo fmt --check` clean. This release also carries the prior entry below. |
 | uncommitted | 2026-10-31 | **OTLP export failures become visible and self-healing: an `Agent Notice` per failed export, and telemetry off after 5 consecutive failures.** `ragent-telemetry::export_health::ObservedMetricExporter` decorates the live `opentelemetry_otlp::MetricExporter` inside `build_provider` and records every export outcome in a process-wide `ExportHealth` monitor: success (resets the streak), non-2xx collector response, transport error, or export timeout (classified from the SDK error text). The wrapped result is forwarded unchanged, so the SDK's own `otel_error!` logging is untouched. `App::poll_telemetry_export_health` (driven from the TUI event loop) drains the monitor and appends one `Agent Notice` bubble per failure with the consecutive count, the reason (e.g. `HTTP export failed with status code: 503`), and the userinfo-masked endpoint; on the 5th consecutive failure it runs the `/telemetry off` path (`set_telemetry_enabled(false)`, which persists `telemetry.otel.enabled: false` and reconfigures the live subsystem), clears the latched flag, and sets the status to `telemetry: disabled after repeated export failures`. `TelemetrySubsystem::reconfigure` clears the monitor, so `/telemetry on` retries with a clean count. `/telemetry counters` and the telemetry panel open with an `Export health` line (`N consecutive failure(s), M total`) once anything has failed, and `/telemetry help` documents the policy. This release also carries the two fixes verified in the same session: the periodic reader must be the async-runtime variant (`periodic_reader_with_async_runtime::PeriodicReader` with `runtime::Tokio`), because the `reqwest-client` OTLP exporter's export future calls `tokio::time::sleep` and the plain OS-thread reader panicked with "there is no reactor running" on the first export, and the TUI panic hook only tears down the terminal when the panicking thread is the UI thread, so a helper-thread panic no longer destroys the alternate screen. Verified live against a mock collector answering `503` (24 responses served, exactly 5 notices, `TELE:` `✓` -> `✗`, config persisted `enabled: false`), plus `cargo nextest run -p ragent-telemetry -E 'test(test_export_health::)'` 13/13 and `-p ragent-tui -E 'test(test_telemetry_export_notice::)'` 4/4. |
 | v1.0.157 | 2026-10-30 | **CI fixes and code-audit follow-up; one runtime fix, otherwise behaviour-neutral.** Autopilot no longer keeps running after the primary agent calls `agent_complete`: the `Event::MessageStart` arm cleared the `last_task_completed_at` latch unconditionally, and the lifecycle events the agent loop publishes after the completion could let a later `MessageStart` wipe the latch, so the next `poll_autopilot_continue` wake saw no completion with a continuation pending and started another turn; the clear is now guarded on `autopilot_enabled`, with regression test `test_event_handler_more::message_start_after_agent_complete_keeps_autopilot_off`. The `test_openai_surface::test_tool_call_raises_permission_prompt_and_is_not_auto_approved` wait is de-flaked: a single 30-second deadline replaces the per-event 200 ms window that broke on the first expiry (CI failed at 0.251 s), `Lagged` is drained rather than terminal, and the request future is raced so a genuine FR-038 regression still fails in milliseconds. Every clippy `redundant_pub_crate` finding is cleared workspace-wide by narrowing `pub(crate)` items to the visibility their module actually grants (`ragent-tools-vcs` `github`/`gitlab` `helpers`, `ragent-research` `analysis::{parser,prompt}`, `session::{topic,fallback}`, `web_gatherer::{relevance,title}` and `polarity`, `ragent-agent` `session::refusal_outcome` plus `session::{permissions,prompt_builders}` and `tool::team_memory_common`, `ragent-tui` `app::{event_handler,plugin,slash,state}`), and `App::discovered_mcp_enabled` gains a `BuildHasher` parameter to clear `implicit_hasher`; no behaviour change. Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 867 dependencies with the single `paste` unmaintained notice the only allowed warning, `cargo nextest run --workspace --no-fail-fast` 15,140 passed / 0 failed / 16 skipped, `cargo test --workspace --doc` 316 passed, clippy `-D warnings`, `cargo fmt --check` and the twelve `scripts/check-*.sh` guards all clean. |
 | v1.0.150 | 2026-10-26 | **The `uniformtools` spec lands: one canonical tool-call model across every provider, Claude-compatible tool spellings, and per-provider wire profiles.** A single ordered dispatch pipeline (`session::dispatch`) decodes a call's arguments exactly once and owns the tool-call lifecycle end to end, so no provider builds its own message array (FR-014) and a tool result's wire form is produced in one place; the rename table (`tool/alias_table.rs`, `tool/rename.rs`) makes the 13 adopted Claude names canonical while every inbound alias still resolves (`scripts/check_tool_rename.py` guards the set), and `ToolWireProfile` carries the per-provider capabilities (`supports_parallel`, extended-thinking interplay) that were previously declared and ignored. Provider-specific fixes: Anthropic's extended thinking requires a specific message shape (FR-011); the Responses-API input list had no item for two shapes (FR-018); several providers report usage differently and are now normalised (FR-022); no alias survives the rename on any inbound path. Also in this release: `.config/nextest.toml` consolidates the test suite onto `cargo nextest` with per-test timeouts and cross-process test groups, CI moves to the `ms0-regression` job shape, the `_npx` cache repair takes a cross-process `flock`, `cargo deny`/audit config moves to `.cargo/audit.toml`, and `AGENTS-LANGUAGE.md` absorbs the Rust and test-layout rules. |
@@ -5780,6 +5930,9 @@ format (FR-006).
   // disabled (skip_serializing_if default rule, FR-001).
   "gcf": {
     "enabled": false
+  },
+  "storage": {
+    "retention": { "enabled": false, "message_days": 14 }
   }
 }
 ```
@@ -5813,6 +5966,53 @@ Thinking/reasoning is configured per model:
 ```
 
 Levels: `auto`, `off`, `low`, `medium`, `high`. `budget_tokens` is optional.
+
+### 5.7 Message Retention (`storage.retention`)
+
+Age-based expiry of session messages is opt-in:
+
+```jsonc
+{ "storage": { "retention": { "enabled": true, "message_days": 14 } } }
+```
+
+- `enabled` defaults to `false`; `message_days` defaults to `14` and must be
+  `>= 1` (a zero-day window is rejected rather than emptying the store).
+- The section is omitted from a saved file while at its default, so an untouched
+  `ragent.json` round-trips byte-identically.
+- `Storage::prune_messages_older_than` deletes messages older than the window in
+  one transaction across `messages_fts`, `message_fts_keys` and `messages`; the
+  `sessions` rows are kept, so an expired transcript stays listed and resumable
+  but reads back empty.
+- The cutoff uses the fallible `chrono::Duration::checked_sub_signed` (SEC-049);
+  `Storage::count_messages_older_than` applies the same predicate for
+  `--dry-run`.
+- Deleting rows does not shrink `ragent.db`; a `VACUUM` reclaims the space but
+  needs exclusive access.
+
+Surfaces: the startup pass, `ragent db prune [--days N] [--dry-run]`, and the
+TUI `/db prune [--days N] [--dry-run]` (confirmed, defaulting to `No`).
+
+### 5.8 Telemetry (`telemetry.otel`)
+
+OpenTelemetry export is opt-in and off by default. `telemetry.otel` configures
+an OTLP exporter for metrics and logs under one master switch: `/telemetry on`
+exports both (`telemetry.otel.logs.enabled` is written beside
+`telemetry.otel.enabled`) and `/telemetry logs <level>` only tunes how much log
+traffic is remote. A hand-edited config still needs `telemetry.otel.enabled:
+true` for any log export at all. The endpoint is a
+**base** URL - `otlp_http_signal_endpoint` appends `/v1/metrics` or `/v1/logs`,
+keeps an existing base path, and uses an explicit signal path verbatim - which
+is what stops a stock collector answering `404`. The logs sink composes with
+the local one, bodies pass through the shared credential redactor (over 16 KiB
+truncated), a log exporter that fails to build leaves metrics running, and both
+signals shut down together. Export health is visible: each failed metric export
+becomes an `Agent Notice` naming the consecutive count and the masked endpoint,
+and five consecutive failures switch telemetry off.
+
+Surfaces: `/telemetry help|on|off|setup|counters` and `/telemetry logs [<level>]`,
+the `Logs level` row in `/telemetry setup`, and the telemetry panel. Full field
+reference in
+`docs/howtos/config.md` §7.22; requirements in `specs/otel/` FR-036..FR-042.
 
 ---
 
@@ -5854,6 +6054,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/gcf on\|off\|show\|help` | Toggle GCF token-efficient tool-result encoding; `show` reports state and source |
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Structured-memory panel and summary: `/memory` / `/memory show` (same), `/memory clear` (a `Yes`/`No` dialog clears this project's memories), `/memory help` |
+| `/db` | Session database: `/db prune [--days N] [--dry-run]` deletes messages older than the retention window (the session row is kept; a real prune arms a `Yes`/`No` dialog that opens on `No`), `/db help` (also the bare form) |
 | `/yolo` | Toggle YOLO mode (`on`/`off` set and persist the state, `status` reports it, a bare `/yolo` toggles; the toggle writes the user-global config, or the `--config` file when one was loaded) |
 | `/todo` `/task` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
@@ -5881,7 +6082,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/init config` | Create a default `ragent.json` in the global config directory |
 | `/startup` | Show per-stage startup timing instrumentation |
 | `/prompt help\|primary [agent]\|subagent [agent]\|list\|<agent>` | Read-only agent system-prompt inspector (no LLM call) |
-| `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
+| `/telemetry help\|on\|off\|setup\|counters\|logs` | Manage OpenTelemetry metrics and log export |
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/status` / `/mouse` | UI preferences |
 | `/skill` / `/skills` | Load or inspect skill packs |

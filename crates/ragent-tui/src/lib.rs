@@ -888,6 +888,12 @@ pub async fn run_tui(
                 // token-shaped fragment would otherwise surface it on screen
                 // (audit Medium 14).
                 let message = ragent_types::sanitize::redact_secrets(&record.message);
+                // `push_log`, not `push_log_exported`: this record IS a
+                // `tracing` event, and the OTLP logs layer has already
+                // exported it. Re-emitting it as a new event (which is what
+                // `push_log_exported` does) showed a collector every line
+                // twice - startup chatter, export failures, MCP banners - and
+                // the duplication, not the volume, is what buried the signal.
                 app.push_log(level, message, None);
                 got_log_record = true;
             }
@@ -909,7 +915,12 @@ pub async fn run_tui(
                     // Redact before display: mirrored child stderr can carry a
                     // credential a subprocess echoed (audit Medium 15).
                     let line = ragent_types::sanitize::redact_secrets(line);
-                    app.push_log(app::LogLevel::Warn, format!("stderr: {line}"), None);
+                    // `push_log_deferred`, not `push_log`: the line stays in the
+                    // panel and the on-disk spool, but is not re-emitted as a
+                    // `tracing` event, so the OTLP logs exporter does not carry
+                    // hundreds of `stderr: ...` records from an npx-launched MCP
+                    // server's startup chatter.
+                    app.push_log_deferred(app::LogLevel::Warn, format!("stderr: {line}"), None);
                     app.needs_redraw = true;
                 }
                 stderr_records_this_frame += 1;

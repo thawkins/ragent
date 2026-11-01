@@ -3135,6 +3135,136 @@ impl App {
         self.needs_redraw = true;
     }
 
+    /// Open the `Prune messages older than N days?` confirmation dialog.
+    ///
+    /// Invoked by `/db prune` when `--dry-run` is absent. It only arms the
+    /// dialog and records the window it will apply - nothing is deleted until
+    /// the user picks `Yes`. The default selection is reset to `No` every time
+    /// it opens so a stray `Enter` cannot delete messages.
+    pub fn open_db_prune_confirm(&mut self, days: u32) {
+        self.db_prune_confirm_open = true;
+        self.db_prune_confirm_selected = crate::app::DB_PRUNE_CONFIRM_NO;
+        self.db_prune_confirm_days = Some(days);
+        self.needs_redraw = true;
+    }
+
+    /// Flip the `Prune messages older than N days?` dialog selection between
+    /// `Yes` and `No`.
+    ///
+    /// The dialog has exactly two options, so any horizontal move (`Left` /
+    /// `Right` / `Tab` / `BackTab`) simply toggles the current selection.
+    pub fn db_prune_confirm_toggle(&mut self) {
+        self.db_prune_confirm_selected = if self.db_prune_confirm_is_yes() {
+            crate::app::DB_PRUNE_CONFIRM_NO
+        } else {
+            crate::app::DB_PRUNE_CONFIRM_YES
+        };
+        self.needs_redraw = true;
+    }
+
+    /// Whether the `Prune messages older than N days?` dialog currently has
+    /// `Yes` selected.
+    #[must_use]
+    pub fn db_prune_confirm_is_yes(&self) -> bool {
+        self.db_prune_confirm_selected == crate::app::DB_PRUNE_CONFIRM_YES
+    }
+
+    /// Close the `Prune messages older than N days?` confirmation dialog,
+    /// resetting the selection to `No` and forgetting the armed window.
+    pub(crate) fn close_db_prune_confirm(&mut self) {
+        self.db_prune_confirm_open = false;
+        self.db_prune_confirm_selected = crate::app::DB_PRUNE_CONFIRM_NO;
+        self.db_prune_confirm_days = None;
+        self.needs_redraw = true;
+    }
+
+    /// Apply the prune the armed `/db prune` dialog was confirmed for.
+    ///
+    /// The window comes from [`Self::db_prune_confirm_days`] - the value the
+    /// dialog title named - so the confirmed action cannot apply a different
+    /// window from the one the user read. The outcome is reported in the chat
+    /// transcript.
+    pub(crate) fn run_confirmed_db_prune(&mut self) {
+        let Some(days) = self.db_prune_confirm_days else {
+            // Nothing armed; a confirmation with no window is a no-op rather
+            // than a guess at a default that could delete far more than the
+            // user expected.
+            return;
+        };
+        self.prune_messages(days);
+    }
+
+    /// Delete messages older than `days`, reporting the outcome in the chat.
+    ///
+    /// Shared by `/db prune` (immediately, when `--dry-run` is given, the count
+    /// is reported instead) and the confirmed dialog.
+    pub(crate) fn prune_messages(&mut self, days: u32) {
+        let window = match chrono::Duration::try_days(i64::from(days)) {
+            Some(window) => window,
+            None => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune\n\n[warn] Retention window out of range: {days} day(s)."
+                ));
+                self.status = "db: bad window".to_string();
+                return;
+            }
+        };
+        match self.storage.prune_messages_older_than(window) {
+            Ok(deleted) => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune\n\nDeleted **{deleted}** message(s) older than \
+                     {days} day(s). Sessions are kept, so an expired transcript \
+                     stays listed but empty.\n\nThe database file does not shrink \
+                     until a `VACUUM`, which needs exclusive access - stop every \
+                     other ragent process first."
+                ));
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("db: pruned {deleted} message(s) older than {days} day(s)"),
+                );
+                self.status = format!("db: pruned {deleted}");
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune\n\n[warn] Could not prune messages: {e}"
+                ));
+                self.status = "db: prune failed".to_string();
+            }
+        }
+    }
+
+    /// Report how many messages a prune of `days` would delete, without
+    /// deleting anything (`/db prune --dry-run`).
+    pub(crate) fn count_prunable_messages(&mut self, days: u32) {
+        let window = match chrono::Duration::try_days(i64::from(days)) {
+            Some(window) => window,
+            None => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune --dry-run\n\n[warn] Retention window out of \
+                     range: {days} day(s)."
+                ));
+                self.status = "db: bad window".to_string();
+                return;
+            }
+        };
+        match self.storage.count_messages_older_than(window) {
+            Ok(n) => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune --dry-run\n\nWould delete **{n}** message(s) \
+                     older than {days} day(s); sessions are kept. Nothing was \
+                     deleted."
+                ));
+                self.status = format!("db: would prune {n}");
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /db prune --dry-run\n\n[warn] Could not count messages: {e}"
+                ));
+                self.status = "db: count failed".to_string();
+            }
+        }
+    }
+
     /// Clear every structured memory scoped to the current project directory.
     ///
     /// Only the project's own memories are removed - other projects' entries are
@@ -3329,6 +3459,7 @@ impl App {
         match trigger {
             "team" => Some("<subcommand>".to_string()),
             "memory" => Some("<subcommand> [<arg>]".to_string()),
+            "db" => Some("[prune [--days N] [--dry-run]|help]".to_string()),
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|show|sync|reindex|help]".to_string()),
             "gcf" => Some("[on|off|show|help]".to_string()),
@@ -5062,12 +5193,106 @@ impl App {
     /// main log panel and the primary output-view overlay. Tracked sub-agent
     /// and teammate events should pass the child/teammate session id so the
     /// per-agent output-view overlay can include their activity.
+    ///
+    /// The entry is always re-emitted to `tracing` - not only while the log
+    /// panel is open - so the OTLP logs signal carries it (spec `otel` FR-036).
+    /// A record travels at the entry's own severity, and no event is natively
+    /// logged at the same level with the same body, so a caller that derived the
+    /// line from a `tracing` record (the drain of
+    /// [`TuiTracingLayer`][crate::tracing_layer::TuiTracingLayer]) still exports
+    /// it exactly once via [`push_log_deferred`](Self::push_log_deferred).
     pub(crate) fn push_log_for(
         &mut self,
         level: LogLevel,
         message: String,
         agent_id: Option<String>,
         session_id: Option<String>,
+    ) {
+        self.push_log_for_inner(level, message, agent_id, session_id);
+    }
+
+    /// Push a log entry that exists **only** in the TUI log panel: session
+    /// activity assembled from the agent event bus (a tool call starting, a
+    /// background task finishing, a teammate spawning) never passes through
+    /// `tracing` on its own.
+    ///
+    /// It behaves exactly like [`push_log`](Self::push_log) - the entry is
+    /// recorded in the panel and re-emitted to the OTLP logs signal (spec `otel`
+    /// FR-036) whether or not the panel is open - and the name is kept because
+    /// the call sites read as "this line has no native event behind it".
+    pub(crate) fn push_log_exported(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    ) {
+        self.push_log_for_inner(level, message, agent_id, session_id);
+    }
+
+    /// Push a log entry the log panel and the on-disk spool record for a line
+    /// the caller emits itself, so the panel entry is documentation for the
+    /// operator rather than the only record of the activity.
+    ///
+    /// The entry is **not** re-emitted to `tracing`: the caller either emitted
+    /// the underlying event itself or derived the line from a record the OTLP
+    /// logs layer has already exported. See
+    /// [`emit_log_entry_to_tracing`] for why the duplicate guard lives on the
+    /// caller rather than on a universally quiet level.
+    pub(crate) fn push_log_deferred(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+    ) {
+        self.push_log_for_inner_quiet(level, message, agent_id, None);
+    }
+
+    /// Shared implementation of [`push_log_for`](Self::push_log_for),
+    /// [`push_log_exported`](Self::push_log_exported) and
+    /// [`push_log_deferred`](Self::push_log_deferred): record the entry in the panel
+    /// and the spool, then re-emit it to `tracing` so the OTLP logs signal
+    /// carries it.
+    fn push_log_for_inner(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    ) {
+        self.push_log_record_and_maybe_export(level, message, agent_id, session_id, true);
+    }
+
+    /// The record-and-spool half of [`push_log_for_inner`](Self::push_log_for_inner),
+    /// with the re-emit suppressed.
+    ///
+    /// Used by [`push_log_deferred`](Self::push_log_deferred) for entries that
+    /// came *from* `tracing` (the `TuiTracingLayer` drain and the mirrored-child
+    /// drain). The OTLP logs layer already exported those records at their
+    /// original severity, so re-emitting the panel line would duplicate every
+    /// startup line and export-failure notice in the collector.
+    fn push_log_for_inner_quiet(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    ) {
+        self.push_log_record_and_maybe_export(level, message, agent_id, session_id, false);
+    }
+
+    /// Record one log entry in the panel (and the spool while the panel is
+    /// open), and optionally re-emit it to `tracing`.
+    ///
+    /// The export is bounded process-wide by [`ExportLimiter`] so a burst of
+    /// panel lines cannot turn into a burst of collector records.
+    fn push_log_record_and_maybe_export(
+        &mut self,
+        level: LogLevel,
+        message: String,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+        export: bool,
     ) {
         // C-008: stamp each entry with its own monotonic sequence number so a
         // new log line only invalidates the *new* group in `log_line_cache`,
@@ -5100,6 +5325,33 @@ impl App {
                 self.append_log_entry_to_spool(path, level, &message);
             }
         }
+        // FR-036: re-emit the entry to `tracing` so the OTLP logs layer carries
+        // it, **independently of whether the panel is open**.
+        //
+        // This block used to sit inside the `if self.show_log` arm above, which
+        // made the export a consequence of a *view* being open. A normal session
+        // runs with the panel closed, so a collector received only the events
+        // that happen to have a native `tracing` record behind them: `Bash`
+        // emits `"Executing bash command"` on every call, while `Edit`, `Write`,
+        // `Grep`, `read` and the rest emit nothing, so they reached the
+        // collector only if the operator happened to open `/log`. That reads as
+        // "only Bash tool calls are exported", which is exactly the defect this
+        // reordering fixes.
+        //
+        // The re-emit carries the entry's OWN severity (a tool call travels at
+        // `INFO`, a warning at `WARN`, an error at `ERROR`) so the default
+        // `--log-level` and `telemetry.otel.logs.level` floors both admit it.
+        // `export` is `false` for entries that were themselves derived from a
+        // `tracing` record the OTLP layer already shipped: duplicating those is
+        // what previously buried the signal under startup chatter.
+        //
+        // The rate limit keeps a burst (a wall of mirrored stderr, a chatty
+        // tool) from turning one panel line into one exported record each; when
+        // the burst is over the next entry reports how many were withheld, so
+        // the collector sees the gap instead of a silent loss.
+        if export {
+            self.export_log_entry_to_tracing(level, &message);
+        }
     }
 
     /// Append a single formatted log line to the log-window spool file.
@@ -5122,8 +5374,17 @@ impl App {
 
     /// Convenience wrapper for [`push_log_for`](Self::push_log_for) that stamps
     /// the entry with the primary TUI session id.
+    ///
+    /// The entry is recorded in the panel but **not** re-emitted to `tracing`.
+    /// This is the quiet half of the pair, and it is only correct for a line the
+    /// OTLP logs layer has *already* exported: the `TuiTracingLayer` drain, whose
+    /// records are themselves `tracing` events, and the mirrored-child stderr
+    /// drain, whose chatter would otherwise drown the signal. Use
+    /// [`push_log_exported`](Self::push_log_exported) for a panel line with no
+    /// native event behind it - which includes every agent-event-bus entry
+    /// reached through [`push_log_no_agent`](Self::push_log_no_agent).
     pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
-        self.push_log_for(level, message, agent_id, None);
+        self.push_log_for_inner_quiet(level, message, agent_id, None);
     }
 
     /// R-10: Trim `messages` and `message_line_cache` to `MAX_TUI_MESSAGES`
@@ -5226,9 +5487,18 @@ impl App {
         }
     }
 
-    /// Convenience wrapper for [`push_log`](Self::push_log) with no agent id.
+    /// Convenience wrapper for [`push_log_exported`](Self::push_log_exported)
+    /// with no agent id.
+    ///
+    /// Every caller is an agent-event-bus line (context compression start and
+    /// finish, response completion, `agent_complete`, agent notices, the
+    /// compaction notice). None of those has a native `tracing` event behind
+    /// them, so this must take the *exporting* path: routing it through
+    /// [`push_log`](Self::push_log), whose quiet half exists for lines the OTLP
+    /// logs layer has already shipped, would leave every one of them in the
+    /// panel and out of the collector.
     pub(crate) fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
-        self.push_log(level, message, None);
+        self.push_log_exported(level, message, None, None);
     }
 
     pub(crate) fn open_output_view_session(&mut self, session_id: String, label: String) {
@@ -5249,11 +5519,211 @@ impl App {
         });
     }
 
+    /// Number of lines the assistant has produced in this session.
     pub(crate) fn assistant_output_lines(&self) -> usize {
         self.messages
             .iter()
             .filter(|m| m.role == Role::Assistant)
             .map(|m| m.text_content().lines().count())
             .sum()
+    }
+
+    /// Re-emit log-window entries to `tracing`, rate limited (spec `otel`
+    /// FR-036).
+    ///
+    /// Every entry pushed is re-emitted to `tracing`, rate limited, through
+    /// [`emit_log_entry_to_tracing`], which is what puts a tool call on the OTLP
+    /// logs signal. The re-emit does not depend on the log panel being open: a
+    /// session normally runs with it closed, and a tool call has no other route
+    /// to the collector.
+    ///
+    /// A burst is bounded at [`EXPORT_BURST`] records per
+    /// [`EXPORT_WINDOW_MILLIS`] milliseconds across the whole process - a
+    /// token-bucket refill - so a wall of mirrored stderr cannot turn one panel
+    /// line into one exported record. When a burst ends, the first entry that
+    /// fits again is preceded by a `warn` notice naming how many were withheld,
+    /// so the collector sees an explicit gap instead of a silent loss.
+    pub(crate) fn export_log_entry_to_tracing(&mut self, level: LogLevel, message: &str) {
+        let now = std::time::Instant::now();
+        let permit = match ExportLimiter::acquire(now) {
+            Ok(permit) => permit,
+            Err(_) => {
+                self.withheld_log_exports = self.withheld_log_exports.saturating_add(1);
+                return;
+            }
+        };
+        if permit.withheld > 0 {
+            let withheld = std::mem::take(&mut self.withheld_log_exports) + permit.withheld;
+            // The notice counts against the same budget, so a flapping burst
+            // cannot emit one notice per entry.
+            if ExportLimiter::acquire(now).is_err() {
+                self.withheld_log_exports = withheld;
+                return;
+            }
+            emit_log_entry_to_tracing(
+                LogLevel::Warn,
+                &format!("log window: {withheld} entries withheld from OTLP export (burst limit)"),
+            );
+        }
+        emit_log_entry_to_tracing(level, message);
+    }
+}
+
+/// Longest a single burst of log-window entries may export, in milliseconds.
+///
+/// One panel line is one exported record, so a wall of mirrored stderr or a
+/// tool that echoes its own progress could otherwise put thousands of records
+/// into a single OTLP batch. `EXPORT_BURST` records per window keeps the
+/// collector's cadence honest while still exporting every ordinary turn.
+const EXPORT_WINDOW_MILLIS: u64 = 1_000;
+
+/// Records exported per [`EXPORT_WINDOW_MILLIS`] before the burst limit trips.
+///
+/// Sized so a normal turn (a handful of tool calls, their results and a few
+/// notices) never reaches it, while a runaway loop is capped.
+const EXPORT_BURST: f64 = 60.0;
+
+/// Process-wide token bucket bounding how many log-window entries reach
+/// `tracing` per [`EXPORT_WINDOW_MILLIS`].
+///
+/// Process-wide on purpose: the panel is one sink and the limit protects one
+/// collector, so per-`App` state would let two windows double the rate.
+static EXPORT_BUCKET: std::sync::OnceLock<std::sync::Mutex<ExportBucket>> =
+    std::sync::OnceLock::new();
+
+/// Token-bucket state behind [`EXPORT_BUCKET`].
+struct ExportBucket {
+    /// Whole permits currently available, capped at [`EXPORT_BURST`].
+    tokens: f64,
+    /// When `tokens` was last refilled.
+    last: std::time::Instant,
+    /// Entries dropped since the last gap notice, awaiting the next permit.
+    withheld: u64,
+}
+
+/// What [`ExportLimiter::acquire`] hands back when a permit is granted.
+struct ExportPermit {
+    /// Entries the burst limit withheld since the last export, `0` when there
+    /// were none. The caller reports the gap on the entry it exports now.
+    withheld: u64,
+}
+
+/// Admission control for the log-window-to-`tracing` re-emit.
+struct ExportLimiter;
+
+impl ExportLimiter {
+    /// Take one permit, refilling the bucket for the elapsed window.
+    ///
+    /// Returns the entries withheld since the last export alongside the permit,
+    /// or `Err(withheld_now)` when the burst is already at its limit - the
+    /// caller increments its own running count and exports nothing.
+    fn acquire(now: std::time::Instant) -> Result<ExportPermit, u64> {
+        let cell = EXPORT_BUCKET.get_or_init(|| {
+            std::sync::Mutex::new(ExportBucket {
+                tokens: EXPORT_BURST,
+                last: now,
+                withheld: 0,
+            })
+        });
+        // A poisoned lock only means another thread panicked while holding it;
+        // the bucket is still consistent, so it is recovered rather than
+        // treated as fatal on a log path.
+        let mut bucket = match cell.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let elapsed = now.saturating_duration_since(bucket.last);
+        let refill =
+            elapsed.as_secs_f64() * (EXPORT_BURST / (EXPORT_WINDOW_MILLIS as f64 / 1000.0));
+        if refill > 0.0 {
+            bucket.tokens = (bucket.tokens + refill).min(EXPORT_BURST);
+            bucket.last = now;
+        }
+        // A permit is whole only once a token has accumulated, so a trickle
+        // refills at the steady-state rate instead of rounding to zero forever.
+        if bucket.tokens < 1.0 {
+            bucket.withheld = bucket.withheld.saturating_add(1);
+            return Err(bucket.withheld);
+        }
+        bucket.tokens -= 1.0;
+        Ok(ExportPermit {
+            withheld: std::mem::take(&mut bucket.withheld),
+        })
+    }
+}
+
+/// Forward one log-window entry to `tracing` at the entry's own severity (spec
+/// `otel` FR-036).
+///
+/// The TUI log window is a local, in-memory sink: an entry pushed there is never
+/// emitted as a `tracing` event, so the OTLP logs layer - which only sees
+/// `tracing` events - could not export it. This function re-emits the entry so a
+/// collector receives the same tool-call, tool-result, warning and error lines
+/// the operator sees in the panel.
+///
+/// # Why the entry's own severity, not `DEBUG`
+///
+/// An earlier revision emitted every entry at `DEBUG` so that no local sink
+/// gained a duplicate. That made the export opt-in twice over: the process-wide
+/// `EnvFilter` defaults to `warn` (`--log-level`), and the collector's
+/// `telemetry.otel.logs.level` defaults to `info`. Both floors sit above
+/// `DEBUG`, so a tool call reached the collector only when the operator also
+/// raised `--log-level` to `debug`/`all` - the exact case this feature exists to
+/// serve, so in practice it exported nothing.
+///
+/// Emitting at the entry's own [`LogLevel`] fixes the class rather than one
+/// caller: a tool call travels at `INFO`, a warning at `WARN`, an error at
+/// `ERROR`, so the default local and remote floors both admit them.
+///
+/// # The duplicate guard moved, it did not disappear
+///
+/// Some panel entries are *derived* from a `tracing` record that has already been
+/// exported - the drain of
+/// [`TuiTracingLayer`][crate::tracing_layer::TuiTracingLayer] records in the TUI
+/// event loop, and the mirrored-child drain that re-records those lines. Those
+/// call sites use [`push_log_deferred`](Self::push_log_deferred), which records
+/// the line in the panel and the spool but never re-emits it. The panel entry is
+/// documentation of an event the collector already has; re-emitting it here
+/// would put every startup line, export-failure notice and MCP banner into the
+/// collector twice.
+///
+/// So the invariant is held by the *caller*, not by a universally quiet level:
+/// use [`push_log_exported`](Self::push_log_exported) for a line that has no
+/// native `tracing` event behind it, and `push_log_deferred` for one that does.
+///
+/// `telemetry.otel.logs.level` still applies on top: `info` (the default)
+/// exports `INFO` and above, so tool calls arrive out of the box. The entry's
+/// own level also travels as the `log_window_level` attribute (`"tool"`,
+/// `"info"`, `"warn"`, `"error"`), so a collector can tell a tool call from a
+/// diagnostic even where both map to `INFO`.
+///
+/// The call is a no-op when no subscriber is installed, which is the case in
+/// tests and in any run that has not initialised `tracing`.
+pub fn emit_log_entry_to_tracing(level: LogLevel, message: &str) {
+    use tracing::Level;
+
+    // `tracing::event!` requires a literal level at the macro site, so the
+    // match has to select the call rather than a level value. Each arm repeats
+    // the same fields; a shared helper cannot be used for the same reason.
+    macro_rules! emit_at {
+        ($lvl:expr, $name:expr) => {
+            tracing::event!(
+                $lvl,
+                log_window = true,
+                log_window_level = $name,
+                "{message}"
+            )
+        };
+    }
+
+    match level {
+        LogLevel::Error => emit_at!(Level::ERROR, "error"),
+        LogLevel::Warn => emit_at!(Level::WARN, "warn"),
+        LogLevel::Info => emit_at!(Level::INFO, "info"),
+        // A tool call is ordinary session activity, not a warning, so it maps
+        // to `INFO` rather than being inflated to `WARN` to clear the local
+        // floor. The `--log-level` default is `info` (`src/main.rs`) so the
+        // local filter admits it.
+        LogLevel::Tool => emit_at!(Level::INFO, "tool"),
     }
 }

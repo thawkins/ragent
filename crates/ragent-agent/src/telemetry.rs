@@ -6,6 +6,7 @@
 //! `ragent-telemetry`; when disabled at compile time, all recorders are
 //! zero-overhead no-ops.
 
+pub use ragent_telemetry::logs::{ExportCell, TracingLogsLayer};
 pub use ragent_telemetry::shutdown::{ShutdownGuard, flush_on_signal_arc};
 pub use ragent_telemetry::{
     InstrumentRegistry, LlmRecorder, OtelConfig, OtelProtocol, SessionRecorder, TelemetryConfig,

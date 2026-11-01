@@ -24,6 +24,8 @@ mod test_disabled_zero_traffic;
 mod test_export_health;
 #[path = "test_http_exporter.rs"]
 mod test_http_exporter;
+#[path = "test_logs_export.rs"]
+mod test_logs_export;
 #[path = "test_malformed_endpoint.rs"]
 mod test_malformed_endpoint;
 #[path = "test_metric_toggles.rs"]
@@ -32,6 +34,8 @@ mod test_metric_toggles;
 mod test_mock_session_metrics;
 #[path = "test_nonblocking.rs"]
 mod test_nonblocking;
+#[path = "test_otlp_http_endpoint.rs"]
+mod test_otlp_http_endpoint;
 #[path = "test_prometheus_render.rs"]
 mod test_prometheus_render;
 #[path = "test_recorder_constructors.rs"]

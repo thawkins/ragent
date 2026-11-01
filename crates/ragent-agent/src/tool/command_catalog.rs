@@ -84,6 +84,8 @@ const SPEC_SUBS: &[&str] = &[
 ];
 const BLUEPRINTS_SUBS: &[&str] = &["help", "list"];
 const OSINFO_SUBS: &[&str] = &["show", "help"];
+const DB_SUBS: &[&str] = &["prune", "help"];
+const DB_FLAGS: &[&str] = &["--days", "--dry-run"];
 const ROUTER_SUBS: &[&str] = &[
     "help",
     "on",
@@ -429,6 +431,12 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
         flags: EMPTY,
     },
     CommandCatalogEntry {
+        trigger: "db",
+        description: "Session database: /db prune [--days N] [--dry-run] deletes old messages (sessions are kept) | /db help",
+        subcommands: DB_SUBS,
+        flags: DB_FLAGS,
+    },
+    CommandCatalogEntry {
         trigger: "perf",
         description: "Alias for /profile - toggle the agent-loop perf panel (/perf on|off|help)",
         subcommands: EMPTY,
@@ -580,7 +588,7 @@ pub const COMMAND_CATALOG: &[CommandCatalogEntry] = &[
     },
     CommandCatalogEntry {
         trigger: "telemetry",
-        description: "Telemetry management: /telemetry help|on|off|setup|counters",
+        description: "Telemetry management: /telemetry help|on|off|setup|counters|logs",
         subcommands: EMPTY,
         flags: EMPTY,
     },

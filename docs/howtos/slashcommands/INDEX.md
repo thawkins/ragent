@@ -63,6 +63,7 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/plan` | [plan](plan.md) | Delegate planning to the plan agent: /plan <task description> \| /plan help |
 | `/mode` | [mode](mode.md) | Set agent role mode: /mode architect\|coder\|reviewer\|debugger\|tester\|off\|help |
 | `/memory` | [memory](memory.md) | Memory panel (Alt+M): /memory \| /memory show \| /memory clear \| /memory help |
+| `/db` | [db](db.md) | Session database: /db prune [--days N] [--dry-run] deletes old messages (sessions are kept) \| /db help |
 | `/github` | [github](github.md) | GitHub integration: /github login \| logout \| status \| help |
 | `/gitlab` | [gitlab](gitlab.md) | GitLab integration: /gitlab setup \| logout \| status \| help |
 | `/update` | [update](update.md) | Check for or install updates: /update \| /update install \| /update help |
@@ -73,8 +74,8 @@ Per-command reference documents for the ragent TUI slash commands. Each document
 | `/codeindex` | [codeindex](codeindex.md) | Manage codebase index: /codeindex on\|off\|show\|lang\|reindex\|rebuild\|graph <build\|export\|lang>\|explain <symbol>\|path <A> <B>\|communities\|godnodes\|help |
 | `/status` | [status](status.md) | Show status message history: /status [clear] |
 | `/mouse` | [mouse](mouse.md) | Toggle mouse support: /mouse on \| off \| help |
-| `/telemetry` | [telemetry](telemetry.md) | Telemetry management: /telemetry help\|on\|off\|setup\|counters |
-| `/telemetry_panel` | [telemetry_panel](telemetry_panel.md) | Toggle the telemetry side panel; use `/telemetry counters` to list values |
+| `/telemetry` | [telemetry](telemetry.md) | Telemetry management: /telemetry help\|on\|off\|setup\|counters\|logs |
+| `/telemetry_panel` | [telemetry_panel](telemetry_panel.md) | Toggle the telemetry side panel; use `/telemetry counters` to list values, including the OTLP log-export state |
 | `/router` | [router](router.md) | Model router management: /router on\|off\|status\|tiers\|weights\|boundaries\|test\|stats\|reload\|help |
 | `/startup` | [startup](startup.md) | Show startup timing breakdown for the current session |
 | `/editlog` | [editlog](editlog.md) | Edit-operation logging: /editlog on\|off\|status\|show\|analyse\|clear |

@@ -1,5 +1,440 @@
 # Changelog
 
+## [1.0.160] - 2026-11-01
+
+OTLP log export, session-message retention plus the `/db` and `ragent db`
+operator surfaces, and a WAL-size fix that stops `ragent.db-wal` ratcheting to
+the high-water mark of a single large write burst. Retention is **opt-in**: with
+no `storage` section no message is ever expired. A follow-up noise-and-
+correctness pass then removes the event-volume the new logs signal made
+expensive (per-path scanner events, per-frame Ollama lines, the duplicated
+`TuiTracingLayer` drain) and closes three resolution gaps: `--log-level` now
+defaults to `info` so tool calls reach the export, MCP config validation runs in
+YOLO mode too, and `allowed-tools` entries resolve case-insensitively with an
+`any` pseudo entry that lifts the restriction.
+
+### Added
+
+- **OTLP log export (spec `otel` FR-036..FR-042).** ragent's `tracing` events
+  can now be shipped to the same OTLP collector as the metrics, through a
+  `tracing_subscriber::Layer` that composes with the existing sinks rather than
+  replacing them: the TUI log panel and stderr keep receiving every event, and
+  enabling log export only adds a destination. New `telemetry.otel.logs` block
+  (`crates/ragent-config/src/telemetry.rs`): `enabled` (default `false`) and
+  `level` (default `"info"`, a floor for the *remote* export only). New
+  `crates/ragent-telemetry/src/logs.rs` with the layer
+  (`logs::TracingLogsLayer`), the pure event-to-record conversion
+  (`logs::convert_event`), severity mapping, `ExportEventFilter` (a hook for
+  refusing a category of event without touching the local sink) and the batched
+  `SdkLoggerProvider` pipeline. The logs signal reuses the metrics endpoint,
+  protocol, timeout and gRPC TLS rules, resolving `/v1/logs` with the same
+  `otlp_http_signal_endpoint` resolver the metrics use, and is flushed and shut
+  down with the meter provider so the last records of a run are not lost in the
+  batch buffer. Every body is passed through `ragent_types::sanitize::redact_secrets`
+  and every attribute through the existing metric sensitive-data guard; bodies
+  over 16 KiB are truncated. A log exporter that fails to build is logged at
+  `warn` level and leaves the metric signal running (a logs failure never
+  disables telemetry). The layer is installed unconditionally in all three
+  tracing install paths in `src/main.rs` against a swap cell, so `/telemetry on`,
+  `/telemetry off` and `/telemetry logs <level>` re-point it live without
+  reinstalling the global subscriber. **One switch, both signals**: `/telemetry
+  on` now enables metric *and* log export (writing `telemetry.otel.logs.enabled`
+  beside `telemetry.otel.enabled`) and `/telemetry off` stops both, so there is
+  no separate logs on/off. `/telemetry logs [<level>]` sets the export level
+  only; `logs on` / `logs off` are answered with a pointer to `/telemetry on|off`
+  instead of silently doing nothing. `/telemetry setup` gained a `Logs level`
+  field (the level; empty keeps the default `info`, and saving the dialog turns
+  both signals on), `/telemetry counters` and the telemetry panel now report the
+  log-export state instead of "log signals are planned", and `/telemetry help`
+  documents the new subcommand. 17 new tests in
+  `crates/ragent-telemetry/tests/test_logs_export.rs` cover the conversion, the
+  redaction and truncation guard, the layer against a real in-memory exporter
+  (export, disabled cell, level floor, filter), the endpoint resolution and the
+  config validation. `specs/otel` SPEC.md/PLAN.md (FR-036..FR-042, NFR-008,
+  Milestone 8), `docs/howtos/config.md` and
+  `docs/howtos/slashcommands/telemetry.md` are updated.
+- **`/telemetry setup` gained a `Logs level` row** (`crates/ragent-tui/src/app/state.rs`,
+  `input.rs`, `layout.rs`, `app/models.rs`). The row is field index 5 in the
+  `Tab`/`BackTab` cycle and is painted after the internal-port row, so the
+  cursor no longer appears to jump as it wraps. The field is the export level,
+  not an on/off switch: saving the dialog writes `logs.enabled: true` with the
+  typed `trace`/`debug`/`info`/`warn`/`error`, and an empty value keeps the
+  default `info` (placeholder) rather than turning the signal off. A non-empty
+  value that is not a level is rejected inline by `OtelConfig::validate()`
+  rather than silently falling back.
+- **`telemetry_counters_content` reports both signals.**
+  `App::telemetry_counters_content` now takes the resolved `OtelLogsConfig` plus
+  the live `logs_exporting()` state, so the content `/telemetry counters` and
+  the telemetry panel render agree: three distinct log states (`on` at a level,
+  `configured but not attached` when no layer holds the pipeline, and `off`) are
+  spelled out instead of a single "log signals are planned" line.
+- **`storage.retention` configuration section** (`crates/ragent-config/src/retention.rs`,
+  new module). `RetentionConfig { enabled, message_days }` with `enabled: false`
+  and `message_days: 14` as defaults; `StorageConfig` wraps it and is
+  `skip_serializing_if = StorageConfig::is_default`, so a `ragent.json` that has
+  never set the section round-trips byte-identically. `RetentionConfig::validate()`
+  rejects `message_days == 0`, because a zero-day window would empty the store on
+  every start - a bound the operator can see is better than a silent wipe.
+- **`Storage::prune_messages_older_than(max_age)`** (`crates/ragent-storage/src/storage.rs`).
+  Deletes every message whose `created_at` is older than the cutoff, in one
+  transaction across the three tables that hold a transcript row: `messages_fts`
+  rowids (collected before the base rows that identify them disappear), then
+  `message_fts_keys`, then `messages`. **Session rows are kept** - an expired
+  transcript stays listed and resumable, it just reads back empty. The cutoff uses
+  `chrono::Duration::checked_sub_signed` (SEC-049 precedent) so an extreme window
+  returns an error rather than panicking inside the subtraction.
+- **`Storage::count_messages_older_than(max_age)`** - the read-only counterpart:
+  the same fallible cutoff and the same predicate, so `--dry-run` and the prune
+  that follows it cannot disagree about what is in the window.
+- **`ragent db prune [--days N] [--dry-run]`** (`src/main.rs` `DbCommands`). Omitted
+  `--days` uses `storage.retention.message_days`; `--days 0` exits with status 2
+  rather than accepting a window that would delete everything; `--dry-run` prints
+  the count via the read-only method. A real prune reports the deleted count and
+  states that the file does not shrink until a `VACUUM`.
+- **TUI `/db` slash command** (`crates/ragent-tui/src/app/slash.rs`). `handle_db_command`
+  routes `help` (and the bare form, plus `--help`/`-h`) to `handle_db_help`, and
+  `prune` to `handle_db_prune`, which accepts both `--days N` and `--days=N`, a
+  positive day count only, and `--dry-run`. Registry entry, autocomplete
+  suggestions (`prune`, `help`), and parameter hint
+  (`[prune [--days N] [--dry-run]|help]`) all mirror the implemented surface; the
+  `db` `COMMAND_CATALOG` entry in `crates/ragent-agent/src/tool/command_catalog.rs`
+  keeps the drift guard green with `DB_SUBS`/`DB_FLAGS`.
+- **`Prune messages older than N days?` confirmation dialog.** A real `/db prune`
+  deletes nothing until the user picks `Yes`; the dialog opens on `No`
+  (`DB_PRUNE_CONFIRM_NO`) so a stray `Enter` cannot remove messages, and the
+  window it names is captured when it opens (`App::db_prune_confirm_days`) so the
+  confirmed action cannot apply a different window from the one the user read.
+  `App::db_retention_days` resolves the configured default once at startup.
+- **Startup retention pass** (`src/main.rs`). When `storage.retention.enabled`, the
+  prune runs on `spawn_blocking` so the three-table cascade never stalls the
+  startup critical path; the outcome is logged at `info` (or `debug` for the
+  no-op).
+- **Tests**: `crates/ragent-config/tests/test_retention_config.rs` (6 cases -
+  defaults, parsing, section default, zero-window rejection, positive window, and
+  the omitted-section round-trip), `crates/ragent-storage/tests/test_message_retention.rs`
+  (5 cases - window scoping, zero window, empty store, session-row survival, and
+  FTS consistency), and `crates/ragent-tui/tests/test_db_command.rs` (13 cases -
+  registration, suggestions/hint, `/help` listing, help page, bare `/db`, unknown
+  subcommand, `--dry-run` deleting nothing, the confirm-then-delete flow, the
+  joined `--days=N` form, the configured default, and the zero-day / unknown-flag
+  rejections). Plus `wal_is_capped_after_a_large_write_burst` in
+  `crates/ragent-storage/tests/test_wal_warmup.rs`.
+
+### Fixed
+
+- **Only `Bash` tool calls reached the OTLP logs endpoint; `Edit`, `Write` and
+  the rest did not.** The log-window re-emit was nested inside
+  `if self.show_log` in `App::push_log_record_and_maybe_export`
+  (`crates/ragent-tui/src/app/session_ops.rs`), so the export was a consequence
+  of a *view* being open - and a normal session runs with the log panel closed.
+  A collector therefore received only the events carrying a native `tracing`
+  record of their own: `Bash` logs `Executing bash command` on every call
+  (`crates/ragent-tools-core/src/bash.rs`), while `Edit`, `Write`, `Grep`, `read`
+  and the remaining tools log nothing at all. The panel-gated code treated every
+  tool identically, so the asymmetry came entirely from which tools happen to log
+  natively; read from a collector it looked like "only Bash is exported". The
+  panel-visibility gate now covers only the panel's own rendering and its spool
+  file, and the re-emit runs unconditionally (still subject to the FR-036d
+  duplicate guard and the FR-036c burst bound). Verified by driving the real
+  `ToolCallStart` handler for both `Bash` and `Edit` with `show_log = false`:
+  before the fix neither produced a record, after it both produce one at `INFO`
+  with `log_window_level = "tool"`. New regression test
+  `test_tool_call_is_exported_with_the_panel_closed` in
+  `crates/ragent-tui/tests/test_log_window_otel_export.rs` asserts both tools, so
+  the export can never again become a consequence of the panel being visible.
+  Recorded as spec `otel` FR-036e; `FR-036a` no longer scopes the re-emit to an
+  open panel, and `README.md` and
+  `docs/howtos/slashcommands/telemetry.md` now say so.
+- **`INF` / `WRN` / `ERR` event-bus lines stayed in the log window and never
+  reached the OTLP logs endpoint.** When the log-window re-emit was split into an
+  exporting path and a quiet one, `App::push_log_no_agent` - the wrapper every
+  agent-event-bus line goes through - was left forwarding to the *quiet*
+  `push_log`. It therefore recorded `Context compression started`,
+  `response finished (...)`, `agent_complete signalled`, the compaction notice and
+  every `agent notice: ...` in the panel while exporting nothing, because none of
+  them has a native `tracing` event behind it for the logs layer to have shipped
+  already (`crates/ragent-tui/src/app/session_ops.rs`). The wrapper now takes the
+  exporting path at the entry's own severity, so an `INF` panel line arrives at
+  the collector as `INFO`, a `WRN` as `WARN` and an `ERR` as `ERROR`. The
+  `push_log` docblock claimed its only callers were the `TuiTracingLayer` drain;
+  that stopped being true when `push_log_no_agent` was written on top of it, and
+  the stale claim is what hid the gap, so the docblock now names the deferred
+  callers explicitly. New regression tests
+  `test_event_bus_info_line_is_exported` and
+  `test_event_bus_warn_and_error_lines_are_exported` in
+  `crates/ragent-tui/tests/test_log_window_otel_export.rs` pin the contract, and
+  they sit beside `test_tracing_record_drain_is_not_re_emitted`, which pins the
+  other half: a `TuiTracingLayer` record has already been exported and must stay
+  quiet.
+- **No TOOL entry from the log window reached the OTLP logs signal.** The
+  `T`/`TUL` lines an operator sees in the log window never appeared at the
+  collector, so a collector configured at `telemetry.otel.logs.level: debug` -
+  the setting an operator uses when debugging a hung or looping tool - received
+  metrics and warnings but not one tool call. Two things stacked to cause it:
+  the export was opt-in per call site (`push_log_exported` only), and the level
+  was the entry's own, which kept the re-emit invisible below `info`. Every
+  entry now exports while the panel is open, at a fixed **`DEBUG`** level
+  (`crates/ragent-tui/src/app/session_ops.rs`), with the entry's own severity
+  carried as the `log_window_level` attribute (`tool`, `info`, `warn`, `error`)
+  so a collector can still tell a tool failure from a tool call. `DEBUG` is the
+  level that keeps both streams exact at once: it is below every severity the
+  panel, the spool file and stderr show, so no local sink gains a duplicate, and
+  nothing in the workspace logs natively at `DEBUG`, so the panel's echo of a
+  `TuiTracingLayer` record, the startup line or an export-failure notice can
+  never share a severity with its original - a collector's single `logs.level`
+  floor admits one or the other, never both. (An `INFO` echo, the previous
+  behaviour for `Tool` and `Info` entries, put the startup line and every
+  export-failure notice at the collector twice.) The export is bounded at 60
+  records per second process-wide by a token bucket, because one panel line is
+  one exported record: a wall of mirrored `npx`-launched MCP stderr would
+  otherwise fill a batch, and when a burst ends the first entry that fits again
+  is preceded by a `warn` record naming how many were withheld, so the collector
+  sees the gap rather than a silent loss. Setting `telemetry.otel.logs.level` to
+  `debug` is now what puts tool calls on the collector, and it is the documented
+  requirement (spec `otel` FR-036a, FR-036c, FR-036d;
+  `docs/howtos/slashcommands/telemetry.md`).
+- **A paste test read the developer's real clipboard.** `ClipboardTestOverrideGuard`
+  overrode only the clipboard *text*, so the image query in
+  `App::paste_image_from_clipboard` still asked the real `arboard` clipboard:
+  `paste_image_from_clipboard_without_image_logs_notice` passed on a headless CI
+  box (no clipboard) and failed on a workstation that had just taken a
+  screenshot, which attached that PNG and asserted `pending_attachments == 0`.
+  The guard now pins the image query too (`Some(None)` = no image), with
+  `ClipboardTestOverrideGuard::with_image` to supply one on purpose, so no test
+  observes the desktop clipboard (`crates/ragent-tui/src/clipboard.rs`).
+ The FR-036a re-emit ran
+  for *every* log-window entry, including the entries the panel had just
+  received from `tracing` itself (`TuiTracingLayer` drained into
+  `App::push_log` in `crates/ragent-tui/src/lib.rs`). Each such entry was
+  therefore exported once natively by the logs layer and once again as its own
+  panel echo, so a collector saw two records per line - startup, config, MCP,
+  code-index, provider, and each of the five `telemetry: OTLP metric export
+  failed` records that precede the auto-disable - and the duplication, not the
+  volume, is what made the channel unreadable. `push_log` / `push_log_for` now
+  record the panel entry and emit nothing; a new `App::push_log_exported` is the
+  only emitting path and is used solely by the lines assembled from the agent
+  event bus (tool-call start/result/failure, background-task transitions,
+  teammate spawn/message/status, reconcile rows, the GitHub device-flow code),
+  which have no `tracing` event of their own. Each line now reaches the
+  collector exactly once, with nothing previously visible removed (spec `otel`
+  FR-036a, FR-036d). New regression test
+  `test_tracing_record_drain_does_not_reexport` in
+  `crates/ragent-tui/tests/test_log_window_otel_export.rs` pins the drain to
+  `push_log` behind a capture subscriber.
+- **Tool-call activity never reached the OTLP logs signal.** The TUI log window
+  is an in-memory sink: entries pushed into it by `App::push_log_for` were never
+  emitted as `tracing` events, so the log export layer - which only sees
+  `tracing` events - had nothing to forward, and a collector received LLM and
+  provider diagnostics but not a single tool-call line. Every log-window entry is
+  now re-emitted as a `tracing` event carrying `log_window = true`
+  (`crates/ragent-tui/src/app/session_ops.rs`), so the OTLP logs signal carries
+  the same activity the panel shows: tool-call start, tool arguments, tool
+  result, tool failure, warnings and information lines. The
+  entry's severity selects the level (`Error` maps to `ERROR`, `Warn` to `WARN`,
+  and `Info` and `Tool` to `INFO`), and `telemetry.otel.logs.level` filters the
+  remote stream exactly as it filters any other event.
+- **Mirrored child-process stderr flooded the OTLP logs signal.** The TUI mirrors
+  every non-empty line a child process writes to stderr into the log window as a
+  `Warn` entry (`crates/ragent-tui/src/lib.rs`), and the FR-036a re-emit then
+  forwarded each one to the collector. An MCP server started through `npx` prints
+  hundreds of banner, deprecation and readiness lines at startup, so a single
+  server launch buried the collector in `stderr: ...` records - line counts in the
+  hundreds of thousands over a session - that carry no session activity. A new
+  `App::push_log_local` records a log-window entry without re-emitting it, and the
+  stderr mirror now uses it: the panel and the log-window spool file still show
+  every line, and the export no longer receives them (spec `otel` FR-036c). This is
+  the only log-window source exempt from FR-036a; tool calls, arguments, results,
+  failures, warnings and information lines are still exported.
+- **`--log-level all` was rejected and silently downgraded to `warn`.** `all` is
+  the natural spelling of "record everything" and is already accepted by
+  `telemetry.otel.logs.level`, but it is not an `EnvFilter` directive, so
+  `--log-level all` printed `invalid log level 'all'` and fell back to `warn` -
+  which meant the one invocation an operator reaches for when they want the
+  collector to receive everything produced the quietest stream. `all` is now
+  mapped to `trace` before the filter is parsed (`src/main.rs`), for both the
+  local sink and the export.
+- **OTLP/HTTP exports 404'd against a working collector on the configured
+  port.** `telemetry.otel.endpoint` is documented as a base URL
+  (`http://localhost:4318`), but `opentelemetry-otlp` treats a programmatic
+  `with_endpoint` value as the *complete* signal URL and posts to it verbatim;
+  the `/v1/metrics` suffix is appended only to the SDK's own default (or to the
+  spec's `OTEL_EXPORTER_OTLP_ENDPOINT` base-URL variable). ragent therefore sent
+  every export to `POST /`, which a stock collector answers with `404` - the
+  export-health monitor then reported "collector returned an error status ...
+  HTTP export failed with status code: 404" once per interval and switched
+  telemetry off after five. New
+  `ragent_telemetry::subsystem::otlp_http_signal_endpoint` resolves the
+  configured value for both signals: a bare base URL gains `/v1/metrics` (or
+  `/v1/logs`; trailing slashes collapsed, query string and fragment preserved),
+  a base path (`https://gw.example.com/otel`) keeps it, and a value that already
+  names a signal path (`.../v1/metrics`) is used exactly as written, so both
+  documented forms work. Verified against a live collector on `:4318` (`flush`
+  -> `Ok`, previously `404`) and by 7 new tests in
+  `crates/ragent-telemetry/tests/test_otlp_http_endpoint.rs`, including an
+  end-to-end export through a mock collector that asserts the request target is
+  `/v1/metrics` - the test fails with `left: "/"` when the fix is reverted.
+  `docs/howtos/config.md` now states the endpoint resolution rule.
+
+- **`ragent.db-wal` retained the high-water mark of every write burst.**
+  `Storage::open` now sets `journal_size_limit` to 32 MiB
+  (`WAL_JOURNAL_SIZE_LIMIT_BYTES`). `wal_autocheckpoint` only decides *when* a
+  checkpoint runs; it never truncates the file, and a checkpoint cannot truncate
+  while another connection holds a reader mark. Without the size limit the WAL
+  ratcheted up to the peak of the largest single burst and stayed there
+  (observed: a 670 MB WAL on a 2 GB database). `journal_size_limit` bounds the
+  steady state, and the explicit `checkpoint_wal()` on graceful shutdown truncates
+  it outright. `crates/ragent-storage/tests/test_wal_warmup.rs` pins both the
+  positive limit and the post-burst truncation.
+- **Graceful shutdown checkpoints the WAL.** `src/main.rs` keeps a `storage`
+  handle for the end of `async_main` (the dispatch moves the original into the TUI
+  and its handlers) and calls `checkpoint_wal()` best-effort, so a failure never
+  turns a successful command into an error exit.
+- **Test harnesses no longer pollute the working directory they inspect.**
+  `tests/test_new_cli_command.rs` and `tests/test_version_flag.rs` split the
+  private `XDG_CONFIG_HOME`/`HOME` root into a *sibling* of `cwd`. `ragent new`
+  refuses a non-empty directory, so a config/home tree created inside `cwd` tripped
+  the very guard those tests exercise; the working directory now contains only
+  what each test deliberately puts there.
+- **A telemetry change silently reset every other telemetry setting - and was
+  then discarded.** `/telemetry on|off`, `/telemetry logs <level>` and
+  `/telemetry setup` read the block they were about to rewrite back from the
+  *loaded* `Config`, then wrote a whole `telemetry.otel` block over the file.
+  Two things went wrong together. First, the destination was a project
+  `.ragent/ragent.json` whenever one was loaded, but the repo-content guard
+  (`SEC-ragent-config-001/002/003`, `Config::merge_project`) discards a project
+  overlay's entire `telemetry` block, so the loaded config never contained what
+  that file held: the read fell back to defaults and the write then both reset
+  the file's real settings and produced a block that was dropped on the next
+  load. Second, even at the right destination a defaults-merge reset the
+  operator's endpoint, protocol, service name and log level on what looked like
+  a one-flag toggle - `/telemetry logs warn` followed by `/telemetry on` put the
+  level back to `info`. `telemetry_config_source_path` now targets the
+  user-global `ragent.json` (the only file whose `telemetry` block reaches a
+  running session) and `telemetry_config_snapshot` reads that file's
+  `telemetry.otel` block directly instead of going through the guarded load, so
+  every caller merges onto what is actually stored.
+  `test_telemetry_on_off_switches_metrics_and_logs_together` pins the
+  level-survives-`on` case and the endpoint-survives-`on` case (both failed with
+  `left: "info"` before the fix);
+  `test_telemetry_setup_save_reconfigures_live_subsystem` now asserts against
+  the global destination.
+
+- **One reindex emitted thousands of `tracing` events.** `scanner::scan_directory`
+  logged a `trace!` line per skipped path - `.git/`, `target/`, `node_modules/`
+  and every glob-excluded file - so walking a real repository produced roughly
+  6,000 events per run, and the new OTLP logs signal dutifully exported them.
+  The skips are now counted instead (`skipped_symlink`, `skipped_excluded`,
+  `skipped_globbed`) and reported in the one existing `debug!` summary, and
+  `process_file` returns a `ProcessOutcome` (`Scanned`/`Empty`/`Oversized`/
+  `GrewPastCap`/`Binary`/`Unreadable`) whose counts are folded into a second
+  summary line rather than logged per file. The information is unchanged; the
+  per-file event volume is gone (`crates/ragent-codeindex/src/scanner.rs`).
+- **Ollama Cloud logged one `INFO` event per streamed frame.** The per-frame
+  line in `ollama_cloud.rs` is diagnostic chatter, not session activity, so it
+  is now `debug!`: a `--log-level debug` run still shows it locally while the
+  default `info` floor keeps it out of the OTLP export. A done frame that carries
+  tool calls is still recorded at `INFO` by the existing "tool_calls found in done
+  frame" event.
+- **A `TuiTracingLayer` record was exported to the collector twice.**
+  `crates/ragent-tui/src/lib.rs` drained each record into `push_log`, which - at
+  the time - re-emitted it; the record had already been exported natively by the
+  logs layer, so startup chatter, provider notices, export-failure lines and MCP
+  banners all arrived twice. The drain now uses the quiet path (`push_log`, not
+  `push_log_exported`), and the mirrored child-process stderr drain uses
+  `push_log_deferred`, so hundreds of `stderr: ...` records from an
+  `npx`-launched MCP server stay in the panel and the spool without reaching the
+  collector (specs `otel` FR-036c, FR-036d).
+- **`--log-level` defaulted to `warn`, which silently dropped every tool call
+  from the OTLP export.** A tool call re-emits at `INFO`, so the local filter
+  discarded it before the logs layer ever saw it: `--log-level` and
+  `--log-level all` produced different collector content for identical agent
+  activity. The default is now `info` and the flag's help text says so
+  (`src/main.rs`).
+- **YOLO mode skipped MCP config validation entirely.** `validate_mcp_config`
+  returned `Ok(())` early whenever YOLO was on, so a mistyped `command` or a
+  malformed `url` was accepted at configure time and surfaced later as an opaque
+  spawn failure. The short-circuit is gone: validation is structural, not a
+  permission check, so it applies in every mode
+  (`crates/ragent-agent/src/mcp/mod.rs`).
+- **`allowed-tools` entries were matched byte for byte.** A manifest writing
+  `bash` or `grep` restricted nothing, because the registry spells them `Bash`
+  and `Grep`; the entry was reported as unresolved and the capability silently
+  disappeared. Resolution now folds ASCII case
+  (`allowed_tools::{entry_matches_tool, resolve_allowed_tool_entry}`) and stores
+  the entry under the **registry's** spelling, so two spellings of one tool
+  cannot become two keys. A retired spelling that names a *different* tool is
+  still unresolved - case folding resolves one tool, never a different one.
+  New `any` pseudo entry (`ANY_TOOL_ENTRY`, `is_any_tool_entry`) lifts the
+  restriction outright by leaving the allowed set empty, which every consumer
+  already reads as "hide nothing"; it is honoured without consulting the
+  registry and is therefore never reported as unresolved. Both sub-agent tool
+  filters (`session/processor.rs`, `session/loop_steps.rs`) and the loop
+  `tool_set` path now route through `is_allowed_tool`, so the case-insensitive
+  rule holds on every surface that renders a tool list. Six new cases in
+  `crates/ragent-agent/tests/test_fr029_allowed_tools.rs`.
+- **`test_telemetry_setup_opens_dialog_with_defaults` asserted the developer's
+  own config.** `/telemetry setup` prefills its fields from `Config::load()`,
+  which reads the user-global `~/.config/ragent/ragent.json`; the test asserted
+  the *defaults* while inheriting whatever that file held, so it passed on a CI
+  box with no config and failed on a workstation whose
+  `telemetry.otel.logs.level` was `all` (expected `info`, got `all`). It now
+  enters an empty scratch project under `target/temp/` with `XDG_CONFIG_HOME`
+  redirected there, holding the crate-wide `global_env_lock` for the run, so the
+  loaded config is the built-in default and the working tree is untouched
+  (`crates/ragent-tui/tests/test_telemetry_slash.rs`).
+- **`ragent models` printed its `tracing` log lines onto stdout.** `Models` was
+  missing from the `machine_output` list in `src/main.rs`, so a run with `INFO`
+  enabled emitted the startup lines (`Tracing initialized`, `Configuration
+  loaded successfully`, `Registries created`, ...) ahead of the model listing on
+  the same stream. Anything piping `ragent models` therefore received ANSI
+  escape sequences and log prose before the first `provider/model` line -
+  `test_wire_matrix_flag_prints_one_row_per_provider` read the `Configuration
+  loaded successfully ... config_paths=[".ragent...` line as a provider id and
+  failed. `Commands::Models { .. }` now routes tracing to stderr like the other
+  report commands, so the listing is the only thing on stdout (verified: zero
+  ANSI bytes on stdout, logs on stderr, all four `--wire-matrix` tests pass).
+- **Eight `pub` items in `ragent-tui` were unreachable from outside the crate.**
+  `QUESTION_TIMEOUT_SECS`, `toggle_plugin_enabled`, `mcp_display_servers`,
+  `render_mcp_config`, `mcp_declaration_files`, `mcp_bridged_owners`,
+  `mcp_ragent_tool_name` and `mcp_status_from_event` sit in the private
+  `app::event_handler`, `app::plugin` and `app::slash` modules, so `-D
+  unreachable_pub` rejected each of them. They are now `pub(crate)`: every call
+  site is inside the crate (including the `_for_tests` re-exports in
+  `crates/ragent-tui/src/app.rs` that the integration tests use), so the
+  visibility matches the actual surface.
+- **The `unresolved_allowed_tools` doctest asserted a spelling was unresolved
+  that now resolves.** The example listed `"Read"` under "never adopted: matches
+  nothing" and expected `vec!["Read", "ReadFile"]`, but FR-029 resolution folds
+  ASCII case, so `"Read"` names the registered `read` and the doctest failed
+  against the real registry. The example now documents that case folding answers
+  `"Read"` with `read` and uses `"Bashh"` as the second genuinely unknown
+  spelling, matching what `test_fr029_allowed_tools.rs` has asserted since the
+  lookup became case-insensitive.
+
+### Changed
+
+- **`/db` is documented end to end**: `docs/sqlite.md` gains the `journal_size_limit`
+  pragma row and a "Message retention" section (opt-in semantics, the one-transaction
+  three-table cascade, SEC-049, sessions-kept, `count_messages_older_than`, and the
+  `VACUUM` caveat).
+- **The telemetry docs now describe both signals.** `docs/howtos/config.md` §7.22
+  gains the `logs` row in the `OtelConfig` table, an `OtelLogsConfig` section
+  (fields, the shared endpoint/interval/timeout/TLS rules, the `/v1/logs` path,
+  the redaction and 16 KiB truncation guard, the build-failure fallback) and an
+  endpoint-resolution sentence on the `endpoint` row;
+  `docs/howtos/slashcommands/telemetry.md` documents
+  `/telemetry logs [<level>]` (level only - enabling is `/telemetry on|off`) and
+  the three states `/telemetry counters` reports; `README.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md` and `SPEC.md` §5.7
+  carry the same feature at their own depth.
+- **`docs/howtos/tools/skills.md` documents case-insensitive `allowed-tools`
+  resolution and the `any` pseudo entry.** The page previously stated that
+  entries are matched byte for byte and are case-sensitive, which stopped being
+  true when the resolver began folding ASCII case.
+- **`docs/howtos/mcp.md` no longer claims validation is skipped in YOLO mode.**
+  The short-circuit was removed, so the page states that validation runs in every
+  permission mode and explains why: YOLO relaxes what a tool may *do*, not
+  whether a server definition is well formed.
+
 ## [1.0.159] - 2026-10-31
 
 Release covering the telemetry export-health work plus four defects found while

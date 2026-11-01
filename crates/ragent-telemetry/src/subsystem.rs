@@ -82,6 +82,22 @@ struct RuntimeState {
     #[cfg(feature = "telemetry")]
     prometheus_handle:
         Option<tokio::task::JoinHandle<std::io::Result<tokio::task::JoinHandle<()>>>>,
+    /// The OTLP logs-signal pipeline (spec `otel` FR-036). `None` when
+    /// `telemetry.otel.logs.enabled` is `false` (the default). Flushed and
+    /// shut down alongside the meter provider so the last records of a run
+    /// are not lost with the batch buffer.
+    #[cfg(feature = "telemetry")]
+    logger: Option<crate::logs::LoggerProviderHandle>,
+    /// The swap cell of the installed [`TracingLogsLayer`] (spec `otel`
+    /// FR-036). `None` until [`TelemetrySubsystem::logs_layer`] hands the
+    /// process's layer to the subsystem; while it is empty the logs signal is
+    /// configured but has nowhere to send records, which is the state of a
+    /// process whose tracing subscriber was installed without the layer (for
+    /// example inside a libtest harness).
+    ///
+    /// [`TracingLogsLayer`]: crate::logs::TracingLogsLayer
+    #[cfg(feature = "telemetry")]
+    logs_cell: Option<crate::logs::ExportCell>,
 }
 
 impl RuntimeState {
@@ -97,6 +113,8 @@ impl RuntimeState {
             provider: None,
             cardinality,
             prometheus_handle: None,
+            logger: None,
+            logs_cell: None,
         }
     }
 
@@ -156,6 +174,10 @@ impl TelemetrySubsystem {
                 // retained on `RuntimeState`.
                 let (provider, _prometheus_reader, prometheus_handle) =
                     build_enabled_provider(&config)?;
+                // A logs pipeline that cannot be built must not take the
+                // metrics signal down with it (FR-041): `build_logs_pipeline`
+                // logs the failure and returns `None`.
+                let logger = build_logs_pipeline(&config);
 
                 let cardinality = std::sync::Arc::new(crate::cardinality::CardinalityCache::new(
                     config.cardinality_limit,
@@ -167,6 +189,8 @@ impl TelemetrySubsystem {
                         provider: Some(std::sync::Arc::new(provider)),
                         cardinality,
                         prometheus_handle,
+                        logger,
+                        logs_cell: None,
                     }),
                 })
             }
@@ -207,6 +231,10 @@ impl TelemetrySubsystem {
                 provider: Some(std::sync::Arc::new(provider)),
                 cardinality,
                 prometheus_handle: None,
+                // A test that injects its own meter provider owns the log
+                // pipeline too; nothing is exported unless it opts in.
+                logger: None,
+                logs_cell: None,
             }),
         }
     }
@@ -245,6 +273,56 @@ impl TelemetrySubsystem {
     #[must_use]
     pub fn config(&self) -> OtelConfig {
         self.runtime.lock().config.clone()
+    }
+
+    /// Attach the process's [`TracingLogsLayer`] cell to this subsystem.
+    ///
+    /// The tracing subscriber is global and is installed once, before the
+    /// telemetry subsystem exists, so the layer cannot hold the subsystem. It
+    /// holds a swap cell instead, and this call hands that cell to the
+    /// subsystem: from then on [`reconfigure`](Self::reconfigure) fills it in
+    /// when `telemetry.otel.logs.enabled` is set and clears it when the signal
+    /// is off, which is what lets `/telemetry on|off` change log export in a
+    /// running process without reinstalling the subscriber.
+    ///
+    /// Calling this with the same cell more than once is harmless; a later call
+    /// with a different cell detaches the earlier one (it is cleared first, so
+    /// it stops exporting).
+    ///
+    /// [`TracingLogsLayer`]: crate::logs::TracingLogsLayer
+    #[cfg(feature = "telemetry")]
+    pub fn attach_logs_layer(&self, cell: crate::logs::ExportCell) {
+        let mut guard = self.runtime.lock();
+        if let Some(previous) = guard.logs_cell.take() {
+            // Two layers can only exist if a caller installed a second
+            // subscriber; clearing the previous cell stops it duplicating every
+            // record into the same pipeline.
+            *previous.write() = None;
+        }
+        guard.logs_cell = Some(cell);
+        install_logs_cell(&guard);
+    }
+
+    /// Returns `true` while log records are being exported to the collector
+    /// (spec `otel` FR-036).
+    ///
+    /// This is `false` when telemetry is off, when the `logs` block is disabled,
+    /// and when no [`TracingLogsLayer`](crate::logs::TracingLogsLayer) has been
+    /// attached even though the block is enabled.
+    #[must_use]
+    pub fn logs_exporting(&self) -> bool {
+        #[cfg(feature = "telemetry")]
+        {
+            let guard = self.runtime.lock();
+            guard
+                .logs_cell
+                .as_ref()
+                .is_some_and(|cell| cell.read().is_some())
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            false
+        }
     }
 
     /// Returns a cheap clone of the live meter provider, if telemetry is
@@ -334,6 +412,21 @@ impl TelemetrySubsystem {
                 handle.abort();
             }
             guard.prometheus_handle = None;
+            // The logs pipeline is torn down with the meter provider so a
+            // reconfigure (or `/telemetry off`) delivers the records emitted up
+            // to that moment instead of leaving them in the batch buffer.
+            if let Some(logger) = guard.logger.take() {
+                // Stop the layer pointing at a provider about to be shut down:
+                // a record emitted in between must not reach a dead processor.
+                if let Some(cell) = &guard.logs_cell {
+                    *cell.write() = None;
+                }
+                if let Err(e) = logger.shutdown()
+                    && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
+                {
+                    tracing::warn!(error = %e, "OTEL log provider shutdown during reconfigure");
+                }
+            }
             if let Some(provider) = guard.provider.take() {
                 // `SdkMeterProvider::shutdown` takes `&self`; call it through
                 // the Arc. Errors are logged but non-fatal - the provider is
@@ -350,10 +443,15 @@ impl TelemetrySubsystem {
             {
                 match build_enabled_provider(&config) {
                     Ok((provider, _prometheus_reader, prometheus_handle)) => {
+                        // The logs pipeline is rebuilt too, so a re-pointed
+                        // endpoint/level takes effect without a restart. A
+                        // logs failure leaves metrics running (FR-041).
+                        let logger = build_logs_pipeline(&config);
                         guard.state = TelemetryState::Enabled;
                         guard.config = config;
                         guard.provider = Some(std::sync::Arc::new(provider));
                         guard.prometheus_handle = prometheus_handle;
+                        guard.logger = logger;
                     }
                     Err(e) => {
                         // Building the new provider failed - leave the
@@ -363,6 +461,7 @@ impl TelemetrySubsystem {
                         guard.state = TelemetryState::Disabled;
                         guard.config = config;
                         guard.provider = None;
+                        guard.logger = None;
                         return Err(e);
                     }
                 }
@@ -383,8 +482,14 @@ impl TelemetrySubsystem {
             #[cfg(feature = "telemetry")]
             {
                 guard.provider = None;
+                guard.logger = None;
             }
         }
+
+        // 3. Point the installed logs layer at whatever pipeline now exists
+        // (or at nothing, when the signal is off).
+        #[cfg(feature = "telemetry")]
+        install_logs_cell(&guard);
         Ok(())
     }
 
@@ -420,13 +525,31 @@ impl TelemetrySubsystem {
         #[cfg(feature = "telemetry")]
         {
             // Clone the provider handle so the blocking flush never runs while
-            // `self.runtime` is locked - `reconfigure` needs that lock.
-            let provider = self
-                .runtime
-                .lock()
-                .provider
-                .as_ref()
-                .map(std::sync::Arc::clone);
+            // `self.runtime` is locked - `reconfigure` needs that lock. The log
+            // pipeline is cloned for the same reason and drained first: its
+            // records are the ones emitted while the metrics were last being
+            // recorded, so flushing it first keeps a collector timeline in the
+            // order the events happened.
+            let (logger, provider) = {
+                let guard = self.runtime.lock();
+                (
+                    guard.logger.clone(),
+                    guard.provider.as_ref().map(std::sync::Arc::clone),
+                )
+            };
+            if let Some(logger) = logger
+                && let Err(e) = logger.force_flush()
+                && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
+            {
+                let kind = crate::export_health::ExportFailureKind::classify(&e.to_string());
+                tracing::warn!(
+                    reason = kind.describe(),
+                    "OTEL log provider force_flush error: {e}"
+                );
+                return Err(crate::TelemetryError::ExporterInit(format!(
+                    "log flush failed: {e}"
+                )));
+            }
             if let Some(provider) = provider
                 && let Err(e) = provider.force_flush()
             {
@@ -471,6 +594,15 @@ impl TelemetrySubsystem {
             let guard = self.runtime.lock();
             if let Some(handle) = &guard.prometheus_handle {
                 handle.abort();
+            }
+            if let Some(logger) = &guard.logger
+                && let Err(e) = logger.shutdown()
+                && !matches!(e, opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown)
+            {
+                tracing::warn!("OTEL log provider shutdown error: {e}");
+                return Err(crate::TelemetryError::ExporterInit(format!(
+                    "log shutdown failed: {e}"
+                )));
             }
             if let Some(provider) = &guard.provider
                 && let Err(e) = provider.shutdown()
@@ -712,6 +844,61 @@ fn build_enabled_provider(
     Ok((provider, prometheus_reader, prometheus_handle))
 }
 
+/// Resolve the OTLP/HTTP metrics URL from a configured endpoint.
+///
+/// The configured `telemetry.otel.endpoint` is a base URL
+/// (`http://localhost:4318`). `opentelemetry-otlp` treats a programmatic
+/// `with_endpoint` value as the complete signal URL and posts to it verbatim,
+/// so the bare base URL reached the collector as `POST /` and a stock collector
+/// answered `404`. The SDK appends `/v1/metrics` only to its own default (or to
+/// the spec's `OTEL_EXPORTER_OTLP_ENDPOINT` base-URL variable), so ragent
+/// appends it here.
+///
+/// An endpoint that already names a signal path is left alone, which keeps
+/// both forms working:
+///
+/// | configured endpoint | posted to |
+/// | --- | --- |
+/// | `http://localhost:4318` | `http://localhost:4318/v1/metrics` |
+/// | `http://localhost:4318/` | `http://localhost:4318/v1/metrics` |
+/// | `https://gw.example.com/otel` | `https://gw.example.com/otel/v1/metrics` |
+/// | `https://gw.example.com/p/v1/metrics` | unchanged |
+///
+/// Query strings and fragments are preserved after the appended path.
+#[cfg(feature = "telemetry")]
+pub fn otlp_http_metrics_endpoint(endpoint: &str) -> String {
+    otlp_http_signal_endpoint(endpoint, "metrics")
+}
+
+/// Resolve the OTLP/HTTP URL for a signal from a configured base URL.
+///
+/// `signal` is the OTLP signal path segment: `"metrics"`, `"logs"` or
+/// `"traces"`. See [`otlp_http_metrics_endpoint`] for the reasoning; the logs
+/// signal (spec `otel` FR-036) reuses the same resolver so one configured
+/// `telemetry.otel.endpoint` addresses both signals.
+///
+/// An endpoint that already names a `v1/<signal>` path is returned unchanged,
+/// whichever signal it names: a deployment that points `endpoint` at
+/// `.../v1/metrics` has made an explicit choice, and silently rewriting it to
+/// `.../v1/logs` would send metrics to the logs receiver.
+#[cfg(feature = "telemetry")]
+pub fn otlp_http_signal_endpoint(endpoint: &str, signal: &str) -> String {
+    /// Any `v1/<signal>` path segment means the operator named the signal URL.
+    const SIGNAL_SEGMENT: &str = "v1/";
+
+    let endpoint = endpoint.trim();
+    let (base, suffix) = match endpoint.find(['?', '#']) {
+        Some(index) => endpoint.split_at(index),
+        None => (endpoint, ""),
+    };
+
+    if base.contains(SIGNAL_SEGMENT) {
+        return endpoint.to_string();
+    }
+
+    format!("{}/v1/{signal}{suffix}", base.trim_end_matches('/'))
+}
+
 /// Construct the OTLP metric exporter based on the configured protocol
 /// (FR-005, FR-023, FR-024).
 ///
@@ -738,10 +925,18 @@ fn build_metric_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::Metr
     match config.protocol {
         OtelProtocol::Http => {
             // OTLP/HTTP with protobuf encoding (FR-023).
+            //
+            // The SDK treats a programmatic `with_endpoint` value as the
+            // COMPLETE signal URL and posts straight to it; only the default
+            // (or the spec's base-URL env var) gets the `/v1/metrics` suffix
+            // appended by `build_endpoint_uri`. Passing the bare base URL
+            // therefore POSTs to `http://localhost:4318/`, which a stock
+            // collector answers with 404. Normalise to the signal URL here so
+            // a configured base URL works as the docs describe it.
             let builder = opentelemetry_otlp::MetricExporter::builder()
                 .with_http()
                 .with_temporality(Temporality::default())
-                .with_endpoint(config.endpoint.clone())
+                .with_endpoint(otlp_http_metrics_endpoint(&config.endpoint))
                 .with_timeout(timeout);
 
             builder.build().map_err(|e| {
@@ -769,12 +964,112 @@ fn build_metric_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::Metr
     }
 }
 
+/// Build the logs pipeline when `telemetry.otel.logs.enabled` is set.
+///
+/// Returns `None` when the signal is off, and logs (rather than propagates) a
+/// build failure: a broken logs exporter must never stop the metrics signal or
+/// the process (FR-041), so the caller keeps running with metrics only.
+#[cfg(feature = "telemetry")]
+fn build_logs_pipeline(config: &OtelConfig) -> Option<crate::logs::LoggerProviderHandle> {
+    if !config.logs.enabled {
+        return None;
+    }
+    match crate::logs::build_logger_provider(config) {
+        Ok(provider) => Some(provider),
+        Err(e) => {
+            let kind = crate::export_health::ExportFailureKind::classify(&e.to_string());
+            tracing::warn!(
+                failure = kind.describe(),
+                "OTLP log export disabled: the log exporter could not be built: {e}"
+            );
+            None
+        }
+    }
+}
+
+/// Point the attached logs layer at the current pipeline (or at nothing).
+///
+/// # Lock order
+///
+/// The runtime lock is held by the caller and the cell lock is taken here, so
+/// the order is always runtime -> cell. [`TracingLogsLayer::on_event`] takes
+/// only the cell lock and never calls back into the subsystem, so no path takes
+/// them the other way round.
+///
+/// [`TracingLogsLayer::on_event`]: crate::logs::TracingLogsLayer
+#[cfg(feature = "telemetry")]
+fn install_logs_cell(guard: &RuntimeState) {
+    let Some(cell) = &guard.logs_cell else {
+        return;
+    };
+    // The `logs` block selects the signal: a reconfigure that leaves it
+    // disabled must detach the layer even though a provider exists, or log
+    // records would keep leaving the machine after the operator turned the
+    // signal off.
+    let (Some(logger), true) = (&guard.logger, guard.config.logs.enabled) else {
+        *cell.write() = None;
+        return;
+    };
+    let active = match crate::logs::build_export(&guard.config, logger) {
+        Ok(active) => Some(active),
+        Err(e) => {
+            tracing::warn!(error = %e, "attaching the OTLP log layer failed");
+            None
+        }
+    };
+    *cell.write() = active;
+}
+
+/// Construct the OTLP log exporter, mirroring [`build_metric_exporter`].
+///
+/// The logs signal travels to the same collector as metrics, on the same
+/// protocol, with the same timeout and the same TLS rules:
+///
+/// - HTTP posts to the `/v1/logs` sibling of the metrics path, so a configured
+///   base URL works for both signals without a second setting;
+/// - gRPC reuses [`ensure_grpc_endpoint_is_encrypted`], so a cleartext
+///   non-loopback endpoint is refused here exactly as it is for metrics.
+#[cfg(feature = "telemetry")]
+pub(crate) fn build_log_exporter(config: &OtelConfig) -> Result<opentelemetry_otlp::LogExporter> {
+    use opentelemetry_otlp::WithExportConfig;
+    use ragent_config::OtelProtocol;
+    use std::time::Duration;
+
+    let timeout = Duration::from_secs(config.export_timeout_seconds.max(1));
+
+    match config.protocol {
+        OtelProtocol::Http => opentelemetry_otlp::LogExporter::builder()
+            .with_http()
+            .with_endpoint(otlp_http_signal_endpoint(&config.endpoint, "logs"))
+            .with_timeout(timeout)
+            .build()
+            .map_err(|e| {
+                crate::TelemetryError::ExporterInit(format!("OTLP HTTP log exporter: {e}"))
+            }),
+        OtelProtocol::Grpc => {
+            ensure_grpc_endpoint_is_encrypted(&config.endpoint)?;
+            opentelemetry_otlp::LogExporter::builder()
+                .with_tonic()
+                .with_endpoint(config.endpoint.clone())
+                .with_timeout(timeout)
+                .build()
+                .map_err(|e| {
+                    crate::TelemetryError::ExporterInit(format!("OTLP gRPC log exporter: {e}"))
+                })
+        }
+    }
+}
+
 /// Refuse an OTLP gRPC endpoint that would be contacted in cleartext.
 ///
 /// SEC-ragent-telemetry-001 (SECTASKS T-019): only `https://` (TLS) and
 /// loopback `http://` (a local collector) are accepted. Everything else -
 /// notably a plain `http://` non-loopback host - is rejected so the operator
 /// cannot accidentally ship metadata over an unencrypted link.
+///
+/// Used by both signal builders (`build_metric_exporter`, `build_log_exporter`),
+/// so a logs-only build of the crate still references it.
+#[cfg(feature = "telemetry")]
 fn ensure_grpc_endpoint_is_encrypted(
     endpoint: &str,
 ) -> std::result::Result<(), crate::TelemetryError> {
@@ -844,7 +1139,7 @@ fn ensure_grpc_endpoint_is_encrypted(
 /// defence-in-depth (e.g. a hostname that happens to contain a colon
 /// between two dense parts would be redacted).
 #[cfg(feature = "telemetry")]
-fn build_resource(config: &OtelConfig) -> Resource {
+pub(crate) fn build_resource(config: &OtelConfig) -> Resource {
     use crate::sensitive::sanitize_attr_value;
 
     let mut kvs = vec![

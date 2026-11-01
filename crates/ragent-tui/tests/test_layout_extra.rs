@@ -644,6 +644,7 @@ fn setup_telemetry_step() {
         interval_field: ragent_tui::input_field::InputField::with_text("30"),
         timeout_field: ragent_tui::input_field::InputField::with_text("10"),
         port_field: ragent_tui::input_field::InputField::new(),
+        logs_field: ragent_tui::input_field::InputField::new(),
         active_field: 0,
         error: None,
     });

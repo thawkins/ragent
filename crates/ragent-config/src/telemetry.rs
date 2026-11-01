@@ -12,6 +12,16 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Minimum-severity rank selected by `telemetry.otel.logs.level: "all"`.
+///
+/// One below `TRACE`'s rank of `0` (see
+/// [`ragent_telemetry::logs::severity_rank`]), so a record at any `tracing`
+/// level clears the `min_rank` comparison and every event the layer sees is
+/// exported. It is `0` in practice because the layer can only observe the five
+/// `tracing` levels; the constant exists so the intent reads explicitly rather
+/// than as a magic literal.
+pub const ALL_SEVERITY_RANK: u8 = 0;
+
 /// Transport protocol for OTLP metric export.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,7 +45,11 @@ pub enum OtelProtocol {
 ///   "export_interval_seconds": 30,
 ///   "service_name": "ragent",
 ///   "resource_attributes": {},
-///   "metrics": {}
+///   "metrics": {},
+///   "logs": {
+///     "enabled": false,
+///     "level": "info"
+///   }
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +116,88 @@ pub struct OtelConfig {
     /// Defaults to `1000`.
     #[serde(default = "default_cardinality_limit")]
     pub cardinality_limit: usize,
+
+    /// OTLP logs-signal export (spec `otel`, FR-036).
+    ///
+    /// Disabled by default. When enabled, ragent's `tracing` events are also
+    /// shipped to the same collector as OTel log records, in addition to
+    /// whatever local sink (TUI log panel or stderr) the run mode uses.
+    #[serde(default)]
+    pub logs: OtelLogsConfig,
+}
+
+/// Configuration for the `telemetry.otel.logs` block (spec `otel`, FR-036).
+///
+/// A log signal is only exported while [`OtelConfig::enabled`] is `true` and
+/// this block is also enabled: the `logs` block selects the signal, it does
+/// not switch telemetry on by itself (FR-040).
+///
+/// ```jsonc
+/// {
+///   "telemetry": {
+///     "otel": {
+///       "enabled": true,
+///       "logs": { "enabled": true, "level": "info" }
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OtelLogsConfig {
+    /// Whether the logs signal is exported (default `false`).
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Minimum severity exported to the collector (default `"info"`).
+    ///
+    /// One of `all`, `trace`, `debug`, `info`, `warn`, `error`. `all` exports
+    /// every record the layer sees, including events below `TRACE`; events
+    /// below any other level still reach the local sink, so the remote export
+    /// is filtered and a `--log-level debug` run does not turn into an
+    /// unbounded log stream unless `all` is chosen deliberately.
+    #[serde(default = "default_log_level")]
+    pub level: String,
+}
+
+impl OtelLogsConfig {
+    /// Returns `true` when the logs signal is enabled.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Parse [`Self::level`] into a min-severity rank.
+    ///
+    /// The returned rank is `0` for `trace`, `1` for `debug`, `2` for `info`,
+    /// `3` for `warn`, and `4` for `error`, matching the ordering a
+    /// `tracing::Level` maps to (see
+    /// `ragent_telemetry::logs::severity_rank`). `all` returns
+    /// [`ALL_SEVERITY_RANK`], one below `trace`, so nothing the layer sees is
+    /// filtered out.
+    ///
+    /// An unrecognised value is reported as a validation problem by
+    /// [`OtelConfig::validate`]; this helper falls back to `info` (`2`) so the
+    /// export filter never fails to build.
+    #[must_use]
+    pub fn min_severity_rank(&self) -> u8 {
+        match self.level.trim().to_ascii_lowercase().as_str() {
+            "all" => ALL_SEVERITY_RANK,
+            "trace" => 0,
+            "debug" => 1,
+            "warn" | "warning" => 3,
+            "error" => 4,
+            _ => 2,
+        }
+    }
+}
+
+impl Default for OtelLogsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            level: default_log_level(),
+        }
+    }
 }
 
 impl OtelConfig {
@@ -142,6 +238,15 @@ impl OtelConfig {
         if self.service_name.is_empty() {
             problems.push("telemetry.otel.service_name must not be empty".to_string());
         }
+        if !matches!(
+            self.logs.level.trim().to_ascii_lowercase().as_str(),
+            "all" | "trace" | "debug" | "info" | "warn" | "warning" | "error"
+        ) {
+            problems.push(format!(
+                "telemetry.otel.logs.level must be one of all, trace, debug, info, warn, error (got \"{}\")",
+                self.logs.level
+            ));
+        }
         problems
     }
 
@@ -165,6 +270,7 @@ impl Default for OtelConfig {
             metrics: HashMap::new(),
             internal_port: None,
             cardinality_limit: default_cardinality_limit(),
+            logs: OtelLogsConfig::default(),
         }
     }
 }
@@ -265,6 +371,10 @@ fn default_endpoint() -> String {
 
 fn default_service_name() -> String {
     "ragent".to_string()
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
 }
 
 const fn default_cardinality_limit() -> usize {

@@ -307,7 +307,13 @@ shell metacharacters (`|`, `;`, `&`, `$`, backtick, `(`, `)`, `{`, `}`, `<`,
 `>`) are rejected, and a path-like `command` must exist on disk. An sse/http
 server must have a valid `http(s)://` `url`. A server that fails validation is
 reported as `failed: <reason>` in the `/mcp` table rather than silently dropped.
-Validation is skipped entirely in YOLO mode.
+
+Validation runs in **every** permission mode, including YOLO. YOLO relaxes the
+*permission* checks on what a tool may do; it does not relax the check that a
+server definition is well formed, because an invalid definition has no process
+to spawn and no endpoint to reach. Removing the YOLO short-circuit means a
+mistyped `command` is reported by name instead of failing later as an opaque
+`spawn: No such file or directory`.
 
 ### Push notifications
 

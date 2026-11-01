@@ -2,11 +2,27 @@
 //! FR-029).
 //!
 //! A skill's `SKILL.md` frontmatter (`allowed-tools`) restricts the tools a run
-//! may call. Entries are resolved by comparing them, byte for byte, with the names
-//! the [`ToolRegistry`] holds: [`super::build_allowed_tool_set`] stores each entry
-//! verbatim and the per-step filter keeps a definition when that stored name
-//! equals the definition's name. [`unresolved_allowed_tools`] is the same
-//! comparison, made once when the restriction is applied.
+//! may call. Entries are resolved by comparing them, case-insensitively, with the
+//! names the [`ToolRegistry`] holds: [`super::build_allowed_tool_set`] stores each
+//! entry under its **registry name** and the per-step filter compares names with
+//! [`eq_ignore_ascii_case`]. [`unresolved_allowed_tools`] is the same comparison,
+//! made once when the restriction is applied.
+//!
+//! ## Two spellings resolve to one name
+//!
+//! `Bash`, `bash` and `BASH` all name the tool the registry spells `Bash`, so a
+//! manifest may write an entry in whatever case reads best. The *lookup* is what
+//! is forgiving: the entry is stored under the registry's own spelling, so two
+//! spellings of one tool cannot become two keys in the allowed set, and the
+//! restriction keeps containing exactly the names the registry holds.
+//!
+//! ## `any` - the one entry that names every tool
+//!
+//! The pseudo entry `any` (any case) lifts the restriction: the allowed set is
+//! returned empty, which every consumer already reads as "no allowlist, hide
+//! nothing". It is honoured without consulting the registry, because it names a
+//! *policy* rather than a tool, so it never appears in the unresolved report and
+//! does not depend on a tool of that name existing (or not).
 //!
 //! ## There is no translation layer, deliberately
 //!
@@ -18,7 +34,9 @@
 //! would reintroduce the second vocabulary FR-026 forbids and would make a retired
 //! spelling work from a manifest, which is exactly what the rename removed. A
 //! `Read` entry is therefore reported rather than quietly answered by `read` - the
-//! derivation rated that spelling `Close`, and `read` kept its name.
+//! derivation rated that spelling `Close`, and `read` kept its name. Case folding
+//! is *not* a mapping of that kind: it resolves one tool, it does not resolve a
+//! different one.
 //!
 //! ## A typo is reported, not silently honoured
 //!
@@ -80,15 +98,71 @@ pub fn reset_unresolved_allowed_tools_for_test() {
         .clear();
 }
 
+/// The pseudo `allowed-tools` entry that lifts the restriction entirely.
+///
+/// A manifest may write it in any case (`any`, `Any`, `ANY`); it names a policy
+/// rather than a tool, so it never has to be a registered tool name.
+pub const ANY_TOOL_ENTRY: &str = "any";
+
+/// `true` when `entry` is the [`ANY_TOOL_ENTRY`] pseudo entry, in any case.
+///
+/// A skill declaring it restricts nothing - the same outcome as an omitted list.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_agent::tool::allowed_tools::is_any_tool_entry;
+///
+/// assert!(is_any_tool_entry("any"));
+/// assert!(is_any_tool_entry("Any"));
+/// assert!(!is_any_tool_entry("Anything"));
+/// ```
+#[must_use]
+pub fn is_any_tool_entry(entry: &str) -> bool {
+    entry.trim().eq_ignore_ascii_case(ANY_TOOL_ENTRY)
+}
+
+/// `true` when `entry` names `tool_name`, ignoring ASCII case.
+///
+/// Names are ASCII identifiers, so ASCII folding suffices and avoids a Unicode
+/// case mapping (which could fold two distinct names together).
+#[must_use]
+pub fn entry_matches_tool(entry: &str, tool_name: &str) -> bool {
+    entry.trim().eq_ignore_ascii_case(tool_name)
+}
+
+/// Resolve one `allowed_tools` entry to the registry's own spelling.
+///
+/// Returns the [`ANY_TOOL_ENTRY`] pseudo entry as [`ANY_TOOL_ENTRY`] (so a caller
+/// can recognise it), the registry name when the entry names a registered tool in
+/// any case, and `None` when it names nothing.
+///
+/// The name is owned because [`ToolRegistry::list`] yields owned names. The scan is
+/// linear, but it runs once per entry at the moment a restriction is applied, never
+/// per turn (NFR-006).
+#[must_use]
+pub fn resolve_allowed_tool_entry(registry: &ToolRegistry, entry: &str) -> Option<String> {
+    if is_any_tool_entry(entry) {
+        return Some(ANY_TOOL_ENTRY.to_string());
+    }
+    registry
+        .list()
+        .into_iter()
+        .find(|name| entry_matches_tool(entry, name))
+}
+
 /// The entries of `allowed` that name no registered tool (FR-029).
 ///
-/// The comparison is a plain registry lookup: an entry naming a tool the registry
-/// holds is resolved, and one that names nothing is returned. Order follows the
-/// manifest, so a report reads like the list it came from.
+/// The comparison is a case-insensitive registry lookup: an entry naming a tool
+/// the registry holds is resolved - under any spelling case - and one that names
+/// nothing is returned. The [`ANY_TOOL_ENTRY`] pseudo entry always resolves, so it
+/// is never reported. Order follows the manifest, so a report reads like the list
+/// it came from.
 ///
-/// Nothing is canonicalised on the way in or out - a retired `before` spelling is
-/// unresolved, not mapped onto its `after` replacement, which is the point of
-/// FR-026 and of adopting the Claude spellings in FR-023.
+/// Nothing is canonicalised onto a *different* tool on the way in or out - a
+/// retired `before` spelling is unresolved, not translated onto its `after`
+/// replacement, which is the point of FR-026 and of adopting the Claude spellings
+/// in FR-023.
 ///
 /// # Examples
 ///
@@ -100,10 +174,16 @@ pub fn reset_unresolved_allowed_tools_for_test() {
 /// let declared = vec![
 ///     "Bash".to_string(),     // adopted Claude spelling: resolves
 ///     "read".to_string(),     // ragent spelling, unchanged by the rename: resolves
-///     "Read".to_string(),     // never adopted: matches nothing
-///     "bash".to_string(),     // retired spelling: matches nothing
+///     "grep".to_string(),     // lower case of the registry's `Grep`: resolves
+///     "Read".to_string(),     // case folding of the registered `read`: resolves
+///     "any".to_string(),      // pseudo entry: always resolves
+///     "ReadFile".to_string(), // typo: matches nothing
+///     "Bashh".to_string(),    // typo: matches nothing
 /// ];
-/// assert_eq!(unresolved_allowed_tools(&registry, &declared), vec!["Read", "bash"]);
+/// assert_eq!(
+///     unresolved_allowed_tools(&registry, &declared),
+///     vec!["ReadFile", "Bashh"]
+/// );
 /// ```
 #[must_use]
 pub fn unresolved_allowed_tools<'a>(
@@ -112,7 +192,7 @@ pub fn unresolved_allowed_tools<'a>(
 ) -> Vec<&'a str> {
     allowed
         .iter()
-        .filter(|entry| registry.get(entry).is_none())
+        .filter(|entry| resolve_allowed_tool_entry(registry, entry).is_none())
         .map(String::as_str)
         .collect()
 }

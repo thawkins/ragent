@@ -93,6 +93,8 @@ mod test_rust_parser;
 mod test_scan_store_integration;
 #[path = "test_scanner.rs"]
 mod test_scanner;
+#[path = "test_scanner_event_volume.rs"]
+mod test_scanner_event_volume;
 #[path = "test_search.rs"]
 mod test_search;
 #[path = "test_search_integration.rs"]

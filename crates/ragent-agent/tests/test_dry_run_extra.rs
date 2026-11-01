@@ -85,23 +85,6 @@ fn isolate() -> (TempDir, EnvGuard, EnvGuard, EnvGuard) {
     (xdg, g1, g2, g3)
 }
 
-/// Restores the runtime YOLO flag on drop.
-struct YoloGuard(bool);
-
-impl YoloGuard {
-    fn on() -> Self {
-        let prev = ragent_config::yolo::is_enabled();
-        ragent_config::yolo::set_enabled(true);
-        Self(prev)
-    }
-}
-
-impl Drop for YoloGuard {
-    fn drop(&mut self) {
-        ragent_config::yolo::set_enabled(self.0);
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -831,33 +814,6 @@ async fn test_mcp_http_error_status_blocked() {
         "message was: {}",
         h.message
     );
-    assert_eq!(exit, 1);
-}
-
-#[tokio::test]
-#[serial_test::serial]
-async fn test_mcp_http_missing_url_blocked_with_yolo() {
-    let (_xdg, _g1, _g2, _g3) = isolate();
-    // With YOLO enabled `validate_mcp_config` short-circuits, so an HTTP server
-    // with no url reaches the dry-run url check instead of being rejected as an
-    // invalid config. Without YOLO this branch is unreachable.
-    let _yolo = YoloGuard::on();
-    let dir = TempDir::new().expect("dir");
-    let path = write_json(
-        &dir,
-        &json!({
-            "provider": {"anthropic": {"env": []}},
-            "mcp": {"h": {"type": "http"}}
-        }),
-    );
-
-    let (report, exit) =
-        ragent_agent::dry_run::run_dry_run(inputs(dir.path().to_path_buf(), Some(path))).await;
-
-    let mcp = section(&report, "mcp");
-    let h = item(mcp, "h");
-    assert_eq!(h.status, ReadinessStatus::Blocked);
-    assert_eq!(h.message, "HTTP/SSE transport requires a url");
     assert_eq!(exit, 1);
 }
 

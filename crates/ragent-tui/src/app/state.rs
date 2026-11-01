@@ -748,7 +748,10 @@ pub enum ProviderSetupStep {
         timeout_field: crate::input_field::InputField,
         /// Optional internal Prometheus port (`""` means disabled).
         port_field: crate::input_field::InputField,
-        /// Currently focused field index (0..=4).
+        /// OTLP logs-signal level (`trace`..`error`); `""` disables log
+        /// export (spec `otel` FR-036).
+        logs_field: crate::input_field::InputField,
+        /// Currently focused field index (0..=5).
         active_field: u8,
         /// Optional validation or save error message.
         error: Option<String>,
@@ -1039,6 +1042,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Memory panel (Alt+M): /memory | /memory show | /memory clear | /memory help",
     },
     SlashCommandDef {
+        trigger: "db",
+        description: "Session database: /db prune [--days N] [--dry-run] deletes old messages (sessions are kept) | /db help",
+    },
+    SlashCommandDef {
         trigger: "github",
         description: "GitHub integration: /github login | logout | status | help",
     },
@@ -1080,7 +1087,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "telemetry",
-        description: "Telemetry management: /telemetry help|on|off|setup|counters",
+        description: "Telemetry management: /telemetry help|on|off|setup|counters|logs",
     },
     SlashCommandDef {
         trigger: "telemetry_panel",
@@ -3257,6 +3264,26 @@ pub struct App {
     /// [`MEMORY_CLEAR_CONFIRM_NO`] (`No`). Initialised to `No` and reset to it
     /// every time the dialog opens so a stray `Enter` cannot clear memory.
     pub memory_clear_confirm_selected: usize,
+    /// Whether the `Prune messages older than N days?` confirmation dialog
+    /// (opened by `/db prune` without `--dry-run`) is displayed. Nothing is
+    /// deleted while it is open; the prune runs only after the user confirms
+    /// with `Yes`.
+    pub db_prune_confirm_open: bool,
+    /// Selected option index within the `Prune messages older than N days?`
+    /// confirmation dialog: [`DB_PRUNE_CONFIRM_YES`] (`Yes`) or
+    /// [`DB_PRUNE_CONFIRM_NO`] (`No`). Initialised to `No` and reset to it every
+    /// time the dialog opens so a stray `Enter` cannot delete messages.
+    pub db_prune_confirm_selected: usize,
+    /// Retention window, in days, the armed `/db prune` dialog will apply.
+    /// `None` while the dialog is closed; captured when it opens so the
+    /// title and the confirmed action cannot disagree.
+    pub db_prune_confirm_days: Option<u32>,
+    /// Default retention window, in days, for `/db prune` when `--days` is
+    /// omitted. Resolved once at startup from
+    /// [`ragent_config::retention::RetentionConfig::message_days`] (the same
+    /// value the startup prune in the CLI uses), so the slash command and the
+    /// opt-in automatic prune agree on what "the configured window" means.
+    pub db_retention_days: u32,
     /// Active plugin-store browser, present while the browse panel is open
     /// (spec `pluginstores` FR-007). `None` when no panel is showing (FR-012).
     /// While it is `Some`, the panel swallows every keystroke and locks the
@@ -3508,6 +3535,10 @@ pub struct App {
     /// when it was last rendered, so a new entry only invalidates the newly
     /// added group rather than the entire cache (C-008).
     pub log_seq: u64,
+    /// How many log-window entries the burst limit withheld from OTLP export
+    /// since the last gap notice (spec `otel` FR-036). Reported on the next
+    /// entry that fits again, so a collector sees the gap rather than silence.
+    pub withheld_log_exports: u64,
     /// Optional file path used to spool log-panel contents when it is visible.
     pub log_window_path: Option<std::path::PathBuf>,
     /// Scroll offset for the log panel (lines from bottom).
@@ -5605,6 +5636,15 @@ pub const MEMORY_CLEAR_CONFIRM_YES: usize = 0;
 /// dialog. `No` is the default selection so pressing `Enter` without changing
 /// the selection does not clear memory.
 pub const MEMORY_CLEAR_CONFIRM_NO: usize = 1;
+
+/// Index of the `Yes` option in the `Prune messages older than N days?`
+/// confirmation dialog (opened by `/db prune` without `--dry-run`).
+pub const DB_PRUNE_CONFIRM_YES: usize = 0;
+
+/// Index of the `No` option in the `Prune messages older than N days?`
+/// confirmation dialog. `No` is the default selection so pressing `Enter`
+/// without changing the selection does not delete messages.
+pub const DB_PRUNE_CONFIRM_NO: usize = 1;
 
 /// Index of the `Yes` option in the destructive row-action confirmation dialog
 /// (spec `agentui` T-009, FR-036, FR-037, FR-040).

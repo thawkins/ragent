@@ -70,6 +70,8 @@ mod test_memory_crud;
 mod test_message_embeddings;
 #[path = "test_message_parts_update.rs"]
 mod test_message_parts_update;
+#[path = "test_message_retention.rs"]
+mod test_message_retention;
 #[path = "test_message_search.rs"]
 mod test_message_search;
 #[path = "test_ms04_diff_boundary.rs"]

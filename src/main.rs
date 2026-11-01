@@ -24,7 +24,7 @@ use ragent_agent::{
     provider,
     session::{SessionManager, processor::SessionProcessor},
     storage::Storage,
-    telemetry::{ShutdownGuard, TelemetrySubsystem},
+    telemetry::{ShutdownGuard, TelemetrySubsystem, TracingLogsLayer},
     tool,
 };
 use ragent_connectors::{ConnectorSession, store_dirs};
@@ -71,8 +71,15 @@ struct Cli {
     #[arg(long, global = true, default_value = "general")]
     agent: String,
 
-    /// Log level
-    #[arg(long, global = true, default_value = "warn")]
+    /// Log level (trace, debug, info, warn, error, or all = trace everything)
+    ///
+    /// Defaults to `info`, not `warn`: the TUI log-window entries re-emitted to
+    /// `tracing` for the OTLP logs signal (spec `otel` FR-036) travel at their
+    /// own severity, and a tool call is `INFO`. A `warn` default silently
+    /// dropped every tool call from the export before the logs layer saw it,
+    /// which is why `--log-level` and `--log-level all` used to produce
+    /// different collector content for identical agent activity.
+    #[arg(long, global = true, default_value = "info")]
     log_level: String,
 
     /// Disable TUI, use plain stdout
@@ -133,6 +140,12 @@ enum Commands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
+    },
+
+    /// Inspect and compact the session database
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
     },
 
     /// Manage persistent memory (export, import, list)
@@ -314,6 +327,24 @@ enum MemoryCommands {
     List,
 }
 
+/// Sub-commands for the `db` namespace.
+#[derive(Subcommand)]
+enum DbCommands {
+    /// Delete messages older than a retention window (sessions are kept)
+    ///
+    /// Deleting rows returns their pages to SQLite's freelist; the file does
+    /// not shrink until a `VACUUM`, which needs exclusive access. Stop every
+    /// other ragent process first.
+    Prune {
+        /// Retention window in days (default: `storage.retention.message_days`)
+        #[arg(long)]
+        days: Option<u32>,
+        /// Report how many messages would be deleted without deleting them
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 /// Return the global-state directory for ragent (`~/.config/ragent/`).
 ///
 /// All ragent global state - databases, logs, history, tokens - lives under
@@ -459,7 +490,17 @@ async fn async_main() -> Result<()> {
     // For non-TUI modes (--no-tui, headless run, server, etc.): fall back to
     // the normal fmt subscriber so logs appear in the terminal as usual.
     let t0 = Instant::now();
-    let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| {
+    // `--log-level all` is the operator's "record everything" spelling. It is
+    // not an `EnvFilter` directive, so map it to the `trace` directive before
+    // the filter is parsed: `trace` is the highest verbosity `tracing` defines,
+    // and the OTLP logs layer's own `telemetry.otel.logs.level = all` then has
+    // every record available to forward to the collector.
+    let log_directive = if cli.log_level.trim().eq_ignore_ascii_case("all") {
+        "trace"
+    } else {
+        cli.log_level.as_str()
+    };
+    let filter = EnvFilter::try_new(log_directive).unwrap_or_else(|_| {
         // Surface the fallback: a typo'd --log-level would otherwise be
         // silently downgraded to `warn` with no hint to the user.
         // SEC-078: `--log-level` is untrusted argv; neutralise control chars
@@ -478,25 +519,37 @@ async fn async_main() -> Result<()> {
             })
         );
     // Commands whose stdout is a machine-readable document or report (`openapi`
-    // emits the OpenAPI JSON or the generated TypeScript client; the parity
-    // subcommands `plugins`, `connectors`, `automation`, `session`, `config`,
-    // `new`, `spec`, and `research` print a report the CLI tests parse) must not
-    // have tracing log lines interleave with that output. Route tracing to
-    // stderr for those commands so the stdout stream stays pure.
+    // emits the OpenAPI JSON or the generated TypeScript client; `models` prints
+    // a `provider/model` line per model that both humans and the `--wire-matrix`
+    // test parse; the parity subcommands `plugins`, `connectors`, `automation`,
+    // `session`, `config`, `new`, `spec`, and `research` print a report the CLI
+    // tests parse) must not have tracing log lines interleave with that output.
+    // Route tracing to stderr for those commands so the stdout stream stays pure.
     let machine_output = matches!(
         cli.command,
         Some(
             Commands::Openapi { .. }
+                | Commands::Models { .. }
                 | Commands::Plugins { .. }
                 | Commands::Connectors { .. }
                 | Commands::Automation { .. }
                 | Commands::New { .. }
                 | Commands::Spec { .. }
                 | Commands::Session { .. }
+                | Commands::Db { .. }
                 | Commands::Config { .. }
                 | Commands::Research { .. }
         )
     );
+    // The OTLP logs layer (spec `otel` FR-036) is installed unconditionally,
+    // with an empty swap cell: the telemetry subsystem is built further down
+    // (it needs the loaded config) and hands its pipeline to this cell, and
+    // `/telemetry on|off` re-points it. The subscriber is global and can
+    // only be set once, so the layer must be in the registry from the start
+    // even when `telemetry.otel.logs.enabled` is false. While the cell is empty
+    // the layer costs one check per event and exports nothing.
+    let logs_layer = TracingLogsLayer::disabled();
+    let logs_cell = logs_layer.cell();
     let tui_log_rx = if tui_will_run {
         use tracing_subscriber::layer::SubscriberExt as _;
         use tracing_subscriber::util::SubscriberInitExt as _;
@@ -504,19 +557,29 @@ async fn async_main() -> Result<()> {
         tracing_subscriber::registry()
             .with(filter)
             .with(ragent_tui::tracing_layer::TuiTracingLayer::new(tx))
+            .with(logs_layer)
             .init();
         Some(rx)
     } else if machine_output {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(false)
-            .with_writer(std::io::stderr)
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use tracing_subscriber::util::SubscriberInitExt as _;
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_target(false)
+                    .with_writer(std::io::stderr),
+            )
+            .with(logs_layer)
             .init();
         None
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(false)
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use tracing_subscriber::util::SubscriberInitExt as _;
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer().with_target(false))
+            .with(logs_layer)
             .init();
         None
     };
@@ -616,6 +679,37 @@ async fn async_main() -> Result<()> {
     let storage = Arc::new(Storage::open(&db_path)?);
     startup.record("Storage open", t0.elapsed());
     tracing::info!("Storage initialized successfully");
+
+    // Message-age retention (opt-in via `storage.retention.enabled`).
+    //
+    // Off-loaded to a blocking thread: the delete is a three-table cascade and
+    // must not stall the startup critical path. Session rows are kept, so an
+    // expired transcript leaves the session listed but empty rather than
+    // vanishing from the session list.
+    {
+        let retention = config.storage.retention;
+        if retention.enabled {
+            let storage = Arc::clone(&storage);
+            tokio::task::spawn_blocking(move || {
+                let days = i64::from(retention.message_days);
+                match chrono::Duration::try_days(days)
+                    .ok_or_else(|| anyhow::anyhow!("retention window out of range: {days} days"))
+                    .and_then(|window| storage.prune_messages_older_than(window))
+                {
+                    Ok(0) => tracing::debug!(
+                        days,
+                        "Message retention: no messages older than the window"
+                    ),
+                    Ok(deleted) => {
+                        tracing::info!(deleted, days, "Expired messages past the retention window");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, days, "Message retention failed");
+                    }
+                }
+            });
+        }
+    }
 
     // M5: Warm the session message FTS index in the background so the
     // conversation/session search tools return up-to-date results after
@@ -814,6 +908,22 @@ async fn async_main() -> Result<()> {
             Arc::new(TelemetrySubsystem::disabled())
         }
     };
+    // Hand the tracing layer's swap cell to the subsystem: from here on
+    // `reconfigure` (which every `/telemetry` subcommand goes through) fills
+    // the cell in when `telemetry.otel.logs.enabled` is set and clears it when
+    // the signal is off, so log export is live-settable without a restart.
+    telemetry.attach_logs_layer(logs_cell);
+    if telemetry.is_enabled() {
+        tracing::info!(
+            logs = telemetry.logs_exporting(),
+            "OTLP log export {}",
+            if telemetry.logs_exporting() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+    }
     // The guard shares the live subsystem via `Arc` - with the same handle
     // also wired into the session processor below, the shared-instance guard
     // flushes the actual provider rather than a disabled clone.
@@ -1075,6 +1185,10 @@ async fn async_main() -> Result<()> {
         });
     }
 
+    // R-23: the command dispatch below moves `storage` into the TUI (and into
+    // several handlers), so keep a handle for the graceful-shutdown WAL
+    // checkpoint at the end of this function.
+    let storage_for_shutdown = Arc::clone(&storage);
     match cli.command {
         None => {
             // Default: run TUI
@@ -1407,6 +1521,39 @@ async fn async_main() -> Result<()> {
                 }
             }
         },
+        Some(Commands::Db { command }) => match command {
+            DbCommands::Prune { days, dry_run } => {
+                let days = match days {
+                    Some(0) => {
+                        cliprintln_err!("ragent db prune: --days must be at least 1");
+                        std::process::exit(2);
+                    }
+                    Some(days) => days,
+                    None => config.read().await.storage.retention.message_days,
+                };
+                let window = chrono::Duration::try_days(i64::from(days))
+                    .ok_or_else(|| anyhow::anyhow!("retention window out of range: {days} days"))?;
+
+                if dry_run {
+                    let n = storage.count_messages_older_than(window)?;
+                    writeln!(
+                        std::io::stdout(),
+                        "Would delete {n} message(s) older than {days} day(s); sessions are kept."
+                    )?;
+                } else {
+                    let deleted = storage.prune_messages_older_than(window)?;
+                    writeln!(
+                        std::io::stdout(),
+                        "Deleted {deleted} message(s) older than {days} day(s); sessions are kept."
+                    )?;
+                    writeln!(
+                        std::io::stdout(),
+                        "The database file does not shrink until a VACUUM, which needs \
+                         exclusive access - stop every other ragent process first."
+                    )?;
+                }
+            }
+        },
         Some(Commands::Auth { provider, key }) => {
             storage.set_provider_auth(&provider, &key)?;
             tracing::info!(provider = %provider, "Stored API key");
@@ -1684,6 +1831,13 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             )
             .await?;
         }
+    }
+    // R-23: on a graceful exit, truncate the WAL so the next start does not
+    // inherit a file that grew to the high-water mark of this session's
+    // largest write burst. Best-effort: a failure here must never turn a
+    // successful command into an error exit.
+    if let Err(e) = storage_for_shutdown.checkpoint_wal() {
+        tracing::warn!(error = %e, "Failed to checkpoint WAL on shutdown");
     }
     Ok(())
 }

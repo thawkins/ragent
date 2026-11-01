@@ -156,6 +156,18 @@ const BUSY_TIMEOUT_MS: i64 = 30_000;
 /// hours.
 const WAL_AUTOCHECKPOINT_PAGES: i64 = 500;
 
+/// SQLite `journal_size_limit` in bytes: the most the WAL file may keep after a
+/// checkpoint (32 MiB).
+///
+/// `wal_autocheckpoint` only decides *when* a checkpoint runs; it does not cap
+/// the WAL file. A checkpoint can never truncate the WAL while another
+/// connection still holds a reader mark, so without this pragma the file
+/// ratchets up to the high-water mark of the largest burst and stays there
+/// (observed: a 670 MB WAL on a 2 GB database). `journal_size_limit` tells
+/// SQLite to truncate the WAL back to this bound at each checkpoint, so the
+/// steady state is bounded instead of monotonic.
+const WAL_JOURNAL_SIZE_LIMIT_BYTES: i64 = 32 * 1024 * 1024;
+
 /// Fill an `N`-byte array with cryptographically secure random bytes.
 ///
 /// Centralises the `rand::rng().fill(..)` pattern used for the credential key
@@ -745,6 +757,11 @@ impl Storage {
         // R-23: explicit WAL auto-checkpoint so the WAL file does not grow to
         // hundreds of MB. See `WAL_AUTOCHECKPOINT_PAGES`.
         conn.pragma_update(None, "wal_autocheckpoint", WAL_AUTOCHECKPOINT_PAGES)?;
+        // R-23: bound the WAL file itself. `wal_autocheckpoint` only schedules
+        // checkpoints; without a size limit a checkpoint that could not
+        // truncate (a concurrent reader held a mark) leaves the file at its
+        // high-water mark forever. See `WAL_JOURNAL_SIZE_LIMIT_BYTES`.
+        conn.pragma_update(None, "journal_size_limit", WAL_JOURNAL_SIZE_LIMIT_BYTES)?;
         let mut storage = Self {
             conn: Mutex::new(conn),
             reader: None,
@@ -785,8 +802,18 @@ impl Storage {
     }
 
     /// R-23: Run a `PRAGMA wal_checkpoint(TRUNCATE)` to truncate the WAL file
-    /// back to zero size. Call on graceful shutdown to keep the WAL file
-    /// small.
+    /// back to zero size.
+    ///
+    /// This is the explicit shutdown/operator checkpoint. It is *not* what
+    /// bounds the WAL during a run: `journal_size_limit` (see
+    /// [`WAL_JOURNAL_SIZE_LIMIT_BYTES`]) is what stops the file retaining the
+    /// high-water mark of a large write burst, because `wal_autocheckpoint`
+    /// alone can never truncate it back down.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the writer connection's lock is poisoned or the
+    /// checkpoint pragma itself fails.
     pub fn checkpoint_wal(&self) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
@@ -1734,6 +1761,130 @@ impl Storage {
         )?;
         tx.commit()?;
         Ok(n)
+    }
+
+    /// Deletes every message whose `created_at` is older than `max_age`.
+    ///
+    /// This is the age-based counterpart to [`Storage::delete_messages`]: the
+    /// same three-table cascade (FTS rowids, `message_fts_keys`, `messages`) in
+    /// one transaction, but scoped by a timestamp cutoff instead of a session
+    /// id. Sessions themselves are deliberately left intact - pruning a
+    /// session's old messages empties its transcript while keeping the session
+    /// listed and resumable.
+    ///
+    /// `created_at` is stored as an RFC 3339 string, so a lexicographic
+    /// comparison against the cutoff string orders correctly without parsing
+    /// every row.
+    ///
+    /// Deleting rows returns their pages to SQLite's freelist; the database
+    /// file does not shrink until a `VACUUM`, which requires exclusive access
+    /// and so is an explicit operator action rather than part of this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the retention window is out of range for
+    /// [`chrono::Duration`], or if the delete fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// // A zero window keeps nothing: the fresh message is already "older".
+    /// let deleted = storage
+    ///     .prune_messages_older_than(chrono::Duration::zero())
+    ///     .unwrap();
+    /// assert_eq!(deleted, 1);
+    /// assert!(storage.get_messages("sess-1").unwrap().is_empty());
+    /// ```
+    pub fn prune_messages_older_than(&self, max_age: chrono::Duration) -> Result<usize> {
+        // SEC-049 precedent: use the fallible chrono constructor so an
+        // out-of-range window returns an error instead of panicking inside
+        // the subtraction.
+        let cutoff = chrono::Utc::now()
+            .checked_sub_signed(max_age)
+            .context("message retention cutoff out of range")?
+            .to_rfc3339();
+
+        let mut conn = lock_conn!(self)?;
+        // C-3: the FTS delete and the base-table delete must commit together,
+        // otherwise a failure between them desyncs the search index from the
+        // messages table.
+        let tx = conn.transaction()?;
+        // Collect the FTS rowids for the doomed messages up front: the
+        // contentless index supports a plain rowid delete, but the rowids must
+        // be read before the base rows that identify them are gone.
+        let doomed: Vec<i64> = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT k.rowid
+                   FROM message_fts_keys k
+                   JOIN messages m ON m.id = k.message_id
+                  WHERE m.created_at < ?1",
+            )?;
+            stmt.query_map(params![cutoff], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for rowid in &doomed {
+            tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![rowid])?;
+        }
+        tx.execute(
+            "DELETE FROM message_fts_keys
+              WHERE message_id IN (SELECT id FROM messages WHERE created_at < ?1)",
+            params![cutoff],
+        )?;
+        let n = tx.execute(
+            "DELETE FROM messages WHERE created_at < ?1",
+            params![cutoff],
+        )?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Counts the messages that [`Storage::prune_messages_older_than`] would
+    /// delete for the same `max_age`, without deleting anything.
+    ///
+    /// The read-only counterpart to the prune: it uses the same fallible cutoff
+    /// computation and the same predicate, so a `--dry-run` report and the
+    /// prune that follows it cannot disagree about what is in the window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the retention window is out of range for
+    /// [`chrono::Duration`], or if the count fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// // A zero window would expire the fresh message, but counting deletes nothing.
+    /// let n = storage
+    ///     .count_messages_older_than(chrono::Duration::zero())
+    ///     .unwrap();
+    /// assert_eq!(n, 1);
+    /// assert_eq!(storage.get_messages("sess-1").unwrap().len(), 1);
+    /// ```
+    pub fn count_messages_older_than(&self, max_age: chrono::Duration) -> Result<usize> {
+        let cutoff = chrono::Utc::now()
+            .checked_sub_signed(max_age)
+            .context("message retention cutoff out of range")?
+            .to_rfc3339();
+
+        let conn = lock_conn!(self)?;
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE created_at < ?1",
+            params![cutoff],
+            |row| row.get(0),
+        )?;
+        usize::try_from(n).context("message count out of range")
     }
 
     // -- Run-cost summaries (FR-018) ------------------------------------

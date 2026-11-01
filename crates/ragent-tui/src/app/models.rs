@@ -1026,6 +1026,7 @@ impl App {
             interval_field,
             timeout_field,
             port_field,
+            logs_field,
             active_field,
             ..
         } = step
@@ -1035,6 +1036,7 @@ impl App {
                 2 => interval_field,
                 3 => timeout_field,
                 4 => port_field,
+                5 => logs_field,
                 _ => return,
             };
             target.insert_str(&clean);

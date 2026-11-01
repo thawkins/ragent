@@ -160,3 +160,100 @@ fn open_waits_out_a_contended_wal_switch() {
     let _ = std::fs::remove_file(path.with_extension("db-wal"));
     let _ = std::fs::remove_file(path.with_extension("db-shm"));
 }
+
+/// Returns the current on-disk size of a database's `-wal` sidecar.
+fn wal_size(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path.with_extension("db-wal")).map_or(0, |m| m.len())
+}
+
+/// `Storage::open` must set `journal_size_limit` so the WAL file cannot keep
+/// the high-water mark of a large write burst forever.
+///
+/// `wal_autocheckpoint` only decides *when* a checkpoint runs; it never
+/// truncates the WAL back down. With the SQLite default of
+/// `journal_size_limit=-1` a single large burst (a big history import, a bulk
+/// compaction write) left a 670 MB WAL that stayed at 670 MB for the rest of
+/// the database's life - the observed production symptom on a 2 GB
+/// `ragent.db`. A bounded `journal_size_limit` lets a later checkpoint shrink
+/// the file back to the bound once the burst is over.
+///
+/// This test writes a burst larger than the bound, lets an auto-checkpoint run,
+/// then requires the WAL to have come back down. It fails with the old
+/// `journal_size_limit=-1`.
+#[test]
+fn wal_is_capped_after_a_large_write_burst() {
+    let path = temp_db_path("wal-size-limit.db");
+    let storage = Storage::open(&path).expect("open storage");
+
+    // `journal_size_limit` is written to the database header by `open`; it
+    // must be a positive bound. -1 means "no limit" (the old behaviour).
+    let limit: i64 = {
+        let conn = storage.conn_lock_for_test().expect("lock connection");
+        conn.query_row("PRAGMA journal_size_limit", [], |row| row.get(0))
+            .expect("read journal_size_limit")
+    };
+    assert!(
+        limit > 0,
+        "Storage::open must set a positive journal_size_limit (got {limit}); \
+         -1 lets the WAL keep the high-water mark of every write burst forever"
+    );
+
+    // Write comfortably more than the bound so a checkpoint has real slack to
+    // reclaim. One large transaction keeps the WAL pinned near its peak until
+    // it commits.
+    let burst = limit as usize * 3;
+    {
+        let conn = storage.conn_lock_for_test().expect("lock connection");
+        conn.execute_batch("CREATE TABLE wal_burst (blob BLOB);")
+            .expect("create burst table");
+        let tx = conn.unchecked_transaction().expect("begin burst");
+        {
+            let mut stmt = tx
+                .prepare("INSERT INTO wal_burst (blob) VALUES (?1)")
+                .expect("prepare insert");
+            let chunk = vec![0x5au8; 1 << 20];
+            let mut written = 0usize;
+            while written < burst {
+                stmt.execute([&chunk[..]]).expect("insert chunk");
+                written += chunk.len();
+            }
+        }
+        tx.commit().expect("commit burst");
+    }
+
+    let peak = wal_size(&path);
+    assert!(
+        peak > limit as u64,
+        "test precondition: the burst ({peak} bytes) must exceed the limit \
+         ({limit} bytes) for the cap to be observable"
+    );
+
+    // Ordinary commits after the burst, so an auto-checkpoint runs once the
+    // burst transaction is no longer the newest one. With `journal_size_limit`
+    // set, that checkpoint truncates the WAL back to the bound.
+    for _ in 0..8 {
+        let conn = storage.conn_lock_for_test().expect("lock connection");
+        conn.execute("INSERT INTO wal_burst (blob) VALUES (?1)", [&b"x"[..]])
+            .expect("small write");
+    }
+
+    let settled = wal_size(&path);
+    assert!(
+        settled <= limit as u64,
+        "the WAL must be truncated back to journal_size_limit ({limit} bytes) \
+         after the burst, but it is still {settled} bytes (peak {peak})"
+    );
+
+    // Data written during the burst survives the truncation.
+    let rows: i64 = {
+        let conn = storage.conn_lock_for_test().expect("lock connection");
+        conn.query_row("SELECT COUNT(*) FROM wal_burst", [], |row| row.get(0))
+            .expect("count rows")
+    };
+    assert!(rows > 3, "burst rows must survive the WAL truncation");
+
+    drop(storage);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("db-wal"));
+    let _ = std::fs::remove_file(path.with_extension("db-shm"));
+}

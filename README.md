@@ -153,10 +153,62 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   and names `/telemetry on` as the retry. `/telemetry counters` and the telemetry
   panel open with an `Export health` line once any failure has been recorded.
   The export result is still forwarded unchanged, so the SDK's own logging is
-  unaffected
+  unaffected. `telemetry.otel.endpoint` is a *base* URL: ragent appends the
+  OTLP/HTTP signal path (`/v1/metrics`, `/v1/logs`) itself, keeps a base path
+  (`https://gw.example.com/otel`), and uses a value that already names a signal
+  path verbatim, so both documented forms reach a stock collector
+- **OTLP log export** — ragent's `tracing` events are also shipped to the
+  metrics collector over the OTLP **logs** signal whenever telemetry is on:
+  `/telemetry on` starts both signals and `/telemetry off` stops both, so there
+  is no separate logs switch. `/telemetry logs [all|trace|debug|info|warn|error]`
+  tunes the level (`telemetry.otel.logs.level`, default `info`), which is written
+  to `telemetry.otel.logs.enabled` beside `telemetry.otel.enabled`. A
+  `tracing_subscriber::Layer` composes
+  with the existing sinks instead of replacing them, so the TUI log panel (or
+  stderr in a headless run) keeps showing everything the local `--log-level`
+  selects, and the level is only a floor for the remote export. Records post to
+  the `/v1/logs` sibling of the configured endpoint on the same protocol,
+  timeout, batch interval and gRPC TLS rules as the metrics, are redacted
+  through the shared credential redactor (bodies over 16 KiB truncated) with
+  every attribute through the metric sensitive-data guard, and are flushed and
+  shut down with the meter provider so the last records of a run are not lost.
+  `/telemetry on|off`, `/telemetry logs` and `/telemetry setup` re-point the
+  layer live without a restart, a log exporter that fails to build leaves the
+  metrics untouched, and `/telemetry counters` plus the telemetry panel report
+  the log-export state. The log window itself is an in-memory sink fed by the
+  TUI, so every entry it records - tool call start, tool arguments, tool
+  result, tool failure, warnings and information lines - is also re-emitted as a
+  `tracing` event **at the entry's own severity** (carrying `log_window = true`
+  and `log_window_level` naming that severity) **whether or not the panel is
+  open**. A session normally runs with the panel closed, so the export is not
+  gated on a view: gating it there left a collector with only the tools that log
+  natively (`Bash` emits `Executing bash command` on every call, `Edit` and its
+  siblings emit nothing), which read as "only Bash tool calls are exported".
+  **A tool call reaches the collector by this route and by no other**, and it
+  travels at `INFO`, so tool-call activity arrives with no extra configuration -
+  neither `--log-level` (now defaulting to `info`) nor `logs.level` (default
+  `info`) has to be raised. Lines that are *copies* of something ragent already
+  logged through `tracing` - the `TuiTracingLayer` drain carrying startup,
+  provider, code-index, MCP and export-health messages, and the mirrored
+  child-process stderr drain - use a deferred push that records them in the panel
+  and the spool without re-emitting, so each such line still reaches the
+  collector exactly once. The export is bounded at 60 records per second, and a
+  burst's withheld count is reported in a `warn` record.
+  `--log-level all` is accepted as a spelling of
+  `trace`, so it records every severity for both the local sink and the export
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
 - **Session management** — persistent conversation history stored in SQLite;
-  list, resume, export-archive, and import sessions
+  list, resume, export-archive, and import sessions. A session's transcript can be
+  aged out with `/db prune [--days N] [--dry-run]` (TUI) or `ragent db prune`
+  (CLI): messages older than the window are deleted and **the session itself is
+  kept**, so an expired conversation stays listed and resumable with an empty
+  transcript. A real prune asks for confirmation first and the dialog opens on
+  `No`, so a stray `Enter` deletes nothing; `--dry-run` reports the count and
+  deletes nothing at all. The default window comes from
+  `storage.retention.message_days` (14 days), and setting
+  `storage.retention.enabled: true` runs the same prune automatically at
+  startup. Deleting rows returns their pages to SQLite's freelist, so the file
+  does not shrink until a `VACUUM`, which needs exclusive access
 - **Permission system** — multi-layered defense-in-depth with hardwired rules
   (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
   security, file-path guards, and YOLO mode for trusted environments
@@ -291,7 +343,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   convention (`.agents/skills/` project and `~/.agents/skills/` user, a directory per
   pack with a `SKILL.md` declaring `name` and `description`), listable via `/skills`
   (or `/skill`) and loadable via `/skill <name> [args]` or the bare `/<name>` trigger,
-  with an existing higher-scope pack winning a name clash
+  with an existing higher-scope pack winning a name clash. A skill's
+  `allowed-tools` frontmatter restricts the run's tool surface; entries resolve
+  against the registry **ignoring case** (`bash` names `Bash`), an `any` entry
+  lifts the restriction entirely, and a retired or misspelt name is reported by
+  name and skill rather than silently removing the capability
 - **Plugin system** — load Codex-dialect (`codex-plugin.json` or the nested
   `.codex-plugin/plugin.json` the `openai/plugins` store ships) and Claude
   Code/Desktop-dialect (`.claude-plugin/plugin.json`) plugins — including
@@ -555,6 +611,7 @@ Commands:
   serve        Start HTTP server only
   orchestrate  Run a small orchestration example (demonstrates multi-agent coordinator)
   session      Manage sessions (list, resume, export-archive, import)
+  db           Inspect and compact the session database (prune)
   memory       Manage persistent memory (export, import, list)
   auth         Configure provider authentication
   models       List available models
@@ -571,7 +628,7 @@ Commands:
 Options:
       --model <MODEL>          Override model (provider/model format)
       --agent <AGENT>          Override agent [default: general]
-      --log-level <LOG_LEVEL>  Log level [default: warn]
+      --log-level <LOG_LEVEL>  Log level, trace..error or all [default: info]
       --no-tui                 Disable TUI, use plain stdout
       --yes                    Auto-approve all permissions
       --log                    Show the log panel in the TUI

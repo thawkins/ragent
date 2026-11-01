@@ -1865,12 +1865,14 @@ fn test_telemetry_setup_context_menu_paste_writes_active_field() {
     let interval_field = ragent_tui::input_field::InputField::new();
     let timeout_field = ragent_tui::input_field::InputField::new();
     let port_field = ragent_tui::input_field::InputField::new();
+    let logs_field = ragent_tui::input_field::InputField::new();
     app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
         endpoint_field,
         protocol: ragent_config::telemetry::OtelProtocol::Http,
         interval_field,
         timeout_field,
         port_field,
+        logs_field,
         active_field: 0,
         error: None,
     });

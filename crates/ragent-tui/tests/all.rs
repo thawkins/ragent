@@ -154,6 +154,8 @@ mod test_force_cleanup_modal;
 
 #[path = "test_autopilot_alt_o.rs"]
 mod test_autopilot_alt_o;
+#[path = "test_db_command.rs"]
+mod test_db_command;
 #[path = "test_fr030_surface_agreement.rs"]
 mod test_fr030_surface_agreement;
 #[path = "test_fr033_completion_surfaces.rs"]
@@ -242,6 +244,8 @@ mod test_layout_deep;
 mod test_layout_extra;
 #[path = "test_lib_schedule_deep.rs"]
 mod test_lib_schedule_deep;
+#[path = "test_log_window_otel_export.rs"]
+mod test_log_window_otel_export;
 #[path = "test_loop_dialog.rs"]
 mod test_loop_dialog;
 #[path = "test_markdown_table.rs"]

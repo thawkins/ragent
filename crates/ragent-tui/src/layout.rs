@@ -429,6 +429,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.memory_clear_confirm_open {
         render_memory_clear_confirm(frame, app);
     }
+    // `Prune messages older than N days?` confirmation dialog (`/db prune`) -
+    // a modal drawn above the chat that reuses the shared overlay machinery.
+    if app.db_prune_confirm_open {
+        render_db_prune_confirm(frame, app);
+    }
     // Destructive row-action confirmation dialog (spec `agentui` T-009) - a
     // modal drawn above the chat (and therefore above the Agents and Teams
     // windows, which render inside the chat pass) so the answer applies to the
@@ -2483,6 +2488,23 @@ fn render_memory_clear_confirm(frame: &mut Frame, app: &mut App) {
     );
 }
 
+/// Render the `Prune messages older than N days?` confirmation dialog opened by
+/// `/db prune` without `--dry-run`.
+///
+/// The title names the window the armed prune would apply, captured when the
+/// dialog opened (`App::db_prune_confirm_days`), so the question the user
+/// answers names the same window the confirmed action uses. `No` is the default
+/// selection (`state.rs` `DB_PRUNE_CONFIRM_NO`), so a stray `Enter` deletes
+/// nothing.
+fn render_db_prune_confirm(frame: &mut Frame, app: &mut App) {
+    let days = app.db_prune_confirm_days.unwrap_or_default();
+    render_yes_no_confirm(
+        frame,
+        &format!(" Delete messages older than {days} day(s)? "),
+        app.db_prune_confirm_selected,
+    );
+}
+
 /// Render the destructive row-action confirmation dialog (spec `agentui`
 /// T-009, FR-036, FR-037, FR-040).
 ///
@@ -4098,6 +4120,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             interval_field,
             timeout_field,
             port_field,
+            logs_field,
             active_field,
             error,
         } => {
@@ -4117,11 +4140,15 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             // and the interval fields because that is the index `Tab` and
             // `BackTab` advance through; listing it last made the cursor
             // appear to jump around the dialog.
-            let fields: [(&str, &crate::input_field::InputField, u8, &str); 4] = [
+            let fields: [(&str, &crate::input_field::InputField, u8, &str); 5] = [
                 ("OTLP endpoint:", endpoint_field, 0, "http://localhost:4318"),
                 ("Export interval (s):", interval_field, 2, "30"),
                 ("Export timeout (s):", timeout_field, 3, "10"),
                 ("Internal Prometheus port:", port_field, 4, "disabled"),
+                // Spec `otel` FR-036: log export ships tracing events to the
+                // same collector whenever telemetry is on; this row only sets
+                // the minimum level shipped (empty keeps the default, `info`).
+                ("Logs level:", logs_field, 5, "info"),
             ];
 
             // Render the endpoint row, then the protocol row, then the
@@ -5545,7 +5572,13 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(block, area);
     app.telemetry_area = area;
 
-    let content = App::telemetry_counters_content();
+    // The panel shares the counter catalogue with `/telemetry counters`, so it
+    // also needs the state of the OTLP logs signal (spec `otel` FR-036).
+    let otel = ragent_agent::Config::load()
+        .map(|cfg| cfg.telemetry.otel)
+        .unwrap_or_default();
+    let content =
+        App::telemetry_counters_content(&otel, app.session_processor.telemetry.logs_exporting());
 
     let header_style = Style::default()
         .fg(Color::LightGreen)

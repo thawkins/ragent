@@ -582,7 +582,13 @@ impl LlmClient for OllamaCloudClient {
                         .is_some();
                     let is_done = parsed.get("done").and_then(serde_json::Value::as_bool) == Some(true);
                     if line_count <= 3 || has_tool_calls || is_done {
-                        tracing::info!(
+                        // Diagnostic chatter, not session activity: `DEBUG` keeps it
+                        // in the local log for a `--log-level debug` run while the
+                        // default `info` floor keeps it out of the OTLP log export.
+                        // The frame content is not lost when it matters - a done
+                        // frame that carries tool calls is still recorded at
+                        // `INFO` by the "tool_calls found in done frame" event below.
+                        tracing::debug!(
                             model = %model_name,
                             line = line_count,
                             done = is_done,

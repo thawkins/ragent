@@ -32,7 +32,19 @@ pub const CLIPBOARD_TEMP_MAX_AGE: Duration = Duration::from_hours(24);
 /// Read raw image data from the system clipboard.
 ///
 /// Returns `None` if the clipboard is unavailable or does not contain an image.
+/// During tests the result may be overridden via
+/// [`set_clipboard_image_test_override`], so a test never observes whatever
+/// image the developer happens to have on their desktop clipboard.
 pub fn get_clipboard_image() -> Option<arboard::ImageData<'static>> {
+    // `Some(None)` means the override is installed and the clipboard has no
+    // image; `None` means no override, so the real clipboard is consulted.
+    if let Some(overridden) = CLIPBOARD_IMAGE_OVERRIDE.with(|o| o.borrow().clone()) {
+        return overridden.map(|(width, height, bytes)| arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Owned(bytes),
+        });
+    }
     arboard::Clipboard::new()
         .ok()
         .and_then(|mut cb| cb.get_image().ok())
@@ -50,6 +62,15 @@ pub fn get_clipboard_image() -> Option<arboard::ImageData<'static>> {
 use std::cell::RefCell;
 
 thread_local! {
+    /// Thread-local test override for the system clipboard image.
+    ///
+    /// `Some(None)` pins the clipboard as holding no image; `Some(Some(..))`
+    /// supplies one. Both keep a test off the developer's real clipboard, whose
+    /// contents are not reproducible - a headless CI box has none, a desktop
+    /// often does, so a test asserting "no image" passed on CI and failed on a
+    /// workstation that had just taken a screenshot.
+    static CLIPBOARD_IMAGE_OVERRIDE: RefCell<Option<Option<(u32, u32, Vec<u8>)>>> =
+        const { RefCell::new(None) };
     /// Thread-local test override for the system clipboard text.
     ///
     /// When set, [`get_clipboard_text`] returns this value on the same thread instead
@@ -91,9 +112,26 @@ pub fn set_clipboard_text_test_override(text: Option<String>) {
 pub struct ClipboardTestOverrideGuard;
 
 impl ClipboardTestOverrideGuard {
-    /// Install `text` as the clipboard override for the current thread.
+    /// Install `text` as the clipboard text override for the current thread, and
+    /// pin the clipboard as holding **no** image.
+    ///
+    /// Pinning the image is what makes the guard hermetic: a clipboard holding
+    /// only text still answered the image query from the developer's real
+    /// desktop, so a test asserting "no image data found" failed on a machine
+    /// whose clipboard happened to hold a picture. Use
+    /// [`with_image`](Self::with_image) to supply one instead.
     pub fn new(text: impl Into<String>) -> Self {
         set_clipboard_text_test_override(Some(text.into()));
+        CLIPBOARD_IMAGE_OVERRIDE.with(|o| *o.borrow_mut() = Some(None));
+        Self
+    }
+
+    /// Install `text` and a `width` x `height` opaque RGBA image as the thread's
+    /// clipboard contents, leaving the real clipboard untouched.
+    pub fn with_image(text: impl Into<String>, width: u32, height: u32) -> Self {
+        set_clipboard_text_test_override(Some(text.into()));
+        let bytes = vec![0x80u8; (width as usize) * (height as usize) * 4];
+        CLIPBOARD_IMAGE_OVERRIDE.with(|o| *o.borrow_mut() = Some(Some((width, height, bytes))));
         Self
     }
 }
@@ -101,6 +139,7 @@ impl ClipboardTestOverrideGuard {
 impl Drop for ClipboardTestOverrideGuard {
     fn drop(&mut self) {
         set_clipboard_text_test_override(None);
+        CLIPBOARD_IMAGE_OVERRIDE.with(|o| *o.borrow_mut() = None);
     }
 }
 

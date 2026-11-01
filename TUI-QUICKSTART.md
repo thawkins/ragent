@@ -4,6 +4,59 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
+## Highlights (v1.0.159, uncommitted)
+
+- **`/telemetry on` ships both signals** - metrics and OTLP log records go to
+  the same collector; `/telemetry off` stops both. There is no separate logs
+  switch; `/telemetry logs [all|trace|debug|info|warn|error]` sets how much is
+  exported. The log layer ships ragent's `tracing` events as OTel log records. The layer composes with the existing sinks, so the Log panel keeps
+  showing everything your `--log-level` selects and the level you give here is a
+  floor for the *remote* export only. A log exporter that fails to build leaves
+  metrics running, and `/telemetry on|off` re-points the layer live with no
+  restart. `/telemetry counters` and the Telemetry panel now name the
+  log-export state instead of saying log signals are planned.
+- **`/telemetry setup` gained a `Logs level` row** - the sixth field in the
+  `Tab` cycle, after the Prometheus port. It sets the level only; leave it empty
+  for the default `info`, or enter `debug`/`warn`/`error` to change what is
+  shipped. Saving the dialog turns telemetry - and log export with it - on.
+- **`/db prune [--days N] [--dry-run]`** - delete chat messages older than a
+  retention window. The session itself is kept: an expired transcript stays
+  listed and resumable, it just reads back empty. A real prune opens a
+  `Delete messages older than N day(s)?` dialog that starts on `No`, so a stray
+  `Enter` deletes nothing; `Left`/`Right`/`Tab` move the selection, `Enter`
+  applies, `Esc` cancels. `--dry-run` reports the count and deletes nothing.
+  `--days` accepts `--days N` and `--days=N`; omit it and the window is
+  `storage.retention.message_days` (default 14). A zero-day window is refused
+  rather than silently emptying the store.
+- **`/db help`** - subcommands, the default window, the sessions-kept rule, and
+  the `VACUUM` caveat. A bare `/db` shows the same page rather than guessing at a
+  destructive action. The autocomplete menu offers `prune` and `help`, and the
+  parameter hint reads `[prune [--days N] [--dry-run]|help]`.
+- **`ragent.db-wal` no longer holds its peak size.** The WAL is bounded
+  (`journal_size_limit`, 32 MiB) and truncated once a large write burst is over,
+  instead of keeping the high-water mark for the life of the database.
+- **Export failures name themselves.** A dead or misconfigured collector no
+  longer fails silently: every non-2xx response, transport error or timeout
+  produces an `Agent Notice` with the consecutive-failure count and the masked
+  endpoint, and five in a row switch telemetry off (persisting
+  `telemetry.otel.enabled: false`) rather than retrying forever.
+- **The collector sees each line once.** Startup chatter, provider notices,
+  export-failure lines and MCP banners used to reach the OTLP endpoint twice
+  (once natively, once as the Log panel's echo of the same record), and an
+  `npx`-launched MCP server's mirrored stderr arrived as hundreds of
+  `stderr: ...` records. Both drains now write to the panel and the spool
+  without re-emitting, so the panel still shows every line and the export
+  carries only what the panel alone knows.
+- **`--log-level` defaults to `info`.** A tool call is `INFO`, and the old
+  `warn` default filtered it out of the export before the logs layer ever saw
+  it - the same agent activity produced different collector content depending on
+  a flag you had no reason to set. `--log-level all` is accepted as a spelling of
+  `trace`.
+- **`allowed-tools` now ignores case, and `any` lifts the restriction.** A
+  `SKILL.md` writing `bash` or `grep` used to restrict nothing (the registry
+  spells them `Bash` and `Grep`); the entry now resolves, and `any` (any case)
+  means "no restriction". A misspelt entry is still reported by name.
+
 ## Highlights (v1.0.158)
 
 - No user-facing change: this release only narrows 57 internal items from `pub`

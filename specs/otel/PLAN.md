@@ -128,15 +128,32 @@ integration test suite are complete.
 Documentation is complete, CHANGELOG and QUICKSTART are updated, and the spec
 status moves from `draft` to `implemented`.
 
+### Milestone 8 - OTLP logs signal (T-040..T-045)
+
+The `tracing` events ragent already emits are shipped to the same collector as
+the metrics when `telemetry.otel.logs.enabled` is set.
+
+| Task | Description | Requirements | Size | Priority | Status | Depends On |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-040 | Add the `telemetry.otel.logs` config block (`enabled`, `level`) with validation | FR-036, FR-040 | S | High | completed | T-002 |
+| T-041 | Implement `logs::TracingLogsLayer` and the pure event-to-record conversion, including the redaction and truncation guards | FR-036, FR-037, FR-039 | L | Critical | completed | T-040 |
+| T-042 | Build the `SdkLoggerProvider` + OTLP log exporter on the metrics endpoint, protocol and TLS rules | FR-036, FR-041 | M | High | completed | T-041 |
+| T-043 | Wire the layer into the three tracing install paths in `src/main.rs` with a live swap cell, and flush/shut down the log pipeline with the meter provider | FR-037, FR-038, FR-042 | M | Critical | completed | T-042 |
+| T-044 | Extend `/telemetry logs`, `/telemetry setup` and `/telemetry counters` with the logs signal | FR-040, FR-042 | M | High | completed | T-043 |
+| T-045 | Tests (conversion, guard, layer, endpoint, config) and docs | NFR-007, NFR-008 | M | High | completed | T-043 |
+
 ## Definition of Done
 
 - `cargo check -p ragent-telemetry` and `cargo test -p ragent-telemetry` pass
   with the `telemetry` feature enabled.
 - `cargo check` (default features, no `telemetry`) still passes and produces
   zero OTEL-related warnings.
-- All acceptance criteria 1–10 are demonstrated by automated or manual test
+- All acceptance criteria 1–15 are demonstrated by automated or manual test
   evidence.
 - The spec status is moved from `draft` to `implemented` with audit metadata.
 - No existing agent loop, TUI, or HTTP server functionality is broken when
   telemetry is disabled.
-- No API keys, file contents, or user prompts appear in any exported metric.
+- No API keys, file contents, or user prompts appear in any exported metric or
+  log record.
+- With the logs signal off, the tracing layer adds one `None` check per event
+  and no allocation.

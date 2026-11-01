@@ -532,11 +532,19 @@ impl SessionProcessor {
                 .map(|spec| {
                     let mut allowed: std::collections::HashSet<String> =
                         spec.tool_set.iter().cloned().collect();
-                    for name in crate::session::loop_state::LOOP_ALWAYS_ALLOWED_TOOLS {
-                        allowed.insert((*name).to_string());
-                    }
-                    for name in crate::tool::always_allowed_tool_names() {
-                        allowed.insert(name.to_string());
+                    // `any` (any case) names every tool, so the set is left empty -
+                    // the shape in which the filter admits everything (FR-029).
+                    if !spec
+                        .tool_set
+                        .iter()
+                        .any(|entry| crate::tool::allowed_tools::is_any_tool_entry(entry))
+                    {
+                        for name in crate::session::loop_state::LOOP_ALWAYS_ALLOWED_TOOLS {
+                            allowed.insert((*name).to_string());
+                        }
+                        for name in crate::tool::always_allowed_tool_names() {
+                            allowed.insert(name.to_string());
+                        }
                     }
                     allowed
                 })
@@ -573,9 +581,10 @@ impl SessionProcessor {
                 .iter()
                 .filter(|d| {
                     (allowed_set.is_empty() || crate::tool::is_allowed_tool(&d.name, &allowed_set))
-                        && loop_tool_set
-                            .as_ref()
-                            .is_none_or(|allowed| allowed.contains(d.name.as_str()))
+                        && loop_tool_set.as_ref().is_none_or(|allowed| {
+                            allowed.contains(d.name.as_str())
+                                || crate::tool::is_allowed_tool(&d.name, allowed)
+                        })
                 })
                 .cloned()
                 .collect::<Vec<ToolDefinition>>()

@@ -18,17 +18,33 @@
 //! | 4 | `test_an_unknown_entry_is_reported_once_naming_the_entry_and_the_skill` | the report, its text, and its once-per-declarer shape |
 //! | 5 | `test_a_second_skill_naming_the_same_entry_still_reports` | the ledger is per declarer, not per entry |
 //! | 6 | `test_a_correct_manifest_is_silent` | no report for a manifest that resolves |
-//! | 7 | `test_the_allowed_set_holds_the_entry_verbatim` | `build_allowed_tool_set` stores the entry, so the filter compares exact names |
+//! | 7 | `test_the_allowed_set_holds_the_registry_spelling_and_dedupes_case` | `build_allowed_tool_set` stores each entry under the registry's spelling, so case variants occupy one key |
 //! | 8 | `test_an_adopted_spelling_matches_exactly_one_definition` | the filtered surface is one definition per adopted entry, never two |
+//! | 8a | `test_case_insensitive_resolution_admits_the_filtered_definition` | a lower-case entry admits the registered definition |
+//! | 8b | `test_the_any_pseudo_entry_is_recognised_in_any_case` | `any`/`Any`/`ANY` resolve without being registered |
+//! | 8c | `test_the_any_entry_is_never_reported_as_unresolved` | the pseudo entry is a policy, never a stale entry |
+//! | 8d | `test_any_empties_the_allowed_set_so_nothing_is_hidden` | `any` yields the empty set every consumer reads as "no allowlist" |
+//! | 8e | `test_any_advertises_the_whole_registry_through_both_filters` | with `any`, every registered tool is admitted |
 //! | 9 | `test_skill_manage_reports_a_stale_entry_when_it_applies_the_restriction` | the `Skill` wiring consumes the ledger |
 //! | 10 | `test_all_three_restriction_sites_report_and_the_prompt_path_does_not` | the other two sites (TUI `/skill`, forked resolver) report, and neither per-turn prompt path does |
 //!
-//! ## Why there is no `Read` case
+//! ## `Read`
 //!
-//! `Read` is deliberately absent from the adopted set: the derivation rated that
-//! spelling `Close`, so `read` kept its name. A skill written for Claude Code that
-//! names `Read` is therefore *reported*, not quietly answered by `read` - that is
-//! case 2's sibling and is asserted through `Read` in case 3's negative half.
+//! `Read` is absent from the adopted set: the derivation rated that spelling
+//! `Close`, so `read` kept its name. Case folding answers `Read` with `read`
+//! anyway - it is the same tool differently cased - so case 2 asserts that
+//! resolution rather than reporting it. What case 2 still refuses is a *different*
+//! tool reached by translation.
+//!
+//! ## Case folding and the `any` pseudo entry
+//!
+//! An entry is matched against the registry **ignoring ASCII case** and stored
+//! under the registry's spelling, so `grep`, `Grep` and `GREP` name one tool and one
+//! key. That is not the translation FR-026 forbids: it resolves the *same* tool, not
+//! a different one, so a retired spelling still cannot reach its replacement.
+//!
+//! The pseudo entry `any` (any case) lifts the restriction entirely, yielding the
+//! empty allowed set - the shape both filters already read as "no allowlist".
 //!
 //! ## What this file deliberately does not check
 //!
@@ -45,8 +61,9 @@ use ragent_agent::agent::AgentInfo;
 use ragent_agent::skill::SkillInfo;
 use ragent_agent::tool::Tool;
 use ragent_agent::tool::allowed_tools::{
-    report_unresolved_allowed_tools_once, reset_unresolved_allowed_tools_for_test,
-    unresolved_allowed_tools, unresolved_entry_report,
+    ANY_TOOL_ENTRY, is_any_tool_entry, report_unresolved_allowed_tools_once,
+    reset_unresolved_allowed_tools_for_test, resolve_allowed_tool_entry, unresolved_allowed_tools,
+    unresolved_entry_report,
 };
 use ragent_agent::tool::create_default_registry;
 use ragent_agent::tool::rename::TOOL_RENAMES;
@@ -112,18 +129,41 @@ fn test_every_adopted_claude_spelling_resolves_without_translation() {
 #[test]
 fn test_the_rename_table_is_not_consulted_when_resolving_an_entry() {
     let registry = create_default_registry();
+    // `Read` is the spelling the derivation rated `Close` and did not adopt. Case
+    // folding now answers it with `read`, which is the intended consequence of the
+    // forgiving lookup: it is the *same* tool differently cased, not a different one.
+    assert_eq!(
+        resolve_allowed_tool_entry(&registry, "Read"),
+        Some("read".to_string()),
+        "FR-029: `Read` resolves to the unchanged `read` by case folding alone"
+    );
+    assert!(
+        registry.get("read").is_some(),
+        "`read` itself is registered"
+    );
+
+    // Case folding is not a rename: every retired `before` spelling names no tool, but
+    // it resolves in any case because it *is* its `after` spelling's tool, differently
+    // cased. Translating it onto a different name (`grep` -> something else) would keep
+    // two vocabularies alive and is still refused - the entry resolves to `Grep` only
+    // because `Grep` is what the registry holds.
     for pair in TOOL_RENAMES {
-        // The retired spelling names no tool, so it is unresolved...
+        // `ask_user` -> `AskUserQuestion` and friends are *renames*, not case
+        // variants: only a pair that differs by case alone may resolve through the
+        // forgiving lookup. Everything else must stay unresolved.
+        let case_variant = pair.before.eq_ignore_ascii_case(pair.after);
         assert_eq!(
-            unresolved_allowed_tools(&registry, &entries(&[pair.before])),
-            vec![pair.before],
-            "FR-029 (FR-026): the retired spelling `{}` must not resolve - translating it \
-             onto `{}` would keep two vocabularies alive",
+            resolve_allowed_tool_entry(&registry, pair.before),
+            case_variant.then(|| pair.after.to_string()),
+            "FR-029: `{}` {} the registered `{}` - a case variant resolves, a rename does not",
             pair.before,
+            if case_variant {
+                "resolves to"
+            } else {
+                "must not resolve to"
+            },
             pair.after
         );
-        // ...and the adopted spelling resolves, which is what makes the first half a
-        // statement about the rename and not about a broken registry.
         assert_eq!(
             unresolved_allowed_tools(&registry, &entries(&[pair.after])),
             Vec::<&str>::new(),
@@ -132,18 +172,15 @@ fn test_the_rename_table_is_not_consulted_when_resolving_an_entry() {
         );
     }
 
-    // `Read` is the spelling the derivation rated `Close` and did not adopt; it is
-    // unresolved, not answered by the unchanged `read`.
-    assert_eq!(
-        unresolved_allowed_tools(&registry, &entries(&["Read"])),
-        vec!["Read"],
-        "FR-029: `Read` was not adopted, so a manifest naming it is reported rather than \
-         silently served by `read`"
-    );
-    assert!(
-        registry.get("read").is_some(),
-        "`read` itself is registered"
-    );
+    // A spelling that names no tool under any case is still reported, so the
+    // forgiving lookup did not become a wildcard.
+    for stale in ["ReadFile", "grep_tool", "Bashh"] {
+        assert_eq!(
+            unresolved_allowed_tools(&registry, &entries(&[stale])),
+            vec![stale],
+            "FR-029: `{stale}` names no tool in any case, so it is reported"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,18 +314,125 @@ fn test_a_correct_manifest_is_silent() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_the_allowed_set_holds_the_entry_verbatim() {
-    let allowed = entries(&["Bash", "read"]);
+fn test_the_allowed_set_holds_the_registry_spelling_and_dedupes_case() {
+    let allowed = entries(&["Bash", "read", "bash", "BASH"]);
     let set = ragent_agent::tool::build_allowed_tool_set(Some(allowed.as_slice()));
     assert!(
         set.contains("Bash") && set.contains("read"),
-        "FR-029: an entry is stored exactly as declared, so the filter compares exact names"
+        "FR-029: an entry is stored under the name the registry holds"
     );
     assert!(
-        !set.contains("bash"),
-        "FR-029 (FR-026): the set must not gain a retired spelling - a second key would be \
-         an alias by another route"
+        !set.contains("bash") && !set.contains("BASH"),
+        "FR-029: `bash` and `BASH` resolve onto the registered `Bash`, so the set gains no \
+         second key per spelling"
     );
+    // Three spellings of one tool plus `read` plus the always-allowed control surface:
+    // the case variants collapsed rather than adding a key each.
+    assert_eq!(
+        set.iter()
+            .filter(|n| n.eq_ignore_ascii_case("Bash"))
+            .count(),
+        1,
+        "FR-029: case variants of one name occupy exactly one key"
+    );
+}
+
+#[test]
+fn test_case_insensitive_resolution_admits_the_filtered_definition() {
+    let registry = create_default_registry();
+    // A manifest that writes the lower-case spelling of an adopted name still gets
+    // the tool: resolution lands on `Grep` and the filter admits the definition.
+    let allowed_set =
+        ragent_agent::tool::build_allowed_tool_set(Some(entries(&["grep"]).as_slice()));
+    assert!(
+        ragent_agent::tool::is_allowed_tool("Grep", &allowed_set),
+        "FR-029: `grep` resolves to the registered `Grep`, so the definition is admitted"
+    );
+    assert!(
+        registry.get("Grep").is_some(),
+        "`Grep` is the registered spelling"
+    );
+    // The lookup is not a wildcard: a name that matches no tool is still refused.
+    assert!(
+        !ragent_agent::tool::is_allowed_tool("Write", &allowed_set),
+        "FR-029: a tool the manifest did not name stays out of the restriction"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 8b: the `any` pseudo entry lifts the restriction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_the_any_pseudo_entry_is_recognised_in_any_case() {
+    for spelling in ["any", "Any", "ANY", "aNy"] {
+        assert!(
+            is_any_tool_entry(spelling),
+            "FR-029: `{spelling}` is the pseudo entry that names every tool"
+        );
+        assert_eq!(
+            resolve_allowed_tool_entry(&create_default_registry(), spelling),
+            Some(ANY_TOOL_ENTRY.to_string()),
+            "FR-029: `{spelling}` resolves without the registry holding a tool of that name"
+        );
+    }
+    assert!(!is_any_tool_entry("Anything"), "not a prefix match");
+    assert!(!is_any_tool_entry(""), "not the empty entry");
+}
+
+#[test]
+fn test_the_any_entry_is_never_reported_as_unresolved() {
+    let registry = create_default_registry();
+    assert_eq!(
+        unresolved_allowed_tools(&registry, &entries(&["Any"])),
+        Vec::<&str>::new(),
+        "FR-029: `any` is a policy, not a tool name, so it is never a stale entry"
+    );
+}
+
+#[test]
+fn test_any_empties_the_allowed_set_so_nothing_is_hidden() {
+    for list in [
+        entries(&["any"]),
+        entries(&["Any"]),
+        entries(&["Bash", "ANY", "ReadFile"]),
+    ] {
+        let set = ragent_agent::tool::build_allowed_tool_set(Some(list.as_slice()));
+        assert!(
+            set.is_empty(),
+            "FR-029: `any` lifts the restriction - the empty set is the shape every consumer \
+             reads as \"no allowlist, hide nothing\": {list:?}"
+        );
+        // An empty set is the "no allowlist" marker: both filters test `is_empty()`
+        // before consulting the set, so nothing is filtered out. Reproduce that
+        // guard here rather than calling `is_allowed_tool`, whose own contract is
+        // "a member of a NON-empty set" (and which returns false for the empty one).
+        assert!(
+            set.is_empty() || ragent_agent::tool::is_allowed_tool("Write", &set),
+            "FR-029: with `any` nothing is filtered out"
+        );
+    }
+}
+
+#[test]
+fn test_any_advertises_the_whole_registry_through_both_filters() {
+    let registry = create_default_registry();
+    let all: Vec<String> = registry.list();
+    for spelling in ["any", "Any"] {
+        let allowed_set =
+            ragent_agent::tool::build_allowed_tool_set(Some(entries(&[spelling]).as_slice()));
+        let admitted: Vec<&String> = all
+            .iter()
+            .filter(|name| {
+                allowed_set.is_empty() || ragent_agent::tool::is_allowed_tool(name, &allowed_set)
+            })
+            .collect();
+        assert_eq!(
+            admitted.len(),
+            all.len(),
+            "FR-029: `{spelling}` must leave every registered tool available"
+        );
+    }
 }
 
 #[test]

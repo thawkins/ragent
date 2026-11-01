@@ -127,6 +127,7 @@ fn telemetry_setup(active: u8) -> ProviderSetupStep {
         interval_field: InputField::with_text("30"),
         timeout_field: InputField::with_text("10"),
         port_field: InputField::new(),
+        logs_field: InputField::new(),
         active_field: active,
         error: None,
     }
@@ -436,10 +437,11 @@ async fn gitlab_validating_other_key_keeps_the_state() {
 // ===========================================================================
 
 #[tokio::test]
-async fn telemetry_setup_tab_cycles_all_five_fields() {
+async fn telemetry_setup_tab_cycles_all_six_fields() {
     let mut app = support::make_app();
     app.provider_setup = Some(telemetry_setup(0));
-    for expected in [1_u8, 2, 3, 4, 0] {
+    // Endpoint, protocol, interval, timeout, Prometheus port, logs level.
+    for expected in [1_u8, 2, 3, 4, 5, 0] {
         app.handle_key_event(key(KeyCode::Tab)).await;
         match app.provider_setup.as_ref().expect("setup") {
             ProviderSetupStep::TelemetrySetup { active_field, .. } => {
@@ -451,7 +453,7 @@ async fn telemetry_setup_tab_cycles_all_five_fields() {
     // BackTab walks the other way and wraps at 0.
     app.handle_key_event(key(KeyCode::BackTab)).await;
     match app.provider_setup.as_ref().expect("setup") {
-        ProviderSetupStep::TelemetrySetup { active_field, .. } => assert_eq!(*active_field, 4),
+        ProviderSetupStep::TelemetrySetup { active_field, .. } => assert_eq!(*active_field, 5),
         other => panic!("expected TelemetrySetup, got {other:?}"),
     }
 }
@@ -491,6 +493,7 @@ async fn telemetry_setup_enter_with_bad_endpoint_reports_problems() {
         interval_field: InputField::with_text("30"),
         timeout_field: InputField::with_text("10"),
         port_field: InputField::new(),
+        logs_field: InputField::new(),
         active_field: 0,
         error: None,
     });

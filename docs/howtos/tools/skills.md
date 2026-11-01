@@ -25,17 +25,25 @@ allowed-tools:
 ---
 ```
 
-Resolution is an **exact name comparison** against the registry. There is no
-translation layer, so:
+Resolution is a **case-insensitive name comparison** against the registry. The
+entry is stored under the registry's own spelling, so two spellings of one tool
+cannot become two keys in the allowed set. There is no translation layer, so:
 
 - the thirteen Claude Code spellings the rename adopted resolve as written -
   `AskUserQuestion`, `Bash`, `Edit`, `EnterPlanMode`, `ExitPlanMode`, `Glob`,
   `Grep`, `Skill`, `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`, `Write`;
 - the tools the rename did **not** touch keep their ragent spelling - `read`,
   `list`, `think`, `codeindex_search`, and so on;
-- a retired spelling (`bash`, `grep`, `task_create`, ...) matches **nothing**, and
-  neither does `Read`, which was rated too close to `read` to adopt;
-- entries are case-sensitive: `Bash` is not `bash`, and `Read` is not `read`;
+- **case does not matter**: `Bash`, `bash` and `BASH` all name the registry's
+  `Bash`, and `grep` names `Grep`, so a manifest can use whatever case reads best
+  (the registry's spelling is what the restriction then holds);
+- a retired spelling that names a **different** tool (`task_create` for
+  `TaskCreate`, `Read` for `read`) still matches nothing. Case folding resolves
+  one tool; it never resolves a different one;
+- `any` (in any case) is a pseudo entry that names every tool: the restriction is
+  lifted, exactly as if the list were omitted. It is never reported as unresolved
+  because it names a policy rather than a tool, so it does not depend on a
+  registered tool of that name existing;
 - an empty list means "no restriction", not "no tools".
 
 An entry that matches no registered tool would silently remove a capability, so

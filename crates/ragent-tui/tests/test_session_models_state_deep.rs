@@ -693,6 +693,9 @@ async fn cut_kb_selection_removes_the_selected_span() {
 
 #[tokio::test]
 async fn paste_image_from_clipboard_without_image_logs_notice() {
+    // The guard pins the image query to "no image" as well as the text, so the
+    // test never reads the developer's real clipboard: on a desktop that had
+    // just taken a screenshot the paste attached that PNG and this failed.
     let _guard = ragent_tui::clipboard::ClipboardTestOverrideGuard::new("just plain text");
     let mut app = support::make_app();
 
@@ -1454,6 +1457,7 @@ fn paste_text_into_provider_setup_covers_every_field_shape() {
         interval_field: InputField::new(),
         timeout_field: InputField::new(),
         port_field: InputField::new(),
+        logs_field: InputField::new(),
         active_field: 0,
         error: None,
     });

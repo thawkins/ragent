@@ -900,6 +900,10 @@ impl App {
                 // Mirrors the subcommands the `/memory` arm actually handles.
                 vec!["show".to_string(), "clear".to_string(), "help".to_string()]
             }
+            "db" => {
+                // Mirrors the subcommands the `/db` arm actually handles.
+                vec!["prune".to_string(), "help".to_string()]
+            }
             "agent" | "agents" => {
                 // Suggest agent-related subcommands
                 vec!["list".to_string(), "switch".to_string(), "help".to_string()]
@@ -1293,31 +1297,31 @@ impl App {
     /// leading `/`). Single entry/single exit: logs the invocation, delegates
     /// to the inner implementation, then logs completion and any output lines.
 
-    /// Return the path of the project or global config file that should be
-    /// mutated for telemetry changes. Prefer the project file when a project
-    /// config was loaded; otherwise fall back to the global config file.
+    /// Return the config file that a telemetry change must be written to.
+    ///
+    /// A project `.ragent/ragent.json` may not configure telemetry at all: the
+    /// repo-content guard in
+    /// [`Config::merge_project`](ragent_config::Config::merge_project)
+    /// (`SEC-ragent-config-001/002/003`) discards the whole `telemetry` block
+    /// from a project overlay, so repository content can neither redirect the
+    /// export nor switch it on. Writing there would therefore be silently
+    /// discarded on every later load - and, worse, a whole-block write would
+    /// first destroy whatever the operator had stored in that file. The
+    /// destination is the user-global `ragent.json`, which is the file whose
+    /// `telemetry` block actually reaches a running session.
     fn telemetry_config_source_path(&self) -> Option<std::path::PathBuf> {
-        let cfg = ragent_agent::Config::load().unwrap_or_default();
-        let was_project = cfg.config_paths.iter().any(|p| {
-            p.file_name().is_some_and(|f| f == "ragent.json")
-                && p.parent()
-                    .and_then(|parent| parent.file_name())
-                    .is_some_and(|f| f == ".ragent")
-        });
-        if was_project {
-            Some(
-                std::env::current_dir()
-                    .unwrap_or_default()
-                    .join(".ragent/ragent.json"),
-            )
-        } else {
-            dirs::config_dir().map(|d| d.join("ragent/ragent.json"))
-        }
+        ragent_config::Config::global_config_path()
     }
 
-    /// Atomically update the source `ragent.json` with a new `telemetry.otel`
-    /// block, preserving all other keys. The destination file is chosen based
-    /// on whether a project or global config was loaded.
+    /// Atomically update the destination `ragent.json` with a new
+    /// `telemetry.otel` block, preserving all other keys.
+    ///
+    /// The full block is serialised, so the caller must pass a complete
+    /// [`OtelConfig`]: merge the change onto
+    /// [`telemetry_config_snapshot`](Self::telemetry_config_snapshot) rather
+    /// than onto a fresh default, or every unrelated setting (endpoint,
+    /// protocol, service name, log level) is reset to its default by what
+    /// looks like a one-flag change.
     pub(crate) fn save_telemetry_otel(&self, otel: &OtelConfig) -> Result<(), String> {
         let path = self
             .telemetry_config_source_path()
@@ -1357,19 +1361,23 @@ impl App {
     /// [`poll_telemetry_export_health`](crate::app::App::poll_telemetry_export_health)
     /// to disable telemetry after repeated OTLP export failures.
     pub(crate) fn set_telemetry_enabled(&mut self, enabled: bool) {
-        let mut cfg = ragent_agent::Config::load().unwrap_or_default();
-        cfg.telemetry.otel.enabled = enabled;
-        match self.save_telemetry_otel(&cfg.telemetry.otel) {
+        // Start from the block as it is stored on disk, not from the loaded
+        // `Config`: the load path runs the repo-content guard, so a project
+        // overlay's `telemetry` block is already gone by the time we get here
+        // and merging onto it would reset every setting to its default.
+        let mut cfg = self.telemetry_config_snapshot();
+        cfg.enabled = enabled;
+        // One switch, both signals: `/telemetry on` also turns on the OTLP
+        // logs signal (at `telemetry.otel.logs.level`, unchanged), and
+        // `/telemetry off` stops it. There is no separate logs toggle.
+        cfg.logs.enabled = enabled;
+        match self.save_telemetry_otel(&cfg) {
             Ok(()) => {
                 self.session_processor.invalidate_config_cache();
                 // Reconfigure the live subsystem so the toggle takes effect
                 // immediately (shut down the old provider on `off`, build a
                 // fresh one on `on`) rather than waiting for a restart.
-                if let Err(e) = self
-                    .session_processor
-                    .telemetry
-                    .reconfigure(cfg.telemetry.otel)
-                {
+                if let Err(e) = self.session_processor.telemetry.reconfigure(cfg) {
                     self.push_log_no_agent(
                         LogLevel::Error,
                         format!("telemetry reconfigure failed: {e}"),
@@ -1385,21 +1393,27 @@ impl App {
         }
     }
 
-    /// Build the markdown help message for the `/telemetry counters` command.
-    ///
-    /// The live in-memory counter/gauge values are read from
-    /// [`ragent_telemetry::counters::current_values`] and appended to each
-    /// line so the user can see not only what each metric means, but also its
-    /// current value inside the running process.
-    fn telemetry_counters_help() -> String {
-        Self::telemetry_counters_content().markdown()
-    }
-
-    /// Build the structured counter/gauge content shared by `/telemetry counters`
-    /// and the live telemetry side panel. Returning a content builder avoids
+    /// Build the structured content shared by `/telemetry counters` and the
+    /// live telemetry side panel. Returning a content builder avoids
     /// duplicating the metric definitions and keeps the panel and the chat
-    /// output in sync.
-    pub(crate) fn telemetry_counters_content() -> TelemetryCountersContent {
+    /// output in sync; the live in-memory counter/gauge values are read from
+    /// [`ragent_telemetry::counters::current_values`] and shown beside each
+    /// metric's meaning.
+    ///
+    /// `otel` and `logs_exporting` describe the OTLP logs signal (spec `otel`
+    /// FR-036), which has no counters of its own but whose state belongs next
+    /// to the metric tables: an operator reading `/telemetry counters` needs to
+    /// know whether log records are leaving the machine at all.
+    ///
+    /// The whole `OtelConfig` comes in because "logs are off" and "telemetry is
+    /// off" are different answers with different remedies, and only the master
+    /// switch tells them apart - `logs_exporting()` is already `false` for
+    /// both, so it cannot distinguish them on its own.
+    pub(crate) fn telemetry_counters_content(
+        otel: &ragent_config::OtelConfig,
+        logs_exporting: bool,
+    ) -> TelemetryCountersContent {
+        let logs_config = &otel.logs;
         let values = current_values();
 
         let mut out = String::from("From: /telemetry counters\n\n## Telemetry counters\n\n");
@@ -1648,15 +1662,29 @@ impl App {
         write_group(&mut out, "Cost metrics", &cost);
         write_group(&mut out, "Effectiveness metrics", &effectiveness);
 
-        out.push_str(
-            "### Logs
-",
-        );
-        out.push_str(
-            "No counters configured - log signals are planned.
-
-",
-        );
+        // Spec `otel` FR-036: the logs signal is a `tracing` sink, not a set of
+        // counters, so report its state rather than a metric table.
+        out.push_str("### Logs\n");
+        if logs_exporting {
+            let _ = writeln!(
+                // INTENTIONAL: write to a String buffer is infallible
+                out,
+                "- OTLP log export is **on** at level `{}` or higher, batched on the \n  configured export interval and delivered to the same collector as metrics.\n",
+                logs_config.level
+            );
+        } else if !otel.enabled {
+            out.push_str(
+                "- OTLP log export is **off** because telemetry is off. `/telemetry on` \n  starts metric and log export together; `/telemetry logs <level>` only sets \n  how much is shipped.\n\n",
+            );
+        } else if !logs_config.enabled {
+            out.push_str(
+                "- OTLP log export is **off** while telemetry is on. `/telemetry on` \n  re-enables the signal alongside the metrics.\n\n",
+            );
+        } else {
+            out.push_str(
+                "- OTLP log export is **configured but not attached**: no tracing layer \n  holds this process's log pipeline, so records stay local.\n\n",
+            );
+        }
         out.push_str(
             "### Traces
 ",
@@ -1675,6 +1703,138 @@ impl App {
         }
     }
 
+    /// The telemetry config currently stored in the destination file.
+    ///
+    /// Reads the `telemetry.otel` block of the file
+    /// [`telemetry_config_source_path`](Self::telemetry_config_source_path)
+    /// names, rather than the loaded [`Config`](ragent_agent::Config):
+    ///
+    /// - the load path runs the repo-content guard, which drops a project
+    ///   overlay's `telemetry` block, so a loaded `Config` cannot tell us what
+    ///   that file holds;
+    /// - the subsystem's live copy is not a substitute either - it is what was
+    ///   applied, not what will be used at the next start, and the two differ
+    ///   exactly when a save could not be applied.
+    ///
+    /// A missing, unreadable, or malformed block falls back to the default,
+    /// which is also what the next start would do.
+    fn telemetry_config_snapshot(&self) -> ragent_config::OtelConfig {
+        let Some(path) = self.telemetry_config_source_path() else {
+            return ragent_config::OtelConfig::default();
+        };
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            return ragent_config::OtelConfig::default();
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return ragent_config::OtelConfig::default();
+        };
+        json.get("telemetry")
+            .and_then(|t| t.get("otel"))
+            .and_then(|otel| serde_json::from_value(otel.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    /// Dispatch `/telemetry logs [<level>]` (spec `otel` FR-036).
+    ///
+    /// `arg` is already lowercased. With no argument the effective level is
+    /// reported. A level spelling persists `telemetry.otel.logs.level` and
+    /// reconfigures the live subsystem so the export filter changes
+    /// immediately - the new level is not deferred to the next restart.
+    ///
+    /// There is no `on`/`off` here: log export follows `/telemetry on|off`,
+    /// which switches both signals, so this command only tunes how much is
+    /// exported. Asking for log export while `telemetry.otel.enabled` is
+    /// `false` still records the level but tells the operator that
+    /// `/telemetry on` is what starts the traffic, rather than leaving them to
+    /// wonder why nothing arrives.
+    fn handle_telemetry_logs_command(&mut self, arg: &str) {
+        const LEVELS: [&str; 6] = ["all", "trace", "debug", "info", "warn", "error"];
+        let requested_level = LEVELS.contains(&arg).then(|| arg.to_string());
+
+        let mut cfg = self.telemetry_config_snapshot();
+        let exporting = self.session_processor.telemetry.logs_exporting();
+
+        let reply = match arg {
+            "" => {
+                let state = if exporting {
+                    "shipping"
+                } else if cfg.enabled {
+                    "configured but not attached"
+                } else {
+                    "off (telemetry is disabled)"
+                };
+                format!(
+                    "From: /telemetry logs\n\nOTLP log export is **{state}** at level `{}`.\n\n\
+                     Use `/telemetry logs <all|trace|debug|info|warn|error>` to change the level, \
+                     or `/telemetry on|off` to start or stop exporting.",
+                    cfg.logs.level
+                )
+            }
+            "on" | "off" => format!(
+                "From: /telemetry logs {arg}\n\nThere is no separate logs switch: log export \
+                 follows `/telemetry on|off`, which starts and stops both signals.\n\n\
+                 Use `/telemetry logs <all|trace|debug|info|warn|error>` to change the level."
+            ),
+            _ if requested_level.is_some() => {
+                cfg.logs.level = arg.to_string();
+                let level = cfg.logs.level.clone();
+                let disabled_hint = if cfg.enabled {
+                    String::new()
+                } else {
+                    "\n\nTelemetry itself is off, so nothing is shipped yet - run `/telemetry on` to start exporting."
+                        .to_string()
+                };
+                match self.apply_telemetry_logs_config(cfg) {
+                    Ok(()) => {
+                        let all_note = if level == "all" {
+                            "\n\n`all` exports every record the layer observes - including TRACE and \
+                             anything below it - so the remote stream is at its most verbose."
+                        } else {
+                            ""
+                        };
+                        format!(
+                            "From: /telemetry logs {arg}\n\n[ok] OTLP log export level set to `{level}`.\n\n\
+                             Records at this level or above are batched to the configured collector \
+                             alongside the metrics; the local log panel keeps showing everything.{all_note}{disabled_hint}"
+                        )
+                    }
+                    Err(e) => format!("From: /telemetry logs {arg}\n\n[err] {e}"),
+                }
+            }
+            _ => format!(
+                "From: /telemetry logs\n\nUnknown argument `{}`.\n\n\
+                 Usage: `/telemetry logs [all|trace|debug|info|warn|error]`",
+                ragent_types::sanitize_terminal::sanitize_terminal(arg)
+            ),
+        };
+
+        self.append_assistant_text(&reply);
+        self.status = "telemetry: logs".to_string();
+    }
+
+    /// Persist an `OtelConfig` and apply it to the live telemetry subsystem.
+    ///
+    /// Shared by the `/telemetry logs` level change. The save is reported
+    /// separately from the apply so an operator whose reconfigure failed still
+    /// learns that the file was (or was not) updated - the same two-stage
+    /// reporting `/telemetry setup` uses.
+    fn apply_telemetry_logs_config(
+        &mut self,
+        otel: ragent_config::OtelConfig,
+    ) -> Result<(), String> {
+        self.save_telemetry_otel(&otel)?;
+        self.session_processor.invalidate_config_cache();
+        self.session_processor
+            .telemetry
+            .reconfigure(otel)
+            .map_err(|e| {
+                format!(
+                    "the configuration was saved but could not be applied to the running \
+                     telemetry subsystem: {e}\n\nThe setting takes effect on the next ragent start."
+                )
+            })
+    }
+
     /// Dispatch the `/telemetry` slash-command family.
     fn handle_telemetry_command(&mut self, args: &str) {
         let sub = args.split_whitespace().next().unwrap_or("");
@@ -1688,10 +1848,19 @@ impl App {
 | Subcommand | Description |
 |---|---|
 | `/telemetry help` | Show this help |
-| `/telemetry on` | Enable OpenTelemetry metrics export |
-| `/telemetry off` | Disable OpenTelemetry metrics export |
-| `/telemetry setup` | Open a TUI dialog to configure endpoint, protocol, interval, timeout, and internal port |
-| `/telemetry counters` | List all available metric counters, grouped by category |
+| `/telemetry on` | Enable OpenTelemetry metrics and log export |
+| `/telemetry off` | Disable OpenTelemetry metrics and log export |
+| `/telemetry setup` | Open a TUI dialog to configure endpoint, protocol, interval, timeout, internal port, and log level |
+| `/telemetry counters` | List all available metric counters, grouped by category, plus the log-export state |
+| `/telemetry logs [<level>]` | Show or set the OTLP log-export level |
+
+`/telemetry on` turns on **both** signals: ragent's `tracing` events are
+batched to the same collector as the metrics, in addition to the local sink
+(the TUI log panel or stderr), which is never redirected. There is no separate
+logs switch - to change how much is exported, set the level with
+`/telemetry logs <all|trace|debug|info|warn|error>` (default `info`). `all`
+exports every record the layer observes, including TRACE and anything below it;
+the local sink is unaffected either way.
 
 Each failed OTLP export (a non-2xx collector response or an export timeout) is
 reported in the message window as an `Agent Notice`. After 5 consecutive
@@ -1705,7 +1874,10 @@ with a clean failure count.",
                 self.append_assistant_text(
                     "From: /telemetry on
 
-[ok] Telemetry enabled.",
+[ok] Telemetry enabled. Metrics and logs are both exported to the collector.
+
+Use `/telemetry logs <all|trace|debug|info|warn|error>` to raise or lower the log
+level.",
                 );
                 self.status = "telemetry: enabled".to_string();
             }
@@ -1714,7 +1886,7 @@ with a clean failure count.",
                 self.append_assistant_text(
                     "From: /telemetry off
 
-[ok] Telemetry disabled.",
+[ok] Telemetry disabled. Metrics and logs both stop.",
                 );
                 self.status = "telemetry: disabled".to_string();
             }
@@ -1735,20 +1907,37 @@ with a clean failure count.",
                             .map(|p| p.to_string())
                             .unwrap_or_default(),
                     ),
+                    // The logs field is the export level only (spec `otel`
+                    // FR-036): log export is switched by `/telemetry on|off`,
+                    // so an empty field means "leave the level unchanged",
+                    // not "turn the signal off".
+                    logs_field: crate::input_field::InputField::with_text(&otel.logs.level),
                     active_field: 0,
                     error: None,
                 });
                 self.status = "telemetry: setup".to_string();
             }
+            "logs" => {
+                let arg = args
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                self.handle_telemetry_logs_command(&arg);
+            }
             "counters" => {
-                self.append_assistant_text(&Self::telemetry_counters_help());
+                let otel = self.telemetry_config_snapshot();
+                let logs_exporting = self.session_processor.telemetry.logs_exporting();
+                self.append_assistant_text(
+                    &Self::telemetry_counters_content(&otel, logs_exporting).markdown(),
+                );
                 self.status = "telemetry: counters".to_string();
             }
             _ => {
                 self.append_assistant_text(
                     "From: /telemetry
 
-Usage: `/telemetry help|on|off|setup|counters`",
+Usage: `/telemetry help|on|off|setup|counters|logs [<level>]`",
                 );
                 self.status = "telemetry: usage".to_string();
             }
@@ -2092,6 +2281,138 @@ Usage: `/telemetry help|on|off|setup|counters`",
         let report = ragent_agent::tool::os_info::render_text(&info);
         self.append_assistant_text(&format!("From: /osinfo show\n\n{report}"));
         self.status = "osinfo: show".to_string();
+    }
+
+    /// Route `/db <args>` to the session-database subcommands.
+    ///
+    /// The first whitespace-separated token (lowercased) selects the
+    /// subcommand: the empty string and the help aliases
+    /// `help`/`--help`/`-h` render the help page
+    /// ([`Self::handle_db_help`]); `prune` deletes messages older than the
+    /// retention window; any other token is rejected with the valid-subcommand
+    /// list. A bare `/db` shows help rather than guessing at a destructive
+    /// action.
+    ///
+    /// `prune` accepts `--dry-run` (report the count, delete nothing) and
+    /// `--days N` / `--days=N`. Without `--days` the window is
+    /// [`App::db_retention_days`], the configured
+    /// `storage.retention.message_days`. A real prune opens the
+    /// `Prune messages older than N days?` confirmation dialog and deletes
+    /// nothing until the user picks `Yes`.
+    fn handle_db_command(&mut self, args: &str) {
+        let mut tokens = args.split_whitespace();
+        let sub = tokens.next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "" | "help" | "--help" | "-h" => self.handle_db_help(),
+            "prune" => self.handle_db_prune(tokens),
+            _ => {
+                self.append_assistant_text(
+                    "From: /db\n\nUnknown subcommand. \
+                     Usage: `/db prune [--days N] [--dry-run]|help`",
+                );
+                self.status = "db: usage".to_string();
+            }
+        }
+    }
+
+    /// Parse and execute the `/db prune [--days N] [--dry-run]` subcommand.
+    ///
+    /// Reached from [`Self::handle_db_command`]. `--days` accepts both the
+    /// two-token (`--days 14`) and the joined (`--days=14`) form; the value is
+    /// a positive day count. Omitting it uses the configured window,
+    /// [`App::db_retention_days`]. `--dry-run` reports how many messages would
+    /// be deleted and deletes nothing; otherwise the confirmation dialog is
+    /// armed (nothing is deleted until the user picks `Yes`).
+    fn handle_db_prune<'a, I>(&mut self, mut tokens: I)
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        let mut days: Option<u32> = None;
+        let mut dry_run = false;
+        let mut bad: Option<String> = None;
+        while let Some(token) = tokens.next() {
+            let lowered = token.to_lowercase();
+            if lowered == "--dry-run" {
+                dry_run = true;
+            } else if let Some(value) = lowered.strip_prefix("--days=") {
+                match value.parse::<u32>() {
+                    Ok(n) if n > 0 => days = Some(n),
+                    _ => bad = Some(token.to_string()),
+                }
+            } else if lowered == "--days" {
+                match tokens.next().and_then(|v| v.parse::<u32>().ok()) {
+                    Some(n) if n > 0 => days = Some(n),
+                    _ => bad = Some("--days".to_string()),
+                }
+            } else {
+                bad = Some(token.to_string());
+            }
+            if bad.is_some() {
+                break;
+            }
+        }
+
+        if let Some(token) = bad {
+            self.append_assistant_text(&format!(
+                "From: /db prune\n\nUnrecognised argument `{token}`. \
+                 Usage: `/db prune [--days N] [--dry-run]` with a positive day \
+                 count."
+            ));
+            self.status = "db: usage".to_string();
+            return;
+        }
+
+        let days = days.unwrap_or(self.db_retention_days);
+        if dry_run {
+            self.count_prunable_messages(days);
+        } else {
+            self.open_db_prune_confirm(days);
+        }
+    }
+
+    /// Render the `/db help` page.
+    ///
+    /// Reached from [`Self::handle_db_command`] for the empty argument and
+    /// every help alias. Documents the `prune` and `help` subcommands, the
+    /// default retention window, the fact that sessions are kept when their
+    /// messages expire, and the `VACUUM` caveat - a `DELETE` returns pages to
+    /// SQLite's freelist but the file stays the same size until a `VACUUM`
+    /// rewrites it, which needs exclusive access.
+    fn handle_db_help(&mut self) {
+        self.append_assistant_text(&format!(
+            "From: /db help\n\n\
+             ## /db - Session database\n\n\
+             `/db prune` deletes chat messages older than a retention window. \
+             Sessions themselves are kept: an expired transcript stays listed \
+             and resumable, just empty. The default window is **{days}** day(s), \
+             from `storage.retention.message_days` in the config.\n\n\
+             A real prune asks for confirmation before deleting anything - the \
+             `Yes` option is never preselected, so a stray `Enter` cannot remove \
+             messages. Use `--dry-run` to see the count first.\n\n\
+             | Subcommand | Description |\n\
+             |---|---|\n\
+             | `/db prune` | Delete messages older than the configured window \
+             (asks to confirm) |\n\
+             | `/db prune --days N` | Delete messages older than N days (asks to \
+             confirm) |\n\
+             | `/db prune --dry-run` | Report how many messages would be deleted; \
+             delete nothing |\n\
+             | `/db help` | Show this help (bare `/db` does the same) |\n\n\
+             Notes:\n\
+             - `--days` accepts `--days 14` and `--days=14`; the value must be a \
+             positive day count.\n\
+             - The same operation is available headless as \
+             `ragent db prune [--days N] [--dry-run]`.\n\
+             - Deleting rows does not shrink `ragent.db`. A `VACUUM` reclaims the \
+             space, but it needs exclusive access: stop every other ragent \
+             process first.\n\n\
+             Examples:\n\
+             - `/db prune --dry-run --days 30` - count the messages older than 30 \
+             days without deleting anything.\n\
+             - `/db prune --days 14` - prune with the confirmation dialog.",
+            days = self.db_retention_days
+        ));
+        self.status = "db: help".to_string();
     }
 
     /// Handle the `/alog` slash command (activity log UI).
@@ -3646,6 +3967,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "goal" => handle_goal_command(self, args),
             "telemetry" => self.handle_telemetry_command(args),
             "osinfo" => self.handle_osinfo_command(args),
+            "db" => self.handle_db_command(args),
             "backend" => self.handle_backend_command(args),
             "automation" => self.handle_automation_command(args).await,
             "about" => {
@@ -10101,11 +10423,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let interval = std::time::Duration::from_secs(flow.interval.max(5));
                     let client_id = ragent_agent::github::GitHubClient::client_id();
                     let event_bus = self.event_bus.clone();
-                    self.push_log(
+                    self.push_log_exported(
                         LogLevel::Info,
                         format!(
                             "GitHub login started - enter code {user_code} at {verification_uri}"
                         ),
+                        None,
                         None,
                     );
 

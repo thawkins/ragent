@@ -93,6 +93,7 @@ re-runs all 27 DDL statements on every open. See [T-09](#t-09--remove-the-unread
 | `synchronous = NORMAL` | yes | yes | yes | no (FULL) | yes |
 | `busy_timeout` | 30 s | 5 s | **no** | 5 s | **no** |
 | `wal_autocheckpoint` | 500 pages | no | **no** | no | no |
+| `journal_size_limit` | 32 MiB | no | **no** | no | no |
 | `temp_store = MEMORY` | no | no | yes | no | no |
 | `foreign_keys = ON` | **no** | n/a | yes | n/a | n/a |
 | `cache_size` | default | default | default | default | default |
@@ -370,6 +371,39 @@ Recording these so a later pass does not regress them:
   `idx_symbols_name_nocase` (range seek), kind -> `idx_symbols_kind`,
   language -> `idx_files_language` -> `idx_symbols_file`. The only slow shape is
   the unfiltered default (P-04).
+
+### 3.1 Message retention (`storage.retention`)
+
+`Storage::prune_messages_older_than(max_age)` (`storage.rs:1766`) deletes chat
+messages whose `created_at` is older than the window. It is the one deliberate
+exception to "never delete transcript rows", so it is **off by default**:
+
+```json
+{ "storage": { "retention": { "enabled": true, "message_days": 14 } } }
+```
+
+- `enabled` defaults to `false` and `message_days` to `14`; `validate()` rejects
+  `message_days == 0`, because a zero-day window would empty the store on every
+  start.
+- All three tables are cascaded in **one transaction**: `messages_fts` rowids,
+  then `message_fts_keys`, then `messages`. A partial cascade would leave the
+  contentless FTS index pointing at rows that no longer exist, and the
+  `prune_keeps_the_fts_index_consistent` test pins that.
+- The cutoff uses `chrono::Duration::checked_sub_signed` (SEC-049): a
+  panicking subtraction on an extreme window is not acceptable inside a
+  startup path.
+- **Sessions are kept.** An expired transcript stays listed and resumable; it
+  just reads back empty. `prune_keeps_the_session_row` asserts this.
+- `Storage::count_messages_older_than` uses the same predicate and deletes
+  nothing, so `--dry-run` reports an honest count.
+- **The file does not shrink.** `DELETE` returns pages to SQLite's freelist;
+  `ragent.db` keeps its size until a `VACUUM` rewrites it, and `VACUUM` needs
+  exclusive access - every other ragent process must have released the database
+  and its `-wal`/`-shm` sidecars first.
+
+Surfaces: startup (when `enabled`), `ragent db prune [--days N] [--dry-run]`,
+and the TUI `/db prune [--days N] [--dry-run]` (which asks for confirmation,
+with `No` preselected, before deleting anything).
 
 ---
 

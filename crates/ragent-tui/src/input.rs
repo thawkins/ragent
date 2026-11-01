@@ -117,6 +117,12 @@ pub enum InputAction {
     /// Dismiss the `Clear this project's memory?` dialog: the `No` option or
     /// `Esc`. Leaves memory unchanged.
     CancelMemoryClear,
+    /// Confirm the `Prune messages older than N days?` dialog's `Yes` option
+    /// (opened by `/db prune`).
+    ConfirmDbPrune,
+    /// Dismiss the `Prune messages older than N days?` dialog: the `No` option
+    /// or `Esc`. Leaves the database unchanged.
+    CancelDbPrune,
     /// Confirm the plan approval dialog (Enter when cursor_approve = true).
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
@@ -722,6 +728,28 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 });
             }
             KeyCode::Esc => return Some(InputAction::CancelMemoryClear),
+            _ => return None,
+        }
+    }
+
+    // If the `Prune messages older than N days?` confirmation dialog (opened by
+    // `/db prune`) is active, intercept keys before any other dialog. Same
+    // two-option shape as the memory dialog above.
+    if app.db_prune_confirm_open {
+        match key.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                app.db_prune_confirm_toggle();
+                app.needs_redraw = true;
+                return None;
+            }
+            KeyCode::Enter => {
+                return Some(if app.db_prune_confirm_is_yes() {
+                    InputAction::ConfirmDbPrune
+                } else {
+                    InputAction::CancelDbPrune
+                });
+            }
+            KeyCode::Esc => return Some(InputAction::CancelDbPrune),
             _ => return None,
         }
     }
@@ -2355,6 +2383,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             mut interval_field,
             mut timeout_field,
             mut port_field,
+            mut logs_field,
             mut active_field,
             error: _,
         } => {
@@ -2367,22 +2396,24 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 interval: &'a mut crate::input_field::InputField,
                 timeout: &'a mut crate::input_field::InputField,
                 port: &'a mut crate::input_field::InputField,
+                logs: &'a mut crate::input_field::InputField,
             ) -> Option<&'a mut crate::input_field::InputField> {
                 match idx {
                     0 => Some(endpoint),
                     2 => Some(interval),
                     3 => Some(timeout),
                     4 => Some(port),
+                    5 => Some(logs),
                     _ => None,
                 }
             }
             match key.code {
                 KeyCode::Tab => {
-                    active_field = (active_field + 1) % 5;
+                    active_field = (active_field + 1) % 6;
                 }
                 KeyCode::BackTab => {
                     active_field = if active_field == 0 {
-                        4
+                        5
                     } else {
                         active_field - 1
                     };
@@ -2398,6 +2429,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     let interval_str = interval_field.text().trim();
                     let timeout_str = timeout_field.text().trim();
                     let port_str = port_field.text().trim();
+                    let logs_str = logs_field.text().trim().to_ascii_lowercase();
 
                     let interval = interval_str.parse::<u64>().unwrap_or(0);
                     let timeout = timeout_str.parse::<u64>().unwrap_or(0);
@@ -2413,6 +2445,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                     interval_field,
                                     timeout_field,
                                     port_field,
+                                    logs_field,
                                     active_field,
                                     error: Some(format!(
                                         "Internal port must be a number between 0 and {}.",
@@ -2424,6 +2457,18 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         }
                     };
 
+                    // The logs field is the OTLP logs-signal export level. Log
+                    // export follows telemetry itself (spec `otel` FR-036), so
+                    // this draft always enables both signals and an empty
+                    // field simply keeps the default level.
+                    let logs = ragent_config::OtelLogsConfig {
+                        enabled: true,
+                        level: if logs_str.is_empty() {
+                            "info".to_string()
+                        } else {
+                            logs_str
+                        },
+                    };
                     let draft = ragent_config::OtelConfig {
                         enabled: true,
                         endpoint,
@@ -2435,6 +2480,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         metrics: std::collections::HashMap::new(),
                         internal_port,
                         cardinality_limit: 1000,
+                        logs,
                     };
 
                     let problems = draft.validate();
@@ -2445,6 +2491,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             interval_field,
                             timeout_field,
                             port_field,
+                            logs_field,
                             active_field,
                             error: Some(problems.join("; ")),
                         });
@@ -2496,6 +2543,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                 interval_field,
                                 timeout_field,
                                 port_field,
+                                logs_field,
                                 active_field,
                                 error: Some(e),
                             });
@@ -2510,6 +2558,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2523,6 +2572,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2536,6 +2586,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2549,6 +2600,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2562,6 +2614,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2575,6 +2628,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         &mut interval_field,
                         &mut timeout_field,
                         &mut port_field,
+                        &mut logs_field,
                     ) else {
                         // Not a text field (protocol); no-op rather than panic.
                         return;
@@ -2590,6 +2644,7 @@ pub(crate) fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 interval_field,
                 timeout_field,
                 port_field,
+                logs_field,
                 active_field,
                 error: None,
             });

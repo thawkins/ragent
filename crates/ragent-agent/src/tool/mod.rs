@@ -1461,15 +1461,32 @@ fn register_extracted_vcs_tools(registry: &ToolRegistry) {
 
 /// Return a `HashSet` of allowed tool names from a skill's `allowed_tools`
 /// list, including the small set of always-allowed control tools.
+///
+/// Resolution is case-insensitive and lands on the registry's own spelling, so
+/// `bash`, `Bash` and `BASH` all become the one key `Bash` (spec `uniformtools`
+/// FR-029). An entry naming no registered tool is kept verbatim, so
+/// [`is_allowed_tool`] still cannot admit a name the registry does not hold, and
+/// [`allowed_tools::report_skill_allowed_tools_once`] can still report it.
+///
+/// The pseudo entry `any` (any case) lifts the restriction: the returned set is
+/// **empty**, which every consumer already reads as "no allowlist, hide nothing".
 pub fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<String> {
-    let mut set = HashSet::new();
-    if let Some(names) = allowed {
-        for name in names {
-            set.insert(name.as_ref().to_string());
-        }
-    } else {
-        return set;
+    let Some(names) = allowed else {
+        return HashSet::new();
+    };
+    if names
+        .iter()
+        .any(|name| allowed_tools::is_any_tool_entry(name.as_ref()))
+    {
+        return HashSet::new();
     }
+    let mut set: HashSet<String> = names
+        .iter()
+        .map(|name| {
+            allowed_tools::resolve_allowed_tool_entry(&create_default_registry(), name.as_ref())
+                .unwrap_or_else(|| name.as_ref().to_string())
+        })
+        .collect();
     for name in always_allowed_tool_names() {
         set.insert(name.to_string());
     }
@@ -1479,11 +1496,17 @@ pub fn build_allowed_tool_set(allowed: Option<&[impl AsRef<str>]>) -> HashSet<St
 /// Return `true` if a tool name is allowed by the given allowed set.
 /// The set already includes always-allowed tools from
 /// [`build_allowed_tool_set`].
+///
+/// The comparison ignores ASCII case, so a name that reached this filter under a
+/// different case than the registry spells it is still admitted (FR-029).
 pub fn is_allowed_tool<S: ::std::hash::BuildHasher>(
     tool_name: &str,
     allowed: &HashSet<String, S>,
 ) -> bool {
     allowed.contains(tool_name)
+        || allowed
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(tool_name))
 }
 
 /// The hardwired always-allowed tool names: the codeindex tools plus the

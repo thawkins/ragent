@@ -138,6 +138,7 @@ fn telemetry_setup(active: u8) -> ProviderSetupStep {
         interval_field: InputField::new(),
         timeout_field: InputField::new(),
         port_field: InputField::new(),
+        logs_field: InputField::new(),
         active_field: active,
         error: None,
     }
@@ -947,15 +948,15 @@ async fn gitlab_validating_esc_returns_to_form() {
 async fn telemetry_setup_tab_cycles_fields_and_protocol_toggle() {
     let mut app = support::make_app();
     app.provider_setup = Some(telemetry_setup(0));
-    // Tab advances through the five fields.
-    for _ in 0..5 {
+    // Tab advances through the six fields.
+    for _ in 0..6 {
         assert!(handle_key(&mut app, key(KeyCode::Tab)).await.is_none());
     }
-    // BackTab from field 0 wraps to 4.
+    // BackTab from field 0 wraps to the last field (5).
     app.provider_setup = Some(telemetry_setup(0));
     assert!(handle_key(&mut app, key(KeyCode::BackTab)).await.is_none());
     match app.provider_setup.as_ref().expect("setup") {
-        ProviderSetupStep::TelemetrySetup { active_field, .. } => assert_eq!(*active_field, 4),
+        ProviderSetupStep::TelemetrySetup { active_field, .. } => assert_eq!(*active_field, 5),
         other => panic!("expected TelemetrySetup, got {other:?}"),
     }
     // On the protocol field, Up toggles the protocol.
@@ -1027,6 +1028,7 @@ async fn telemetry_setup_bad_port_sets_error() {
         interval_field: InputField::with_text("30"),
         timeout_field: InputField::with_text("10"),
         port_field: InputField::with_text("not-a-port"),
+        logs_field: InputField::new(),
         active_field: 0,
         error: None,
     });

@@ -10,7 +10,7 @@ use ignore::WalkBuilder;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::fs;
 use std::path::Path;
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 /// Hardcoded directory names that are always excluded from scanning.
 const EXCLUDED_DIRS: &[&str] = &[
@@ -61,6 +61,15 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         .follow_links(false) // SEC-ragent-codeindex-001: never traverse symlinks
         .build();
 
+    // Skip reasons are counted, never logged per path. A walk of a real
+    // repository crosses thousands of files under `.git/`, `target/` and
+    // `node_modules/`, so one event per skipped path made a single reindex
+    // emit ~6k `tracing` events (which the OTLP logs signal then exported).
+    // The counts carry the same information in one line.
+    let mut skipped_symlink = 0usize;
+    let mut skipped_excluded = 0usize;
+    let mut skipped_globbed = 0usize;
+
     for entry in walker {
         let entry = match entry {
             Ok(e) => e,
@@ -80,7 +89,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         // Skip symlinks: a link inside the tree may point anywhere, and
         // following it indexes content outside the project root.
         if entry.file_type().is_some_and(|ft| ft.is_symlink()) {
-            trace!("skipping symlink: {}", path.display());
+            skipped_symlink += 1;
             continue;
         }
 
@@ -94,7 +103,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
                         || config.extra_exclude_dirs.contains(&name.to_string())
                 })
         }) {
-            trace!("skipping excluded path: {}", path.display());
+            skipped_excluded += 1;
             continue;
         }
 
@@ -102,7 +111,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         if let Some(matcher) = &exclude_matcher
             && matcher.is_match(path)
         {
-            trace!("skipping glob-excluded path: {}", path.display());
+            skipped_globbed += 1;
             continue;
         }
 
@@ -110,30 +119,75 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
     }
 
     debug!(
-        "found {} candidate files in {}",
+        "found {} candidate files in {} (skipped {skipped_symlink} symlinks, \
+         {skipped_excluded} excluded paths, {skipped_globbed} glob-excluded)",
         paths.len(),
         root.display()
     );
 
     // Process files in parallel.
-    let results: Vec<Option<ScannedFile>> = paths
+    //
+    // `process_file` returns the reason it dropped a file instead of logging
+    // it: the parallel iterator has no place to aggregate, and one event per
+    // dropped file is the same volume problem the walker had. The reasons are
+    // counted here and reported in a single summary line.
+    let results: Vec<ProcessOutcome> = paths
         .par_iter()
         .map(|path| process_file(path, &root, config))
         .collect();
 
-    let files: Vec<ScannedFile> = results.into_iter().flatten().collect();
-    debug!("scanned {} source files", files.len());
+    let mut oversized = 0usize;
+    let mut grown = 0usize;
+    let mut binary = 0usize;
+    let mut unreadable = 0usize;
+    let mut files: Vec<ScannedFile> = Vec::with_capacity(results.len());
+    for outcome in results {
+        match outcome {
+            ProcessOutcome::Scanned(file) => files.push(file),
+            ProcessOutcome::Empty => {}
+            ProcessOutcome::Oversized => oversized += 1,
+            ProcessOutcome::GrewPastCap => grown += 1,
+            ProcessOutcome::Binary => binary += 1,
+            ProcessOutcome::Unreadable => unreadable += 1,
+        }
+    }
+
+    debug!(
+        "scanned {} source files (skipped {oversized} oversized, {grown} grew past the cap, \
+         {binary} binary, {unreadable} unreadable)",
+        files.len()
+    );
 
     Ok(files)
 }
 
+/// Why [`process_file`] did or did not produce a [`ScannedFile`].
+///
+/// The skip variants carry no path: a walk drops thousands of files and the
+/// caller reports aggregate counts, not one log event each.
+#[derive(Debug)]
+enum ProcessOutcome {
+    /// The file was read, hashed, and is a scannable source file.
+    Scanned(ScannedFile),
+    /// The file was zero bytes, before or after the read.
+    Empty,
+    /// `fs::metadata` reported a size above `ScanConfig::max_file_size`.
+    Oversized,
+    /// The file grew past the cap between the stat and the read.
+    GrewPastCap,
+    /// The first [`BINARY_CHECK_BYTES`] contained a NUL byte.
+    Binary,
+    /// The file existed at stat time but could not be read.
+    Unreadable,
+}
+
 /// Process a single file: check size, detect binary, hash, count lines.
-fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<ScannedFile> {
+fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> ProcessOutcome {
     let metadata = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) => {
             warn!("cannot stat {}: {e}", path.display());
-            return None;
+            return ProcessOutcome::Unreadable;
         }
     };
 
@@ -141,13 +195,12 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
 
     // Skip oversized files.
     if size > config.max_file_size {
-        trace!("skipping oversized file ({size} bytes): {}", path.display());
-        return None;
+        return ProcessOutcome::Oversized;
     }
 
     // Skip empty files.
     if size == 0 {
-        return None;
+        return ProcessOutcome::Empty;
     }
 
     // Read the file.
@@ -155,7 +208,7 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
         Ok(c) => c,
         Err(e) => {
             warn!("cannot read {}: {e}", path.display());
-            return None;
+            return ProcessOutcome::Unreadable;
         }
     };
 
@@ -168,20 +221,15 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
     // real size exceeds the limit.
     let size = content.len() as u64;
     if size == 0 {
-        return None;
+        return ProcessOutcome::Empty;
     }
     if size > config.max_file_size {
-        trace!(
-            "skipping file that grew past the cap ({size} bytes): {}",
-            path.display()
-        );
-        return None;
+        return ProcessOutcome::GrewPastCap;
     }
 
     // Binary check: look for NUL bytes in the first chunk.
     if is_binary(&content) {
-        trace!("skipping binary file: {}", path.display());
-        return None;
+        return ProcessOutcome::Binary;
     }
 
     let hash = hash_content(&content);
@@ -190,7 +238,7 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
     let mtime_ns = mtime_nanos(&metadata);
     let rel_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
 
-    Some(ScannedFile {
+    ProcessOutcome::Scanned(ScannedFile {
         path: rel_path,
         hash,
         size,

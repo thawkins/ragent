@@ -9,6 +9,7 @@ use crate::compaction::CompactionConfig;
 use crate::gcf::GcfConfig;
 use crate::i18n::I18nConfig;
 use crate::openai::OpenAiConfig;
+use crate::retention::StorageConfig;
 use crate::security_analyzer::SecurityAnalyzerConfig;
 use crate::tools::ToolsConfig;
 use anyhow::bail;
@@ -178,6 +179,15 @@ pub struct Config {
     /// while `enabled` is `false`.
     #[serde(default, skip_serializing_if = "GcfConfig::is_default")]
     pub gcf: GcfConfig,
+    /// Session-message retention configuration.
+    ///
+    /// Retention is opt-in: with no `storage` section no message is ever
+    /// expired. When enabled, messages older than
+    /// [`RetentionConfig::message_days`] are deleted from the session store;
+    /// session rows are kept so an old conversation remains resumable with an
+    /// empty transcript.
+    #[serde(default, skip_serializing_if = "StorageConfig::is_default")]
+    pub storage: StorageConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
@@ -382,6 +392,7 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             compaction: CompactionConfig::default(),
             gcf: GcfConfig::default(),
+            storage: StorageConfig::default(),
             gitlab: GitLabIntegrationConfig::default(),
             agent_perf: AgentPerfConfig::default(),
             telemetry: crate::telemetry::TelemetryConfig::default(),

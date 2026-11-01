@@ -42,6 +42,7 @@ pub mod prompt;
 mod research;
 mod reverse;
 mod session_ops;
+pub use self::session_ops::emit_log_entry_to_tracing;
 pub mod skillgen;
 mod slash;
 
@@ -60,6 +61,50 @@ where
     H: std::hash::BuildHasher,
 {
     slash::mcp_display_servers(previous, configured, working_dir, live)
+}
+
+/// Test hook: record one mirrored-child-stderr line through the same path the
+/// TUI event loop uses, and report what the log window holds afterwards.
+///
+/// `tests/test_log_window_otel_export.rs` asserts the `stderr: ...` line lands
+/// in the panel while producing no `tracing` event, which is what keeps an
+/// npx-launched MCP server's startup chatter off the OTLP logs export.
+#[doc(hidden)]
+pub fn push_mirrored_stderr_for_tests(app: &mut App, chunk: &str) {
+    for line in chunk.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+        let line = ragent_types::sanitize::redact_secrets(line);
+        app.push_log_deferred(LogLevel::Warn, format!("stderr: {line}"), None);
+    }
+}
+
+/// Test hook: drain one record through the same `push_log` path the TUI event
+/// loop uses for `TuiTracingLayer` records, and record it in the log window.
+///
+/// `tests/test_log_window_otel_export.rs` asserts the line reaches the panel
+/// while producing no `tracing` event: the record already was one, and
+/// re-emitting it exported every event to the collector twice.
+#[doc(hidden)]
+pub fn push_tracing_record_for_tests(app: &mut App, message: &str) {
+    app.push_log(LogLevel::Info, message.to_string(), None);
+}
+
+/// Test hook: record one agent-event-bus line through the same
+/// `push_log_no_agent` path the TUI event handler uses, and report what the log
+/// window holds afterwards.
+///
+/// `tests/test_log_window_otel_export.rs` asserts that such a line - which has no
+/// native `tracing` event behind it - both lands in the panel and is re-emitted
+/// to `tracing`, because the panel is the only sink an event-bus notice ever
+/// reaches.
+#[doc(hidden)]
+pub fn push_event_bus_log_for_tests(app: &mut App, level: LogLevel, message: &str) {
+    app.push_log_no_agent(level, message.to_string());
+}
+
+/// Test hook: every message currently held by the log window, oldest first.
+#[doc(hidden)]
+pub fn log_window_messages_for_tests(app: &App) -> Vec<String> {
+    app.log_entries.iter().map(|e| e.message.clone()).collect()
 }
 mod launch;
 mod mcp_bridge;

@@ -61,6 +61,8 @@ the project root `README.md` and the **Tutorial** in
    - 7.38 [`openai`](#738-openai)
    - 7.39 [`automation`](#739-automation)
    - 7.40 [`tools`](#740-tools)
+   - 7.41 [`agents`](#741-agents)
+   - 7.42 [`storage`](#742-storage)
 8. [Full Example File](#8-full-example-file)
 9. [Common Recipes](#9-common-recipes)
 10. [Related Documents](#10-related-documents)
@@ -1104,7 +1106,8 @@ OpenTelemetry metrics export configuration.
       "resource_attributes": { "deployment.environment": "production" },
       "metrics": { "ragent.tool.call_count": false },
       "internal_port": null,
-      "cardinality_limit": 1000
+      "cardinality_limit": 1000,
+      "logs": { "enabled": false, "level": "info" }
     }
   }
 }
@@ -1119,7 +1122,7 @@ Wraps `OtelConfig` as `telemetry.otel`.
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `enabled` | `bool` | `false` | Master on/off switch. |
-| `endpoint` | `String` | `"http://localhost:4318"` | OTLP endpoint base URL. Must be `http://` or `https://`. |
+| `endpoint` | `String` | `"http://localhost:4318"` | OTLP endpoint base URL. Must be `http://` or `https://`. ragent appends the OTLP/HTTP signal path (`/v1/metrics`) to a base URL, so `http://localhost:4318` exports to `http://localhost:4318/v1/metrics`; a base path (`https://gw.example.com/otel`) is kept. An endpoint that already names a signal path (`.../v1/metrics`) is used exactly as written. |
 | `protocol` | `OtelProtocol` | `http` | Transport: `http` or `grpc`. |
 | `export_interval_seconds` | `u64` | `30` | Batch export interval. Must be > 0 when enabled. |
 | `export_timeout_seconds` | `u64` | `10` | Per-export request timeout. Must be > 0 when enabled. |
@@ -1128,6 +1131,45 @@ Wraps `OtelConfig` as `telemetry.otel`.
 | `metrics` | `HashMap<String, bool>` | `{}` | Per-metric enable/disable toggles. Absent = enabled by default. |
 | `internal_port` | `Option<u16>` | `None` | Optional in-process Prometheus text endpoint port. |
 | `cardinality_limit` | `usize` | `1000` | Max distinct attribute combinations per metric before overflow into `unknown` bucket. |
+| `logs` | `OtelLogsConfig` | `{ enabled: false, level: "info" }` | OTLP log-signal export of ragent's `tracing` events (see below). |
+
+#### `OtelLogsConfig` schema (`telemetry.otel.logs`)
+
+Ragent logs through `tracing` to a local sink: the TUI log panel in a terminal
+session, or stderr in a headless/server run. When telemetry is on, a **second**
+destination - the same OTLP collector that receives the metrics - is fed from
+this block, without redirecting the local sink. There is no separate logs
+switch: `/telemetry on` writes `enabled: true` here alongside
+`telemetry.otel.enabled`, `/telemetry off` clears it, and `/telemetry logs
+[<level>]` only changes how much is exported.
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `enabled` | `bool` | `false` | Ship `tracing` events over the OTLP logs signal. Maintained by `/telemetry on\|off` (which sets it together with `telemetry.otel.enabled`); a hand-edited `true` still requires `telemetry.otel.enabled: true` to export anything. The setup dialog prefills `Logs level` with the current level (or `info`); a blank field keeps the default rather than clearing this flag - `/telemetry on\|off` is the only switch. |
+| `level` | `String` | `"info"` | Minimum severity exported: `trace`, `debug`, `info`, `warn` or `error`. A value outside that list is a validation problem; an unknown value falls back to `info`. Events below the level still reach the local sink. |
+
+The logs signal travels on the same `endpoint`, `protocol` and
+`export_timeout_seconds` as the metrics, posting to the `/v1/logs` sibling of the
+metrics path (so `http://localhost:4318` sends logs to
+`http://localhost:4318/v1/logs`), batches on the same
+`export_interval_seconds`, and obeys the same TLS rule for gRPC (a cleartext
+non-loopback endpoint is refused). Every exported body is passed through the
+shared credential redactor and every exported attribute through the
+metric-attribute sensitive-data guard; a body longer than 16 KiB is truncated
+with a `... [truncated]` marker. If the log exporter cannot be built, the
+failure is logged at `warn` level and the metric signal keeps running.
+
+```json
+{
+  "telemetry": {
+    "otel": {
+      "enabled": true,
+      "endpoint": "http://localhost:4318",
+      "logs": { "enabled": true, "level": "warn" }
+    }
+  }
+}
+```
 
 The legacy `experimental.open_telemetry` flag is mapped as a deprecated alias
 via `apply_legacy_flag()`.
@@ -1868,6 +1910,44 @@ to `1` rather than accepted: zero would silently switch the feature off while
 still claiming to be configured, which is worse than a bound the operator can
 see. An out-of-range value is clamped to the nearest bound.
 
+### 7.42 `storage`
+
+Session-message retention. **Opt-in**: with no `storage` section no message is
+ever expired, and the section is omitted from a saved file while at its default,
+so an untouched `ragent.json` round-trips byte-identically.
+
+```json
+{
+  "storage": {
+    "retention": { "enabled": true, "message_days": 14 }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `retention.enabled` | `bool` | `false` | Run age-based message expiry at startup and permit `/db prune` / `ragent db prune`. |
+| `retention.message_days` | `u32` | `14` | Days a message is kept. Must be `>= 1`; a zero-day window is rejected because it would empty the store on every start. |
+
+**Sessions are kept.** The prune deletes from `messages_fts`,
+`message_fts_keys` and `messages` in one transaction and never touches
+`sessions`, so an expired conversation stays listed by `ragent session list`
+and can be resumed - it just reads back empty.
+
+**The cutoff is fallible.** `chrono::Duration::checked_sub_signed` (SEC-049)
+means an extreme window returns an error instead of panicking inside the startup
+path, and `Storage::count_messages_older_than` applies the same predicate for
+`--dry-run`, so a report and the prune that follows it cannot disagree.
+
+**The file does not shrink.** `DELETE` returns pages to SQLite's freelist;
+`ragent.db` keeps its size until a `VACUUM`, which needs exclusive access - stop
+every other ragent process first. See `docs/sqlite.md` for the storage-level
+detail.
+
+Surfaces: the startup pass (on a blocking thread, so it never stalls startup),
+`ragent db prune [--days N] [--dry-run]`, and the TUI `/db prune [--days N]
+[--dry-run]` (confirmed, with `No` preselected).
+
 ---
 
 ## 8. Full Example File
@@ -2054,7 +2134,8 @@ need all of these — every section has defaults, so an empty `{}` is valid.
       "export_interval_seconds": 30,
       "export_timeout_seconds": 10,
       "service_name": "ragent",
-      "cardinality_limit": 1000
+      "cardinality_limit": 1000,
+      "logs": { "enabled": false, "level": "info" }
     }
   },
 
@@ -2147,6 +2228,10 @@ need all of these — every section has defaults, so an empty `{}` is valid.
     "agents": {
       "claude": { "id": "claude", "command": "claude-code-acp", "args": [] }
     }
+  },
+
+  "storage": {
+    "retention": { "enabled": true, "message_days": 14 }
   }
 }
 ```

@@ -28,6 +28,7 @@ pub mod cardinality;
 pub mod counters;
 pub mod export_health;
 pub mod instruments;
+pub mod logs;
 pub mod prometheus;
 pub mod recorder;
 pub mod sensitive;

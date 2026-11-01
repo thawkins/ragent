@@ -155,3 +155,6 @@ mod test_user_dirs_helpers;
 
 #[path = "test_yolo_persistence.rs"]
 mod test_yolo_persistence;
+
+#[path = "test_retention_config.rs"]
+mod test_retention_config;

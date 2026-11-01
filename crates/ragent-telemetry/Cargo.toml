@@ -35,15 +35,22 @@ url = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# The logs signal is delivered as a `tracing_subscriber::Layer`, so the trait
+# definition is needed in production code, not only in tests (FR-036).
+tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }
 
 # Optional OTEL dependencies — only pulled in when the `telemetry` feature is
 # enabled, satisfying NFR-006 (users who do not need OTEL can build without
 # these crates).
-opentelemetry = { version = "0.33", optional = true }
+#
+# `logs` (spec `otel` FR-036) gates the logs signal: the SdkLoggerProvider, the
+# OTLP/HTTP and OTLP/gRPC log exporters, and the log record types.
+opentelemetry = { version = "0.33", optional = true, features = ["logs"] }
 opentelemetry_sdk = { version = "0.33", optional = true, features = [
     "metrics",
+    "logs",
     "rt-tokio",
     # `ManualReader`/`MetricReader`/`Pipeline` are required by the optional
     # Prometheus scrape endpoint (FR-028). OTEL SDK 0.33 gates the custom
@@ -52,6 +59,9 @@ opentelemetry_sdk = { version = "0.33", optional = true, features = [
 ] }
 opentelemetry-otlp = { version = "0.33", optional = true, default-features = false, features = [
     "metrics",
+    # Spec `otel` FR-036: the OTLP logs signal ships `tracing` events to the
+    # same collector as the metrics signal.
+    "logs",
     "http-proto",
     # The BLOCKING reqwest client, not `reqwest-client`. The async client calls
     # `tokio::time::sleep` inside its export future, so the SDK's default
@@ -85,7 +95,7 @@ opentelemetry = { version = "0.33" }
 # The `InMemoryMetricExporter` used by the telemetry tests is not feature-gated
 # (it lives in the always-present `metrics::in_memory_exporter` module), and
 # `testing` only adds async-std/trace/logs wiring we do not use.
-opentelemetry_sdk = { version = "0.33", features = ["metrics", "rt-tokio", "testing", "experimental_metrics_custom_reader"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "logs", "rt-tokio", "testing", "experimental_metrics_custom_reader"] }
 
 [lints]
 workspace = true

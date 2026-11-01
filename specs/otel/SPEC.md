@@ -3,7 +3,7 @@ status: draft
 audit:
   - { time: 1784284250, from: "none", to: "draft", actor: "system" }
 ---
-# Specification: OpenTelemetry Metrics Export Interface
+# Specification: OpenTelemetry Metrics and Logs Export Interface
 
 ## Spec ID
 
@@ -41,6 +41,9 @@ wiring them into OTEL instruments rather than replacing them.
 - Wire the existing `ExperimentalFlags.open_telemetry` flag into the new
   telemetry subsystem as the legacy on/off switch (deprecated alias).
 - Export metrics via the standard OTLP/HTTP and OTLP/gRPC protocols.
+- Export `tracing` events over the OTLP **logs** signal, opt-in via
+  `telemetry.otel.logs`, through a `tracing_subscriber::Layer` that composes
+  with the existing local sinks.
 
 - Support graceful shutdown that flushes pending metric exports on process
   termination.
@@ -301,6 +304,84 @@ requirements that reference it.
   distinct attribute combinations per metric; if the limit is exceeded, the
   system shall aggregate excess attributes into an `unknown` bucket.
 
+### Logs Signal
+
+- **FR-036** The system shall export its `tracing` events to the OTLP logs
+  signal when `telemetry.otel.enabled` and `telemetry.otel.logs.enabled` are both
+  `true`, posting to `/v1/logs` (HTTP) or the collector's gRPC log service at the
+  same endpoint and on the same protocol as the metrics.
+- **FR-036a** The system shall re-emit every TUI log-window entry as a `tracing`
+  event at **the entry's own severity**, so the OTLP logs signal receives the
+  activity the panel shows - tool-call start, tool arguments, tool result, tool
+  failure, warnings and information lines - whether or not the panel is open
+  (FR-036e).
+  A tool call is exported at `INFO`, a warning at `WARN` and an error at `ERROR`,
+  so both default floors (`--log-level info` and
+  `telemetry.otel.logs.level: info`) admit them and tool-call activity reaches a
+  collector with no extra configuration. Each such record shall carry the
+  attributes `log_window = true` and `log_window_level` naming the entry's own
+  severity (`tool`, `info`, `warn`, `error`), so a collector can separate a tool
+  failure from a routine tool call even where both map to the same `INFO`
+  severity.
+- **FR-036e** The re-emit required by FR-036a shall **not** be conditional on the
+  log panel being visible. A session normally runs with the panel closed, so
+  gating the export on `show_log` made the collector's tool-call coverage depend
+  on whether the operator happened to open `/log`: `Bash` emits a native
+  `Executing bash command` record on every call and so arrived regardless, while
+  `Edit`, `Write`, `Grep`, `read` and the remaining tools emit no `tracing` event
+  at all and arrived only with the panel open. Observed from a collector that
+  reads as "only Bash tool calls are exported", for tools that the panel-gated
+  code treated identically. The panel-visibility gate shall therefore apply only
+  to the panel's own rendering and to the spool file; the export is unconditional
+  (subject to the FR-036d duplicate guard and the FR-036c burst bound).
+- **FR-036d** The system shall keep each line to exactly one exported record at
+  every `logs.level` floor by putting the duplicate guard on the **caller**
+  rather than on a universally quiet severity. Several panel lines exist twice -
+  once as a native `tracing` event and once as the panel's copy of it (the drain
+  of `TuiTracingLayer` records, the mirrored-child stderr drain) - so those call
+  sites use the deferred push, which records the line in the panel and the spool
+  and never re-emits it. Every other entry is re-emitted exactly once. An earlier
+  revision instead emitted every re-emit at a fixed `DEBUG`, which kept the
+  streams disjoint but placed the transport below both default floors, so a tool
+  call reached the collector only when the operator also raised `--log-level`;
+  in practice the logs signal shipped no tool-call activity at all. A fixed echo
+  severity also tied the duplicate guard to one `logs.level` floor, whereas
+  suppressing the echo holds at every floor.
+- **FR-036c** The system shall bound the log-window re-emit at 60 records per
+  second across the whole process, as a token bucket, because one panel line is
+  one exported record: a wall of mirrored child-process stderr - an MCP server
+  launched through `npx` emits hundreds of banner, deprecation and readiness
+  lines at startup - would otherwise put thousands of records into one batch.
+  When a burst ends, the first entry that fits again shall be preceded by a
+  `warn` record naming the number of entries withheld, so the collector sees an
+  explicit gap rather than a silent loss. Interactive diagnosis is unchanged:
+  the panel and the spool file still show every line.
+- **FR-036b** The system shall accept `--log-level all` as a spelling of the
+  highest verbosity `tracing` defines (`trace`), so a run can record every
+  severity for both the local sink and the OTLP logs export.
+- **FR-037** The system shall deliver log records through a batched log
+  processor on a background thread; the thread that emits a `tracing` event
+  shall never block on the network or on the collector.
+- **FR-038** The system shall batch log exports on the same
+  `telemetry.otel.export_interval_seconds` as the metrics, and shall flush the
+  log pipeline on `flush`, `shutdown` and reconfigure so a process that exits
+  inside one interval does not drop its last records.
+- **FR-039** The system shall pass every exported log body through the shared
+  credential redactor and every exported log attribute through the existing
+  metric-attribute sensitive-data guard, and shall truncate a body longer than
+  16 KiB rather than exporting it whole.
+- **FR-040** While `telemetry.otel.logs.enabled` is `false`, or telemetry itself
+  is disabled, the system shall export no log records at all, and the local sink
+  (the TUI log panel or stderr) shall continue to receive every event.
+- **FR-041** If the OTLP log exporter cannot be built, the system shall log the
+  failure, keep the metric signal running, and continue with local logging
+  only; a broken logs pipeline shall never disable telemetry or stop the
+  process.
+- **FR-042** When the log pipeline is reconfigured (`/telemetry on`, `/telemetry
+  off`, `/telemetry logs <level>`, `/telemetry setup`), the system shall apply
+  the change to the installed layer without reinstalling the global tracing
+  subscriber, and shall not lose the records emitted before the change.
+
 ## Non-Functional Requirements
 
 - **NFR-001** The `ragent-telemetry` crate shall depend only on
@@ -319,6 +400,8 @@ requirements that reference it.
   dependency.
 - **NFR-007** All public functions in `ragent-telemetry` shall have docblock
   documentation per the project's documentation standards.
+- **NFR-008** With the OTLP logs signal disabled, the tracing layer shall add no
+  more than one `None` check per emitted event, and shall allocate nothing.
 
 ## Configuration Schema
 
@@ -340,6 +423,10 @@ The `telemetry.otel` block in `ragent.json`:
         "ragent.tokens.input": true,
         "ragent.cost.estimated": true,
         "ragent.tool.invocations": false
+      },
+      "logs": {
+        "enabled": false,
+        "level": "info"
       }
     }
   }
@@ -355,6 +442,8 @@ The `telemetry.otel` block in `ragent.json`:
 | `service_name` | string | `"ragent"` | `service.name` resource attribute |
 | `resource_attributes` | map | `{}` | Custom resource attributes |
 | `metrics` | map<string, bool> | `{}` | Per-metric enable/disable |
+| `logs.enabled` | bool | `false` | Export `tracing` events over the OTLP logs signal |
+| `logs.level` | `"all"`\|`"trace"`\|`"debug"`\|`"info"`\|`"warn"`\|`"error"` | `"info"` | Minimum severity exported to the collector (the local sink is unaffected) |
 
 The existing `experimental.open_telemetry` flag is treated as a deprecated
 alias: if `telemetry.otel` is absent and `experimental.open_telemetry` is
@@ -384,6 +473,20 @@ emitted.
 9. The `/otel` TUI command toggles export on/off and displays current status.
 10. No API keys, file contents, or user prompts appear in any metric attribute
     or resource attribute.
+11. With `telemetry.otel.enabled: true` and `telemetry.otel.logs.enabled: true`,
+    `ragent run "hello"` posts at least one record to `/v1/logs` whose body is a
+    message ragent actually logged, and those same messages still appear in the
+    log panel (TUI) or on stderr.
+12. With `telemetry.otel.logs.enabled: false` (the default), no request is made
+    to `/v1/logs` and the tracing layer adds no allocation to the emitting path.
+13. A log line containing a credential (an API key, an `Authorization: Bearer`
+    header) reaches the collector redacted, and a body over 16 KiB is truncated
+    with a `... [truncated]` marker.
+14. Setting `telemetry.otel.logs.level: "warn"` stops `info` and `debug` records
+    being exported while the local sink still shows them.
+15. An unreachable collector or a malformed log endpoint leaves the process
+    running with local logging intact; the failure is logged at `warn` level and
+    the metric signal keeps exporting.
 
 ## Related Work
 
@@ -394,4 +497,6 @@ emitted.
 - Existing event bus: `crates/ragent-types/src/event.rs`
 - OpenTelemetry Rust SDK: <https://crates.io/crates/opentelemetry>
 - OTLP exporter crate: <https://crates.io/crates/opentelemetry-otlp>
+- OTel logs data model: <https://opentelemetry.io/docs/specs/otel/logs/data-model/>
+- Existing local sinks: `src/main.rs` (tracing init), `crates/ragent-tui/src/tracing_layer.rs`
 - OTEL semantic conventions: <https://opentelemetry.io/docs/specs/semconv/>
