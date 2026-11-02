@@ -329,7 +329,8 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   legacy undated `RESEARCH.md` / `CORPA.md`, and every read surface resolves
   whichever exists) and `GET/POST/DELETE /research` HTTP endpoints;
   concept/finding output limits (`--max-concepts`/`--max-findings`, `research.max_concepts`/
-  `research.max_findings`), scholarly-engine control (scholarly backends are
+  `research.max_findings`), a topic-decomposition query limit (`--max-queries`,
+  `research.max_queries`, default 20; `0` = unbounded), scholarly-engine control (scholarly backends are
   excluded by default; `--papers` includes them, `research.exclude_academic_engines`
   persists the exclusion), open-access toggles
   (`--oa-enable`/`--no-oa`), URL cloaking (`--url-cloak`) that defangs web
@@ -341,7 +342,16 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   `published_after` (an exact `YYYY-MM-DD` bound that Exa, Tavily and Serper
   honour server-side and the coarse `freshness` enum cannot express), and a
   per-engine progress table that breaks exclusions
-  and fetch failures out by reason/cause (including its own `age` column)
+  and fetch failures out by reason/cause (including its own `age` column).
+  The report `title` is named by the LLM from the generated executive summary
+  when the synthesis came from the model (seeded with the topic, normalised and
+  capped at 80 characters), falling back to the truncated summary; `--format`
+  selects the artifact - `report`, `executive-summary`, `comparison-table`,
+  `source-bibliography`, `imrad` or `newsletter`, where `newsletter` emits only
+  the reader-facing sections (topic, executive summary, top 10 implications,
+  open questions, concepts, findings, findings relationship diagram) and drops
+  the corpus scoreboard, research brief, search-query/engine blocks, data-quality
+  sections, cross-references and references index
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions; also discovers the AgentSkills
   convention (`.agents/skills/` project and `~/.agents/skills/` user, a directory per

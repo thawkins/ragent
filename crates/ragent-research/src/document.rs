@@ -333,6 +333,8 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
         body.push_str(&assemble_imrad_body(doc, &topic));
     } else if doc.output_format == crate::run_config::OutputFormat::ComparisonTable {
         body.push_str(&assemble_comparison_table_body(doc, &topic));
+    } else if doc.output_format == crate::run_config::OutputFormat::Newsletter {
+        body.push_str(&assemble_newsletter_body(doc, &topic));
     } else {
         body.push_str(&assemble_report_body(doc, &topic));
     }
@@ -1172,7 +1174,8 @@ fn render_scoreboard(doc: &ResearchDocument) -> String {
 
     // FR-013: abbreviated formats render only the score line, meter bar, and
     // source facts; the critic subscore and tension/citation lines are held
-    // back for the full report and IMRaD layouts.
+    // back for the full report and IMRaD layouts. `Newsletter` never reaches
+    // here at all - its layout omits the scoreboard entirely.
     let abbreviated = matches!(
         doc.output_format,
         crate::run_config::OutputFormat::ExecutiveSummary
@@ -1654,6 +1657,74 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
 
     // -- References Index (FR-011) ----------------------------------------
     push_references_index(&mut body, doc);
+
+    body
+}
+
+/// Build the body of a newsletter-format `RESEARCH.md` report.
+///
+/// The newsletter layout carries only the reader-facing narrative sections, in
+/// this order: Topic, Executive Summary, Top 10 Implications, Open Questions,
+/// Concepts, Findings, Findings Relationship Diagram. Everything the default
+/// report adds around them - the corpus quality scoreboard, the research
+/// brief, the search queries/engine/provider blocks, Data Quality &
+/// Consistency, the QA artifact sections, In-Project Cross-References and the
+/// References Index - is deliberately omitted so the artifact reads as a
+/// newsletter rather than an audit trail. The `# Title:` line and the YAML
+/// frontmatter are emitted by [`assemble_document`], above this body.
+///
+/// Sections whose data was never produced (no concepts extracted, no summary
+/// recorded) still render their placeholder, exactly as the report layout does,
+/// so the newsletter's shape is stable.
+fn assemble_newsletter_body(doc: &ResearchDocument, topic: &str) -> String {
+    let mut body = String::new();
+
+    // -- Topic -------------------------------------------------------------
+    body.push_str("## Topic\n\n");
+    body.push_str(strip_control_chars(topic).trim());
+    body.push_str("\n\n");
+
+    // -- Executive Summary -------------------------------------------------
+    body.push_str("## Executive Summary\n\n");
+    if doc.summary.trim().is_empty() {
+        body.push_str("_(no executive summary recorded yet - run a gathering pass to populate)_\n");
+    } else {
+        body.push_str(&strip_control_chars(doc.summary.trim()));
+        body.push('\n');
+    }
+    body.push('\n');
+
+    // -- Top 10 Implications ----------------------------------------------
+    body.push_str("## Top 10 Implications\n\n");
+    if doc.top_implications.is_empty() {
+        body.push_str(
+            "_(no ranked implications yet - the synthesis pass will populate this section)_\n\n",
+        );
+    } else {
+        for (idx, imp) in doc.top_implications.iter().enumerate() {
+            let n = idx + 1;
+            let cleaned = strip_control_chars(imp).trim().to_string();
+            body.push_str(&format!("{n}. {cleaned}\n"));
+        }
+        body.push('\n');
+    }
+
+    // -- Open Questions ---------------------------------------------------
+    push_open_questions(&mut body, doc, 2);
+
+    // -- Concepts ---------------------------------------------------------
+    if let Some(concepts) = &doc.concepts {
+        body.push_str("## Concepts\n\n");
+        body.push_str(concepts.trim());
+        body.push_str("\n\n");
+    }
+
+    // -- Findings ---------------------------------------------------------
+    body.push_str("## Findings\n\n");
+    push_findings(&mut body, doc);
+
+    // -- Findings Relationship Diagram ------------------------------------
+    body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
 
     body
 }

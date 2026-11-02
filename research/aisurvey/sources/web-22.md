@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.avnation.tv/2026/10/09/logitech-unveils-its-biggest-enterprise-launch-ever
-- Title: Logitech Unveils Its Biggest Enterprise Launch Ever
-- Author(s): AVNation Staff, AVNation Staff, @AVNationTV
+- URL: https://news.prfree.org/@julieczachur/strategywiz-consulting-expands-ai-governance-and-responsible-ai-services-for-enterprise-ai-adoption-li2t2te3vy6m
+- Title: StrategyWiz Consulting Expands AI Governance and Responsible AI Services for Enterprise AI Adoption
+- Author(s): JulieCzachur, StrategyWiz Consulting
 - Language: English
-- Published (UTC): 2026-10-09T15:00:32+00:00
-- Captured (UTC): 2026-10-27T13:11:36.315303272+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-10-07T11:46:16+00:00
+- Captured (UTC): 2026-11-02T11:13:48.554482847+00:00
+- Relevance: High - title + snippet match query
 
 
 ```text
-Logitech unveiled its largest enterprise product launch to date—Rally Bar 2, Rally System 2 Pro, and Sound Shape audio—targeting AI-powered workplaces, with Henry Levak framing it as addressing IT’s dual mandate of delivering current meeting experiences while preparing for AI. Rally Bar 2 features a Qualcomm chipset with four times more edge AI processing than various other video bars, a custom lens and 1-inch sensor, RightSound 3 audio, occupancy/environmental sensing, and certification for Microsoft Teams, Zoom Rooms, and Google Meet on MDEP; Rally System 2 Pro is a modular system for large/divisible rooms including RoomMate 2 Pro (up to three 4K displays), Rally AI Camera Pro, Rally Speaker 2, Logitech Link AV-over-IP, and Right Sight 3 multi-camera tracking. Sound Shape, used in Rally Speaker 2 Pro (32 micro-drivers) and Rally Speaker 2 Max (64), directs focused acoustic beams to distribute audio across 20 m/65 ft; Rally Bar 2, Tap IP 2, and Tap Scheduler 2 are priced at $4,299/€4,299 and $1,299/€1,299 respectively and rolling out now, while Rally System 2 Pro, RoomMate 2 Pro, and the Rally Speaker 2 lineup arrive Summer 2027 and Right Sight 3 in H2 2027 as a free CollabOS update.
+On October 7, 2026, StrategyWiz Consulting announced expansion of its AI governance and responsible AI services to help enterprises move AI from experimentation to production while addressing model reliability, data privacy, bias, explainability, regulatory compliance, and performance. The technology consulting and digital transformation firm’s offerings include AI risk assessments, model evaluation, bias and fairness audits, explainable AI, data traceability, compliance controls, and post-deployment drift monitoring, plus automated auditing, runtime guardrails, human-in-the-loop controls, and continuous monitoring. Founder Vikas Agarwal said enterprise AI adoption “cannot depend on trust alone” and needs measurable controls embedded in the development lifecycle; StrategyWiz’s broader AI portfolio also covers agentic AI, AI application development, RAG pipelines and LLM fine-tuning, business process automation, and AI ROI measurement.
 ```

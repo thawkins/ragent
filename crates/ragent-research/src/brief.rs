@@ -90,6 +90,9 @@ pub fn generate_research_brief(
         Some(OutputFormat::Imrad) => {
             "Structure the final report in IMRaD form: Abstract, Introduction, Methods, Results, Discussion, and References Index."
         }
+        Some(OutputFormat::Newsletter) => {
+            "Deliver a short, reader-facing newsletter: frontmatter, title, topic, executive summary, top 10 implications, open questions, concepts, findings, and a findings relationship diagram - and nothing else."
+        }
         _ => {
             "Produce a full multi-section research report with findings, implications, open questions, and a references index."
         }

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://aiflashreport.com/model-releases.html
-- Title: AI Model Release Tracker: New LLM Launches, Updated Weekly | AI Flash Report
-- Author(s): AI Flash Report
+- URL: https://www.kognitos.com/blog/agent-observability
+- Title: Agent Observability: What Traces Show and What Auditors Need
+- Author(s): Kognitos
 - Language: English
-- Published (UTC): 2026-10-19T00:00:00+00:00
-- Captured (UTC): 2026-10-27T13:09:27.212971753+00:00
-- Relevance: High - title + snippet match query
+- Published (UTC): 2026-10-21T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:12:13.529718100+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-AI Flash Report tracks major AI model releases with launch date, benchmarks, and pricing, updated weekly; it says new models arrive roughly every 1 day, with 24 released in the last 90 days and the latest tracked launches being deepseek-ai DeepSeek-V4.1-Flash-1017 (2026-10-17), microsoft scFM-dataselection (2026-10-16), and nvidia Nemotron-3.5-Rerank-8B-BF16 (2026-10-15). Notable listed releases include Google’s flagship with a 2x reasoning improvement and ARC-AGI-2 score of 77.1% at $2.50/$10 per 1M tokens, Anthropic’s Sonnet with Agent Teams for 2–16 Claude instances at $3/$15 and 80.8% SWE-bench Verified, DeepSeek’s open-weight MoE with 1M+ token context at $0.27/$1.10, and Zhipu’s model trained entirely on Huawei Ascend chips, claiming 50.4% HLE and 1.2% hallucination at $0.11/$0.28. It also cites OpenAI’s self-improving agentic coding model at $1.25/$10, 25% faster than GPT-5.2-Codex and flagged “high” on cybersecurity, and Moonshot’s open-weight 1.04T-parameter model, described as the first open-weight #1 on LMSYS Chatbot Arena, at $0.15/$2.50.
+Agent observability instruments AI agents using OpenTelemetry GenAI semantic conventions, with tool calls, model invocations, and retrieval steps as child spans, and is used for latency/cost monitoring, tracing, evaluation, and governance via tools such as Arize Phoenix, Langfuse, LangSmith, Braintrust, and Datadog LLM Observability. It is effective for debugging—answering what the system did—but not for audit evidence of why an action was authorized, because traces record model production rather than permission, evaluation is sampled, retention windows are short, and storing full prompt text in span attributes is an anti-pattern. Audit-grade records instead require the exact input, model determination/confidence and threshold, the rule and rule version that fired, the action taken in the system of record, reviewer identity/time, and replay capability, which requires deterministic execution. Kognitos is not an observability platform but exports every run over OpenTelemetry into Datadog, Splunk, or any SIEM; it uses a human-approved LLM-drafted procedure executed by a symbolic executor so every write comes from a versioned rule, and its plain-English business journal logs variables, rules, actions, timestamps, and policy citations, is accepted as SOX 404 evidence, and is replayable.
 ```

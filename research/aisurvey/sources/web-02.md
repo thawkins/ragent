@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.fulkersonadvisors.com/research/ai-model-releases
-- Title: AI Model Releases Tracker: New Models, Open vs Closed
-- Author(s): -
+- URL: https://www.splunk.com/en_us/blog/learn/best-agent-observability-platforms.html
+- Title: 6 Best AI Agent Observability Tools for Production in 2026 | Splunk
+- Author(s): Jackson Wells
 - Language: English
-- Published (UTC): 2026-10-27T00:00:00+00:00
-- Captured (UTC): 2026-10-27T13:09:22.558186912+00:00
-- Relevance: High - title + snippet match query
+- Published (UTC): 2026-09-16T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:12:20.283105392+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-The page compares the best closed and open-weight AI models across benchmarks as of Oct. 25. On Science (GPQA), the best closed model is GPT-6 Astra at 96% (Sept. 4, 2026), versus Kimi K3 at 94% (July 16, 2026). On Humanity’s Last Exam, Claude Fable 5.1 leads closed models at 65% (Sept. 1, 2026), while GLM-5.3 leads open-weight models at 63% (Aug. 14, 2026). On Coding (SWE-bench), Claude Fable 5 leads at 95% (June 9, 2026), compared with DeepSeek-V4-Pro-Max at 81% (Apr. 23, 2026).
+The article argues that traditional APM misses agent failures that still return HTTP 200, citing a preprint where fabricating results was the most common silent tool-failure behavior (56.6% across 396 valid agent responses), and recommends agent-specific observability with graph tracing, step-level evals, tool analysis, and run-level latency/cost tracking. It compares Splunk Agent Observability, LangSmith, Arize AI (acquired by Dynatrace in October 2026), Braintrust, Langfuse (acquired by ClickHouse in January 2026), and AgentOps, noting LangSmith fits LangGraph teams, Braintrust suits CI-driven teams, and Langfuse/Phoenix support self-hosting. Splunk’s Luna evaluators are described as returning verdicts in about 152 ms versus about 3,200 ms for a frontier judge, at up to 98% lower cost than LLM-as-a-judge, with nine agentic evaluators and runtime guardrails. The article also cites Gartner’s prediction that over 40% of agentic AI projects will be canceled by end-2027, EU AI Act Article 50 obligations since August 2, 2026 with penalties up to €15 million or 3% of worldwide turnover, Deloitte’s finding that only 21% of companies planning agentic AI deployment have mature governance, and benchmark data including Gemini 2.5 Pro completing 30.3% of 175 TheAgentCompany tasks.
 ```

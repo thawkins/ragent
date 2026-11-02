@@ -89,7 +89,7 @@ fn gatherer_with(
     cache: Option<Arc<SharedQueryCache>>,
 ) -> WebGatherer {
     let g = WebGatherer::new(search, Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer));
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()));
     let g = match budget {
         Some(b) => g.with_search_budget(b),
         None => g,
@@ -155,4 +155,69 @@ async fn test_gatherer_unbudgeted_run_issues_all_searches() {
     let _ = g.gather("topic one", 10).await.unwrap();
     let _ = g.gather("topic two", 10).await.unwrap();
     assert_eq!(search.call_count(), 2);
+}
+
+// -- `--max-queries` -------------------------------------------------------
+
+/// A decomposer that always yields four distinct queries, so the cap can be
+/// observed without depending on the heuristic splitter's input sensitivity.
+struct FourQueryDecomposer {
+    limit: Option<usize>,
+}
+
+#[async_trait]
+impl ragent_research::QueryDecomposer for FourQueryDecomposer {
+    async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
+        Ok(vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            "delta".to_string(),
+        ])
+    }
+
+    fn query_limit(&self) -> Option<usize> {
+        self.limit
+    }
+}
+
+/// `--max-queries N` bounds the number of searches a single gather pass
+/// issues: the cap is applied to the decomposed set *before* the search loop,
+/// so the search tool sees exactly `N` queries.
+#[tokio::test]
+async fn test_max_queries_caps_the_queries_searched() {
+    let search = Arc::new(CountingSearch::default());
+    let g = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
+        .with_decomposer(Arc::new(FourQueryDecomposer { limit: Some(2) }));
+
+    g.gather("unused topic", 10).await.unwrap();
+
+    let queries = search.queries();
+    assert_eq!(
+        queries,
+        vec!["alpha".to_string(), "beta".to_string()],
+        "only the first two decomposed queries are searched"
+    );
+}
+
+/// `--max-queries 0` is unbounded: every decomposed query is searched.
+#[tokio::test]
+async fn test_max_queries_zero_searches_every_query() {
+    let search = Arc::new(CountingSearch::default());
+    let g = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
+        .with_decomposer(Arc::new(FourQueryDecomposer { limit: None }));
+
+    g.gather("unused topic", 10).await.unwrap();
+    assert_eq!(search.call_count(), 4, "all four queries are searched");
+}
+
+/// A cap larger than the decomposed set changes nothing.
+#[tokio::test]
+async fn test_max_queries_above_the_query_count_is_a_no_op() {
+    let search = Arc::new(CountingSearch::default());
+    let g = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
+        .with_decomposer(Arc::new(FourQueryDecomposer { limit: Some(20) }));
+
+    g.gather("unused topic", 10).await.unwrap();
+    assert_eq!(search.call_count(), 4);
 }

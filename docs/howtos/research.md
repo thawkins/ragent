@@ -182,13 +182,14 @@ This is the primary command.
   [--iterations N] [--depth shallow|standard|deep]
   [--tier light|full|dissertation]
   [--mode normal|supervisor|competitive]
-  [--format report|executive-summary|comparison-table|source-bibliography|imrad]
+  [--format report|executive-summary|comparison-table|source-bibliography|imrad|newsletter]
   [--sources-dir <path>] [--template <name>]
   [--fetch-concurrently N] [--local-concurrently N]
   [--fetch-timeout-secs N]
   [--web-time N] [--web-phase-timeout-secs N] [--local-phase-timeout-secs N]
   [--search-max-retries N] [--search-retry-base-delay-ms N]
   [--max-web-results N] [--max-search-calls N]
+  [--max-queries N]
   [--max-concepts N] [--max-findings N]
   [--use-local] [--use-specs] [--use-low-relevance] [--papers] [--use-pdf]
   [--oa-enable] [--no-oa] [--url-cloak]
@@ -371,9 +372,23 @@ section directly above `## Findings`:
 **Definition:** Retrieval that understands research questions rather than
 exact keywords.
 
+Semantic search ranks by meaning, so a query phrased as a question still
+reaches the passages that answer it. The index itself is unchanged - only
+the scoring function differs.
+
+It depends on a dense embedding model and is bounded by whatever that model
+was trained on, which is why hybrid retrieval layers a keyword pass on top.
+
 **Key Evidence:**
 - hybrid retrieval across 200M+ papers ([#6])
 ```
+
+A `**Definition:**` is three separate paragraphs (roughly 120-200 words in
+total), not one: the concept and why it matters, then how it works and the
+distinctions it carries, then where it sits in the wider context. The prompt
+asks for the shape twice - inline on the field description and again as a
+writing rule - because a single mention was routinely collapsed into one
+paragraph.
 
 `[#N]` citations resolve against the References Index at the bottom of
 the report, exactly like the Findings citations. The section is omitted
@@ -612,6 +627,7 @@ The depth also controls how many local files are captured:
 | `comparison-table` | Topic, Research Brief, Executive Summary, Comparison Criteria, Comparison Table, Entity Profiles, Findings, References Index |
 | `source-bibliography` | Bibliography of all captured sources |
 | `imrad` | Scientific/technical report: Abstract, Introduction, Methods, Results, Discussion, References Index |
+| `newsletter` | Reader-facing subset only: Topic, Executive Summary, Top 10 Implications, Open Questions, Concepts, Findings, Findings Relationship Diagram |
 
 The format is recorded in the item frontmatter and can be reopened later
 with `/research open`.
@@ -636,6 +652,7 @@ The parser accepts several aliases for each format:
 | `comparison-table` | `comparison-table`, `comparison_table`, `comparison` |
 | `source-bibliography` | `source-bibliography`, `source_bibliography`, `bibliography` |
 | `imrad` | `imrad`, `im-rad`, `scientific` |
+| `newsletter` | `newsletter` (no aliases) |
 
 ### When to use each format
 
@@ -649,12 +666,18 @@ The parser accepts several aliases for each format:
   sources without narrative findings.
 - **`imrad`** — for scientific or technical reports following the
   Introduction/Methods/Results/Discussion structure.
+- **`newsletter`** — when the artifact is meant to be read rather than
+  audited: a lead paragraph, the ten ranked implications, the open questions,
+  the concepts and the findings, with the corpus scoreboard, research brief,
+  search-query/engine blocks, data-quality sections, cross-references and
+  references index all omitted.
 
 ```text
 /research create exec-brief "Q4 security posture" --format executive-summary --tier light
 /research create tool-comparison "PostgreSQL vs MySQL vs SQLite" --format comparison-table
 /research create bib "Sources on transformer architectures" --format source-bibliography
 /research create sci-report "Reproducing GPT-3 results" --format imrad --tier full
+/research create briefing "AI economics in late 2026" --format newsletter --tier light
 ```
 
 ---
@@ -741,6 +764,7 @@ These flags control the performance and resilience of the gathering phases.
 | `--search-retry-base-delay-ms N` | 200 | First retry delay in ms, doubled each retry (200, 400, 800...). |
 | `--max-search-calls N` | derived from `--depth` | Hard, run-scoped cap on total web-search calls, shared via `Arc` across every supervisor/competitive researcher and gather pass. A run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls. |
 | `--max-web-results N` | derived from `--depth` (shallow 6 / standard 9 / deep 15) | Cap on the web-source budget. |
+| `--max-queries N` | `research.max_queries` (20) | Cap on the number of search queries the topic-decomposition step may produce. The cap bounds the model request, the heuristic fallback, and the queries the gatherer actually searches. `0` means unbounded (still subject to the decomposer's hard upper bound of 20). |
 | `--max-concepts N` | `research.max_concepts` (5) | Output cap on the `## Concepts` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
 | `--max-findings N` | `research.max_findings` (20) | Output cap on the `## Findings` list. Entries are ordered most-relevant-first before truncation. `0` means unbounded. |
 | `--use-low-relevance` | off | Keep sources that would normally be filtered out as low-relevance. The pre-fetch filter matches query terms morphologically (plurals, gerunds, and derived forms such as "agentic" matching "agent" or "loops" matching "loop") and retains hits scoring Medium (35%+ term overlap) or better. |
@@ -1211,6 +1235,7 @@ source count, and all session events as a JSON array.
     "iterations": 3,
     "max_concepts": 5,
     "max_findings": 20,
+    "max_queries": 20,
     "url_cloak": false,
     "format": "report"
 }
@@ -1381,6 +1406,7 @@ Research-specific configuration lives under the `research` key in
         "oa_min_full_text_chars": 1000,
         "max_concepts": 5,
         "max_findings": 20,
+        "max_queries": 20,
         "evaluate": {
             "enabled": true
         }
@@ -1396,6 +1422,7 @@ Research-specific configuration lives under the `research` key in
 | `oa_min_full_text_chars` | usize | `1000` | Minimum body length that triggers OA recovery |
 | `max_concepts` | usize | `5` | Output cap on the `## Concepts` list. A per-run `--max-concepts` takes precedence; `0` means unbounded. |
 | `max_findings` | usize | `20` | Output cap on the `## Findings` list. A per-run `--max-findings` takes precedence; `0` means unbounded. |
+| `max_queries` | usize | `20` | Cap on the number of search queries produced by topic decomposition. A per-run `--max-queries` takes precedence; `0` means unbounded. |
 | `evaluate` | `ResearchEvaluateConfig` | `{"enabled": false}` | Self-evaluation scorecard settings (FR-015 of specs/opendeepresearch). When enabled, the pipeline appends a deterministic quality scorecard (quality, relevance, groundedness, completeness, structure) to the report. |
 
 Web search engine keys are top-level in `ragent.json`:

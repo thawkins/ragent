@@ -13,6 +13,11 @@ use std::sync::Arc;
 
 use crate::web_gatherer::MAX_DECOMPOSED_QUERIES;
 
+/// Default cap on the number of search queries a decomposition pass may
+/// produce. A per-run `--max-queries` (or `research.max_queries`) overrides it;
+/// `0` means "no cap beyond the model's own output".
+pub const DEFAULT_MAX_QUERIES: usize = 20;
+
 /// Trait abstracting the decomposition of a research topic into focused
 /// sub-queries.  A decomposer may be heuristic (cheap, no LLM) or LLM-backed
 /// (higher quality, costs one call).  When no decomposer is configured the
@@ -23,6 +28,14 @@ pub trait QueryDecomposer: Send + Sync {
     /// query in parallel, deduplicates results by URL, and then fetches up
     /// to the caller's `max_results` unique pages.
     async fn decompose(&self, topic: &str) -> anyhow::Result<Vec<String>>;
+
+    /// The cap this decomposer applies to the queries it returns.
+    ///
+    /// `None` means "no cap is applied" (`--max-queries 0`) and the gatherer
+    /// searches every query the decomposer produced.
+    fn query_limit(&self) -> Option<usize> {
+        Some(MAX_DECOMPOSED_QUERIES)
+    }
 }
 
 /// Simple heuristic decomposer that splits a topic on conjunctions and
@@ -31,8 +44,37 @@ pub trait QueryDecomposer: Send + Sync {
 /// Cheap and deterministic; requires no network calls.  Kept as a fallback
 /// for the LLM-backed decomposer and for callers that intentionally want
 /// heuristic splitting.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct HeuristicQueryDecomposer;
+///
+/// The number of queries it yields is capped by [`Self::max_queries`], which
+/// mirrors the per-run `--max-queries` flag (default
+/// [`DEFAULT_MAX_QUERIES`]; `0` = no cap).
+#[derive(Debug, Clone, Copy)]
+pub struct HeuristicQueryDecomposer {
+    max_queries: Option<usize>,
+}
+
+impl Default for HeuristicQueryDecomposer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HeuristicQueryDecomposer {
+    /// Build a decomposer using the default query cap.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            max_queries: Some(DEFAULT_MAX_QUERIES),
+        }
+    }
+
+    /// Cap the number of queries returned. `None` means "no cap".
+    #[must_use]
+    pub fn with_max_queries(mut self, max_queries: Option<usize>) -> Self {
+        self.max_queries = max_queries;
+        self
+    }
+}
 
 #[async_trait]
 impl QueryDecomposer for HeuristicQueryDecomposer {
@@ -83,8 +125,14 @@ impl QueryDecomposer for HeuristicQueryDecomposer {
 
         // Cap the number of sub-queries to avoid hammering the search
         // provider while still giving broad topics enough coverage.
-        deduped.truncate(MAX_DECOMPOSED_QUERIES);
+        if let Some(limit) = self.max_queries {
+            deduped.truncate(limit);
+        }
         Ok(deduped)
+    }
+
+    fn query_limit(&self) -> Option<usize> {
+        self.max_queries
     }
 }
 
@@ -191,8 +239,9 @@ fn collapse_whitespace(s: &str) -> String {
 /// LLM-backed query decomposer.
 ///
 /// Sends the topic to the configured provider/model and asks it to return a
-/// JSON array of 1-10 focused web-search queries. The first query should be the
-/// most specific; the last query can be a broader catch-all. If the model
+/// JSON array of focused web-search queries (bounded by the per-run
+/// `--max-queries` cap, default [`DEFAULT_MAX_QUERIES`]). The first query should
+/// be the most specific; the last query can be a broader catch-all. If the model
 /// response cannot be parsed, or the provider is unavailable, the decomposer
 /// falls back to the heuristic splitter so research always makes progress.
 #[derive(Clone)]
@@ -203,6 +252,7 @@ pub struct LlmQueryDecomposer {
     api_key: Option<String>,
     base_url: Option<String>,
     fallback: HeuristicQueryDecomposer,
+    max_queries: Option<usize>,
 }
 
 impl std::fmt::Debug for LlmQueryDecomposer {
@@ -222,13 +272,15 @@ impl LlmQueryDecomposer {
         provider_id: impl Into<String>,
         model_id: impl Into<String>,
     ) -> Self {
+        let max_queries = Some(DEFAULT_MAX_QUERIES);
         Self {
             provider_registry,
             provider_id: provider_id.into(),
             model_id: model_id.into(),
             api_key: None,
             base_url: None,
-            fallback: HeuristicQueryDecomposer,
+            fallback: HeuristicQueryDecomposer::new().with_max_queries(max_queries),
+            max_queries,
         }
     }
 
@@ -244,6 +296,28 @@ impl LlmQueryDecomposer {
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
         self
+    }
+
+    /// Cap the number of queries this decomposer produces (and searches).
+    ///
+    /// `None` means "no cap": the model is not told a maximum and every query
+    /// it returns is used. The cap also bounds the heuristic fallback, so a
+    /// degraded run honours the same limit as a model-backed one.
+    #[must_use]
+    pub fn with_max_queries(mut self, max_queries: Option<usize>) -> Self {
+        self.max_queries = max_queries;
+        self.fallback = self.fallback.with_max_queries(max_queries);
+        self
+    }
+
+    /// The query count the model is asked for, clamped for the prompt.
+    ///
+    /// The prompt already hard-caps the request at
+    /// [`MAX_DECOMPOSED_QUERIES`]; a larger `--max-queries` cannot make the
+    /// model emit more than that, so the asked-for count is clamped rather than
+    /// promising a number the parser would then truncate.
+    fn prompt_query_cap(&self) -> Option<usize> {
+        self.max_queries.map(|n| n.min(MAX_DECOMPOSED_QUERIES))
     }
 
     async fn decompose_with_llm(&self, topic: &str) -> anyhow::Result<Vec<String>> {
@@ -275,8 +349,17 @@ impl LlmQueryDecomposer {
         // years other than the current one.
         let today = chrono::Utc::now().format("%Y-%m-%d");
         let current_year = chrono::Utc::now().format("%Y");
+        // `--max-queries` sets the array size the model is asked for. When the
+        // cap is disabled (`--max-queries 0`) the prompt falls back to the
+        // hard upper bound so the response stays a bounded JSON array.
+        let count_phrase = match self.prompt_query_cap() {
+            Some(n) => format!("an array of 1 to {n} short search-engine queries"),
+            None => format!(
+                "an array of short search-engine queries (at most {MAX_DECOMPOSED_QUERIES})"
+            ),
+        };
         let prompt = format!(
-            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nToday's date is {today}.\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {MAX_DECOMPOSED_QUERIES} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nDo not put a year in a query. The single exception is when the topic names a specific year; then use only {current_year}, never an earlier year. Do not write date ranges or relative phrases such as \"recent\" or \"latest\" - the caller applies its own publication-date filter.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
+            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nToday's date is {today}.\n\nReturn a JSON object with exactly one key, \"queries\", whose value is {count_phrase} that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nDo not put a year in a query. The single exception is when the topic names a specific year; then use only {current_year}, never an earlier year. Do not write date ranges or relative phrases such as \"recent\" or \"latest\" - the caller applies its own publication-date filter.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
         );
 
         let request = ChatRequest {
@@ -310,7 +393,7 @@ impl LlmQueryDecomposer {
             }
         }
 
-        parse_query_decomposition(&text)
+        parse_query_decomposition(&text, self.max_queries)
     }
 }
 
@@ -336,13 +419,20 @@ impl QueryDecomposer for LlmQueryDecomposer {
             }
         }
     }
+
+    fn query_limit(&self) -> Option<usize> {
+        self.max_queries
+    }
 }
 
 /// Parse the model's JSON response into a list of queries.
 ///
 /// Accepts `{ "queries": [...] }`, markdown-fenced JSON, and strips trailing
-/// commas before delegating to `serde_json`.
-fn parse_query_decomposition(raw: &str) -> anyhow::Result<Vec<String>> {
+/// commas before delegating to `serde_json`. `limit` is the effective
+/// `--max-queries` cap; `None` keeps every query the model returned (the hard
+/// [`MAX_DECOMPOSED_QUERIES`] bound still applies so a runaway response cannot
+/// fan out into unbounded searches).
+fn parse_query_decomposition(raw: &str, limit: Option<usize>) -> anyhow::Result<Vec<String>> {
     let trimmed = raw.trim();
     let json_str = if trimmed.starts_with("```") {
         trimmed
@@ -376,8 +466,14 @@ fn parse_query_decomposition(raw: &str) -> anyhow::Result<Vec<String>> {
         anyhow::bail!("LLM decomposer returned no usable queries");
     }
 
-    // Enforce the same cap used elsewhere.
-    Ok(queries.into_iter().take(MAX_DECOMPOSED_QUERIES).collect())
+    // Enforce the per-run `--max-queries` cap. The hard
+    // `MAX_DECOMPOSED_QUERIES` bound always applies first, so an unbounded
+    // (`--max-queries 0`) run cannot fan out past what the prompt asked for.
+    let cap = limit.unwrap_or(MAX_DECOMPOSED_QUERIES);
+    Ok(queries
+        .into_iter()
+        .take(cap.min(MAX_DECOMPOSED_QUERIES))
+        .collect())
 }
 
 /// Remove trailing commas before `}` or `]` in JSON.

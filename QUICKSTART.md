@@ -1754,6 +1754,16 @@ academically-classified engines (OpenAlex) in the search sweep
 (`research.exclude_academic_engines` persists the exclusion), and
 `--oa-enable` / `--no-oa` toggle open-access recovery for the run.
 
+Select the artifact with `--format report|executive-summary|comparison-table|
+source-bibliography|imrad|newsletter`. `newsletter` is the reader-facing
+layout: it carries only the topic, executive summary, top 10 implications, open
+questions, concepts, findings and the findings relationship diagram, and omits
+the corpus quality scoreboard, research brief, search-query/engine/provider
+blocks, data-quality sections, cross-references and references index. A report
+whose synthesis came from the model is named by the LLM from its executive
+summary (seeded with the topic, capped at 80 characters) rather than from the
+first 80 characters of that summary.
+
 Pass `--url-cloak` to write web source URLs as defanged plain text
 (`hxxps://host[.]tld/…` in a code span) in the `Sources` bullets and the
 `References Index` table instead of clickable links, so automated URL scanners
@@ -3177,7 +3187,11 @@ on top of `6cf0b60f` (MS-04).
   detail** — `/research create` caps its `## Concepts` and `## Findings` lists
   at 5 and 20 by default, reordering most-relevant-first before truncation
   (`--max-concepts N` / `--max-findings N`, or `research.max_concepts` /
-  `research.max_findings`; `0` = unbounded); scholarly engines are excluded by
+  `research.max_findings`; `0` = unbounded); `--max-queries N` (or
+  `research.max_queries`, default 20; `0` = unbounded) caps the number of
+  search queries the topic-decomposition step produces, bounding both what the
+  model is asked for and how many queries the gatherer searches; scholarly
+  engines are excluded by
   default and `--papers` opts them back in; `--oa-enable` / `--no-oa` toggle
   open-access recovery per run; and the per-engine progress table breaks
   exclusions and fetch failures down by reason/cause.

@@ -3,10 +3,10 @@ name: aisurvey
 title: "Across the 42 sources, the AI space in late 2026 is characterized less by any..."
 topic: "revew all available content related to recent developents in the AI space, including New Models, New Techniques, new Products and new bBusiness models for AI use."
 Model: "ollama_cloud/deepseek-v4.1-flash:1017"
-status: complete
+status: in-progress
 created: 2026-10-27T13:14:30.418279153+00:00
-modified: 2026-10-27T13:14:30.418380614+00:00
-sources: 42 # see sources/ subdirectory
+modified: 2026-11-02T04:35:43.342914602+00:00
+sources: 0 # see sources/ subdirectory
 queries:
   - "AI model release tracker after:2026-09-27"
   - "foundation model announcement tracker after:2026-09-27"

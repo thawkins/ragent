@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://jobs.centene.com/us/en/jobs/1669432/vice-president-ai-innovation-partnerships
-- Title: Vice President, AI Innovation &amp; Partnerships
-- Author(s): Centene Careers
+- URL: https://thesciencesignal.com/ai-model-releases-accelerate-as-minimax-deepseek-nvidia-and-meta-expand-reasoning-and-multimodal-capabilities
+- Title: AI Model Releases Accelerate as MiniMax, DeepSeek, NVIDIA and Meta Expand Reasoning and Multimodal Capabilities |...
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-15T00:00:00+00:00
-- Captured (UTC): 2026-10-27T13:12:39.734104952+00:00
+- Published (UTC): 2026-10-28T16:20:00+00:00
+- Captured (UTC): 2026-11-02T11:15:33.033336857+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Centene’s Vice President, AI Innovation & Partnerships role leads enterprise AI innovation and strategic technology partnerships, focusing on high-value AI use cases, vendor AI “harness” strategy, reference architectures, prototypes, and scaled production solutions while advising executives on build/buy/partner/co-develop decisions. The position requires a bachelor’s degree and 12+ years of related experience, including 10+ years leading enterprise technology initiatives; healthcare, managed care, or regulated-industry AI experience is preferred. The pay range is $207,000.00–$392,100.00 per year.
+In October 2026, MiniMax, DeepSeek, NVIDIA, and Meta accelerated AI model releases focused on efficiency, reasoning, and multimodal capabilities. MiniMax’s M3.1 Flash (Oct. 19) claims nearly 3x faster inference, 70% lower agentic-task costs, over 200 tokens/sec in some conditions, text/image/video input, and a 1-million-token context; DeepSeek’s V4.1-Flash uses a 552-billion-parameter mixture-of-experts design with about 8 billion active parameters for input and 16 billion for output, native visual understanding, reduced key-value cache needs, API access, and open weights. NVIDIA released Nemotron 3.5 Bolt, Nemotron 3.5 Super VL, and Dory 1.0, while Meta introduced Muse Wonder and Muse Wonder Full (Oct. 12) and the open-weight, natively multimodal Muse Spark Open (Oct. 15); the article frames the competition as shifting from parameter counts toward practical value, independent evaluation, deployment flexibility, and reliable performance at acceptable cost.
 ```

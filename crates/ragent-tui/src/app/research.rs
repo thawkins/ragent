@@ -294,6 +294,7 @@ impl App {
                 search_retry_base_delay_ms,
                 max_web_results,
                 max_search_calls,
+                max_queries,
                 max_local_sources,
                 max_synthesis_sources,
                 max_concepts,
@@ -367,6 +368,7 @@ impl App {
                     search_retry_base_delay_ms,
                     max_web_results,
                     max_search_calls,
+                    max_queries,
                     max_local_sources,
                     max_synthesis_sources,
                     max_concepts,
@@ -395,6 +397,7 @@ impl App {
                     Some(self.provider_registry.clone()),
                     self.agent_info.model.clone(),
                     Some(name.as_str()),
+                    config.web.max_queries,
                 );
                 let observer_clone = Arc::new(TuiResearchObserver {
                     app_event_bus: observer.app_event_bus.clone(),
@@ -790,6 +793,7 @@ impl App {
                             Some(provider_registry),
                             active_model,
                             Some(name.as_str()),
+                            config.web.max_queries,
                         );
                         event_bus.publish(Event::AgentNotice {
                             session_id: session_id.clone(),

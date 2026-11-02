@@ -2387,7 +2387,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/blueprints help\|list` | List installed team blueprints |
 | `/skill help\|list\|<name> [args]` | Load or inspect skill packs: list them, or load and invoke `<name>` |
 | `/osinfo show [--no-probe]\|help` | Read-only host OS/hardware report; routes through the `os_info` tool's collector/renderer (spec `osinfo`) |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak`, `--age <SPAN>` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-queries N`, `--max-concepts N`, `--max-findings N`, `--url-cloak`, `--age <SPAN>` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |
@@ -3142,11 +3142,15 @@ can see why the LLM path failed.
 Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
 
 - YAML frontmatter with `name`, `title`, `status`, `created`, `modified`, `sources`
-  (the `title` is a reduced-length version of the `## Summary` content, capped at
-  80 characters, so the headline reflects the synthesis rather than the original
-  prompt) plus an optional `invocation` line recording the verbatim front-end
-  command (`ragent research create ...` from the CLI, `/research ...` from the
-  TUI, or a `POST /research` summary from the HTTP API) so the
+  (the `title` is named by the LLM from the generated executive summary when the
+  synthesis came from the model - seeded with the research topic, normalised by
+  `clean_generated_title` and capped at `RESEARCH_TITLE_MAX_CHARS` on a word
+  boundary - and otherwise a reduced-length version of the `## Summary`
+  content capped at 80 characters, so the headline reflects the synthesis
+  rather than the original prompt) plus an optional `invocation` line recording
+  the verbatim front-end command (`ragent research create ...` from the CLI,
+  `/research ...` from the TUI, or a `POST /research` summary from the HTTP
+  API) so the
   `/research update` command can replay the run
   - `# Title:` heading
   - `## Topic`
@@ -3161,6 +3165,15 @@ Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
   Relationship Diagram → In-Project Cross-References → References Index.
   Open Questions sits directly under Top 10 Implications so unresolved gaps
   surface immediately after the ranked consequences.
+
+  The `newsletter` format (§11.7) replaces that layout with the reader-facing
+  subset only: Topic → Executive Summary → Top 10 Implications → Open Questions
+  → Concepts → Findings → Findings Relationship Diagram. The corpus quality
+  scoreboard, research brief, search-query/engine/provider blocks, Data Quality
+  & Consistency, every QA render section, In-Project Cross-References and the
+  References Index are not emitted, so the artifact reads as a newsletter
+  rather than an audit trail. The `CORPA` companion is unaffected - it is
+  written for every format.
 
   The quality-assurance render sections (Contradiction Graph, Loci Analysis,
   Depth Investigation, Cross-Locus Reconcile, Source Tensions, Synthesis
@@ -3218,6 +3231,7 @@ Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
 | `/research create ... --max-concurrent-research-units N` | Limit parallel researchers in supervisor/competitive modes |
 | `/research create ... --papers` | Include academically-classified backends (OpenAlex) in the search sweep. Scholarly engines are excluded by default; config `research.exclude_academic_engines` persists the exclusion |
 | `/research create ... --oa-enable` / `--no-oa` | Force open-access recovery on/off for the run, overriding `research.open_access_recovery` |
+| `/research create ... --max-queries N` | Cap the number of search queries produced by the topic-decomposition step (default 20, or `research.max_queries`; `0` = unbounded, subject to the decomposer's hard upper bound of 20). Bounds the LLM request, the heuristic fallback, and the queries the gatherer searches |
 | `/research create ... --max-concepts N` | Cap the `## Concepts` list (default 5; `0` = unbounded); entries are ordered most-relevant-first before truncation |
 | `/research create ... --max-findings N` | Cap the `## Findings` list (default 20; `0` = unbounded); entries are ordered most-relevant-first before truncation |
 | `/research create ... --url-cloak` | Emit web source URLs in `Sources` bullets and the `References Index` (and `CORPA.md` `Sources Reference`) as defanged plain text (`hxxps://host[.]tld/…` in a code span) instead of clickable links |
@@ -3266,6 +3280,16 @@ The `--format` flag selects the artifact produced at the end of a session:
 | `comparison-table` | Comparison table across key entities. |
 | `source-bibliography` | Standalone bibliography of all captured sources. |
 | `imrad` | Introduction, Methods, Results, Discussion structure for academic-style reports. |
+| `newsletter` | Short, reader-facing newsletter: frontmatter, title, topic, executive summary, top 10 implications, open questions, concepts, findings, and the findings relationship diagram. Every audit-trail section is omitted. |
+
+`newsletter` accepts only the canonical spelling (no aliases) and persists as
+`output_format: newsletter` in the item frontmatter. Its layout is the five
+narrative sections plus the diagram - it never renders the corpus quality
+scoreboard, the research brief, the search queries / engine summary / provider
+request blocks, Data Quality & Consistency, the QA artifact sections,
+In-Project Cross-References or the References Index. Sections whose data was
+not produced still render their placeholder, so the document's shape is stable
+across a partially-populated corpus.
 
 ### 11.8 Research Tiers
 
@@ -6103,7 +6127,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/todo` `/task` | Open the TASKS side panel |
 | `/skill help\|list\|<name> [args]` | Load or inspect skill packs: list them, or load and invoke `<name>` |
 | `/osinfo show [--no-probe]\|help` | Read-only host OS/hardware report; routes through the `os_info` tool's collector/renderer (spec `osinfo`) |
-| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-concepts N`, `--max-findings N`, `--url-cloak`, `--age <SPAN>` |
+| `/research create\|list\|show\|search\|cluster\|archive\|delete\|update` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance`, `--papers`, `--oa-enable`/`--no-oa`, `--max-queries N`, `--max-concepts N`, `--max-findings N`, `--url-cloak`, `--age <SPAN>` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |

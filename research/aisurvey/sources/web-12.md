@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://geodd.io/blog/multimodal-ai-models
-- Title: What Are Multimodal AI Models? Examples and Capabilities | Geodd
+- URL: https://www.sweet.security/agent-security/ai-agent-aim
+- Title: AI Agent Identity Access Management: 2026 Enterprise Guide
 - Author(s): -
 - Language: English
-- Published (UTC): 2026-10-08T06:10:05.178+00:00
-- Captured (UTC): 2026-10-27T13:10:28.609880407+00:00
-- Relevance: High - title + snippet match query
+- Published (UTC): 2026-09-27T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:13:11.878622718+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-Multimodal AI models are defined as systems that accept and produce multiple data types—text, images, audio, and video—within one model, avoiding the context loss and compounded errors of stitched OCR/speech-to-text/captioning pipelines. The article cites GPT-4o (real-time voice), Gemini (long video and large documents), Claude (charts and dense PDFs), Meta Llama vision models (open weights), ByteDance Seedream/Seedance for image/video generation, and Qwen vision-language models, while cautioning that models still misread fine detail, miscount objects, and lose track of events in long videos. For production, it recommends testing 50–100 real samples, comparing p95 latency and cost per successful task rather than cost per token, starting serverless and moving to dedicated GPUs at steady high volume, and monitoring token use because images and audio are token-heavy. Geodd says it offers an OpenAI-compatible API, serverless and dedicated inference, real-time token usage, US-EAST and EU-NORTH (Norway) regions, Zero Data Retention, and GDPR-ready data handling.
+AI agent identity access management should be treated as a delegation problem rather than static inventory: agents should receive only narrow, runtime-evaluated capabilities tied to intent, task, time, and context, with the delegation chain from human principal to agent identity, capability token, tool call, policy decision, enforcement, and audit log recorded for explainability. Key risks include orphaned agents, over-privileged tokens, untracked delegation, and excessive agency flagged as OWASP LLM06; controls include agent identity registries with named owners and provenance, policy decision/enforcement points, guardrails, time/task/context-bound grants, revocation, step-up approval, and human-in-the-loop checks. Recommended practices align with zero trust and NIST SP 800-207/CISA guidance—continuous authorization, least privilege, anomaly monitoring, and review cadence—implemented via a roadmap of inventorying agents/tools/data/credentials, defining policies and delegation workflows, then automating enforcement and monitoring. To prepare for 2026 standards, IAM teams should build first-class agent identities, ownership/provenance metadata, dynamic capability scoping and delegation, continuous authorization, automated enforcement, and explainable audit trails.
 ```

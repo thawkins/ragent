@@ -124,6 +124,7 @@ fn session_for(registry: Arc<ToolRegistry>, workdir: PathBuf) -> ragent_research
         None,
         None,
         None,
+        ragent_research::DEFAULT_MAX_QUERIES,
     )
 }
 

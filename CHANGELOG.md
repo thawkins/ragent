@@ -1,5 +1,91 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.162] - 2026-11-02
+
+Minor research updates: a query-count budget for topic decomposition, a
+reader-facing `newsletter` output format, longer and more useful concept
+definitions, and LLM-named report titles. `pulldown-cmark` is bumped to 0.13.6
+to clear RUSTSEC-2026-0433.
+
+### Security
+
+- **`pulldown-cmark` 0.13.5 -> 0.13.6.** Clears RUSTSEC-2026-0433 (quadratic
+  parsing of nested image wikilinks when `ENABLE_WIKILINKS` is set; severity
+  7.5). `cargo audit` now reports no vulnerabilities; the only remaining notice
+  is the allowed `paste` unmaintained warning.
+
+### Added
+
+- **`--max-queries` research flag.** `/research create`,
+  `ragent research create`, `POST /research` and the config file now accept
+  `--max-queries N` / `research.max_queries` (default 20) to cap the number of
+  search queries the topic-decomposition step produces. The value bounds the
+  query count the LLM is asked for, the heuristic splitter's output, and the
+  queries the gatherer actually searches, so a run cannot fan out past the
+  limit however its queries were produced. `0` means unbounded, subject only to
+  the decomposer's existing hard upper bound of 20 (`MAX_DECOMPOSED_QUERIES`),
+  which the prompt cannot exceed and which therefore also caps what the prompt
+  asks for. `QueryDecomposer` gained a `query_limit()` accessor (default
+  `Some(MAX_DECOMPOSED_QUERIES)`) so the gatherer enforces the cap
+  independently of the decomposer implementation. Precedence follows the
+  existing `--max-concepts` / `--max-findings` convention: flag, then
+  `research.max_queries`, then the built-in default. Covered by
+  `tests/test_max_queries.rs` (parser, precedence, invocation replay,
+  decomposer caps) and three gatherer tests in
+  `tests/test_search_budget_gatherer.rs` that assert on the queries the search
+  tool actually receives.
+- **`newsletter` research output format.** `/research create
+  --format newsletter` (and `ragent research create`) emits a short,
+  reader-facing artifact instead of the default audit-style report. The layout
+  carries exactly the reader-facing narrative: the YAML frontmatter, the
+  `# Title:` line, then Topic, Executive Summary, Top 10 Implications, Open
+  Questions, Concepts, Findings, and the Findings Relationship Diagram.
+  Everything the default report wraps around those sections - the corpus quality
+  scoreboard, the research brief, the search queries / engine summary / provider
+  request blocks, Data Quality & Consistency, the QA artifact sections,
+  In-Project Cross-References and the References Index - is deliberately
+  omitted, so the artifact reads as a newsletter rather than an audit trail.
+  `OutputFormat::Newsletter` joins the enum with the `newsletter` spelling in
+  `OutputFormat::parse` and `as_str`, and `output_format` persists it in the
+  item frontmatter like every other format. The body is produced by
+  `document::assemble_newsletter_body`, the synthesis prompt by the matching
+  arm of `analysis::prompt::render_output_template`, and the brief by
+  `brief::generate_research_brief`. Sections whose data was never produced
+  still render their placeholder, so the newsletter's shape is stable. Covered
+  by `tests/test_newsletter_format.rs`, which asserts the nine carried elements
+  and pins fourteen section headings the format must never emit.
+
+### Changed
+
+- **Concept definitions are three paragraphs, not one.** The
+  synthesis prompt asked for a one-to-two-sentence `**Definition**` paragraph,
+  which produced concept entries too thin to stand alone. It now asks for three
+  self-contained paragraphs separated by a blank line, roughly 120-200 words in
+  total: the first defines the concept and why it matters, the second expands on
+  how it works and the distinctions it carries, and the third places it in the
+  wider context by naming what it depends on, competes with or changes. The
+  prompt states the three-paragraph shape twice - once inline where the field is
+  described and once as a closing writing rule - because a single mention was
+  routinely collapsed into one paragraph by the model.
+- **`/research create` names the report with the LLM.** The `title` written to
+  the report frontmatter and the `# Title:` header was the first 80 characters
+  of the generated executive summary, which clipped mid-thought and rarely read
+  as a title (a real run produced `"The 97 sources describe an AI economy in
+  2026 that is simultaneously deflating..."`). When the synthesis came from the
+  model, the session now asks the wired analysis engine to name the report from
+  that summary, seeded with the research topic
+  (`LlmAnalysisEngine::summarize_title`). The reply is normalised by
+  `clean_generated_title`, which keeps the first line, strips the decoration
+  providers add (`Title:` / `Report title:` prefixes, quotes, markdown
+  headings, trailing full stops) and caps the result at
+  `RESEARCH_TITLE_MAX_CHARS` on a word boundary. When the call fails, returns
+  nothing usable, or the synthesis fell back to the mechanical path, the
+  previous behaviour is kept unchanged, so the feature degrades gracefully
+  without an LLM. The step is reported as a `title` `RunStep` event, and both
+  assembly paths (default pipeline and supervisor/competitive) use it.
+
 ## [1.0.161] - 2026-11-02
 
 Research reports get a dated file name so a re-run no longer destroys the

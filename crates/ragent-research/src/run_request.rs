@@ -61,7 +61,7 @@ pub struct ResearchRunRequest {
     pub tier: Option<String>,
     /// `--iterations N` override.
     pub iterations: Option<u32>,
-    /// `--format report|executive-summary|comparison-table|source-bibliography|imrad`.
+    /// `--format report|executive-summary|comparison-table|source-bibliography|imrad|newsletter`.
     /// When `None` and `--mode competitive` is set the builder defaults this to
     /// `comparison-table`; any explicit value wins.
     pub output_format: Option<String>,
@@ -103,6 +103,11 @@ pub struct ResearchRunRequest {
     /// run, shared across all supervisor/competitive researchers and gather
     /// passes. When `None`, no cap is applied.
     pub max_search_calls: Option<usize>,
+    /// `--max-queries N` - cap on the number of search queries produced by the
+    /// topic-decomposition step. When `None` the configured
+    /// `research.max_queries` value is used, falling back to the built-in
+    /// default (20). `0` means "unbounded" (FR-012, FR-014, FR-016).
+    pub max_queries: Option<usize>,
     /// Override the maximum number of in-project local sources to capture.
     pub max_local_sources: Option<usize>,
     /// Override the maximum number of sources sent to the LLM synthesis engine.
@@ -236,6 +241,7 @@ impl ResearchRunRequest {
                 search_retry_base_delay_ms,
                 max_web_results,
                 max_search_calls,
+                max_queries,
                 max_local_sources,
                 max_synthesis_sources,
                 max_concepts,
@@ -275,6 +281,7 @@ impl ResearchRunRequest {
                     search_retry_base_delay_ms,
                     max_web_results,
                     max_search_calls,
+                    max_queries,
                     max_local_sources,
                     max_synthesis_sources,
                     max_concepts,
@@ -401,6 +408,11 @@ pub fn build_session_config(
             .map(|r| r.max_findings)
             .unwrap_or(crate::limits::DEFAULT_MAX_FINDINGS)
     });
+    let max_queries = req.max_queries.unwrap_or_else(|| {
+        cfg_research
+            .map(|r| r.max_queries)
+            .unwrap_or(crate::web_gatherer::DEFAULT_MAX_QUERIES)
+    });
 
     let tier = req
         .tier
@@ -455,6 +467,7 @@ pub fn build_session_config(
                 .web_phase_timeout_secs
                 .or(Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)),
             max_search_calls: req.max_search_calls,
+            max_queries,
             max_age: req.max_age,
         },
         local: LocalConfig {

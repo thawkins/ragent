@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/posts/aydinmirzaee_we-just-launched-the-ability-to-monitor-activity-7514340600372957184-19Rm
-- Title: Launch Advanced Trackers with AI Help on Fellow | Aydin Mirzaee posted on the topic | LinkedIn
-- Author(s): Aydin Mirzaee
+- URL: https://www.ibm.com/products/agent-identity
+- Title: IBM Agent Identity
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-09T15:06:48.825+00:00
-- Captured (UTC): 2026-10-27T13:11:02.403090656+00:00
+- Published (UTC): 2026-10-23T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:13:34.291748621+00:00
 - Relevance: High - title matches query
 
 
 ```text
-Aydin Mirzaee’s LinkedIn post cites that 70% of B2B professionals lose an average of 3.5 hours per week to unstructured meetings, and claims a 30-minute agenda cuts that waste by 70%, freeing 2.1 hours weekly for prospect outreach. It recommends a timer app such as Time Doctor and a “one-topic, one-winner” rule, and asserts that by 2026 companies automating meeting facilitation with AI tools will see a 45% reduction in repeat conversations.
+IBM Agent Identity is an identity control plane for agentic AI that helps organizations discover, register, authenticate, authorize, and govern AI agents across their lifecycle via a centralized inventory with ownership, lifecycle visibility, risk context, and governance. It supports securing assistants, copilots, and autonomous agents; governing agent-to-agent interactions with delegated authority and traceability; enforcing contextual, least-privilege access to enterprise systems; and creating evidence-grade audit records. It integrates with IBM Verify, HashiCorp Vault, watsonx Orchestrate, and existing identity providers such as Microsoft Entra ID, Okta, and Ping Identity.
 ```

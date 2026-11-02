@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.weflow.ai/blog/weflow-trackers
-- Title: Weflow Trackers: Counting Competitor, Product and Pricing Mentions Across Sales Calls
-- Author(s): Weflow
+- URL: https://www.adaptivesecurity.com/blog/ai-governance-roadmap
+- Title: AI Governance Roadmap: Milestones, Controls and Metrics for Responsible AI Adoption
+- Author(s): Adaptive Team
 - Language: English
-- Published (UTC): 2026-10-15T07:51:38.492+00:00
-- Captured (UTC): 2026-10-27T13:11:22.775042477+00:00
+- Published (UTC): 2026-09-24T12:00:00+00:00
+- Captured (UTC): 2026-11-02T11:14:16.015277081+00:00
 - Relevance: High - title matches query
 
 
 ```text
-Weflow trackers are named term lists within Weflow Conversation Intelligence that count every mention on recorded calls and roll hits up in Insights by rep, team, region, and week; counts cover recorded calls only and arrive after call processing, and Weflow says its customers typically record 50–70% of meetings. Weflow recommends one tracker per competitor or topic using buyer-used names/product names, because catch-all trackers inflate counts with passing mentions, and it notes trackers are literal—no paraphrase matching—and post-call only, unlike Aviso, Salesloft, Momentum, or Clari Copilot’s live battlecards. Trackers are included in the $39/user/month Conversation Intelligence seat (annual, 10-user minimum) or the $49/user/month Revenue AI Foundation bundle, with no tracker consumption meter and free viewer seats; existing trackers can be migrated in about one to two weeks. Weflow serves 200+ B2B companies, and KORE Wireless SVP Scott Jones is cited on using call-level context for messaging, product gaps, and pricing pushback.
+The page frames an AI governance roadmap as a lifecycle plan that converts principles into dated milestones, named owners, approval gates, a RACI matrix and retrievable evidence, beginning with discovery of approved, shadow and employee-built AI before policy. It recommends a four-tier taxonomy—prohibited, restricted, monitored and low-risk—with proportionate oversight, plus monitoring, incident response, rollback, retirement and role-specific cybersecurity awareness training, since employee behavior is a key signal of governance effectiveness. Cited evidence includes FBI IC3’s 2025 Internet Crime Report ($20.877 billion in reported losses, up 26% from $16.6 billion in 2024), Verizon’s 2026 DBIR (62% of confirmed breaches involve a human element; 13% involve stolen credentials), NCA’s 2025–2026 *Oh Behave!* report (52% of employed respondents lacked AI security/privacy training despite 65% using AI and 43% sharing sensitive work information), PwC’s 2025 Responsible AI Survey (61% strategic/embedded, 18% early foundational), and WEF’s 2026 Global Cybersecurity Outlook (52% of highly resilient organizations give board members regular cyber updates; 48% report active board engagement). It maps frameworks by role—NIST for risk method, ISO/IEC 42001 for management system, EU AI Act as legal floor—and references NIST’s 2024 Generative AI Profile inventory guidance, the UK 2025 AI Playbook’s governance-board recommendation, and the European Commission’s 2025 guidance on prohibited AI practices.
 ```

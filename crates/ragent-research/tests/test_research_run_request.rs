@@ -117,6 +117,7 @@ fn build_session_config_maps_all_explicit_fields() {
         search_retry_base_delay_ms: Some(500),
         max_web_results: Some(50),
         max_search_calls: Some(40),
+        max_queries: Some(9),
         max_local_sources: Some(30),
         max_synthesis_sources: Some(15),
         max_concepts: Some(7),
@@ -160,6 +161,7 @@ fn build_session_config_maps_all_explicit_fields() {
     assert!(cfg.web.use_pdf_web_sources);
     assert_eq!(cfg.web.web_phase_timeout_secs, Some(120));
     assert_eq!(cfg.web.max_search_calls, Some(40));
+    assert_eq!(cfg.web.max_queries, 9);
     assert_eq!(cfg.web.max_age, AgeSpan::parse("6m").ok());
 
     // Local

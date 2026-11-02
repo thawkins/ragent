@@ -265,7 +265,7 @@ struct CreateResearchRequest {
     /// `--iterations N` override. When supplied the iterative branch is used.
     #[serde(default)]
     iterations: Option<u32>,
-    /// `--format report|executive-summary|comparison-table|source-bibliography|imrad`.
+    /// `--format report|executive-summary|comparison-table|source-bibliography|imrad|newsletter`.
     #[serde(default)]
     format: Option<String>,
     /// `--mode tiered|supervisor|competitive` research execution strategy
@@ -304,6 +304,11 @@ struct CreateResearchRequest {
     /// across all supervisor/competitive researchers. When `None`, no cap.
     #[serde(default)]
     max_search_calls: Option<usize>,
+    /// Cap on the number of search queries the topic-decomposition step may
+    /// produce. When `None`, `research.max_queries` (default 20) is used; `0`
+    /// means "unbounded".
+    #[serde(default)]
+    max_queries: Option<usize>,
     /// Maximum in-project local sources to capture.
     #[serde(default)]
     max_local_sources: Option<usize>,
@@ -439,6 +444,9 @@ impl CreateResearchRequest {
         if let Some(v) = self.max_search_calls {
             parts.push(format!("--max-search-calls {v}"));
         }
+        if let Some(v) = self.max_queries {
+            parts.push(format!("--max-queries {v}"));
+        }
         if let Some(v) = self.max_local_sources {
             parts.push(format!("--max-local-sources {v}"));
         }
@@ -512,6 +520,7 @@ impl CreateResearchRequest {
             search_retry_base_delay_ms: self.search_retry_base_delay_ms,
             max_web_results: self.max_web_results,
             max_search_calls: self.max_search_calls,
+            max_queries: self.max_queries,
             max_local_sources: self.max_local_sources,
             max_synthesis_sources: self.max_synthesis_sources,
             max_concepts: self.max_concepts,
@@ -630,6 +639,7 @@ async fn create_research(
         Some(provider_registry),
         active_model,
         Some(req.name.as_str()),
+        config.web.max_queries,
     );
 
     // Spawn the research run as a background task so the HTTP response
@@ -824,6 +834,7 @@ async fn update_research(
         Some(provider_registry),
         active_model,
         Some(name.as_str()),
+        config.web.max_queries,
     );
 
     // Spawn the replay as a background task so the HTTP response returns

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://dev.to/max_quimby/open-weights-just-closed-the-gap-2ln3
-- Title: Open Weights Just Closed the Gap
-- Author(s): @ComputeLeapAI
+- URL: https://konghq.com/blog/enterprise/ai-governance-tools-and-platforms-guide
+- Title: AI Governance Tools and Platforms: Enterprise Guide
+- Author(s): Kong, @kong
 - Language: English
-- Published (UTC): 2026-10-03T04:40:22+00:00
-- Captured (UTC): 2026-10-27T13:09:55.675127707+00:00
-- Relevance: Medium - partial query match
+- Published (UTC): 2026-09-23T22:18:57.378+00:00
+- Captured (UTC): 2026-11-02T11:12:56.164607401+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-In early October 2026, the article cites three events as an open-weights phase transition: Cloudflare released Clef, a 27B Apache-2.0 decision model built on Qwen3.8-27B that beats Jev on 7 of 10 benchmarks (94.20 vs. 79.74 BANKING77 macro-F1; 209.3 ms median latency, or 38.8 ms for 9B Clef-flash, vs. 524.1 ms) and supports multimodal 64k context; Black Forest Labs released FLUX 3 Image, praised by Canva, Magnific, Krea, and Picsart for detail, steerability, and in-image text, with open-weight FLUX 3 Dev confirmed; and PewDiePie/Felix Kjellberg said OpenAI banned him twice for distilling OpenAI Sol outputs to fine-tune Ajax, a local Qwen3.5-9B assistant. It frames a distillation policy fight around a July 24, 2026 letter by 25 organizations (notably without OpenAI, Anthropic, or Google), Anthropic CEO Dario Amodei’s rebuttal and report of 25,000 fake accounts/28.8M Claude exchanges, and OpenAI’s planned Cursor cutoff on Nov. 12, 2026. Citing Epoch AI’s stable four-month open-vs-closed lag and open models ~15% cheaper than GPT-5.2 (DeepSeek V4 Flash ~90% cheaper), the article argues open weights are already sufficient for most production workloads, though closed models still lead on the hardest reasoning and longest-horizon tasks; it also notes Clef is “open weights, not open source” because itsdata and training pipeline are not published.
+The article argues enterprises need AI governance to catch up with agentic AI moving rapidly from pilots to production, with agents built across major cloud and model providers by central teams, business units, and developers. It describes an “enablement” pillar—native MCP support for connecting agents to enterprise tools/data, plus SDKs and frameworks—and warns that “you can’t govern what you can’t see,” citing AI spending projected to reach $2.59 trillion in 2026 and production traffic through Kong AI Gateway. It notes a gap between manual “paper approvals” and network reality, since firewalls and gateways lack context, while agents are only as useful as the context they can access (e.g., inventory levels, customer history); as deployments become more distributed, control decreases.
 ```

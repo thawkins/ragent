@@ -217,6 +217,27 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
             );
         }
+        Some(OutputFormat::Newsletter) => {
+            out.push_str("## Executive Summary\n");
+            out.push_str(
+                "A concise one-paragraph executive summary of what the sources collectively say about the topic, written as a newsletter lead: plain language, no bullet lists.\n\n",
+            );
+            out.push_str("## Top 10 Implications\n");
+            out.push_str(
+                "Rank the top 10 practical consequences implied by the evidence. Output a numbered list `1.`..`10.` ordered by importance. Each entry must be one or two sentences. If fewer than 10 are justified, list only those.\n\n",
+            );
+            out.push_str("## Findings\n");
+            out.push_str(
+                "A numbered list of concrete findings. Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
+                 Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
+                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
+                 **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
+                 **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question. This paragraph must be substantive - write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. Every sentence should carry analytical weight - do not pad with filler or repetition.\n\n\
+                 **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, contradicts, or is prerequisite to, using `Finding N` references. If there are no dependencies, write \"No direct dependencies.\"\n\n\
+                 **Implication:** Summarize the practical consequence, open risk, or recommended follow-up action.\n\n\
+                 Put each label on its own line, and separate every paragraph with a blank line. Put each finding on its own line starting with `1. `, `2. `, etc.\n\n",
+            );
+        }
         _ => {
             out.push_str("## Executive Summary\n");
             out.push_str(

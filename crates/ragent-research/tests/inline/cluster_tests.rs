@@ -188,8 +188,10 @@ fn format_concepts_md_handles_empty_input() {
 
 #[test]
 fn build_concept_extraction_prompt_repeats_payload_independently() {
+    // Use a payload token that cannot also appear in the prompt's own prose,
+    // so the count asserts on the inserted payload alone.
     let payload = ClusterPayload {
-        text: "first".to_string(),
+        text: "PAYLOADMARKER".to_string(),
         files: vec![],
         total_bytes: 0,
         max_bytes: 0,
@@ -199,7 +201,7 @@ fn build_concept_extraction_prompt_repeats_payload_independently() {
     let p2 = build_concept_extraction_prompt(&payload);
     assert_eq!(p1, p2, "same payload must produce deterministic prompt");
     assert_eq!(
-        p1.matches("first").count(),
+        p1.matches("PAYLOADMARKER").count(),
         1,
         "payload inserted exactly once"
     );

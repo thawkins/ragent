@@ -35,6 +35,7 @@ fn test_build_research_session_wires_available_tools() {
         None,
         None,
         None,
+        ragent_research::DEFAULT_MAX_QUERIES,
     );
     let debug = format!("{:?}", session);
     assert!(

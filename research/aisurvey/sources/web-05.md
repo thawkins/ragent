@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://flaviocopes.com/open-weights
-- Title: What “open weights” means for AI models
-- Author(s): Flavio Copes
+- URL: https://www.fiddler.ai/blog/opentelemetry-ai-observability-guide
+- Title: OpenTelemetry for AI Observability: What It Covers and Where It Stops | Fiddler AI Blog
+- Author(s): Fiddler Team, @fiddler_ai
 - Language: English
-- Published (UTC): 2026-10-14T10:00:00+00:00
-- Captured (UTC): 2026-10-27T13:09:50.948088539+00:00
-- Relevance: Medium - partial query match
+- Published (UTC): 2026-10-30T23:58:05.456+00:00
+- Captured (UTC): 2026-11-02T11:12:37.809132977+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article distinguishes **open weights**—downloadable trained parameters that let users run, fine-tune, quantize, inspect, and host a model—from **open-source AI**, which the Open Source Initiative says also requires training/running code and enough training-data information to understand and substantially recreate the system. It cites **Qwen3.8** (announced July 19, 2026; `Qwen/Qwen3.8-2.4T-A95B` posted Aug. 12 as a 2.4T-parameter MoE with 95B active under a custom Qwen3.8-Max license, and `Qwen/Qwen3.8-27B` posted Aug. 14 as a dense multimodal Apache 2.0 model) and Moonshot AI’s **Kimi K3** (announced July 16, 2026; 2.8T parameters, native vision, 1M-token context; full weights released July 27 under the Kimi K3 License as ~1.56 TB of MXFP4 safetensors across 96 shards, with 896 experts activating 16 per token). It stresses that licenses can restrict commercial use, redistribution, modification, and hosting, and that open weights do not guarantee reproducibility, affordability, safety, or practical local usability—Kimi K3, for example, is documented for deployments with 64+ accelerators.
+OpenTelemetry is presented as the vendor-neutral telemetry standard for AI observability, providing distributed tracing, metrics, and logs across LLM calls, agent workflows, and infrastructure; its GenAI semantic conventions—still at Development status—standardize attributes such as `gen_ai.provider.name`, model, input/output token usage, and finish reasons, but do not cover output evaluation, safety scoring, or content quality. Production AI observability therefore needs OpenTelemetry as the data plane plus an evaluation/control layer, which Fiddler provides by ingesting OTel telemetry and applying in-environment Centor Models for faithfulness, toxicity, and policy-compliance scoring without sampling, along with Guardrails checks under 80ms. The article also flags production pitfalls including lost multi-turn session context, prompt/completion data-governance risk, span explosion in multi-agent systems, and evaluation-latency tradeoffs, and cites a financial-services agent example where traditional APM showed green while compliance violations occurred.
 ```

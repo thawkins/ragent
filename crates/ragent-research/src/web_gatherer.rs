@@ -59,7 +59,9 @@ mod relevance;
 mod title;
 
 pub use classify::{WebSourceKind, classify_web_source};
-pub use decomposer::{HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer};
+pub use decomposer::{
+    DEFAULT_MAX_QUERIES, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
+};
 pub use relevance::PreparedQuery;
 use title::clean_web_source_title;
 
@@ -2126,7 +2128,9 @@ impl WebGatherer {
                     // `truncated` short-circuits into an empty query set, so
                     // no sub-query search is issued at all (FR-008: no new
                     // work after the deadline).
-                    match tokio::time::timeout(remaining(), d.decompose(topic)).await {
+                    let decomposed = match tokio::time::timeout(remaining(), d.decompose(topic))
+                        .await
+                    {
                         Ok(Ok(qs)) if !qs.is_empty() => qs,
                         Ok(Ok(_)) => {
                             tracing::warn!(
@@ -2147,6 +2151,22 @@ impl WebGatherer {
                             }
                             Vec::new()
                         }
+                    };
+                    // `--max-queries`: a hard cap on the number of decomposed
+                    // queries this pass searches. The decomposer usually
+                    // applies the cap itself; enforcing it here too keeps the
+                    // limit honest for any decomposer implementation. A limit
+                    // of 0 means "unbounded" and resolves to `None`.
+                    match crate::limits::effective_limit(d.query_limit().unwrap_or(0)) {
+                        Some(limit) if decomposed.len() > limit => {
+                            tracing::debug!(
+                                decomposed = decomposed.len(),
+                                limit,
+                                "research: capping decomposed queries to --max-queries"
+                            );
+                            decomposed.into_iter().take(limit).collect()
+                        }
+                        _ => decomposed,
                     }
                 }
                 None => vec![topic.to_string()],

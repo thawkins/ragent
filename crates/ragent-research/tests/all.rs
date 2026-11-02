@@ -62,8 +62,12 @@ mod test_findings_diagram_section_skeleton;
 mod test_hit_author_propagation;
 #[path = "test_hyperresearch_manual.rs"]
 mod test_hyperresearch_manual;
+#[path = "test_max_queries.rs"]
+mod test_max_queries;
 #[path = "test_ms04_source_neutralisation.rs"]
 mod test_ms04_source_neutralisation;
+#[path = "test_newsletter_format.rs"]
+mod test_newsletter_format;
 #[path = "test_no_percall_regex.rs"]
 mod test_no_percall_regex;
 #[path = "test_open_access_helpers.rs"]
@@ -122,6 +126,8 @@ mod test_session_topic_extra;
 mod test_source_vault;
 #[path = "test_template_merge.rs"]
 mod test_template_merge;
+#[path = "test_title_extraction.rs"]
+mod test_title_extraction;
 #[path = "test_url_cloak.rs"]
 mod test_url_cloak;
 #[path = "test_verify_func065.rs"]

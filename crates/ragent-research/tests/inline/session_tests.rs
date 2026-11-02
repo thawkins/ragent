@@ -483,7 +483,7 @@ async fn session_persists_decomposed_queries_in_research_md() {
 
     let manager = ResearchManager::new(&research_root);
     let web = WebGatherer::new(Arc::new(RecordingSearch), Arc::new(OkFetch))
-        .with_decomposer(Arc::new(HeuristicQueryDecomposer));
+        .with_decomposer(Arc::new(HeuristicQueryDecomposer::new()));
     let session = ResearchSession::new(
         manager,
         Some(web),

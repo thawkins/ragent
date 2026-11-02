@@ -130,6 +130,7 @@ fn research_config_round_trips_through_json() {
         oa_min_full_text_chars: 750,
         max_concepts: 8,
         max_findings: 25,
+        max_queries: 12,
         models: ragent_config::ResearchModelsConfig::default(),
         supervisor: ragent_config::ResearchSupervisorConfig::default(),
         evaluate: ragent_config::ResearchEvaluateConfig::default(),

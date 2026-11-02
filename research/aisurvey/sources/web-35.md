@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://globalresearchnetwork.us/index.php/ajebm/article/view/5786
-- Title: Strategic Management and Economic Performance in Digital Media: The Role of AI and Innovation
-- Author(s): Rustamov Z.X.
+- URL: https://emergent.sh/news/meta-releases-muse-spark-open-ai-model-open
+- Title: Meta Releases Muse Spark Open AI Model: Open-Weight Era
+- Author(s): Kamran
 - Language: English
-- Published (UTC): 2026-10-02T00:00:00+00:00
-- Captured (UTC): 2026-10-27T13:12:32.028598217+00:00
+- Published (UTC): 2026-10-16T19:18:42+00:00
+- Captured (UTC): 2026-11-02T11:15:04.421593973+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-This article examines how strategic management and AI-driven innovation affect the economic performance of digital media firms, proposing a framework that links strategic-management stages to AI instruments and to performance through cost efficiency, revenue growth, business model innovation, and risk. It reports that the global entertainment and media market reached about US$3.5 trillion in 2025, with advertising exceeding US$1 trillion for the first time due to AI-enabled personalization, and that 88% of organizations use AI in at least one business function. However, only 37% of firms attribute any EBIT impact to AI, and news publishers expect search referral traffic to fall by more than 40% within three years. The article argues that AI creates sustainable value in digital media only when embedded in a coherent strategy and supported by proprietary data, human capital, and governance, and it offers recommendations for media managers and for policy in Uzbekistan.
+Meta officially released **Muse Spark Open** on **October 16, 2026**, an **open-weight** generative AI model positioned as complementary to its **Llama** series and intended for creative and multimodal tasks such as image generation/editing, text-visual content synthesis, style transfer, and rapid prototyping. The model uses transformer-based attention and is available through Meta’s AI research portal under an open-weight license permitting commercial use with attribution while restricting certain high-risk deployments; it ships in multiple quantization formats with documentation, API libraries, and framework integration guides. Meta frames the release as part of its strategy to counter closed, API-only competitors, though it has not published comprehensive evaluation metrics.
 ```

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/pulse/market-outlook-year-end-2026-ai-still-booming-whats-next-ygm3e
-- Title: Market Outlook Year-End 2026: AI is still booming - but what's next?
-- Author(s): Julius Baer
+- URL: https://www.linkedin.com/posts/andjdavies_96-of-ai-companies-got-their-cost-forecasts-activity-7515720720296079360--PyP
+- Title: AI Cost Forecasts Often Wrong, Cloud Capital Report Finds | Andrew Davies posted on the topic | LinkedIn
+- Author(s): Andrew Davies
 - Language: English
-- Published (UTC): 2026-10-16T06:01:47+00:00
-- Captured (UTC): 2026-10-27T13:13:03.677366364+00:00
+- Published (UTC): 2026-10-13T10:30:55.055+00:00
+- Captured (UTC): 2026-11-02T11:15:15.895258445+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-The year-end 2026 outlook says AI dominated markets for much of 2026, but earnings growth and equity opportunities are broadening beyond US tech into Europe, Asia, healthcare and communications. It sees resilient global growth, faded stagflation fears and relatively low recession risk despite geopolitical shocks and a possible AI-spending slowdown; preferred areas include AI semiconductors/selected software, communications on AI monetization, biotech/MedTech, European banks/cyclicals, and Japan, Singapore, China and India. Rates are unlikely to return to ultra-low levels and may settle “higher-but-stable” than pre-pandemic due to reshoring, defense spending and geopolitical fragmentation, with AI productivity possibly offsetting inflation; investors should adjust expectations while seeking fixed income opportunities.
+A LinkedIn post citing Cloud Capital’s *The Cost of Compute* report says 96% of AI companies got their cost forecasts wrong; AI breaks SaaS’s ~80% gross-margin model because every prompt, generation, and agentic action costs money, not just tokens. Cloud Capital’s survey of 100 CFOs found forecasts break most often on compute infrastructure (64%), data & storage (60%), and model APIs/tokens (47%). The post argues flat $20/month subscriptions work when marginal cost is near zero but not when a power user consumes 100x more compute, predicting shifts to subscription+usage, platform fee+credits, seats+consumption, and eventually outcome-based pricing, with the CFO role increasingly important; it credits Edward Barrow and team.
 ```

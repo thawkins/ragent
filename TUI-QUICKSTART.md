@@ -1514,8 +1514,11 @@ The `create` form supports a number of optional flags:
 - `--use-low-relevance` — keep low-relevance web sources instead of filtering
   them out.
 - `--depth shallow|standard|deep` — control how broadly ragent searches.
-- `--format report|executive-summary|comparison-table|source-bibliography|imrad`
-  — choose the output artifact.
+- `--format report|executive-summary|comparison-table|source-bibliography|imrad|newsletter`
+  — choose the output artifact. `newsletter` emits only the reader-facing
+  sections (topic, executive summary, top 10 implications, open questions,
+  concepts, findings, findings relationship diagram) and drops the audit-trail
+  blocks, so the document reads as a newsletter rather than a report.
 
 Reports are saved under `research/<name>/RESEARCH-<YYYY-MM-DD>.md`. The primary
 report uses the item's creation date, so it is stable from creation onwards;

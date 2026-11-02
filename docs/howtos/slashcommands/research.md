@@ -36,6 +36,17 @@ The first positional after `create` is the project name; everything after it is
 the topic. The parser splits on whitespace and honours double quotes, so a
 topic can be quoted as one argument.
 
+## Report title
+
+When the synthesis came from the model, the report's `title` (the frontmatter
+field and the `# Title:` header) is named by the LLM from the generated
+executive summary, seeded with the research topic, and capped at 80 characters
+on a word boundary. A model-produced title reads as a label for the report
+instead of a clipped first sentence. If the model returns nothing usable, the
+call fails, or the synthesis fell back to the mechanical path, the title stays
+the topic-derived one (or the truncated summary) and the run continues. The
+step reports as a `title` `RunStep` event.
+
 ## Subcommands
 
 | Form | Description |
@@ -71,7 +82,7 @@ topic can be quoted as one argument.
 | `--compression-model` | `<provider:model>` override for compression. |
 | `--final-report-model` | `<provider:model>` override for the final report. |
 | `--max-concurrent-research-units N` | Parallel research unit cap. |
-| `--format` | `report` \| `executive-summary` \| `comparison-table` \| `source-bibliography` \| `imrad`. |
+| `--format` | `report` \| `executive-summary` \| `comparison-table` \| `source-bibliography` \| `imrad` \| `newsletter`. |
 | `--sources-dir <dir>` | Local sources directory to cross-reference. |
 | `--template <name>` | Output template override. |
 | `--fetch-concurrently N` | Concurrent fetch cap (default 10). |
@@ -83,6 +94,7 @@ topic can be quoted as one argument.
 | `--search-retry-base-delay-ms N` | Retry backoff base (default 200). |
 | `--max-web-results N` | Web result cap. |
 | `--max-search-calls N` | Search-call cap. |
+| `--max-queries N` | Cap on the queries produced by topic decomposition (default 20; `0` = unbounded). Per-run override of `research.max_queries`. |
 | `--max-local-sources N` | Local source cap. |
 | `--max-synthesis-sources N` | Sources admitted into synthesis. |
 | `--max-concepts N` | Output cap on the `## Concepts` list (default 5; `0` = unbounded). Per-run override of `research.max_concepts`. |

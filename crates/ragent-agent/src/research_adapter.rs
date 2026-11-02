@@ -46,6 +46,8 @@ use ragent_research::{
 /// * `research_name` - when `Some`, is sanitised and used in the JSONL
 ///   gather-log file name (`log/research/research-<name>-<ts>-<rand>-web.jsonl`)
 ///   recording every considered/captured/rejected URL.
+/// * `max_queries` - cap on the number of search queries the topic-decomposition
+///   step may produce (`--max-queries`). `0` means "unbounded".
 #[allow(clippy::too_many_arguments)]
 pub fn build_research_session(
     registry: &Arc<ToolRegistry>,
@@ -58,6 +60,7 @@ pub fn build_research_session(
     provider_registry: Option<Arc<ProviderRegistry>>,
     active_model: Option<ModelRef>,
     research_name: Option<&str>,
+    max_queries: usize,
 ) -> ResearchSession {
     let web = build_web_gatherer(
         registry,
@@ -68,6 +71,7 @@ pub fn build_research_session(
         config.clone(),
         provider_registry.clone(),
         active_model.clone(),
+        max_queries,
     );
     let local = build_local_gatherer(
         registry,
@@ -252,6 +256,7 @@ fn build_tool_context(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_web_gatherer(
     registry: &Arc<ToolRegistry>,
     session_id: String,
@@ -261,6 +266,7 @@ fn build_web_gatherer(
     config: Option<Arc<Config>>,
     provider_registry: Option<Arc<ProviderRegistry>>,
     active_model: Option<ModelRef>,
+    max_queries: usize,
 ) -> Option<WebGatherer> {
     let search = registry
         .get("mf_search")
@@ -284,6 +290,10 @@ fn build_web_gatherer(
         registry.clone(),
     );
 
+    // `--max-queries`: 0 means "unbounded", which the decomposers express as
+    // `None`. The cap bounds both the model request and the heuristic
+    // fallback, and the gatherer re-applies it before searching.
+    let query_limit = ragent_research::effective_limit(max_queries);
     let decomposer: Arc<dyn QueryDecomposer> = match (provider_registry, active_model) {
         (Some(registry), Some(model_ref)) => {
             let api_key = storage
@@ -297,10 +307,11 @@ fn build_web_gatherer(
             Arc::new(
                 LlmQueryDecomposer::new(registry, &model_ref.provider_id, &model_ref.model_id)
                     .with_api_key(api_key)
-                    .with_base_url(base_url),
+                    .with_base_url(base_url)
+                    .with_max_queries(query_limit),
             )
         }
-        _ => Arc::new(HeuristicQueryDecomposer),
+        _ => Arc::new(HeuristicQueryDecomposer::new().with_max_queries(query_limit)),
     };
 
     Some(

@@ -511,6 +511,11 @@ pub struct WebConfig {
     /// is shared via `Arc` across every gatherer in the run, and exhausted
     /// budgets degrade the run to its partial results instead of failing.
     pub max_search_calls: Option<usize>,
+    /// `--max-queries N`: cap on the number of search queries produced by the
+    /// topic-decomposition step. `0` means "unbounded" (subject only to the
+    /// decomposer's hard upper bound). Consumed by the adapter when it builds
+    /// the query decomposer; a value of `0` resolves to `None`.
+    pub max_queries: usize,
     /// `--age <span>`: reject web sources published longer ago than this span
     /// (`30d`, `6m`, `2y`). When `Some`, a web source with no publication date
     /// is rejected as well. When `None` (the default) publication age is not
@@ -757,6 +762,7 @@ impl Default for WebConfig {
             use_pdf_web_sources: false,
             web_phase_timeout_secs: Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
             max_search_calls: None,
+            max_queries: crate::web_gatherer::DEFAULT_MAX_QUERIES,
             max_age: None,
         }
     }
@@ -1927,7 +1933,13 @@ impl ResearchSession {
         };
 
         let final_title = if llm_produced && !doc.summary.trim().is_empty() {
-            crate::item::truncate_title(&doc.summary)
+            self.derive_report_title(
+                topic,
+                &doc.summary,
+                crate::item::truncate_title(&doc.summary),
+                &observer,
+            )
+            .await
         } else {
             title.to_string()
         };
@@ -2948,7 +2960,13 @@ impl ResearchSession {
         // meaningful headline - so we keep the topic-derived title instead.
         let final_title =
             if synth_outcome == SynthesizeOutcome::Llm && !doc.summary.trim().is_empty() {
-                truncate_title(&doc.summary)
+                self.derive_report_title(
+                    &topic,
+                    &doc.summary,
+                    truncate_title(&doc.summary),
+                    &observer,
+                )
+                .await
             } else {
                 item_title
             };
@@ -3596,6 +3614,70 @@ impl ResearchSession {
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
         let analysis = self.analysis.with_brief(brief.map(String::from));
         analysis.analyze_with_outcome(topic, &bodies).await
+    }
+
+    /// Choose the `RESEARCH.md` headline for a finished report.
+    ///
+    /// The title is what `/research list`, the markdown header, and the
+    /// frontmatter show, so it has to read as a label for the report rather
+    /// than as a clipped sentence. When an LLM engine is wired and the
+    /// summary was model-produced, the engine names the report from its
+    /// executive summary (seeded with the research topic); the result is
+    /// reduced to a single capped line.
+    ///
+    /// `fallback` is the title to keep when no engine is wired, the summary
+    /// did not come from the model, or the call fails or returns something
+    /// unusable - callers pass the topic-derived title for a mechanical
+    /// summary and [`crate::item::truncate_title`] of the summary otherwise.
+    pub(crate) async fn derive_report_title(
+        &self,
+        topic: &str,
+        summary: &str,
+        fallback: String,
+        observer: &Arc<dyn SessionObserver>,
+    ) -> String {
+        let engine = self.concepts_engine.as_ref().or(self.summarizer.as_ref());
+        let Some(engine) = engine else {
+            return fallback;
+        };
+        if summary.trim().is_empty() {
+            return fallback;
+        }
+        observer.on_event(SessionEvent::RunStep {
+            step: "title".to_string(),
+            status: "started".to_string(),
+            detail: None,
+        });
+        match engine.summarize_title(summary, topic).await {
+            Ok(Some(title)) => {
+                observer.on_event(SessionEvent::RunStep {
+                    step: "title".to_string(),
+                    status: "completed".to_string(),
+                    detail: Some(title.clone()),
+                });
+                title
+            }
+            Ok(None) => {
+                observer.on_event(SessionEvent::RunStep {
+                    step: "title".to_string(),
+                    status: "skipped".to_string(),
+                    detail: Some("model returned no usable title".to_string()),
+                });
+                fallback
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "research: title extraction failed; keeping the derived title"
+                );
+                observer.on_event(SessionEvent::RunStep {
+                    step: "title".to_string(),
+                    status: "failed".to_string(),
+                    detail: Some(e.to_string()),
+                });
+                fallback
+            }
+        }
     }
 
     /// Extract the cross-source concept list for the `## Concepts` section

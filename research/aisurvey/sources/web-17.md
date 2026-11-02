@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://launchpad.io/blog/meet-launchpads-new-ai-assistant
-- Title: AI Assistant for Enterprise Application Development | Launchpad
-- Author(s): -
+- URL: https://www.linkedin.com/posts/jeganselvarajlinkedin_your-ai-agents-need-an-identity-and-access-activity-7520808520082956288-uUlB
+- Title: Your AI agents need an identity and access checklist. | Jegan Selvaraj
+- Author(s): Jegan Selvaraj
 - Language: English
-- Published (UTC): 2026-09-30T12:00:00+00:00
-- Captured (UTC): 2026-10-27T13:10:56.586542194+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-10-27T11:28:01.052+00:00
+- Captured (UTC): 2026-11-02T11:13:41.987650265+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-In a Sept. 30, 2026 post, Sam Tremlett, Senior Director of Product Management at Launchpad.io, announced Launchpad’s AI Assistant, which enables organizations to design, build, and evolve enterprise-grade applications using natural language. Rather than generating code, it generates human-readable visual rule models for business logic, workflows, decisions, data structures, and user experiences, with Ask, Plan, and Build modes for exploration, reviewable planning, and implementation. Launchpad claims the resulting applications are enterprise-grade and production-ready from day one—not prototypes—and offers free access at Launchpad.io.
+In a LinkedIn post, Jegan Selvaraj argues that AI agents need an identity and access checklist because agents with system access can read data, modify records, and trigger actions. The five areas are identity, least-privilege access, authentication, monitoring, and revocation; he recommends starting with an agent inventory, clear ownership, permission reviews, and an audit trail.
 ```

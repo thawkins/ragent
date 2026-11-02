@@ -73,6 +73,7 @@ fn minimal_request(name: &str, papers: bool) -> CreateResearchRequest {
         search_retry_base_delay_ms: None,
         max_web_results: None,
         max_search_calls: None,
+        max_queries: None,
         max_local_sources: None,
         max_synthesis_sources: None,
         max_concepts: None,

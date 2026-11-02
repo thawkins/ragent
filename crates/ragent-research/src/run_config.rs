@@ -18,6 +18,11 @@ use std::str::FromStr;
 /// - `imrad` - IMRaD-compliant scientific/technical report format
 ///   (Abstract, Introduction, Methods, Results, Discussion, References Index),
 ///   as specified in `specs/imradreport/SPEC.md`.
+/// - `newsletter` - short, reader-facing newsletter layout: frontmatter, title,
+///   topic, executive summary, top 10 implications, open questions, concepts,
+///   findings, and the findings relationship diagram. Every other default
+///   section (corpus scoreboard, research brief, search queries, data quality,
+///   QA artifacts, cross-references, references index) is omitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     /// Full multi-section research report (default).
@@ -32,6 +37,8 @@ pub enum OutputFormat {
     /// IMRaD-compliant scientific/technical report format (Introduction, Methods,
     /// Results, and Discussion) - FR-001 / FR-002 of specs/imradreport.
     Imrad,
+    /// Short newsletter layout: only the reader-facing narrative sections.
+    Newsletter,
 }
 
 impl OutputFormat {
@@ -46,6 +53,7 @@ impl OutputFormat {
                 Some(Self::SourceBibliography)
             }
             "imrad" | "im-rad" | "scientific" => Some(Self::Imrad),
+            "newsletter" => Some(Self::Newsletter),
             _ => None,
         }
     }
@@ -59,6 +67,7 @@ impl OutputFormat {
             Self::ComparisonTable => "comparison-table",
             Self::SourceBibliography => "source-bibliography",
             Self::Imrad => "imrad",
+            Self::Newsletter => "newsletter",
         }
     }
 }

@@ -565,6 +565,42 @@ impl LlmAnalysisEngine {
         .await
     }
 
+    /// Ask the LLM to name the finished report from its executive summary.
+    ///
+    /// The rendered `RESEARCH.md` headline is otherwise the first
+    /// [`crate::item::RESEARCH_TITLE_MAX_CHARS`] characters of the summary,
+    /// which clips mid-thought and rarely reads as a title (e.g. "The 97
+    /// sources describe an AI economy in 2026 that is simultaneously
+    /// deflating..."). This call asks the model for a short, standalone label
+    /// that states what the summary is about.
+    ///
+    /// Returns the cleaned title, or `None` when the model output is empty or
+    /// unusable (too short, all punctuation, or a meta-response such as
+    /// "Title: ..." with no content). Callers fall back to truncating the
+    /// summary so the feature degrades gracefully without an LLM.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provider is unavailable or the request fails.
+    pub async fn summarize_title(
+        &self,
+        summary: &str,
+        topic: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let prompt = build_title_prompt(summary, topic);
+        let raw = self
+            .complete_raw(
+                &prompt,
+                Some(
+                    "You label finished research reports. Reply with the title only - \
+                     one line, no prefix, no quotes, no markdown.",
+                ),
+                128,
+            )
+            .await?;
+        Ok(clean_generated_title(&raw))
+    }
+
     /// Send a raw prompt to the wired provider/model and return the full
     /// response text. This is the shared low-level completion path for the
     /// synthesis stream and the `/research create` concept-extraction step:
@@ -667,6 +703,94 @@ fn parse_subject_summary(text: &str) -> Option<(String, String)> {
         return None;
     }
     Some((topic, title))
+}
+
+/// Build the prompt that asks the model to name a finished report from its
+/// executive summary.
+///
+/// The prompt is deliberately narrow: it supplies the research topic (so the
+/// title sits in the right frame of reference) and the executive summary as the
+/// only evidence, and it pins the shape of the answer (one line, a character
+/// budget, no prefix) so the reply can be used verbatim as the document title.
+fn build_title_prompt(summary: &str, topic: &str) -> String {
+    const MAX_SUMMARY_CHARS: usize = 4_000;
+    let max_chars = crate::item::RESEARCH_TITLE_MAX_CHARS;
+    let summary: String = summary.trim().chars().take(MAX_SUMMARY_CHARS).collect();
+    let topic = topic.trim();
+    let mut prompt = String::new();
+    if !topic.is_empty() {
+        prompt.push_str("Research topic:\n");
+        prompt.push_str(topic);
+        prompt.push_str("\n\n");
+    }
+    prompt.push_str("Executive summary of the finished report:\n\n");
+    prompt.push_str(&summary);
+    prompt.push_str(&format!(
+        "\n\nWrite a title for this report.\n\
+         - At most {max_chars} characters, one line.\n\
+         - State what the report concludes or covers. Not a sentence from the summary.\n\
+         - No \"Title:\" prefix, no quotes, no markdown, no trailing full stop.\n\
+         - Reply with the title only."
+    ));
+    prompt
+}
+
+/// Normalise a model reply into a usable report title.
+///
+/// Providers routinely decorate a one-line answer: they prepend `Title:`, wrap
+/// it in quotes or a markdown heading, add a trailing full stop, or answer the
+/// question instead of naming the report ("Here is the title: ..."). This
+/// strips that decoration, keeps only the first line, caps the result at
+/// [`crate::item::RESEARCH_TITLE_MAX_CHARS`] on a word boundary, and returns
+/// `None` when nothing usable remains so the caller falls back to truncating
+/// the summary.
+///
+/// Public so the normalisation rules can be exercised from the crate's
+/// `tests/` tree; it is an implementation detail of
+/// [`LlmAnalysisEngine::summarize_title`].
+#[doc(hidden)]
+#[must_use]
+pub fn clean_generated_title(raw: &str) -> Option<String> {
+    /// Wrapping characters providers add around a quoted title.
+    const DECORATION: [char; 6] = ['#', '*', '`', '"', '\'', '_'];
+
+    let sanitized = strip_control_chars(raw);
+    // Take the first non-empty line: any explanation the model added after the
+    // title belongs to the following lines.
+    let first_line = sanitized
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    let mut title = first_line.trim_matches(|c: char| DECORATION.contains(&c) || c.is_whitespace());
+    // Drop a leading "Title:" / "Report title:" label, whatever its case and
+    // however it is decorated. The label is short by construction, so a colon
+    // later in the line (part of the title itself) is left alone.
+    if let Some((label, rest)) = title.split_once(':')
+        && label.chars().count() <= 16
+        && matches!(
+            label
+                .trim()
+                .trim_matches(|c: char| DECORATION.contains(&c))
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "title" | "report title" | "suggested title" | "proposed title"
+        )
+    {
+        title = rest.trim_matches(|c: char| DECORATION.contains(&c) || c.is_whitespace());
+    }
+    // A "title" of one word, or a few characters of punctuation, is a refusal
+    // or a stray marker rather than a label for the report.
+    if title.chars().filter(|c| c.is_alphanumeric()).count() < 8
+        || !title.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    let title = title.trim_end_matches('.').trim_end();
+    if title.is_empty() {
+        return None;
+    }
+    Some(crate::item::truncate_title(title))
 }
 
 /// Build [`SourceBody`] values from the gathered [`Source`] list and a function

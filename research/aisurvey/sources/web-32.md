@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/pulse/ai-longer-just-changing-products-business-i6lje
-- Title: AI Is No Longer Just Changing Products — It Is Changing the Business Models Behind Them
-- Author(s): Bosch Innovation Consulting
+- URL: https://saascron.com/ai-pricing-saas
+- Title: AI pricing in SaaS: credits, usage and outcome-based models compared
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-02T07:22:12+00:00
-- Captured (UTC): 2026-10-27T13:12:10.235497865+00:00
-- Relevance: High - title + snippet match query
+- Published (UTC): 2026-10-27T16:00:00+00:00
+- Captured (UTC): 2026-11-02T11:14:50.558978963+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-In its September 25–October 2, 2026 scan, the article argues AI is shifting from product innovation to business-model innovation, citing Microsoft’s Copilot pricing that combines per-user subscriptions with usage-based billing for agentic work—“the work that gets done rather than the number of people doing it”—and Shopify’s WebMCP checkout support allowing authorized browser-based AI agents to inspect checkout details and complete transactions. It also cites Meta’s September 28 launch of Meta Enterprise Platform under former MongoDB CEO CJ Desai, including Muse, Meta Business Agent, Muse API and Muse Code, plus expanded Muse for small businesses with integrations such as Shopify, Stripe, Slack, QuickBooks, Canva, Asana, Notion and Zoom; Accenture’s fiscal 2027 revenue-growth forecast of 3%–6% amid pricing pressure from clients expecting AI efficiency gains; Nvidia’s effort to make high-end compute a financeable asset class despite lender caution over rapid GPU depreciation; and Amazon’s reported exploration of moving about $8 billion of Nvidia Grace Blackwell chips into an outside-investor-funded special-purpose vehicle and leasing the capacity back. The article frames these as shifts from seat to usage/outcome, human to agent customer, internal capability to external revenue, hours to capabilities/outcomes, ownership to access, and technology innovation to financial innovation.
+The page outlines five AI pricing models—bundled in the seat, per-user add-on, allowance plus credits, per action, and per outcome—with examples including Slack’s bundled AI, Salesforce Agentforce at $125/user/month, Atlassian Rovo’s 25 credits/user/month then $0.01/credit, GitHub Copilot Pro’s $10/month with $15 AI credits at $0.01 each, Salesforce Flex Credits at $500/100,000 credits and 20 credits per standard action ($0.10/action), and Intercom Fin at $0.99/outcome. In a worked example with 20 support agents, 3,000 monthly conversations, 60% resolved, 5 actions per conversation, and $0.04 inference cost per action, vendor inference cost is $600/month; per-user pricing at $30 yields $600 revenue and $0 margin, per-action at $0.10 yields $1,500 revenue and 60% margin, and per-outcome at $0.90 yields $1,620 revenue and 63% margin, while doubled volume turns the per-user option into a $600 monthly loss. It advises buyers and vendors to convert every offer to cost per finished task and to get the unit definition, allowance pooling, limit behavior, minimum commitments, and conversion-rate change terms in writing.
 ```

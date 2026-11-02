@@ -75,6 +75,7 @@ fn session_for(registry: Arc<ToolRegistry>, workdir: PathBuf) -> ragent_research
         None,
         None,
         None,
+        ragent_research::DEFAULT_MAX_QUERIES,
     )
 }
 
@@ -131,6 +132,7 @@ async fn provider_model_wiring_uses_storage_and_config_base_url() {
         Some(provider_registry),
         Some(model),
         None,
+        ragent_research::DEFAULT_MAX_QUERIES,
     );
 
     // The default registry provides websearch+webfetch+glob/grep/read/list.
@@ -170,6 +172,7 @@ async fn provider_wiring_resolves_copilot_and_azure_base_urls() {
             Some(provider_registry.clone()),
             Some(model),
             None,
+            ragent_research::DEFAULT_MAX_QUERIES,
         );
         assert!(format!("{session:?}").contains("has_web: true"));
     }
@@ -192,6 +195,7 @@ async fn research_name_creates_the_gather_log_directory() {
         None,
         None,
         Some("My Research / 2025!"),
+        ragent_research::DEFAULT_MAX_QUERIES,
     );
     assert!(
         tmp.path().join("log").join("research").is_dir(),

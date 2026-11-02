@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.diagrid.io/blog/ai-agent-frameworks
-- Title: AI Agent Frameworks in 2026: The 17 Best Compared
-- Author(s): Mark Fussell
+- URL: https://www.datawiza.com/blog/zero-trust-for-ai-agents
+- Title: Zero Trust for AI Agents: Identity, Access &amp; Data
+- Author(s): Datawiza
 - Language: English
-- Published (UTC): 2026-10-05T00:00:00+00:00
-- Captured (UTC): 2026-10-27T13:10:48.105647058+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-10-05T03:52:08.594+00:00
+- Captured (UTC): 2026-11-02T11:13:24.742180770+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-Diagrid’s guide compares 17 AI agent frameworks across Python, TypeScript, Java, .NET, and Go—including LangGraph, LangChain, CrewAI, PydanticAI, Google ADK (five official SDKs: Python, TypeScript, Java, Go, Kotlin; Kotlin 1.0 in September 2026), AWS Strands, OpenAI Agents SDK, Deep Agents, smolagents, Microsoft Agent Framework, Spring AI, Claude Agent SDK, Dapr Agents (v1.0 GA), Eino, LangChainGo, Mastra, and HolmesGPT—by programming model, language fit, tools/MCP/memory, multi-agent support, human-in-the-loop, tracing/evaluation/debugging, and model/cloud portability. It argues there is no universal winner: choose first on programming model and existing language/stack, then ecosystem, state, debugging, and multi-agent needs, not GitHub stars or feature-list length. On durability, it distinguishes no persistence, conversation-state reload, checkpointed state, and durable execution (every LLM/tool call recorded so a crash resumes from the last completed call); Diagrid wraps framework loops in Dapr Workflows, offers 13 runnable crash quickstarts, and provides Python packages for LangGraph, LangChain, CrewAI, Google ADK, AWS Strands, OpenAI Agents SDK, PydanticAI, Claude Agent SDK, Deep Agents, smolagents, and HolmesGPT, plus Spring AI (Java), Microsoft Agent Framework (.NET), Mastra (TypeScript), and Eino/LangChainGo (Go).
+Zero trust for AI agents means enforcing runtime decisions on each request—who started it, which agent/workload is acting, what tool/action/resource is requested, and what data moves—rather than trusting a prior login, because agents chain actions across MCP servers, APIs, SaaS apps, and internal systems and consume untrusted content that can enable prompt injection. It requires an identity chain from user/owner through AI client, agent/workload, tool/action, downstream credential, and protected resource; least-privilege policy at the tool/action/resource level; inline enforcement that can allow, limit, redact, require approval, or deny; credential brokering that keeps backend secrets out of the agent runtime; and bidirectional DLP for PII, credentials, financial/health/customer data, and source code. Datawiza Agent Gateway implements this in the traffic path by checking identity and action, brokering credentials, inspecting requests/responses, and auditing outcomes; the article notes authentication alone is insufficient, zero trust does not prevent prompt injection but contains damage, and the approach is not limited to MCP.
 ```

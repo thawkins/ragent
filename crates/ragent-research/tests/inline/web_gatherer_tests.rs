@@ -1288,7 +1288,7 @@ async fn gather_with_decomposer_runs_parallel_sub_queries_and_dedupes() {
         calls: Mutex::new(Vec::new()),
     });
     let gatherer = WebGatherer::new(search.clone(), Arc::new(OkFetch))
-        .with_decomposer(Arc::new(HeuristicQueryDecomposer));
+        .with_decomposer(Arc::new(HeuristicQueryDecomposer::new()));
 
     let result = gatherer
         .gather_with_observer("Rust async and Tokio runtime", 5, None)

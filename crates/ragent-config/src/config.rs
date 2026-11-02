@@ -3296,6 +3296,9 @@ impl Config {
         if overlay.research.max_findings != default_max_findings() {
             base.research.max_findings = overlay.research.max_findings;
         }
+        if overlay.research.max_queries != default_max_queries() {
+            base.research.max_queries = overlay.research.max_queries;
+        }
         base.research.evaluate.merge(&overlay.research.evaluate);
 
         // Plugins config: the overlay section wins wholesale when present, so
@@ -4203,6 +4206,12 @@ pub struct ResearchConfig {
     /// flag takes precedence. `0` means "unbounded".
     #[serde(default = "default_max_findings")]
     pub max_findings: usize,
+    /// Maximum number of search queries produced by the topic-decomposition
+    /// step. Defaults to 20; a per-run `--max-queries` flag takes precedence.
+    /// `0` means "unbounded" (subject only to the decomposer's hard upper
+    /// bound).
+    #[serde(default = "default_max_queries")]
+    pub max_queries: usize,
     /// Model selection for multi-stage research pipelines (FR-013 of
     /// specs/opendeepresearch). Each field overrides the default model for a
     /// specific phase when set.
@@ -4333,6 +4342,11 @@ const fn default_max_findings() -> usize {
     20
 }
 
+/// Default topic-decomposition query limit (`--max-queries`): 20 queries.
+const fn default_max_queries() -> usize {
+    20
+}
+
 impl ResearchConfig {
     /// Returns `true` when the research config contains only default values and
     /// can be omitted from the serialized `ragent.json`.
@@ -4344,6 +4358,7 @@ impl ResearchConfig {
             && self.oa_min_full_text_chars == default_oa_min_full_text_chars()
             && self.max_concepts == default_max_concepts()
             && self.max_findings == default_max_findings()
+            && self.max_queries == default_max_queries()
             && self.models.is_empty()
             && self.supervisor.is_empty()
             && self.evaluate.is_empty()
@@ -4366,6 +4381,7 @@ impl Default for ResearchConfig {
             oa_min_full_text_chars: default_oa_min_full_text_chars(),
             max_concepts: default_max_concepts(),
             max_findings: default_max_findings(),
+            max_queries: default_max_queries(),
             models: ResearchModelsConfig::default(),
             supervisor: ResearchSupervisorConfig::default(),
             evaluate: ResearchEvaluateConfig::default(),

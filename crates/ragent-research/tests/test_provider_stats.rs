@@ -145,7 +145,7 @@ async fn test_gatherer_counts_one_request_per_logical_search() {
     let search = Arc::new(CountingSearch::default());
     let stats = Arc::new(ProviderCallStats::new());
     let g = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_provider_stats(stats.clone());
 
     // The heuristic decomposer splits this into at least two sub-queries;
@@ -168,7 +168,7 @@ async fn test_gatherer_retries_count_as_one_request() {
     let search = Arc::new(CountingSearch::default());
     let stats = Arc::new(ProviderCallStats::new());
     let g = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_provider_stats(stats.clone());
     search.record_failure_for("rust");
 
@@ -185,7 +185,7 @@ async fn test_gatherer_shared_stats_aggregate_across_clones() {
     let search = Arc::new(CountingSearch::default());
     let stats = Arc::new(ProviderCallStats::new());
     let base = WebGatherer::new(search.clone(), Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_provider_stats(stats.clone());
 
     // Supervisor wiring: one gatherer cloned into two "researchers", each
@@ -208,7 +208,7 @@ async fn test_gatherer_emits_provider_calls_summary_once_per_pass() {
     let search = Arc::new(CountingSearch::default());
     let stats = Arc::new(ProviderCallStats::new());
     let g = WebGatherer::new(search, Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_provider_stats(stats.clone());
     let obs = CollectEvents::default();
 
@@ -231,7 +231,7 @@ async fn test_gatherer_emits_provider_calls_summary_once_per_pass() {
 async fn test_gatherer_without_stats_emits_no_summary() {
     let search = Arc::new(CountingSearch::default());
     let g = WebGatherer::new(search, Arc::new(AlwaysFetch))
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer));
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()));
     let obs = CollectEvents::default();
 
     let _ = g

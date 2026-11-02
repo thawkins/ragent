@@ -45,7 +45,7 @@ pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data ana
     3. For each concept, produce a markdown section with:\n\
     \n\
        - A level-2 heading (`## N. Concept Name`) with a concise label (2-4 words), where N is the concept's sequential number starting at 1.\n\
-       - A **Definition** paragraph (1-2 sentences).\n\
+       - A **Definition** of exactly three paragraphs, separated by a blank line, roughly 120-200 words in total: the first paragraph defines the concept and why it matters; the second expands on how it works or the key distinctions and nuance it carries; the third places it in the wider context, naming what it depends on, competes with or changes. Each paragraph must be substantive and self-contained rather than restating the previous one.\n\
        - A **Key Evidence** bullet list with 1-2 brief examples from the text, citing the contributing documents with `[#N]` citation markers (e.g. `[#1]`, `[#7]`), where N is the number in each document header (`--- web-NN.md ---`).\n\
     \n\
     Output format requirements:\n\
@@ -53,6 +53,7 @@ pub const CONCEPT_EXTRACTION_PROMPT_TEMPLATE: &str = "You are an expert data ana
     - Begin the response with a single `# Concepts` level-1 heading.\n\
     - Use level-2 headings (`##`) for each concept name, numbered sequentially (`## 1. First Concept`, `## 2. Second Concept`, ...).\n\
     - Use bold labels (`**Definition:**` and `**Key Evidence:**`) inside each section.\n\
+    - Write each **Definition** as three paragraphs separated by a blank line; do not collapse them into one paragraph.\n\
     - Keep evidence bullets short and specific, and cite sources with `[#N]` markers (N matches the number in each document's `web-NN.md` header) for each claim.\n\
     - Focus on depth and relevance over quantity.\n\
     \n\

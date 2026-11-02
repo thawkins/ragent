@@ -5,7 +5,18 @@
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
 > Metrics below are measured against the current working tree at the
-> `1.0.161` state. This pass gives research output
+> `1.0.161` state **plus the uncommitted research pass**. That pass adds the
+> `newsletter` output format (a reader-facing layout that drops the audit-trail
+> sections), names the report title with the LLM from the generated executive
+> summary (`LlmAnalysisEngine::summarize_title` normalised by
+> `clean_generated_title`) instead of truncating that summary's first 80
+> characters, and widens a concept's `**Definition**` from one paragraph to
+> three (roughly 120-200 words). Two test modules land with it
+> (`tests/test_newsletter_format.rs`, `tests/test_title_extraction.rs`) and the
+> `research` slash-command page, `docs/howtos/research.md`, README, QUICKSTART
+> and TUI-QUICKSTART now document the new format.
+>
+> The `1.0.161` baseline gives research output
 > files a **dated name** (`RESEARCH-<YYYY-MM-DD>.md` / `CORPA-<YYYY-MM-DD>.md`,
 > resolved through `ResearchIo::find_research_md` /
 > `resolve_research_md` with the legacy undated `RESEARCH.md` still accepted),
@@ -79,11 +90,11 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 748,115 (740,807 in `crates/` + 7,308 in root `src/`/`tests/`) |
-| Total Rust files | 1,928 (1,907 workspace crates + 21 root `src/`/`tests/`) |
-| Tests defined | 15,257 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
-| Test files | 1,209 under crate `tests/` trees (1,049 consolidated `test_*.rs` + 127 `tests/inline/*` modules, 19 `tests/all.rs` roots and 8 shared `support` helpers); the 19 `tests/all.rs` roots are the per-crate targets |
-| Test binaries | 37 (19 consolidated `[[test]] name = "all"` integration targets - one per crate including the root package, 18 crate lib targets and the 1 root bin) |
+| Total Rust lines | 748,724 (741,416 in `crates/` + 7,308 in root `src/`/`tests/`) |
+| Total Rust files | 1,930 (1,909 workspace crates + 21 root `src/`/`tests/`) |
+| Tests defined | 15,268 (`#[test]` / `#[tokio::test]` attributes, including `flavor = ...` variants, across `crates/`, `src/`, and root `tests/`) |
+| Test files | 1,209 under crate `tests/` trees (1,054 consolidated `test_*.rs` + 127 `tests/inline/*` modules, 18 `tests/all.rs` roots and 8 shared `support` helpers); the 18 `tests/all.rs` roots are the per-crate targets |
+| Test binaries | 36 (18 consolidated `[[test]] name = "all"` integration targets - one per crate, 17 crate lib targets and the 1 root bin) |
 | Tests executed | 15,240 passed / 0 failed / 16 ignored across **40 reporting targets** (`cargo test --workspace --all-targets`, see `BUILDSTATS.md`) |
 | Line coverage | 86.7% (146,001 of 168,392 instrumented lines) |
 | Benchmark files | 17 (+1 in `vendor/html2text`) |
@@ -91,6 +102,7 @@
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
 | Workspace crates | 18 |
 | Specs on disk | 61 directories in `specs/` |
+| Research output formats | 6 (`report`, `executive-summary`, `comparison-table`, `source-bibliography`, `imrad`, `newsletter`) |
 | Documentation | 24 top-level how-tos (including the new `skills.md`), 23 files in `docs/howtos/tools/` (22 per-category tool how-tos + `INDEX.md`, + generated PDFs), 83 files in `docs/howtos/slashcommands/` (82 command pages + `INDEX.md`, + generated PDFs) |
 | Authors | 1 |
 | Version | 1.0.161 |
@@ -99,17 +111,21 @@ The tool registry is unchanged this pass: research output naming is a file-layou
 change inside `ragent-research`, and the automation fix is an ordering change in
 `execute_run`, so nothing is added to or removed from the registry and the count
 stays at 150 across 21 families. `ragent-research` is the crate that moves
-materially (64,529 -> 64,960 lines, +431) for the dated-name primitives, the
-resolution helpers and the doc updates; `ragent-tui` (+153) and
-`ragent-telemetry` (+20) move only by their test-side isolation changes, and
-`ragent-agent` (+38) by the `execute_run` reordering and its test lock.
+materially (64,960 -> 65,569 lines, +609) for the dated-name primitives, the
+resolution helpers, the LLM report-title derivation
+(`LlmAnalysisEngine::summarize_title` + `clean_generated_title`), the
+`newsletter` output format (`assemble_newsletter_body`, its synthesis prompt and
+its brief) and the three-paragraph concept-definition prompt, plus the two new
+test modules; `ragent-tui` (+153) and `ragent-telemetry` (+20) move only by
+their test-side isolation changes, and `ragent-agent` (+38) by the `execute_run`
+reordering and its test lock.
 
 The test-binary count is the headline effect of the consolidation rollout: the
 tree still holds 1,049 consolidated `test_*.rs` files plus 127 `tests/inline/*`
 modules, but each crate compiles them into
 ONE `tests/all.rs` target (`autotests = false` + `[[test]] name = "all"` +
-`#[path = "test_x.rs"] mod test_x;`), so a full run links 19 integration
-binaries instead of ~1,034. Tests run under `cargo nextest`
+`#[path = "test_x.rs"] mod test_x;`), so a full run links 18 integration
+binaries instead of ~1,039. Tests run under `cargo nextest`
 (`.config/nextest.toml`); run one file by filter:
 `cargo nextest run -p <crate> -E 'test(test_foo::)'`.
 
@@ -143,7 +159,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-connectors` | 45 | 19,729 | 22 |
 | `ragent-llm` | 98 | 39,119 | 57 |
 | `ragent-plugins` | 66 | 23,647 | 39 |
-| `ragent-research` | 170 | 64,960 | 103 |
+| `ragent-research` | 172 | 65,569 | 105 |
 | `ragent-server` | 27 | 11,205 | 18 |
 | `ragent-specs` | 38 | 20,640 | 25 |
 | `ragent-storage` | 57 | 18,979 | 52 |
@@ -154,7 +170,7 @@ shows the file count, line count, and test-file count for each crate (including
 | `ragent-tools-vcs` | 75 | 18,121 | 34 |
 | `ragent-tui` | 316 | 181,376 | 252 |
 | `ragent-types` | 71 | 15,597 | 45 |
-| **Total** | **1,907** | **740,807** | **1,209** |
+| **Total** | **1,909** | **741,416** | **1,209** |
 
 ---
 
@@ -164,7 +180,7 @@ shows the file count, line count, and test-file count for each crate (including
 
 ragent-tui            ############  181,376 lines (24.5%)
 ragent-agent          ###########   170,174 lines (23.0%)
-ragent-research       ####          64,960 lines (8.8%)
+ragent-research       ####          65,569 lines (8.8%)
 ragent-tools-extended ####          62,300 lines (8.4%)
 ragent-llm            ##            39,119 lines (5.3%)
 ragent-codeindex      #             25,573 lines (3.5%)

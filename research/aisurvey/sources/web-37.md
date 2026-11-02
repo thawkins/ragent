@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://hbr.org/podcast/2026/10/how-ai-is-changing-innovation-why-speed-alone-isnt-a-strategy
-- Title: How AI Is Changing Innovation: Why Speed Alone Isn&rsquo;t a Strategy
-- Author(s): @harvardbiz
+- URL: https://www.tekedia.com/mistral-releases-trillion-parameter-open-weight-large-4-ai-model-to-expand-sovereign-cybersecurity-capabilities
+- Title: Mistral Releases Trillion-Parameter Open-Weight Large 4 AI Model to Expand Sovereign Cybersecurity Capabilities -...
+- Author(s): Samuel Nwite, @tekedia
 - Language: English
-- Published (UTC): 2026-10-01T11:04:26+00:00
-- Captured (UTC): 2026-10-27T13:12:34.713235705+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-10-30T17:52:00+00:00
+- Captured (UTC): 2026-11-02T11:15:10.387010909+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-In an HBR IdeaCast episode, Cisco Chief Product Officer Jeetu Patel argues that generative AI’s faster, cheaper experimentation makes human judgment, taste, and deciding what not to build more important—not less—and that competitive advantage comes from how effectively companies deploy AI resources, not merely access to them. Cisco has 32,000 engineers coding with AI and expects 70% of its products to be 100% AI-written by the end of next year while still having more engineers; it has also rolled out 90,000 agents, one for each employee. Patel cites Cisco’s $63 billion revenue and 250 acquisitions in describing a unified management plane that was expected to take 7–9 years but was built in nine months. He stresses runtime security monitoring, human provenance for AI-written code, and notes that fewer than 2% of people currently use agents substantively.
+Mistral has released the weights of its trillion-parameter Mistral Large 4 model, nicknamed “Le Chonk,” via Hugging Face and its API, positioning it as an open-weight alternative to closed systems from OpenAI and Anthropic for sovereign deployment and cybersecurity. Mistral claims Large 4 performs comparably to China’s GLM-5.3, uses 47% fewer tokens per task, and ranks ahead of other open models on Artificial Analysis’ Coding Agent Index for agentic coding. CEO Arthur Mensch frames the goal as making AI “a tool for empowerment, not dominance,” while VP of Science Pierre Stock says open weights give enterprises and governments cyber-defense access that “can’t be cut off,” though Mistral notes such deployments still require infrastructure, expertise, maintenance, and safeguards.
 ```

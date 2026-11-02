@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://dust.tt/blog/multi-model-ai-platform
-- Title: What is a multi-model AI platform? A guide for teams
-- Author(s): Dust Team
+- URL: https://www.linkedin.com/posts/pooja3p_agenticai-aigovernance-enterprisearchitecture-activity-7519110335748833280-8Ixs
+- Title: AI Agent Sprawl: The Next Big Enterprise Governance Challenge | Pooja Sund
+- Author(s): Pooja Sund
 - Language: English
-- Published (UTC): 2026-10-13T13:16:43.917+00:00
-- Captured (UTC): 2026-10-27T13:10:09.138168219+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-10-22T19:00:02.356+00:00
+- Captured (UTC): 2026-11-02T11:12:58.986344050+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-Dust describes a multi-model AI platform as software offering several providers’ models through a shared interface or API, with managed access consolidating billing while BYOK setups still require customer-controlled provider accounts. Dust itself offers 20+ models from OpenAI, Anthropic, Google, xAI, and Mistral—subject to plan, region, and admin settings—and lets users choose a model per message in the composer or set agent defaults in Agent Builder using specific models or Basic/Standard/Premium lists. Its agents include 80+ integrations such as Slack, Notion, Google Drive, Salesforce, and Zendesk, with access governed by spaces, groups, and roles. The article advises evaluating platforms by task fit, provider diversity, regional availability, and speed of adding new models rather than model count, and notes that managed access, BYOK, prepaid balances, and subscriptions can overlap, so buyers should compare rate cards, fees, reporting, and budget controls; it also distinguishes multi-model from multimodal AI.
+Pooja Sund argues that as enterprises scale from AI-agent experimentation to hundreds or thousands of deployed agents, “AI agent sprawl” becomes a major governance challenge around ownership, access, and accountability. She recommends six controls: centralized agent visibility across platforms such as Microsoft Copilot Studio, Azure AI Foundry, AWS Bedrock, and internal frameworks; assigned business/technical owners and risk classifications; treating agents as non-human identities with least-privilege access and monitoring; risk-based approval gates involving architecture, security, data governance, and compliance; full lifecycle management through recertification; and formal decommissioning. She proposes an Enterprise AI Agent Control Plane combining inventory, identity, policy enforcement, observability, and lifecycle management, and asks whether governance should be centralized under an enterprise AI platform team or federated across business units with common guardrails.
 ```

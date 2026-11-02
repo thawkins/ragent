@@ -76,6 +76,11 @@ fn parse_output_formats() {
     assert_eq!(OutputFormat::parse("im-rad"), Some(OutputFormat::Imrad));
     assert_eq!(OutputFormat::parse("scientific"), Some(OutputFormat::Imrad));
     assert_eq!(OutputFormat::Imrad.as_str(), "imrad");
+    assert_eq!(
+        OutputFormat::parse("newsletter"),
+        Some(OutputFormat::Newsletter)
+    );
+    assert_eq!(OutputFormat::Newsletter.as_str(), "newsletter");
     assert_eq!(OutputFormat::parse("nonsense"), None);
 }
 

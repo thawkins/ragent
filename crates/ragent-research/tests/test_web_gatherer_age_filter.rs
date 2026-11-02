@@ -342,7 +342,7 @@ async fn with_a_span_every_decomposed_query_ends_with_the_iso_date() {
     });
 
     let sources = WebGatherer::new(search.clone(), fetch)
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_max_age(Some(span))
         .gather_with_observer("rust async runtime, tokio scheduling", 10, None)
         .await
@@ -380,7 +380,7 @@ async fn without_a_span_decomposed_queries_are_unchanged() {
     });
 
     WebGatherer::new(search.clone(), fetch)
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .gather_with_observer("rust async runtime, tokio scheduling", 10, None)
         .await
         .expect("gather should succeed");
@@ -439,7 +439,7 @@ async fn a_span_reports_the_hinted_queries_to_the_observer() {
     let expected_hint = format!("after:{}", span.oldest_allowed_date(now));
 
     WebGatherer::new(search.clone(), fetch)
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_max_age(Some(span))
         .gather_with_observer("rust async runtime, tokio scheduling", 10, Some(&observer))
         .await
@@ -506,7 +506,7 @@ async fn a_span_hands_the_search_tool_a_structured_date_bound() {
     let expected = span.oldest_allowed_date(now);
 
     WebGatherer::new(search.clone(), fetch)
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .with_max_age(Some(span))
         .gather("rust async runtime, tokio scheduling", 10)
         .await
@@ -539,7 +539,7 @@ async fn without_a_span_no_date_bound_is_passed() {
     });
 
     WebGatherer::new(search.clone(), fetch)
-        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer))
+        .with_decomposer(Arc::new(ragent_research::HeuristicQueryDecomposer::new()))
         .gather("rust async runtime, tokio scheduling", 10)
         .await
         .expect("gather should succeed");

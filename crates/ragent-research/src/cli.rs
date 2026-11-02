@@ -139,6 +139,11 @@ pub enum ResearchCliCommand {
         /// calls the run may issue, shared across all supervisor/competitive
         /// researchers and gather passes. When `None`, no cap is applied.
         max_search_calls: Option<usize>,
+        /// `--max-queries N` - cap on the number of search queries produced by
+        /// the topic-decomposition step. When `None` the configured
+        /// `research.max_queries` value (default 20) is used; `0` means
+        /// "unbounded" (FR-006, FR-014, FR-016).
+        max_queries: Option<usize>,
         /// `--max-local-sources N` - override the maximum number of in-project
         /// local sources to capture.
         max_local_sources: Option<usize>,
@@ -327,6 +332,7 @@ impl ResearchCliCommand {
         let mut oa_recovery: Option<bool> = None;
         let mut max_web_results: Option<usize> = None;
         let mut max_search_calls: Option<usize> = None;
+        let mut max_queries: Option<usize> = None;
         let mut max_local_sources: Option<usize> = None;
         let mut max_synthesis_sources: Option<usize> = None;
         let mut max_concepts: Option<usize> = None;
@@ -369,6 +375,7 @@ impl ResearchCliCommand {
                 | "--search-retry-base-delay-ms"
                 | "--max-web-results"
                 | "--max-search-calls"
+                | "--max-queries"
                 | "--max-local-sources"
                 | "--max-synthesis-sources"
                 | "--max-concepts"
@@ -461,6 +468,13 @@ impl ResearchCliCommand {
                                 Err(_) => {
                                     invalid =
                                         Some(format!("--max-search-calls {v}: expected an integer"))
+                                }
+                            },
+                            "--max-queries" => match v.parse() {
+                                Ok(n) => max_queries = Some(n),
+                                Err(_) => {
+                                    invalid =
+                                        Some(format!("--max-queries {v}: expected an integer"))
                                 }
                             },
                             "--max-local-sources" => match v.parse() {
@@ -586,6 +600,7 @@ impl ResearchCliCommand {
             search_retry_base_delay_ms,
             max_web_results,
             max_search_calls,
+            max_queries,
             max_local_sources,
             max_synthesis_sources,
             max_concepts,
@@ -774,7 +789,7 @@ Common create flags:
   --depth shallow|standard|deep
   --tier light|full|dissertation
   --mode tiered|supervisor|competitive (competitive implies --format comparison-table)
-  --format report|executive-summary|comparison-table|source-bibliography|imrad
+  --format report|executive-summary|comparison-table|source-bibliography|imrad|newsletter
   --sources-dir <dir>                                Extra local sources directory
   --template <name>                                  Output template override
   --summarization-model <provider:model>             Per-page webpage summariser
@@ -791,6 +806,7 @@ Common create flags:
   --search-retry-base-delay-ms N                     Retry backoff base (default 200)
   --max-web-results N                                Web result cap
   --max-search-calls N                               Total web-search call cap
+  --max-queries N                                    Decomposed query cap (default 20; 0 = unbounded)
   --max-local-sources N                              Local source cap
   --max-synthesis-sources N                          Sources admitted into synthesis
   --max-concepts N                                   Concept cap (default 5; 0 = unbounded)

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.nops.io/blog/pricing-for-ai
-- Title: AI Pricing Guide: Models, Provider Costs, Hidden Fees
-- Author(s): -
+- URL: https://www.kore.ai/blog/what-is-enterprise-ai
+- Title: What is enterprise AI? A complete guide to the agentic era
+- Author(s): What is Enterprise AI: A complete guide
 - Language: English
-- Published (UTC): 2026-10-08T17:30:33.860+00:00
-- Captured (UTC): 2026-10-27T13:11:46.309356609+00:00
-- Relevance: High - title matches query
+- Published (UTC): 2026-09-28T16:34:41.866+00:00
+- Captured (UTC): 2026-11-02T11:14:23.045907158+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-AI pricing is still being invented: in 2026 GitHub moved Copilot to usage-based credits, Cursor restructured team plans, and Salesforce sells Agentforce three ways, while only 11% of organizations say they can forecast AI spend within 10%. The guide identifies three main meters—tokens for model APIs, users for assistants/embedded AI, and GPU hours for training/hosting—and seven billing models (per-token, per-seat, GPU-hour, outcome, tiers/free, credits, hybrid), citing Microsoft 365 Copilot business seats at roughly $20–$30/user/month, GPU rates from ~$1.50/hour for a single A100 to ~$55/hour for an eight-GPU H100 server, outcome pricing of $0.99 (Intercom Fin), from $1.50 (Zendesk), and $2 per resolved conversation (Salesforce Agentforce), and Salesforce Flex Credits at $500 per 100,000 with a standard action using 20 credits (10 cents). It warns list prices are not directly comparable—Anthropic says its newer tokenizer produces ~30% more tokens, output costs 5–8x input, and batch discounts halve costs—and gives an example where 1,000 requests at 2,000 input/500 output tokens cost $1.85 on Gemini 3.5 Flash-Lite, $9.00 on Claude Sonnet 5.5, and $18.00 on Claude Opus 5.5 (Sonnet batch: $4.50). nOps promotes its AI Cost Visibility & Optimization platform, built on hourly AWS Cost and Usage Report data with no agent/code changes, for cross-provider attribution, predictive budgets, AI Wallets spend limits/approvals, anomaly alerts at 3x baseline, and cost-per-customer/feature tracking.
+Kore.ai’s blog frames enterprise AI as shifting from isolated pilots and chatbots to an embedded intelligence layer, with Agentic AI—systems that reason, plan, execute, and adapt—central to 2025 transformation. It cites scaled adopters reporting 20–30% productivity gains, 15–25% EBITDA growth, and up to 40% faster decision cycles; over 60% of large enterprises have embedded AI in at least three core processes, yet fewer than one-third of the 70% that launched AI projects have scaled, and less than 15% of enterprise data is AI-ready. The article outlines seven success pillars and five architecture layers, warns of talent shortages (70%), governance gaps (74% cite privacy/security concerns; only 24% have well-established frameworks), and build-vs-buy maintenance costs (15–30% annually), while citing Gartner’s prediction that 40% of enterprise applications will embed task-specific AI agents by 2026, Bain’s finding that process/tooling mismatches choke up to 40% of AI productivity gains, and regulatory pressure including the EU AI Act; it recommends buying platform plumbing, building differentiating skills, and treating trust and governance as non-negotiable.
 ```

@@ -211,7 +211,7 @@ pub use tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserve
 pub use verify::{KeywordVerifier, VerificationResult, Verifier};
 pub use web_date::extract_published_at;
 pub use web_gatherer::{
-    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
+    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_QUERIES, DEFAULT_MAX_WEB_RESULTS,
     DEFAULT_SEARCH_MAX_RETRIES, DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, FetchFailure, FetchFailureKind,
     GatherEvent, GatherResult, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
     WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer, WebSearchHit, WebSearchTool,

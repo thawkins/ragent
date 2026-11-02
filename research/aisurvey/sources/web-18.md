@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.labellerr.com/blog/10-best-ai-coding-agents
-- Title: 10 Best AI Coding Agents in 2026
-- Author(s): @akash_rawal_1
+- URL: https://gca.net/blog/nist-ai-agent-identity-tenets
+- Title: NIST AI Agent Identity Tenets: Extend, Build, or Hand Off
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-19T14:08:42+00:00
-- Captured (UTC): 2026-10-27T13:11:05.128445138+00:00
-- Relevance: Medium - partial query match
+- Published (UTC): 2026-10-30T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:13:35.922203923+00:00
+- Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article defines AI coding agents as tools that plan, write, execute, and debug code with minimal supervision, built from an LLM, repository context/memory (e.g., AGENTS.md or CLAUDE.md), tools including MCP integrations, a sandbox, and verification/review. It cites the 2026 Stack Overflow Developer Survey of over 30,000 responses from 169 countries, finding 66% use coding assistants or agents, making coding the top AI use case ahead of general chatbots at 63%, and ranks agents using adoption data from 12,255 surveyed agent users plus Terminal-Bench 4.0. Its top 10 are Claude Code, OpenAI Codex, GitHub Copilot, Cursor, Google Antigravity, Devin, OpenCode, Gemini CLI, Cline, and Kiro; Claude Code led with 65.5% past-year usage and 64.8% on Terminal-Bench with Opus 5.5, Codex scored 58.2% at about $1.92 per task and reported over 5 million weekly active users in June 2026, Copilot had 58.7% usage, and SpaceX acquired Cursor for $60 billion in August 2026. It also notes Google Antigravity had 16% trial among agent users, Gemini CLI offers up to 1,000 daily requests on a personal Google account, and only 48% of developers trust AI when they can easily validate its answers.
+NIST published “Design Tenets for Agent Identity Management Systems” on its Cybersecurity Insights blog on October 27, 2026, proposing ten initial design tenets for IAM systems that manage AI agents, applied according to transaction risk; NIST calls them a starting point, not a standard or audit criterion, and says current standards and technology will not immediately fulfill all of them. In a GCA practice opinion dated October 29, 2026, the author groups tenets 1, 3, 4, and 8 as existing IAM work—distinct agent identities with named owners and lifecycles, zero standing privilege, short-lived JIT/audience-specific authorization checked per call, and deterministic access decisions—and tenets 2 and 6 as real gaps: cryptographic linking and scope attenuation across delegation chains, and signed mandates/constraints. Tenets 5, 7, 9, and 10 (human-in-the-loop triggers, separation of policy from reasoning, continuous monitoring, and immutable evidence) sit outside or are shared with IAM. The article recommends inventorying agents, naming human owners, removing standing access in favor of JIT, enforcing policy at the identity provider, and prioritizing tenet 3 if only one can be funded.
 ```

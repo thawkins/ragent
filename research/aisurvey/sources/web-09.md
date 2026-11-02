@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://intnxt.com/blog/how-do-open-weight-ai-models-work
-- Title: How Do Open-Weight AI Models Work? - INTNXT
-- Author(s): John Ellan, @INTNXT1
+- URL: https://oximy.com/resources/best-enterprise-ai-agent-platforms
+- Title: 7 Best Enterprise AI Agent Platforms in 2026
+- Author(s): Oximy
 - Language: English
-- Published (UTC): 2026-09-30T15:11:12+00:00
-- Captured (UTC): 2026-10-27T13:10:13.105144776+00:00
+- Published (UTC): 2026-10-12T00:00:00+00:00
+- Captured (UTC): 2026-11-02T11:13:02.934942955+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article explains that open-weight AI models release trained numerical parameters (weights) that developers can download and run under license terms, but open-weight is not automatically open-source because licenses may restrict uses, training data, or redistribution. It describes creation through data collection/preparation, repeated training (e.g., next-token prediction for LLMs), and weight generation, noting weights encode learned patterns rather than storing training documents; deployment requires model architecture, software libraries, tokenizer/preprocessing components, and compute. Customization can use fine-tuning, parameter-efficient fine-tuning, and retrieval-augmented generation (RAG), with deployment on cloud, private servers, enterprise data centers, workstations, specialized AI hardware, and edge devices for smaller models. Compared with closed API models, open-weight models offer more control but require organizations to manage infrastructure, updates, security, performance, monitoring, and compliance; potential benefits include deployment flexibility, customization, data-flow control, potentially lower inference costs at scale, and private-system integration, while challenges include compute needs, licensing, security, and variable performance. INTNXT is presented as helping businesses build customized AI solutions using modern models, RAG, AI agents, enterprise integrations, and intelligent automation.
+The guide says the best enterprise AI agent platform depends on where work, data, identity, and operational control already live, and it compares seven ecosystem-centered builders, runtimes, and orchestration platforms: Microsoft Copilot Studio for Microsoft 365/Power Platform low-code workflows; Salesforce Agentforce for Salesforce-centered customer and revenue work; Google Gemini for Google Cloud agent development; Amazon Bedrock AgentCore for model- and framework-flexible developer teams; ServiceNow AI Agents for ServiceNow workflows; IBM watsonx Orchestrate for multi-agent orchestration and governance; and UiPath for long-running processes combining agents, robots, APIs, legacy systems, and humans. It presents Oximy separately as a device-governance layer—not one of the seven—that checks supported AI requests, files, and agent actions locally against company policy, including sensitive-data redaction, review of production changes, and limits on runs or purchases. The guide advises making every finalist complete the same real workflow with the same permissions, controls, quality measures, failure tests, and cost boundary, and evaluating identity and tool authorization, total operating cost, and exit options rather than choosing from a logo grid.
 ```
