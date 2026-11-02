@@ -4,7 +4,31 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (v1.0.159, uncommitted)
+## Highlights (v1.0.161)
+
+- **`/research open <name>` still opens the right file after a re-run.** Research
+  reports are now written to a **dated** name -
+  `research/<name>/RESEARCH-<YYYY-MM-DD>.md` - with the QA companion at
+  `CORPA-<YYYY-MM-DD>.md`, so `/research update` no longer overwrites the
+  previous run's report. The primary report is named for the item's creation
+  date; each later run writes its own dated file. `/research open` resolves
+  whichever file exists (newest dated first, legacy undated `RESEARCH.md` last)
+  instead of assuming `RESEARCH.md`, and reports a resolution failure as a
+  normal error rather than opening the wrong document. Items created by an older
+  ragent keep working unchanged.
+- **The Skills system now has a full how-to.** `docs/howtos/skills.md` covers
+  discovery order, the `SKILL.md` frontmatter reference (`allowed-tools`, the
+  case-insensitive resolution and the `any` escape hatch), body authoring, the
+  `/skills` / `/skill <name>` / bare `/<name>` triggers, a worked example and a
+  troubleshooting section.
+- **`BUILDSTATS.md` records what a build actually costs.** Phase-by-phase wall
+  time and disk for `cargo clean`, the release and debug builds, a full
+  `cargo test --workspace --all-targets` (8m 49s and 0.30 GiB once the test
+  binaries exist) and a coverage run, plus **86.7% line coverage** over 168,392
+  instrumented lines and per-crate figures. Read it before planning a long local
+  test cycle.
+
+## Highlights (v1.0.160)
 
 - **`/telemetry on` ships both signals** - metrics and OTLP log records go to
   the same collector; `/telemetry off` stops both. There is no separate logs
@@ -847,7 +871,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 ## Highlights (1.0.79)
 
 - **`/research create --max-search-calls N`** — hard, run-scoped cap on total web-search calls per research run, shared across every supervisor/competitive researcher and gather pass.
-- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files.
+- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line. (Since v1.0.161 the report is dated, so a re-run writes a new `RESEARCH-<run date>.md` and keeps the earlier report.)
 - **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
 - **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly.
 - **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
@@ -912,7 +936,7 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
   already in flight (each capped by `--fetch-timeout-secs`), so the phase always
   returns (researchfix T-005, FR-008).
 - **Concepts section in `/research create`** — the pipeline now extracts a
-  cross-source concept list and embeds it in `RESEARCH.md` as a `## Concepts`
+  cross-source concept list and embeds it in the report as a `## Concepts`
   section directly above `## Findings` (report layout) or `### Concepts` above
   `### Findings` (IMRaD layout).
 - **Web-phase deadline observability and deduplication** — TUI status bar shows a
@@ -1460,7 +1484,7 @@ ragent will:
 1. Search the web for relevant pages.
 2. Fetch key pages.
 3. Cross-reference findings against your local codebase and project memory.
-4. Write a self-contained `RESEARCH.md` report.
+4. Write a self-contained dated `RESEARCH-<YYYY-MM-DD>.md` report.
 
 ### Common forms
 
@@ -1493,12 +1517,17 @@ The `create` form supports a number of optional flags:
 - `--format report|executive-summary|comparison-table|source-bibliography|imrad`
   — choose the output artifact.
 
-Reports are saved under `research/<name>/RESEARCH.md`. Open the report in the
-TUI with `/research open <name>`. Quality-assurance detail (contradiction
-graph, loci analysis, depth investigation, reconcile, tensions, audits) is
-kept in a companion file at `research/<name>/CORPA.md`; it includes a
-`Sources Reference` copy of the References Index so `[#N]` citations resolve
-in both documents.
+Reports are saved under `research/<name>/RESEARCH-<YYYY-MM-DD>.md`. The primary
+report uses the item's creation date, so it is stable from creation onwards;
+each later run (including a same-day `/research update`) writes its own dated
+file and leaves the earlier one in place. Open the report in the TUI with
+`/research open <name>` - it resolves whichever report exists rather than
+assuming a file name. Quality-assurance detail (contradiction graph, loci
+analysis, depth investigation, reconcile, tensions, audits) is kept in the
+companion `CORPA-<YYYY-MM-DD>.md`; it includes a `Sources Reference` copy of the
+References Index so `[#N]` citations resolve in both documents. An item created
+by an older ragent keeps its undated `RESEARCH.md` / `CORPA.md`, which resolves
+the same way.
 
 While the run is gathering, the pinned **Research Progress** message in the
 message window does not list each captured URL (that previously flooded the

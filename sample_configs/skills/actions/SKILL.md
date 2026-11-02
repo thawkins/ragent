@@ -2,6 +2,8 @@
 description: "Check last for Github Actions logs and fix any issues shown. "
 user-invocable: true
 disable-model-invocation: true
+allowed-tools:
+ - any
 ---
 Check and Fix Github action runs by following these steps **in order**:
 

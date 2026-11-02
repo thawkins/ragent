@@ -3,6 +3,8 @@ description: "Update all the Major DOC file"
 user-invocable: true
 disable-model-invocation: true
 arguments: true
+allowed-tools:
+ - any
 ---
 Perform an update of key documentation files.
 

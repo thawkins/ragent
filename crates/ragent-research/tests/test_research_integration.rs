@@ -125,12 +125,21 @@ async fn write_document_persists_supports_files_and_index() {
     };
     mgr.write_document(&doc).await.unwrap();
 
-    // RESEARCH.md on disk has the full body.
-    let body = std::fs::read_to_string(ragent_research::ResearchIo::research_md_path(
-        tmp.path(),
-        &ResearchName::new("rust-async").unwrap(),
-    ))
-    .unwrap();
+    // The dated report on disk has the full body.
+    let item_name = ResearchName::new("rust-async").unwrap();
+    let report_path = ragent_research::ResearchIo::find_research_md(tmp.path(), &item_name)
+        .await
+        .unwrap();
+    let body = std::fs::read_to_string(&report_path).unwrap();
+    assert!(
+        report_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("RESEARCH-"),
+        "the report must be written under its dated name; got {}",
+        report_path.display()
+    );
     assert!(body.contains("Captured one web source"));
     assert!(body.contains("What about errors?"));
     assert!(body.contains("src/lib.rs"));
@@ -324,9 +333,10 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
         .await
         .unwrap();
 
-    let body = tokio::fs::read_to_string(research_root.join("rust-async/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body =
+        tokio::fs::read_to_string(crate::research_report_path(&research_root, "rust-async").await)
+            .await
+            .unwrap();
     assert!(
         body.contains("LLM-generated summary"),
         "RESEARCH.md should contain the synthesized summary\n{body}"
@@ -523,9 +533,11 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     // RESEARCH.md must contain a real summary that names the web title and
     // either mentions the body excerpt (LLM path) or the title + a
     // fallback note.
-    let research_md = tokio::fs::read_to_string(research_root.join("lifetime-check/RESEARCH.md"))
-        .await
-        .unwrap();
+    let research_md = tokio::fs::read_to_string(
+        crate::research_report_path(&research_root, "lifetime-check").await,
+    )
+    .await
+    .unwrap();
     assert!(
         research_md.contains("Example Page"),
         "RESEARCH.md must reference the captured web title, got:\n{research_md}"
@@ -669,9 +681,10 @@ async fn session_renders_synthesis_error_note_and_fallback_findings() {
         .await
         .unwrap();
 
-    let body = tokio::fs::read_to_string(research_root.join("rust-async/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body =
+        tokio::fs::read_to_string(crate::research_report_path(&research_root, "rust-async").await)
+            .await
+            .unwrap();
     assert!(
         body.contains("Synthesis engine failed"),
         "RESEARCH.md should surface the synthesis error note\n{body}"
@@ -687,9 +700,10 @@ async fn session_renders_synthesis_error_note_and_fallback_findings() {
 
     // The CORPA.md companion must contain a synthesis audit that reflects the
     // fallback narrative (not the pre-fallback empty analysis).
-    let corpa = tokio::fs::read_to_string(research_root.join("rust-async/CORPA.md"))
-        .await
-        .unwrap();
+    let corpa =
+        tokio::fs::read_to_string(crate::research_corpa_path(&research_root, "rust-async").await)
+            .await
+            .unwrap();
     assert!(
         corpa.contains("## Synthesis Audit"),
         "CORPA.md should contain a synthesis audit section\n{corpa}"
@@ -1002,7 +1016,7 @@ async fn competitive_mode_produces_comparison_table_and_entity_profiles() {
         .unwrap();
 
     let research_md: String = {
-        let p = research_root.join("competitive-test/RESEARCH.md");
+        let p = crate::research_report_path(&research_root, "competitive-test").await;
         let s = tokio::fs::read_to_string(&p).await.unwrap();
         let _ = std::fs::write(
             "/home/thawkins/Projects/ragent/target/temp/head_research_md.md",

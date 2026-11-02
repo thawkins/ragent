@@ -3,16 +3,9 @@ name: rust-hygiene
 description: Run all CI and Security Audit checks locally (cargo check, cargo nextest, dead-code lint, clippy, fmt, cargo audit, cargo deny) and fix any issues surfaced
 argument-hint: "[check-name or 'all']"
 allowed-tools:
-  - Bash
-  - Read
-  - Edit
-  - Multiedit
-  - Write
-  - Create
-  - Grep
-  - Glob
-  - Codeindex_search
+  - any
 ---
+
 # Hygiene: Local CI + Security Audit
 
 Run the same checks performed by the GitHub Actions **CI** and **Security Audit**

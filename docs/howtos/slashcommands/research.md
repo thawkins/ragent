@@ -5,9 +5,10 @@
 ## Overview
 
 `/research` drives the structured research pipeline: web search plus local file
-cross-referencing, synthesis, and a self-contained RESEARCH.md output. Projects
-are named, persisted, and can be listed, resumed, clustered, exported, and
-imported. Create accepts a rich flag set covering depth, tier, mode, per-stage
+cross-referencing, synthesis, and a self-contained dated report output
+(`RESEARCH-<YYYY-MM-DD>.md`, with the legacy undated `RESEARCH.md` still read).
+Projects are named, persisted, and can be listed, resumed, clustered, exported,
+and imported. Create accepts a rich flag set covering depth, tier, mode, per-stage
 models, concurrency, timeouts, and source limits. The TUI runs the pipeline on
 a background task while the status bar shows `[wait] research: <name>...`.
 
@@ -42,7 +43,7 @@ topic can be quoted as one argument.
 | `create <name> <topic>` | Starts a research project. See the flag table below. |
 | `list [--all] [--json]` | Lists projects; `--all` includes archived, `--json` emits JSON. |
 | `show <name> [--json]` | Shows project state and findings; `--json` emits JSON. |
-| `open <name>` | Opens the project's RESEARCH.md in the log panel. |
+| `open <name>` | Opens the project's resolved report (newest dated `RESEARCH-<date>.md`, or the legacy `RESEARCH.md`) in the log panel. |
 | `search <query> [--json]` | Searches stored research content. |
 | `delete <name> [--yes]` | Deletes a project; `--yes` skips confirmation. |
 | `archive <name>` | Moves a project to the archive. |
@@ -159,7 +160,8 @@ Continues a project with steering guidance.
 
 - While running, the status bar shows `[wait] research: <name>...` and the
   pipeline streams progress lines into the message window.
-- On completion the project's RESEARCH.md is written and a summary block lists
+- On completion the project's `RESEARCH-<YYYY-MM-DD>.md` report is written and a
+  summary block lists
   the report path, source counts, and synthesis highlights.
 - `list` renders a project table; `--json` variants emit machine-readable
   output for scripting.

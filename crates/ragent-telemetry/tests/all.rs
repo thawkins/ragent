@@ -6,6 +6,23 @@
 //! `AGENTS.md` ("Test Layout") and
 //! `docs/reports/testconsolidation-review.md`.
 
+/// The process-wide lock of this test binary (see AGENTS.md, "Test Layout"):
+/// one binary per crate merges every former test file into one process, so a
+/// file-local mutex only serialises the children that happen to share that
+/// file.
+pub fn global_env_mutex() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Acquire [`global_env_mutex`], recovering from a poisoned lock (a panicking
+/// test must not wedge every later test).
+pub fn global_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    global_env_mutex()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[path = "test_attr_session.rs"]
 mod test_attr_session;
 #[path = "test_batch_export.rs"]

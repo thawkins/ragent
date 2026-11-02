@@ -323,7 +323,11 @@ Start with [TUI-QUICKSTART.md](TUI-QUICKSTART.md) to run it, or
   message window; also available as the `ragent new` CLI subcommand
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
-  self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints;
+  self-contained dated report outputs (`research/<name>/RESEARCH-<YYYY-MM-DD>.md`
+  plus the `CORPA-<YYYY-MM-DD>.md` QA companion, so a `/research update` re-run
+  keeps the earlier run's report; an item created by an older ragent keeps its
+  legacy undated `RESEARCH.md` / `CORPA.md`, and every read surface resolves
+  whichever exists) and `GET/POST/DELETE /research` HTTP endpoints;
   concept/finding output limits (`--max-concepts`/`--max-findings`, `research.max_concepts`/
   `research.max_findings`), scholarly-engine control (scholarly backends are
   excluded by default; `--papers` includes them, `research.exclude_academic_engines`
@@ -538,9 +542,13 @@ Incremental compilation is disabled workspace-wide (`.cargo/config.toml` sets
 `[build] incremental = false`, and `[profile.dev]` / `[profile.test]` repeat it)
 because the configured `sccache` wrapper cannot cache incremental artifacts, so
 the cache only consumed disk. Expect full rebuilds; `BUILDSTATS.md` records the
-measured cost of each step on the reference machine (release build 7m 37s /
-1.80 GiB, debug build 2m 41s / 2.40 GiB, full test run 9m 12s / 14.92 GiB,
-coverage run 9m 58s / 15.82 GiB).
+measured cost of each step on the reference machine - release build 8m 1s /
+1.78 GiB, debug build 2m 22s / 2.37 GiB, the first full test run 7m 9s /
+14.95 GiB (that run compiles every test binary from scratch; the green re-run
+that reused them took 8m 49s and 0.30 GiB), and a coverage run 9m 0s that
+reused the instrumented tree. The same report carries the line-coverage figures:
+**86.7% of 168,392 instrumented lines**, with all 18 crates above 85% except the
+CLI presentation binary.
 
 Every crate builds **one** integration-test binary from its `tests/` tree
 (`autotests = false` plus a single `[[test]] name = "all"` that `#[path]`-includes
@@ -861,7 +869,7 @@ The project is a Cargo workspace built from 18 focused crates:
 | `ragent-connectors`     | Connector catalogue, store, providers, MCP bridge, `/connectors`       |
 | `ragent-llm`            | Provider clients and model registry (14 providers + Model Router)        |
 | `ragent-plugins`        | Codex/Claude dialect plugins, sandboxed JS runtime, `/plugins`         |
-| `ragent-research`       | Web/local research gathering, synthesis, RESEARCH.md output              |
+| `ragent-research`       | Web/local research gathering, synthesis, dated report output             |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                       |
 | `ragent-specs`          | Spec lifecycle: discovery, validation, review, archival, JTBD            |
 | `ragent-storage`        | SQLite storage, snapshots, encrypted credentials                         |

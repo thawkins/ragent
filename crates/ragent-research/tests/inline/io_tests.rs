@@ -31,10 +31,62 @@ fn item_dir_uses_name_as_dir_name() {
 }
 
 #[test]
-fn research_md_path_appends_filename() {
+fn dated_research_md_path_appends_dated_filename() {
     let name = ResearchName::new("rust-async").unwrap();
-    let path = ResearchIo::research_md_path(Path::new("/data"), &name);
-    assert_eq!(path, PathBuf::from("/data/rust-async/RESEARCH.md"));
+    let path = ResearchIo::dated_research_md_path(Path::new("/data"), &name, "2026-02-14");
+    assert_eq!(
+        path,
+        PathBuf::from("/data/rust-async/RESEARCH-2026-02-14.md")
+    );
+}
+
+#[test]
+fn primary_research_md_path_uses_creation_date() {
+    let name = ResearchName::new("rust-async").unwrap();
+    let created_at = DateTime::parse_from_rfc3339("2026-02-14T23:30:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    assert_eq!(
+        ResearchIo::primary_research_md_path(Path::new("/data"), &name, created_at),
+        PathBuf::from("/data/rust-async/RESEARCH-2026-02-14.md"),
+    );
+    assert_eq!(
+        ResearchIo::primary_corpa_md_path(Path::new("/data"), &name, created_at),
+        PathBuf::from("/data/rust-async/CORPA-2026-02-14.md"),
+    );
+}
+
+#[test]
+fn dated_file_name_predicates_accept_only_iso_dates() {
+    assert!(is_dated_research_file_name("RESEARCH-2026-02-14.md"));
+    assert!(is_dated_corpa_file_name("CORPA-2026-02-14.md"));
+    assert!(!is_dated_research_file_name("RESEARCH.md"));
+    assert!(!is_dated_research_file_name("RESEARCH-2026-2-14.md"));
+    assert!(!is_dated_research_file_name("RESEARCH-2026-02-14-extra.md"));
+    assert!(!is_dated_corpa_file_name("RESEARCH-2026-02-14.md"));
+}
+
+#[test]
+fn pick_research_file_name_prefers_dated_then_legacy() {
+    // Legacy only.
+    assert_eq!(
+        pick_research_file_name(&["RESEARCH.md".to_string(), "CORPA.md".to_string()]),
+        Some("RESEARCH.md".to_string())
+    );
+    // Dated wins over legacy, and the greatest date wins among dated files.
+    assert_eq!(
+        pick_research_file_name(&[
+            "RESEARCH.md".to_string(),
+            "RESEARCH-2026-01-05.md".to_string(),
+            "RESEARCH-2026-02-14.md".to_string(),
+        ]),
+        Some("RESEARCH-2026-02-14.md".to_string())
+    );
+    // No report at all.
+    assert_eq!(
+        pick_research_file_name(&["sources".to_string(), "CORPA.md".to_string()]),
+        None
+    );
 }
 
 #[test]

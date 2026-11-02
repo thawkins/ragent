@@ -4,9 +4,7 @@ description: Measure wall-clock time and disk usage of a clean release build, a 
 disable-model-invocation: true
 argument-hint: ""
 allowed-tools:
-  - bash
-  - read
-  - write
+  - any
 ---
 
 # Build statistics

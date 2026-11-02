@@ -289,8 +289,8 @@ impl AutomationService {
         {
             Ok(child) => child,
             Err(e) => {
-                self.finalise(&run, RunOutcome::Error, None).await;
                 self.running.lock().remove(&run.automation_id);
+                self.finalise(&run, RunOutcome::Error, None).await;
                 tracing::warn!(automation = %run.automation_id, error = %e, "automation run: session create failed");
                 return;
             }
@@ -308,6 +308,13 @@ impl AutomationService {
         };
         clear_session_backend(&child.id);
 
+        // Clear the in-flight marker BEFORE the terminal record is written, so
+        // a reader that observes a terminal outcome can never see the run still
+        // reported as running: `is_running` and the persisted outcome would
+        // otherwise disagree for the whole of `finalise`'s storage write,
+        // dispatch and prune (FR-018).
+        self.running.lock().remove(&run.automation_id);
+
         let (outcome, output_ref) = match result {
             Ok(text) => {
                 let path = self.write_output(&run.id, &text);
@@ -320,7 +327,6 @@ impl AutomationService {
         };
 
         self.finalise(&run, outcome, output_ref).await;
-        self.running.lock().remove(&run.automation_id);
     }
 
     /// Resolve the agent and run one turn in the child session (FR-033).

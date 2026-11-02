@@ -3,6 +3,8 @@ description: "ship a release"
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[commit message]"
+allowed-tools:
+ - any
 ---
 Perform a shipment of the ragent project by following these steps **in order**:
 

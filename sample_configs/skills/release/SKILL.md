@@ -3,6 +3,8 @@ description: "Increment patch version, commit, push, and tag the release"
 user-invocable: true
 disable-model-invocation: true
 argument-hint: "[commit message]"
+allowed-tools:
+ - any
 ---
 Perform a release of the ragent project by following these steps **in order**:
 

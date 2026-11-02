@@ -552,7 +552,14 @@ pub async fn handle_research_command(
         }
         ResearchCliCommand::Open { name } => {
             let item = manager.show(&name).await?;
-            let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
+            // The report may be dated (`RESEARCH-YYYY-MM-DD.md`) or the legacy
+            // undated `RESEARCH.md`; resolve the one that actually exists.
+            let path = ragent_research::ResearchIo::resolve_research_md(
+                manager.root(),
+                &item.name,
+                item.created_at,
+            )
+            .await?;
             cliprintln!("{}", path.display());
         }
         ResearchCliCommand::Search { query, json } => {

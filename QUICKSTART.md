@@ -1076,6 +1076,12 @@ On a name clash the existing higher-scope pack wins, so an AgentSkills pack neve
 shadows a same-named `.ragent/skills/` pack. Reload after edits with
 `/reload skills`.
 
+A skill's `allowed-tools` frontmatter narrows the run's tool surface: entries
+resolve against the registry ignoring case (`bash` names `Bash`), a single `any`
+entry lifts the restriction entirely, and a retired or misspelt name is reported
+by name and skill rather than silently removing the capability. See
+[`docs/howtos/skills.md`](docs/howtos/skills.md) for the full authoring guide.
+
 ---
 
 ## 7b. Plugins
@@ -1775,16 +1781,24 @@ researchers coordinated by a lead supervisor), or `competitive`
 and `competitive` modes, `--max-concurrent-research-units N` caps the
 number of parallel researchers (default 5). `--summarization-model`
 selects a lightweight model for per-page webpage summaries, and
-`--evaluate` appends a deterministic quality scorecard to the final
-`RESEARCH.md`.
+`--evaluate` appends a deterministic quality scorecard to the final report.
 
-Every `RESEARCH.md` frontmatter also records an `invocation` line — the
+The report is written to a **dated** file, `research/<name>/RESEARCH-<YYYY-MM-DD>.md`,
+alongside the QA companion `CORPA-<YYYY-MM-DD>.md`. The primary report is named
+for the item's creation date (so an item answers the same path before and after
+its first run); a later run writes its own dated file. That is what makes a
+re-run non-destructive: an item accumulates one report per run date instead of
+overwriting the last one. An item created by an older ragent keeps its legacy
+undated `RESEARCH.md` / `CORPA.md`, and every read surface resolves whichever
+file exists (newest dated first, legacy last).
+
+Every report frontmatter also records an `invocation` line — the
 verbatim `ragent research create ...` command, `/research ...` TUI slash
 command, or `POST /research` request summary that started the run. The
 `/research update <name>` command (or `ragent research update <name>` /
 `PUT /research/<name>`) reads that line and replays the exact run,
-overwriting `RESEARCH.md` and the associated source/companion files with
-freshly gathered results. The original invocation is preserved on
+writing a fresh dated report and companion while the earlier run's report
+stays on disk. The original invocation is preserved on
 `research continue` re-runs.
 
 See [`docs/research.md`](docs/research.md) for the full workflow guide.
@@ -1898,7 +1912,7 @@ Type `/` in the input to open an autocomplete menu:
 ### New in v1.0.79
 
 - **`/research create --max-search-calls N`** — places a hard, run-scoped cap on the total web-search calls a research run may issue, shared across every supervisor/competitive researcher and gather pass.
-- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files with freshly gathered results.
+- **`/research update <name>`** — re-runs a research item by replaying its recorded invocation line. (Since v1.0.161 the report is dated — `RESEARCH-<run date>.md` — so a re-run no longer overwrites the earlier report.)
 - **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
 - **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly.
 - **`/clip`** — copies the rendered message-window transcript to the system clipboard in one step.
@@ -2302,6 +2316,31 @@ enforces a fifth **Sources Cited / Date Spread** paragraph and a
 recency-weighting rule when the corresponding knobs are enabled, and falls
 back to a deterministic mechanical extraction when the LLM response cannot be
 parsed into the required structure (FR-005/FR-006).
+
+## Version 1.0.161
+
+- **Dated research reports** — a run now writes
+  `research/<name>/RESEARCH-<YYYY-MM-DD>.md` and
+  `research/<name>/CORPA-<YYYY-MM-DD>.md` instead of one undated pair, so
+  `/research update` keeps the earlier run's report instead of overwriting it.
+  Items created by an older ragent keep their undated `RESEARCH.md` / `CORPA.md`
+  and are still found (the resolver tries the creation-dated name, then the
+  newest dated name, then the legacy file).
+- **`tests/test_tool_rename_guard.rs` gets the in-process half of its
+  exclusion** — a file-local `guard_lock()` is taken by all 16 cases; the
+  nextest `tool-rename-guard` group remains the cross-process half.
+- **`ragent-telemetry` declares `global_env_lock()`** — the crate-wide
+  poison-tolerant `OnceLock<Mutex<()>>` the test-layout convention requires,
+  taken by the three `export_health()` observations so no sibling test can see a
+  half-applied environment.
+- **`AutomationService::execute_run` clears its in-flight marker first** — the
+  `running` entry is removed before `finalise()` writes the terminal record, so
+  `is_running` and the stored outcome can no longer disagree.
+- **New `BUILDSTATS.md`** — the first measured build/test/coverage cost report:
+  phase timings, disk deltas, 15,240 tests across 40 targets, 86.7% line
+  coverage.
+- **New `docs/howtos/skills.md`**, and `docs/howtos/research.md`, the `research`
+  slash-command page and the tutorial now describe the dated layout.
 
 ## Version 1.0.160 (uncommitted)
 

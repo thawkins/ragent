@@ -249,6 +249,7 @@ mod observed {
     /// reader's own logging is unaffected) and queues one notice.
     #[test]
     fn test_observed_exporter_forwards_error_and_records_notice() {
+        let _lock = crate::global_env_lock();
         let health = ragent_telemetry::export_health::export_health();
         health.clear();
         let exporter = observed(Some("HTTP export failed with status code: 503"));
@@ -271,6 +272,7 @@ mod observed {
     /// A successful export records success and queues nothing.
     #[test]
     fn test_observed_exporter_success_queues_no_notice() {
+        let _lock = crate::global_env_lock();
         let health = ragent_telemetry::export_health::export_health();
         health.clear();
         let exporter = observed(None);
@@ -285,6 +287,7 @@ mod observed {
     /// auto-disable, and the fifth notice carries the disable wording.
     #[test]
     fn test_observed_exporter_trips_auto_disable_on_fifth_failure() {
+        let _lock = crate::global_env_lock();
         let health = ragent_telemetry::export_health::export_health();
         health.clear();
         let exporter = observed(Some("Operation failed: HTTP export failed: network error"));

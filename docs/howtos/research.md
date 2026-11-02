@@ -4,7 +4,8 @@ This guide explains how to use ragent's built-in research system to perform
 extensive, structured information gathering and report synthesis. The research
 system decomposes a topic into sub-queries, searches the web and your local
 project in parallel, gathers and vaults sources, then runs an adversarial
-quality pipeline before writing a structured `RESEARCH.md` report.
+quality pipeline before writing a structured dated report
+(`RESEARCH-<YYYY-MM-DD>.md`).
 
 The same commands are available in three surfaces:
 
@@ -82,7 +83,7 @@ The TUI will:
    plus any configured API engines), optionally scan
    local project files and specs, and synthesize a structured report.
 3. Stream progress into the message window and status bar.
-4. Write the final document to `research/rust-async/RESEARCH.md`.
+4. Write the final document to `research/rust-async/RESEARCH-<YYYY-MM-DD>.md`.
 
 When it finishes, open the result with:
 
@@ -90,7 +91,7 @@ When it finishes, open the result with:
 /research open rust-async
 ```
 
-A typical `RESEARCH.md` contains:
+A typical report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
 
 - YAML frontmatter (title, topic, status, timestamps, source counts, tier,
   format, open-access disclosure)
@@ -114,7 +115,10 @@ A research item is a self-contained folder under `research/<name>/`:
 research/
 ├── INDEX.md
 └── rust-async/
-    ├── RESEARCH.md          # final report (frontmatter + markdown body)
+    ├── RESEARCH-2026-02-14.md   # report of the run dated 2026-02-14
+    ├── RESEARCH-2026-03-02.md   # report of a later `/research update` run
+    ├── CORPA-2026-02-14.md      # QA companion for the first run
+    ├── CORPA-2026-03-02.md      # QA companion for the later run
     └── sources/
         ├── web-01.md
         ├── web-02.md
@@ -123,9 +127,16 @@ research/
         └── spec-01.md
 ```
 
-- `RESEARCH.md` is the deliverable. It contains an executive summary, findings,
-  implications, diagrams, cross-references, open questions, and a numbered
-  references index.
+- `RESEARCH-<YYYY-MM-DD>.md` is the deliverable. It contains an executive
+  summary, findings, implications, diagrams, cross-references, open questions,
+  and a numbered references index.
+- The report name carries the run's ISO date, so a re-run **adds** a file
+  instead of replacing one: `/research update rust-async` on 2026-03-02 writes
+  `RESEARCH-2026-03-02.md` and leaves `RESEARCH-2026-02-14.md` on disk. The
+  **primary** report is the one named for the item's creation date, which is
+  the file every read surface resolves by default; the newest dated file wins
+  when the primary is absent. An item created by an older ragent keeps its
+  undated `RESEARCH.md` / `CORPA.md`, which resolves by the same rule.
 - `sources/` holds the captured body text of every web, local, and spec
   source so each citation can be traced back to the original text.
 - `research/INDEX.md` is a derived table of all items, regenerated
@@ -162,7 +173,8 @@ flag.
 
 ### 4.2 `/research create`
 
-Run a research session and write `RESEARCH.md`. This is the primary command.
+Run a research session and write a dated report (`RESEARCH-<YYYY-MM-DD>.md`).
+This is the primary command.
 
 ```text
 /research create <name> [topic]
@@ -191,11 +203,22 @@ subcommand, the parser treats the whole line as `<name> <topic>`; this lets
 you type quickly when the name is valid.
 
 **Re-running a research item:** `/research update <name>` replays the item's
-recorded invocation line and re-runs the full pipeline, overwriting
-`RESEARCH.md` and its associated files (`CORPA.md`, `sources/`, index) with
-freshly gathered results. The original invocation is preserved on the replayed
-run. The same replay is available from the CLI (`ragent research update <name>`)
-and over HTTP (`PUT /research/{name}`).
+recorded invocation line and re-runs the full pipeline, writing a **new dated
+report** (`RESEARCH-<run date>.md` plus its `CORPA-<run date>.md` companion) and
+refreshing `sources/` and the index with freshly gathered results. Because the
+report name carries the run date, the previous run's report is left in place -
+a same-day re-run still produces its own file. The original invocation is
+preserved on the replayed run. The same replay is available from the CLI
+(`ragent research update <name>`) and over HTTP (`PUT /research/{name}`).
+
+**Which file does a read command open?** Every read surface resolves the report
+rather than assuming a name. `ResearchIo::resolve_research_md` checks the
+canonical creation-dated file first (one `stat`), then scans the item directory
+preferring the lexicographically greatest dated name - the ISO prefix sorts
+chronologically, so that is the most recent run - and finally accepts the legacy
+undated `RESEARCH.md`. `/research open`, `/research search`, `/research show`,
+the index refresh and the CLI all go through that resolver, so an item still
+opens correctly whether it predates the dated scheme or is several runs old.
 
 **Quick syntax note:** The `--from-url` flag can be repeated to seed multiple
 pages. The `--from-file` flag accepts PDF, TXT, and MD files. When neither a topic nor a seed source is supplied, the
@@ -324,7 +347,7 @@ and open-access recovery note if applicable).
 
 ### 4.5 `/research open <name>`
 
-Open the rendered `RESEARCH.md` in the TUI's markdown overlay. See
+Open the item's resolved report in the TUI's markdown overlay. See
 section 11 for viewer controls.
 
 ```text
@@ -337,7 +360,7 @@ When `/research create` runs with an LLM configured, a concept-extraction step
 runs automatically after synthesis. The gathered corpus is sent to the model
 as a context-bounded payload (each source block headed `--- [#N] Title ---`,
 where `N` is the source's position in the References Index), and the numbered
-concept list it returns is embedded in `RESEARCH.md` as a `## Concepts`
+concept list it returns is embedded in the report as a `## Concepts`
 section directly above `## Findings`:
 
 ```markdown
@@ -353,7 +376,7 @@ exact keywords.
 ```
 
 `[#N]` citations resolve against the References Index at the bottom of
-`RESEARCH.md`, exactly like the Findings citations. The section is omitted
+the report, exactly like the Findings citations. The section is omitted
 when no LLM is configured, the extraction fails, or the model returns no
 concept sections; the step is visible in the progress output as a `concepts`
 step (started / completed / skipped / failed).
@@ -379,8 +402,8 @@ URLs as defanged plain text instead of clickable links. The transformation
 rewrites the scheme (`https://` -> `hxxps://`, `http://` -> `hxxp://`),
 brackets every dot (`example.com` -> `example[.]com`), and wraps the result in
 a Markdown code span. It applies to the `**Sources:**` bullets under each
-finding and to the `References Index` table in `RESEARCH.md` (plus the
-`Sources Reference` table in `CORPA.md`); non-URL rows (local paths, spec ids)
+finding and to the `References Index` table in the report (plus the
+`Sources Reference` table in the `CORPA` companion); non-URL rows (local paths, spec ids)
 are untouched, and every other section is unchanged. Use it when the document
 is ingested by tooling that rejects or flags live URLs. The flag is off by
 default and is recorded in frontmatter so `/research update` replays it.
@@ -405,9 +428,9 @@ the model's context budget.
 The output is a markdown file with a `# Concepts` heading, followed by one
 numbered section per concept (`## 1. Concept Name`, `## 2. Next Concept`, ...)
 containing a short definition and key evidence bullets. Inline citations use
-the same `[#N]` style as `RESEARCH.md`; each concept that cites captured
+the same `[#N]` style as the report; each concept that cites captured
 sources gains a `**WebSources:**` block listing those sources in the same
-format as the `**Sources:**` lists under `## Findings` in `RESEARCH.md`:
+format as the `**Sources:**` lists under `## Findings` in the report:
 
 ```markdown
 ## 3. Semantic Scholarly Search
@@ -423,12 +446,12 @@ exact keywords.
 ```
 
 The companion is rewritten on every run and uses the same source indices as
-`RESEARCH.md`. Concept headings are renumbered sequentially on write, even if
+the report. Concept headings are renumbered sequentially on write, even if
 the model emits them out of order or unnumbered.
 
 ### 4.8 `/research search <query>`
 
-Full-text search across all `RESEARCH.md` files. Returns matching item names,
+Full-text search across every item's resolved report. Returns matching item names,
 titles, and snippets. The search returns up to 25 results.
 
 ```text
@@ -459,7 +482,7 @@ output but kept on disk. Use `/research list --all` to see archived items.
 Resume an in-progress item. Loads state and appends a follow-up sub-question
 to the plan. The optional message is added to the plan as a new sub-question.
 The saved state file is written back unchanged when there is no follow-up —
-an item's `InProgress`/`Complete` status lives in the `RESEARCH.md`
+an item's `InProgress`/`Complete` status lives in the report's
 frontmatter, not the state file.
 
 ```text
@@ -580,7 +603,7 @@ The depth also controls how many local files are captured:
 
 ## 7. Output formats
 
-`--format` changes the skeleton and final layout of `RESEARCH.md`.
+`--format` changes the skeleton and final layout of the report.
 
 | Format | Layout |
 |--------|--------|
@@ -593,12 +616,12 @@ The depth also controls how many local files are captured:
 The format is recorded in the item frontmatter and can be reopened later
 with `/research open`.
 
-### CORPA.md companion
+### CORPA companion
 
 Quality-assurance renders (Contradiction Graph, Loci Analysis, Depth
 Investigation, Cross-Locus Reconcile, Source Tensions, Synthesis Audit,
-Corpus Critic) are written to `research/<name>/CORPA.md` rather than inline
-in `RESEARCH.md`. The companion file is created with the skeleton and
+Corpus Critic) are written to `research/<name>/CORPA-<YYYY-MM-DD>.md` rather
+than inline in the report. The companion file is created with the skeleton and
 rewritten on every full write; its `## Sources Reference` section repeats the
 References Index table so `[#N]` indices resolve in either document.
 
@@ -817,7 +840,7 @@ The `dissertation` tier adds a **ChapterPartition** step before all others,
 dividing the topic into up to 12 chapters. Each chapter then runs the full
 pipeline independently.
 
-Each step appears in `RESEARCH.md` when it produced results. Steps that
+Each step appears in the report when it produced results. Steps that
 produce no output (e.g. no contradictions found) are omitted from the final
 report. The run manifest tracks every step's lifecycle (pending, in-progress,
 completed, skipped, failed) and is persisted for resumability.
@@ -1249,7 +1272,7 @@ by title similarity).
 ### PUT /research/{name}
 
 Replay the item's recorded invocation line: re-runs the full pipeline and
-overwrites `RESEARCH.md` and its associated files with freshly gathered
+writes a new dated report and its associated files with freshly gathered
 results. This is the HTTP equivalent of `/research update <name>` (and
 `ragent research update <name>`). The response uses the same envelope as
 `POST /research`.

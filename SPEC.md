@@ -1,9 +1,9 @@
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
-<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.160</p>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>        <p style="margin-top: 4em; font-size: 1.1em;">        <strong>Version:</strong> 1.0.161</p>
         <p style="font-size: 1.1em;">
-          <strong>Date:</strong> 2026-10-31
+          <strong>Date:</strong> 2026-11-02
       </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -443,7 +443,7 @@ below documents the current state of all subsystems.
 
 - **Research web-search quota controls** — `--max-search-calls N` places a hard, run-scoped cap on total web-search calls per research run, shared via `Arc` across every supervisor/competitive researcher and gather pass; a run-scoped query cache memoises identical sub-queries so parallel researchers reuse cached hits instead of re-issuing paid calls (FR-016 of specs/opendeepresearch).
 - **`--depth` bounds web volume by default** — the effective web-source budget is derived from the selected depth (shallow 6 / standard 9 / deep 15) unless `--max-web-results` is passed explicitly, so `--depth shallow` now actually limits search/fetch volume.
-- **`/research update <name>` invocation replay** — re-runs a research item by replaying its recorded invocation line, overwriting `RESEARCH.md` and associated files with freshly gathered results; available via CLI, TUI, and HTTP `PUT /research/{name}`.
+- **`/research update <name>` invocation replay** — re-runs a research item by replaying its recorded invocation line and writes a new dated report (`RESEARCH-<run date>.md`, companion `CORPA-<run date>.md`) with freshly gathered results, leaving the earlier run's report in place; available via CLI, TUI, and HTTP `PUT /research/{name}`.
 - **`--mode competitive` defaults `--format` to `comparison-table`** — competitive runs no longer require an explicit `--format comparison-table`.
 - **GitHub `blob/` URLs no longer fail research gathering** — file-view URLs are rewritten to `raw.githubusercontent.com` and non-HTML content bypasses the readability gate, eliminating guaranteed `readability extraction failed` rejections.
 - **`/clip` slash command** — copies the rendered message-window transcript to the system clipboard in one step.
@@ -3030,13 +3030,16 @@ progress lines update a single in-place progress message.
 
 The `/research` slash command and `ragent research` CLI create structured
 research items under `research/<name>/`. Each item contains captured sources
-(web pages, local files, prior specs) and a single `RESEARCH.md` document.
+(web pages, local files, prior specs) and one or more dated report documents
+(`RESEARCH-<YYYY-MM-DD>.md`; an item created by an older ragent keeps its
+legacy undated `RESEARCH.md`).
 
 ### 11.2 Source Gathering
 
 A research session runs in phases:
 
-1. **Setup** — validate name and create the skeleton `RESEARCH.md`.
+1. **Setup** — validate name and create the skeleton report
+   `RESEARCH-<YYYY-MM-DD>.md` (named for the item's creation date).
 2. **Web** — issue `websearch` queries and fetch pages via `webfetch`. Every
    HTML page captured as a web source must have been extracted by the
    `readability-rs` crate (the research web-gather phase verifies the
@@ -3136,7 +3139,7 @@ the `SynthesizeResult { outcome: FallbackError, detail }` event so the user
 can see why the LLM path failed.
 ### 11.4 Output Document
 
-Every `RESEARCH.md` contains:
+Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
 
 - YAML frontmatter with `name`, `title`, `status`, `created`, `modified`, `sources`
   (the `title` is a reduced-length version of the `## Summary` content, capped at
@@ -3162,10 +3165,34 @@ Every `RESEARCH.md` contains:
   The quality-assurance render sections (Contradiction Graph, Loci Analysis,
   Depth Investigation, Cross-Locus Reconcile, Source Tensions, Synthesis
   Audit, Corpus Critic) are written to a per-research companion file
-  `research/<name>/CORPA.md` instead of `RESEARCH.md`. The companion is
-  created alongside the skeleton and rewritten on every `write_document`;
+  `research/<name>/CORPA-<YYYY-MM-DD>.md` instead of the report. The companion
+  is created alongside the skeleton and rewritten on every `write_document`;
   it ends with a `## Sources Reference` copy of the References Index table so
   `[#N]` source indices resolve in both files.
+
+  #### Dated output names
+
+  Both files carry the run's ISO date, so a `/research update` re-run (which
+  replays the recorded invocation and rewrites the report) keeps the earlier
+  run's document instead of overwriting it:
+
+  - The **primary** report is `RESEARCH-<created_at date>.md`, where
+    `created_at` is taken from the item's frontmatter. It is what
+    `ResearchManager::create` publishes, so an item answers the same path
+    before and after its first run.
+  - A later run writes `RESEARCH-<run date>.md`, so the same item accumulates
+    one report per run date and a same-day re-run produces a new file.
+  - **Resolution** (`ResearchIo::resolve_research_md` /
+    `resolve_corpa_md`) checks the canonical creation-dated name with one
+    `try_exists`, then falls back to a directory scan
+    (`find_research_md` / `find_corpa_md`) that accepts the lexicographically
+    greatest dated name - the ISO prefix sorts chronologically, so that is the
+    most recent run - and otherwise the legacy undated
+    `RESEARCH.md` / `CORPA.md` (`LEGACY_RESEARCH_FILE_NAME` /
+    `LEGACY_CORPA_FILE_NAME`). No command joins a hardcoded file name; every
+    read surface (`ResearchManager::{list, show_validated, set_status, search,
+    complete_gathering, write_document, continue_item}`, `ragent research open`
+    and the TUI `/research open`) resolves the report first.
 
   When an LLM is configured, `/research create` also runs a concept-extraction
   step (spec researchcluster) after synthesis: the gathered corpus is assembled
@@ -3204,11 +3231,11 @@ Every `RESEARCH.md` contains:
 | `/research create <name> --from-file <PATH>` | Extract a local document and use it as the research subject |
 | `/research create ... --use-low-relevance` | Retain low-relevance web sources |
 | `/research continue <name> [message]` | Resume an in-progress research item |
-| `/research update <name>` | Replay the recorded invocation for a run and overwrite `RESEARCH.md` |
+| `/research update <name>` | Replay the recorded invocation for a run and write a new dated report (`RESEARCH-<run date>.md`); the earlier run's report is kept |
 | `/research list` | List research items |
-| `/research open <name>` | Show the path to `RESEARCH.md` |
+| `/research open <name>` | Show the path to the item's report (the newest dated `RESEARCH-<date>.md`, or the legacy `RESEARCH.md`) |
 | `/research show <name>` | Show metadata |
-| `/research search <query>` | Search across all `RESEARCH.md` files |
+| `/research search <query>` | Search across every item's resolved report file |
 | `/research delete <name>` | Delete a research item |
 | `/research archive <name>` | Archive a research item |
 
@@ -5401,6 +5428,7 @@ The review, the measurement method and the per-crate rollout record live in
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.161 | 2026-11-02 | **Research output files get a dated name (SPEC 11.4).** A run now writes `research/<name>/RESEARCH-<YYYY-MM-DD>.md` and `CORPA-<YYYY-MM-DD>.md` instead of the single undated `RESEARCH.md` / `CORPA.md` pair, so `/research update` - which replays the recorded invocation and rewrites the report - keeps the earlier run's document instead of destroying it. The primary report is named for the item's **creation** date carried in its frontmatter, so an item answers the same path before and after its first run, and a later run writes under its own run date (a same-day re-run still produces a new file). `crates/ragent-research/src/io.rs` gains the naming primitives (`dated_stamp`, `dated_research_file_name`, `dated_corpa_file_name`, `is_dated_research_file_name`, `is_dated_corpa_file_name`, `pick_research_file_name`), the path builders (`dated_research_md_path`, `dated_corpa_md_path`, `primary_research_md_path`, `primary_corpa_md_path`) and the resolvers (`find_research_md`, `find_corpa_md`, `resolve_research_md`, `resolve_corpa_md`); resolution tries the canonical creation-dated name with one `try_exists`, then scans the directory preferring the lexicographically greatest dated name (the ISO prefix sorts chronologically) over the legacy undated `RESEARCH.md` / `CORPA.md` (`LEGACY_RESEARCH_FILE_NAME` / `LEGACY_CORPA_FILE_NAME`). `research_md_path` is removed and every read surface resolves instead of joining a hardcoded name (`ResearchManager` `create`/`create_with_format`/`list`/`show_validated`/`set_status`/`search`/`search_hits`/`write_document`/`complete_gathering`/`continue_item`, the index staleness check, `ragent research open` in `src/cli.rs`, and the TUI `/research open`). Also fixed: `AutomationService::execute_run` cleared the in-flight `running` marker *after* `finalise()` had persisted the terminal record, so `is_running` and the stored outcome could disagree for the whole of that write (FR-018) - the marker is now removed first, on both the normal and session-create error paths. Test isolation: `test_tool_rename_guard` gains a file-local `guard_lock()` taken by all 16 cases (the in-process half of the exclusion nextest's `tool-rename-guard` group provides across processes), and `crates/ragent-telemetry/tests/all.rs` declares `global_env_mutex()` / `global_env_lock()` taken by the three `export_health()` observations. Docs: new `docs/howtos/skills.md`, new `BUILDSTATS.md` (phase timings, 86.7% line coverage over 168,392 instrumented lines, 15,240 tests across 40 targets). Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 867 dependencies with the single `paste` unmaintained notice the only allowed warning, `cargo test --workspace --all-targets` 15,240 passed / 0 failed / 16 ignored, `cargo fmt --all --check` clean, `scripts/check-test-env-isolation.sh` OK, and clippy clean under the CI invocation for the touched crates. |
 | uncommitted | 2026-11-01 | **Only `Bash` tool calls reached the OTLP logs endpoint.** The log-window re-emit sat inside `if self.show_log` in `App::push_log_record_and_maybe_export`, so the export was a consequence of the log *view* being open - and a session normally runs with it closed. A collector therefore received only the events carrying a native `tracing` record of their own: `Bash` logs `Executing bash command` on every call, while `Edit`, `Write`, `Grep`, `read` and the rest log nothing, so they appeared only when the operator happened to open `/log`. The panel-gated code treated every tool identically, so the asymmetry came entirely from which tools log natively; from a collector it read as "only Bash is exported". New spec `otel` FR-036e: the panel-visibility gate now covers only the panel's rendering and its spool file and the re-emit is unconditional (still under the FR-036d duplicate guard and the FR-036c burst bound); FR-036a no longer scopes the re-emit to an open panel. Verified by driving the real `ToolCallStart` handler for `Bash` and `Edit` with `show_log = false` - neither produced a record before, both produce one at `INFO` with `log_window_level = "tool"` after. New regression test `test_tool_call_is_exported_with_the_panel_closed` in `crates/ragent-tui/tests/test_log_window_otel_export.rs`; `cargo nextest run -p ragent-tui` 3939/3939, `cargo fmt --check` clean. |
 | uncommitted | 2026-11-01 | **OTLP log export, plus `/db` message retention and a bounded WAL.** ragent's `tracing` events can now ship to the same collector as its metrics through a composing `tracing_subscriber::Layer` (`ragent_telemetry::logs::TracingLogsLayer`): the TUI log panel and stderr keep every event the local `--log-level` admits, and `telemetry.otel.logs.level` is only a floor for the remote copy. New `telemetry.otel.logs` block (`enabled`, default `false`; `level`, default `info`). **One switch, both signals**: `/telemetry on` enables metrics *and* logs (persisting `logs.enabled: true` beside `otel.enabled`) and `/telemetry off` stops both, so there is no separate logs on/off; `/telemetry logs [<level>]` sets the export level only, and `/telemetry setup` gained a `Logs level` row (index 5 of the `Tab` cycle) whose empty value keeps the default rather than disabling the signal. A level change reconfigures the live subsystem, so the layer changes its filter without a restart; `/telemetry counters` and the telemetry panel report whether records are leaving the machine instead of promising "log signals are planned". The logs pipeline reuses the metrics endpoint, protocol, timeout and gRPC TLS rules, posts to `/v1/logs` via the shared `otlp_http_signal_endpoint` resolver, redacts every body through `ragent_types::sanitize::redact_secrets` (16 KiB cap), guards every attribute through the metric sensitive-data path, and is flushed and shut down with the meter provider; a log exporter that cannot be built leaves the metric signal running. Earlier in the same tree: the opt-in `storage.retention` section, `Storage::prune_messages_older_than` / `count_messages_older_than`, the `spawn_blocking` startup pass, `ragent db prune` and the TUI `/db prune\|help` surface with a confirm dialog that opens on `No`, and a `journal_size_limit` bound (32 MiB) so `ragent.db-wal` stops retaining the high-water mark of a write burst. 17 new tests in `crates/ragent-telemetry/tests/test_logs_export.rs`; `cargo check --workspace` clean and `cargo audit` reports no advisories (867 dependencies, the pre-existing `paste` unmaintained notice unchanged). A follow-up noise-and-correctness pass rides the same tree: the code index counts its skip reasons (`skipped_symlink`/`skipped_excluded`/`skipped_globbed`, plus a `ProcessOutcome` tally for `Empty`/`Oversized`/`GrewPastCap`/`Binary`/`Unreadable`) instead of logging one `trace!` per skipped path - roughly 6,000 events per reindex, which the new logs signal then exported; Ollama Cloud's per-frame line drops to `DEBUG`; the `TuiTracingLayer` drain and the mirrored-child-stderr drain use the deferred push so a record the OTLP layer already shipped is not exported twice; `--log-level` defaults to `info` (a tool call is `INFO`, so a `warn` default silently dropped every tool call from the export) and `all` maps to `trace`; `validate_mcp_config` no longer short-circuits under YOLO, because a well-formed definition is a structural requirement rather than a permission; and `allowed-tools` resolution folds ASCII case (`entry_matches_tool`, `resolve_allowed_tool_entry`, storing each entry under the registry's spelling so one tool cannot become two keys) with a new `any` pseudo entry (`ANY_TOOL_ENTRY`, `is_any_tool_entry`) that lifts the restriction by emptying the allowed set, both sub-agent filters and the loop `tool_set` path now routing through `is_allowed_tool`. |
 | v1.0.158 | 2026-10-30 | **CI `Dead-code lint` fix; no behaviour change.** The job runs `cargo check --workspace --lib --all-features` with `RUSTFLAGS='-D unreachable_pub -D dead_code -D unused_imports'`, and 57 items were declared `pub` inside private modules with no public re-export path, so `unreachable_pub` failed the build (`ragent-research` `analysis::{parser,prompt}` 17, `session::{fallback,topic}` 16, `web_gatherer::{relevance,title}` 7 and `polarity` 5; `ragent-agent` `session::refusal_outcome` 4 — the `ToolOutcome` alias and `refusal`/`denial`/`synthesised`, superseded by `ToolDispatchPipeline`; `ragent-tui` `app::slash` 6 MCP helpers, `app::plugin::toggle_plugin_enabled`, `app::event_handler::QUESTION_TIMEOUT_SECS`). Each was demoted to `pub(crate)`, the exact reachability it had; nothing is referenced from another crate, a bench, or a test through a public path. Verification: `cargo check --workspace` clean, `cargo audit` exit 0 across 867 dependencies with the single `paste` unmaintained notice the only allowed warning, the exact CI lint command at exit 0, `cargo nextest run -p ragent-research` 1175/1175, `-p ragent-agent` 2560 passed / 1 skipped, `-p ragent-tui` 3901/3901, CI's clippy invocation (`-D warnings -A clippy::used_underscore_items -A clippy::redundant_pub_crate -A clippy::wildcard_imports`) clean, `cargo fmt --check` clean, and the twelve `scripts/check-*.sh` guards passing. |

@@ -398,9 +398,11 @@ async fn g003_search_falls_back_when_research_md_modified_after_cache() {
     // Sleep briefly so the manual write mtime is strictly after the cache
     // generation time.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    // Manually append content to RESEARCH.md (simulating a manual edit).
+    // Manually append content to the report (simulating a manual edit).
     let research_md =
-        ResearchIo::research_md_path(tmp.path(), &ResearchName::new("rust-async").unwrap());
+        ResearchIo::find_research_md(tmp.path(), &ResearchName::new("rust-async").unwrap())
+            .await
+            .unwrap();
     let original = tokio::fs::read_to_string(&research_md).await.unwrap();
     let modified = format!("{original}\n\nManual edit: keyword XYZXYZ.\n");
     tokio::fs::write(&research_md, &modified).await.unwrap();
@@ -585,7 +587,9 @@ async fn write_document_persists_body_and_supports_files() {
         provider_stats: None,
     };
     mgr.write_document(&doc).await.unwrap();
-    let path = ResearchIo::research_md_path(tmp.path(), &name);
+    let path = ResearchIo::find_research_md(tmp.path(), &name)
+        .await
+        .unwrap();
     let body = tokio::fs::read_to_string(&path).await.unwrap();
     assert!(body.contains("Found one good link"));
     assert!(body.contains("Finding A"));

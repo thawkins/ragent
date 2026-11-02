@@ -81,6 +81,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// The in-process half of the exclusion documented above. Nextest's
+// `tool-rename-guard` group orders these tests across *processes*; this lock
+// orders them inside ONE process, which is what `cargo test` runs (the whole
+// `all` binary in a single process, default thread count). Both are needed:
+// the group does nothing under `cargo test`, and the mutex does nothing under
+// nextest. Every case takes it, because every case runs the guard over a tree
+// while two of them (`--self-test` and the `tests/` scope probe) have a fixture
+// planted in the checkout.
+fn guard_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -389,6 +404,7 @@ fn parse_report(text: &str) -> GuardReport {
 /// why this module sits in the `tool-rename-guard` nextest group.
 #[test]
 fn test_self_test_detects_a_seeded_retired_literal() {
+    let _guard = guard_lock();
     let (code, combined) = run_guard(&["--self-test"]);
     assert_eq!(
         code, 0,
@@ -423,6 +439,7 @@ fn test_self_test_detects_a_seeded_retired_literal() {
 /// contributor actually sees - the self-test's own line is a success message.
 #[test]
 fn test_a_failure_names_the_predicate_letter_and_the_exact_edit() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_failure_message");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_failure_message.rs",
@@ -468,6 +485,7 @@ pub const SEEDED_FAILURE: &str = "bash";
 /// tool-name site is the defect the guard exists to catch.
 #[test]
 fn test_every_exemption_is_reviewable_and_the_two_structural_ones_are_named() {
+    let _guard = guard_lock();
     let (code, listing) = run_guard(&["--exemptions"]);
     assert_eq!(
         code, 0,
@@ -532,6 +550,7 @@ fn test_every_exemption_is_reviewable_and_the_two_structural_ones_are_named() {
 /// an instant.
 #[test]
 fn test_a_retired_literal_in_a_test_file_is_out_of_scope() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_tests_scope");
     let probe = tree.seed(
         "crates/ragent-tools-core/tests/test_zz_guard_scope_probe.rs",
@@ -578,6 +597,7 @@ fn test_a_retired_literal_in_a_test_file_is_out_of_scope() {
 /// from one implementation").
 #[test]
 fn test_the_script_form_and_the_test_form_report_the_same_thing() {
+    let _guard = guard_lock();
     let (script_code, script_out) = run_guard(&["--check"]);
     let (json_code, json_out) = run_guard(&["--json"]);
     assert_eq!(
@@ -642,6 +662,7 @@ fn test_the_script_form_and_the_test_form_report_the_same_thing() {
 /// that turns the guard into something that walks the whole repository.
 #[test]
 fn test_the_guard_finishes_in_a_few_seconds() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_cost");
     let start = std::time::Instant::now();
     let (code, out) = tree.check();
@@ -668,6 +689,7 @@ fn test_the_guard_finishes_in_a_few_seconds() {
 ///   prove on its own.
 #[test]
 fn test_the_guard_reads_only_the_repository_and_never_a_workbook() {
+    let _guard = guard_lock();
     let script = std::fs::read_to_string(repo_root().join("scripts/check_tool_rename.py"))
         .expect("the guard must be readable");
     for forbidden in [
@@ -739,6 +761,7 @@ fn test_the_guard_reads_only_the_repository_and_never_a_workbook() {
 /// copy without the table fails closed rather than passing silently.
 #[test]
 fn test_a_root_without_the_rename_table_fails_closed() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_no_table");
     std::fs::remove_file(tree.root.join("crates/ragent-types/src/tool_rename.rs"))
         .expect("the scratch copy carries the table");
@@ -812,6 +835,7 @@ fn assert_reported(report: &str, letter: &str, fixture: &str) {
 /// naming one, and an entry mapping a spelling onto itself.
 #[test]
 fn test_nfr008_predicate_a_alias_table_entry_is_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_a");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_alias_table.rs",
@@ -850,6 +874,7 @@ pub const SEEDED_TABLE: [(&str, &str); 3] = [
 /// (a2) is the only one that can catch it.
 #[test]
 fn test_nfr008_predicate_a2_self_mapping_is_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_a2");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_self_mapping.rs",
@@ -877,6 +902,7 @@ pub const SEEDED_SELF_MAPPING: [(&str, &str); 1] = [
 /// rest of the file still parses as the resolver it is.
 #[test]
 fn test_nfr008_predicate_b_resolver_arm_is_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_b");
     let original =
         std::fs::read_to_string(repo_root().join("crates/ragent-agent/src/tool/alias_table.rs"))
@@ -911,6 +937,7 @@ fn test_nfr008_predicate_b_resolver_arm_is_reported() {
 /// Predicate (c): a default configuration value holding a retired spelling.
 #[test]
 fn test_nfr008_predicate_c_default_value_is_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_c");
     let fixture = tree.seed(
         "crates/ragent-config/src/__guard_default.rs",
@@ -929,6 +956,7 @@ pub fn default_seeded_tool() -> String {
 /// key, and a second declaration of a name the tree already registers.
 #[test]
 fn test_nfr008_predicates_d_and_f_registry_key_and_duplicate_are_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_d_f");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_registry_keys.rs",
@@ -964,6 +992,7 @@ impl SeededSecondOldTool {
 /// in a crate this one depends on, i.e. one registered earlier.
 #[test]
 fn test_nfr008_predicate_g_wholesale_forwarder_is_reported() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_g");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_forwarder.rs",
@@ -1008,6 +1037,7 @@ impl Tool for SeededWrapperTool {
 /// retired key that would make it one.
 #[test]
 fn test_nfr008_predicate_g_ignores_a_forwarder_that_decides() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_predicate_g_deciding");
     let fixture = tree.seed(
         "crates/ragent-agent/src/__guard_deciding_forwarder.rs",
@@ -1064,6 +1094,7 @@ impl Tool for SeededAliasTool {
 /// case in this file.
 #[test]
 fn test_one_run_reports_every_predicate_at_once() {
+    let _guard = guard_lock();
     let tree = ScratchTree::new("t048_all_predicates");
     let retired = tree.seed(
         "crates/ragent-agent/src/__guard_many_literal.rs",

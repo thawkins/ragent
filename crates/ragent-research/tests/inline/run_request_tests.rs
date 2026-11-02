@@ -162,7 +162,7 @@ fn build_session_config_parses_all_modes() {
 }
 
 /// Research items are discovered by directory under `<research_root>/`
-/// regardless of research mode, so the RESEARCH.md write path is the same
+/// regardless of research mode, so the report write path is the same
 /// for `tiered` (default `/research create`) and the supervisor/competitive
 /// `--mode` runs. Pin that invariant so a mode branch can never drift to a
 /// different output folder.
@@ -170,10 +170,16 @@ fn build_session_config_parses_all_modes() {
 fn research_md_path_is_mode_independent() {
     let root = std::path::Path::new("research");
     let name = crate::research_name::ResearchName::try_new("mode-output").expect("valid name");
-    let path = crate::io::ResearchIo::research_md_path(root, &name);
+    let path = crate::io::ResearchIo::primary_research_md_path(
+        root,
+        &name,
+        chrono::DateTime::parse_from_rfc3339("2026-02-14T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+    );
     assert_eq!(
         path,
-        root.join("mode-output").join("RESEARCH.md"),
-        "RESEARCH.md must always be written under <research_root>/<name>/"
+        root.join("mode-output").join("RESEARCH-2026-02-14.md"),
+        "the dated report must always be written under <research_root>/<name>/"
     );
 }

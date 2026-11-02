@@ -1,6 +1,8 @@
 
 ---
 description: Audit codebase for coding standards, duplication, logging hygiene, security, test quality, and dependency freshness
+allowed-tools:
+ - any
 ---
 Run a comprehensive code quality audit of this project. If the user provided a path argument, scope the audit to that subdirectory only: `$ARGUMENTS`
 

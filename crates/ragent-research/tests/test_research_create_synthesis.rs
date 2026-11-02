@@ -283,9 +283,11 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
 
     // FR-006: the final RESEARCH.md still contains findings (from the
     // engine's fallback finding).
-    let body = tokio::fs::read_to_string(research_root.join("malformed-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = tokio::fs::read_to_string(
+        crate::research_report_path(&research_root, "malformed-test").await,
+    )
+    .await
+    .unwrap();
     assert!(
         body.contains("## Findings"),
         "RESEARCH.md must still contain a Findings section, got:\n{body}"
@@ -358,9 +360,11 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
 
     // RESEARCH.md must contain the LLM finding verbatim, including the
     // [#1] citation.
-    let body = tokio::fs::read_to_string(research_root.join("wellformed-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = tokio::fs::read_to_string(
+        crate::research_report_path(&research_root, "wellformed-test").await,
+    )
+    .await
+    .unwrap();
     assert!(
         body.contains("The source describes async/await idioms [#1]"),
         "RESEARCH.md must contain the LLM finding verbatim, got:\n{body}"
@@ -419,9 +423,11 @@ async fn executive_summary_format_writes_shorter_summary_instruction() {
         .await
         .unwrap();
 
-    let body = tokio::fs::read_to_string(research_root.join("exec-summary-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = tokio::fs::read_to_string(
+        crate::research_report_path(&research_root, "exec-summary-test").await,
+    )
+    .await
+    .unwrap();
     // Non-default formats are persisted in the frontmatter.
     assert!(
         body.contains("requested_format: executive-summary"),
@@ -465,9 +471,10 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
 
     // RESEARCH.md still gets mechanical findings derived from the captured
     // web source.
-    let body = tokio::fs::read_to_string(research_root.join("no-llm-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body =
+        tokio::fs::read_to_string(crate::research_report_path(&research_root, "no-llm-test").await)
+            .await
+            .unwrap();
     assert!(body.contains("## Findings"));
     assert!(
         body.contains("### **Finding 1** -"),
@@ -526,9 +533,10 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         observer.outcomes.lock().unwrap()
     );
 
-    let body = tokio::fs::read_to_string(research_root.join("imrad-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body =
+        tokio::fs::read_to_string(crate::research_report_path(&research_root, "imrad-test").await)
+            .await
+            .unwrap();
 
     // FR-002 / FR-012: non-default format is recorded in frontmatter.
     assert!(

@@ -64,7 +64,9 @@ async fn complete_gathering_preserves_sources_count_and_queries() {
     mgr.write_document(&doc).await.unwrap();
     mgr.complete_gathering("rust-async").await.unwrap();
 
-    let path = ResearchIo::research_md_path(tmp.path(), &ResearchName::new("rust-async").unwrap());
+    let path = ResearchIo::find_research_md(tmp.path(), &ResearchName::new("rust-async").unwrap())
+        .await
+        .unwrap();
     let content = tokio::fs::read_to_string(&path).await.unwrap();
     assert!(
         content.contains("sources: 1 # see sources/ subdirectory"),

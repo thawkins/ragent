@@ -532,8 +532,27 @@ impl App {
                     match mgr.show(&name).await {
                         Ok(item) => {
                             let root = mgr.root().to_path_buf();
-                            let path =
-                                ragent_research::ResearchIo::research_md_path(&root, &item.name);
+                            // The report may be dated (`RESEARCH-YYYY-MM-DD.md`)
+                            // or the legacy undated `RESEARCH.md`; resolve the
+                            // one that actually exists.
+                            let path = match ragent_research::ResearchIo::resolve_research_md(
+                                &root,
+                                &item.name,
+                                item.created_at,
+                            )
+                            .await
+                            {
+                                Ok(path) => path,
+                                Err(e) => {
+                                    event_bus.publish(Event::TextDelta {
+                                        session_id,
+                                        text: format!(
+                                            "From: /research open\n\n**Error:** failed to locate the research report: {e}"
+                                        ),
+                                    });
+                                    return;
+                                }
+                            };
                             match ragent_research::ResearchIo::read_file(&path).await {
                                 Ok(content) => {
                                     let (_frontmatter, body) =
@@ -550,7 +569,7 @@ impl App {
                                     event_bus.publish(Event::TextDelta {
                                         session_id,
                                         text: format!(
-                                            "From: /research open\n\n**Error:** failed to read RESEARCH.md: {e}"
+                                            "From: /research open\n\n**Error:** failed to read the research report: {e}"
                                         ),
                                     });
                                 }

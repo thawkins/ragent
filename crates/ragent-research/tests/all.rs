@@ -22,6 +22,10 @@ mod all_prelude;
 
 pub use all_prelude::{document, source};
 
+// Report/companion path helpers, so a child reachable as `crate::` can resolve
+// a run's dated output without joining a hardcoded file name.
+pub use all_prelude::{research_corpa_path, research_report_path};
+
 #[path = "test_analysis_engine.rs"]
 mod test_analysis_engine;
 #[path = "test_analysis_engine_builders.rs"]

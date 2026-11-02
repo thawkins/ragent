@@ -171,8 +171,11 @@ async fn test_corpa_manager_create_writes_skeleton_file() {
         .expect("create succeeds");
     assert_eq!(item.name.as_str(), "corpa-skel");
 
-    let corpa_path = tmp.path().join("corpa-skel").join("CORPA.md");
-    let corpa = std::fs::read_to_string(&corpa_path).expect("CORPA.md written at create");
+    // The companion carries a dated name; resolve the file `create` wrote.
+    let corpa_path = ragent_research::ResearchIo::find_corpa_md(tmp.path(), &item.name)
+        .await
+        .expect("CORPA companion written at create");
+    let corpa = std::fs::read_to_string(&corpa_path).expect("CORPA companion readable");
     assert!(corpa.starts_with("# Corpus Analysis Companion"));
     assert!(corpa.contains("## Sources Reference"));
     assert!(corpa.contains("No sources captured"));
@@ -190,7 +193,7 @@ async fn test_corpa_manager_write_document_updates_companion() {
         .expect("create succeeds");
 
     let mut doc = base_document();
-    doc.item = ResearchItem::new(name, "CORPA Write", "write path");
+    doc.item = ResearchItem::new(name.clone(), "CORPA Write", "write path");
     doc.item.add_source(web_source(1));
     let mut graph = ContradictionGraph::empty();
     graph.add_edge(ContradictionEdge {
@@ -204,15 +207,19 @@ async fn test_corpa_manager_write_document_updates_companion() {
 
     manager.write_document(&doc).await.expect("write succeeds");
 
-    // RESEARCH.md no longer carries the moved QA sections.
-    let research = std::fs::read_to_string(tmp.path().join("corpa-write").join("RESEARCH.md"))
-        .expect("RESEARCH.md written");
+    // The dated report no longer carries the moved QA sections.
+    let research_path = ragent_research::ResearchIo::find_research_md(tmp.path(), &name)
+        .await
+        .expect("report written");
+    let research = std::fs::read_to_string(&research_path).expect("report readable");
     assert!(!research.contains("## Contradiction Graph"));
     assert!(!research.contains("## Source Tensions"));
 
-    // CORPA.md carries the moved sections and the Sources Reference copy.
-    let corpa = std::fs::read_to_string(tmp.path().join("corpa-write").join("CORPA.md"))
-        .expect("CORPA.md written");
+    // The companion carries the moved sections and the Sources Reference copy.
+    let corpa_path = ragent_research::ResearchIo::find_corpa_md(tmp.path(), &name)
+        .await
+        .expect("CORPA companion written");
+    let corpa = std::fs::read_to_string(&corpa_path).expect("CORPA companion readable");
     assert!(corpa.contains("## Contradiction Graph"));
     assert!(corpa.contains("opposing performance claims"));
     assert!(corpa.contains("## Sources Reference"));

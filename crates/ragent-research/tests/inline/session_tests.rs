@@ -13,6 +13,26 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
+/// Resolve the path of the report a session run wrote for `name`.
+async fn report_path(research_root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let research_name = crate::research_name::ResearchName::try_new(name).expect("valid name");
+    crate::io::ResearchIo::find_research_md(research_root, &research_name)
+        .await
+        .unwrap_or_else(|e| panic!("locating the report for '{name}': {e}"))
+}
+
+/// Read the report a session run wrote for `name` under `research_root`.
+///
+/// Reports carry a dated name (`RESEARCH-YYYY-MM-DD.md`) or, for an item
+/// created by an older ragent, the legacy undated `RESEARCH.md`; this resolves
+/// whichever the run actually wrote.
+async fn read_report(research_root: &std::path::Path, name: &str) -> String {
+    let path = report_path(research_root, name).await;
+    tokio::fs::read_to_string(&path)
+        .await
+        .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+}
+
 /// The width-sweep detail must render the per-engine reason columns, the
 /// fetch-failure breakdown columns, blank lines above and below the table,
 /// and a totals row whose reason counts sum to the global exclusion tally.
@@ -273,7 +293,7 @@ async fn session_runs_end_to_end_and_writes_document() {
     );
     assert_ne!(outcome.sources, [] as [crate::source::Source; 0]);
     // Document should exist on disk.
-    let p = research_root.join("rust-async/RESEARCH.md");
+    let p = report_path(&research_root, "rust-async").await;
     assert!(p.is_file());
     let body = tokio::fs::read_to_string(&p).await.unwrap();
     // The final title is the topic-derived title ("Rust Async") because
@@ -495,9 +515,7 @@ async fn session_persists_decomposed_queries_in_research_md() {
         ]
     );
 
-    let body = tokio::fs::read_to_string(research_root.join("decomp-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "decomp-test").await;
     assert!(body.contains("## Search Queries"));
     assert!(body.contains("- Rust async"));
     assert!(body.contains("- Tokio runtime"));
@@ -625,9 +643,7 @@ async fn from_url_fetches_page_and_derives_topic_when_topic_is_empty() {
     // the fetched page body (not the page title). The body's first
     // substantive sentence is "Long-form article about Rust async/await
     // idioms.", which must appear in RESEARCH.md.
-    let body = tokio::fs::read_to_string(research_root.join("from-url-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "from-url-test").await;
     assert!(
         body.contains("Long-form article about Rust async/await idioms"),
         "RESEARCH.md should reference the topic derived from the fetched page body, not the title: {body}"
@@ -731,9 +747,7 @@ async fn from_url_derives_topic_from_body_not_title_when_body_has_boilerplate() 
 
     // The topic must be derived from the article sentence, not the
     // "Example Site" title or the nav/cookie boilerplate.
-    let body = tokio::fs::read_to_string(research_root.join("body-topic-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "body-topic-test").await;
     assert!(
         body.contains("Rust async model maps asynchronous operations"),
         "RESEARCH.md should reference the topic derived from the cleaned page body: {body}"
@@ -825,9 +839,7 @@ async fn from_url_falls_back_to_title_when_body_is_pure_boilerplate() {
         .run("fallback-test", "Fallback", &cfg, Arc::new(NoopObserver))
         .await
         .unwrap();
-    let body = tokio::fs::read_to_string(research_root.join("fallback-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "fallback-test").await;
     assert!(
         body.contains("Meaningful Page Title"),
         "RESEARCH.md should fall back to the page title when the cleaned body is empty: {body}"
@@ -909,9 +921,7 @@ async fn from_url_keeps_explicit_topic_when_both_are_supplied() {
             .any(|s| matches!(s, Source::Web { url, .. } if url == "https://example.com/page")),
         "the --from-url page should still be captured as a source"
     );
-    let body = tokio::fs::read_to_string(research_root.join("both-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "both-test").await;
     assert!(
         body.contains("Custom Topic"),
         "explicit topic should be used, not the fetched page title: {body}"
@@ -1234,7 +1244,7 @@ async fn run_persists_model_in_frontmatter_when_set() {
         .run("rust-async", "Rust Async", &cfg, observer)
         .await
         .unwrap();
-    let path = research_root.join("rust-async").join("RESEARCH.md");
+    let path = report_path(&research_root, "rust-async").await;
     let content = tokio::fs::read_to_string(&path).await.unwrap();
     assert!(
         content.contains("Model: \"anthropic/claude-sonnet-4\""),
@@ -1263,7 +1273,7 @@ async fn run_omits_model_line_when_not_set() {
         .run("rust-async", "Rust Async", &cfg, observer)
         .await
         .unwrap();
-    let path = research_root.join("rust-async").join("RESEARCH.md");
+    let path = report_path(&research_root, "rust-async").await;
     let content = tokio::fs::read_to_string(&path).await.unwrap();
     assert!(
         !content.contains("Model:"),
@@ -1555,9 +1565,7 @@ async fn overlapped_gather_combines_web_and_local_sources_and_emits_phases() {
     );
 
     // RESEARCH.md must cite both source types in the mechanical summary.
-    let body = tokio::fs::read_to_string(research_root.join("overlap-test/RESEARCH.md"))
-        .await
-        .unwrap();
+    let body = read_report(&research_root, "overlap-test").await;
     assert!(
         body.contains("Example"),
         "RESEARCH.md should cite the web source title; got:\n{body}"
@@ -2869,6 +2877,14 @@ async fn competitive_mode_delegates_one_researcher_per_entity() {
         .await
         .unwrap();
 
+    // The run should still write a report document, under its dated name.
+    assert!(
+        report_path(&research_root, "comp-delegation")
+            .await
+            .is_file(),
+        "a research report should be written for competitive mode"
+    );
+
     let events = observer.events.lock().unwrap();
 
     // FR-006: competitive extraction event is emitted.
@@ -2956,11 +2972,6 @@ async fn competitive_mode_delegates_one_researcher_per_entity() {
         "expected supervisor_finalize RunStep, got {run_steps:?}"
     );
 
-    // The run should still write a RESEARCH.md document.
-    assert!(
-        research_root.join("comp-delegation/RESEARCH.md").is_file(),
-        "RESEARCH.md should be written for competitive mode"
-    );
     assert!(!outcome.sources.is_empty(), "should capture web sources");
 }
 

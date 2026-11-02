@@ -330,7 +330,8 @@ See `docs/howtos/spec.md` for the full command reference and SDD workflow.
 ```
 
 ragent searches the web, fetches key pages, cross-references local files,
-and writes `research/toml-config/RESEARCH.md`. Link research to a spec:
+and writes `research/toml-config/RESEARCH-<YYYY-MM-DD>.md` (a re-run adds a new
+dated report instead of replacing it). Link research to a spec:
 
 ```text
 /spec create config-loader "Implement TOML config loading" --from-research toml-config

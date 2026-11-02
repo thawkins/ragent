@@ -1,5 +1,101 @@
 # Changelog
 
+## [1.0.161] - 2026-11-02
+
+Research reports get a dated file name so a re-run no longer destroys the
+previous report, two test-isolation defects that a single-process test run
+exposed are fixed, and the first build/test/coverage cost measurement lands in
+`BUILDSTATS.md`. This entry also publishes the documentation pass that follows
+the code change: `docs/howtos/research.md`, the `research` slash-command page and
+the tutorial now describe the dated layout and the resolution rule, every
+generated PDF is regenerated, `docs/howtos/skills.md` is added, and `STATS.md` /
+`BUILDSTATS.md` carry the re-measured counts.
+
+### Added
+
+- **Dated research output files (spec `research` §11.4).** A run now writes
+  `research/<name>/RESEARCH-<YYYY-MM-DD>.md` and
+  `research/<name>/CORPA-<YYYY-MM-DD>.md` instead of the single undated
+  `RESEARCH.md` / `CORPA.md` pair, so `/research update` (which replays a
+  recorded invocation and rewrites the report) keeps the earlier run's document
+  on disk rather than overwriting it. The primary report is named for the
+  item's **creation** date carried in its frontmatter (`created_at`), so an item
+  answers the same path before and after its first run and
+  `RESEARCH-<created>.md` is the file `ResearchManager::create` publishes.
+  `crates/ragent-research/src/io.rs` gains the naming primitives
+  (`dated_stamp`, `dated_research_file_name`, `dated_corpa_file_name`,
+  `is_dated_research_file_name`, `is_dated_corpa_file_name`,
+  `pick_research_file_name`) and the resolution helpers
+  (`dated_research_md_path`, `dated_corpa_md_path`, `primary_research_md_path`,
+  `primary_corpa_md_path`, `find_research_md`, `find_corpa_md`,
+  `resolve_research_md`, `resolve_corpa_md`). Resolution is deliberately
+  tolerant: the canonical creation-dated name costs one `try_exists`, and the
+  fallback scan accepts the greatest dated name (the ISO prefix sorts
+  chronologically, so that is the most recent run) or the legacy undated
+  `RESEARCH.md` (`LEGACY_RESEARCH_FILE_NAME`) / `CORPA.md`
+  (`LEGACY_CORPA_FILE_NAME`) of an item created by an older ragent.
+  `research_md_path` is gone; the undated `corpa_md_path` remains as the
+  *legacy* name only, with `resolve_corpa_md` named as the accessor to use.
+  `ResearchManager` (`create`, `create_with_format`, `list`,
+  `show_validated`, `set_status`, `search`, `write_document`,
+  `complete_gathering`, the index refresh and `search_hits`) now resolves the
+  report instead of joining a hardcoded file name, and `write_document` writes
+  under the **run** date so a same-day re-run produces a new file while an
+  earlier day's report survives. The TUI `/research open` path and
+  `ragent research open` resolve through the same helper and report a
+  resolution failure as a normal error instead of reading the wrong file.
+- **`BUILDSTATS.md`** — a measured build/test/coverage cost report for the
+  workspace: per-phase wall time and filesystem free-space delta for
+  `cargo clean`, `cargo build --release --workspace`, `cargo build --workspace`,
+  `cargo test --workspace --all-targets` and
+  `cargo llvm-cov --workspace --all-targets --no-fail-fast`, plus per-crate and
+  overall line coverage (`146001/168392` lines, 86.7%) and the test totals
+  summed from the run log (15,240 passed / 0 failed / 16 ignored across 40 test
+  binaries).
+- **`docs/howtos/skills.md`** — a how-to for the skills system: discovery
+  order, `SKILL.md` frontmatter reference (`allowed-tools`, case-insensitive
+  resolution and the `any` escape hatch), body-writing guidance, the
+  `/skills` / `/skill <name>` / bare `/<name>` invocation surfaces, a worked
+  example and a troubleshooting section.
+
+### Changed
+
+- **`crates/ragent-research`'s test layout follows the dated naming.**
+  `tests/all_prelude.rs` gains `research_report_path` / `research_corpa_path`
+  (re-exported from `tests/all.rs` as `crate::` shims), so a child test module
+  asks the resolver for a run's output instead of joining `RESEARCH.md`; the
+  io/manager/session/frontmatter/run-request inline suites and the
+  `test_corpa_companion`, `test_research_create_synthesis`,
+  `test_research_integration`, `test_web_time_deadline` and
+  `crates/ragent-server/tests/test_research_routes.rs` suites are updated to
+  match, and four new `io_tests` cases pin the date-component predicate, the
+  picker's dated-over-legacy preference and the creation-date canonical path.
+
+### Fixed
+
+- **An automation run could still be reported as running after its terminal
+  record was written (spec `openhands` FR-018).**
+  `AutomationService::execute_run` removed the in-flight `running` entry
+  *after* `finalise()` had already persisted the terminal outcome, so for the
+  whole of the storage write, the notification dispatch and the prune a reader
+  could see `is_running == true` beside a finished outcome - and a re-trigger
+  in that window was refused as already running. The marker is now cleared
+  before `finalise()` on both the normal path and the session-create error
+  path.
+- **`test_tool_rename_guard` raced itself under a single-process test run.**
+  The 16 cases run the guard over a tree while two of them plant a fixture in
+  the checkout; nextest's `tool-rename-guard` group orders them across
+  *processes*, but `cargo test` runs the whole `all` binary in one process, so
+  they interleaved. A file-local `guard_lock()` is taken by every case, which
+  is the in-process half of the exclusion; the nextest group remains the
+  cross-process half.
+- **`ragent-telemetry`'s export-health tests raced over process-global
+  environment.** `tests/all.rs` now declares the crate-wide
+  `global_env_mutex()` / `global_env_lock()` pair (a poison-tolerant
+  `OnceLock<Mutex<()>>`, as the test-layout convention requires) and the three
+  `export_health()` observations in `tests/test_export_health.rs` take it, so
+  no sibling test can observe a half-applied environment.
+
 ## [1.0.160] - 2026-11-01
 
 OTLP log export, session-message retention plus the `/db` and `ragent db`

@@ -12,7 +12,9 @@
 //! research/
 //! |-- INDEX.md                       (derived cache, regenerated on change)
 //! |-- <name>/
-//! |   |-- RESEARCH.md                (frontmatter + body, 8 sections)
+//! |   |-- RESEARCH-<ISO date>.md     (frontmatter + body, 8 sections)
+//! |   |-- CORPA-<ISO date>.md        (QA companion)
+//! |   |-- RESEARCH.md                (only when the dated name is not unique)
 //! |   \-- sources/
 //! |       |-- web-NN.md
 //! |       |-- local-NN.md
@@ -21,6 +23,13 @@
 //! \-- _templates/                    (optional research templates, FR-020)
 //!     \-- <name>.md
 //! ```
+//!
+//! ## Dated output files
+//!
+//! Every run writes its report to `RESEARCH-YYYY-MM-DD.md` and its companion to
+//! `CORPA-YYYY-MM-DD.md`, so a re-run of an existing item (`/research update`)
+//! keeps the earlier report instead of overwriting it (see
+//! [`ResearchIo::dated_research_file_name`]).
 
 use crate::research_name::ResearchName;
 use crate::source::Source;
@@ -29,6 +38,84 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::fs;
+
+/// The `YYYY-MM-DD` stamp used in the dated output file names.
+///
+/// `created_at` is the item's creation instant carried in its `RESEARCH.md`
+/// frontmatter, so the primary report of an item is named for the day the
+/// research was created and every later run (same day or not) still points at
+/// one stable, existing file.
+#[must_use]
+pub fn dated_stamp(created_at: DateTime<Utc>) -> String {
+    created_at.format("%Y-%m-%d").to_string()
+}
+
+/// `RESEARCH-<stamp>.md` - the dated report file name for `stamp`.
+#[must_use]
+pub fn dated_research_file_name(stamp: &str) -> String {
+    format!("RESEARCH-{stamp}.md")
+}
+
+/// `CORPA-<stamp>.md` - the dated companion file name for `stamp`.
+#[must_use]
+pub fn dated_corpa_file_name(stamp: &str) -> String {
+    format!("CORPA-{stamp}.md")
+}
+
+/// Pick the report file name from the entries in an item directory.
+///
+/// Dated reports (`RESEARCH-YYYY-MM-DD.md`) win over the legacy undated
+/// `RESEARCH.md`, and among several dated reports the lexicographically
+/// greatest name wins - the ISO date prefix sorts chronologically, so that is
+/// the most recent run. Returns `None` when the directory holds no report.
+#[must_use]
+pub fn pick_research_file_name(names: &[String]) -> Option<String> {
+    names
+        .iter()
+        .filter(|n| is_dated_research_file_name(n))
+        .max()
+        .or_else(|| {
+            names
+                .iter()
+                .find(|n| n.as_str() == LEGACY_RESEARCH_FILE_NAME)
+        })
+        .cloned()
+}
+
+/// Whether `name` is a dated report file name (`RESEARCH-YYYY-MM-DD.md`).
+#[must_use]
+pub fn is_dated_research_file_name(name: &str) -> bool {
+    name.strip_prefix("RESEARCH-")
+        .and_then(|rest| rest.strip_suffix(".md"))
+        .is_some_and(is_iso_date_component)
+}
+
+/// Whether `name` is a dated companion file name (`CORPA-YYYY-MM-DD.md`).
+#[must_use]
+pub fn is_dated_corpa_file_name(name: &str) -> bool {
+    name.strip_prefix("CORPA-")
+        .and_then(|rest| rest.strip_suffix(".md"))
+        .is_some_and(is_iso_date_component)
+}
+
+/// Whether `s` is exactly an ISO `YYYY-MM-DD` date component.
+fn is_iso_date_component(s: &str) -> bool {
+    s.len() == 10
+        && s.as_bytes().iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+}
+
+/// The undated report file name used before the dated scheme, still accepted
+/// for items created by an older ragent.
+pub const LEGACY_RESEARCH_FILE_NAME: &str = "RESEARCH.md";
+
+/// The undated companion file name used before the dated scheme.
+pub const LEGACY_CORPA_FILE_NAME: &str = "CORPA.md";
 
 /// Whether `name` is safe to interpolate into a template file path.
 ///
@@ -76,21 +163,158 @@ impl ResearchIo {
         research_root.join(name.dir_name())
     }
 
-    /// Compute the path of the `RESEARCH.md` file for a research item.
+    /// Compute the path of the dated `RESEARCH-<stamp>.md` file for a research
+    /// item, where `stamp` is the ISO date of the run being written.
+    ///
+    /// The default output file name is the one for the item's own creation
+    /// date ([`Self::primary_research_md_path`]); a re-run passes its own
+    /// run date so every run lands in a file of its own.
     #[must_use]
-    pub fn research_md_path(research_root: &Path, name: &ResearchName) -> PathBuf {
-        Self::item_dir(research_root, name).join("RESEARCH.md")
+    pub fn dated_research_md_path(
+        research_root: &Path,
+        name: &ResearchName,
+        stamp: &str,
+    ) -> PathBuf {
+        Self::item_dir(research_root, name).join(dated_research_file_name(stamp))
     }
 
-    /// Compute the path of the `CORPA.md` companion file for a research item.
+    /// Compute the path of the dated `CORPA-<stamp>.md` companion file for a
+    /// research item, alongside [`Self::dated_research_md_path`].
+    #[must_use]
+    pub fn dated_corpa_md_path(research_root: &Path, name: &ResearchName, stamp: &str) -> PathBuf {
+        Self::item_dir(research_root, name).join(dated_corpa_file_name(stamp))
+    }
+
+    /// Compute the path of an item's canonical report file for the given
+    /// creation instant: `RESEARCH-<YYYY-MM-DD>.md`.
     ///
-    /// CORPA.md carries the QA render sections (contradiction graph, loci
-    /// analysis, depth investigation, cross-locus reconcile, source tensions,
-    /// synthesis audit, corpus critic) plus a copy of the references table, so
-    /// `RESEARCH.md` can stay focused on the narrative findings.
+    /// This is the name [`crate::manager::ResearchManager::create`] writes, so
+    /// an item created before any run can still be opened by the same rule
+    /// that opens it after one.
+    #[must_use]
+    pub fn primary_research_md_path(
+        research_root: &Path,
+        name: &ResearchName,
+        created_at: DateTime<Utc>,
+    ) -> PathBuf {
+        Self::dated_research_md_path(research_root, name, &dated_stamp(created_at))
+    }
+
+    /// Compute the path of an item's canonical companion file for the given
+    /// creation instant: `CORPA-<YYYY-MM-DD>.md`.
+    #[must_use]
+    pub fn primary_corpa_md_path(
+        research_root: &Path,
+        name: &ResearchName,
+        created_at: DateTime<Utc>,
+    ) -> PathBuf {
+        Self::dated_corpa_md_path(research_root, name, &dated_stamp(created_at))
+    }
+
+    /// Locate an item's report file, whether it uses the dated naming scheme
+    /// (`RESEARCH-YYYY-MM-DD.md`, most recent first) or the legacy undated
+    /// `RESEARCH.md`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResearchIoError::NotFound`] when the item directory holds no
+    /// report file, and [`ResearchIoError::Io`] when the directory itself
+    /// cannot be read.
+    pub async fn find_research_md(research_root: &Path, name: &ResearchName) -> Result<PathBuf> {
+        let dir = Self::item_dir(research_root, name);
+        let mut read_dir = fs::read_dir(&dir).await.map_err(ResearchIoError::Io)?;
+        let mut names = Vec::new();
+        while let Some(entry) = read_dir.next_entry().await.map_err(ResearchIoError::Io)? {
+            if let Some(file_name) = entry.file_name().to_str() {
+                names.push(file_name.to_string());
+            }
+        }
+        match pick_research_file_name(&names) {
+            Some(file_name) => Ok(dir.join(file_name)),
+            None => Err(ResearchIoError::NotFound(name.to_string())),
+        }
+    }
+
+    /// Locate an item's report file from the creation instant recorded in its
+    /// frontmatter, falling back to a directory scan.
+    ///
+    /// The canonical name is checked first: it is what
+    /// [`crate::manager::ResearchManager::create`] publishes and what a re-run
+    /// leaves alone, so the common case costs one `stat`. The scan covers an
+    /// item whose oldest surviving report is dated differently (a re-run never
+    /// removes a dated file) and one created before the dated scheme.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::find_research_md`].
+    pub async fn resolve_research_md(
+        research_root: &Path,
+        name: &ResearchName,
+        created_at: DateTime<Utc>,
+    ) -> Result<PathBuf> {
+        let canonical = Self::primary_research_md_path(research_root, name, created_at);
+        if fs::try_exists(&canonical).await.unwrap_or(false) {
+            return Ok(canonical);
+        }
+        Self::find_research_md(research_root, name).await
+    }
+
+    /// Locate an item's companion file, whether it uses the dated naming
+    /// scheme (`CORPA-YYYY-MM-DD.md`, most recent first) or the legacy undated
+    /// `CORPA.md`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResearchIoError::NotFound`] when the item directory holds no
+    /// companion file, and [`ResearchIoError::Io`] when the directory itself
+    /// cannot be read.
+    pub async fn find_corpa_md(research_root: &Path, name: &ResearchName) -> Result<PathBuf> {
+        let dir = Self::item_dir(research_root, name);
+        let mut read_dir = fs::read_dir(&dir).await.map_err(ResearchIoError::Io)?;
+        let mut names = Vec::new();
+        while let Some(entry) = read_dir.next_entry().await.map_err(ResearchIoError::Io)? {
+            if let Some(file_name) = entry.file_name().to_str() {
+                names.push(file_name.to_string());
+            }
+        }
+        let picked = names
+            .iter()
+            .filter(|n| is_dated_corpa_file_name(n))
+            .max()
+            .or_else(|| names.iter().find(|n| n.as_str() == LEGACY_CORPA_FILE_NAME))
+            .cloned();
+        match picked {
+            Some(file_name) => Ok(dir.join(file_name)),
+            None => Err(ResearchIoError::NotFound(name.to_string())),
+        }
+    }
+
+    /// Locate an item's companion file from the creation instant recorded in
+    /// its frontmatter, falling back to a directory scan.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::find_corpa_md`].
+    pub async fn resolve_corpa_md(
+        research_root: &Path,
+        name: &ResearchName,
+        created_at: DateTime<Utc>,
+    ) -> Result<PathBuf> {
+        let canonical = Self::primary_corpa_md_path(research_root, name, created_at);
+        if fs::try_exists(&canonical).await.unwrap_or(false) {
+            return Ok(canonical);
+        }
+        Self::find_corpa_md(research_root, name).await
+    }
+
+    /// Compute the path of a research item's companion file.
+    ///
+    /// Since the dated scheme this is the *legacy* undated name
+    /// ([`LEGACY_CORPA_FILE_NAME`]); use [`Self::resolve_corpa_md`] or
+    /// [`Self::find_corpa_md`] to locate the companion that actually exists.
     #[must_use]
     pub fn corpa_md_path(research_root: &Path, name: &ResearchName) -> PathBuf {
-        Self::item_dir(research_root, name).join("CORPA.md")
+        Self::item_dir(research_root, name).join(LEGACY_CORPA_FILE_NAME)
     }
 
     /// Compute the path of the `CONCEPTS.md` file produced by the `cluster`

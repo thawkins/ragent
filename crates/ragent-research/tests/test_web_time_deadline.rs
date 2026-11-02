@@ -222,7 +222,7 @@ async fn test_web_deadline_returns_partial_sources_and_proceeds() {
 
     // The complete corpus (deadline only truncates the *search stage*) must
     // survive all the way to a written RESEARCH.md citing every source.
-    let research_md = research_root.join("web-deadline-partial/RESEARCH.md");
+    let research_md = crate::research_report_path(&research_root, "web-deadline-partial").await;
     assert!(
         research_md.is_file(),
         "RESEARCH.md must be written after the gather phase"

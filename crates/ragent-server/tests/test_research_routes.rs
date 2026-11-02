@@ -107,9 +107,9 @@ async fn create_test_item(root: &std::path::Path, name: &str, topic: &str) {
         panic!("could not create research item '{name}': {e}");
     }
     // Publishing an item is a directory create followed by two file renames
-    // (`RESEARCH.md`, then `CORPA.md`), so a reader arriving in between sees a
-    // directory with only part of the pair. Wait for the files this helper
-    // promises rather than handing a half-published item to the request.
+    // (the dated report, then its companion), so a reader arriving in between
+    // sees a directory with only part of the pair. Wait for the files this
+    // helper promises rather than handing a half-published item to the request.
     let Ok(research_name) = ragent_research::ResearchName::try_new(name) else {
         return;
     };
@@ -120,8 +120,12 @@ async fn create_test_item(root: &std::path::Path, name: &str, topic: &str) {
         if !item_dir.is_dir() {
             return;
         }
-        if ragent_research::ResearchIo::research_md_path(root, &research_name).is_file()
-            && ragent_research::ResearchIo::corpa_md_path(root, &research_name).is_file()
+        if ragent_research::ResearchIo::find_research_md(root, &research_name)
+            .await
+            .is_ok()
+            && ragent_research::ResearchIo::find_corpa_md(root, &research_name)
+                .await
+                .is_ok()
         {
             return;
         }
@@ -154,10 +158,15 @@ fn auth_put(token: &str, uri: &str) -> Request<Body> {
 }
 
 /// Create a research item on disk and stamp a recorded invocation line into
-/// its RESEARCH.md frontmatter, as a real invocation-aware front-end would.
+/// its report frontmatter, as a real invocation-aware front-end would.
 async fn create_test_item_with_invocation(root: &std::path::Path, name: &str, invocation: &str) {
     create_test_item(root, name, "replay topic").await;
-    let path = root.join(name).join("RESEARCH.md");
+    // The report carries a dated name; resolve the file `create` just wrote.
+    let research_name = ragent_research::ResearchName::try_new(name)
+        .unwrap_or_else(|e| panic!("invalid research name '{name}': {e}"));
+    let path = ragent_research::ResearchIo::find_research_md(root, &research_name)
+        .await
+        .unwrap_or_else(|e| panic!("locating the report for '{name}' after create: {e}"));
     let content = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("reading {} after create: {e}", path.display()));
     let stamped = content.replacen(
