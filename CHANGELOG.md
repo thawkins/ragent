@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+## [1.0.164] - 2026-11-06
+
+Deep-refactor audit train (`docs/reports/deep-refactor-audit.md`): fifteen
+defects fixed (all but the `/swarm` log line and the router-prompt preview with a
+regression test that fails on the old code), and
+host-dependent test failures made deterministic.
+
+### Security
+
+- File tools could write outside the working directory. The path guard dropped
+  every `..` in the not-yet-existing tail of a path, so `ghost/../../x` passed
+  as `ghost/x`. `..` is now applied as a pop.
+
+### Fixed
+
+- A runtime-flag toggle (`/yolo` and friends) replaced the user's whole global
+  `ragent.json` when the file existed but could not be read (invalid UTF-8,
+  permission denied). Only a missing file now starts from `{}`.
+- A cancelled sub-agent was reported as `Completed` / `success: true`; the
+  foreground spawn path also always reported finish reason `stop`.
+- A storage error while ending a cancelled or interrupted turn skipped the
+  `MessageEnd` event and left the UI with an open message.
+- Concurrent `team_task_create` calls collided on the same `task-NNN` id; the id
+  is now allocated under the task-store lock.
+- The web UI was served from the build machine's source tree and returned 404
+  from any installed binary; `index.html` is now embedded.
+- `/swarm` panicked on a goal with a multi-byte character at byte 80.
+- `/spec govcreate` section splitting panicked on some non-ASCII text and
+  matched `PLAN.md` inside `TESTPLAN.md`.
+- The router's `<tier> mode` modifier fired on "models", "modern" and
+  "modeling".
+- `Retry-After: 0` used up every retry at once; the delay is floored at 1 s.
+- Meta-refresh detection read the page's first `<meta>` tag instead of the
+  refresh tag.
+- Derived research topics were cut one character short.
+- Feedback-log and router-prompt previews mixed byte and character counts.
+- Hygiene failures in the 1.0.163 deck code: two stale doc-test examples in
+  `deck.rs`, 22 `pub` items in a private module of `mcp/deck_sink.rs`, a local
+  `truncate_chars` in `deck_enrich.rs` that duplicated `strutil`, and a
+  masked-parameter `let _` in `deck_pptx.rs`.
+
+### Changed
+
+- `tower` is a dev-dependency of `ragent-server`.
+- The CI clippy gate passes on the stable 1.97 toolchain again (16 `Duration`
+  constructors use the larger unit, same values; a lint unknown to that
+  toolchain was dropped from `[workspace.lints.clippy]`).
+- 16 functions and one module with no callers anywhere in the workspace are
+  removed.
+- Tests that need a denied permission, a configured-provider-free host, or a
+  specific container runtime now detect the host instead of assuming it.
+
+## [1.0.163] - 2026-11-06
+
+Research diff decks: `/research deck <name>` now groups findings under the
+report's own concepts, one slide per concept, and the deck's PowerPoint export
+actually writes the `.pptx`. Also clears RUSTSEC-2026-0436 by moving
+`calamine` to 0.38.
+
 ### Security
 
 - **`calamine` 0.37 -> 0.38.** Clears RUSTSEC-2026-0436 (panic and unbounded
@@ -10,13 +69,6 @@
   workbooks, so the upgrade is contained. `cargo audit` now reports no
   vulnerabilities; the only remaining notice is the allowed `paste`
   unmaintained warning.
-
-## [1.0.163] - 2026-11-06
-
-Research diff decks: `/research deck <name>` now groups findings under the
-report's own concepts, one slide per concept, and the deck's PowerPoint export
-actually writes the `.pptx`. Also clears RUSTSEC-2026-0436 by moving
-`calamine` to 0.38.
 
 ### Fixed
 
@@ -169,49 +221,6 @@ actually writes the `.pptx`. Also clears RUSTSEC-2026-0436 by moving
   a production path; `diff_reports` and `render_deck` are public pure functions
   over in-memory strings so both stages are unit-testable without filesystem
   access. Documented in `docs/howtos/research.md` § 4.12.
-
-### Deep-refactor audit train
-
-Deep-refactor audit train (`docs/reports/deep-refactor-audit.md`): fifteen
-defects fixed (all but the `/swarm` log line and the router-prompt preview with a
-regression test that fails on the old code), and
-host-dependent test failures made deterministic.
-
-#### Security
-
-- File tools could write outside the working directory. The path guard dropped
-  every `..` in the not-yet-existing tail of a path, so `ghost/../../x` passed
-  as `ghost/x`. `..` is now applied as a pop.
-
-#### Fixed
-
-- A runtime-flag toggle (`/yolo` and friends) replaced the user's whole global
-  `ragent.json` when the file existed but could not be read (invalid UTF-8,
-  permission denied). Only a missing file now starts from `{}`.
-- A cancelled sub-agent was reported as `Completed` / `success: true`; the
-  foreground spawn path also always reported finish reason `stop`.
-- A storage error while ending a cancelled or interrupted turn skipped the
-  `MessageEnd` event and left the UI with an open message.
-- Concurrent `team_task_create` calls collided on the same `task-NNN` id; the id
-  is now allocated under the task-store lock.
-- The web UI was served from the build machine's source tree and returned 404
-  from any installed binary; `index.html` is now embedded.
-- `/swarm` panicked on a goal with a multi-byte character at byte 80.
-- `/spec govcreate` section splitting panicked on some non-ASCII text and
-  matched `PLAN.md` inside `TESTPLAN.md`.
-- The router's `<tier> mode` modifier fired on "models", "modern" and
-  "modeling".
-- `Retry-After: 0` used up every retry at once; the delay is floored at 1 s.
-- Meta-refresh detection read the page's first `<meta>` tag instead of the
-  refresh tag.
-- Derived research topics were cut one character short.
-- Feedback-log and router-prompt previews mixed byte and character counts.
-
-#### Changed
-
-- `tower` is a dev-dependency of `ragent-server`.
-- Tests that need a denied permission, a configured-provider-free host, or a
-  specific container runtime now detect the host instead of assuming it.
 
 ## [1.0.162] - 2026-11-02
 
