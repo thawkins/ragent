@@ -696,9 +696,8 @@ pub trait DeckSlideSink: Send + Sync {
     async fn write_deck_with_progress(
         &self,
         plan: &DeckSlidePlan,
-        progress: Option<&dyn DeckProgress>,
+        _progress: Option<&dyn DeckProgress>,
     ) -> DeckPptxOutcome {
-        let _ = progress;
         self.write_deck(plan).await
     }
 }

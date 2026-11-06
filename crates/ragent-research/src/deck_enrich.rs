@@ -286,7 +286,7 @@ fn build_summary_prompt(headline: &str, blocks: &[String], max_chars: usize) -> 
     prompt.push_str(headline.trim());
     prompt.push_str("\n\n");
     for block in blocks {
-        let block = truncate_chars(&collapse_whitespace(block), FINDING_PROMPT_MAX_CHARS);
+        let block = cap_prompt_text(&collapse_whitespace(block), FINDING_PROMPT_MAX_CHARS);
         prompt.push_str(&block);
         prompt.push_str("\n\n");
     }
@@ -308,23 +308,27 @@ fn build_relevance_prompt(concepts: &[(String, String)], findings: &[(String, St
     );
     prompt.push_str("CONCEPTS\n");
     for (idx, (_, text)) in concepts.iter().enumerate() {
-        let text = truncate_chars(&collapse_whitespace(text), CONCEPT_PROMPT_MAX_CHARS);
+        let text = cap_prompt_text(&collapse_whitespace(text), CONCEPT_PROMPT_MAX_CHARS);
         prompt.push_str(&format!("{}. {text}\n", idx + 1));
     }
     prompt.push_str("\nFINDINGS\n");
     for (idx, (_, text)) in findings.iter().enumerate() {
-        let text = truncate_chars(&collapse_whitespace(text), FINDING_PROMPT_MAX_CHARS);
+        let text = cap_prompt_text(&collapse_whitespace(text), FINDING_PROMPT_MAX_CHARS);
         prompt.push_str(&format!("{}. {text}\n", idx + 1));
     }
     prompt
 }
 
 /// Cap `text` at `limit` characters without splitting a UTF-8 code point.
-fn truncate_chars(text: &str, limit: usize) -> String {
+///
+/// Keeps `limit` characters (the `...` marker does not count toward it) and
+/// drops trailing whitespace before the marker, which is why this is not
+/// `strutil::truncate_chars` (that one reserves three of the budget).
+fn cap_prompt_text(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_string();
     }
-    let head: String = text.chars().take(limit).collect();
+    let head = ragent_types::strutil::truncate_chars_no_ellipsis(text, limit);
     format!("{}...", head.trim_end())
 }
 

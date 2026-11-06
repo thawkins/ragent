@@ -716,7 +716,7 @@ fn item_key(element: DeckElement, text: &str) -> String {
 /// use ragent_research::deck::{DeckElement, normalize_identity};
 ///
 /// assert_eq!(
-///     normalize_identity(DeckElement::Concepts, "Bold **claim** here [#12]"),
+///     normalize_identity(DeckElement::ExecutiveSummary, "Bold **claim** here [#12]"),
 ///     "bold claim here"
 /// );
 /// ```
@@ -1049,8 +1049,8 @@ impl DeckDiff {
 /// ```
 /// use ragent_research::deck::{ItemStatus, diff_reports, parse_report};
 ///
-/// let older = parse_report("## Open Questions\n\n- Will it ship?\n").unwrap();
-/// let newer = parse_report("## Open Questions\n\n- Will it ship?\n").unwrap();
+/// let older = parse_report("## Executive Summary\n\nIt will ship.\n").unwrap();
+/// let newer = parse_report("## Executive Summary\n\nIt will ship.\n").unwrap();
 /// assert_eq!(diff_reports(&older, &newer).count(ItemStatus::Old), 1);
 /// ```
 #[must_use]

@@ -558,52 +558,52 @@ impl SlideRender for DeckSlide {
 /// is one coherent grid rather than a set of numbers scattered through the code.
 mod style {
     /// Slide width in points.
-    pub const WIDTH: f64 = 960.0;
+    pub(super) const WIDTH: f64 = 960.0;
     /// Slide height in points.
-    pub const HEIGHT: f64 = 540.0;
+    pub(super) const HEIGHT: f64 = 540.0;
     /// Left content margin.
-    pub const MARGIN: f64 = 64.0;
+    pub(super) const MARGIN: f64 = 64.0;
     /// Right content edge.
-    pub const RIGHT: f64 = WIDTH - MARGIN;
+    pub(super) const RIGHT: f64 = WIDTH - MARGIN;
     /// Text column width.
-    pub const COLUMN: f64 = RIGHT - MARGIN;
+    pub(super) const COLUMN: f64 = RIGHT - MARGIN;
     /// The status accent bar down the left edge.
-    pub const ACCENT_X: f64 = 40.0;
+    pub(super) const ACCENT_X: f64 = 40.0;
     /// The accent bar's top edge.
-    pub const ACCENT_Y: f64 = 96.0;
+    pub(super) const ACCENT_Y: f64 = 96.0;
     /// The accent bar's width.
-    pub const ACCENT_W: f64 = 8.0;
+    pub(super) const ACCENT_W: f64 = 8.0;
     /// The accent bar's height.
-    pub const ACCENT_H: f64 = 96.0;
+    pub(super) const ACCENT_H: f64 = 96.0;
     /// The status badge's left edge.
-    pub const BADGE_X: f64 = WIDTH - MARGIN - 112.0;
+    pub(super) const BADGE_X: f64 = WIDTH - MARGIN - 112.0;
     /// The status badge's top edge.
-    pub const BADGE_Y: f64 = 36.0;
+    pub(super) const BADGE_Y: f64 = 36.0;
     /// The status badge's width.
-    pub const BADGE_W: f64 = 112.0;
+    pub(super) const BADGE_W: f64 = 112.0;
     /// The status badge's height.
-    pub const BADGE_H: f64 = 26.0;
+    pub(super) const BADGE_H: f64 = 26.0;
     /// The body text box's top edge, clear of the title and badge.
-    pub const BODY_Y: f64 = 150.0;
+    pub(super) const BODY_Y: f64 = 150.0;
     /// The body text box's height.
-    pub const BODY_H: f64 = HEIGHT - BODY_Y - 56.0;
+    pub(super) const BODY_H: f64 = HEIGHT - BODY_Y - 56.0;
     /// Title font size in points.
-    pub const TITLE_SIZE: f64 = 30.0;
+    pub(super) const TITLE_SIZE: f64 = 30.0;
     /// Body font size in points.
-    pub const BODY_SIZE: f64 = 16.0;
+    pub(super) const BODY_SIZE: f64 = 16.0;
     /// Body line spacing, as a multiple of the font size.
-    pub const BODY_LEADING: f64 = 1.25;
+    pub(super) const BODY_LEADING: f64 = 1.25;
 
     /// Ink: titles and body text.
-    pub const INK: &str = "#1F2A44";
+    pub(super) const INK: &str = "#1F2A44";
     /// Table header band.
-    pub const BAND: &str = "#EEF1F6";
+    pub(super) const BAND: &str = "#EEF1F6";
     /// Hairline rules and table borders.
-    pub const RULE: &str = "#D8DCE4";
+    pub(super) const RULE: &str = "#D8DCE4";
 
     /// The colour a status badge is drawn in.
     #[must_use]
-    pub fn status_colour(tag: &str) -> &'static str {
+    pub(super) fn status_colour(tag: &str) -> &'static str {
         match tag {
             "NEW" => "#1D6FB8",
             "ADDED" => "#2E8B57",
