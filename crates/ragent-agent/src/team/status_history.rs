@@ -102,16 +102,6 @@ impl StatusHistoryEntry {
         }
     }
 
-    /// The status word the member now holds, decoded from `to`.
-    ///
-    /// Falls back to the raw token when it is not one of the canonical ones, so
-    /// a line written by a future release still renders something truthful
-    /// instead of being dropped.
-    #[must_use]
-    pub fn to_status(&self) -> Option<MemberStatus> {
-        MemberStatus::from_wire(&self.to)
-    }
-
     /// The one-line human rendering used by `team_status` (FR-036).
     ///
     /// Both status words and the cause go through the canonical mapping, so a

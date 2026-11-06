@@ -368,15 +368,6 @@ pub async fn rollback_to_capture(capture: LoopCapture) -> Result<()> {
     Ok(())
 }
 
-/// Whether `capture` recorded a usable snapshot (i.e. rollback is possible).
-#[must_use]
-pub fn capture_is_rollbackable(capture: &LoopCapture) -> bool {
-    capture
-        .snapshot
-        .as_ref()
-        .is_some_and(|s| !s.files.is_empty())
-}
-
 #[cfg(test)]
 #[path = "../../tests/inline/loop_capture_tests.rs"]
 mod tests;

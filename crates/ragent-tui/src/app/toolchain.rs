@@ -598,20 +598,6 @@ pub fn probe_version_args(program: &str, args: &[&str]) -> VersionResult {
     }
 }
 
-/// Capture the version of an installed runtime command (FR-008).
-///
-/// Executes `<command> <version-flag>` - the per-tool flag from
-/// [`version_flag_for`], default `--version` - and returns the first
-/// non-empty line from stdout or stderr, trimmed. The probe is bounded by
-/// [`VERSION_PROBE_TIMEOUT`]; an overrunning child is killed and reported as
-/// [`VersionResult::Timeout`] (FR-012). Spawn failures and textless exits
-/// yield [`VersionResult::Unknown`]; no failure propagates a panic or blocks
-/// the caller.
-#[must_use]
-pub fn probe_version(command: &str) -> VersionResult {
-    probe_version_args(command, &[version_flag_for(command)])
-}
-
 // ---------------------------------------------------------------------------
 // Full walk (T-011, FR-004 / FR-006 / FR-009 / FR-010)
 // ---------------------------------------------------------------------------

@@ -151,18 +151,6 @@ impl ResearchState {
         }
     }
 
-    /// Apply a user follow-up message to an in-progress state (T-014).
-    ///
-    /// The message is appended to the topic and added as a new high-priority
-    /// pending sub-question so the next iteration will gather evidence for it.
-    pub fn apply_follow_up(&mut self, message: impl Into<String>) {
-        let msg = message.into();
-        let id = format!("follow-up-{}", self.plan.sub_questions.len() + 1);
-        self.plan.topic.push_str(&format!("\n\nFollow-up: {msg}"));
-        self.add_sub_question(&id, &msg, 10);
-        self.set_sub_question_status(&id, SubQuestionStatus::Pending);
-    }
-
     /// Add a follow-up query produced by the missing-link detector.
     pub fn add_follow_up_query(&mut self, query: impl Into<String>) {
         let q = query.into();

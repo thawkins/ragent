@@ -9,7 +9,6 @@ use dashmap::DashMap;
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::time::Duration;
 
 use super::policy;
 use super::{AgentRegistry, Router};
@@ -237,21 +236,6 @@ impl Coordinator {
 
     /// Constructor that accepts a custom Router implementation.
     pub fn with_router(registry: AgentRegistry, router: Arc<dyn Router>) -> Self {
-        Self {
-            registry,
-            router,
-            jobs: Arc::new(DashMap::new()),
-            metrics: Arc::new(Metrics::new()),
-            policy: None,
-        }
-    }
-
-    /// Constructor that sets a custom per-request timeout on the default `InProcessRouter`.
-    #[must_use]
-    pub fn with_request_timeout(registry: AgentRegistry, timeout: Duration) -> Self {
-        let mut r = super::router::InProcessRouter::new(registry.clone());
-        r.request_timeout = timeout;
-        let router: Arc<dyn Router> = Arc::new(r);
         Self {
             registry,
             router,

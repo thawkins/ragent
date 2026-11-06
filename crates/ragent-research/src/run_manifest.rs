@@ -11,7 +11,6 @@
 //! [`StepStatus::Skipped`] rather than completed.
 
 use crate::run_config::{ResearchMode, Tier};
-use crate::source::Source;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -423,24 +422,6 @@ impl RunManifest {
     /// Mark the entire run as completed.
     pub fn complete_run(&mut self) {
         self.completed_at = Some(Utc::now());
-    }
-
-    /// Update captured-source counters and vault source ids.
-    pub fn record_sources(&mut self, sources: &[Source]) {
-        for src in sources {
-            self.sources_count += 1;
-            if let Source::Web {
-                url, media_type, ..
-            } = src
-            {
-                if media_type == "pdf" {
-                    self.pdf_count += 1;
-                } else if media_type == "youtube" {
-                    self.youtube_count += 1;
-                }
-                self.vault_sources.insert(url.clone(), self.run_tag.clone());
-            }
-        }
     }
 
     /// Compute progress as `(completed_or_skipped, total)`.

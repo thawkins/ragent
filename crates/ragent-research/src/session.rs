@@ -22,7 +22,7 @@ use crate::document::{ResearchDocument, mark_in_progress};
 use crate::engine::{Critic, EngineConfig, IterativeEngine};
 use crate::io::ResearchIo;
 use crate::item::ResearchItem;
-use crate::local_gatherer::{LocalGatherConfig, LocalGatherer, LocalTool};
+use crate::local_gatherer::{LocalGatherConfig, LocalGatherer};
 use crate::locus::{analyze_loci, investigate_depth};
 use crate::manager::{ResearchError, ResearchManager, Result};
 use crate::patcher::{PatchResult, build_surgical_patches};
@@ -2013,20 +2013,6 @@ impl ResearchSession {
             self.web = Some(web.with_gather_log(log));
         }
         self
-    }
-
-    /// Build a session backed only by a local tool (no web search).
-    pub fn with_local_tool(
-        manager: ResearchManager,
-        local_tool: Arc<dyn LocalTool>,
-        analysis: Arc<dyn AnalysisEngine>,
-    ) -> Self {
-        Self::new(
-            manager,
-            None,
-            Some(LocalGatherer::new(local_tool)),
-            analysis,
-        )
     }
 }
 

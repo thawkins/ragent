@@ -112,11 +112,3 @@ impl PendingVerdicts {
             .is_some_and(|calls| calls.contains(call_id))
     }
 }
-
-/// Test-only re-export of [`PendingVerdicts`] operations used by integration
-/// tests, which live in a separate crate.
-#[doc(hidden)]
-#[must_use]
-pub fn pending_verdicts_for_test() -> PendingVerdicts {
-    PendingVerdicts::new()
-}

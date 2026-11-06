@@ -127,11 +127,6 @@ impl TierRouter {
         &self.manifest
     }
 
-    /// Mutably borrow the underlying manifest.
-    pub fn manifest_mut(&mut self) -> &mut RunManifest {
-        &mut self.manifest
-    }
-
     /// Return the tier selected for this run.
     #[must_use]
     pub fn tier(&self) -> Tier {

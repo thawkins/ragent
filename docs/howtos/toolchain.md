@@ -352,7 +352,7 @@ by the 2-second per-probe timeout.
 | Language classification + runtime mapping | `crates/ragent-tui/src/app/toolchain.rs` (`LANGUAGE_RUNTIMES`, `LanguageClass`, `LanguageRuntime`) |
 | Exhaustiveness check | `toolchain.rs` (`exhaustiveness_errors`) |
 | Presence probe (`PATH` walk) | `toolchain.rs` (`probe_installed`, `resolve_in_dirs`) |
-| Version probes + overrides | `toolchain.rs` (`probe_version`, `VERSION_FLAG_OVERRIDES`, `VERSION_PROBE_ARGS_OVERRIDES`, `VERSION_PROBE_TIMEOUT`) |
+| Version probes + overrides | `toolchain.rs` (`probe_version_args`, `version_flag_for`, `VERSION_FLAG_OVERRIDES`, `VERSION_PROBE_ARGS_OVERRIDES`, `VERSION_PROBE_TIMEOUT`) |
 | Report walk | `toolchain.rs` (`build_report_rows`) |
 | Markdown / JSON renderers | `toolchain.rs` (`render_markdown_report`, `render_json_report`) |
 | Slash dispatch + help/usage/filter/`--json` handling | `crates/ragent-tui/src/app/slash.rs` (`handle_toolchain_command`, `handle_toolchain_help`, `handle_toolchain_list`, `handle_toolchain_unknown`) |

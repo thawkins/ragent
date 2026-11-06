@@ -2246,34 +2246,6 @@ impl TaskStore {
         .await?
     }
 
-    /// PERF-016: `spawn_blocking` wrapper around [`TaskStore::cancel`].
-    pub async fn cancel_blocking(
-        &self,
-        task_id: String,
-        actor: String,
-    ) -> Result<TaskCancellation> {
-        let team_dir = self.team_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            let store = Self::open(&team_dir)?;
-            store.cancel(&task_id, &actor)
-        })
-        .await?
-    }
-
-    /// `spawn_blocking` wrapper around the pre-assign half of the claim path.
-    pub async fn pre_assign_task_blocking(
-        &self,
-        task_id: String,
-        agent_id: String,
-    ) -> Result<Task> {
-        let team_dir = self.team_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            let store = Self::open(&team_dir)?;
-            store.pre_assign_task(&task_id, &agent_id)
-        })
-        .await?
-    }
-
     /// PERF-016: `spawn_blocking` wrapper around [`TaskStore::update_task`].
     pub async fn update_task_blocking<F>(&self, task_id: String, f: F) -> Result<Task>
     where

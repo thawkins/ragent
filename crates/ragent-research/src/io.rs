@@ -467,19 +467,6 @@ impl ResearchIo {
         Ok(())
     }
 
-    /// The lock file that serialises writers of one item's files.
-    ///
-    /// `research_md_path` and `corpa_md_path` live in the same directory, and
-    /// [`Self::atomic_write`] renames a temp file onto them. A writer that
-    /// rewrites `RESEARCH.md` while another publishes the pair must not be
-    /// interleaved with it, or a reader can observe the new `RESEARCH.md` beside
-    /// a missing (or half-published) `CORPA.md`. Writers of one item take this
-    /// lock; readers never do.
-    #[must_use]
-    pub fn item_write_lock_path(research_root: &Path, name: &ResearchName) -> PathBuf {
-        Self::item_dir(research_root, name).join(".write.lock")
-    }
-
     /// Recursively remove a research item directory.
     pub async fn remove_item(research_root: &Path, name: &ResearchName) -> Result<()> {
         let dir = Self::item_dir(research_root, name);

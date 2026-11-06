@@ -220,12 +220,6 @@ impl CodeIndex {
         self.store.try_lock().ok()
     }
 
-    /// Try to acquire the FTS mutex (for testing concurrency behaviour).
-    #[doc(hidden)]
-    pub fn try_lock_fts_for_test(&self) -> Option<std::sync::MutexGuard<'_, FtsIndex>> {
-        self.fts.try_lock().ok()
-    }
-
     /// Set the graph-busy flag directly (for testing busy-state reporting).
     #[doc(hidden)]
     pub fn set_graph_busy_for_test(&self, busy: bool) {
@@ -1503,15 +1497,6 @@ impl WatchSession {
     #[must_use]
     pub fn is_stopped(&self) -> bool {
         self.worker_handle.is_stopped()
-    }
-
-    /// Whether the background worker thread is still running.
-    ///
-    /// `false` indicates the worker panicked or never started, so no further
-    /// automatic indexing will happen (FUNC-018).
-    #[must_use]
-    pub fn is_worker_running(&self) -> bool {
-        self.worker_handle.is_running()
     }
 
     /// Manually queue a single file for re-indexing.

@@ -504,19 +504,6 @@ impl SourceVault {
             .await
     }
 
-    /// Async [`Self::read_summary`]: off-loads the blocking vault query
-    /// (FUNC-052 - the sync method holds a `Mutex<Connection>` and must not be
-    /// called directly from an async task).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the blocking task panics or the query fails.
-    pub async fn read_summary_async(&self, source_id: &str) -> Result<Option<String>> {
-        let source_id = source_id.to_string();
-        self.run_blocking("vault read_summary", move |v| v.read_summary(&source_id))
-            .await
-    }
-
     /// Async [`Self::list`]: off-loads the blocking vault query.
     ///
     /// # Errors

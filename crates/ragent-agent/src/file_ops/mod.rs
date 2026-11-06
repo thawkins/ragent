@@ -13,8 +13,6 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 mod api;
-/// Wrapper utilities for file operations.
-pub mod wrapper;
 pub use api::apply_batch_edits;
 
 /// Result of reading a single file.
