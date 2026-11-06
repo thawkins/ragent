@@ -33,7 +33,7 @@ pub fn shared_client() -> Client {
                 .pool_idle_timeout(Duration::from_secs(90))
                 .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
                 .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-                .tcp_keepalive(Duration::from_secs(60))
+                .tcp_keepalive(Duration::from_mins(1))
                 .build()
                 .unwrap_or_else(|e| {
                     tracing::warn!(

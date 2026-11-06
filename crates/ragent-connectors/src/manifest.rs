@@ -49,7 +49,7 @@ pub const MAX_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Wall-clock budget for one install-archive download.
-pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Read/write chunk size for streaming a download to disk.
 const STREAM_CHUNK_BYTES: usize = 65_536;

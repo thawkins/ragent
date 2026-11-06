@@ -46,7 +46,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// Whole-request timeout for a non-streaming MCP HTTP call (connect + send +
 /// read body). Bounds a server that accepts the connection then stalls.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// Connection-establishment timeout for the shared MCP HTTP client.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

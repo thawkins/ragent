@@ -22,7 +22,7 @@ use std::time::Duration;
 /// Verification commands are typically quick test/grep invocations; a run
 /// that exceeds this budget is treated as a failure (the loop must not hang
 /// waiting on a stalled verification step).
-const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(600);
+const VERIFICATION_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// Maximum number of characters kept from the head of the captured output.
 const VERIFICATION_HEAD_CHARS: usize = 8000;

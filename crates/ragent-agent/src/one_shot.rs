@@ -109,7 +109,7 @@ pub async fn send_one_shot(
         stream_timeout_secs: None,
     };
 
-    let overall_timeout = std::time::Duration::from_secs(300);
+    let overall_timeout = std::time::Duration::from_mins(5);
     let response_fut = async {
         let mut stream = client.chat(request).await?;
         let mut chunks = Vec::new();

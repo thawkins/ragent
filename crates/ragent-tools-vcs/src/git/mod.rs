@@ -48,7 +48,7 @@ use std::time::Duration;
 /// Wall-clock budget for a single local `git` invocation. An interactive
 /// credential prompt or a hung network operation would otherwise block a tokio
 /// worker forever (FUNC-050).
-pub const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+pub const GIT_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Captured result of a single `git` subprocess invocation.
 pub struct GitOutput {

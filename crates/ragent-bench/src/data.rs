@@ -912,7 +912,7 @@ fn download_url_bytes(url: &str) -> Result<Vec<u8>> {
         // SEC-069: bound the total request/read time and the redirect chain so a
         // slow-loris dataset endpoint cannot hang `/bench init --full` forever.
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_mins(1))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if attempt.previous().len() >= 5 || attempt.url().scheme() != "https" {
                     attempt.error("benchmark download refused a redirect (too many hops or non-https)")

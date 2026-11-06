@@ -4287,7 +4287,7 @@ impl SessionProcessor {
         match client.chat(init_request).await {
             Ok(mut stream) => loop {
                 let ev =
-                    match tokio::time::timeout(std::time::Duration::from_secs(60), stream.next())
+                    match tokio::time::timeout(std::time::Duration::from_mins(1), stream.next())
                         .await
                     {
                         Ok(Some(event)) => event,

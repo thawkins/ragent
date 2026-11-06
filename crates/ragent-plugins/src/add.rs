@@ -66,7 +66,7 @@ pub const MAX_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024;
 /// Was a bare `from_secs(60)` inside [`download_and_extract`]; naming it keeps
 /// the crate's other limits (`MAX_ARCHIVE_BYTES`, `FetchLimits::DEFAULT_TIMEOUT`)
 /// company.
-pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
 /// Read/write chunk size for streaming a download to disk.
 const STREAM_CHUNK_BYTES: usize = 65_536;

@@ -119,7 +119,6 @@ double_must_use = "allow"
 # An intentional production `.unwrap()`/`.expect()` is exempted in place with a
 # same-line `// no-panic-ok: <reason>` (see scripts/check_security_unwraps.py).
 unused_async = "allow"
-unused_async_trait_impl = "allow"
 # Additional lints from second auto-fix pass
 bool_to_int_with_if = "allow"
 cast_lossless = "allow"

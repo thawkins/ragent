@@ -48,7 +48,7 @@ pub struct FetchLimits {
 
 impl FetchLimits {
     /// Compiled default timeout: 10 seconds.
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(10_000);
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
     /// Compiled default body ceiling: 2 MiB.
     pub const DEFAULT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 

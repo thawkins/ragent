@@ -66,11 +66,11 @@ pub struct CatalogueLimits {
 
 impl CatalogueLimits {
     /// Compiled default timeout: 10 seconds.
-    pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(10_000);
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
     /// Compiled default body ceiling: 2 MiB.
     pub const DEFAULT_MAX_BYTES: u64 = 2 * 1024 * 1024;
     /// Compiled default cache TTL: 1 hour.
-    pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(3_600);
+    pub const DEFAULT_CACHE_TTL: Duration = Duration::from_hours(1);
 
     /// Build limits from a timeout, a byte ceiling, and a cache TTL.
     #[must_use]

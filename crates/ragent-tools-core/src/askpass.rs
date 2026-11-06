@@ -57,7 +57,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// because `from_mins` is nightly-only and this crate targets stable Rust
 /// (the workspace happens to build on nightly, but the constant must not
 /// depend on that).
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.

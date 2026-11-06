@@ -1211,7 +1211,7 @@ pub async fn run_tui(
 fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time::Instant {
     let now = std::time::Instant::now();
     // Default: sleep for a long time when there is nothing animate to show.
-    let mut deadline = now + Duration::from_secs(60);
+    let mut deadline = now + Duration::from_mins(1);
 
     // Permission countdown updates every second.
     if !app.permission_queue.is_empty() {
