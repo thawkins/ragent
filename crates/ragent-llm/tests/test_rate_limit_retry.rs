@@ -196,3 +196,27 @@ async fn test_client_error_is_not_retried() {
 fn truncate_for_log(url: &str) -> &str {
     url
 }
+
+#[tokio::test]
+async fn test_rate_limit_retry_after_zero_is_floored_at_one_second() {
+    // `Retry-After: 0` must not make the retry loop hammer a rate-limited
+    // endpoint: the shared guard floors the honoured delay at one second.
+    let (url, served) = spawn_scripted_server(vec![Reply::RateLimited(0), Reply::Status(200)])
+        .await
+        .expect("spawn server");
+    let started = Instant::now();
+
+    let response = execute_with_retry(
+        || async { client().get(truncate_for_log(&url)).send().await },
+        3,
+    )
+    .await
+    .expect("the retry after a 429 must return the second attempt's response");
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(served.load(Ordering::SeqCst), 2);
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "Retry-After: 0 must be floored at one second"
+    );
+}

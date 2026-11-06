@@ -2605,22 +2605,10 @@ impl Config {
     /// Returns an error if the config directory cannot be resolved, an existing
     /// config file is present but not valid JSON, or the write fails.
     pub(crate) fn set_global_bool_key(key: &str, value: bool) -> anyhow::Result<PathBuf> {
-        let path = match Self::config_write_target() {
-            Some(explicit) => explicit,
-            None => Self::global_config_path()
-                .ok_or_else(|| anyhow::anyhow!("no config directory found"))?,
-        };
-        let mut json: serde_json::Value = match std::fs::read_to_string(&path) {
-            Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).map_err(|e| {
-                anyhow::anyhow!("Failed to parse global config '{}': {}", path.display(), e)
-            })?,
-            _ => serde_json::Value::Object(serde_json::Map::new()),
-        };
-        let object = json.as_object_mut().ok_or_else(|| {
-            anyhow::anyhow!("global config '{}' is not a JSON object", path.display())
+        let path = Self::edit_global_config(|object| {
+            object.insert(key.to_string(), serde_json::Value::Bool(value));
+            Ok(true)
         })?;
-        object.insert(key.to_string(), serde_json::Value::Bool(value));
-
         // Attribution trail: this is the single writer of the user-global
         // config's privileged runtime-flag keys, so an unexplained flip on disk
         // (the intermittent "YOLO keeps going off" report) can be tied back to
@@ -2631,13 +2619,6 @@ impl Config {
             path = %path.display(),
             "setting user-global config key"
         );
-
-        let json = serde_json::to_string_pretty(&json)
-            .map_err(|e| anyhow::anyhow!("Failed to serialise global config: {}", e))?;
-        Self::write_config_if_changed(&path, &json)?;
-        // The write changed a file the M-025 load cache is keyed on; drop it so
-        // the next `load` re-reads the new value.
-        Self::invalidate_load_cache();
         Ok(path)
     }
 
@@ -2668,11 +2649,25 @@ impl Config {
             None => Self::global_config_path()
                 .ok_or_else(|| anyhow::anyhow!("no config directory found"))?,
         };
+        // Only a missing (or blank) file starts from an empty object. Any other
+        // read failure - permission denied, invalid UTF-8 - must propagate:
+        // treating it as empty would overwrite the user's whole file with the
+        // single edited key.
         let mut json: serde_json::Value = match std::fs::read_to_string(&path) {
             Ok(raw) if !raw.trim().is_empty() => serde_json::from_str(&raw).map_err(|e| {
                 anyhow::anyhow!("Failed to parse global config '{}': {}", path.display(), e)
             })?,
-            _ => serde_json::Value::Object(serde_json::Map::new()),
+            Ok(_) => serde_json::Value::Object(serde_json::Map::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                serde_json::Value::Object(serde_json::Map::new())
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to read global config '{}': {}",
+                    path.display(),
+                    e
+                ));
+            }
         };
         let object = json.as_object_mut().ok_or_else(|| {
             anyhow::anyhow!("global config '{}' is not a JSON object", path.display())

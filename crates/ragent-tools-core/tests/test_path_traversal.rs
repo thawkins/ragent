@@ -352,3 +352,44 @@ fn check_path_rejects_alias_to_sibling_directory() {
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_file(&alias);
 }
+
+// ============================================================================
+// `..` inside a not-yet-existing parent (regression: the missing-tail walk used
+// to drop every `..`, so `ghost/../../x` was checked as `ghost/x`)
+// ============================================================================
+
+#[test]
+fn check_rejects_parent_dir_through_missing_directory() {
+    let dir = tmp_dir();
+    let escape = dir.join("ghost").join("..").join("..").join("escape.txt");
+    assert!(
+        check_path_within_root(&escape, &dir).is_err(),
+        "`..` through a missing directory must not be dropped"
+    );
+}
+
+#[test]
+fn check_allows_parent_dir_that_stays_inside_root() {
+    let dir = tmp_dir();
+    let inside = dir.join("ghost").join("..").join("inside.txt");
+    assert!(check_path_within_root(&inside, &dir).is_ok());
+}
+
+#[tokio::test]
+async fn write_rejects_traversal_through_missing_directory() {
+    let dir = tmp_dir();
+    let unique = format!("escape-{}.txt", std::process::id());
+    let path = format!("ghost/../../{unique}");
+    let out = WriteTool
+        .execute(json!({"path": path, "content": "x"}), &ctx(&dir))
+        .await;
+    assert!(
+        out.is_err(),
+        "write must reject ghost/../../ escape: {out:?}"
+    );
+    let outside = dir.parent().map(|p| p.join(&unique));
+    assert!(
+        outside.is_some_and(|p| !p.exists()),
+        "nothing may be written outside the root"
+    );
+}

@@ -220,24 +220,13 @@ pub fn check_path_within_any_root(path: &Path, roots: &[&Path]) -> anyhow::Resul
             .canonicalize()
             .unwrap_or_else(|_| roots[0].to_path_buf().clean_path());
 
-        let mut existing: &Path = path;
-        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
-        loop {
-            if existing.exists() {
-                let mut base = existing.canonicalize()?;
-                for part in tail.iter().rev() {
-                    base = base.join(part);
-                }
-                break base;
+        resolve_missing_path(path, fallback_root, |p| {
+            if p.exists() {
+                Ok(Some(p.canonicalize()?))
+            } else {
+                Ok(None)
             }
-            if let Some(name) = existing.file_name() {
-                tail.push(name);
-            }
-            match existing.parent() {
-                Some(parent) => existing = parent,
-                None => break fallback_root.clone(),
-            }
-        }
+        })?
     };
 
     // Check if path is within any of the allowed roots
@@ -269,6 +258,59 @@ pub fn check_path_within_any_root(path: &Path, roots: &[&Path]) -> anyhow::Resul
         path.display(),
         canonical.display()
     );
+}
+
+/// Resolve a path that does not exist (yet) to the canonical form it would
+/// have once created.
+///
+/// Walks up to the longest prefix `canonical_of` resolves, then re-applies the
+/// remaining components lexically. A `..` in the missing tail is applied as a
+/// pop, never dropped: once `ghost` is created the OS resolves
+/// `wd/ghost/../../x` to the parent of `wd`, so the check must see that
+/// location too. Lexical popping is sound because no component of the missing
+/// tail can be a symlink, and the prefix it may pop into is already canonical.
+///
+/// # Arguments
+///
+/// * `path` - The path to resolve.
+/// * `fallback_root` - Base used when no prefix of `path` exists.
+/// * `canonical_of` - Returns the canonical form of an existing path, or
+///   `None` when it does not exist.
+///
+/// # Errors
+///
+/// Propagates any error `canonical_of` returns.
+fn resolve_missing_path(
+    path: &Path,
+    fallback_root: PathBuf,
+    mut canonical_of: impl FnMut(&Path) -> anyhow::Result<Option<PathBuf>>,
+) -> anyhow::Result<PathBuf> {
+    use std::path::Component;
+
+    let mut existing: &Path = path;
+    let mut tail: Vec<Component<'_>> = Vec::new();
+    let mut base = loop {
+        if let Some(c) = canonical_of(existing)? {
+            break c;
+        }
+        match existing.components().next_back() {
+            Some(c @ (Component::Normal(_) | Component::ParentDir)) => tail.push(c),
+            Some(Component::CurDir | Component::RootDir | Component::Prefix(_)) | None => {}
+        }
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => break fallback_root,
+        }
+    };
+    for part in tail.iter().rev() {
+        match part {
+            Component::ParentDir => {
+                base.pop();
+            }
+            other => base.push(other.as_os_str()),
+        }
+    }
+    Ok(base)
 }
 
 /// Cached variant of [`check_path_within_any_root`] (FR-017).
@@ -304,24 +346,7 @@ pub fn check_path_within_any_root_cached(
             .get_or_canonicalize(roots[0])
             .unwrap_or_else(|| roots[0].to_path_buf().clean_path());
 
-        let mut existing: &Path = path;
-        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
-        loop {
-            if let Some(c) = cache.get_or_canonicalize(existing) {
-                let mut base = c;
-                for part in tail.iter().rev() {
-                    base = base.join(part);
-                }
-                break base;
-            }
-            if let Some(name) = existing.file_name() {
-                tail.push(name);
-            }
-            match existing.parent() {
-                Some(parent) => existing = parent,
-                None => break fallback_root.clone(),
-            }
-        }
+        resolve_missing_path(path, fallback_root, |p| Ok(cache.get_or_canonicalize(p)))?
     };
 
     // Check if path is within any of the allowed roots

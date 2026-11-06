@@ -235,8 +235,9 @@ pub fn redact_frame(frame: &str) -> String {
 ///
 /// SEC-ragent-llm-003 (SECTASKS T-028): an endpoint answering `429` with
 /// `Retry-After: 315360000` previously parked the request for the lifetime of
-/// the process.
-pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+/// the process. The single source of truth is
+/// [`ragent_types::guard::MAX_RETRY_AFTER`]; this name is kept for callers.
+pub const MAX_RETRY_AFTER: Duration = ragent_types::guard::MAX_RETRY_AFTER;
 
 /// Read a response body into a string, capped at `limit` bytes.
 ///
@@ -500,9 +501,12 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     //
     // SEC-ragent-llm-003 (SECTASKS T-028): clamp to `MAX_RETRY_AFTER`. A remote
     // endpoint that answers `429` with a huge `Retry-After` must not be able to
-    // park this process's LLM call for years.
+    // park this process's LLM call for years. The shared guard also floors the
+    // delay at one second, so `Retry-After: 0` cannot burn every retry at once.
     if let Ok(seconds) = value_str.parse::<u64>() {
-        return Some(Duration::from_secs(seconds).min(MAX_RETRY_AFTER));
+        return Some(ragent_types::guard::clamp_retry_after(Duration::from_secs(
+            seconds,
+        )));
     }
 
     // Try parsing as HTTP date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT").

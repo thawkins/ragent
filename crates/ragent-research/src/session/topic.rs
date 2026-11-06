@@ -435,13 +435,5 @@ fn remove_markdown_links(s: &str) -> String {
 
 /// Truncate `s` to at most `max_chars` characters on a UTF-8 char boundary.
 pub(crate) fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let end = s
-        .char_indices()
-        .take(max_chars)
-        .last()
-        .map_or(s.len(), |(i, _)| i);
-    s[..end].to_string()
+    ragent_types::strutil::truncate_chars_no_ellipsis(s, max_chars)
 }

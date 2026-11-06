@@ -114,3 +114,17 @@ fn clean_site_title_handles_separator_segments_and_noise() {
     assert_eq!(clean_site_title("Subscribe to our newsletter"), None);
     assert_eq!(clean_site_title(""), None);
 }
+
+#[test]
+fn truncate_at_char_boundary_keeps_exactly_max_chars() {
+    // Regression: the helper used to keep `max_chars - 1` characters.
+    assert_eq!(truncate_at_char_boundary("abcdef", 3), "abc");
+    assert_eq!(truncate_at_char_boundary("ab\u{2014}cd", 3), "ab\u{2014}");
+    let long = "x".repeat(MAX_DERIVED_TOPIC_CHARS + 50);
+    assert_eq!(
+        truncate_at_char_boundary(&long, MAX_DERIVED_TOPIC_CHARS)
+            .chars()
+            .count(),
+        MAX_DERIVED_TOPIC_CHARS
+    );
+}

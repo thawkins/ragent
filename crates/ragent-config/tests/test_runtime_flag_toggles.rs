@@ -192,3 +192,27 @@ fn test_runtime_flag_activity_log_top_level_global_key() {
     let root: serde_json::Value = serde_json::from_str(&raw).expect("parse global config");
     assert_eq!(root["activity_log"], serde_json::json!(false));
 }
+
+#[test]
+#[serial_test::serial]
+fn test_runtime_flag_persist_to_global_keeps_unreadable_file() {
+    let sandbox = Sandbox::new();
+    let global_dir = sandbox.temp.path().join("config").join("ragent");
+    std::fs::create_dir_all(&global_dir).expect("create global config dir");
+    let global = global_dir.join("ragent.json");
+    // Not valid UTF-8, so `read_to_string` fails with `InvalidData` rather
+    // than `NotFound`. The toggle must refuse instead of replacing the file.
+    let original: &[u8] = b"{\"model\": \"\xff\xfe\"}";
+    std::fs::write(&global, original).expect("write unreadable global config");
+
+    let flag = RuntimeFlag::new("yolo", false);
+    assert!(
+        flag.persist_to_global(true).is_err(),
+        "an unreadable global config must not be overwritten"
+    );
+    assert_eq!(
+        std::fs::read(&global).expect("re-read global config"),
+        original,
+        "the global config bytes must be untouched"
+    );
+}

@@ -76,3 +76,28 @@ fn test_split_authored_sections_case_insensitive_markers() {
         "unmentioned testplan gets placeholder: {testplan}"
     );
 }
+
+#[test]
+fn test_split_authored_sections_non_ascii_before_marker_does_not_panic() {
+    // Lowercasing `\u{1E9E}` shrinks it from 3 bytes to 2, so an offset taken
+    // from a lowercased copy used to land inside the euro sign and panic.
+    let body = "\u{1E9E}\u{20AC}SPEC.md\nspec body\n";
+    let (spec, _, _) = split_authored_sections(body);
+    assert!(spec.starts_with("SPEC.md"), "spec section: {spec}");
+}
+
+#[test]
+fn test_split_authored_sections_plan_marker_not_matched_inside_testplan() {
+    // TESTPLAN before PLAN: `plan.md` used to match inside `TESTPLAN.md`, so the
+    // test-plan body was filed as PLAN.md.
+    let body =
+        "1. `x/SPEC.md`\nspec body\n2. `x/TESTPLAN.md`\ntest body\n3. `x/PLAN.md`\nplan body\n";
+    let (_, plan, testplan) = split_authored_sections(body);
+    assert!(plan.starts_with("PLAN.md"), "plan section: {plan}");
+    assert!(plan.contains("plan body"), "plan section: {plan}");
+    assert!(
+        testplan.contains("test body"),
+        "testplan section: {testplan}"
+    );
+    assert!(!plan.contains("test body"), "plan section: {plan}");
+}

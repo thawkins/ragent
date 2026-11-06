@@ -8213,7 +8213,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             LogLevel::Info,
                             format!(
                                 "Swarm: decomposing - {}",
-                                &full_prompt[..full_prompt.len().min(80)]
+                                ragent_types::strutil::truncate_bytes_no_ellipsis(&full_prompt, 80)
                             ),
                         );
 

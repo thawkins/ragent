@@ -63,8 +63,16 @@ pub fn detect_modifier(prompt: &str) -> Option<ModifierResult> {
     // Also handles "simple mode, <prompt>" and "deep mode <prompt>"
     if let Some((alias, rest)) = split_first_word(trimmed) {
         let rest_trimmed = rest.trim_start();
-        let rest_lower = rest_trimmed.to_lowercase();
-        if rest_lower.starts_with("mode") {
+        // "mode" must be a whole word: "deep models" or "basic modern UI" are
+        // ordinary prompts, not tier modifiers.
+        let is_mode_word = rest_trimmed
+            .get(.."mode".len())
+            .is_some_and(|head| head.eq_ignore_ascii_case("mode"))
+            && rest_trimmed["mode".len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| c == ':' || c == ',' || c.is_whitespace());
+        if is_mode_word {
             // Strip "mode" and any following separator (colon, comma, space)
             let after_mode = &rest_trimmed["mode".len()..];
             let separator_stripped = after_mode.trim_start_matches([':', ',', ' ']).to_string();

@@ -492,3 +492,18 @@ fn test_modifier_result_fields() {
     assert_eq!(result.tier, Tier::Complex);
     assert_eq!(result.remaining_prompt, "refactor this code");
 }
+
+#[test]
+fn test_mode_prefix_requires_whole_word() {
+    // "models" / "modern" start with "mode" but are not the modifier word.
+    assert!(detect_modifier("Deep models are hard").is_none());
+    assert!(detect_modifier("basic modern UI layout").is_none());
+    assert!(detect_modifier("simple modeling question").is_none());
+}
+
+#[test]
+fn test_mode_word_at_end_of_prompt() {
+    let result = detect_modifier("deep mode").unwrap();
+    assert_eq!(result.tier, Tier::Reasoning);
+    assert_eq!(result.remaining_prompt, "");
+}

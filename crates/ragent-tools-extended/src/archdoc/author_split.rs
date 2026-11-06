@@ -26,9 +26,8 @@
 pub fn split_authored_sections(body: &str) -> (String, String, String) {
     let markers: [(&str, usize); 3] = [("SPEC.md", 1), ("PLAN.md", 2), ("TESTPLAN.md", 3)];
     let mut cuts: Vec<(usize, usize)> = Vec::new(); // (byte_idx, which)
-    let lowered = body.to_lowercase();
     for (name, which) in markers {
-        if let Some(idx) = lowered.find(&name.to_lowercase()) {
+        if let Some(idx) = find_marker(body, name) {
             cuts.push((idx, which));
         }
     }
@@ -72,4 +71,25 @@ pub fn split_authored_sections(body: &str) -> (String, String, String) {
             (spec_md, plan_md, testplan_md)
         }
     }
+}
+
+/// Byte offset of the first case-insensitive occurrence of the ASCII marker
+/// `name` in `body` that starts a word.
+///
+/// The search runs on `body` itself, never on a lowercased copy: lowercasing
+/// can change a string's byte length (`\u{1E9E}` is 3 bytes, its lowercase
+/// 2), so an offset found in the copy can land inside a character of the
+/// original. The word-start rule stops `PLAN.md` matching inside
+/// `TESTPLAN.md`. Because `name` is ASCII, any match starts on a char
+/// boundary.
+fn find_marker(body: &str, name: &str) -> Option<usize> {
+    let bytes = body.as_bytes();
+    bytes
+        .windows(name.len())
+        .enumerate()
+        .find(|&(i, window)| {
+            window.eq_ignore_ascii_case(name.as_bytes())
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        })
+        .map(|(i, _)| i)
 }
