@@ -1019,7 +1019,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "research",
-        description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster",
+        description: "Research system: /research create [--mode tiered|supervisor|competitive] [--summarization-model <model>] [--evaluate] [other flags] <name> <topic...> | list | open | search | show | delete | archive | cluster | deck <name> [--from DATE] [--to DATE] [--elements LIST] [--include-old] [--out PATH] [--force]",
     },
     SlashCommandDef {
         trigger: "new",

@@ -16,6 +16,7 @@ pub use ragent_research::session::SessionPhase;
 use ragent_research::session::{AnalysisEvent, SessionEvent, SynthesisEvent, SynthesizeOutcome};
 
 use crate::app::sanitize_for_display;
+use crate::deck_progress::DeckTracker;
 /// Sentinel prefix marking an [`Event::AgentNotice`] message as a research
 /// progress update. The remainder of the message is a JSON payload produced by
 /// [`encode_progress_event`].
@@ -103,6 +104,13 @@ pub struct ResearchProgress {
     /// the TUI renders a live countdown from this instant (FR-010, FR-013).
     /// Cleared when the web phase ends or the deadline is reached.
     pub web_phase_deadline: Option<std::time::Instant>,
+    /// The stage rows of a `/research deck` run (spec `diffdeck` FR-031).
+    ///
+    /// Empty for every other research command. A deck run's progress is a
+    /// fixed stage list rather than an append-only log, so it is tracked
+    /// separately from [`Self::steps`] and rendered in stage order beneath the
+    /// same header, which keeps one message per run in the window.
+    pub deck: Option<DeckTracker>,
 }
 
 impl ResearchProgress {
@@ -122,6 +130,7 @@ impl ResearchProgress {
             youtube_count: 0,
             excluded_count: 0,
             web_phase_deadline: None,
+            deck: None,
         }
     }
 

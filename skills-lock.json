@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "cargo-nextest": {
+      "source": "laurigates/claude-plugins",
+      "sourceType": "github",
+      "skillPath": "rust-plugin/skills/cargo-nextest/SKILL.md",
+      "computedHash": "7f4e04dc64c19125a6fe0fd98326227c3611a161c2f5e114b5d988e604a53ca0"
+    }
+  }
+}

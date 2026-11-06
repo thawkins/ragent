@@ -421,14 +421,14 @@ fn test_any_advertises_the_whole_registry_through_both_filters() {
     for spelling in ["any", "Any"] {
         let allowed_set =
             ragent_agent::tool::build_allowed_tool_set(Some(entries(&[spelling]).as_slice()));
-        let admitted: Vec<&String> = all
+        let admitted = all
             .iter()
             .filter(|name| {
                 allowed_set.is_empty() || ragent_agent::tool::is_allowed_tool(name, &allowed_set)
             })
-            .collect();
+            .count();
         assert_eq!(
-            admitted.len(),
+            admitted,
             all.len(),
             "FR-029: `{spelling}` must leave every registered tool available"
         );

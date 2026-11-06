@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/posts/mikesutcliff_technology-governance-has-often-relied-on-activity-7516479509911494656-AAhw
-- Title: Who governs enterprise AI adoption and decision making | Mike Sutcliff posted on the topic | LinkedIn
-- Author(s): -
+- URL: https://techgenyz.com/ai-inference-optimization-speed-costs
+- Title: AI Inference Tuning for Dependable AI Apps - Techgenyz
+- Author(s): @techgenyz
 - Language: English
-- Published (UTC): 2026-10-15T12:46:04.598+00:00
-- Captured (UTC): 2026-11-02T11:14:04.430697642+00:00
-- Relevance: Medium - multiple title terms match query
+- Published (UTC): 2026-11-03T08:30:00+00:00
+- Captured (UTC): 2026-11-03T21:07:08.302101208+00:00
+- Relevance: High - title matches query
 
 
 ```text
-A LinkedIn post argues that traditional central oversight is insufficient for enterprise AI: 88% of surveyed CIOs say AI adoption is outpacing their governance structures’ ability to adapt. The post cites a new Global CIO Survey 2026, *Who governs enterprise AI?*, based on insights from 3,200 CIOs on governance, accountability, and AI economics, and advocates distributed governance with clear decision rights and guardrails closer to the work. It claims the next phase of enterprise AI will be defined less by adoption speed than by organizations’ ability to govern AI systems and workforces well enough to scale responsibly.
+AI inference optimization must balance latency, throughput, reliability, model quality, and infrastructure cost across workloads such as chatbots, image classifiers, recommendation services, and offline jobs. The article highlights dynamic/continuous and in-flight batching to improve accelerator utilization; KV/prefix caching to avoid repeated work; hardware acceleration via NVIDIA TensorRT/TensorRT-LLM; and quantization to INT8, INT4, or FP8 to cut memory and compute—while warning that larger batches can increase queueing, lower precision can hurt output quality, and bigger caches can consume GPU memory. It recommends workload-specific baselines and production monitoring of p95/p99 latency, memory use, queue depth, error rates, token throughput, and cost per request to verify end-to-end gains and preserve reliability.
 ```

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.adaptivesecurity.com/blog/ai-governance-roadmap
-- Title: AI Governance Roadmap: Milestones, Controls and Metrics for Responsible AI Adoption
-- Author(s): Adaptive Team
+- URL: https://www.netguru.com/blog/ai-model-optimization
+- Title: AI Model Optimization Techniques for Enhanced Performance in 2025
+- Author(s): Kacper Rafalski
 - Language: English
-- Published (UTC): 2026-09-24T12:00:00+00:00
-- Captured (UTC): 2026-11-02T11:14:16.015277081+00:00
+- Published (UTC): 2026-10-29T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:07:19.673244447+00:00
 - Relevance: High - title matches query
 
 
 ```text
-The page frames an AI governance roadmap as a lifecycle plan that converts principles into dated milestones, named owners, approval gates, a RACI matrix and retrievable evidence, beginning with discovery of approved, shadow and employee-built AI before policy. It recommends a four-tier taxonomy—prohibited, restricted, monitored and low-risk—with proportionate oversight, plus monitoring, incident response, rollback, retirement and role-specific cybersecurity awareness training, since employee behavior is a key signal of governance effectiveness. Cited evidence includes FBI IC3’s 2025 Internet Crime Report ($20.877 billion in reported losses, up 26% from $16.6 billion in 2024), Verizon’s 2026 DBIR (62% of confirmed breaches involve a human element; 13% involve stolen credentials), NCA’s 2025–2026 *Oh Behave!* report (52% of employed respondents lacked AI security/privacy training despite 65% using AI and 43% sharing sensitive work information), PwC’s 2025 Responsible AI Survey (61% strategic/embedded, 18% early foundational), and WEF’s 2026 Global Cybersecurity Outlook (52% of highly resilient organizations give board members regular cyber updates; 48% report active board engagement). It maps frameworks by role—NIST for risk method, ISO/IEC 42001 for management system, EU AI Act as legal floor—and references NIST’s 2024 Generative AI Profile inventory guidance, the UK 2025 AI Playbook’s governance-board recommendation, and the European Commission’s 2025 guidance on prohibited AI practices.
+AI model optimization improves AI models’ speed, size, and accuracy without sacrificing task performance through techniques such as hyperparameter tuning, data preprocessing, pruning, quantization, fine-tuning, and knowledge distillation; it should be integrated throughout the AI lifecycle and evaluated with metrics like inference time, memory use, throughput, latency, accuracy, precision/recall, ROC/AUC, and baseline comparisons. Reported results include quantization shrinking models by 75–80% with usually under 2% accuracy loss, pruning removing 30–50% of parameters, distillation student models reaching 90–95% of teacher performance, and combined pruning-plus-quantization yielding models 4–5x smaller and 2–3x faster. Named tools/frameworks include Optuna, Ray Tune, TensorRT, ONNX Runtime, XGBoost, and Intel’s OpenVINO/oneDNN, with oneDNN claimed to improve performance 3–8x on Intel hardware and Google Cloud AI Platform cited as reducing inference times by up to 80%; case claims include a legal advisory firm analyzing over 100,000 documents in under a minute, a major bank cutting inference time 73% for real-time fraud detection, and an e-commerce recommendation engine using 40% less computing.
 ```

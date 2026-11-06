@@ -1752,11 +1752,12 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             }
         }
         Some(Commands::Research { command }) => {
-            cli::handle_research_command(
+            Box::pin(cli::handle_research_command_with_model(
                 *command,
                 resolved_agent.model.clone(),
                 Some(storage.clone()),
-            )
+                Some(provider_registry.clone()),
+            ))
             .await?;
         }
         Some(Commands::New { scaffold, .. }) => {

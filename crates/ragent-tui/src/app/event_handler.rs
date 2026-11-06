@@ -861,6 +861,14 @@ impl App {
                 ref session_id,
                 ref message,
             } if self.is_current_session(session_id) => {
+                // Deck stage reports (FR-031) are sentinel-prefixed and carry a
+                // fixed stage list, so they are folded into one in-place
+                // `Research Progress` message rather than appended as per-stage
+                // notice bubbles.
+                if let Some(decoded) = crate::deck_progress::decode_deck_progress_event(message) {
+                    self.apply_deck_progress(decoded);
+                    return;
+                }
                 // Research progress events are sentinel-prefixed; route them
                 // to the dedicated progress log list instead of the generic
                 // agent-notice chat bubble.
@@ -3009,6 +3017,80 @@ impl App {
             .any(|t| t.child_session_id == session_id || t.parent_session_id == session_id)
     }
 
+    /// Fold one `/research deck` stage report into the run's progress message
+    /// (spec `diffdeck` FR-031).
+    ///
+    /// The tracker is found (or created) by research item name, so a report that
+    /// arrives before the handler seeded the tracker - a run started from another
+    /// surface in the same session - still lands on the right message. The status
+    /// bar mirrors the current stage as a `[wait]` line for as long as the run is
+    /// live, which is what stops [`App::arm_status_expiry`] from clearing it to
+    /// "ready" while stages are still arriving.
+    pub fn apply_deck_progress(&mut self, decoded: crate::deck_progress::DecodedDeckProgress) {
+        use ragent_research::deck_progress::DeckStepStatus;
+
+        let mut tracker = self
+            .research_progress
+            .iter_mut()
+            .find(|p| p.name == decoded.name && p.deck.is_some())
+            .and_then(|p| p.deck.take())
+            .unwrap_or_else(crate::deck_progress::DeckTracker::new);
+        tracker.apply(&decoded.event());
+        if decoded.stage == ragent_research::deck_progress::DeckStage::Export
+            && decoded.status == DeckStepStatus::Done
+        {
+            tracker.finish();
+        }
+
+        let name = decoded.name.clone();
+        // The status bar names the stage in flight and its unit count, so a slow
+        // enrichment or export is visible without opening the message pane.
+        if let Some(current) = tracker.current() {
+            match current.total {
+                Some(total) if total > 0 => {
+                    self.status = format!(
+                        "[wait] research: deck '{name}' - {} {}/{}",
+                        current.stage.label(),
+                        current.completed.min(total),
+                        total
+                    );
+                }
+                _ => {
+                    self.status = format!(
+                        "[wait] research: deck '{name}' - {}...",
+                        current.stage.label()
+                    );
+                }
+            }
+        } else if tracker.finished {
+            self.status = format!("research: deck '{name}' complete");
+            self.arm_status_expiry();
+        }
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!(
+                "research: deck {} - {} {}",
+                decoded.stage.label(),
+                decoded.status.as_str(),
+                crate::app::helpers::sanitize_for_display(&decoded.detail)
+            ),
+        );
+
+        // Store the tracker back on the run so the next report extends the same
+        // stage list instead of starting over, creating the run's entry on
+        // demand when the report arrived before the slash handler seeded one.
+        match self.research_progress.iter_mut().find(|p| p.name == name) {
+            Some(progress) => progress.deck = Some(tracker),
+            None => {
+                let mut progress =
+                    crate::research_progress::ResearchProgress::new(name.clone(), name.clone());
+                progress.deck = Some(tracker);
+                self.research_progress.push(progress);
+            }
+        }
+        self.refresh_research_progress_message(&name);
+    }
+
     pub(crate) fn refresh_research_progress_message(&mut self, name: &str) {
         let Some(progress) = self
             .research_progress
@@ -3018,7 +3100,13 @@ impl App {
         else {
             return;
         };
-        let rendered = self.render_markdown_to_ascii(&progress.render());
+        let rendered = match &progress.deck {
+            // A deck run has a fixed stage list rather than an append-only log;
+            // rendering it through the session tracker would print an empty
+            // "Topic:" header and no stages at all.
+            Some(deck) => self.render_markdown_to_ascii(&deck.render(&progress.name)),
+            None => self.render_markdown_to_ascii(&progress.render()),
+        };
         // Must match the first line emitted by `ResearchProgress::render`
         // ("[research] Research Progress - `{name}`") so the existing
         // message is replaced in place instead of duplicating per event.

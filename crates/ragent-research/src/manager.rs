@@ -19,6 +19,7 @@
 //! method is async and stateless so it can be cloned freely across TUI
 //! background tasks.
 
+use crate::deck::{DeckElement, ReportSeries};
 use crate::document::{
     AssembledDocument, ResearchDocument, assemble_document, mark_in_progress,
     render_corpa_skeleton, render_skeleton, render_supporting_file,
@@ -115,6 +116,20 @@ pub enum ResearchError {
         /// The single clarifying question to present to the user.
         question: String,
     },
+    /// A deck run could not select its two reports (FR-011, FR-012, FR-020).
+    #[error("{0}")]
+    DeckSelect(#[from] crate::deck::DeckSelectError),
+    /// A deck run read a report that is not UTF-8 or not parseable (FR-019).
+    #[error("cannot read report '{path}' for deck: {reason}")]
+    DeckReport {
+        /// The offending report file.
+        path: String,
+        /// Why it could not be used.
+        reason: String,
+    },
+    /// A deck run could not write its output (FR-016, FR-017).
+    #[error("{0}")]
+    DeckWrite(#[from] crate::deck::DeckWriteError),
 }
 
 /// Result alias for [`ResearchManager`].
@@ -797,6 +812,465 @@ impl ResearchManager {
 
         self.save_state(name, &state).await?;
         Ok(state)
+    }
+
+    // -- Deck (spec `diffdeck`, T-008) --------------------------------------
+
+    /// Write a diff deck for `name` from two of its dated reports
+    /// (FR-002, FR-011, FR-014, FR-015, FR-016, FR-017, FR-018, FR-019, FR-021).
+    ///
+    /// The run is a sequence of steps whose refusal points all come **before**
+    /// the single [`ResearchIo::atomic_write`] that publishes the deck, so a
+    /// refusal never leaves a half-written or modified deck behind:
+    ///
+    /// 1. the item must exist, or the run is refused naming it and creates
+    ///    nothing (FR-018);
+    /// 2. the item directory is enumerated and [`ReportSeries::select_pair`]
+    ///    picks the two reports - the two most recent by default, or the pair
+    ///    `--from` / `--to` names - refusing when the directory cannot supply
+    ///    two (FR-011, FR-012, FR-020);
+    /// 3. both reports are read as UTF-8 text and parsed into
+    ///    [`ParsedReport`](crate::deck::ParsedReport)s; an unreadable file, a
+    ///    non-UTF-8 file, or one with no recognised top-level section is
+    ///    refused naming the path and the reason (FR-019, `--force` never
+    ///    bypasses this);
+    /// 4. the parsed pair is diffed, then restricted to the elements
+    ///    `--elements` names (FR-014) - the filter runs before rendering so a
+    ///    filtered run's cover and summary counts describe only what it wrote;
+    /// 5. the output path is resolved: the `--out` value when given (with its
+    ///    missing parent directories created, FR-016), otherwise
+    ///    `DECK-<today>.md` inside the item directory (FR-002);
+    /// 6. an existing output file is refused unless `--force` was given
+    ///    (FR-017);
+    /// 7. the deck is rendered with `--include-old` applied (FR-015) and
+    ///    written atomically.
+    ///
+    /// No file outside the research root or the caller's `--out` path is
+    /// touched (FR-021). This entry point makes no network request and no LLM
+    /// call; [`Self::deck_with_model`] is the same run followed by the optional
+    /// enrichment stage (FR-023, FR-024).
+    ///
+    /// # Errors
+    ///
+    /// - [`ResearchError::NotFound`] when the item does not exist (FR-018);
+    /// - [`ResearchError::DeckSelect`] when the pair cannot be selected
+    ///   (FR-011, FR-012, FR-020);
+    /// - [`ResearchError::DeckReport`] when a report cannot be read or parsed
+    ///   (FR-019);
+    /// - [`ResearchError::DeckWrite`] when the destination is unusable or
+    ///   already exists without `--force` (FR-016, FR-017);
+    /// - [`ResearchError::Io`] when the write itself fails.
+    pub async fn deck(
+        &self,
+        name: &str,
+        options: &crate::deck::DeckRunOptions,
+    ) -> Result<crate::deck::DeckOutcome> {
+        self.deck_with_model(name, options, None).await
+    }
+
+    /// Write a diff deck for `name` with an optional LLM enrichment stage
+    /// (spec `diffdeck` FR-023, FR-024).
+    ///
+    /// The stages, the refusals and the atomic publication are exactly
+    /// [`Self::deck`]'s; the only difference is that the parsed reports are
+    /// handed to [`crate::deck_enrich::enrich_deck`] before rendering, so each
+    /// finding slide carries a one-paragraph summary of its observation and
+    /// analysis and each Top Implication lists the findings ranked most relevant
+    /// to it.
+    ///
+    /// `model: None` is a supported call, not a degraded one: the enrichment
+    /// stage then computes the deterministic baseline - the first sentence of
+    /// each finding's observation and analysis, and a term-overlap ranking of
+    /// findings behind each implication - so a run with no provider configured
+    /// still produces the improved layout and spends no tokens. A model that
+    /// fails mid-stage falls back to the same values per finding/implication
+    /// rather than failing the run.
+    pub async fn deck_with_model(
+        &self,
+        name: &str,
+        options: &crate::deck::DeckRunOptions,
+        model: Option<&dyn crate::deck_enrich::DeckModel>,
+    ) -> Result<crate::deck::DeckOutcome> {
+        self.deck_with_sink(name, options, model, None).await
+    }
+
+    /// Write a diff deck and, when a sink is supplied, its PowerPoint twin
+    /// (spec `diffdeck` FR-030).
+    ///
+    /// The markdown deck is produced exactly as [`Self::deck_with_model`] does -
+    /// same stages, same refusals, same atomic publication - and the `.pptx`
+    /// export runs *after* it has been written. That ordering is the contract:
+    ///
+    /// - the markdown deck is the canonical artifact, so a failed or absent
+    ///   presentation export can never cost the user their deck;
+    /// - the export is best-effort, so a sink that fails is recorded in
+    ///   [`crate::deck::DeckOutcome::pptx`] as
+    ///   [`crate::deck_pptx::DeckPptxOutcome::Failed`] and reported to the user,
+    ///   while the run still returns `Ok`;
+    /// - `sink: None` is a supported call meaning "this surface offers no
+    ///   presentation capability", recorded as
+    ///   [`crate::deck_pptx::DeckPptxOutcome::Unavailable`].
+    ///
+    /// The sink is handed the markdown deck's own rendered text
+    /// ([`crate::deck::DeckDocument::markdown`]) rather than the parsed reports,
+    /// so the presentation describes the same data as the file beside it and the
+    /// two can never diverge.
+    ///
+    /// # Errors
+    ///
+    /// Exactly [`Self::deck_with_model`]'s errors: the export stage cannot fail a
+    /// run that reached it.
+    pub async fn deck_with_sink(
+        &self,
+        name: &str,
+        options: &crate::deck::DeckRunOptions,
+        model: Option<&dyn crate::deck_enrich::DeckModel>,
+        sink: Option<&dyn crate::deck_pptx::DeckSlideSink>,
+    ) -> Result<crate::deck::DeckOutcome> {
+        self.deck_with_progress(name, options, model, sink, None)
+            .await
+    }
+
+    /// Write a diff deck, reporting each stage's progress (FR-031).
+    ///
+    /// The stages, the refusals, the atomic publication and the optional
+    /// presentation twin are exactly [`Self::deck_with_sink`]'s. `progress`
+    /// receives one report as each stage begins and one as it ends, plus a
+    /// per-unit report where a stage has units (one per finding paragraph, one
+    /// per exported slide), so a surface can show a run that is working rather
+    /// than one that has gone quiet.
+    ///
+    /// Reporting is additive: `progress: None` is [`Self::deck_with_sink`], and a
+    /// sink that fails to deliver a report changes nothing about the artifact.
+    ///
+    /// # Errors
+    ///
+    /// Exactly [`Self::deck_with_sink`]'s errors. A refusal reports the failing
+    /// stage before returning, so the surface sees where the run stopped.
+    pub async fn deck_with_progress(
+        &self,
+        name: &str,
+        options: &crate::deck::DeckRunOptions,
+        model: Option<&dyn crate::deck_enrich::DeckModel>,
+        sink: Option<&dyn crate::deck_pptx::DeckSlideSink>,
+        progress: Option<&dyn crate::deck_progress::DeckProgress>,
+    ) -> Result<crate::deck::DeckOutcome> {
+        use crate::deck_progress::{DeckEvent, DeckStage, report};
+
+        let name = ResearchName::try_new(name)?;
+        report(
+            progress,
+            DeckEvent::started(
+                DeckStage::Select,
+                format!("looking up item '{name}' and its report series"),
+            ),
+        );
+        // Step 1 (FR-018): refuse before touching the directory.
+        if !ResearchIo::item_exists(&self.research_root, &name).await {
+            let suggestions = self.suggest_closest(name.as_str()).await;
+            return Err(ResearchError::NotFound(name.to_string(), suggestions));
+        }
+        let item_dir = ResearchIo::item_dir(&self.research_root, &name);
+
+        // Step 2 (FR-006, FR-007, FR-011, FR-012, FR-020).
+        let series = ReportSeries::classify(&self.deck_dir_entry_names(&item_dir).await?);
+        let pair = series.select_pair(
+            name.as_str(),
+            options.from.as_deref(),
+            options.to.as_deref(),
+        )?;
+        report(
+            progress,
+            DeckEvent::done(
+                DeckStage::Select,
+                format!("comparing {} to {}", pair.older_label(), pair.newer_label()),
+            ),
+        );
+
+        // Step 3 (FR-019): read both reports before deciding anything else.
+        report(
+            progress,
+            DeckEvent::started(DeckStage::Read, "reading both reports of the pair"),
+        );
+        let older = self.read_deck_report(&item_dir, &pair.older).await?;
+        let newer = self.read_deck_report(&item_dir, &pair.newer).await?;
+        report(
+            progress,
+            DeckEvent::done(
+                DeckStage::Read,
+                format!(
+                    "read {} item(s) from the older and {} from the newer report",
+                    older.items(DeckElement::Findings).len()
+                        + older.items(DeckElement::Concepts).len(),
+                    newer.items(DeckElement::Findings).len()
+                        + newer.items(DeckElement::Concepts).len()
+                ),
+            ),
+        );
+
+        // Step 4 (FR-004, FR-008, FR-013, FR-014).
+        report(
+            progress,
+            DeckEvent::started(
+                DeckStage::Diff,
+                "diffing the two reports element by element",
+            ),
+        );
+        let diff = crate::deck::filter_elements(
+            &crate::deck::diff_reports(&older, &newer),
+            &options.elements,
+        );
+        report(
+            progress,
+            DeckEvent::done(
+                DeckStage::Diff,
+                format!("{} element(s) in the diff", diff.elements.len()),
+            ),
+        );
+
+        // Step 5 (FR-002, FR-016): resolve the destination.
+        report(
+            progress,
+            DeckEvent::started(DeckStage::Destination, "resolving the output path"),
+        );
+        let generated_on = DateTime::<Utc>::from(SystemTime::now()).date_naive();
+        let stamp = generated_on.format("%Y-%m-%d").to_string();
+        let path = match options.out.as_deref() {
+            Some(value) => self.deck_out_path(value)?,
+            None => crate::deck::default_deck_path(&item_dir, &stamp),
+        };
+
+        // Step 6 (FR-017): an existing deck is only replaced under `--force`.
+        if !options.force && tokio::fs::metadata(&path).await.is_ok() {
+            return Err(crate::deck::DeckWriteError::Exists {
+                path: path.display().to_string(),
+            }
+            .into());
+        }
+        report(
+            progress,
+            DeckEvent::done(
+                DeckStage::Destination,
+                format!("writing to {}", path.display()),
+            ),
+        );
+
+        // Step 7 (FR-023, FR-024): enrich the findings and implications. This
+        // is the only step that can consult a model; it is best-effort, so a
+        // failure here leaves the deterministic values in place rather than
+        // refusing a deck that is otherwise complete. The enrichment reports its
+        // own per-finding progress (FR-031), which is why it is handed the sink.
+        let enrichment =
+            crate::deck_enrich::enrich_deck_with_progress(&newer, older.clone(), model, progress)
+                .await;
+
+        // Step 8 (FR-015, FR-002): render and publish atomically.
+        report(
+            progress,
+            DeckEvent::started(DeckStage::Render, "rendering the deck document"),
+        );
+        let render_options =
+            crate::deck::DeckRenderOptions::new(name.as_str(), generated_on, &pair, &older, &newer)
+                .with_include_old(options.include_old)
+                .with_enrichment(enrichment.clone());
+        let document = crate::deck::render_deck(&diff, &render_options);
+        ResearchIo::atomic_write(&path, &document.markdown).await?;
+        report(
+            progress,
+            DeckEvent::done(
+                DeckStage::Render,
+                format!(
+                    "wrote {} ({} element slide(s), {} byte(s))",
+                    path.display(),
+                    document.elements.len(),
+                    document.markdown.len()
+                ),
+            ),
+        );
+        tracing::info!(
+            name = %name,
+            path = %path.display(),
+            from = %pair.older_label(),
+            to = %pair.newer_label(),
+            elements = document.elements.len(),
+            model = enrichment.used_model,
+            summaries = enrichment.summaries.len(),
+            ranked = enrichment.concept_findings.len(),
+            "research: wrote diff deck"
+        );
+
+        // Step 9 (FR-030): the optional PowerPoint twin. This runs strictly
+        // after the markdown deck has been published and is best-effort: the
+        // markdown deck is the canonical artifact, so an absent or failing
+        // presentation capability is reported on the outcome and never turned
+        // into an error that would make the run look as if it wrote nothing.
+        let mut outcome = crate::deck::DeckOutcome::new(path.clone(), pair, document, &diff);
+        outcome.pptx = match sink {
+            None => {
+                report(
+                    progress,
+                    DeckEvent::skipped(
+                        DeckStage::Export,
+                        "no presentation capability connected; the markdown deck is complete",
+                    ),
+                );
+                crate::deck_pptx::DeckPptxOutcome::Unavailable
+            }
+            Some(sink) => {
+                report(
+                    progress,
+                    DeckEvent::started(
+                        DeckStage::Export,
+                        format!("writing the presentation beside {}", path.display()),
+                    ),
+                );
+                let generated_on = generated_on.format("%Y-%m-%d").to_string();
+                let plan = crate::deck_pptx::DeckSlidePlan::from_document(
+                    name.as_str(),
+                    // `render_options.title` is already the newer report's
+                    // `# Title:` line, resolved once for the markdown deck; reusing
+                    // it keeps the two artifacts describing the same run.
+                    render_options.title.clone(),
+                    &outcome.pair.older_label(),
+                    &outcome.pair.newer_label(),
+                    &generated_on,
+                    &outcome.document,
+                    // The plan is rendered from the same diff the markdown deck
+                    // was: the presentation carries the run's data, not a
+                    // transcription of the markdown file.
+                    &diff,
+                    render_options.include_old,
+                    crate::deck_pptx::deck_pptx_path(&path),
+                    // FR-017's `--force` governs the markdown deck's own
+                    // destination; the presentation beside it is an addition, so
+                    // it is replaced whenever its markdown twin is, and never
+                    // becomes the reason a rerun is refused.
+                    true,
+                );
+                let result = sink.write_deck_with_progress(&plan, progress).await;
+                match &result {
+                    crate::deck_pptx::DeckPptxOutcome::Written { path, slides, .. } => {
+                        report(
+                            progress,
+                            DeckEvent::done(
+                                DeckStage::Export,
+                                format!("wrote {} ({slides} slide(s))", path.display()),
+                            ),
+                        );
+                        tracing::info!(
+                            name = %name,
+                            path = %path.display(),
+                            slides,
+                            "research: wrote deck presentation"
+                        );
+                    }
+                    crate::deck_pptx::DeckPptxOutcome::Failed { reason } => {
+                        // Warn, not error: the deck run itself succeeded and the
+                        // markdown file is on disk and complete.
+                        report(
+                            progress,
+                            DeckEvent::skipped(
+                                DeckStage::Export,
+                                format!("presentation export skipped: {reason}"),
+                            ),
+                        );
+                        tracing::warn!(
+                            name = %name,
+                            reason = %reason,
+                            "research: deck presentation export failed; markdown deck is unaffected"
+                        );
+                    }
+                    crate::deck_pptx::DeckPptxOutcome::Unavailable => {
+                        report(
+                            progress,
+                            DeckEvent::skipped(
+                                DeckStage::Export,
+                                "no presentation capability connected; the markdown deck is complete",
+                            ),
+                        );
+                        tracing::debug!(
+                            name = %name,
+                            "research: no PowerPoint capability available for the deck"
+                        );
+                    }
+                }
+                result
+            }
+        };
+        Ok(outcome)
+    }
+
+    /// The entry names of a deck run's item directory, sorted for a stable
+    /// series.
+    ///
+    /// A directory that vanished between the existence check and the read is
+    /// reported as an empty series rather than an I/O error, so the run reaches
+    /// the FR-011 refusal that names the item and the count found instead of
+    /// surfacing a bare `NotFound` from `read_dir`.
+    async fn deck_dir_entry_names(&self, item_dir: &Path) -> Result<Vec<String>> {
+        let mut read_dir = match tokio::fs::read_dir(item_dir).await {
+            Ok(read_dir) => read_dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(ResearchIoError::Io(e).into()),
+        };
+        let mut names: Vec<String> = Vec::new();
+        while let Some(entry) = read_dir.next_entry().await.map_err(ResearchIoError::Io)? {
+            if let Some(name) = entry.file_name().to_str() {
+                names.push(name.to_string());
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    /// Read and parse one report of a deck run's pair (FR-019).
+    ///
+    /// The bytes are read once and decoded explicitly so a non-UTF-8 report is
+    /// named as such rather than reported as a generic I/O failure, and a report
+    /// with no recognised top-level section names the reason the parse gave.
+    async fn read_deck_report(
+        &self,
+        item_dir: &Path,
+        report: &crate::deck::ReportFile,
+    ) -> Result<crate::deck::ParsedReport> {
+        let path = item_dir.join(&report.name);
+        let report_error = |reason: String| ResearchError::DeckReport {
+            path: path.display().to_string(),
+            reason,
+        };
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| report_error(e.to_string()))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|e| report_error(format!("file is not valid UTF-8: {e}")))?;
+        crate::deck::parse_report(&text).map_err(|e| report_error(e.to_string()))
+    }
+
+    /// Resolve an FR-016 `--out` value into a writable deck path.
+    ///
+    /// The value is taken relative to the process working directory, and its
+    /// missing parent directories are created so a run can write into a fresh
+    /// directory in one step. A value that names no file (an empty string, or a
+    /// path ending in a directory separator) is refused rather than written
+    /// somewhere unintended.
+    fn deck_out_path(&self, value: &str) -> Result<PathBuf> {
+        let invalid = |reason: &'static str| {
+            ResearchError::DeckWrite(crate::deck::DeckWriteError::InvalidOut {
+                value: value.to_string(),
+                reason,
+            })
+        };
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(invalid("expected a file path"));
+        }
+        let path = PathBuf::from(trimmed);
+        if path.file_name().is_none() || path.is_dir() {
+            return Err(invalid("expected a file path, not a directory"));
+        }
+        // `atomic_write` creates missing parents; this keeps the refusal path
+        // (FR-017) able to report a real destination.
+        Ok(path)
     }
 
     // -- INDEX.md (T-012) + .index.json cache (Milestone G) ---------------

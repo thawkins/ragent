@@ -3219,6 +3219,89 @@ Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
   completes normally; the step is surfaced in the UI as a `concepts` `RunStep`
   event (started / completed / skipped / failed).
 
+### 11.4.1 Diff Deck (`/research deck`)
+
+`/research deck <name>` (CLI: `ragent research deck <name>`, spec `diffdeck`)
+consumes an item's *series* of dated reports as a change narrative: it selects
+two of them, diffs them element by element, and writes a single Markdown slide
+deck. The deck is **deterministic and LLM-free** - a pure function of the two
+input reports - so the same pair always yields byte-identical output, the run
+costs no tokens, and it works with no provider configured.
+
+**File naming.** The deck is written into the item directory as
+`DECK-<YYYY-MM-DD>.md`, dated by the UTC day the deck was **generated** (never
+by either contributing report), using the same atomic write-then-rename path as
+every other research artifact. Regenerating on a later day therefore adds a file
+beside the earlier deck instead of overwriting it. `--out <path>` redirects the
+output (creating missing parent directories); `--force` overwrites an existing
+target, which is otherwise refused by name. A `DECK-*.md` file is not a report:
+the report resolver and `ReportSeries` ignore it.
+
+**Report pair.** By default a deck covers the two most recent dated reports,
+rendered older-as-baseline / newer-as-current. `--from <YYYY-MM-DD>` and
+`--to <YYYY-MM-DD>` name the pair explicitly; each must match a
+`RESEARCH-<stamp>.md`, and supplying only one pairs it with its *adjacent*
+dated report (the next older for `--to`, the next newer for `--from`). An
+explicit pair must be ordered older-then-newer. A legacy undated `RESEARCH.md`
+is the oldest report of the series - baseline only - so an item whose only
+report is `RESEARCH.md` is refused specifically as needing its first *dated*
+report.
+
+**Coverage window.** The cover slide carries the research title, the generation
+date, the research id, and the two contributing report dates as the coverage
+window `**Coverage:** <older-date> to <newer-date>` (a legacy side reads
+`legacy`), plus counts of element slides, change items and unchanged items. The
+window is what makes a stored deck self-describing months later.
+
+**Composition.** Markdown slides separated by `---` rules, in fixed order: one
+cover slide, then one slide per changed element in the fixed element precedence
+(Executive Summary, Concepts, Findings, Cross-References, References), then one
+closing summary slide reporting the element-slide count, the per-status counts
+and the element names that produced a slide. The **Concepts** element is the
+deck's key grouping and emits one slide per concept: the concept's name, its
+status, its definition, then the findings that belong to it - each with its own
+status tag, headline and observation/analysis paragraph. Every finding no
+concept claimed (the grouping is at most three per concept) is rendered on an
+`Other Findings` slide, so each finding appears on the deck exactly once. The
+report's `## Top 10 Implications` and `## Open Questions` are not deck elements
+and produce no slide; `--elements` neither accepts nor lists them. The other
+element slides each carry **every** item of the element from both reports - the
+changed items and the unchanged ones - so a slide is a complete picture of that
+element, not only its deltas. A pair that changed nothing still writes a deck,
+with an explicit `_No changes detected between the two reports._` notice in
+place of the element slides. `--include-old` additionally emits a slide for an
+element carrying only unchanged items.
+
+**Status tags.** Every rendered item carries exactly one tag from the closed set:
+
+| Tag | Definition |
+| --- | --- |
+| `NEW` | The item exists only in the newer report. |
+| `ADDED` | The item exists only in the newer report **and** cites at least one source the older report did not cite. |
+| `UPDATE` | The item exists in both reports with changed condensed text. |
+| `OLD` | The item exists in both reports with unchanged condensed text. |
+
+Items are matched by section-scoped normalised identity: Findings by their
+extracted headline (so a reworded headline is `NEW`), Concepts by their declared
+name (the `### <n>. <name>` heading minus its ordinal), and every other element
+by its normalised text with citations, Markdown emphasis, backticks and
+whitespace runs removed (so cosmetic drift is `UPDATE`, not a `NEW` plus a
+silent deletion).
+Each item is condensed to one bullet, capped at 200 characters on a word
+boundary with a trailing ellipsis, and has Markdown-significant characters
+escaped so text containing `|`, backticks or a leading `#` cannot break the
+slide structure.
+
+**Safety.** No network request, LLM call or write outside the research root is
+performed. Every refusal (unknown item, fewer than two reports, bad or unknown
+`--from`/`--to` date listing the dates that do exist, inverted pair, unknown
+`--elements` value listing the accepted ones, unreadable / non-UTF-8 /
+section-less report, existing target without `--force`) is decided before the
+destination is written, and leaves the item directory byte-identical - an
+existing deck file included. The diff and render stages are pure functions over
+in-memory strings; the implementation contains no `unsafe` code and no
+`unwrap()`/`expect()` on a production path.
+
 ### 11.5 Slash Commands
 
 | Command | Purpose |
@@ -3252,6 +3335,11 @@ Every report (`RESEARCH-<YYYY-MM-DD>.md`) contains:
 | `/research search <query>` | Search across every item's resolved report file |
 | `/research delete <name>` | Delete a research item |
 | `/research archive <name>` | Archive a research item |
+| `/research deck <name>` | Write `DECK-<YYYY-MM-DD>.md` for the item: a deterministic, LLM-free slide deck diffing two of its dated reports (§11.4.1) |
+| `/research deck <name> --from <date> --to <date>` | Diff the named report pair instead of the two most recent; one alone pairs with its adjacent dated report |
+| `/research deck <name> --elements <list>` | Restrict the deck to named elements (case-insensitive; slide label or report heading); unknown names are refused |
+| `/research deck <name> --include-old` | Also emit slides for elements that changed nothing |
+| `/research deck <name> --out <path>` / `--force` | Write elsewhere (parent dirs created) / overwrite an existing target |
 
 ### 11.6 Iterative Research Loop (`researchext`)
 

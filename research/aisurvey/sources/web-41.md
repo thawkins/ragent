@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/posts/andjdavies_96-of-ai-companies-got-their-cost-forecasts-activity-7515720720296079360--PyP
-- Title: AI Cost Forecasts Often Wrong, Cloud Capital Report Finds | Andrew Davies posted on the topic | LinkedIn
-- Author(s): Andrew Davies
+- URL: https://zylo.com/blog/best-ai-cost-management-tools
+- Title: Best AI Cost Management Tools: A 2026 Buyer&#x27;s Guide
+- Author(s): Nicole Wood
 - Language: English
-- Published (UTC): 2026-10-13T10:30:55.055+00:00
-- Captured (UTC): 2026-11-02T11:15:15.895258445+00:00
+- Published (UTC): 2026-10-13T14:35:46.821+00:00
+- Captured (UTC): 2026-11-03T21:08:30.286302380+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-A LinkedIn post citing Cloud Capital’s *The Cost of Compute* report says 96% of AI companies got their cost forecasts wrong; AI breaks SaaS’s ~80% gross-margin model because every prompt, generation, and agentic action costs money, not just tokens. Cloud Capital’s survey of 100 CFOs found forecasts break most often on compute infrastructure (64%), data & storage (60%), and model APIs/tokens (47%). The post argues flat $20/month subscriptions work when marginal cost is near zero but not when a power user consumes 100x more compute, predicting shifts to subscription+usage, platform fee+credits, seats+consumption, and eventually outcome-based pricing, with the CFO role increasingly important; it credits Edward Barrow and team.
+The article argues that AI cost management splits into three distinct surfaces—AI infrastructure (GPUs/cloud), API/token consumption, and SaaS-embedded or AI-native software—so no single tool fits all; leading infrastructure tools include CloudZero, IBM Apptio Cloudability, Mavvrik, nOps, and Vantage, API/token tools include Anthropic and OpenAI native dashboards, Helicone, LangSmith, and Portkey, and SaaS-side tools include 1Password SaaS Manager, Flexera, Vendr/Vertice, and Zylo. It reports Zylo data showing AI-native software spend rose 334% year over year as of September 23, 2026, and 507% at organizations with more than 10,000 employees, while SaaS with AI functionality rose 143% overall and 447% at companies with 2,501–10,000 employees. It also cites 78% of IT leaders reporting unexpected charges tied to consumption-based or AI pricing in the past 12 months, and 61% of IT leaders in the 2026 SaaS Management Index cutting projects due to unplanned SaaS cost increases. The guide recommends starting with the category holding most AI spend and adding a second tool only for real gaps, noting that most large enterprises should lead with SaaS-side visibility, then add infrastructure or API depth.
 ```

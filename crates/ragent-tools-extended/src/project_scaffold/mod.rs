@@ -30,7 +30,11 @@
 //! - [`docs`] - FR-019 documentation scaffold: `README.md`, `QUICKSTART.md`,
 //!   `STATS.md`, and the `docs/` folder, all rendered from the language
 //!   recipe data (NFR-002) (T-017).
+//! - [`crate_workspace`] - FR-020 additive `--type crate` scaffold: plans
+//!   `crates/<name>/` into an existing Cargo workspace and registers the
+//!   member, without rewriting the project's existing root files.
 
+pub mod crate_workspace;
 pub mod docs;
 pub mod emit;
 pub mod flags;
@@ -44,6 +48,10 @@ pub mod stack;
 pub mod summary;
 pub mod workspace;
 
+pub use crate_workspace::{
+    CRATES_DIR, CrateLayout, CrateWorkspaceError, CrateWorkspaceOutcome, MemberStatus,
+    WORKSPACE_MANIFEST, plan_crate_layout, plan_crate_workspace,
+};
 pub use docs::{DocFile, doc_artifacts};
 pub use emit::{
     EmitReport, FileStatus, PlannedArtifact, emit_file, emit_files, ensure_workspace_dirs,

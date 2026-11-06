@@ -98,6 +98,21 @@ fn test_reverse_webapp_type_is_accepted() {
 }
 
 #[test]
+fn test_reverse_crate_type_is_accepted() {
+    // `--type crate` is the additive form that adds a library crate to the
+    // Cargo workspace the command runs in, rather than scaffolding a new
+    // project root.
+    let cmd = parse_reverse("owner/repo --language rust --type crate");
+    let SpecCommand::Reverse { scaffold, .. } = cmd else {
+        panic!("crate must be an accepted --type value");
+    };
+    assert_eq!(
+        scaffold.expect("scaffold request").app_type().as_str(),
+        "crate"
+    );
+}
+
+#[test]
 fn test_reverse_stack_alone_is_a_usage_error() {
     // A lone --stack has no --language/--type to pair with; the shared /new
     // parser rejects it and its error text is reported verbatim.
@@ -336,5 +351,25 @@ fn test_reverse_quoted_repo_consumes_first_token() {
     assert_eq!(
         scaffold.expect("scaffold request").language().as_str(),
         "rust"
+    );
+}
+
+#[test]
+fn test_spec_help_reverse_row_shows_a_crate_example() {
+    // The `/spec help` table is the only place a reader learns the additive
+    // crate form; the worked example must name both the destination and the
+    // `--create` chain, or the two independent names are guesswork.
+    let help = SpecCommand::build_help_message();
+    assert!(
+        help.contains("Example: `/spec reverse acme/widget --language rust --type crate"),
+        "the /spec reverse row must carry a crate example: {help}"
+    );
+    assert!(
+        help.contains("--folder crates/widget --create widget-spec"),
+        "the example must show the folder and the spec name: {help}"
+    );
+    assert!(
+        help.contains("crates/widget/specs/widget-spec/"),
+        "the example must say where the spec lands: {help}"
     );
 }

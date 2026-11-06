@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.linkedin.com/pulse/why-ai-governance-becoming-essential-enterprise-adoption-xfyrf
-- Title: Why AI Governance Is Becoming Essential for Enterprise AI Adoption
-- Author(s): Blueflame Labs
+- URL: https://www.linkedin.com/posts/ashugargvc_everything-you-need-to-know-about-model-distillation-activity-7503830956986871808-2KtI
+- Title: Distillation Explained: What It Is and Isn't in AI Models | Ashu Garg posted on the topic | LinkedIn
+- Author(s): Ashu Garg
 - Language: English
-- Published (UTC): 2026-10-09T13:31:07+00:00
-- Captured (UTC): 2026-11-02T11:13:44.307883906+00:00
+- Published (UTC): 2026-09-10T15:05:14.536+00:00
+- Captured (UTC): 2026-11-03T21:06:54.650810050+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-The article argues that AI governance—policies, processes, responsibilities, and technical controls across an AI system’s lifecycle—is essential for enterprises adopting generative AI, AI agents, predictive analytics, and automated workflows, because it manages risks around data privacy, security, accuracy, transparency, and accountability. It highlights governance for risk and reliability, data/privacy protection, regulatory compliance, and trust, with use cases in customer service/CRM, finance/ERP, and enterprise data/analytics; effective frameworks begin with an AI inventory, impact-based controls, clear ownership, practical standards, and continuous monitoring. Blueflame Labs is positioned as helping enterprises build governed AI through secure data integration, access controls, data quality, monitoring, and alignment with leadership, legal, security, and compliance teams.
+A LinkedIn post argues that model distillation is often misused to explain open-model gains: true distillation trains a student on a teacher’s full outputs, reasoning traces, and next-token confidence/probability distributions, requiring full internals and thus only feasible within a lab distilling its own models. Cross-lab “distillation” through APIs is merely behavior parroting of finished outputs, especially since frontier models stopped returning reasoning logic last year and now hide or heavily summarize chain of thought. The post says distillation does not sufficiently explain Kimi K3 and DeepSeek V4 matching frontier models on some benchmarks—K3 launched weeks after Fable and 7 days after GPT-5.6, too short a window to extract enough high-quality signal via restricted APIs—and cites Gavin Baker saying the “Sputnik moment” for Chinese open source has not arrived; when it does, open models will be more performant and cheaper than closed ones.
 ```

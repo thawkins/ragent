@@ -109,6 +109,12 @@ pub fn render_detailed_help(
          \x20       webapp   web-application starter: a tiny HTTP server\n\
          \x20                (rust/python/go/typescript/javascript);\n\
          \x20                other languages degrade to the manifest only\n\
+         \x20       crate    adds a library crate to the Cargo workspace the\n\
+         \x20                command runs in: writes crates/<name>/ (manifest\n\
+         \x20                plus src/lib.rs) and registers the member. It is\n\
+         \x20                additive - existing project files are never\n\
+         \x20                rewritten - so it needs an existing workspace\n\
+         \x20                root, not an empty target. rust only.\n\
          \x20     Omitted: validation error; nothing is created.\n\
          \n\
          \x20 --stack <name>\n\

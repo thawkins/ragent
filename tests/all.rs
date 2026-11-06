@@ -45,6 +45,9 @@ mod test_plugins_cli_command;
 #[path = "test_serve_openai_gate.rs"]
 mod test_serve_openai_gate;
 
+#[path = "test_research_deck_cli_command.rs"]
+mod test_research_deck_cli_command;
+
 #[path = "test_version_flag.rs"]
 mod test_version_flag;
 

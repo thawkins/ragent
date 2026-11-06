@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://resources.rework.com/libraries/ai-startup-growth/ai-inference-costs-gross-margin
-- Title: &quot;Inference Costs and Gross Margin in AI Companies&quot;
-- Author(s): -
+- URL: https://hsecurities.in/blog/beyond-hourly-billing-best-monetization-strategies-for-ai-service-businesses
+- Title: AI Service Monetization: Move Beyond Hourly Rates with Smart Pricing Models
+- Author(s): hSECURITIES
 - Language: English
-- Published (UTC): 2026-10-06T00:00:00+00:00
-- Captured (UTC): 2026-11-02T11:14:55.040640507+00:00
+- Published (UTC): 2026-10-25T00:19:02+00:00
+- Captured (UTC): 2026-11-03T21:08:05.097787708+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-Inference—running a trained model on each customer action—is a variable cost driven by input/output tokens, context length, model size, reasoning steps, agent loops, and retries, unlike largely usage-independent training costs. Anthropic reports agents use about 4x more tokens than chat and multi-agent systems about 15x. A hypothetical $30/seat product with 100 seats and 1¢ per request had $3,000 revenue, $710 inference cost, and ~76% gross margin, but the top 10% of users generated ~79% of inference spend; a 5x cost-per-request increase pushed cost to $3,550 and margin to about -18%. Flat pricing leaves inference risk with the vendor, while usage-based, credit, and hybrid models shift or cap it; a16z cites ~10x annual declines in cost for equivalent LLM capability, while Epoch AI finds 9x–900x annual declines depending on benchmark. The article recommends measuring inference cost per active customer and its distribution, top-10% cost share, cost per completed task, and gross margin by usage cohort.
+The hSECURITIES blog argues AI service businesses should move beyond hourly billing because it incentivizes logged time over efficient outcomes and fails to capture AI’s value. It recommends value-based pricing tied to client ROI; tiered subscriptions (Basic/POC, Professional, Enterprise with KPI-linked bonuses); usage-based pricing metered by tokens, API calls, or GPU-hours; productizing reusable AI IP into SaaS via a freemium-to-enterprise value ladder; and hybrid models combining a predictable base subscription, overage charges, and success uplifts. Examples include pricing against a 15% annual reduction in equipment failure and adding a bonus only if predictive accuracy improves more than 10% over the prior quarter’s baseline; a $1,000/month core SaaS plus $5 per human-validated record is also cited.
 ```

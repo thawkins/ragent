@@ -2,18 +2,188 @@
 
 ## [Unreleased]
 
+### Security
+
+- **`calamine` 0.37 -> 0.38.** Clears RUSTSEC-2026-0436 (panic and unbounded
+  allocation in the CFB/OLE2 parser on malformed input; severity 7.5).
+  `calamine` is used only by `ragent-bench` to read back generated `.xlsx`
+  workbooks, so the upgrade is contained. `cargo audit` now reports no
+  vulnerabilities; the only remaining notice is the allowed `paste`
+  unmaintained warning.
+
+## [1.0.163] - 2026-11-06
+
+Research diff decks: `/research deck <name>` now groups findings under the
+report's own concepts, one slide per concept, and the deck's PowerPoint export
+actually writes the `.pptx`. Also clears RUSTSEC-2026-0436 by moving
+`calamine` to 0.38.
+
+### Fixed
+
+- **A generated deck no longer opens with a blank slide, and its concept slides
+  carry their definitions.** Three defects made the `.pptx` disagree with the
+  plan: (1) a new presentation already holds one blank `title`-layout slide, and
+  the sink appended every planned slide beside it - a 19-slide plan produced a
+  20-slide file whose first slide was an empty `ctrTitle`/`subTitle` cover; the
+  default slide is now re-laid-out to the planned layout and written in place,
+  so plan and file agree slide for slide; (2) the cover used the `title` layout,
+  whose `ctrTitle`/`subTitle` placeholders the builder does not style, so the
+  cover's counts and coverage line were written nowhere - every slide now uses
+  `titleAndContent`, which the builder already styles; and (3) a concept's
+  definition lives in its `detail` paragraphs, not its heading, so the
+  per-concept slides rendered a title over an empty body - they now lead with
+  the definition. Also removed a duplicate `slide.go`: the builder's `dress`
+  navigates before it draws, so every slide was being navigated to twice and the
+  server asked for a slide change it had already performed. Verified end to
+  end: the regenerated 19-slide deck has no empty body, and the cover, a concept
+  slide and a findings slide were rendered and checked for overflow.
+- **The deck's PowerPoint export now actually writes the `.pptx`, and reports a
+  refusal instead of claiming success.** Two defects combined to produce
+  `PowerPoint export skipped: server 'deckcraft' reported success but ...
+  was not created` and no file: (1) the command-driven sink sent DeckCraft the
+  command ids `presentation.new` / `presentation.save`, which DeckCraft does not
+  implement (its ids are `file.new` / `file.save`), and (2)
+  `McpClient::call_tool` only fails on a transport error, so every
+  `unknown command` rejection came back as an ordinary result and was ignored -
+  the sink ran to completion, found no file, and reported a misleading
+  success/failure pair. The sink now honours `is_error` on every call and
+  surfaces the server's own wording (`\`new_presentation\` rejected: unknown
+  command ...`), and drives a command-channel server through its wrapper tools
+  (`new_presentation`, `add_slide`, `save_presentation`) whenever it publishes
+  them, using the raw command ids only as a fallback. Verified end to end:
+  `ragent research deck aisurvey --force` now writes a 15-slide
+  `DECK-2026-11-04.pptx` beside the markdown deck.
+
+### Changed
+
+- **Research diff decks group the findings under their concepts.** `/research
+  deck` now uses the report's `## Concepts` as its key categories: the Concepts
+  element renders **one slide per concept**, carrying the concept's name, its
+  status tag, its definition, and then the findings that belong to it - each
+  with its own `NEW` / `ADDED` / `UPDATE` / `OLD` tag, headline and
+  observation/analysis paragraph. The grouping is the deck's model stage (a
+  concept claims at most three findings); with no provider wired in it falls
+  back to the existing term-overlap ranking over the concept's name and
+  definition, so a concept with no related finding lists none rather than a
+  neighbouring one. A finding that no concept claims is rendered on an
+  `Other Findings` slide, so every finding still appears on the deck exactly
+  once. Concepts are identified by their declared name (the `### <n>. <name>`
+  heading minus its ordinal) and reach the deck from either the report layout
+  (`## Concepts`) or the IMRaD one (`### Concepts` under `## Results`).
+- **The report's `Top 10 Implications` and `Open Questions` are no longer deck
+  elements.** The deck is grouped by concept, so the reader-facing implication
+  list and question list produce no slides, and `--elements` neither accepts nor
+  lists them (`Top Implications` / `Open Questions` are now refused as unknown
+  element names). The element precedence is Executive Summary, Concepts,
+  Findings, Cross-References, References. Documented in
+  `docs/howtos/research.md` § 4.12 and `specs/diffdeck/SPEC.md` (FR-003, FR-009,
+  FR-014, FR-024, FR-026).
+
+### Fixed
+
+- **Research diff deck: lost elements and an unreachable `ADDED` tag.** Three
+  report-parsing defects made `/research deck <name>` misreport what changed
+  between two runs:
+  - **A `### ` sub-heading that names a deck element now opens that element's
+    section.** The report layout nests `### Open Questions` inside
+    `## Top 10 Implications`, and every sub-heading was previously kept as body
+    text of its enclosing section. The questions were therefore swallowed as
+    trailing lines of the last implication, so the Open Questions element never
+    reached the deck at all - a pair of reports with twelve questions each
+    produced **no** Open Questions slide. (`## Findings` was unaffected: the
+    IMRaD layout already opened it from a `### ` heading.)
+  - **The Top Implications heading now accepts any count.** The parser required
+    the literal `## Top 10 Implications`, so a run that produced a different
+    number of implications - or wrote `## Top Implications` - became an
+    unrecognised section that was dropped silently, and its items vanished from
+    the deck.
+  - **Prose and listicle items now record the `[#N]` citations their text
+    carries.** FR-004 tags an unmatched item `ADDED` when it "has a source the
+    older report did not cite", but only findings collected sources (from their
+    `**Sources:**` block). Every Executive Summary paragraph, Top Implication
+    and Open Question therefore carried an empty source set, so `ADDED` could
+    never be assigned to any of them and each unmatched item read `NEW` - which
+    is what made a deck look like "everything is new or added". Regenerating the
+    `aisurvey` deck now yields NEW 18 / ADDED 27 over 4 element slides (was NEW 33
+    over 3, with the summary paragraph and all twelve questions missing).
+
+### Added
+
+- **`/research deck <name>` - research diff decks (spec `diffdeck`)** -
+  `/research deck <name>` (CLI: `ragent research deck <name>`) turns an item's
+  *series* of dated reports into a single Markdown slide deck that says what
+  changed between two runs: what appeared, what was re-sourced, what drifted,
+  and what stayed put. The deck is **deterministic and LLM-free** - a pure
+  function of the two input reports - so the same pair always yields
+  byte-identical output, the run costs no tokens, and it works with no provider
+  configured.
+
+  The deck is written to `research/<name>/DECK-<YYYY-MM-DD>.md`, dated by the
+  UTC day it was *generated* (never by either contributing report), through the
+  same atomic write-then-rename path as every other research artifact, so
+  regenerating on a later day adds a file beside the earlier deck instead of
+  overwriting it. It renders as Markdown slides separated by `---` rules: a
+  cover slide carrying the title, generation date, research id and the
+  **coverage window** (`Coverage: <older> to <newer>`) plus element/change/
+  unchanged counts; one slide per concept and per changed element in a fixed
+  precedence (Executive Summary, Concepts, Findings,
+  Cross-References, References), each carrying **every** item of that element
+  from both reports - the deltas *and* the unchanged items - so a slide is a
+  complete picture rather than only what moved; a `No changes` slide in place
+  of the element slides when the pair changed nothing; and a closing summary
+  with the element-slide count, the per-status counts and the element names that
+  produced a slide.
+
+  Every item is tagged from a closed set of four: `NEW` (only in the newer
+  report), `ADDED` (only in the newer report *and* citing at least one source
+  the older report did not), `UPDATE` (in both, changed condensed text) and
+  `OLD` (in both, unchanged). Items match by section-scoped normalised identity
+  - Findings by their extracted headline, everything else by text with
+  citations, Markdown emphasis, backticks and whitespace runs removed - so
+  cosmetic drift reads as `UPDATE` rather than a `NEW` plus a silent deletion.
+  Bullets are condensed to one line, capped at 200 characters on a word
+  boundary with a trailing ellipsis, and have Markdown-significant characters
+  escaped so a `|`, a backtick or a leading `#` cannot break the slide
+  structure.
+
+  Selection is the two most recent dated reports by default, or an explicit
+  `--from <YYYY-MM-DD>` / `--to <YYYY-MM-DD>` pair (one alone pairs with its
+  adjacent dated report; an inverted pair is refused rather than silently
+  swapped). A legacy undated `RESEARCH.md` is the oldest report of the series -
+  baseline only - so an item holding *only* `RESEARCH.md` is refused with a
+  message saying it needs its first dated report. `--elements <list>` narrows
+  the deck (case-insensitive, accepting either the slide label or the report
+  heading, unknown names refused with the accepted list), `--include-old`
+  additionally emits slides for elements that changed nothing, `--out <path>`
+  writes elsewhere (creating parent directories) and `--force` overwrites an
+  existing target.
+
+  Every refusal - unknown item, fewer than two reports, bad or unknown date
+  listing the dates that do exist, inverted pair, unknown element, unreadable /
+  non-UTF-8 / section-less report, existing target without `--force` - is
+  decided before the destination is written, so a failed run leaves the item
+  directory byte-identical, an existing deck file included. The CLI emits one
+  `ragent-research: {"kind":"deck","payload":{…}}` event line (counts taken from
+  the written deck's own diff, so the line cannot disagree with the file)
+  followed by a human summary. No `unsafe` code and no `unwrap()`/`expect()` on
+  a production path; `diff_reports` and `render_deck` are public pure functions
+  over in-memory strings so both stages are unit-testable without filesystem
+  access. Documented in `docs/howtos/research.md` § 4.12.
+
+### Deep-refactor audit train
+
 Deep-refactor audit train (`docs/reports/deep-refactor-audit.md`): fifteen
 defects fixed (all but the `/swarm` log line and the router-prompt preview with a
 regression test that fails on the old code), and
 host-dependent test failures made deterministic.
 
-### Security
+#### Security
 
 - File tools could write outside the working directory. The path guard dropped
   every `..` in the not-yet-existing tail of a path, so `ghost/../../x` passed
   as `ghost/x`. `..` is now applied as a pop.
 
-### Fixed
+#### Fixed
 
 - A runtime-flag toggle (`/yolo` and friends) replaced the user's whole global
   `ragent.json` when the file existed but could not be read (invalid UTF-8,
@@ -37,7 +207,7 @@ host-dependent test failures made deterministic.
 - Derived research topics were cut one character short.
 - Feedback-log and router-prompt previews mixed byte and character counts.
 
-### Changed
+#### Changed
 
 - `tower` is a dev-dependency of `ragent-server`.
 - Tests that need a denied permission, a configured-provider-free host, or a

@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.kore.ai/blog/what-is-enterprise-ai
-- Title: What is enterprise AI? A complete guide to the agentic era
-- Author(s): What is Enterprise AI: A complete guide
+- URL: https://www.netguru.com/blog/ai-saas-solutions
+- Title: AI SaaS: What it is, how it works &amp; top tools in 2026
+- Author(s): Kacper Rafalski
 - Language: English
-- Published (UTC): 2026-09-28T16:34:41.866+00:00
-- Captured (UTC): 2026-11-02T11:14:23.045907158+00:00
-- Relevance: Medium - multiple title terms match query
+- Published (UTC): 2026-11-03T00:00:00+00:00
+- Captured (UTC): 2026-11-03T21:07:34.630568948+00:00
+- Relevance: High - title matches query
 
 
 ```text
-Kore.ai’s blog frames enterprise AI as shifting from isolated pilots and chatbots to an embedded intelligence layer, with Agentic AI—systems that reason, plan, execute, and adapt—central to 2025 transformation. It cites scaled adopters reporting 20–30% productivity gains, 15–25% EBITDA growth, and up to 40% faster decision cycles; over 60% of large enterprises have embedded AI in at least three core processes, yet fewer than one-third of the 70% that launched AI projects have scaled, and less than 15% of enterprise data is AI-ready. The article outlines seven success pillars and five architecture layers, warns of talent shortages (70%), governance gaps (74% cite privacy/security concerns; only 24% have well-established frameworks), and build-vs-buy maintenance costs (15–30% annually), while citing Gartner’s prediction that 40% of enterprise applications will embed task-specific AI agents by 2026, Bain’s finding that process/tooling mismatches choke up to 40% of AI productivity gains, and regulatory pressure including the EU AI Act; it recommends buying platform plumbing, building differentiating skills, and treating trust and governance as non-negotiable.
+The article defines AI SaaS as software whose core runtime is an inference layer—not the training layer—and contrasts vertical products such as Harvey AI, Veeva, and Gong with horizontal platforms such as Salesforce Einstein, Microsoft Copilot, and the OpenAI API, warning that shared vector stores and fine-tuning can create tenant data-leakage risk. It says AI SaaS pricing has split into consumption-based (e.g., GPT-4o at $2.50 per million input tokens and $10 per million output tokens), per-seat, and outcome-based models; Gartner projects 40% of enterprise apps will include task-specific AI agents by 2026, while Netguru estimates 80–85% of SaaS companies have implemented or are implementing AI. Its build-vs-buy guidance puts custom builds at $500k+ and 12–18 months, vertical purchases at $50k–$500k annually, and add-on adoption at $10k–$60k annually, with inference cost and model-versioning SLAs flagged as major risks.
 ```

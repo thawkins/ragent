@@ -1,0 +1,39 @@
+[package]
+name = "ragent-hyperresearch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Deep-research engine crate: persistent vault, fetch/scholarly providers, claims, graph, MCP and HTTP surfaces"
+
+autotests = false
+
+[[bin]]
+name = "hyperresearch"
+path = "src/main.rs"
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_norway = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

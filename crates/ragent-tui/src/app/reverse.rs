@@ -788,6 +788,17 @@ pub(crate) fn reverse_help_message() -> String {
      stack (quote values containing spaces, e.g. `--tech \"Next.js + Rails\"`)\n\
      - `--create <name>` - after generation, chain into `/spec create <name>`\n\
      - `--depth <N>` - directory levels to fetch (1-10, default 1)\n\n\
+     **Examples:**\n\
+     - `/reverse owner/repo` - generate a creation prompt for a repository.\n\
+     - `/reverse owner/repo --tech \"Next.js + Postgres\" --depth 2 --create my-spec` -\
+     constrain the stack, fetch two directory levels, and chain into `/spec create my-spec`.\n\
+     - `/spec reverse acme/widget --language rust --type crate --folder crates/widget` -\
+     the additive scaffold: writes `crates/widget/` into the Cargo workspace this command\
+     runs in and registers the workspace member, rewriting no existing project file.\n\
+     - `/spec reverse acme/widget --language rust --type crate --create widget-spec` -\
+     the same, then chains into `/spec create widget-spec`, writing the generated spec to\
+     `specs/widget-spec/`.\n\
+     \n\
      **Prerequisites:**\n\
      - GitHub: run `/github login` first to configure a GitHub token.\n\
      - GitLab: run `/gitlab setup` first (or set GITLAB_TOKEN + GITLAB_URL env vars)."

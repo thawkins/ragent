@@ -254,7 +254,10 @@ fn test_flags_value_lists_cover_registry() {
          sql, markdown, protobuf, verilog, vhdl, terraform, openscad, cmake, \
          gradle, gradle_kts, maven, nix, hcl"
     );
-    assert_eq!(app_type_value_list(), "library, cmdline, tui, gui, webapp");
+    assert_eq!(
+        app_type_value_list(),
+        "library, cmdline, tui, gui, webapp, crate"
+    );
 }
 
 // ---------------------------------------------------------------- FR-009 ---

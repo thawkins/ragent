@@ -1,14 +1,14 @@
 # Web source
 
-- URL: https://www.kpipartners.com/blogs/agentops-part-3-observe-govern-scale-ai-agents
-- Title: AgentOps Part 3: Observe, Govern and Scale AI Agents
-- Author(s): Omar Razi
+- URL: https://kcpdynamics.com/en/ai-agent-governance-enterprises
+- Title: Technical and Regulatory Framework for AI Agent Governance in LATAM Enterprises
+- Author(s): -
 - Language: English
-- Published (UTC): 2026-10-27T13:05:31+00:00
-- Captured (UTC): 2026-11-02T11:13:07.113242735+00:00
+- Published (UTC): 2026-10-28T08:00:00+00:00
+- Captured (UTC): 2026-11-03T21:06:19.832957065+00:00
 - Relevance: Medium - multiple title terms match query
 
 
 ```text
-KPI Partners’ AgentOps Part 3 argues that production agents need one end-to-end trace rendered as three stakeholder views—executive ROI/risk, SME quality, and platform health—and that firms should track cost per accepted answer rather than cost per call; an LLM judge scored faithfulness at 4.5 but completeness from 4.1 for the strongest large model to 2.3 for the smallest. It says governance must be enforced through platform controls: least-privilege grants for each sub-agent/tool, the authenticated user’s identity carried into every query, human approval for consequential actions, and audit logging, citing Gartner’s expectation that 40% of enterprises will demote or decommission autonomous AI agents by 2027 due to governance gaps. A roughly 12-week AgentOps engagement ends with four measurable numbers—monthly operating-cycle cost, merged-change-to-gated-release time, alert-to-previous-version recovery time, and seeded-regression catch rate—to support evidence-based CIO decisions, using a native-first architecture across Databricks, Snowflake, AWS, and Azure.
+The page outlines a 90-day, three-phase AI-agent governance roadmap for medium-sized enterprises: days 1–30 inventory authorized/unauthorized AI tools, classify risk, and assign owners; days 31–60 activate DLP in Microsoft Purview, assign individual identities via Entra Agent ID, and enable Sentinel audit logs; days 61–90 approve an AI usage policy, define new-agent approval, add human-in-the-loop for high-impact decisions, and conduct a Zero Trust permissions review. It says typical medium-sized LATAM implementations take 8–16 weeks of consulting plus licenses such as Purview and Sentinel, while IBM data cited put the average breach cost for organizations with uncontrolled shadow AI more than $670,000 above average, and argues progressive governance typically pays for itself within the first year. It also notes that existing uncontrolled agents should start with an inventory and risk-prioritized incremental controls, that the EU AI Act can reach LATAM firms affecting EU people or results, and that financial services, healthcare (especially Brazil’s LGPD), and regulated manufacturing face the strictest LATAM requirements, with human-in-the-loop required for significant-impact decisions.
 ```
